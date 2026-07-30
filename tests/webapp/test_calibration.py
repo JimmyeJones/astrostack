@@ -907,6 +907,52 @@ def test_calibration_suggestions_endpoint(client, solved_library):
     assert body["n_frames"] >= 1
 
 
+def test_calibration_suggestions_reports_the_targets_frame_size(client, solved_library):
+    """The Stack form needs the subs' size to warn that a master built for another
+    camera/binning can't be applied — the engine refuses it and fails the whole
+    stack, so an advisory after the fact is too late."""
+    from tests.webapp.conftest import FRAME_H, FRAME_W
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    body = client.get(f"/api/targets/{safe}/calibration-suggestions").json()
+
+    assert body["params"]["width_px"] == FRAME_W
+    assert body["params"]["height_px"] == FRAME_H
+
+
+def test_calibration_suggestions_frame_size_is_none_when_unrecorded(
+        client, solved_library):
+    """A target whose frames never recorded a size reports None rather than
+    guessing — the form then can't disprove any master, so it flags none."""
+    from seestack.io.library import Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, width_px=None, height_px=None)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/calibration-suggestions").json()
+
+    assert body["params"]["width_px"] is None
+    assert body["params"]["height_px"] is None
+
+
+def test_modal_dim_ignores_strays_and_unknowns():
+    """The *modal* size, so one mis-ingested frame from another camera doesn't
+    move the size every master is judged against."""
+    assert calibration.modal_dim([1080, 1080, 1080, 540]) == 1080
+    assert calibration.modal_dim([None, 1080, "bad", 1080]) == 1080
+    assert calibration.modal_dim([]) is None
+    assert calibration.modal_dim([None, None]) is None
+
+
 def test_build_master_endpoint(client, data_root, tmp_path):
     darks = tmp_path / "darks"
     _write_darks(darks)

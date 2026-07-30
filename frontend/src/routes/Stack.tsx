@@ -13,6 +13,7 @@ import { notifications } from "@mantine/notifications";
 import { api, type StackOptionField } from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
+import { masterOptionSuffix, masterSizeWarning } from "../calibrationFit";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
 import { memoryFixAction } from "../stackMemoryFix";
@@ -279,6 +280,11 @@ export function StackView() {
   const recFlatId = sug?.flat_master_id ?? null;
   const recFlatDarkId = sug?.flat_dark_master_id ?? null;
   const recBiasId = sug?.bias_master_id ?? null;
+  // The target's own frame size, when its subs recorded one. A master whose
+  // dimensions differ was built for a different camera or binning mode and is
+  // refused outright by the engine, so the form flags it rather than letting the
+  // stack job die with a cryptic validate error.
+  const frameDims = sug?.params ?? null;
   // Badge the master matching `recId` (may differ per select — the light dark
   // and the flat-dark are both "dark" masters but recommended for different
   // exposures).
@@ -286,10 +292,13 @@ export function StackView() {
     (masters.data ?? [])
       .filter((m) => m.kind === kind && m.exists)
       .map((m) => {
-        const star = m.id === recId ? " ★ recommended" : "";
+        // A master built for another camera/binning can't be applied at all, so
+        // say so in the picker rather than only after it's chosen.
+        const misfit = masterOptionSuffix(m, frameDims);
+        const star = !misfit && m.id === recId ? " ★ recommended" : "";
         return {
           value: String(m.id),
-          label: `${m.name} (${m.n_frames} frames, ${m.width_px}×${m.height_px})${star}`,
+          label: `${m.name} (${m.n_frames} frames, ${m.width_px}×${m.height_px})${star}${misfit}`,
         };
       });
   const darkOpts = masterOpts("dark", recDarkId);
@@ -392,6 +401,15 @@ export function StackView() {
   // pedestal fixed while the dark current is rescaled), so it isn't inert.
   const biasIgnoredForLights =
     Boolean(values.bias_master_id && values.dark_master_id) && !darkScalingActive;
+  // Wrong-camera/binning picks. Unlike the advisories above these are hard
+  // blockers — the engine refuses the master and the whole stack fails — so they
+  // read red; and the walk-away auto-stack silently skips them, which is exactly
+  // the "I added darks and nothing happened" confusion worth heading off.
+  const biasM = masterById(values.bias_master_id);
+  const darkSizeWarning = masterSizeWarning("dark", darkM, frameDims);
+  const flatSizeWarning = masterSizeWarning("flat", flatM, frameDims);
+  const flatDarkSizeWarning = masterSizeWarning("flat-dark", flatDarkM, frameDims);
+  const biasSizeWarning = masterSizeWarning("bias", biasM, frameDims);
   const running = job && (job.state === "running" || job.state === "queued");
   const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
 
@@ -797,6 +815,16 @@ export function StackView() {
                     disabled={flatOpts.length === 0}
                   />
                 </Group>
+                {darkSizeWarning ? (
+                  <Alert color="red" variant="light" py={6} px="sm">
+                    <Text size="xs">{darkSizeWarning}</Text>
+                  </Alert>
+                ) : null}
+                {flatSizeWarning ? (
+                  <Alert color="red" variant="light" py={6} px="sm">
+                    <Text size="xs">{flatSizeWarning}</Text>
+                  </Alert>
+                ) : null}
                 {darkWarning ? (
                   <Alert color="yellow" variant="light" py={6} px="sm">
                     <Text size="xs">{darkWarning}</Text>
@@ -835,6 +863,11 @@ export function StackView() {
                     onChange={(v) => set("flat_dark_master_id", v)}
                   />
                 ) : null}
+                {flatDarkSizeWarning ? (
+                  <Alert color="red" variant="light" py={6} px="sm">
+                    <Text size="xs">{flatDarkSizeWarning}</Text>
+                  </Alert>
+                ) : null}
                 {flatDarkWarning ? (
                   <Alert color="yellow" variant="light" py={6} px="sm">
                     <Text size="xs">{flatDarkWarning}</Text>
@@ -848,6 +881,11 @@ export function StackView() {
                     data={biasOpts} value={asStr(values.bias_master_id)}
                     onChange={(v) => set("bias_master_id", v)}
                   />
+                ) : null}
+                {biasSizeWarning ? (
+                  <Alert color="red" variant="light" py={6} px="sm">
+                    <Text size="xs">{biasSizeWarning}</Text>
+                  </Alert>
                 ) : null}
                 {biasIgnoredForLights ? (
                   <Alert color="yellow" variant="light" py={6} px="sm">

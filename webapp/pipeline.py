@@ -1747,22 +1747,6 @@ def _reprocess_output_basename(existing: set[str], version: str) -> str:
     return f"{base}_{n}"
 
 
-def _mode_dim(vals: list[Any]) -> int | None:
-    """Most common frame dimension — the size ``run_stack`` will validate
-    calibration masters against. Used to reject a wrong-camera master
-    before it can hard-fail the unattended stack."""
-    counts: dict[int, int] = {}
-    for v in vals:
-        if v is None:
-            continue
-        try:
-            k = int(v)
-        except (TypeError, ValueError):
-            continue
-        counts[k] = counts.get(k, 0) + 1
-    return max(counts, key=lambda k: counts[k]) if counts else None
-
-
 def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
     """The confidently-matching library master dark/flat/bias paths for a target's
     accepted frames — the ``StackOptions`` calibration keys an *unattended* stack
@@ -1793,8 +1777,8 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
         exposure_s=_med([f.exposure_s for f in frames]),
         gain=_med([f.gain for f in frames]),
         sensor_temp_c=_med([f.sensor_temp_c for f in frames]),
-        width_px=_mode_dim([f.width_px for f in frames]),
-        height_px=_mode_dim([f.height_px for f in frames]),
+        width_px=calibration.modal_dim([f.width_px for f in frames]),
+        height_px=calibration.modal_dim([f.height_px for f in frames]),
     )
 
 
@@ -1852,8 +1836,8 @@ def _apply_saved_calibration_masters(
         nonlocal dims
         if dims is None:
             frames = list(proj.iter_frames(accepted_only=True))
-            dims = (_mode_dim([f.width_px for f in frames]),
-                    _mode_dim([f.height_px for f in frames]))
+            dims = (calibration.modal_dim([f.width_px for f in frames]),
+                    calibration.modal_dim([f.height_px for f in frames]))
         return dims
 
     def _dims_conflict(entry: dict[str, Any]) -> bool:

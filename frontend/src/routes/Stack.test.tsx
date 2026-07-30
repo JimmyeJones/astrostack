@@ -1415,6 +1415,57 @@ describe("StackView", () => {
     expect(screen.queryByText("Stack — NGC_7000")).not.toBeInTheDocument();
   });
 
+  it("flags a wrong-camera master at pick time instead of failing the stack", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 9 });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 9, name: "S50 Dark", kind: "dark", filename: "d9.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 1080, height_px: 1920,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null,
+                width_px: 480, height_px: 320 },
+      dark_master_id: null, flat_master_id: null, flat_dark_master_id: null,
+      bias_master_id: null, scores: {}, n_frames: 12,
+    });
+
+    renderStack();
+
+    // The chosen dark is 1080x1920 but the subs are 480x320 — the engine would
+    // refuse it and the whole stack would die, so it's called out up front.
+    await waitFor(() =>
+      expect(screen.getByText(/different camera or binning mode/)).toBeInTheDocument());
+    // …and the picker itself marks it, so it reads as unusable before it's chosen.
+    expect(screen.getByText(/S50 Dark.*wrong size for this target/)).toBeInTheDocument();
+  });
+
+  it("stays quiet when the master matches the target's frames", async () => {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 9 });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 9, name: "Matching Dark", kind: "dark", filename: "d9.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null,
+                width_px: 480, height_px: 320 },
+      dark_master_id: 9, flat_master_id: null, flat_dark_master_id: null,
+      bias_master_id: null, scores: { "9": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(screen.queryByText(/different camera or binning mode/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/wrong size for this target/)).not.toBeInTheDocument();
+  });
+
   it("falls back to the slug in the title when the target record can't be loaded", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});

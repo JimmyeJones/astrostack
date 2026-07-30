@@ -187,6 +187,26 @@ def resolve_master_paths(
     )
 
 
+def modal_dim(vals: list[Any]) -> int | None:
+    """Most common frame dimension in *vals* (ignoring unknowns), or ``None``.
+
+    A target's frames can carry the odd stray size (a mis-ingested file, a frame
+    from another camera), so the *modal* value — not the first or the max — is the
+    size ``run_stack`` will validate calibration masters against. Used both to
+    reject a wrong-camera master before it can hard-fail an unattended stack and
+    to tell the Stack form which masters can't apply to this target."""
+    counts: dict[int, int] = {}
+    for v in vals:
+        if v is None:
+            continue
+        try:
+            k = int(v)
+        except (TypeError, ValueError):
+            continue
+        counts[k] = counts.get(k, 0) + 1
+    return max(counts, key=lambda k: counts[k]) if counts else None
+
+
 def _match_distance(
     master: dict[str, Any], *, exposure_s: float | None,
     gain: float | None, sensor_temp_c: float | None, kind: str,

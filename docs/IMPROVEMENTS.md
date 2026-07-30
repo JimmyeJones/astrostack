@@ -8060,10 +8060,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   exposure-matched dark. Regression: `frontend/src/routes/Stack.test.tsx` (+1 — an exposure-matched 30 s dark shot 15°C
   warmer warns on temperature with *no* exposure warning). Upgrade-safe: frontend-only, additive, reuses data already in
   the suggestions payload; no API/schema/default change.
-  **Still open (the (c) slice):** the **loaded-but-inert** master notice — a bias whose shape doesn't match the dark, or
-  a master whose dimensions don't match the target's frames, with a "this master won't be used because it doesn't match
-  your camera/binning" note. That one needs the backend to expose per-master dims-vs-target validity (the frontend can't
-  tell a shape mismatch from the current payload), so it's a separate S–M slice.
+  **▶ SLICE (c) — the wrong-camera/binning half SHIPPED v0.215.0** (Builder 2026-07-30, branch
+  `claude/relaxed-turing-m9ayja`; tested). A master whose dimensions don't match the target's frames is not merely a
+  poor match — `CalibrationMasters.validate` **refuses** it, so the whole stack job dies with an error a beginner
+  can't decode (and, since v0.214.0, the walk-away auto-stack silently *skips* it, so "I added darks" quietly isn't
+  true). Both now get said out loud at pick time. **Backend:** `GET /api/targets/{safe}/calibration-suggestions`
+  gained `params.width_px` / `params.height_px` — the target's **modal** raw frame size via a new shared
+  `webapp/calibration.py::modal_dim` (lifted out of `pipeline._confident_master_binding`, so one mis-ingested frame
+  from another camera can't move the size every master is judged against). Additive keys; the masters payload already
+  carried each master's own dims, so that's all the frontend needed. **Frontend:** a pure, unit-tested
+  `frontend/src/calibrationFit.ts` (`masterFitsFrames` / `masterSizeWarning` / `masterOptionSuffix`) drives (i) a
+  **red** inline alert under each of the four master selects naming both sizes and saying the stack would fail, and
+  (ii) a "— wrong size for this target" suffix in the picker itself, so a mismatched master reads as unusable
+  *before* it's chosen (and never carries the ★ recommended badge). Deliberately one-sided, mirroring the server-side
+  gate: an older master that recorded no size, or a target whose frames never recorded one, can't be disproved and is
+  never flagged. Tests: `calibrationFit.test.ts` (+7), `Stack.test.tsx` (+2 — a 1080×1920 dark on 480×320 subs warns
+  *and* is marked in the picker; a matching dark stays silent), `tests/webapp/test_calibration.py` (+3 — the frame
+  size is reported, is `None` when unrecorded, and `modal_dim` ignores strays/unknowns). Upgrade-safe: two additive
+  response fields + display-only frontend; no config/DB-schema/on-disk/default change and no API-shape break (an
+  older client ignores the new keys; a newer client against an older backend simply can't disprove anything and flags
+  nothing). **Still open:** the narrower *bias-shape-vs-dark* inert case (a bias whose shape doesn't match the
+  **dark** it's paired with, rather than the frames) — same idea, different comparison.
   `CalibrationMasters.calibration_warnings()` already produces the right
   plain-language advisories ("Master dark is 30s but your subs are 10s — its pedestal will be over-subtracted on every
   frame…"; the temperature-mismatch line), and this run's fix keeps them honest. But they only reach the *stack log* —
