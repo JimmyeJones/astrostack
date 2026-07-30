@@ -10297,8 +10297,47 @@ problems. Dogfood it every big-picture run and fix root causes.
   controls, using the clipboard API with a "Copied!" confirmation; (c, follow-on) offer the same caption in the
   share-image flow so the picture and its words travel together. Keeps the beginner-feature pipeline stocked with a
   pure *share/understand* capability distinct from the image-side share features already filed.
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your first image": a dismissible, self-checking end-to-end
-  getting-started guide that walks a brand-new user from empty app → shared picture.** *(Friendliness + autonomy /
+- **FOLLOW-ON to "Your first image" (Builder 2026-07-30, slice (c) of the shipped v0.219.0 card) — show the same
+  checklist on the *empty* Library and Gallery states, where a first-time user is at least as likely to land.** The
+  card is on the Dashboard only. A beginner who opens Library first (reasonable — it's where the subs go) sees an
+  empty list and no map. The card is already self-contained, read-only and self-hiding, so this is an import and a
+  render guard (`n_targets === 0`), not new machinery; the only care needed is that a user who scrolls past both
+  copies doesn't see it twice on one screen. (S, friendliness — PRIORITY 3.)
+- **NEW IDEA (Builder 2026-07-30, spotted while building the "Your first image" card) — the checklist can't see the
+  last two steps of the journey (edit + share) because nothing cheap reports them.** `/api/stats` knows frames,
+  accepted frames and stack runs, but not "this user has saved an edit recipe" or "this user has exported/shared a
+  picture" — both of which live in per-run project meta and would need a per-run walk to count. **Idea:** have the
+  library-level roll-up that `_rollup_stacks` already does (it opens each target's project anyway, and is cached)
+  also count runs that carry a saved recipe and runs that have a share/export artifact, and serve them as two
+  additive `n_edited_runs` / `n_shared_runs` counters. That's one cheap addition to a walk that already happens, and
+  it would let the first-image card carry the *whole* journey — plus give the Dashboard an honest "you've finished N
+  of your M stacks" signal. **Care:** measure the added cost on a library with many runs before shipping; if it
+  isn't free, don't do it (the roll-up is on the Dashboard's hot poll). (S–M, friendliness — PRIORITY 3.)
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your first image": a dismissible, self-checking end-to-end
+  getting-started guide that walks a brand-new user from empty app → shared picture.**~~ — **SHIPPED v0.219.0**
+  (Builder 2026-07-30, branch `claude/relaxed-turing-ai56dq`), slices (a) + (b). A `FirstImageCard`
+  (`frontend/src/components/dashboard/FirstImageCard.tsx`) now sits at the top of the Dashboard with **four** ordered
+  plain-language steps — *point AstroStack at your subs* → *let it work out where each frame points* → *let it check
+  and grade your frames* → *stack them into your first picture* — each with a one-sentence jargon-free hint, a link
+  to the page that does it, and a tick it sets itself. The pure `firstImageSteps(system, stats)` helper reads only
+  `GET /api/system` and `GET /api/stats`, which the Dashboard already fetches, so there is **no new endpoint, no new
+  engine math and nothing written anywhere**; missing data reads as "not done", so it never claims progress it can't
+  see. The card leads with the single next step (`firstImageNextStep`) rather than four at once, shows a progress bar,
+  and when the last step ticks it turns into a one-line well-done pointing at the Gallery.
+  **The upgrade-safety detail that matters:** it must never congratulate the owner — who has thousands of subs and
+  hundreds of stacks — on their "first" picture. So it only ever renders after it has seen this install *mid-journey*
+  (a `firstImageStarted` localStorage flag set the first time a step is open); an established box has every step
+  ticked on first render, never sets the flag, and never sees the card at all. Dismissal (`firstImageDismissed`) is
+  permanent, and both flags are defensively guarded so a disabled/broken localStorage can't break the Dashboard.
+  *(Deliberately four steps, not five: "an edit recipe / share exists" is not on any payload the Dashboard already
+  fetches, and adding a per-run meta walk to `/api/stats` for it would cost more than it's worth — the well-done line
+  points at the editor and sharing instead. Slice (c), the same card on the empty Library state, is filed below.)*
+  Tests: `firstImageSteps.test.ts` (+9 — order, fresh install, all-ticked, mid-journey next-step, ASTAP missing,
+  star-DB missing, the one-sided unreported-star-DB rule, undefined data, and that every step has copy + a link),
+  `FirstImageCard.test.tsx` (+8 — fresh install, partial ticks with only the open step linked, the
+  established-install silence, the congratulation, the started-flag write, hide-this, stays-hidden, and loading).
+  Upgrade-safe: frontend-only, read-only, additive; no config/DB/API-shape/default change.
+  *(Original idea kept below for provenance.)* *(Friendliness + autonomy /
   "understand the app" pillar, PRIORITY 2–3; size M; fully offline, additive, read-only — no new deps.)* **Why a
   beginner wants it:** the very first time someone opens AstroStack they face a wall of screens (Dashboard, Library,
   Calibration, Stack, Editor, History, Storage) with no map of the journey. Today the only first-run help is the
@@ -13575,6 +13614,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.219.0** — NEW beginner feature "Your first image": a self-checking four-step map of the journey (point at your
+  subs → locate → check & grade → stack) on the Dashboard, each step ticking itself off from `/api/system` +
+  `/api/stats` (no new endpoint), leading with the single next thing to do and turning into a one-line well-done at
+  the end. Never appears on an established install (it only renders once it has seen this box mid-journey), and
+  dismissal is permanent. Tests: `firstImageSteps.test.ts` (+9), `FirstImageCard.test.tsx` (+8).
 - **v0.218.0** — The master-coverage roll-up now *explains* itself: each missed target carries a plain-language
   reason from the binder's own gates (`coverage_miss_reason` — frame size / gain / temperature / a dark's exposure,
   and the honest "another master is a closer match" / "a dark already includes the bias" when nothing is wrong with

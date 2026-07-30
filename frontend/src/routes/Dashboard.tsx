@@ -13,6 +13,7 @@ import { formatIntegration } from "../format";
 import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
 import { ContinueTonightCard } from "../components/ContinueTonightCard";
+import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import { ImagingCalendarCard } from "../components/ImagingCalendarCard";
 import { LastNightCard } from "../components/LastNightCard";
@@ -167,6 +168,11 @@ export function Dashboard() {
           </Button>
         </Alert>
       ) : null}
+
+      {/* The positive first-run map: four plain steps from a folder of subs to a
+          finished picture, each ticking itself off. Self-hides on an established
+          install (every step already done on first render) and once dismissed. */}
+      <FirstImageCard />
 
       <SampleImageCard />
 
