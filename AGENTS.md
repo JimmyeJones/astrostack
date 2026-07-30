@@ -80,41 +80,30 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
-**⚡ IMMEDIATE PRIORITY (owner-reported + 2026-07 audits) — the plate-solve + ingest
-fixes shipped; the top OPEN issues are now IMAGE QUALITY and a few real data bugs.**
-The S30 wrong-FOV solve failures, the ASTAP ladder, the faint-field stack-then-solve
-bootstrap, and the Seestar ingest/upgrade-heal are all FIXED and verified
-(v0.184–v0.210). Front-of-queue now (see the ⭐ entries in `docs/IMPROVEMENTS.md` →
-"Bugs"), highest owner-impact first:
+**⚡ IMMEDIATE PRIORITY (refreshed 2026-07-30) — that queue is DRAINED; every ⭐ item
+this section used to list is now fixed and verified.** Don't go looking for them: the
+S30 wrong-FOV solves, the ASTAP ladder, the faint-field stack-then-solve bootstrap and
+the Seestar ingest/upgrade-heal shipped in v0.184–v0.210; the whole **one-click Auto
+colour/brightness breakage** chain then shipped in v0.210.5–v0.213.0 — SCNR's magenta
+sky (−11.5% → −1.2%), the auto-contrast curve lifting the whole sky (+42% → gated off
+on sky-dominated frames), the **final** gradient pass's starved object mask (colour
+spread 34.3 → 3.9 ADU), and the **per-frame** flatten's identical starved mask, which
+was the upstream half (honest-path stack tilt Σ|R/G/B| 102.7 → 18.1 ADU, and the
+finished Auto picture's brightness tilt +64% → +11% of sky). The numeric-`null`
+stack-defaults poisoning, the 2000-frame truncation, and all five listed click-path
+bugs are fixed too.
 
-1. **⭐⭐ Auto one-click colour breakage on light-polluted data (MEASURED).** On
-   ordinary LP-gradient data the finished Auto picture comes out purple on one side,
-   green/blown on the other (sky cast −44% / brightness +182% on an 18% gradient;
-   −86%/+52% even on a mild 8% one). Three isolated mechanisms: luminance-mode gradient
-   removal leaves per-channel gradient shapes; Background2D fit bias survives stacking
-   (dither doesn't decorrelate it); per-channel STF turns the residual into diverging
-   colour. **Measured trap: naively switching to per-channel gradient mode erases faint
-   nebulae** — the backlog entry has the validated safe fix. This is the owner's #1
-   priority (a good final picture) and the biggest reason results still look wrong.
-   Also filed & measured: SCNR ~−10% magenta sky on noisy stacks (validated
-   smoothed-excess fix → −1%); auto-contrast curve lifts the whole sky +42%; auto
-   denoise saturates to a waxy sky on thin stacks.
-2. **⭐ Clearing a numeric Stack field sends `null` → engine TypeError, and it can be
-   SAVED into stack-defaults — poisoning every future stack.** Data-integrity; coerce/
-   validate nulls at the API + defaults layers.
-3. **⭐ The frames list silently truncates at 2000 — one S30 night ≈ 2,100 subs**, so
-   grading + pre-flight checks silently operate on a subset. Paginate / raise the cap
-   for the real Seestar workload.
-4. Other verified click-path bugs (filed): History "Full-res PNG" of a Process-target
-   run serves the UN-edited image; North-up mode mis-places Identify pins and saves the
-   sideways image; re-saved previews stay stale up to a day (no Cache-Control); Tonight
-   planner strips object types; "next night" names the wrong night west of UTC.
-
-**(Resolved this cycle):** the `Editor.test.tsx` flake was a REAL product bug — debounce-
-keyed queries dropped their data for one fetch per edit, so editor controls (Coverage
-toggle, suggestions, overlays) blinked out on every slider drag — fixed at root with
-`keepPreviousData` (v0.210.3). Ingest/upgrade-heal, legacy whole-device-drop targets,
-and all three solve fixes are shipped and verified.
+**So what's front-of-queue now?** There is no known, blind-fixable ⭐ bug left. Every
+entry still open in `docs/IMPROVEMENTS.md` → "Bugs" is **gated** on something an agent
+cannot supply from the repo — real elongated-target data (the streak auto-reject
+thresholds), confirmation of S30/S50 folder naming (the bare mosaic-output skip), or a
+legacy library shape the owner doesn't have (the wholesale-drop ingest). **Read the
+gate before starting one; do not blind-flip a threshold or a default on the
+on-by-default hot path.** With the bug list in that state, work the **Current focus**
+list immediately below — a bug *you* verify yourself still outranks all of it. And
+**grep before you build**: the Ideas list has repeatedly carried items that were
+already shipped, and several "new" features turn out to be copy tweaks on machinery
+that already exists.
 
 
 **Current focus (2026-07 — set by the owner).** The editor (priority 1) is now

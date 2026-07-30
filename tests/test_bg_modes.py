@@ -103,16 +103,21 @@ def test_luminance_subtracts_same_shape_from_all_channels():
     assert np.std(rg_diff) < 25
 
 
-def _sparse_mosaic_canvas(h: int = 400, w: int = 400) -> np.ndarray:
-    """A mosaic proxy whose covered area is a thin diagonal strip (~10% of the
+def _sparse_mosaic_canvas(h: int = 400, w: int = 400, strip: int = 15) -> np.ndarray:
+    """A mosaic proxy whose covered area is a thin diagonal strip (~4% of the
     bounding canvas) and the rest is uncovered NaN. The object mask ``| ~finite``
     then covers >80% of every default box, which makes ``Background2D`` raise at
-    the strict ``exclude_percentile=80`` — exactly the case the ladder degrades."""
+    the strict ``exclude_percentile=80`` — exactly the case the ladder degrades.
+
+    The strip has to be narrower than a fifth of the 100 px box for that to hold:
+    a wider one leaves enough sky per box to survive the strict percentile now
+    that the object mask no longer inflates itself by dilating single-pixel noise
+    detections inside the covered strip (v0.213.0)."""
     rng = np.random.default_rng(0)
     img = np.full((h, w), np.nan, dtype=np.float32)
     for i in range(h):
         lo = int(i * 0.9)
-        hi = min(w, lo + 40)
+        hi = min(w, lo + strip)
         # A tight sky population inside the covered strip; the rest is NaN.
         img[i, lo:hi] = rng.normal(0.3, 0.02, size=hi - lo).astype(np.float32)
     return np.stack([img, img, img], axis=-1)
