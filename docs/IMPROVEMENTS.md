@@ -10343,8 +10343,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   controls, using the clipboard API with a "Copied!" confirmation; (c, follow-on) offer the same caption in the
   share-image flow so the picture and its words travel together. Keeps the beginner-feature pipeline stocked with a
   pure *share/understand* capability distinct from the image-side share features already filed.
-- **FOLLOW-ON to "Your first image" (Builder 2026-07-30, slice (c) of the shipped v0.219.0 card) — show the same
-  checklist on the *empty* Library and Gallery states, where a first-time user is at least as likely to land.** The
+- ~~**FOLLOW-ON to "Your first image" (Builder 2026-07-30, slice (c) of the shipped v0.219.0 card) — show the same
+  checklist on the *empty* Library and Gallery states, where a first-time user is at least as likely to land.**~~ —
+  **SHIPPED v0.220.1** (Builder 2026-07-30, branch `agent/chroma-blotch-reducer`; tested). `FirstImageCard` now also
+  renders (a) at the top of **Library**'s `targets.length === 0` empty state — the page a beginner most plausibly
+  opens first, since it's where the subs go — and (b) under **Gallery**'s empty message, but *only* when the gallery
+  is genuinely empty: a search or a method/calibration filter that happens to match nothing leaves it hidden, because
+  that user already has pictures and "here's how to make your first one" would read as a non-sequitur. Pure re-use of
+  the existing self-contained component — it keeps its own `localStorage` guards, so an established install (every
+  step already ticked, `firstImageStarted` never set) and a dismissed card stay invisible on all three surfaces, and
+  the three routes are separate pages so nothing double-renders on one screen. Frontend-only, read-only, additive; no
+  API/schema/config/default change. Tests: `Library.test.tsx` (+1 — shown on an empty library, gone once it has
+  targets), `Gallery.test.tsx` (+1 — shown on a truly empty gallery, hidden when a non-matching search is what
+  emptied it). *(Original idea kept for provenance.)* The
   card is on the Dashboard only. A beginner who opens Library first (reasonable — it's where the subs go) sees an
   empty list and no map. The card is already self-contained, read-only and self-hiding, so this is an import and a
   render guard (`n_targets === 0`), not new machinery; the only care needed is that a user who scrolls past both

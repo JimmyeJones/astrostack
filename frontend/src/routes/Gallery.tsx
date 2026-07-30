@@ -20,6 +20,7 @@ import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
+import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 
 export type GallerySort = "newest" | "cleanest";
 export type CalFilter = "all" | "calibrated" | "uncalibrated";
@@ -390,15 +391,24 @@ export function GalleryView() {
       ) : null}
 
       {items.length === 0 ? (
-        <Text c="dimmed">
-          {search.trim()
-            ? `No images match “${search.trim()}”.`
-            : methodFilter !== "all"
-              ? `No ${COMBINE_METHOD_LABELS[methodFilter]}-combined images.`
-              : calFilter !== "all"
-                ? `No ${calFilter} images.`
-                : "No stacked images yet. Stack a target and its results will appear here."}
-        </Text>
+        <Stack gap="sm">
+          <Text c="dimmed">
+            {search.trim()
+              ? `No images match “${search.trim()}”.`
+              : methodFilter !== "all"
+                ? `No ${COMBINE_METHOD_LABELS[methodFilter]}-combined images.`
+                : calFilter !== "all"
+                  ? `No ${calFilter} images.`
+                  : "No stacked images yet. Stack a target and its results will appear here."}
+          </Text>
+          {/* Only on a genuinely empty gallery — never when a search or filter is
+              what emptied it, where "here's how to make your first picture" would
+              read as a non-sequitur. The card itself also stays hidden on an
+              established install and once dismissed. */}
+          {!search.trim() && methodFilter === "all" && calFilter === "all"
+            ? <FirstImageCard />
+            : null}
+        </Stack>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>
           {items.map((it) => (
