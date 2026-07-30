@@ -6013,8 +6013,31 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-07-30, spotted while shipping the saved-master binder v0.214.0) — record on the *run*
-  when a saved calibration master was skipped, so History can say why instead of only the server log.** v0.214.0
+- ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the saved-master binder v0.214.0) — record on the *run*
+  when a saved calibration master was skipped, so History can say why instead of only the server log.**~~ —
+  **SHIPPED v0.216.0** (Builder 2026-07-30, branch `claude/relaxed-turing-rrutdf`; tested).
+  `_apply_saved_calibration_masters` (`webapp/pipeline.py`) now **returns** the skips it made as finished,
+  second-person sentences (`_skip_sentence`/`_dims_reason`) — *"Your saved master dark wasn't used: it's no longer in
+  your calibration library."* / *"…it's 1080×1920 pixels, but this target's subs are 480×320."* — and `_stack_target`
+  stamps them on the finished run under a new project-meta key
+  (`CALIBRATION_SKIPPED_META_PREFIX` + run id, a JSON list), the same additive per-run note mechanism the auto-edit
+  note/sky-cast/colour-cal already use. `GET …/stack-runs/{id}/info` reads them back as an additive
+  `calibration_skipped: string[]` (`_run_calibration_skipped`), and the History Info panel renders them as their own
+  **yellow** line beneath the calibration status via `calibrationSummaryText(cards, advice, skipped)` — which now
+  returns the skip separately from `text`, because the two answer different questions (*what this picture got* vs
+  *what the user asked for and didn't get*) and because a skipped pick matters **even on a calibrated run**: a bound
+  flat is no excuse for silently dropping the dark they chose. This is *recorded* evidence rather than the v0.215.1
+  `diagnose_uncalibrated` inference, so it is the only signal that can explain a master **deleted** after it was
+  picked (the library holds nothing left to infer from). Fail-soft throughout: stamping is wrapped in a suppress, a
+  run that skipped nothing writes no key, and an older run reads back `[]` — so every existing History line is
+  byte-identical. Upgrade-safe: additive meta key + additive response field + an optional third helper argument (the
+  editor's `calibrationSummaryText(cards)` caller is untouched); no config/DB-schema/on-disk/default/`StackOptions`
+  change. Tests: `tests/webapp/test_auto_stack_saved_masters.py` (+4 — a deleted master's exact sentence, a
+  wrong-size master naming both frame sizes, a fully-bound run recording nothing, and only-the-skipped-slot when
+  another master binds), `tests/webapp/test_stack_render.py` (+2 — the info payload carries a stamped reason; an
+  ordinary/older run reports `[]`), `History.test.tsx` (+5 — the skip line beside an uncalibrated *and* a calibrated
+  run, multi-skip joining with blanks dropped, unset when nothing was skipped, plus a component test that the Info
+  panel shows it). *(Original idea kept for provenance.)* v0.214.0
   makes the walk-away auto-stack honour a target's saved master picks, and deliberately **fail-soft** per slot: a
   master deleted since it was saved, or one whose dimensions don't match the subs, is skipped with a
   `log.warning` rather than failing the overnight job. That's the right runtime behaviour — but the *user* still

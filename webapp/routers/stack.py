@@ -64,6 +64,31 @@ def _run_auto_edit_note(request: Request, safe: str, run_id: int) -> str | None:
         lib.close()
 
 
+def _run_calibration_skipped(request: Request, safe: str, run_id: int) -> list[str]:
+    """Plain-language reasons a run had to skip the calibration masters the user
+    explicitly saved for this target (an empty list when it skipped none).
+
+    The unattended binder is deliberately fail-soft — a master deleted since it was
+    saved, or one built for another camera, is dropped rather than failing the
+    overnight job — but that leaves the user with a less-calibrated picture and the
+    reason only in the server log. Stamped by ``pipeline._stack_target`` and read
+    back here so History can say it out loud."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        raw = proj.get_meta(
+            f"{pipeline.CALIBRATION_SKIPPED_META_PREFIX}{run_id}")
+    finally:
+        proj.close()
+        lib.close()
+    if not raw:
+        return []
+    with contextlib.suppress(ValueError, TypeError):
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed if isinstance(item, str)]
+    return []
+
+
 def _run_auto_edit_sky_cast(request: Request, safe: str, run_id: int) -> dict | None:
     """The finished picture's residual sky-background cast (r/g/b sky medians +
     a neutral/colour verdict) measured by the unattended auto-edit, or ``None``
@@ -1313,6 +1338,12 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     calibration_advice = None
     if cards and "CALSTAT" not in header:
         calibration_advice = _uncalibrated_advice(request, safe)
+    # Recorded (not inferred) reasons this run dropped a saved calibration pick.
+    # Stronger evidence than ``calibration_advice``, which can only re-derive a
+    # likely cause from the library — and it's the only thing that knows about a
+    # master *deleted* since it was saved. Reported even when the run *is*
+    # calibrated: a bound flat doesn't excuse a silently-dropped dark.
+    calibration_skipped = _run_calibration_skipped(request, safe, run_id)
     return {"run_id": run_id, "integration_s": integration_s,
             "n_frames": n_frames, "weighting": weighting,
             "photometric": photometric, "dark_scaling": dark_scaling,
@@ -1320,6 +1351,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             "auto_edit": auto_edit, "sky_cast": sky_cast,
             "color_cal": color_cal,
             "calibration_advice": calibration_advice,
+            "calibration_skipped": calibration_skipped,
             "processing": processing, "cards": cards}
 
 

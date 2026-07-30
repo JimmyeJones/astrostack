@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 from astropy.io import fits
 
@@ -1109,3 +1111,45 @@ def test_stack_info_no_calibration_advice_without_a_near_miss_master(
 
     body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
     assert body["calibration_advice"] is None
+
+
+def test_stack_info_reports_a_skipped_saved_calibration_pick(
+        client, solved_library):
+    """The unattended binder drops a saved master rather than failing the overnight
+    job, stamping the reason on the run. The info payload must hand that recorded
+    reason to History — it's the only signal that can explain a master the user
+    chose and that was later deleted (the library holds nothing to infer from)."""
+    from webapp import pipeline
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    reason = ("Your saved master dark wasn't used: it's no longer in your "
+              "calibration library.")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["STACKER"] = "sigma-clip"
+            proj.set_meta(
+                f"{pipeline.CALIBRATION_SKIPPED_META_PREFIX}{int(run_id)}",
+                json.dumps([reason]))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["calibration_skipped"] == [reason]
+
+
+def test_stack_info_calibration_skipped_is_empty_for_an_ordinary_run(
+        client, solved_library):
+    """Upgrade-safety: a run recorded before this existed (or one that skipped
+    nothing) reports an empty list, so History's calibration line is unchanged."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["calibration_skipped"] == []

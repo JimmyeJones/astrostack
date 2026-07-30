@@ -759,6 +759,12 @@ export interface StackRunInfo {
   // holds a master that's usable but for one concrete, fixable thing; the generic
   // "build or pick a master" copy is used otherwise.
   calibration_advice?: string | null;
+  // Plain-language reasons this run had to *skip* a calibration master the user
+  // explicitly saved for the target — e.g. one deleted since it was saved, or one
+  // built for another camera. Recorded by the run itself (not inferred), so it's
+  // the only signal that can explain a dropped pick; empty/absent on runs that
+  // skipped nothing and on runs from before this was recorded.
+  calibration_skipped?: string[] | null;
   processing?: StackProcessingStep[];
   cards: StackInfoCard[];
 }
