@@ -144,6 +144,38 @@ export function uploadProgressLabel(loaded: number, total: number): string {
   return `${fmtBytes(loaded)} of ${fmtBytes(total)} (${uploadProgressPercent(loaded, total)}%)`;
 }
 
+/** The distinct top-level folder names carried by a picked file list — i.e. the
+ *  folders a drop is about to reproduce under ``incoming/``. Files picked
+ *  individually (no relative path) contribute nothing. Sorted for a stable,
+ *  readable list. */
+export function pickedFolders(files: File[]): string[] {
+  const seen = new Set<string>();
+  for (const f of files) {
+    const i = f.name.indexOf("/");
+    if (i > 0) seen.add(f.name.slice(0, i));
+  }
+  return Array.from(seen).sort();
+}
+
+/** Plain-language "we'll keep your folders" line for a folder drop, or "" when
+ *  the pick carries no folders (a plain multi-file select). Names the folders so
+ *  a beginner can see their targets *before* uploading — the whole point of
+ *  keeping the structure is that ``M 31_sub`` comes in as the target *M 31*
+ *  rather than everything landing in one Unsorted pile. When the user also typed
+ *  a target folder the structure is kept *inside* it, so say that instead of
+ *  promising separate targets. */
+export function folderPreserveNote(folders: string[], target = ""): string {
+  if (!folders.length) return "";
+  const shown = folders.slice(0, 3).map((f) => `“${f}”`).join(", ");
+  const more = folders.length > 3 ? ` +${folders.length - 3} more` : "";
+  const noun = folders.length === 1 ? "folder" : "folders";
+  const named = target.trim();
+  if (named) {
+    return `Keeping your ${noun} (${shown}${more}) inside “${named}”.`;
+  }
+  return `Keeping your ${noun} (${shown}${more}) so they come in as separate targets.`;
+}
+
 /** One plain-language line summarising an upload's outcome. */
 export function uploadSummary(r: UploadResult): string {
   const parts: string[] = [];
@@ -151,7 +183,13 @@ export function uploadSummary(r: UploadResult): string {
   if (r.skipped.length) parts.push(`${r.skipped.length} already there`);
   if (r.rejected.length) parts.push(`${r.rejected.length} skipped`);
   if (!parts.length) return "Nothing to upload.";
-  const where = r.target ? ` into “${r.target}”` : "";
+  // A folder upload landed in several folders, so name those rather than the
+  // single destination (older servers send no ``folders`` — then this is inert).
+  const kept = r.folders ?? [];
+  const where = kept.length
+    ? ` into ${kept.slice(0, 3).map((f) => `“${f}”`).join(", ")}${
+      kept.length > 3 ? ` +${kept.length - 3} more` : ""}`
+    : r.target ? ` into “${r.target}”` : "";
   return parts.join(" · ") + where + ".";
 }
 
@@ -171,9 +209,15 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
   const folderInput = useRef<HTMLInputElement | null>(null);
 
+  // Folders present in the pick → land them as real folders under `incoming/`
+  // so the scanner's Seestar convention makes the right targets. A plain
+  // multi-file pick carries none, and then nothing about the request changes.
+  const folders = pickedFolders(files);
+
   const upload = useMutation({
     mutationFn: () =>
-      api.uploadFits(files, target, (loaded, total) => setProgress({ loaded, total })),
+      api.uploadFits(files, target, (loaded, total) => setProgress({ loaded, total }),
+                     folders.length > 0),
     onMutate: () => setProgress(null),
     onSuccess: (r) => {
       setResult(r);
@@ -287,10 +331,19 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
       </Group>
 
       {files.length > 0 && !upload.isPending ? (
-        <Text size="xs" c="dimmed">
-          {files.length} FITS {files.length === 1 ? "file" : "files"} ready
-          {target.trim() ? ` — will go into “${target.trim()}”` : " — will go to Unsorted"}.
-        </Text>
+        <Stack gap={2}>
+          <Text size="xs" c="dimmed">
+            {files.length} FITS {files.length === 1 ? "file" : "files"} ready
+            {target.trim()
+              ? ` — will go into “${target.trim()}”`
+              : folders.length
+                ? ""
+                : " — will go to Unsorted"}.
+          </Text>
+          {folders.length ? (
+            <Text size="xs" c="dimmed">{folderPreserveNote(folders, target)}</Text>
+          ) : null}
+        </Stack>
       ) : null}
 
       {upload.isPending ? (
@@ -349,7 +402,8 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
         </Group>
         <Text size="sm" c="dimmed">
           No NAS share needed — pick your Seestar FITS files (or a whole folder) and they’ll
-          drop straight into the pipeline.
+          drop straight into the pipeline. Drop a folder and its structure is kept, so each
+          target comes in under its own name.
         </Text>
         {body}
       </Stack>

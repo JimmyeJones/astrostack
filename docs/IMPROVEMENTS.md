@@ -8889,6 +8889,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+- **MEASURED GROUND TRUTH (Builder 2026-07-30, engine QA probe — no code change needed; recorded so no future
+  run re-derives it).** Ran the real `run_stack` end-to-end on synthetic 8-sub Seestar sets (480×320, shared
+  stars, independent per-sub noise) to check what the rejection modes actually do to the *final image*:
+  **(1) noise really does drop as √N** — a single frame's sky σ 33.5 ADU → 11.80 with a plain mean and
+  **identically** 11.80 with κ-σ (κ=3), i.e. **2.84×** against the ideal 2.83×, so the accumulator +
+  per-frame flatten chain is unbiased. **(2) The κ-σ blind spot is real and large on the final picture.**
+  With a bright trail planted in **one** of the 8 subs, the trail ridge lands at **+502 ADU** above sky on
+  *both* the plain-mean and the κ-**σ** stack — byte-identical results, because a lone point's z-score against
+  statistics that include it caps at `(n−1)/√n = 2.47 < κ`, exactly as `_auto_kappa_min_frames` documents.
+  `min_max_reject` (k=1) cuts the same ridge to **+8.3 ADU**. So the "κ-σ can't see a lone trail below ~11
+  subs" claim is not theoretical — it is a ~60× difference in the delivered image. **(3) The k>1 trim costs
+  real SNR on a thin stack:** at 8 frames, min/max k=1 gives a 2.73× noise reduction and **k=3 only 2.45×**
+  (it throws away 6 of 8 samples per pixel), so raising the count on a short session measurably degrades the
+  background — the Stack form's existing `minMaxKTooHighHint` is earning its keep. **Coverage check (why this
+  is ground truth, not a bug):** every path a beginner actually takes already turns `auto_reject` on — the
+  walk-away chains (`webapp/pipeline.py`, `auto=True`, when no explicit rejection key is set) and the Stack
+  form for a never-configured target (`webapp/routers/stack.py`, `merged.setdefault("auto_reject", True)`) —
+  and it resolves to min/max below 11 subs. The residual exposure is a user who once saved per-target/global
+  stack defaults *without* a rejection key and then stacks a short session: they keep plain κ-σ and the trail
+  survives. That's narrow and self-inflicted, and flipping the dataclass default is a §9 default change — so
+  it stays an observation, not a fix. (Repro: `tests/synth.py::make_star_field(streak=True)` in 1 of 8 subs,
+  same WCS, sample the ridge `y=60..260, x=y−10` in the green plane.)
+
+
 
 - **MEASURED NON-BUG — don't "fix" SCNR's noise-protection sigma to use `ctx.scaled_px` (Builder 2026-07-30, spotted
   and measured while shipping the colour-blotch smoother v0.220.0).** `_scnr`'s noise-protected estimator smooths
@@ -9789,6 +9813,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW IDEA (Builder 2026-07-30, follow-on to the v0.228.0 folder-structure-preserving upload) — accept a
+  **`.zip` of a Seestar folder** in the browser upload (the last real slice-(c) item, and now much cheaper).**
+  *(Beginner feature; PRIORITY 2–3 autonomy/friendliness; size M.)* Uploading a night of subs file-by-file over
+  a browser is thousands of multipart parts; a single `.zip` is one request, and a beginner's instinct on
+  Windows/macOS is to right-click → compress the folder anyway. This only became a small job now that
+  v0.228.0 landed the folder-preserving writer: unpacking would reuse the *same* `safe_relpath` +
+  `confined_dest` pair per entry, so the extracted tree lands under `incoming/` exactly like a folder drop and
+  the Seestar-aware scanner makes the right targets with no further work. **Slice:** accept a `.zip` alongside
+  FITS in `POST /api/upload`, stream it to a temp file (never into RAM), then iterate `ZipFile.infolist()` —
+  skipping directory entries, non-FITS names, and anything whose sanitised path is `None` — and stream each
+  member through the existing `.part`-sidecar writer. **Guardrails that must be honoured** (this is an
+  attacker-shaped format): reject absolute / `..` member names via `safe_relpath` (never `extractall`), cap the
+  **uncompressed** total against the same free-space reserve *before* writing (a zip bomb otherwise fills the
+  NAS), cap the member count, and report per-member outcomes in the existing `saved`/`skipped`/`rejected`
+  lists so the summary line needs no new shape. Frontend: allow `.zip` in the picker's `accept` + the
+  client-side filter, and say so in the card copy. Keep it additive — a zip is just another accepted upload
+  type, no config/schema/default change.
 
 - ~~**⭐ OWNER-REQUESTED (2026-07-30) — let the user turn OFF the Auto auto-crop; make the ragged-border trim a
   toggle.**~~ — **SHIPPED v0.226.0** (Builder 2026-07-30, branch `claude/relaxed-turing-zajzay`). The one-click
@@ -12580,6 +12622,43 @@ problems. Dogfood it every big-picture run and fix root causes.
   the upload call). tsc + full vitest (882) + vite build green. *(Beginner bar ✔ — one obvious "pick my
   Seestar folder" button, sane default, no new concepts.)* **Slice (b) remainder — true *per-file*
   progress, partial-upload cleanup — and slice (c) remain open.**
+  — **FOLDER *STRUCTURE* PRESERVATION SHIPPED v0.228.0** (Builder 2026-07-30, branch
+  `claude/relaxed-turing-et05r3`): the last real slice-(b) gap, and a genuine correctness hole rather
+  than polish. Both folder paths (drop **and** the `webkitdirectory` picker) already carried each file's
+  relative path — but the server *flattened* it into one filename (`M 31_sub__Light_0001.fit`) and
+  landed every file in **one** directory. So the app's headline on-ramp — "drag a whole Seestar folder
+  in" — silently destroyed the very folder structure the ingest path depends on: the Seestar-aware
+  scanner (`<T>_sub` → target `<T>`, `<T>_mosaic_sub` → `<T> (mosaic)`, `*_video` skipped, a
+  whole-device `MyWorks/` container expanded) only fires on **real directories** under `incoming/`, so a
+  browser upload of several targets came in as **one giant `Unsorted` target** mixing every object's
+  subs — a stack of which is gibberish — where the identical files copied over an SMB share came in
+  correctly. **Server:** a new pure `safe_relpath(name)` (`webapp/routers/upload.py`) sanitises a
+  relative path *per segment* while keeping its directories (any `..`/NUL rejects the whole name;
+  empty/`.` segments dropped; capped at 6 components keeping the tail, since the target folder sits
+  right above the file), and `confined_dest(root, rel)` re-resolves every write under the destination —
+  which also catches an existing symlink inside `incoming/` redirecting a write outside. Gated on a new
+  **opt-in** `preserve_folders` form field (default **off**, so an older frontend and any existing
+  caller get byte-for-byte the previous flattened behaviour); the response gained an additive
+  `folders: []` listing the top-level folders written. **Frontend:** `api.uploadFits` takes a
+  `preserveFolders` flag and `UploadFits` sets it only when the pick actually carries folder paths — a
+  plain multi-file select posts exactly the body it always did. Two new pure helpers name the outcome
+  *before* the user commits: `pickedFolders(files)` and `folderPreserveNote(folders, target)` render
+  "Keeping your folders (“M 13_sub”, “M 31_sub”) so they come in as separate targets." (or "… inside
+  “MyWorks”." when a target folder was typed), and `uploadSummary` reports the folders the subs landed
+  in rather than a single destination. **Tests (+18):** `tests/webapp/test_upload.py` (+11 —
+  `safe_relpath` table incl. Windows separators / leading separator / empty-and-dot segments /
+  traversal, the depth cap keeping the tail, `confined_dest` refusing a symlink escape, the headline
+  two-folder upload landing as real directories with nothing flattened into the root, nesting under a
+  typed target, **the opt-out path unchanged** (upgrade safety), traversal still rejected with the flag
+  on, dedup on a re-upload, and an **end-to-end** run of the real `scan_and_organize` over what the
+  upload landed proving it produces the targets *M 31* and *M 13* and no `Unsorted`);
+  `UploadFits.test.tsx` (+7 — `pickedFolders` distinct/sorted and empty for a flat pick,
+  `folderPreserveNote` wording incl. the cap and the typed-target variant, `uploadSummary` naming the
+  folders and falling back on an older server's absent field, and two component tests that a folder drop
+  shows the note and asks the server to preserve while a plain pick does not). Additive and
+  upgrade-safe: new opt-in field + additive response key, no config/DB-schema/on-disk-layout change and
+  no existing default flipped. **Slice (b) remainder — true *per-file* progress, partial-upload
+  cleanup — and slice (c) remain open.**
   <details><summary>Original write-up</summary>
   Today the only way to get subs in is to drop Seestar target folders
   into `incoming/` over an SMB/NFS share — which assumes the user can mount the NAS

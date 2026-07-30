@@ -14,9 +14,11 @@ sys.path.insert(1, str(Path(__file__).resolve().parents[1]))
 from synth import write_seestar_fits  # noqa: E402
 
 from webapp.routers.upload import (  # noqa: E402
+    confined_dest,
     is_fits_name,
     safe_component,
     safe_relname,
+    safe_relpath,
     safe_target_dir,
 )
 
@@ -360,3 +362,185 @@ def test_upload_closes_every_part_on_all_paths(client, data_root, tmp_path, monk
     counts = {n: closed.count(n) for n in ("good.fit", "dup.fit", "notes.txt")}
     assert all(c >= 1 for c in counts.values())
     assert len(set(counts.values())) == 1, counts
+
+
+# ---------------------------------------------------------------------------
+# Folder-preserving upload (``preserve_folders``)
+#
+# A dragged Seestar folder must land like a NAS drop — real directories under
+# ``incoming/`` — so the scanner's folder convention (``<T>_sub`` → target
+# ``<T>``, ``*_video`` skipped, a whole-device container expanded) actually
+# fires. Flattening every path into one filename tipped every object's subs into
+# a single ``Unsorted`` pile.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Light_001.fit", "Light_001.fit"),
+    ("M 31_sub/Light_001.fit", "M 31_sub/Light_001.fit"),
+    ("MyWorks/M 31_sub/Light_001.fit", "MyWorks/M 31_sub/Light_001.fit"),
+    ("C:\\subs\\M31_sub\\Light_001.fit", "C:/subs/M31_sub/Light_001.fit"),
+    ("/M 31_sub/Light_001.fit", "M 31_sub/Light_001.fit"),   # leading separator
+    ("a//b/./c.fit", "a/b/c.fit"),                            # empty/dot segments
+    ("  M31_sub  /  Light_001.fit  ", "M31_sub/Light_001.fit"),
+    ("../../../etc/passwd", None),                            # traversal → rejected
+    ("a/../b.fit", None),
+    ("", None),
+    # A trailing separator just means the last segment is the "filename"; it's
+    # kept as a path and the FITS-suffix check downstream rejects it, so nothing
+    # is ever written for it.
+    ("only/dir/", "only/dir"),
+    ("a\0b.fit", None),
+])
+def test_safe_relpath(raw: str, expected: str | None) -> None:
+    assert safe_relpath(raw) == expected
+
+
+def test_safe_relpath_caps_the_depth_keeping_the_tail() -> None:
+    """An absurdly deep drop can't grow an unbounded tree under incoming/; the
+    *tail* is kept because the target folder sits right above the file."""
+    deep = "/".join(f"d{i}" for i in range(12)) + "/Light_001.fit"
+    out = safe_relpath(deep)
+    assert out is not None
+    parts = out.split("/")
+    assert len(parts) == 6
+    assert parts[-1] == "Light_001.fit"
+    assert parts[0] == "d7"
+
+
+def test_confined_dest_rejects_an_escape(tmp_path: Path) -> None:
+    root = tmp_path / "incoming"
+    root.mkdir()
+    assert confined_dest(root, "M31_sub/a.fit") == (root / "M31_sub" / "a.fit").resolve()
+    # A symlinked subfolder pointing outside must not become a write target.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "link").symlink_to(outside, target_is_directory=True)
+    assert confined_dest(root, "link/a.fit") is None
+
+
+def test_upload_preserves_the_dropped_folder_structure(client, data_root, tmp_path) -> None:
+    """The headline: dragging a Seestar folder in creates the real folders under
+    ``incoming/`` rather than one flat pile, so the Seestar-aware scanner sees
+    ``M 31_sub`` / ``M 13_sub`` and makes two targets. Fails before the fix (both
+    files landed flat as ``M 31_sub__Light_0001.fit`` in ``incoming/``)."""
+    write_seestar_fits(tmp_path / "a.fit", width=64, height=64, n_stars=5, seed=1)
+    write_seestar_fits(tmp_path / "b.fit", width=64, height=64, n_stars=8, seed=2)
+    a = (tmp_path / "a.fit").read_bytes()
+    b = (tmp_path / "b.fit").read_bytes()
+    r = client.post(
+        "/api/upload",
+        data={"preserve_folders": "true"},
+        files=[
+            ("files", ("M 31_sub/Light_0001.fit", a, "application/octet-stream")),
+            ("files", ("M 13_sub/Light_0001.fit", b, "application/octet-stream")),
+        ],
+    )
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert {f["name"] for f in payload["saved"]} == {
+        "M 31_sub/Light_0001.fit", "M 13_sub/Light_0001.fit"}
+    assert sorted(payload["folders"]) == ["M 13_sub", "M 31_sub"]
+    inc = data_root / "incoming"
+    assert (inc / "M 31_sub" / "Light_0001.fit").read_bytes() == a
+    assert (inc / "M 13_sub" / "Light_0001.fit").read_bytes() == b
+    # Nothing flattened into the root.
+    assert not list(inc.glob("*.fit"))
+    assert list(inc.glob("**/*.part")) == []
+
+
+def test_upload_preserved_folders_nest_under_a_named_target(
+    client, data_root, tmp_path
+) -> None:
+    body = _fits_bytes(tmp_path)
+    r = client.post(
+        "/api/upload",
+        data={"target": "MyWorks", "preserve_folders": "true"},
+        files=[("files", ("M 31_sub/Light_0001.fit", body, "application/octet-stream"))],
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["folders"] == ["M 31_sub"]
+    assert (data_root / "incoming" / "MyWorks" / "M 31_sub" / "Light_0001.fit").exists()
+
+
+def test_upload_without_preserve_folders_is_unchanged(client, data_root, tmp_path) -> None:
+    """Upgrade safety: the flag is opt-in, so an older frontend (which sends no
+    ``preserve_folders``) still gets the flattened single-folder behaviour and an
+    empty, ignorable ``folders`` list."""
+    body = _fits_bytes(tmp_path)
+    r = client.post(
+        "/api/upload",
+        files=[("files", ("M 31_sub/Light_0001.fit", body, "application/octet-stream"))],
+    )
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert [f["name"] for f in payload["saved"]] == ["M 31_sub__Light_0001.fit"]
+    assert payload["folders"] == []
+    assert (data_root / "incoming" / "M 31_sub__Light_0001.fit").exists()
+    assert not (data_root / "incoming" / "M 31_sub").exists()
+
+
+def test_upload_preserve_folders_still_rejects_traversal(client, data_root, tmp_path) -> None:
+    body = _fits_bytes(tmp_path)
+    r = client.post(
+        "/api/upload",
+        data={"preserve_folders": "true"},
+        files=[("files", ("../../evil.fit", body, "application/octet-stream"))],
+    )
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert payload["saved"] == []
+    assert [f["name"] for f in payload["rejected"]] == ["../../evil.fit"]
+    assert not (data_root / "evil.fit").exists()
+    assert not (data_root / "incoming" / "evil.fit").exists()
+
+
+def test_upload_preserve_folders_skips_an_already_present_file(
+    client, data_root, tmp_path
+) -> None:
+    body = _fits_bytes(tmp_path)
+    files = [("files", ("M 31_sub/Light_0001.fit", body, "application/octet-stream"))]
+    first = client.post("/api/upload", data={"preserve_folders": "true"}, files=files)
+    assert first.status_code == 200, first.text
+    assert len(first.json()["saved"]) == 1
+    second = client.post("/api/upload", data={"preserve_folders": "true"}, files=files)
+    assert second.status_code == 200, second.text
+    payload = second.json()
+    assert payload["saved"] == []
+    assert [f["name"] for f in payload["skipped"]] == ["M 31_sub/Light_0001.fit"]
+    assert payload["job_id"] is None  # nothing new → no scan enqueued
+
+
+def test_uploaded_seestar_folders_become_the_right_targets(
+    client, data_root, tmp_path
+) -> None:
+    """End-to-end proof of *why* this matters: run the real scanner over what the
+    upload landed and confirm the Seestar convention produced the true targets
+    (``M 31_sub`` → "M 31", ``*_video`` ignored) instead of one Unsorted pile."""
+    from seestack.io.library import Library
+    from seestack.io.scanner import scan_and_organize
+
+    write_seestar_fits(tmp_path / "a.fit", width=64, height=64, n_stars=5, seed=1)
+    write_seestar_fits(tmp_path / "b.fit", width=64, height=64, n_stars=8, seed=2)
+    a = (tmp_path / "a.fit").read_bytes()
+    b = (tmp_path / "b.fit").read_bytes()
+    r = client.post(
+        "/api/upload",
+        data={"preserve_folders": "true"},
+        files=[
+            ("files", ("M 31_sub/Light_0001.fit", a, "application/octet-stream")),
+            ("files", ("M 13_sub/Light_0001.fit", b, "application/octet-stream")),
+        ],
+    )
+    assert r.status_code == 200, r.text
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, data_root / "incoming")
+        names = {t.name for t in lib.list_targets()}
+    finally:
+        lib.close()
+    # The two uploaded folders became their own real targets (rather than every
+    # sub landing in one "Unsorted" pile). Other fixture targets may also be
+    # present in incoming/, so assert on ours specifically.
+    assert {"M 31", "M 13"} <= names
+    assert "Unsorted" not in names
