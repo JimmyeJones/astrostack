@@ -29,6 +29,7 @@ import { StackHealthCard } from "../components/StackHealthCard";
 import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
 import { StackNoiseBadge } from "../components/StackNoiseBadge";
 import { FirstLookCard } from "../components/FirstLookCard";
+import { SampleTourNote } from "../components/SampleTourNote";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { SharePictureButton } from "../components/SharePictureButton";
 import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
@@ -731,6 +732,8 @@ export function TargetView() {
 
   return (
     <Stack>
+      {/* First-run coaching, on the sample demo only (see SampleTourNote). */}
+      <SampleTourNote step="target" safe={safe} />
       {solveSetup ? (
         <Alert color="orange" icon={<IconAlertTriangle size={18} />}
           title={solveSetup.kind === "astap"

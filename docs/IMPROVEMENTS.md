@@ -6013,6 +6013,36 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-07-30, spotted while shipping the auto-grade reconsider pass v0.221.0) — say when
+  auto-grade *gives a sub back*, not only when it takes one away.** *(Friendliness + trust — PRIORITY 3; size S.)*
+  v0.221.0 made auto-grade's rejections reversible: on each re-grade it reconsiders its own `auto:grade` rejects
+  against the now-larger population and re-accepts the ones that are no longer outliers. That's the right
+  behaviour, but it is currently **invisible** — `_auto_grade_target` logs the re-accepts and returns only the
+  *rejected* count, so the scan/QC job summary's `auto_graded` figure and the Target page's reject breakdown never
+  mention it. The frame simply reappears. The app is otherwise scrupulous about narrating what automation did (the
+  down-weighting sentence, the "N not located yet" bucket, the rejection-clipped trust line, and now the
+  bootstrap-rescue note), so this is a hole in an established pattern. **Slice:** have `_auto_grade_target` return
+  (or record) both counts, add an additive `auto_regraded_back` summary key alongside `auto_graded`, and render one
+  plain line on the Jobs result — *"Put 3 subs back: with more of your night to compare against, they're no longer
+  outliers."* Frontend-only beyond the one summary field; the counts already exist. Pairs with the v0.221.1
+  bootstrap-rescue note as the other half of "automation explains itself".
+- **NEW IDEA (Builder 2026-07-30, spotted while adding the `qc_solve` job result block in v0.221.1) — give a
+  finished Check/Plate-solve job a real one-line outcome, not a bare "done".** *(Friendliness — PRIORITY 3; size
+  S.)* Every other finished job kind now states its outcome in plain language (`process_target`, `pipeline`,
+  `reprocess_all`, `build_master`), but `qc_solve` had **no result renderer at all** until v0.221.1 added one for
+  the bootstrap-rescue case alone — so a user who runs "Check & locate" and *isn't* rescued still gets nothing.
+  `run_qc_and_solve` already returns `qc_done`/`qc_total`/`solve_done`/`solve_total`, so the line is a pure helper
+  away: *"Checked 42 subs and located 40 of them — 2 couldn't be placed in the sky."* (with the existing
+  plate-solve nudge when the located count is low). Extend the `qcSolveSummary`-shaped helper next to
+  `bootstrapRescueNote` in `routes/Jobs.tsx`, unit-tested like its siblings. Purely additive, no backend change.
+- **NEW IDEA (Builder 2026-07-30, follow-on to the sample first-run tour v0.222.0) — extend the tour to the two
+  screens it deliberately skipped: History/Gallery ("this is where your finished pictures live") and the export
+  step.** *(Friendliness / onboarding — PRIORITY 3; size S.)* v0.222.0 coaches Target → Stack → Editor, which is the
+  spine of the journey, but a newcomer who finishes the demo edit still lands on History/Gallery with no idea that
+  it's the permanent home of every run, or that "Export" is what turns the recipe into a shareable picture. The
+  component is already built and step-keyed (`SampleTourStep` + `SAMPLE_TOUR_COPY`), each step dismisses
+  independently, and the sample-detection is one prop — so this is copy plus two mount points. Keep the same bar:
+  one calm sentence, sample-only, dismissible.
 - ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the skipped-master note v0.216.0) — the skip reason only
   reaches a user who opens the History *Info* panel; put it where the walk-away user actually lands.**~~ — **SHIPPED
   v0.217.1** (Builder 2026-07-30, branch `claude/relaxed-turing-ai56dq`). Both surfaces named in the idea now show it,
@@ -6753,8 +6783,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   been validated on real faint-field data — the bootstrap may cover enough of the owner's cases that the full-rotation
   path isn't needed.
 
-- **IMPROVEMENT IDEA (Builder 2026-07-25) — surface the stack-then-solve bootstrap's rescue on the job/Target
-  summary so the user sees it worked ("N subs located via a deep-image solve").** *(Friendliness / trust —
+- ~~**IMPROVEMENT IDEA (Builder 2026-07-25) — surface the stack-then-solve bootstrap's rescue on the job/Target
+  summary so the user sees it worked ("N subs located via a deep-image solve").**~~ — **SHIPPED v0.221.1**
+  (Builder 2026-07-30, branch `claude/relaxed-turing-xuihhk`). The rescue now says so wherever the job lands.
+  **Webapp:** the single-target jobs (`qc_solve`, `process_target`) already returned `run_qc_and_solve`'s summary
+  verbatim, so its `bootstrap_propagated` was on the wire and simply unrendered — but the whole-library **scan**
+  loop *discarded* the per-target summary, which is exactly the walk-away path where the rescue happens unattended.
+  `_pipeline_body` now keeps it and rolls the counts up into an additive `summary["bootstrap_rescued"]` map
+  (`{safe: n}`), omitted entirely when the bootstrap never engaged or propagated nothing — no misleading zero.
+  **Frontend:** two pure helpers in `routes/Jobs.tsx` — `bootstrapRescuedCount` (reads both shapes: the
+  single-target `bootstrap_propagated` and the scan's per-target map, tolerating junk values rather than printing
+  `NaN`) and `bootstrapRescueNote` (one calm sentence, singularised for one sub: *"Located 12 more subs by
+  combining your un-located frames into a deeper image — they're in your stack now."*). Rendered on the
+  Process-target result, the scan result, and a **new** `qc_solve` result block — a Check/Plate-solve job used to
+  finish with a bare "done", and the rescue is precisely the answer the user ran it for. Self-hiding: nothing is
+  said when the bootstrap didn't engage. Upgrade-safe: additive summary key + display-only frontend, no
+  config/DB-schema/on-disk/API-shape/default change; `astap_bootstrap_solve` stays off by default. Tests:
+  `tests/webapp/test_bootstrap_rescue_summary.py` (+3 — the scan reports the per-target rescue; the key is absent
+  when the bootstrap never engaged; an engaged-but-propagated-nothing run doesn't claim a rescue) and
+  `Jobs.test.tsx` (+8 — both payload shapes, singular/plural, silence, junk tolerance, and the rendered scan /
+  `qc_solve` / no-rescue cases). *(Original idea kept below for provenance.)* *(Friendliness / trust —
   PRIORITY 3; size S.)* **What prompts it:** the v0.210.0 bootstrap writes `wcs_json` back to rescued subs and
   `run_qc_and_solve` already returns `bootstrap_engaged` / `bootstrap_solved` / `bootstrap_propagated` in its
   summary, but nothing surfaces that to the user — a beginner who turned the setting on (because their faint
@@ -6998,8 +7046,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   caller are byte-for-byte unchanged). Tests: `rejectionNote.test.ts` (+10), `Jobs.test.tsx` (+3 — min/max note,
   κ-σ %, thin-stack suppression), `test_stack_pipeline.py` (+1 StackResult-mirrors-persisted, +2 assertions on the
   plain-mean case).
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — auto-grade should be able to *re-accept* a frame it earlier rejected once
-  a larger population no longer flags it (machine decisions shouldn't be permanent).** *(Autonomy; pillar 2; size
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — auto-grade should be able to *re-accept* a frame it earlier rejected once
+  a larger population no longer flags it (machine decisions shouldn't be permanent).**~~ — **SHIPPED v0.221.0**
+  (Builder 2026-07-30, branch `claude/relaxed-turing-xuihhk`). Built exactly the Builder design note below — one
+  deterministic grading pass over the **combined, invariant** population, driving both directions. **Engine**
+  (`seestack/qc/grading.py`): `grade_frames` grew an optional `reconsider: list[FrameRow]` — the target's own
+  `auto:grade` rejects — which rejoin *both* the population statistics and the `considered` set exactly as if
+  accepted (copied via `dataclasses.replace`, never mutated; a `user_override` or id-less row is dropped, and an id
+  already present in `frames` is de-duplicated). New `GradeReport.re_accept: list[int]` names every reconsidered
+  frame the pass did **not** flag, and new `apply_grade_reaccepts(project, report)` puts those back
+  (`accept=True`, `reject_reason=None`) — re-checking current state so it only ever touches a frame that is still
+  rejected, still carries an `auto:grade` reason, and still has no `user_override`; a manual or `auto:streak`
+  rejection is never undone by automation. The recommendation sort also gained a `frame_id` tiebreak so which
+  frames the cap keeps can't depend on the order the caller handed the rows in (a reconsidered row arrives at the
+  end of `considered`, so a z-score tie at the cap boundary would otherwise flip a frame in and out between scans).
+  **Webapp** (`webapp/pipeline.py::_auto_grade_target`): passes its `auto:grade` rejects as `reconsider` and applies
+  both directions — and, as the design note required, the v0.175.1 external `budget` truncation is **removed in the
+  same change** rather than layered on (grading over the combined set makes `grade_frames`' own
+  `int(len(considered)·MAX_REJECT_FRACTION)` cap measure against the original population directly, so keeping both
+  would double-cap). **Why it can't oscillate:** the combined set is invariant under auto-grade's own moves (a frame
+  only ever swaps halves), so the pass is a fixed point — the strengthened cumulative-cap regression now asserts
+  that directly (first scan decides; the next 7 change *nothing*, same reject set every time), which is a stronger
+  property than the old "the cascade is capped". Upgrade-safe: gated behind `auto_grade_frames` (off by default),
+  additive-only signatures with defaults, no config/DB-schema/on-disk/API-shape change (`GradeReportOut` maps
+  fields explicitly, so the new `re_accept` field never reaches the wire), and the interactive
+  `/auto-grade/apply` endpoint passes no `reconsider` so its behaviour is byte-for-byte unchanged. Tests, all
+  fail-before/pass-after: `tests/test_qc_grading.py` (+6 — re-accepts a frame the bigger population no longer
+  flags; a still-bad frame stays rejected and never lands in `re_accept`; user decisions are ignored; the
+  fixed-point property across repeated grading; the cap measured against the original 60-frame population; and
+  `apply_grade_reaccepts` puts back only auto-grade rejects, skipping `auto:streak`/user/already-accepted rows, and
+  is idempotent) and `tests/webapp/test_auto_grade.py` (+2 and 1 strengthened — an early reject returns once 60
+  ordinary subs arrive; a user reject and an `auto:streak` reject stay put while an `auto:grade` reject beside them
+  comes back; the cumulative-cap test now also asserts convergence). *(Original idea + design note kept below for
+  provenance.)* *(Autonomy; pillar 2; size
   S–M; opt-in, off by default — only bites installs that turned `auto_grade_frames` on.)* Found while shipping the
   auto-grade cumulative-cap fix (v0.175.1): `apply_grade_report` (`seestack/qc/grading.py`) only ever sets
   `accept=False` — it **never re-accepts** a frame it previously auto-rejected — and `grade_frames` never
@@ -9746,9 +9825,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   why stacking matters; sane default (no options to pick), plain language, reversible (Remove sample still cleans it
   all up). Testable via the existing job/stack test harness. (S, friendliness/onboarding — PRIORITY 3.)
 
-- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.199.0 sample demo) — a lightweight guided "first-run tour"
+- ~~**NEW IDEA (Builder 2026-07-24, follow-on to the v0.199.0 sample demo) — a lightweight guided "first-run tour"
   overlay that only shows while the *sample* target is active, coaching the newcomer through QC → Stack → Edit →
-  Export with one plain sentence per screen.** *(Pillar: 3 friendliness / understand-and-learn; size M.)* **The gap:**
+  Export with one plain sentence per screen.**~~ — **SHIPPED v0.222.0** (Builder 2026-07-30, branch
+  `claude/relaxed-turing-xuihhk`). A new `SampleTourNote` (`frontend/src/components/SampleTourNote.tsx`) renders a
+  small, non-modal, dismissible `Alert` on the **Target**, **Stack** and **Editor** screens — and *only* when the
+  sample demo is loaded **and** the target on screen is that sample, so a real target never sees a word of it. Each
+  step says what the screen is for and where to go next in one calm, jargon-free paragraph (the target page: "green
+  ones are kept … nothing here changes your files"; Stack: "adding frames together averages the noise away — that's
+  the whole trick"; Editor: "your stack is linear and dark until it's stretched … nothing you do here is
+  permanent"). **Implemented frontend-only** — no new endpoint or flag was needed: it compares the route's `safe`
+  against the `safe` already returned by `GET /api/sample`, reusing the `["sample"]` query key the onboarding card
+  owns. Each step dismisses **independently** and persists in `localStorage` (defensively guarded, so a
+  disabled/blocked store degrades to "doesn't stay dismissed" rather than breaking the page), and the query is
+  `enabled`-gated on "not dismissed **and** a target is resolved", so an established user's page loads cost nothing.
+  Removing the sample removes the whole tour with it. Upgrade-safe: display-only, additive, off for everyone who
+  hasn't tapped "Try it". Tests: `SampleTourNote.test.tsx` (+7 — all three steps coach on the sample; silent on a
+  real target; silent when the sample was never loaded/was removed; nothing rendered and nothing fetched before the
+  route resolves; dismissing one step persists but leaves the others; renders and dismisses even when
+  `localStorage` throws; and a copy guard that every step stays jargon-free). *(Original idea kept below for
+  provenance.)* *(Pillar: 3 friendliness / understand-and-learn; size M.)* **The gap:**
   the sample demo gives a beginner real data to poke at, but the *screens themselves* are still unlabelled — a first-
   timer on the Target/QC/Stack/Editor pages doesn't necessarily know what they're looking at or what to click next.
   The Scout's original sample idea called for "each screen with a one-line 'this is what you'll see with your own

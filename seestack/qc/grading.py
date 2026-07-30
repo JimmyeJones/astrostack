@@ -43,13 +43,33 @@ This module only *recommends*; ``apply_grade_report`` writes rejections with
 reason ``auto:grade:<metric>`` and — like ``auto:streak`` — does **not** set
 ``user_override``, so a machine decision never masquerades as a human one and
 the user can freely re-accept.
+
+Reconsidering old machine decisions
+-----------------------------------
+A live Seestar target drips subs, so the unattended hook re-grades it on every
+scan. A frame rejected **early** — graded against a tiny, noisy population whose
+median/MAD are unstable — used to stay rejected forever, even once hundreds of
+good subs made it plainly typical. ``grade_frames`` therefore takes an optional
+``reconsider`` list: the target's own ``auto:grade`` rejects (never a user
+decision). They rejoin the population *and* the considered set exactly as if
+accepted, so one deterministic pass over that stable set decides **both**
+directions — the frames it flags are the true outliers against the whole night
+(reject / stay rejected), and every reconsidered frame it does *not* flag comes
+back in ``GradeReport.re_accept``.
+
+Grading over that combined set is what makes the decision a fixed point rather
+than a ratchet: the set is invariant under auto-grade's own accept/reject moves
+(a frame only ever moves *between* its two halves), so the same recommendations
+come out every scan and a frame can't reject → re-accept → reject churn. It also
+makes the ``max_reject_fraction`` rail cumulative for free — the cap is measured
+against the original considered population, not against a shrinking survivor set.
 """
 
 from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from seestack.io.project import FrameRow
@@ -178,6 +198,11 @@ class GradeReport:
     metrics_used: list[str] = field(default_factory=list)
     metrics_skipped: dict[str, str] = field(default_factory=dict)
     capped: bool = False  # the MAX_REJECT_FRACTION rail truncated the list
+    # Ids from ``reconsider`` this pass did **not** flag: previously
+    # auto-rejected frames the now-larger population no longer calls outliers,
+    # so ``apply_grade_report`` puts them back. Always empty when no
+    # ``reconsider`` list was given (every existing caller).
+    re_accept: list[int] = field(default_factory=list)
 
 
 def _median(values: list[float]) -> float:
@@ -224,6 +249,7 @@ def grade_frames(
     sensitivity: str = DEFAULT_SENSITIVITY,
     min_frames: int = MIN_FRAMES_FOR_GRADING,
     max_reject_fraction: float = MAX_REJECT_FRACTION,
+    reconsider: list[FrameRow] | None = None,
 ) -> GradeReport:
     """
     Grade a target's accepted frames and recommend statistical outliers for
@@ -232,6 +258,16 @@ def grade_frames(
     ``frames`` should be the target's **accepted** frames (they define the
     population that would stack). Frames with ``user_override`` set inform the
     statistics but are never recommended — the user's decision stands.
+
+    ``reconsider`` (optional) is the target's own previously ``auto:grade``-
+    rejected frames. They are graded exactly as if accepted — they rejoin both
+    the population statistics and the considered set — so this one pass decides
+    both directions over a stable set (see the module docstring). Any of them the
+    pass does *not* flag is reported in :attr:`GradeReport.re_accept`; any it
+    does flag simply stays rejected (it is listed in ``recommendations``, and
+    ``apply_grade_report`` leaves an already-rejected frame alone). A
+    ``user_override`` or id-less entry is ignored — a user decision is never
+    reconsidered.
     """
     if sensitivity not in SENSITIVITY_THRESHOLDS:
         raise ValueError(
@@ -239,6 +275,18 @@ def grade_frames(
             f"(expected one of {sorted(SENSITIVITY_THRESHOLDS)})"
         )
     threshold = SENSITIVITY_THRESHOLDS[sensitivity]
+
+    # Reconsidered frames join the population as accepted candidates. Copy rather
+    # than mutate — these rows come straight from the caller's DB read.
+    seen_ids = {f.id for f in frames if f.id is not None}
+    reconsidered = [
+        f if f.accept else replace(f, accept=True)
+        for f in (reconsider or [])
+        if f.id is not None and not f.user_override and f.id not in seen_ids
+    ]
+    reconsidered_ids = {f.id for f in reconsidered}
+    if reconsidered:
+        frames = list(frames) + reconsidered
 
     accepted = [f for f in frames if f.accept]
     considered = [f for f in accepted if f.id is not None and not f.user_override]
@@ -311,7 +359,13 @@ def grade_frames(
     for fid, rs in reasons.items():
         rs.sort(key=lambda r: r.z, reverse=True)
         recs.append(FrameGrade(frame_id=fid, name=names[fid], reasons=rs))
-    recs.sort(key=lambda g: g.worst_z, reverse=True)
+    # Worst-first, then by frame id so the order — and therefore which frames the
+    # cap below keeps — never depends on the order the caller happened to hand
+    # the rows in. That determinism is what makes the ``reconsider`` pass a fixed
+    # point: a reconsidered frame arrives at the end of ``considered``, so a
+    # z-score tie at the cap boundary would otherwise flip a frame in and out
+    # between scans.
+    recs.sort(key=lambda g: (-g.worst_z, g.frame_id))
 
     # Safety rail: never recommend more than the cap, keep the worst offenders.
     cap = max(1, int(len(considered) * max_reject_fraction)) if considered else 0
@@ -323,6 +377,14 @@ def grade_frames(
             "(%.0f%% rail)", cap, len(reasons), max_reject_fraction * 100,
         )
     report.recommendations = recs
+    # Every reconsidered frame the pass didn't end up recommending comes back.
+    # Read off the *post-cap* list deliberately: the cap is part of the same
+    # deterministic decision over the (invariant) combined set, so a frame the
+    # rail keeps out is kept out every scan too — re-accepting it is stable, not
+    # a step in a reject↔accept oscillation.
+    if reconsidered_ids:
+        flagged = {g.frame_id for g in recs}
+        report.re_accept = sorted(reconsidered_ids - flagged)
     return report
 
 
@@ -378,4 +440,30 @@ def apply_grade_report(project, report: GradeReport) -> list[int]:
             reject_reason=f"auto:grade:{rec.primary_metric}",
         )
         changed.append(rec.frame_id)
+    return changed
+
+
+def apply_grade_reaccepts(project, report: GradeReport) -> list[int]:
+    """
+    Put back the frames in ``report.re_accept`` — previously auto-graded rejects
+    the now-larger population no longer flags. Returns the ids actually changed.
+
+    Kept separate from :func:`apply_grade_report` so the two directions stay
+    independently reportable (and so every existing caller's return shape is
+    unchanged). Like the reject step it re-checks each frame's *current* state:
+    only a frame that is still rejected, still carries an ``auto:grade`` reason,
+    and still has no ``user_override`` is touched — so a rejection the user made
+    (or a streak/QC rejection, a different decision entirely) is never undone by
+    automation. Empty ``re_accept`` (every caller that passes no ``reconsider``
+    list) is a no-op.
+    """
+    changed: list[int] = []
+    for fid in report.re_accept:
+        f = project.get_frame(fid)
+        if f is None or f.accept or f.user_override:
+            continue
+        if not (f.reject_reason or "").startswith("auto:grade"):
+            continue
+        project.update_frame(fid, accept=True, reject_reason=None)
+        changed.append(fid)
     return changed

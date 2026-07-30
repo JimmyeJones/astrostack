@@ -12,6 +12,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type StackOptionField } from "../api/client";
 import { dependencyMet } from "../api/depends";
+import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import { masterOptionSuffix, masterSizeWarning } from "../calibrationFit";
 import { detectMixedPointings } from "../components/target/mixedPointings";
@@ -685,6 +686,8 @@ export function StackView() {
           Back to frames
         </Button>
       </Group>
+
+      <SampleTourNote step="stack" safe={safe} />
 
       {reuseRunId && reuse.data ? (
         <Alert color="blue" variant="light" py={6} px="sm">

@@ -46,6 +46,14 @@ def make_frame(
     )
 
 
+def make_frame_like(f: FrameRow, **overrides) -> FrameRow:
+    """A copy of ``f`` with fields overridden — for handing a frame back to
+    ``grade_frames(reconsider=…)`` as a rejected row."""
+    import dataclasses
+
+    return dataclasses.replace(f, **overrides)
+
+
 def clean_population(n: int = 40, seed: int = 7) -> list[FrameRow]:
     """A realistic, well-behaved night: small correlated wobble on each metric."""
     import random
@@ -332,6 +340,118 @@ def test_apply_grade_report_rejects_with_reason_and_respects_user(tmp_path):
 
         # Idempotent: re-applying changes nothing (frame already rejected).
         assert apply_grade_report(proj, report) == []
+    finally:
+        proj.close()
+
+
+# ---------------------------------------------------------------------------
+# reconsider / re_accept — machine decisions are reversible
+# ---------------------------------------------------------------------------
+
+
+def test_reconsider_re_accepts_a_frame_the_bigger_population_no_longer_flags():
+    """A frame rejected against a small, tight population is no longer an
+    outlier once the night's real spread arrives — so it comes back."""
+    early = [make_frame(i, fwhm=3.0 + 0.01 * i) for i in range(1, 16)]
+    borderline = make_frame(99, fwhm=4.2)
+    first = grade_frames(early + [borderline])
+    assert recommended_ids(first) == {99}
+    assert first.re_accept == []
+
+    # The night goes on: the population is now genuinely spread, so 4.2 px is
+    # ordinary. Grade the survivors with the earlier reject handed back in.
+    later = early + [make_frame(200 + i, fwhm=3.0 + 0.85 * (i % 4)) for i in range(60)]
+    rejected = make_frame(99, fwhm=4.2, accept=False)
+    second = grade_frames(later, reconsider=[rejected])
+    assert 99 not in recommended_ids(second)
+    assert second.re_accept == [99]
+
+
+def test_reconsider_keeps_a_frame_rejected_when_it_is_still_an_outlier():
+    """A genuinely bad sub stays rejected when reconsidered: it is recommended
+    again (so nothing changes) and never lands in ``re_accept``."""
+    frames = clean_population()
+    rejected = make_frame(0, fwhm=9.0, accept=False)
+    report = grade_frames(frames, reconsider=[rejected])
+    assert 0 in recommended_ids(report)
+    assert report.re_accept == []
+
+
+def test_reconsider_ignores_user_decisions():
+    """Only auto-grade's own machine decisions are reconsidered — a frame the
+    user set aside is neither re-accepted nor re-graded."""
+    frames = clean_population()
+    mine = make_frame(0, fwhm=3.0, accept=False, user_override=True)
+    report = grade_frames(frames, reconsider=[mine])
+    assert report.re_accept == []
+    assert 0 not in recommended_ids(report)
+
+
+def test_reconsider_is_a_fixed_point_across_repeated_grading():
+    """The combined set is invariant under auto-grade's own accept/reject moves,
+    so re-grading the same data converges instead of ratcheting: the second pass
+    reproduces exactly the first pass's decision, with nothing to re-accept."""
+    frames = clean_population(n=60, seed=11)
+    frames += [make_frame(500 + i, fwhm=5.5 + 0.3 * i) for i in range(4)]
+    first = grade_frames(frames)
+    flagged = recommended_ids(first)
+    assert flagged
+
+    survivors = [f for f in frames if f.id not in flagged]
+    reconsider = [
+        make_frame_like(f, accept=False) for f in frames if f.id in flagged
+    ]
+    second = grade_frames(survivors, reconsider=reconsider)
+    assert recommended_ids(second) == flagged
+    assert second.re_accept == []
+
+
+def test_reconsider_holds_the_cap_against_the_original_population():
+    """Grading over the combined set is what makes the ``max_reject_fraction``
+    rail cumulative: the cap is measured against everything auto-grade has ever
+    considered, not against a shrinking survivor set."""
+    frames = clean_population(n=40, seed=13)
+    frames += [make_frame(600 + i, fwhm=6.0 + 0.4 * i) for i in range(20)]
+    first = grade_frames(frames)
+    flagged = recommended_ids(first)
+    survivors = [f for f in frames if f.id not in flagged]
+    reconsider = [make_frame_like(f, accept=False) for f in frames if f.id in flagged]
+
+    second = grade_frames(survivors, reconsider=reconsider)
+    # Population = survivors + reconsidered = the original 60 considered frames.
+    cap = int(60 * MAX_REJECT_FRACTION)
+    assert len(second.recommendations) <= cap
+    # Without the reconsider list the same survivors would be re-graded against
+    # themselves — the shrinking-denominator cascade the cap has to prevent.
+    assert second.n_considered == 60
+
+
+def test_apply_grade_reaccepts_puts_back_only_auto_grade_rejects(tmp_path):
+    from seestack.io.project import Project
+    from seestack.qc.grading import GradeReport, apply_grade_reaccepts
+
+    proj = Project.create(tmp_path, "ReAcceptTest")
+    try:
+        ids = []
+        for f in clean_population(n=4):
+            f.id = None
+            ids.append(proj.add_frame(f))
+        auto, streak, mine, still_ok = ids
+        proj.update_frame(auto, accept=False, reject_reason="auto:grade:fwhm_px")
+        proj.update_frame(streak, accept=False, reject_reason="auto:streak")
+        proj.update_frame(mine, accept=False, reject_reason="auto:grade:fwhm_px",
+                          user_override=True)
+
+        report = GradeReport(sensitivity="balanced", threshold=3.5,
+                             n_accepted=1, n_considered=1,
+                             re_accept=[auto, streak, mine, still_ok])
+        assert apply_grade_reaccepts(proj, report) == [auto]
+        assert proj.get_frame(auto).accept is True
+        assert proj.get_frame(auto).reject_reason is None
+        assert proj.get_frame(streak).accept is False
+        assert proj.get_frame(mine).accept is False
+        # Idempotent: a second apply has nothing left to do.
+        assert apply_grade_reaccepts(proj, report) == []
     finally:
         proj.close()
 
