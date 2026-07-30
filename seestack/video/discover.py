@@ -31,12 +31,6 @@ _VIDEO_SUFFIX = "_video"
 #: archive and not worth walking on every request.
 _MAX_DEPTH = 2
 
-#: Stop looking for ``*_video`` sub-folders inside a directory once it has this
-#: many entries. A directory that big is a dump of sub-frames, not a container
-#: — and the incoming tree can hold thousands of FITS per target, which this
-#: walk would otherwise re-read on every poll of the Moon & Sun page.
-_MAX_ENTRIES_PER_DIR = 4000
-
 
 def _kind_for(base_name: str) -> str:
     """``"lunar"`` / ``"solar"`` / ``"other"`` from the Seestar's folder prefix."""
@@ -118,12 +112,18 @@ def find_video_captures(root: str | Path) -> list[VideoCapture]:
         # and answers ``is_dir()`` from the entry itself, so a target folder
         # holding thousands of subs costs one readdir instead of thousands of
         # stats plus a full sort of paths we're going to ignore.
+        #
+        # Every entry is examined, deliberately. An earlier revision capped the
+        # entries read per directory to bound the work on a poll — but ``scandir``
+        # returns entries in filesystem order, so the cap decided *at random*
+        # whether a capture filed alongside a lot of sub-frames was found at all.
+        # A user's video going missing depending on inode order is far worse than
+        # one extra readdir, and the directory listing is a single streamed
+        # syscall either way; the caller keeps the poll rate low instead.
         children: list[Path] = []
         try:
             with os.scandir(folder) as entries:
-                for n, entry in enumerate(entries):
-                    if n >= _MAX_ENTRIES_PER_DIR:
-                        break
+                for entry in entries:
                     try:
                         if entry.is_dir(follow_symlinks=False):
                             children.append(Path(entry.path))

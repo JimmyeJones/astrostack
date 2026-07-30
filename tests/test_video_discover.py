@@ -8,7 +8,9 @@ same folder, and neither may claim the other's.
 
 from __future__ import annotations
 
-from seestack.video import discover
+from pathlib import Path
+from unittest import mock
+
 from seestack.video.discover import (
     find_video_capture,
     find_video_captures,
@@ -83,22 +85,45 @@ def test_missing_root_is_not_an_error(tmp_path):
     assert find_video_captures(tmp_path / "does-not-exist") == []
 
 
-def test_gives_up_on_a_directory_holding_a_dump_of_sub_frames(tmp_path, monkeypatch):
-    """The walk runs on every page poll; it must not re-read a huge frame folder.
+def test_finds_a_capture_filed_beside_a_dump_of_sub_frames(tmp_path):
+    """A capture must be found regardless of what else is in the folder.
 
-    Beyond the entry cap we stop looking for ``_video`` children *inside* that
-    directory — a folder with thousands of entries is a dump of subs, not a
-    container someone filed a capture under.
+    An earlier revision capped how many directory entries the walk would read,
+    to bound the work done on a page poll. ``os.scandir`` returns entries in
+    filesystem order, so that cap decided *at random* whether a capture sitting
+    beside a few hundred sub-frames was discovered — the user's video would
+    appear or vanish depending on inode order (it passed locally and failed on
+    CI). Reading the whole listing is one streamed syscall; a capture going
+    missing is not an acceptable price for skipping part of it.
     """
-    monkeypatch.setattr(discover, "_MAX_ENTRIES_PER_DIR", 5)
     night = tmp_path / "2026-07-30"
-    for i in range(20):
+    for i in range(300):
         _touch(night / f"Light_{i:03d}.fit")
     _touch(night / "zzz_video" / "clip.mp4", 100)
-    assert find_video_captures(tmp_path) == []
-    # A normal-sized folder one level down is still found.
-    _touch(tmp_path / "small" / "Lunar_video" / "clip.mp4", 100)
-    assert [c.folder_name for c in find_video_captures(tmp_path)] == ["Lunar_video"]
+    assert [c.folder_name for c in find_video_captures(tmp_path)] == ["zzz_video"]
+
+
+def test_does_not_stat_every_file_while_walking(tmp_path):
+    """The walk runs on every poll of the Moon & Sun page, so it must decide
+    "is this a directory?" from the dirent rather than stat-ing each of a
+    target folder's thousands of sub-frames."""
+    for i in range(50):
+        _touch(tmp_path / "M_42" / f"Light_{i:03d}.fit")
+    _touch(tmp_path / "Lunar_video" / "clip.mp4", 100)
+
+    stats: list[str] = []
+    real_stat = Path.stat
+
+    def counting_stat(self, *a, **kw):
+        stats.append(self.name)
+        return real_stat(self, *a, **kw)
+
+    with mock.patch.object(Path, "stat", counting_stat):
+        assert [c.folder_name for c in find_video_captures(tmp_path)] == ["Lunar_video"]
+    # The 50 FITS in the neighbouring target folder are never touched — only the
+    # roots being walked and the discovered capture's own video file are stat-ed.
+    assert not [n for n in stats if n.startswith("Light_")]
+    assert len(stats) < 10, stats
 
 
 def test_files_are_listed_in_a_stable_order(tmp_path):

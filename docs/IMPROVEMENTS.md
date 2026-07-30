@@ -9826,6 +9826,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   `tests/webapp/test_video_api.py` (+11, including a crafted-id traversal attempt and a `file_name` escape attempt),
   and `frontend/src/routes/MoonSun.test.tsx` (+10). Upgrade-safe: new module + new endpoints + a new opt-in data
   sub-directory created on first use; no config/DB/API-shape/on-disk change and no default flipped.
+  **Follow-up fixed v0.225.1** (same run): the discovery walk originally capped how many directory entries it read
+  per folder, to bound the work done on a page poll. `os.scandir` returns entries in *filesystem* order, so that cap
+  decided **at random** whether a capture filed beside a few hundred sub-frames was found at all — it passed locally
+  and failed on CI, and on a live install it would have made a user's video appear or vanish by inode order. The cap
+  is gone (the listing is one streamed syscall either way; `scandir` still avoids stat-ing every sub-frame, which was
+  the real win). Tests replaced with the two deterministic properties that actually matter: a capture *is* found
+  beside 300 sub-frames, and the walk never stats a neighbouring target folder's frames.
   **Still open — slice (b)/(c)** (filed as their own entry below): a keep-% fine-tune slider, per-frame colour/debayer
   handling for raw OSC video, an optional final unsharp, disk crop/centre, a quality histogram, and drizzle-upscale.
   *(Original spec kept below for provenance.)*
