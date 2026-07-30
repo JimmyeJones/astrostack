@@ -34,6 +34,10 @@ def _subtract(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         dilate_object_mask_px=_scaled_box(ctx, 4, minimum=0),
         mode=str(params.get("mode", "per_channel")),
         enabled=True,
+        # Lets the object detector scale its own internal full-res pixel measures
+        # (the minimum detection area, the extended-structure block) the same way,
+        # so preview and export mask the same structure.
+        proxy_scale=float(ctx.proxy_scale),
     )
     # for_image_size (called inside subtract_background) floors box_size further
     # for tiny images, so the mesh always tiles the proxy.

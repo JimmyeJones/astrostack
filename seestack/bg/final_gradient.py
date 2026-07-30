@@ -24,28 +24,18 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from seestack.bg.sky_poly import fit_sky_poly
+
 log = logging.getLogger(__name__)
 
 DEFAULT_BOX_SIZE = 256
 DEFAULT_DETECT_SIGMA = 2.5
 DEFAULT_DILATE_PX = 16
 
-# Degree of the robust polynomial used to *detrend before detecting* objects, and
-# to model each channel's residual colour gradient. Two is the sweet spot: it
-# follows the smooth, frame-scale shape light pollution actually has, yet cannot
-# bend into a localised galaxy/nebula the way a per-channel Background2D mesh can
-# (that mesh-eats-the-nebula failure is exactly why `luminance` is the default).
-_POLY_DEG = 2
-# The surface is fitted to a coarse grid of per-tile sky *medians* rather than to
-# raw pixels. A median is unbiased however many of a tile's pixels the object mask
-# removed, whereas least-squares over raw pixels with outlier clipping is not:
-# clipping bites harder where the mask is denser, which bends a spurious few-ADU
-# surface out of a frame that has no gradient at all (measured). It is also much
-# cheaper — ~600 samples instead of millions — so it runs on every preview render.
-_POLY_TILES = 24
-# A tile needs this fraction of its pixels to be unmasked sky before its median is
-# trusted as a sample; otherwise the tile is dropped from the fit.
-_POLY_TILE_MIN_FRAC = 0.25
+# The robust low-order sky surface used to *detrend before detecting* objects, and
+# to model each channel's residual colour gradient, lives in `bg/sky_poly.py` —
+# the per-frame flatten's object mask needs exactly the same primitive.
+#
 # Smallest detection (full-res px) taken seriously as an object. A real point
 # source spans several pixels once the seeing is ~2 px FWHM, while a single-pixel
 # spike is noise — and dilating those by dilate_px is what used to swell the mask
@@ -116,97 +106,6 @@ def remove_final_gradient(
     return _subtract_per_channel_with_mask(rgb, mask, options, errors=errors)
 
 
-def _poly_design(ys: np.ndarray, xs: np.ndarray, deg: int) -> np.ndarray:
-    """Design matrix for a 2D polynomial of degree ``deg`` in normalised coords."""
-    terms = [np.ones_like(xs)]
-    for d in range(1, deg + 1):
-        for k in range(d + 1):
-            terms.append((xs ** (d - k)) * (ys ** k))
-    return np.stack(terms, axis=-1)
-
-
-def _tile_medians(
-    plane: np.ndarray, include: np.ndarray, tiles: int = _POLY_TILES,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Coarse grid of robust sky samples: ``(ys, xs, values)`` in normalised
-    ``[-0.5, 0.5]`` coordinates, one entry per tile that held enough sky.
-    """
-    h, w = plane.shape[:2]
-    ny = max(2, min(tiles, h))
-    nx = max(2, min(tiles, w))
-    y_edges = np.linspace(0, h, ny + 1).astype(int)
-    x_edges = np.linspace(0, w, nx + 1).astype(int)
-    ys: list[float] = []
-    xs: list[float] = []
-    vals: list[float] = []
-    for iy in range(ny):
-        y0, y1 = y_edges[iy], y_edges[iy + 1]
-        if y1 <= y0:
-            continue
-        for ix in range(nx):
-            x0, x1 = x_edges[ix], x_edges[ix + 1]
-            if x1 <= x0:
-                continue
-            cell = plane[y0:y1, x0:x1]
-            ok = include[y0:y1, x0:x1] & np.isfinite(cell)
-            n_ok = int(ok.sum())
-            if n_ok < max(8, int(_POLY_TILE_MIN_FRAC * cell.size)):
-                continue
-            ys.append((y0 + y1) * 0.5 / max(h - 1, 1) - 0.5)
-            xs.append((x0 + x1) * 0.5 / max(w - 1, 1) - 0.5)
-            vals.append(float(np.median(cell[ok])))
-    return (np.asarray(ys, dtype=np.float64),
-            np.asarray(xs, dtype=np.float64),
-            np.asarray(vals, dtype=np.float64))
-
-
-def _fit_sky_poly(
-    plane: np.ndarray,
-    include: np.ndarray | None = None,
-    *,
-    deg: int = _POLY_DEG,
-    iters: int = 3,
-) -> np.ndarray | None:
-    """
-    Robust low-order polynomial surface through the *sky* of a 2D plane.
-
-    ``include`` (optional) restricts the samples to those pixels (the sky mask).
-    The solve runs over per-tile medians (see :func:`_tile_medians`), then rejects
-    tiles whose residual is a high outlier — nebulosity the mask missed — and
-    re-solves, so a faint object cannot drag the surface up around it.
-
-    Returns ``None`` when there is too little sky to fit, so callers can skip
-    the pass rather than subtract a garbage surface.
-    """
-    h, w = plane.shape[:2]
-    if include is None:
-        include = np.ones((h, w), dtype=bool)
-    ys, xs, vals = _tile_medians(plane, include)
-    n_terms = (deg + 1) * (deg + 2) // 2
-    if vals.size < n_terms * 4:
-        return None
-    design = _poly_design(ys, xs, deg)
-    keep = np.ones(vals.shape, dtype=bool)
-    coef = None
-    for _ in range(iters):
-        if int(keep.sum()) < n_terms * 4:
-            break
-        coef, *_ = np.linalg.lstsq(design[keep], vals[keep], rcond=None)
-        resid = vals - design @ coef
-        kept = resid[keep]
-        sigma = 1.4826 * float(np.median(np.abs(kept - np.median(kept))))
-        if not np.isfinite(sigma) or sigma <= 0.0:
-            break
-        keep = (resid < 2.5 * sigma) & (resid > -3.0 * sigma)
-    if coef is None:
-        return None
-    yy, xx = np.mgrid[0:h, 0:w]
-    full = _poly_design((yy / max(h - 1, 1) - 0.5).ravel().astype(np.float64),
-                        (xx / max(w - 1, 1) - 0.5).ravel().astype(np.float64), deg)
-    return (full @ coef).reshape(h, w).astype(np.float32)
-
-
 def _build_object_mask(rgb: np.ndarray, options: FinalGradientOptions) -> np.ndarray:
     """
     True where there's a non-sky object (star, galaxy, nebula). The fitter
@@ -243,7 +142,7 @@ def _build_object_mask(rgb: np.ndarray, options: FinalGradientOptions) -> np.nda
     if not finite.any():
         return np.zeros(luma.shape, dtype=bool)
     luma_filled = np.where(finite, luma, np.nan)
-    trend = _fit_sky_poly(luma_filled)
+    trend = fit_sky_poly(luma_filled)
     resid = luma_filled if trend is None else luma_filled - trend
     _, med, std = sigma_clipped_stats(resid, sigma=3.0, maxiters=5)
     if not np.isfinite(med) or not np.isfinite(std) or std <= 0:
@@ -424,7 +323,7 @@ def _subtract_luminance_with_mask(
         # only ever removes brightness that all three have in common.
         for c in range(3):
             finite = np.isfinite(out[..., c])
-            surface = _fit_sky_poly(out[..., c], ~mask & finite)
+            surface = fit_sky_poly(out[..., c], ~mask & finite)
             if surface is not None:
                 out[..., c] = np.where(finite, out[..., c] - surface, out[..., c])
 

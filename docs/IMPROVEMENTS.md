@@ -382,10 +382,39 @@ when you take it.
   `Seestar.test.tsx` (+1, "surfaces a retryable error instead of spinning forever"). Frontend-only, upgrade-safe.
   (S, UX — PRIORITY 3.)
 
-- **⭐⭐ MEASURED (2026-07-29) — the PER-FRAME background flatten has exactly the same starved-object-mask bug that
+- ~~**⭐⭐ MEASURED (2026-07-29) — the PER-FRAME background flatten has exactly the same starved-object-mask bug that
   was just fixed in the final-gradient pass, and it is on the hot path for every single sub: on a light-polluted sub
   it masks 0.4 % of the dim fifth but 60 % of the BRIGHT fifth, and on a gradient-free sub it masks 60 % of the whole
-  frame.** *(Stacking-engine correctness — PRIORITY 1 per AGENTS.md §1 "Current focus"; wrong-result, it corrupts
+  frame.**~~ — **FIXED v0.213.0** (Builder 2026-07-30, branch `claude/funny-bohr-gdego5`). `_build_object_mask_for_bg`
+  (`seestack/bg/per_frame.py`) now detects against the same robust low-order **tile-median trend** the final pass got in
+  v0.211.0 (moved to a shared `seestack/bg/sky_poly.py`), drops **noise-sized detections** before dilating them into
+  blobs, and adds a **block-averaged** faint-extended pass. Measured on the audit's 1080×1920 S30 sub, mask coverage
+  dim→bright fifth goes from `0.4/0.3/1.4/13.9/59.7 %` (and 60 % of a *gradient-free* frame) to a flat
+  `3.3/2.9/19.9/14.4/3.1 %` — the 20/14 % is the nebula, correctly masked, not starvation.
+
+  | honest 12-sub path, stack tilt R/G/B (ADU) | before | after |
+  |---|---|---|
+  | 18 % LP gradient | +30.6/+48.2/+23.9 (Σ 102.7) | **+5.3/+8.7/+4.2 (Σ 18.1)** |
+  | 8 % LP gradient  | +16.8/+28.6/+13.5 (Σ 59.0)  | **+2.2/+3.8/+1.8 (Σ 7.7)** |
+  | no gradient      | Σ 0.5                        | Σ 0.4 (unchanged) |
+
+  The faint nebula also survives the flatten **better**, not worse: with the gradient present the mask starvation used
+  to wreck its colour (G kept 1.8 of 18 ADU, R 19.1 of 55) — now 12.0/35.5, ratios intact, which is what the
+  block-averaged pass is for (a single sub's grain is larger than the nebula, so no per-pixel threshold can see it and
+  an honest fit would eat it). **Hot-path budget (the entry's precondition), measured on a 1080×1920 sub:** the mask
+  build is **~200 ms vs ~215 ms before** — *cheaper*, because the sky median/σ is now a sigma-clip of a regular
+  ~200 k-pixel subsample (~15 ms instead of ~145 ms) and the trend surface is evaluated by broadcasting instead of a
+  full-res design matrix (~20 ms instead of ~245 ms and ~96 MB of float64). End-to-end `subtract_background` is within
+  noise of before (~2.0–2.1 s/sub on this box, both) and peak RSS +23 MB on a 2 M-pixel frame, bounded per frame. The
+  **GPU path now calls the same shared builder** instead of its own global-median/MAD approximation, closing both the
+  bug and a silent CPU↔GPU parity gap. Regression tests, all fail-before/pass-after:
+  `tests/test_bg_object_mask_starvation.py` (+7: gradient starvation, noise-sized detections, still-finds-stars/nebula,
+  honest-path stack tilt, nebula survival, extended pass doesn't eat a plain LP sky, `for_image_size` keeps new fields)
+  and `test_gpu_path_masks_exactly_what_the_cpu_path_masks` (`tests/test_bg_gpu_shim.py`). `test_bg_modes.py`'s sparse
+  mosaic canvas was narrowed 40 → 15 px so its *premise* assertion (the strict `exclude_percentile=80` fit really does
+  raise) still holds now that the mask no longer inflates itself with dilated noise. Upgrade-safe: additive
+  `BackgroundOptions.proxy_scale` (JSON-safe, `StackOptions` untouched), no config/DB/API/on-disk change.
+  *(Stacking-engine correctness — PRIORITY 1 per AGENTS.md §1 "Current focus"; wrong-result, it corrupts
   every stack's sky before the frames are even combined; **reproduced + measured**.)*
   `_build_object_mask_for_bg` (`seestack/bg/per_frame.py:316-343`) thresholds luminance at `med + 2.0·σ` where both
   are **whole-frame** sigma-clipped statistics. On a raw Seestar sub that still has its full light-pollution gradient
@@ -416,9 +445,20 @@ when you take it.
   residual luminance tilt in the finished picture. Confidence: reproduced + measured. (M, stacking-engine correctness
   — PRIORITY 1.)
 
-- **⭐ MEASURED (2026-07-29, the surviving half of the ⭐⭐ colour-split bug above) — the finished Auto picture still
+- ~~**⭐ MEASURED (2026-07-29, the surviving half of the ⭐⭐ colour-split bug above) — the finished Auto picture still
   brightens strongly toward the light-polluted corner: a residual LUMINANCE tilt of ~+46 % of sky that mesh-scale
-  `Background2D` bias leaves behind.** *(Editor/auto image quality — PRIORITY 1; wrong-result on the flagship
+  `Background2D` bias leaves behind.**~~ — **FIXED v0.213.0** (Builder 2026-07-30, branch `claude/funny-bohr-gdego5`),
+  by fix direction **(c)**: the per-frame flatten's systematic bias was indeed the larger term, and unstarving its
+  object mask (the ⭐⭐ entry above) removes it upstream, before it can enter the stack. Measured end-to-end on the
+  honest path (6 full-res subs → default per-frame flatten → stack → `auto_recipe` → `apply_recipe`), frame-eighth sky
+  level of the finished Auto render: **left 0.216 → right 0.360 (+64 % of sky) becomes 0.215 → 0.240 (+11 %)** on an
+  18 % LP gradient, and **+18 % → +5 %** on an 8 % one — inside this entry's own `< 15 % of sky` acceptance target,
+  with the worst per-channel sky cast also down (4 % → 3 %). No change to `_fit_background_2d` was needed, so fix
+  directions (a) and (b) stay unspent if a future audit finds a case this doesn't cover. Note the residual scales with
+  how few mesh boxes tile the frame, so it is larger on small/decimated frames than on a real 1080×1920 Seestar stack
+  (a 480×800 synthetic still spreads ~29 %); the shipped path is the full-res one. Regression: the stack-tilt test in
+  `tests/test_bg_object_mask_starvation.py` (a small-scene *end-to-end* assertion was deliberately not added — at test
+  scale the mesh bias dominates and the metric barely discriminates). *(Editor/auto image quality — PRIORITY 1; wrong-result on the flagship
   "Process target" picture; **reproduced** at two gradient strengths.)* With the object-mask and per-channel fixes
   (v0.211.0) the *colour* split is gone (cross-channel sky spread 34.3 → 3.9 ADU, i.e. below the grain), but the
   **brightness** ramp is only halved: measured on the honest 12-sub path, left→right sky level after the full Auto
@@ -13293,6 +13333,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.213.0** — ⭐⭐ Fixed the PER-FRAME background flatten's starved object mask — the last stacking-engine source of
+  the "one corner is washed out" final picture. `_build_object_mask_for_bg` now detrends by a robust low-order
+  tile-median sky poly (shared `seestack/bg/sky_poly.py`), drops noise-sized detections, and adds a cheap
+  block-averaged faint-extended pass; the GPU path calls the same builder instead of its own global-threshold
+  approximation. Mask coverage dim→bright fifth 0.4 %…59.7 % → a flat ~3 %; honest-path stack tilt Σ|R/G/B| 102.7 →
+  18.1 ADU (18 % LP) and 59.0 → 7.7 (8 % LP); the finished one-click Auto picture's brightness tilt +64 % → +11 % of
+  sky, which also closes the ⭐ surviving-luminance-tilt bug. Faint-nebula colour survives the flatten far better
+  (G 1.8 → 12.0 of 18 ADU). Mask build ~200 ms vs ~215 ms before (subsampled clip stats + broadcast poly evaluation),
+  so the hot path is no slower. Tests: `tests/test_bg_object_mask_starvation.py` (+7), `tests/test_bg_gpu_shim.py`
+  (+1).
 - **v0.212.0** — NEW beginner feature "Was last night's sky bright?": a relative, self-hiding read on the latest
   night's sky brightness, measured from the `sky_adu_median` QC already records and compared against the target's own
   nights (never an absolute Bortle claim). Exposure- and gain-grouped so a settings change can't masquerade as a
