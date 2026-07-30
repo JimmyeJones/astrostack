@@ -6,6 +6,7 @@ from seestack.recap import (
     RecapFacts,
     draw_recap_poster,
     recap_caption,
+    recap_other_targets_line,
     recap_since_line,
     recap_stats,
     recap_top_project_line,
@@ -165,3 +166,90 @@ def test_poster_shrinks_a_very_long_target_name_to_fit():
     facts = RecapFacts(top_target_name="A" * 200, top_target_integration_s=3600.0)
     for size in (200, 540):
         assert draw_recap_poster(facts, size=size).size == (size, size)
+
+
+# --- recap_other_targets_line ("what else you pointed at") ------------------
+
+
+def _shot(names, n_targets: int) -> RecapFacts:
+    return RecapFacts(n_targets=n_targets, top_target_name="M 31",
+                      top_target_integration_s=15120.0,
+                      other_target_names=tuple(names))
+
+
+def test_also_shot_names_what_you_pointed_at():
+    """The numbers say how much; this says *what* — the part a beginner wants to
+    point at. Reads as a sentence, not a table."""
+    assert recap_other_targets_line(_shot(["M 42", "NGC 7000"], 3)) == \
+        "Also shot: M 42 and NGC 7000"
+    assert recap_other_targets_line(_shot(["M 42"], 2)) == "Also shot: M 42"
+
+
+def test_also_shot_caps_the_names_and_counts_the_rest_from_the_total():
+    """A big library spells out three names and counts the remainder — from the
+    real target total, not the (capped) name list it was handed."""
+    facts = _shot(["M 42", "NGC 7000", "M 45", "M 51", "M 13"], 9)
+    assert recap_other_targets_line(facts) == \
+        "Also shot: M 42, NGC 7000, M 45 and 5 more"
+
+
+def test_also_shot_self_hides_on_a_one_target_library():
+    """A library with one target must not read as a boast about one target — the
+    "biggest project" line already names it."""
+    assert recap_other_targets_line(_shot([], 1)) == ""
+    assert recap_other_targets_line(RecapFacts()) == ""
+
+
+def test_also_shot_ignores_blank_and_duplicate_names():
+    """A hand-edited registry (blank name, the same target twice) must not print a
+    dangling comma or repeat itself."""
+    facts = _shot(["M 42", "  ", "M 42", "NGC 7000", None], 3)
+    assert recap_other_targets_line(facts) == "Also shot: M 42 and NGC 7000"
+
+
+def test_also_shot_never_reports_a_negative_remainder():
+    """An inconsistent n_targets (fewer than the names supplied) falls back to the
+    list length rather than printing "and -2 more"."""
+    facts = _shot(["M 42", "NGC 7000", "M 45", "M 51"], 1)
+    assert recap_other_targets_line(facts) == \
+        "Also shot: M 42, NGC 7000, M 45 and 1 more"
+
+
+def test_also_shot_uses_no_glyph_the_built_in_font_lacks():
+    """Same constraint as the biggest-project line: this is rendered onto a poster
+    with Pillow's built-in font, which has no em dash."""
+    line = recap_other_targets_line(_shot(["M 42", "NGC 7000", "M 45", "M 51"], 9))
+    assert "—" not in line and "–" not in line
+    assert all(ord(c) < 128 for c in line)
+
+
+def test_caption_adds_what_else_you_shot_after_the_biggest_project():
+    """Every other target named (4 targets = the biggest plus three others), so
+    the caption closes with the names rather than a count."""
+    facts = RecapFacts(**{**_full().__dict__,
+                          "other_target_names": ("M 42", "NGC 7000", "M 45")})
+    cap = recap_caption(facts)
+    assert cap.endswith(
+        "biggest project: M 31 (4h 12m) · also shot: M 42, NGC 7000 and M 45")
+
+
+def test_caption_counts_the_targets_it_did_not_name():
+    """When the caller hands over fewer names than the library has targets, the
+    remainder is counted — never silently dropped."""
+    facts = RecapFacts(**{**_full().__dict__,
+                          "other_target_names": ("M 42", "NGC 7000")})
+    assert recap_caption(facts).endswith("also shot: M 42, NGC 7000 and 1 more")
+
+
+def test_caption_is_unchanged_when_nothing_else_was_shot():
+    """The single-target library's caption is byte-for-byte what it was before."""
+    assert recap_caption(_full()) == (
+        "12 nights under the sky · 8h 20m of light · 4 targets · "
+        "biggest project: M 31 (4h 12m)")
+
+
+def test_poster_renders_the_also_shot_line_without_failing():
+    facts = RecapFacts(**{**_full().__dict__,
+                          "other_target_names": ("M 42", "NGC 7000", "M 45", "M 51")})
+    img = draw_recap_poster(facts, size=320)
+    assert img.size == (320, 320) and img.mode == "RGB"

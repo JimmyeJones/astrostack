@@ -648,6 +648,10 @@ class RecapOut(BaseModel):
     total_integration_s: float
     top_target_name: str | None = None
     top_target_integration_s: float | None = None
+    # The "what else you pointed at" line ("Also shot: M 42, NGC 7000 and 5
+    # more"), or "" on a one-target library. Additive; the poster carries the
+    # same line.
+    also_shot: str = ""
 
 
 def _recap_facts(request: Request, months: int):
@@ -670,6 +674,14 @@ def _recap_facts(request: Request, months: int):
         lib.close()
     cal = _cached_activity_calendar(request, months)
     top = summary.longest_target
+    # The rest of what you pointed at, ranked by integration — every imaged
+    # target (not just the ones with a finished picture), minus the biggest
+    # project, which has its own line. A few more than the line prints, so the
+    # pure layer's de-duplication still has something to work with.
+    others = tuple(
+        t.name for t in summary.imaged_ranked
+        if top is None or t.safe != top.safe
+    )[:8]
     return summary, RecapFacts(
         total_integration_s=summary.total_integration_s,
         n_targets=summary.n_targets_imaged,
@@ -679,6 +691,7 @@ def _recap_facts(request: Request, months: int):
         first_light_utc=summary.first_light_utc,
         top_target_name=top.name if top is not None else None,
         top_target_integration_s=top.total_exposure_s if top is not None else None,
+        other_target_names=others,
     )
 
 
@@ -689,7 +702,9 @@ def get_recap(request: Request, months: int = 12) -> RecapOut:
     ``has_anything=false`` (and empty text) on a library that hasn't collected
     any light yet, so the share card self-hides instead of offering a blank
     poster."""
-    from seestack.recap import recap_caption, recap_since_line, recap_stats
+    from seestack.recap import (
+        recap_caption, recap_other_targets_line, recap_since_line, recap_stats,
+    )
 
     months = max(1, min(24, months))
     summary, facts = _recap_facts(request, months)
@@ -706,6 +721,7 @@ def get_recap(request: Request, months: int = 12) -> RecapOut:
         total_integration_s=summary.total_integration_s,
         top_target_name=facts.top_target_name,
         top_target_integration_s=facts.top_target_integration_s,
+        also_shot=recap_other_targets_line(facts),
     )
 
 

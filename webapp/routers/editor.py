@@ -190,7 +190,8 @@ def _trim_rect_for_run(run, min_frac: float = 0.5
 
 
 def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
-                              prefs: dict | None = None) -> Recipe:
+                              prefs: dict | None = None,
+                              auto_crop: bool = True) -> Recipe:
     """The one-click Auto recipe for a run, built from its own proxy — the same
     logic the ``…/editor/auto`` endpoint serves, factored out so the one-click
     "Process target" job can chain an auto-edit onto the stack it just produced
@@ -200,16 +201,21 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
     ``prefs`` is the library's Adaptive-Auto taste profile (see
     ``AUTO_PREFERENCES_META_KEY``): when supplied it shifts Auto's data-driven
     values toward the owner's taste, each clamped to a safe range. ``None``/empty ⇒
-    unchanged (today's Auto)."""
+    unchanged (today's Auto).
+
+    ``auto_crop`` is the owner's "let Auto trim the ragged border" preference
+    (``auto_crop_border``, default on = today's behaviour); off keeps the full
+    frame."""
     rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
     is_mosaic = _run_is_mosaic(run, load=True)
     trim = _trim_rect_for_run(run) if is_mosaic else None
     return presets_mod.auto_recipe(
         rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
-        prefs=prefs)
+        prefs=prefs, auto_crop=auto_crop)
 
 
-def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | None) -> dict:
+def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | None,
+                                auto_crop: bool = True) -> dict:
     """The measured cues that *drove* the Auto recipe for a run — the causal
     inputs behind the ops (sky level, background noise, star size, mosaic trim).
     Mirrors ``build_auto_recipe_for_run`` exactly (same proxy, same mosaic verdict,
@@ -220,7 +226,8 @@ def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | Non
     is_mosaic = _run_is_mosaic(run, load=True)
     trim = _trim_rect_for_run(run) if is_mosaic else None
     return presets_mod.analyze_auto_inputs(
-        rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim)
+        rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
+        auto_crop=auto_crop)
 
 
 def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
@@ -1228,9 +1235,33 @@ async def edit_coverage_map(safe: str, run_id: int, request: Request,
                     headers={"Cache-Control": "no-store"})
 
 
+async def _auto_crop_pref(request: Request) -> bool:
+    """Whether this Auto request should trim the ragged border. The library-wide
+    ``auto_crop_border`` setting is the default; an optional ``{"auto_crop": bool}``
+    request body overrides it for this call alone, so the editor can offer a
+    per-run switch without writing to config. A body-less POST (what every older
+    frontend sends) reads as "use the setting", so the endpoint stays
+    backward-compatible."""
+    default = bool(deps.get_settings(request).auto_crop_border)
+    try:
+        raw = await request.body()
+    except Exception:  # noqa: BLE001 — a preference must never sink Auto
+        return default
+    if not raw:
+        return default
+    try:
+        body = json.loads(raw)
+    except (ValueError, TypeError):
+        return default
+    if isinstance(body, dict) and isinstance(body.get("auto_crop"), bool):
+        return bool(body["auto_crop"])
+    return default
+
+
 @router.post("/api/targets/{safe}/stack-runs/{run_id}/editor/auto")
 async def auto_process(safe: str, run_id: int, request: Request) -> dict:
     project_dir, run = _run_info(request, safe, run_id)
+    auto_crop = await _auto_crop_pref(request)
     # The target's median star FWHM sizes the auto sharpen radius to the data
     # (same conversion as the sharpen-from-stars button), not a fixed guess.
     lib, proj = deps.open_target_project(request, safe)
@@ -1250,7 +1281,8 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
         # single-field stack is unchanged. Uses the stacker's authoritative
         # is_mosaic verdict, never the old coverage_max>min heuristic.
         return build_auto_recipe_for_run(
-            project_dir, run, median_fwhm, prefs=prefs).to_dict()
+            project_dir, run, median_fwhm, prefs=prefs,
+            auto_crop=auto_crop).to_dict()
 
     return await run_in_threadpool(work)
 
@@ -1263,6 +1295,7 @@ async def auto_analysis(safe: str, run_id: int, request: Request) -> dict:
     4.7 px stars"), not just which ops ran. Additive sibling of ``…/editor/auto``;
     it never persists anything and leaves the Recipe response shape untouched."""
     project_dir, run = _run_info(request, safe, run_id)
+    auto_crop = await _auto_crop_pref(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
         median_fwhm = proj.median_fwhm()
@@ -1271,7 +1304,8 @@ async def auto_analysis(safe: str, run_id: int, request: Request) -> dict:
         lib.close()
 
     def work() -> dict:
-        return build_auto_analysis_for_run(project_dir, run, median_fwhm)
+        return build_auto_analysis_for_run(project_dir, run, median_fwhm,
+                                           auto_crop=auto_crop)
 
     return await run_in_threadpool(work)
 

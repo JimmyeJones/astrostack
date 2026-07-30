@@ -6099,8 +6099,34 @@ to **Shipped**.)_
   historical (`PLAN.md`-era) and its only tests are the three Qt ones, so a drive-by change at merge time wasn't
   worth it; take it if you're already in that file. Confidence: traced (the counter semantics are proven by
   `tests/test_solve_runner.py::test_run_qc_and_solve_reports_the_frames_it_actually_located`).
-- **NEW IDEA (Builder 2026-07-30, follow-on to the "Share your sky" poster v0.223.0) — let the recap say *what* you
-  shot, not only how much.** *(Friendliness / enjoy + share — PRIORITY 3; size S–M.)* The poster now carries the
+- ~~**NEW IDEA (Builder 2026-07-30, follow-on to the "Share your sky" poster v0.223.0) — let the recap say *what* you
+  shot, not only how much.**~~ — **SHIPPED v0.227.0** (Builder 2026-07-30, branch `claude/relaxed-turing-zajzay`).
+  The poster and its caption carried the quantities and the biggest project; they now also name the rest of what you
+  pointed at — **"Also shot: M 42, NGC 7000 and 5 more"** — which is the part a friend actually reads. Exactly one
+  line, as the entry asked: `recap_other_targets_line` (`seestack/recap.py`) spells out up to **three** names and
+  counts the remainder from the real target total (`n_targets`), not the capped list it was handed, so it stays
+  honest on a library with hundreds of targets. It deliberately **excludes** the biggest project, which has its own
+  line right above it, so the two never repeat a name, and it returns `""` on a one-target library — keeping the
+  poster's self-hiding contract (one target must not read as a boast about one target). Blank/duplicate names from a
+  hand-edited registry are dropped rather than printing a dangling comma, and the line is pure ASCII because Pillow's
+  built-in font has no em dash (the same constraint the biggest-project line documents).
+  **Where the names come from:** `summarize_library` (`seestack/library_summary.py`) gained an additive
+  `imaged_ranked` — *every* imaged target ranked by integration. `heroes` couldn't answer "what did I shoot?"
+  because it is narrowed to targets with a preview on disk, so a target still waiting to be stacked was invisible
+  to it. `webapp/routers/stats.py` drops the biggest project off the front of that ranking and passes the next few
+  as `other_target_names`; `GET /api/recap` gains an additive `also_shot` field, and the caption gains the same
+  clause (lower-cased mid-sentence). No frontend work was needed — the "Share your sky" card renders the caption
+  verbatim and the poster is server-rendered — so the shareable output gained the names without gaining clutter.
+  **Tests (+14):** `tests/test_recap.py` (+9 — the sentence forms, the three-name cap with an honest remainder,
+  self-hide on one target, blank/duplicate names, no negative remainder, ASCII-only, the caption clause, the
+  unchanged one-target caption, and the poster still rendering), `tests/test_library_summary.py` (+3 —
+  `imaged_ranked` includes a not-yet-stacked target, respects the cap, empty on an untouched library),
+  `tests/webapp/test_recap.py` (+2 — the endpoint names the other target and never the biggest one; empty on an
+  empty library). Upgrade-safe: additive dataclass field with a default, additive response field, no
+  config/DB/on-disk/API-breaking change; a library with one target gets byte-for-byte the old caption.
+  **Still open (the entry's other two slices):** an explicit this-year vs all-time toggle (`window_months` is
+  already on the payload, it just has no UI), and baking the poster through `submit_editor_share`.
+  *(Original idea kept below for provenance.)* *(Friendliness / enjoy + share — PRIORITY 3; size S–M.)* The poster now carries the
   quantities (nights, integration, targets, subs) and the biggest project, which is the honest core — but the thing
   a beginner most wants to point at is the *names*: "M 31, M 42, the Pleiades and 5 more". `summarize_library`
   already ranks every imaged target by integration, so a "what you pointed at" line is a couple of fields away, and
@@ -9764,8 +9790,39 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-REQUESTED (2026-07-30) — let the user turn OFF the Auto auto-crop; make the ragged-border trim a
-  toggle.** The one-click Auto chain ends with a `geometry.crop` op (`seestack/edit/presets.py:462–466`,
+- ~~**⭐ OWNER-REQUESTED (2026-07-30) — let the user turn OFF the Auto auto-crop; make the ragged-border trim a
+  toggle.**~~ — **SHIPPED v0.226.0** (Builder 2026-07-30, branch `claude/relaxed-turing-zajzay`). The one-click
+  Auto chain ended with a `geometry.crop` that silently reframed the owner's picture; it is now a plain choice,
+  **defaulting to on** so no other install's result changes.
+  **Engine:** `auto_recipe` and `analyze_auto_inputs` (`seestack/edit/presets.py`) take an additive
+  `auto_crop: bool = True`. Off ⇒ the `geometry.crop` op is simply not emitted and **every other op and parameter
+  is byte-identical** (pinned by `test_auto_crop_off_changes_nothing_else_about_the_recipe`) — the trim rectangle
+  is still *measured*, it just isn't applied. The analysis mirrors the recipe rather than the measurement, so
+  `trim_fraction` is `None` when nothing was trimmed (the "what Auto did" note can never claim a crop that didn't
+  happen) while a new `trim_fraction_available` still reports what the trim *would* remove, so the UI can offer it.
+  **Webapp:** new setting `auto_crop_border` (`webapp/config.py`, default `True`) is the library-level default and
+  is honoured on **every** Auto path — the editor's Auto-process button, the one-click "Process target", the
+  walk-away auto-stack auto-edit, and "Reprocess everything" (`_auto_edit_process_run` now takes the preference and
+  all three call sites pass `settings.auto_crop_border`). The two Auto endpoints accept an optional
+  `{"auto_crop": bool}` body that overrides the setting for that call alone; a body-less POST — what every older
+  frontend sends — and a garbled body both read as "use the setting", so the endpoints stay backward-compatible.
+  **Frontend:** a "Let Auto trim the ragged border off a mosaic" switch in Settings → Automatic pipeline (with a
+  plain-language hint), plus a compact **"Auto-crop edges"** switch beside Auto-process in the editor for a
+  per-run override. The editor switch is shown **only when there is a ragged border to trim** (a mosaic with a
+  well-covered rectangle — exactly when Auto would crop), so it is never a decision about nothing, and while the
+  user hasn't touched it the client sends **no** override at all, so a slow settings fetch can't crop a picture the
+  owner asked Auto to leave alone.
+  **Tests (+16):** engine `tests/test_edit_engine.py` (+6 — crop suppressed, everything-else-identical, default
+  still crops, analysis mirrors the recipe while reporting what was available, single-field unaffected); webapp
+  `tests/webapp/test_editor.py` (+3 — the setting governs the endpoint, the body overrides it in both directions
+  without persisting, junk/absent bodies fall back), `tests/webapp/test_pipeline.py` (+3 — the setting reaches the
+  Process-target and watcher auto-edit chains, and defaults to cropping on an untouched install),
+  `tests/webapp/test_config_upgrade.py` (+1 — an old config upgrades to `auto_crop_border=True`); frontend
+  `src/api/autoCropBody.test.ts` (+4) and `src/routes/Editor.test.tsx` (+3 — the switch reflects the saved default,
+  overrides it either way, and hides on a single-field stack). Upgrade-safe: additive setting defaulting to the
+  historical behaviour, additive optional request body, additive analysis fields, no DB/on-disk/API-shape change,
+  and an already-saved recipe is untouched (this only changes what Auto *emits* next time).
+  *(Original request kept below for provenance.)* The one-click Auto chain ends with a `geometry.crop` op (`seestack/edit/presets.py:462–466`,
   `trim_crop`) that trims the ragged, low-coverage mosaic/dither border so the result is cleanly framed. The owner
   **does not like Auto cropping his images automatically** and wants to keep the full frame. Add a user-facing
   setting — **"Auto-crop ragged border" (default ON**, so nobody else's result changes) — that, when off, drops the

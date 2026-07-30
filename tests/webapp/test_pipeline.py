@@ -410,3 +410,54 @@ def test_process_target_skips_stack_when_nothing_solved(client, built_library):
     # No stack run was created.
     runs = client.get("/api/targets/M_42/stack-runs").json()
     assert len(runs) == 0
+
+
+def _record_auto_crop(monkeypatch) -> list[bool]:
+    """Wrap ``_auto_edit_process_run`` so a test can see the ``auto_crop``
+    preference each unattended auto-edit was actually given."""
+    from webapp import pipeline as pipeline_mod
+
+    seen: list[bool] = []
+    real = pipeline_mod._auto_edit_process_run
+
+    def spy(lib, safe, run_id, auto_crop=True):
+        seen.append(auto_crop)
+        return real(lib, safe, run_id, auto_crop=auto_crop)
+
+    monkeypatch.setattr(pipeline_mod, "_auto_edit_process_run", spy)
+    return seen
+
+
+def test_process_target_auto_edit_honours_the_auto_crop_setting(
+        client, solved_library, monkeypatch):
+    """The owner's "Auto-crop ragged border" setting reaches the *unattended*
+    auto-edit too — otherwise the hands-off "Process target" picture would still be
+    cropped after they turned it off in Settings."""
+    seen = _record_auto_crop(monkeypatch)
+    client.put("/api/settings", json={"auto_crop_border": False})
+    r = client.post("/api/targets/M_42/process")
+    body = _wait_job(client, r.json()["job_id"], timeout=120)
+    assert body["state"] == "done", body
+    assert seen == [False], seen
+
+
+def test_auto_stack_auto_edit_honours_the_auto_crop_setting(
+        client, solved_library, monkeypatch):
+    """Same for the fully-unattended watcher chain (auto-stack → auto-edit)."""
+    seen = _record_auto_crop(monkeypatch)
+    client.put("/api/settings", json={
+        "auto_stack": True, "auto_edit_on_autostack": True,
+        "auto_crop_border": False})
+    _run_scan(client)
+    assert seen and all(v is False for v in seen), seen
+
+
+def test_auto_edit_crops_by_default_on_an_unchanged_install(
+        client, solved_library, monkeypatch):
+    """And the default is unchanged: an install that never touched the setting
+    still gets the trimming Auto it always had."""
+    seen = _record_auto_crop(monkeypatch)
+    r = client.post("/api/targets/M_42/process")
+    body = _wait_job(client, r.json()["job_id"], timeout=120)
+    assert body["state"] == "done", body
+    assert seen == [True], seen

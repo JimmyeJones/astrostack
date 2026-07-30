@@ -93,6 +93,17 @@ class Settings(BaseModel):
     # one-click "Process target" button still stack whatever the user explicitly
     # asks for.
     auto_stack_min_frames: int = Field(default=3, ge=1, le=1000)
+    # Should the one-click Auto edit trim the ragged, low-coverage border off a
+    # mosaic/dithered result? On (the historical behaviour) Auto ends with a
+    # ``geometry.crop`` to the largest well-covered rectangle, so the picture is
+    # cleanly framed. Some owners would rather keep the *whole* frame — uneven
+    # edges and all — than have Auto silently reframe their image, so this makes
+    # it a choice. Off ⇒ the crop op is simply not emitted (everything else about
+    # Auto is identical, and the editor's "Trim border" button still crops by
+    # hand). Applies to every Auto path: the editor's Auto-process button, the
+    # one-click "Process target", the walk-away auto-edit and "Reprocess
+    # everything". Defaults to on so an existing install is unchanged.
+    auto_crop_border: bool = True
     # When an *unattended* stack (watcher auto-stack, one-click "Process target",
     # or library-wide "Reprocess everything") has no calibration masters chosen,
     # auto-bind the library's best *confidently-matching* master dark/flat/bias to

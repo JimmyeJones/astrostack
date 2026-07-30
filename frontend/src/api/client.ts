@@ -471,6 +471,9 @@ export interface LibraryRecap {
   total_integration_s: number;
   top_target_name: string | null;
   top_target_integration_s: number | null;
+  /** "Also shot: M 42, NGC 7000 and 5 more" — what else you pointed at, or ""
+   * on a one-target library. Optional: an older backend omits it. */
+  also_shot?: string;
 }
 
 export interface DashboardStats {
@@ -1004,6 +1007,10 @@ export interface AutoAnalysis {
   sharpen_radius: number | null; // unsharp radius Auto sized from the stars (px)
   is_mosaic: boolean;
   trim_fraction: number | null;  // fraction of frame trimmed as ragged mosaic edge
+  // What the trim *would* remove, even when auto-crop is off — so the UI can offer
+  // the crop without claiming it happened. Optional: an older backend omits both.
+  trim_fraction_available?: number | null;
+  auto_crop?: boolean;           // whether this recipe trimmed the border at all
 }
 
 /** A coarse content-classification hint served by `…/editor/preset-suggestion`:
@@ -1289,6 +1296,14 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+/** Body for the two Auto endpoints' optional per-run "trim the ragged border?"
+ * override. `undefined` sends no body at all, which the backend reads as "use the
+ * saved `auto_crop_border` setting" — so the default call is byte-identical to
+ * what every earlier build sent. */
+function autoCropBody(autoCrop?: boolean): { body?: string } {
+  return autoCrop === undefined ? {} : { body: JSON.stringify({ auto_crop: autoCrop }) };
 }
 
 export const api = {
@@ -1801,11 +1816,14 @@ export const api = {
     req<Histogram>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/histogram?recipe=${encodeRecipe(recipe)}`,
       { signal }),
-  autoProcess: (safe: string, runId: number) =>
-    req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/auto`, { method: "POST" }),
-  autoAnalysis: (safe: string, runId: number) =>
+  // `autoCrop` overrides the library's "Auto-crop ragged border" setting for this
+  // call only (the editor's per-run switch); omit it to use the saved setting.
+  autoProcess: (safe: string, runId: number, autoCrop?: boolean) =>
+    req<Recipe>(`/api/targets/${safe}/stack-runs/${runId}/editor/auto`,
+      { method: "POST", ...autoCropBody(autoCrop) }),
+  autoAnalysis: (safe: string, runId: number, autoCrop?: boolean) =>
     req<AutoAnalysis>(`/api/targets/${safe}/stack-runs/${runId}/editor/auto-analysis`,
-      { method: "POST" }),
+      { method: "POST", ...autoCropBody(autoCrop) }),
   presetSuggestion: (safe: string, runId: number) =>
     req<PresetSuggestion>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/preset-suggestion`,

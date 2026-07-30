@@ -99,3 +99,32 @@ def test_hero_limit_bounds_the_grid():
     assert len(s.heroes) == 3
     # Highest-exposure first.
     assert [h.name for h in s.heroes] == ["T9", "T8", "T7"]
+
+
+def test_imaged_ranked_names_every_imaged_target_even_without_a_picture():
+    """"What did I shoot?" must include a target that's collected light but hasn't
+    been stacked into a picture yet — `heroes` can't answer that, because it's
+    narrowed to targets with a preview on disk."""
+    targets = [
+        _entry("A", accepted=5, exposure=1000.0, preview="a.png"),
+        _entry("B", accepted=5, exposure=3000.0, preview=None),   # no picture yet
+        _entry("C", accepted=5, exposure=2000.0, preview="c.png"),
+        _entry("Empty", accepted=0, exposure=0.0),                # never imaged
+    ]
+    s = summarize_library(targets)
+    assert [t.name for t in s.imaged_ranked] == ["B", "C", "A"]  # by integration
+    assert [t.name for t in s.heroes] == ["C", "A"]              # unchanged
+    # has_preview still reports honestly per target.
+    assert [t.has_preview for t in s.imaged_ranked] == [False, True, True]
+
+
+def test_imaged_ranked_respects_the_same_cap_as_the_hero_grid():
+    targets = [
+        _entry(f"T{i}", accepted=1, exposure=float(i + 1)) for i in range(10)
+    ]
+    s = summarize_library(targets, hero_limit=3)
+    assert [t.name for t in s.imaged_ranked] == ["T9", "T8", "T7"]
+
+
+def test_imaged_ranked_is_empty_on_an_untouched_library():
+    assert summarize_library([]).imaged_ranked == []

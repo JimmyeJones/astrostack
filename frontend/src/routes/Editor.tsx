@@ -1,6 +1,6 @@
 import {
   ActionIcon, Alert, Badge, Button, Center, Checkbox, CopyButton, Grid, Group, Loader, Menu, Paper,
-  Select, Stack, Text, TextInput, Title, Tooltip,
+  Select, Stack, Switch, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import {
@@ -615,6 +615,21 @@ export function EditorView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo, canUndo, canRedo]);
 
+  // "Should Auto trim the ragged border off this picture?" The library-wide
+  // default lives in Settings (`auto_crop_border`, on — the historical
+  // behaviour); this is the per-run override, so someone who normally keeps the
+  // full frame can still let Auto crop this one picture (or vice versa) without a
+  // trip to Settings. `null` = follow the saved setting. Read-only use of the
+  // settings query — the editor never writes config.
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const [autoCropOverride, setAutoCropOverride] = useState<boolean | null>(null);
+  // What the switch shows. Until the settings query lands we show "on" — the
+  // long-standing behaviour — but we deliberately send *nothing* (below) while the
+  // user hasn't touched the switch, so a slow settings fetch can never make Auto
+  // crop a picture the owner asked it to leave alone.
+  const autoCrop = autoCropOverride ?? (settings.data?.auto_crop_border !== false);
+  const autoCropArg = autoCropOverride ?? undefined;
+
   // --- mutations -----------------------------------------------------------
   const saveRecipe = useMutation({
     mutationFn: () => api.putRecipe(safe, rid, recipe),
@@ -629,8 +644,8 @@ export function EditorView() {
     // best-effort (an older backend has no such endpoint) so it never blocks Auto.
     mutationFn: async () => {
       const [recipe, analysis] = await Promise.all([
-        api.autoProcess(safe, rid),
-        api.autoAnalysis(safe, rid).catch(() => null),
+        api.autoProcess(safe, rid, autoCropArg),
+        api.autoAnalysis(safe, rid, autoCropArg).catch(() => null),
       ]);
       return { recipe, analysis };
     },
@@ -915,7 +930,7 @@ export function EditorView() {
   const pickLook = useMutation({
     mutationFn: async (choice: LookChoice): Promise<{ label: string; ops: OpInstance[] }> => {
       if (choice.kind === "auto") {
-        const r = await api.autoProcess(safe, rid);
+        const r = await api.autoProcess(safe, rid, autoCropArg);
         return { label: "Auto", ops: toOpInstances(r.ops ?? []) };
       }
       const raw = toOpInstances(choice.preset.ops);
@@ -1152,6 +1167,17 @@ export function EditorView() {
                 onClick={applyDataDefaults}>
                 Use data defaults{nDataDriven > 1 ? ` (${nDataDriven})` : ""}
               </Button>
+            </Tooltip>
+          ) : null}
+          {/* Only meaningful when there *is* a ragged border to trim (a mosaic with
+              a well-covered rectangle worth cropping to) — which is exactly when
+              Auto would add the crop. On an ordinary single-field stack Auto never
+              crops, so the switch would be a decision about nothing. */}
+          {trimCrop ? (
+            <Tooltip multiline w={260} withArrow
+              label="Auto normally trims the ragged, uneven edge off a mosaic so the picture is cleanly framed. Turn this off to keep the full frame, edges and all — you can still crop by hand with 'Trim border'. The default for every target is in Settings.">
+              <Switch size="xs" label="Auto-crop edges" checked={autoCrop}
+                onChange={(e) => setAutoCropOverride(e.currentTarget.checked)} />
             </Tooltip>
           ) : null}
           {trimCrop ? (

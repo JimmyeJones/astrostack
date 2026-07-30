@@ -41,6 +41,11 @@ class RecapFacts:
     ``window_months`` is how far back the ``n_nights`` count reaches (the
     activity calendar's trailing window), so the poster can say "this year"
     honestly rather than implying an all-time figure it doesn't have.
+
+    ``other_target_names`` are the *rest* of the imaged targets ranked by
+    integration — everything after ``top_target_name``, which already has its own
+    "biggest project" line. Keeping the top one out is what lets the two lines sit
+    together without repeating a name.
     """
 
     total_integration_s: float | None = None
@@ -51,10 +56,61 @@ class RecapFacts:
     first_light_utc: str | None = None
     top_target_name: str | None = None
     top_target_integration_s: float | None = None
+    other_target_names: tuple[str, ...] = ()
 
 
 def _plural(n: int, one: str, many: str) -> str:
     return f"{n} {one}" if n == 1 else f"{n:,} {many}"
+
+
+# How many other target names the "also shot" line spells out before it falls
+# back to "and N more". Three is what fits one line on the poster at a readable
+# size, and it keeps the line a sentence rather than a table — the poster's whole
+# virtue is that it's uncluttered.
+_MAX_OTHER_NAMES = 3
+
+
+def _clean_names(names) -> list[str]:  # noqa: ANN001 — any iterable of str|None
+    """Trimmed, de-duplicated, blank-free names in their original order."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in names or ():
+        name = (raw or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def recap_other_targets_line(facts: RecapFacts) -> str:
+    """The "what else you pointed at" line, e.g. ``"Also shot: M 42, NGC 7000 and
+    5 more"`` — or ``""`` when there's nothing to add.
+
+    The numbers say *how much* you imaged; this says *what*, which is the part a
+    beginner actually wants to point at. It deliberately excludes the biggest
+    project (which has its own line right above it), so the two never repeat a
+    name, and it returns ``""`` on a one-target library — where "also shot"
+    would be a boast about nothing.
+
+    The "and N more" tail counts every remaining imaged target, taken from
+    ``n_targets`` rather than the (capped) name list, so it stays honest on a
+    library with hundreds of targets.
+    """
+    names = _clean_names(facts.other_target_names)
+    if not names:
+        return ""
+    shown = names[:_MAX_OTHER_NAMES]
+    # Everything imaged, minus the biggest project, minus the names we spelled
+    # out. Fall back to the list length when the total is missing/inconsistent so
+    # a hand-built facts object can't produce a negative "and -2 more".
+    total_others = max(len(names), int(facts.n_targets or 0) - 1)
+    rest = max(0, total_others - len(shown))
+    if rest:
+        return "Also shot: " + ", ".join(shown) + f" and {rest:,} more"
+    if len(shown) == 1:
+        return f"Also shot: {shown[0]}"
+    return "Also shot: " + ", ".join(shown[:-1]) + f" and {shown[-1]}"
 
 
 def recap_stats(facts: RecapFacts) -> list[tuple[str, str]]:
@@ -103,6 +159,11 @@ def recap_caption(facts: RecapFacts) -> str:
         top_dur = format_duration(facts.top_target_integration_s)
         parts.append(f"biggest project: {name} ({top_dur})" if top_dur
                      else f"biggest project: {name}")
+    # …and *what else* you shot — the names are the part a friend reads. Lower
+    # case here (mid-sentence) where the poster's own line is capitalised.
+    others = recap_other_targets_line(facts)
+    if others:
+        parts.append(others[0].lower() + others[1:])
     return " · ".join(parts)
 
 
@@ -187,9 +248,10 @@ def draw_recap_poster(facts: RecapFacts, hero=None, *, size: int = POSTER_SIZE):
     renders rather than failing.
 
     Layout, top to bottom: a title, up to four big stat blocks in a 2×2 grid,
-    the "biggest project" line, and the "since <date>" footnote. Anything with
-    no data is skipped and the rest closes up, so the poster is never sparse in
-    an obviously-broken way.
+    the "biggest project" line, the smaller "also shot" line naming the rest of
+    your targets, and the "since <date>" footnote. Anything with no data is
+    skipped and the rest closes up, so the poster is never sparse in an
+    obviously-broken way.
     """
     from PIL import Image, ImageDraw
 
@@ -238,6 +300,12 @@ def draw_recap_poster(facts: RecapFacts, hero=None, *, size: int = POSTER_SIZE):
         y -= round(size * 0.048)
         sfont = _fit_font(draw, since, round(size * 0.030), inner)
         draw.text((margin, y), since, font=sfont, fill=(158, 164, 184))
+
+    others = recap_other_targets_line(facts)
+    if others:
+        y -= round(size * 0.046)
+        ofont = _fit_font(draw, others, round(size * 0.029), inner)
+        draw.text((margin, y), others, font=ofont, fill=(178, 184, 204))
 
     line = recap_top_project_line(facts)
     if line:
