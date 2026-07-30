@@ -13,7 +13,7 @@ import contextlib
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from seestack.io.library import Library
 from seestack.io.scanner import run_qc_and_solve, scan_and_organize
@@ -102,6 +102,11 @@ def _pipeline_body(
 
         if settings.auto_qc or settings.auto_solve:
             graded: dict[str, int] = {}
+            # Subs auto-grade *put back* this pass (it reconsiders its own earlier
+            # rejects against the now-larger population). Counted per target like
+            # ``graded`` so the walk-away scan can say it out loud instead of the
+            # frame silently reappearing.
+            regraded_back: dict[str, int] = {}
             qc_errors: dict[str, str] = {}
             # Subs the stack-then-solve bootstrap rescued per target (it can only
             # engage when most subs failed to plate-solve). The single-target
@@ -139,9 +144,11 @@ def _pipeline_body(
                         if n_rescued > 0:
                             rescued[safe] = n_rescued
                         if settings.auto_grade_frames and settings.auto_qc:
-                            n = _auto_grade_target(proj, settings)
-                            if n:
-                                graded[safe] = n
+                            counts = _auto_grade_target(proj, settings)
+                            if counts.rejected:
+                                graded[safe] = counts.rejected
+                            if counts.restored:
+                                regraded_back[safe] = counts.restored
                     finally:
                         proj.close()
                     lib.refresh_target_stats(safe)
@@ -163,6 +170,8 @@ def _pipeline_body(
                     qc_errors[safe] = str(exc)
             if graded:
                 summary["auto_graded"] = graded
+            if regraded_back:
+                summary["auto_regraded_back"] = regraded_back
             if rescued:
                 summary["bootstrap_rescued"] = rescued
             if qc_errors:
@@ -362,9 +371,24 @@ def submit_build_master(
     return jm.submit("build_master", body)
 
 
-def _auto_grade_target(proj: Any, settings: Settings) -> int:
+class AutoGradeCounts(NamedTuple):
+    """How many frames one auto-grade pass moved, in each direction.
+
+    ``rejected`` is what the pass took away; ``restored`` is what it *gave back*
+    (frames it had rejected against a smaller, noisier population that the
+    now-larger night no longer flags). Both are worth saying out loud — the app
+    narrates what automation did everywhere else, and a sub silently reappearing
+    is as confusing as one silently vanishing.
+    """
+
+    rejected: int
+    restored: int
+
+
+def _auto_grade_target(proj: Any, settings: Settings) -> AutoGradeCounts:
     """Run auto-grade over a target's accepted frames and apply the rejections
-    (the opt-in ``auto_grade_frames`` pipeline hook). Returns frames rejected.
+    (the opt-in ``auto_grade_frames`` pipeline hook). Returns how many frames the
+    pass rejected and how many it put back.
     Best-effort: grading must never sink a QC/ingest pass.
 
     ``grade_frames`` caps a *single* pass at ``MAX_REJECT_FRACTION`` of the
@@ -410,7 +434,7 @@ def _auto_grade_target(proj: Any, settings: Settings) -> int:
             and (f.reject_reason or "").startswith("auto:grade")
         ]
         if not accepted and not reconsider:
-            return 0
+            return AutoGradeCounts(0, 0)
         report = grade_frames(
             accepted,
             sensitivity=settings.auto_grade_sensitivity,
@@ -428,10 +452,10 @@ def _auto_grade_target(proj: Any, settings: Settings) -> int:
                 "longer flags: %s", len(restored),
                 ", ".join(str(fid) for fid in restored),
             )
-        return len(changed)
+        return AutoGradeCounts(len(changed), len(restored))
     except Exception as exc:  # noqa: BLE001 — advisory automation, never fatal
         log.warning("Auto-grade failed: %s", exc)
-        return 0
+        return AutoGradeCounts(0, 0)
 
 
 def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
@@ -456,9 +480,11 @@ def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
                 )
                 summary = dict(summary)
                 if settings.auto_grade_frames:
-                    n = _auto_grade_target(proj, settings)
-                    if n:
-                        summary["auto_graded"] = n
+                    counts = _auto_grade_target(proj, settings)
+                    if counts.rejected:
+                        summary["auto_graded"] = counts.rejected
+                    if counts.restored:
+                        summary["auto_regraded_back"] = counts.restored
             finally:
                 proj.close()
             lib.refresh_target_stats(safe)
@@ -510,9 +536,11 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
                     should_stop=job.cancel_requested,
                 ))
                 if settings.auto_grade_frames:
-                    n = _auto_grade_target(proj, settings)
-                    if n:
-                        summary["auto_graded"] = n
+                    counts = _auto_grade_target(proj, settings)
+                    if counts.rejected:
+                        summary["auto_graded"] = counts.rejected
+                    if counts.restored:
+                        summary["auto_regraded_back"] = counts.restored
                 solved_accepted = _solved_accepted_count(proj)
                 # Pre-flight mixed-pointing check while the project is still open
                 # (below reflects the post-grade accept state the stack will use).

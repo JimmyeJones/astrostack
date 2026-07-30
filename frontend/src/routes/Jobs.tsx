@@ -235,6 +235,38 @@ export function bootstrapRescueNote(r: Record<string, unknown>): string | null {
       + "deeper image — they're in your stack now.";
 }
 
+/** How many subs auto-grade *put back* in this job result, or 0 when it gave
+ * none back (pure, tested).
+ *
+ * Auto-grade reconsiders its own earlier rejections on every re-grade: a sub it
+ * dropped against a small, noisy population stops being an outlier once the rest
+ * of the night arrives, and gets re-accepted. Single-target jobs (`qc_solve`,
+ * `process_target`) carry a plain count; the whole-library scan reports a
+ * per-target map. Both shapes are read here so one helper covers every surface. */
+export function autoRegradedBackCount(r: Record<string, unknown>): number {
+  const v = r.auto_regraded_back;
+  if (v && typeof v === "object") {
+    return Math.max(0, Object.values(v as Record<string, unknown>)
+      .reduce<number>((sum, n) => sum + (Number(n) || 0), 0));
+  }
+  return Math.max(0, Number(v ?? 0) || 0);
+}
+
+/** The plain-language note for that re-accept, or null when nothing came back.
+ *
+ * The app says so when auto-grade takes a sub away ("auto-grade dropped 3"), so
+ * it should say so when it gives one back — otherwise the frame simply
+ * reappears and the counts the user remembers stop adding up. */
+export function autoRegradedBackNote(r: Record<string, unknown>): string | null {
+  const n = autoRegradedBackCount(r);
+  if (n <= 0) return null;
+  return n === 1
+    ? "Put 1 sub back: with more of your night to compare against, it's no "
+      + "longer an outlier."
+    : `Put ${n} subs back: with more of your night to compare against, they're `
+      + "no longer outliers.";
+}
+
 /** Plain-language outcome of a finished "Build master" job (pure, tested). A
  * beginner building a master from a Dark/Flat folder should see how many of
  * their frames were actually combined — and, when some were set aside (wrong
@@ -321,12 +353,16 @@ function JobResultActions({ job }: { job: Job }) {
           ? `/targets/${job.target}/edit/${runId}`
           : `/targets/${job.target}/history`;
     const rescue = bootstrapRescueNote(r);
+    const putBack = autoRegradedBackNote(r);
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm">{line}</Text>
         {/* Credit the stack-then-solve rescue where the result lands, so a
             suddenly-thicker stack has a visible cause. */}
         {rescue ? <Text size="xs" c="dimmed">{rescue}</Text> : null}
+        {/* The other half of "auto-grade dropped N": say when it handed subs
+            back, so the numbers the user remembers keep adding up. */}
+        {putBack ? <Text size="xs" c="dimmed">{putBack}</Text> : null}
         {thin ? (
           <Alert color={thin.level === "single" ? "orange" : "yellow"} p="xs"
             title="Very few frames stacked">
@@ -378,10 +414,12 @@ function JobResultActions({ job }: { job: Job }) {
     const { line, held } = pipelineSummary(r);
     const autoEdited = Number(r.auto_edited ?? 0) || 0;
     const rescue = bootstrapRescueNote(r);
+    const putBack = autoRegradedBackNote(r);
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm">{line}</Text>
         {rescue ? <Text size="xs" c="dimmed">{rescue}</Text> : null}
+        {putBack ? <Text size="xs" c="dimmed">{putBack}</Text> : null}
         {held.length ? (
           <Alert color="blue" variant="light" p="xs"
             title="Waiting for more of your subs to be located">
@@ -423,10 +461,12 @@ function JobResultActions({ job }: { job: Job }) {
     // subs weren't located, so "12 more are located now" is the answer they came
     // for. Nothing to say when the bootstrap didn't engage — stay quiet.
     const rescue = bootstrapRescueNote(r);
-    if (!rescue) return null;
+    const putBack = autoRegradedBackNote(r);
+    if (!rescue && !putBack) return null;
     return (
       <Stack gap={2} mt="xs">
-        <Text size="sm">{rescue}</Text>
+        {rescue ? <Text size="sm">{rescue}</Text> : null}
+        {putBack ? <Text size="sm">{putBack}</Text> : null}
       </Stack>
     );
   }

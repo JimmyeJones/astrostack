@@ -5,8 +5,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  JobRow, JobsView, bootstrapRescueNote, bootstrapRescuedCount, buildMasterSummary,
-  friendlyJobError, jobKindLabel, pipelineSummary, processTargetSummary, reprocessSummary,
+  JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
+  bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobKindLabel,
+  pipelineSummary, processTargetSummary, reprocessSummary,
 } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
@@ -203,6 +204,26 @@ describe("JobsView process_target result actions", () => {
     expect(link).toHaveAttribute("href", "/targets/M_42/history");
   });
 
+  it("says when auto-grade put subs back, beside the count it dropped", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-back", kind: "process_target", target: "M_42", state: "done",
+        result: {
+          stacked: true, solved_accepted: 8, auto_graded: 2, auto_regraded_back: 1,
+          stack: { n_frames_used: 8, run_id: 7 },
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    await screen.findByRole("link", { name: "View result" });
+    expect(screen.getByText("Stacked 8 frames into a new master (auto-grade dropped 2)."))
+      .toBeInTheDocument();
+    expect(screen.getByText(
+      "Put 1 sub back: with more of your night to compare against, it's "
+      + "no longer an outlier.",
+    )).toBeInTheDocument();
+  });
+
   it("shows the 'cut your noise ~N×' payoff on a healthy finished stack", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({
@@ -383,6 +404,44 @@ describe("bootstrapRescueNote", () => {
   });
 });
 
+describe("autoRegradedBackNote", () => {
+  it("reads the single-target job's own count", () => {
+    expect(autoRegradedBackCount({ auto_regraded_back: 3 })).toBe(3);
+    expect(autoRegradedBackNote({ auto_regraded_back: 3 })).toBe(
+      "Put 3 subs back: with more of your night to compare against, they're "
+      + "no longer outliers.",
+    );
+  });
+
+  it("sums the scan's per-target map", () => {
+    expect(autoRegradedBackCount({ auto_regraded_back: { "M 42": 2, "M 31": 4 } }))
+      .toBe(6);
+    expect(autoRegradedBackNote({ auto_regraded_back: { "M 42": 2, "M 31": 4 } }))
+      ?.toContain("Put 6 subs back");
+  });
+
+  it("singularises one restored sub", () => {
+    expect(autoRegradedBackNote({ auto_regraded_back: 1 })).toBe(
+      "Put 1 sub back: with more of your night to compare against, it's "
+      + "no longer an outlier.",
+    );
+  });
+
+  it("stays silent when auto-grade gave nothing back", () => {
+    expect(autoRegradedBackNote({})).toBeNull();
+    expect(autoRegradedBackNote({ auto_regraded_back: 0 })).toBeNull();
+    expect(autoRegradedBackNote({ auto_regraded_back: {} })).toBeNull();
+    // An older backend that only reports rejections says nothing either.
+    expect(autoRegradedBackNote({ auto_graded: 4 })).toBeNull();
+  });
+
+  it("tolerates junk values rather than printing NaN", () => {
+    expect(autoRegradedBackCount({ auto_regraded_back: "some" })).toBe(0);
+    expect(autoRegradedBackCount({ auto_regraded_back: { "M 42": "x", "M 31": 2 } }))
+      .toBe(2);
+  });
+});
+
 describe("JobsView pipeline result actions", () => {
   function renderJobsRouted() {
     const qc = new QueryClient();
@@ -428,6 +487,20 @@ describe("JobsView pipeline result actions", () => {
     expect(await screen.findByText(
       "Located 12 more subs by combining your un-located frames into a deeper "
       + "image — they're in your stack now.",
+    )).toBeInTheDocument();
+  });
+
+  it("says when auto-grade handed subs back on a finished scan", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-3", kind: "pipeline", target: null, state: "done",
+        result: { scanned: 40, auto_regraded_back: { "M 42": 3 } },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "Put 3 subs back: with more of your night to compare against, they're "
+      + "no longer outliers.",
     )).toBeInTheDocument();
   });
 

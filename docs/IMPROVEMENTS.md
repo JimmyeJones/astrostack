@@ -6013,8 +6013,26 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-07-30, spotted while shipping the auto-grade reconsider pass v0.221.0) — say when
-  auto-grade *gives a sub back*, not only when it takes one away.** *(Friendliness + trust — PRIORITY 3; size S.)*
+- ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the auto-grade reconsider pass v0.221.0) — say when
+  auto-grade *gives a sub back*, not only when it takes one away.**~~ — **SHIPPED v0.222.1** (Builder 2026-07-30,
+  branch `claude/relaxed-turing-judl31`). `_auto_grade_target` (`webapp/pipeline.py`) now returns a small
+  `AutoGradeCounts(rejected, restored)` NamedTuple instead of a bare rejected count, and all three job bodies that
+  surface a summary (the whole-library scan, `qc_solve`, `process_target`) record an additive `auto_regraded_back`
+  key beside the existing `auto_graded` — a per-target map on the scan, a plain count on the single-target jobs,
+  exactly mirroring the `bootstrap_rescued`/`bootstrap_propagated` pair. The Jobs page renders it through two new
+  pure helpers next to their bootstrap siblings (`autoRegradedBackCount` reads **both** shapes,
+  `autoRegradedBackNote` writes the sentence): *"Put 3 subs back: with more of your night to compare against,
+  they're no longer outliers."* It shows on all three surfaces — Process target, the scan, and Check & locate,
+  which previously had nothing at all to say unless the plate-solve bootstrap engaged. Self-hiding: no re-accepts,
+  a zero, an empty map, or an older backend that doesn't send the key all render nothing rather than a misleading
+  "put 0 back", and the key is omitted from the summary entirely when nothing came back. Tests:
+  `tests/webapp/test_auto_grade.py` (+2 — a scan that hands a typical early reject back reports
+  `auto_regraded_back == {"M_42": 1}` and omits `auto_graded`; an ordinary reject-only scan omits the new key —
+  plus the existing re-accept test now asserts both directions of the returned counts),
+  `Jobs.test.tsx` (+7 — both payload shapes, singular/plural, the four silent cases, junk-tolerance, and rendered
+  lines on a Process-target and a scan job). Upgrade-safe: additive summary field + frontend-only rendering, no
+  config/DB/on-disk/API-shape/default change; an old persisted job row simply lacks the key. *(Original idea kept
+  below for provenance.)*
   v0.221.0 made auto-grade's rejections reversible: on each re-grade it reconsiders its own `auto:grade` rejects
   against the now-larger population and re-accepts the ones that are no longer outliers. That's the right
   behaviour, but it is currently **invisible** — `_auto_grade_target` logs the re-accepts and returns only the
