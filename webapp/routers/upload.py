@@ -12,9 +12,12 @@ Guardrails (this is a file-writing endpoint on a live NAS):
 * **Stream to disk, never buffer whole files in RAM** — a bulk upload can be
   thousands of subs / many GB. Files are read in chunks and written from a
   threadpool so the event loop / single job worker aren't blocked.
-* **Sanitise every name** — only the basename is used, traversal (``..`` / path
-  separators / a browser-supplied relative path) is stripped, and every write is
-  confined strictly under ``incoming/``. Only FITS suffixes are accepted.
+* **Sanitise every name** — every path segment is sanitised, traversal (``..`` /
+  NUL / a leftover separator) rejects the name outright, and every write is
+  re-confirmed strictly under ``incoming/``. Only FITS suffixes are accepted.
+  A folder drop can opt into keeping its **directories** (``preserve_folders``)
+  so the scanner's Seestar folder convention sees ``M 31_sub/`` and makes the
+  right target, instead of every object landing in one ``Unsorted`` pile.
 * **Disk-space aware** — the free space is checked before each write and a clear
   "not enough room" reason is returned instead of silently filling the NAS.
 * **Resilient** — each file streams to a ``.part`` sidecar and is atomically
@@ -101,6 +104,52 @@ def safe_relname(name: str) -> str | None:
     return flat
 
 
+# How many path components of a browser-supplied relative path are kept when
+# folder structure is preserved. Real Seestar trees are 2–3 deep
+# (``MyWorks/M 31_sub/Light_0001.fit``); anything deeper is a user who dragged in
+# a whole archive, and an unbounded tree under ``incoming/`` is worth capping.
+# The *last* components are the meaningful ones (the target folder sits right
+# above the file), so a deeper path keeps its tail.
+_MAX_REL_DEPTH = 6
+
+
+def safe_relpath(name: str) -> str | None:
+    """Reduce a client-supplied relative path to a safe **relative path**, keeping
+    its directories.
+
+    This is the folder-preserving counterpart to :func:`safe_relname`. A folder
+    drop / ``webkitdirectory`` pick sends ``M 31_sub/Light_0001.fit``; flattening
+    that to one filename lands every target's subs in a single ``incoming/`` pile,
+    so the scanner's Seestar-aware folder convention (``<T>_sub`` → target
+    ``<T>``, ``<T>_mosaic_sub`` → ``<T> (mosaic)``, ``*_video`` skipped, a
+    whole-device container expanded) never fires and the user gets one giant
+    ``Unsorted`` target instead of their real ones. Keeping the directories makes
+    an upload land exactly like a NAS drop.
+
+    Every segment is sanitised the same way :func:`safe_component` sanitises one:
+    empty / ``.`` segments are dropped and any all-dots (``..``) segment or NUL
+    rejects the whole path, so the result can never escape the destination. The
+    path is capped at :data:`_MAX_REL_DEPTH` components (keeping the tail, which
+    carries the target folder). Returns a ``/``-joined relative path, or ``None``
+    when the name is unusable.
+    """
+    if not name or "\0" in name:
+        return None
+    segments: list[str] = []
+    for seg in name.replace("\\", "/").split("/"):
+        seg = seg.strip()
+        if seg == "" or seg == ".":
+            continue  # empty / current-dir segment — safely dropped
+        if set(seg) <= {"."}:  # ``..`` (or any all-dots) — a traversal segment
+            return None
+        segments.append(seg)
+    if not segments:
+        return None
+    if len(segments) > _MAX_REL_DEPTH:
+        segments = segments[-_MAX_REL_DEPTH:]
+    return "/".join(segments)
+
+
 def is_fits_name(base: str) -> bool:
     """True when ``base`` is a FITS file the scanner would actually ingest."""
     return Path(base).suffix.lower() in FITS_SUFFIXES
@@ -128,6 +177,21 @@ def safe_target_dir(incoming: Path, target: str) -> Path | None:
     return dest
 
 
+def confined_dest(dest_dir: Path, rel: str) -> Path | None:
+    """Resolve ``dest_dir / rel``, confirming it stays strictly under ``dest_dir``.
+
+    :func:`safe_relpath` already rejects traversal segments, so this is defence in
+    depth — it also catches the case where an existing *symlink* inside
+    ``incoming/`` would redirect a write outside the watched tree. Returns
+    ``None`` when the resolved path escapes.
+    """
+    dest = (dest_dir / rel).resolve()
+    root = dest_dir.resolve()
+    if root not in dest.parents:
+        return None
+    return dest
+
+
 class UploadedFile(BaseModel):
     name: str
     bytes: int
@@ -145,6 +209,11 @@ class UploadResponse(BaseModel):
     rejected: list[RejectedFile]    # not a FITS, unsafe name, or no disk room
     bytes_written: int
     job_id: str | None     # the scan enqueued to ingest the upload, if any
+    # Top-level folders this upload wrote into under the destination,
+    # when folder structure was preserved (empty on the flat path). Additive —
+    # older frontends simply ignore it — and it lets the UI say *which* targets
+    # the drop is about to become instead of a bare file count.
+    folders: list[str] = []
 
 
 async def _stream_to_disk(upload: UploadFile, dest: Path) -> int:
@@ -204,6 +273,7 @@ async def upload_files(
     request: Request,
     files: Annotated[list[UploadFile], File()],
     target: Annotated[str, Form()] = "",
+    preserve_folders: Annotated[bool, Form()] = False,
 ) -> UploadResponse:
     """Accept FITS uploads, land them in ``incoming/<target>/``, kick a scan.
 
@@ -212,6 +282,16 @@ async def upload_files(
     content dedup would drop it anyway). A scan is enqueued only when at least
     one new file was saved, so the existing ingest → QC → solve pipeline runs
     exactly as it does for a NAS drop.
+
+    ``preserve_folders`` (opt-in, default off so an older frontend and every
+    existing caller behave exactly as before) keeps the browser-relative
+    **directories** of a folder drop / ``webkitdirectory`` pick instead of
+    flattening them into one filename. That is what makes a dragged Seestar
+    folder land like a NAS drop: the scanner's folder convention then sees
+    ``M 31_sub/`` and creates the target *M 31* — rather than tipping every
+    object's subs into one ``Unsorted`` pile. Paths are sanitised per segment and
+    every write is re-confirmed under the destination (:func:`safe_relpath`,
+    :func:`confined_dest`).
     """
     settings = deps.get_settings(request)
     incoming = settings.resolved_incoming_dir
@@ -225,11 +305,17 @@ async def upload_files(
     except OSError as e:
         raise HTTPException(
             status_code=500, detail=f"Could not create upload folder: {e}") from e
+    # Resolve once: ``safe_target_dir`` returns ``incoming`` verbatim for the
+    # blank-target case, so comparing a *resolved* destination against it would
+    # otherwise mis-read every flat write as a subfolder on an install whose
+    # incoming path is relative or crosses a symlink.
+    dest_root = dest_dir.resolve()
 
     saved: list[UploadedFile] = []
     skipped: list[UploadedFile] = []
     rejected: list[RejectedFile] = []
     bytes_written = 0
+    folders: list[str] = []
 
     for upload in files:
         # Close each upload's spooled temp on *every* path — reject, skip,
@@ -237,11 +323,14 @@ async def upload_files(
         # multi-file POST doesn't hold spooled parts open until GC. (Starlette
         # closes form uploads only on a parse error, not on success.)
         try:
-            # Preserve the browser-relative subpath (flattened) so two different
-            # subs sharing a basename across session subfolders don't collide onto
-            # one destination and silently drop one (Seestar restarts per-session
-            # frame numbering). safe_relname stays a single traversal-safe name.
-            base = safe_relname(upload.filename or "")
+            # Preserve the browser-relative subpath: as real directories when the
+            # caller asked for it (so the scanner's Seestar folder convention
+            # fires), otherwise flattened into one filename so two different subs
+            # sharing a basename across session subfolders don't collide onto one
+            # destination and silently drop one (Seestar restarts per-session
+            # frame numbering). Either way the result is traversal-safe.
+            base = (safe_relpath(upload.filename or "") if preserve_folders
+                    else safe_relname(upload.filename or ""))
             if base is None:
                 rejected.append(RejectedFile(name=upload.filename or "(unnamed)",
                                              reason="unsafe file name"))
@@ -252,7 +341,24 @@ async def upload_files(
                     reason="not a FITS file (accepts .fit, .fits, .fts)"))
                 continue
 
-            dest = dest_dir / base
+            dest = confined_dest(dest_root, base)
+            if dest is None:
+                rejected.append(RejectedFile(name=base, reason="unsafe file name"))
+                continue
+            if dest.parent != dest_root:
+                # A preserved subfolder — create it (once per new folder) so the
+                # stream below has somewhere to land, and remember its top level
+                # for the response's plain-language "which targets is this?" line.
+                try:
+                    await run_in_threadpool(
+                        dest.parent.mkdir, parents=True, exist_ok=True)
+                except OSError as e:
+                    rejected.append(RejectedFile(
+                        name=base, reason=f"could not be saved ({e})"))
+                    continue
+                top = base.split("/", 1)[0]
+                if top not in folders:
+                    folders.append(top)
             if dest.exists():
                 skipped.append(UploadedFile(name=base, bytes=dest.stat().st_size))
                 continue
@@ -294,4 +400,5 @@ async def upload_files(
         target=dest_dir.name if dest_dir != incoming else "",
         saved=saved, skipped=skipped, rejected=rejected,
         bytes_written=bytes_written, job_id=job_id,
+        folders=folders,
     )

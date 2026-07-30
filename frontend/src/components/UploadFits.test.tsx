@@ -4,8 +4,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  UploadFits, collectDroppedFiles, filesFromFolderInput, isFitsFilename,
-  readEntryFiles, uploadSummary, uploadProgressLabel, uploadProgressPercent,
+  UploadFits, collectDroppedFiles, filesFromFolderInput, folderPreserveNote,
+  isFitsFilename, pickedFolders, readEntryFiles, uploadSummary,
+  uploadProgressLabel, uploadProgressPercent,
   type FsEntry,
 } from "./UploadFits";
 import type { UploadResult } from "../api/client";
@@ -279,5 +280,94 @@ describe("UploadFits", () => {
     // The progress readout is gone once it's done (only shown while in flight).
     await waitFor(() =>
       expect(screen.queryByText(/Uploading —/)).not.toBeInTheDocument());
+  });
+});
+
+
+describe("pickedFolders", () => {
+  const f = (name: string) => new File(["x"], name);
+
+  it("lists the distinct top-level folders of a folder pick, sorted", () => {
+    expect(pickedFolders([
+      f("M 31_sub/Light_0001.fit"),
+      f("M 31_sub/Light_0002.fit"),
+      f("M 13_sub/Light_0001.fit"),
+    ])).toEqual(["M 13_sub", "M 31_sub"]);
+  });
+
+  it("is empty for a plain multi-file pick (no relative paths)", () => {
+    expect(pickedFolders([f("Light_0001.fit"), f("Light_0002.fit")])).toEqual([]);
+  });
+});
+
+describe("folderPreserveNote", () => {
+  it("names the folders and says they become separate targets", () => {
+    expect(folderPreserveNote(["M 31_sub"]))
+      .toBe("Keeping your folder (“M 31_sub”) so they come in as separate targets.");
+    expect(folderPreserveNote(["M 13_sub", "M 31_sub"]))
+      .toContain("Keeping your folders (“M 13_sub”, “M 31_sub”)");
+  });
+
+  it("caps the named folders and counts the rest", () => {
+    expect(folderPreserveNote(["a", "b", "c", "d", "e"])).toContain("+2 more");
+  });
+
+  it("says the folders nest inside a typed target instead", () => {
+    expect(folderPreserveNote(["M 31_sub"], "MyWorks"))
+      .toBe("Keeping your folder (“M 31_sub”) inside “MyWorks”.");
+  });
+
+  it("is empty when nothing carries a folder", () => {
+    expect(folderPreserveNote([])).toBe("");
+  });
+});
+
+describe("uploadSummary with preserved folders", () => {
+  it("names the folders the subs landed in rather than the single target", () => {
+    expect(uploadSummary(result({ target: "", folders: ["M 13_sub", "M 31_sub"] })))
+      .toBe("Uploaded 1 sub into “M 13_sub”, “M 31_sub”.");
+  });
+
+  it("falls back to the target when the server sent no folders (older server)", () => {
+    expect(uploadSummary(result({ folders: undefined }))).toBe("Uploaded 1 sub into “M31”.");
+  });
+});
+
+describe("UploadFits folder preservation", () => {
+  it("tells the user their folders are kept and asks the server to keep them", async () => {
+    const spy = vi.spyOn(client.api, "uploadFits").mockResolvedValue(
+      result({ target: "", folders: ["M 31_sub"] }));
+    renderUpload();
+
+    const zone = screen.getByText(/Drag your Seestar FITS files/);
+    const dropped = new File(["x"], "Light_0001.fit");
+    fireEvent.drop(zone, {
+      dataTransfer: dtWithEntries([
+        dirEntry([fileEntry(dropped.name, "/M 31_sub/Light_0001.fit")]),
+      ]),
+    });
+
+    await waitFor(() => expect(
+      screen.getByText(/Keeping your folder \(“M 31_sub”\)/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^Upload/ }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    // The 4th argument is the preserve-folders flag.
+    expect(spy.mock.calls[0][3]).toBe(true);
+  });
+
+  it("does not ask for folder preservation on a plain multi-file pick", async () => {
+    const spy = vi.spyOn(client.api, "uploadFits").mockResolvedValue(result());
+    renderUpload();
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const good = new File(["x"], "Light_001.fit", { type: "application/octet-stream" });
+    Object.defineProperty(input, "files", { value: [good], configurable: true });
+    fireEvent.change(input);
+
+    await waitFor(() => expect(screen.getByText(/1 FITS file ready/)).toBeInTheDocument());
+    expect(screen.queryByText(/Keeping your folder/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Upload/ }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(spy.mock.calls[0][3]).toBe(false);
   });
 });
