@@ -456,6 +456,23 @@ export interface LibrarySummary {
   heroes: SummaryTarget[];
 }
 
+/** The shareable "your sky, so far" recap — the poster's own figures plus the
+ * copy-paste caption to post beside it. `has_anything` is false until some light
+ * has been collected, which is the card's cue to hide. */
+export interface LibraryRecap {
+  has_anything: boolean;
+  caption: string;
+  since: string;
+  stats: { value: string; label: string }[];
+  window_months: number;
+  n_nights: number;
+  n_targets: number;
+  n_subs_kept: number;
+  total_integration_s: number;
+  top_target_name: string | null;
+  top_target_integration_s: number | null;
+}
+
 export interface DashboardStats {
   n_targets: number;
   n_frames: number;
@@ -1632,6 +1649,11 @@ export const api = {
     req<ActivityCalendar>(`/api/activity-calendar?months=${months}`),
   getLibraryProgress: () => req<TargetProgress[]>("/api/library-progress"),
   getLibrarySummary: () => req<LibrarySummary>("/api/library/summary"),
+  getLibraryRecap: () => req<LibraryRecap>("/api/recap"),
+  // Download URL for the recap poster — a square, social-ready JPEG rendered
+  // from the same figures over the user's own best picture. A href/download,
+  // not a fetch: the browser saves the image.
+  recapPosterUrl: () => `/api/recap.jpg`,
 
   // "Try it with a sample image" onboarding demo
   getSampleStatus: () => req<SampleStatus>("/api/sample"),

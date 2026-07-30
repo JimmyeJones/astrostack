@@ -550,7 +550,9 @@ def run_qc_and_solve(
     which keeps SQLite access single-threaded per project.
 
     Returns a small summary dict: ``{'qc_done', 'qc_total', 'solve_done',
-    'solve_total'}``.
+    'solve_total', 'solve_ok'}``. The ``*_done`` figures are progress counters
+    (frames *attempted*); ``solve_ok`` is how many of them actually came back
+    with a usable plate solution.
     """
     from seestack.qc.runner import (
         apply_qc_result_to_db,
@@ -614,17 +616,27 @@ def run_qc_and_solve(
                 for (fid, path, ap, fov, to, *rest) in solve_args
             ]
         summary["solve_total"] = len(solve_args)
+        # ``solve_done`` counts frames *attempted* (it's the progress counter), so
+        # it can't answer "how many did we actually locate?" — a field where every
+        # solve failed still finishes with solve_done == solve_total. Count the
+        # genuine successes separately so a caller can report an honest number.
+        # The bar is the same one ``apply_solve_result_to_db`` writes a WCS for:
+        # ASTAP said yes *and* a usable WCS came out of the sidecar.
+        solve_ok = 0
         for done, result in _map_jobs(
             solve_one, solve_args,
             serial=serial, max_workers=max_workers,
             phase="Solving", progress=progress, should_stop=should_stop,
         ):
             if result is not None:
+                if result.solved and result.wcs_text is not None:
+                    solve_ok += 1
                 try:
                     apply_solve_result_to_db(project, result)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("solve DB write failed: %s", exc)
             summary["solve_done"] = done
+        summary["solve_ok"] = solve_ok
 
         # Stack-then-solve bootstrap: if the per-sub pass left most subs unsolved
         # (a faint / sparse-star field), integrate the accepted-but-unsolved subs

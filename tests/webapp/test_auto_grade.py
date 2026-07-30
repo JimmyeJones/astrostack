@@ -245,6 +245,59 @@ def test_pipeline_auto_grades_when_enabled(built_library, data_root):
         lib.close()
 
 
+def test_pipeline_reports_the_subs_auto_grade_put_back(built_library, data_root):
+    """A scan that hands subs back must say so in its summary.
+
+    Auto-grade reconsiders its own earlier rejects on every re-grade (v0.221.0),
+    but the walk-away scan only ever reported the ``auto_graded`` *rejections* —
+    so a frame the pass re-accepted simply reappeared with no explanation. The
+    scan now carries an additive ``auto_regraded_back`` count beside it."""
+    _seed_metrics(data_root)
+    # A frame auto-grade rejected in some earlier pass, sitting right in the
+    # middle of the population it is now measured against: nothing about it is
+    # an outlier anymore, so this scan should give it back.
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            typical = proj.add_frame(FrameRow(
+                source_path="/synthetic/early_reject.fit",
+                fwhm_px=3.0, star_count=400, sky_adu_median=1200.0,
+                eccentricity_median=0.40, transparency_score=5000.0))
+            proj.update_frame(typical, accept=False,
+                              reject_reason="auto:grade:fwhm_px")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    summary = _run_pipeline(data_root, auto_grade_frames=True)
+    assert summary["auto_regraded_back"] == {"M_42": 1}
+    # Nothing was rejected this pass, so the reject key stays absent rather than
+    # reporting a misleading zero.
+    assert "auto_graded" not in summary
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            back = proj.get_frame(typical)
+            assert back.accept and not back.reject_reason
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_pipeline_omits_the_put_back_count_when_nothing_came_back(
+        built_library, data_root):
+    """The note must not nag: an ordinary scan that only rejects says nothing
+    about re-accepts."""
+    _seed_metrics(data_root, bad={"fwhm_px": 9.0})
+    summary = _run_pipeline(data_root, auto_grade_frames=True)
+    assert summary["auto_graded"] == {"M_42": 1}
+    assert "auto_regraded_back" not in summary
+
+
 def test_pipeline_leaves_frames_alone_when_disabled(built_library, data_root):
     bad_id = _seed_metrics(data_root, bad={"fwhm_px": 9.0})
     summary = _run_pipeline(data_root)  # auto_grade_frames defaults off
@@ -346,7 +399,7 @@ def test_auto_grade_cumulative_cap_holds_across_repeated_scans(
         for _ in range(8):  # simulate repeated ingest scans re-grading
             proj = lib.open_target("M_42")
             try:
-                per_scan.append(pipeline._auto_grade_target(proj, settings))
+                per_scan.append(pipeline._auto_grade_target(proj, settings).rejected)
                 rejected_sets.append({
                     f.id for f in proj.iter_frames()
                     if not f.accept
@@ -400,7 +453,7 @@ def test_auto_grade_re_accepts_a_frame_the_bigger_population_no_longer_flags(
     try:
         proj = lib.open_target("M_42")
         try:
-            pipeline._auto_grade_target(proj, settings)
+            first = pipeline._auto_grade_target(proj, settings)
             f = proj.get_frame(borderline)
             assert not f.accept and (f.reject_reason or "").startswith("auto:grade")
             # The night goes on: 60 more subs arrive, scattered widely enough
@@ -409,7 +462,7 @@ def test_auto_grade_re_accepts_a_frame_the_bigger_population_no_longer_flags(
                 proj.add_frame(FrameRow(
                     source_path=f"/synthetic/later_{i:03d}.fit",
                     **_flat_metrics(3.0 + 0.85 * (i % 4))))
-            pipeline._auto_grade_target(proj, settings)
+            second = pipeline._auto_grade_target(proj, settings)
             back = proj.get_frame(borderline)
         finally:
             proj.close()
@@ -419,6 +472,10 @@ def test_auto_grade_re_accepts_a_frame_the_bigger_population_no_longer_flags(
     assert back.accept, "the early auto-grade reject should have been re-accepted"
     assert not back.reject_reason
     assert not back.user_override
+    # The pass reports *both* directions, so the job summary can say a sub came
+    # back rather than letting it silently reappear.
+    assert first.rejected > 0 and first.restored == 0, first
+    assert second.restored > 0, second
 
 
 def test_auto_grade_never_re_accepts_a_user_or_streak_rejection(

@@ -690,3 +690,85 @@ def test_run_qc_and_solve_threads_settings_fov_and_timeout(tmp_path):
         assert captured[0][4] == pytest.approx(120.0)  # timeout threaded from Settings
     finally:
         proj.close()
+
+
+def test_run_qc_and_solve_reports_the_frames_it_actually_located(tmp_path):
+    """``solve_ok`` counts genuine plate solutions, not attempts.
+
+    ``solve_done`` is the progress counter — it reaches ``solve_total`` even when
+    every single solve failed — so a caller that reported it as "located N" would
+    tell a beginner their star-poor field solved perfectly while nothing did.
+    ``solve_ok`` is the honest number, and it applies the same bar
+    ``apply_solve_result_to_db`` uses to write a WCS: ASTAP said yes *and* a
+    usable WCS came out of the sidecar."""
+    from seestack.io.scanner import run_qc_and_solve
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for i in range(4):
+            f = tmp_path / f"{i}.fit"
+            f.write_bytes(b"")
+            proj.add_frame(FrameRow(source_path=str(f)))
+
+        def fake_solve_one(*args):
+            fid = args[0]
+            # One clean success, one "solved" with an unusable sidecar (which the
+            # DB layer records as a failure), and two honest failures.
+            if fid == 1:
+                return SolveResult(
+                    frame_id=fid, fits_path=args[1], solved=True,
+                    wcs_text="CRVAL1=1.0", ra_center_deg=1.0, dec_center_deg=2.0,
+                    pixscale_arcsec=1.0, rotation_deg=0.0, error=None,
+                )
+            if fid == 2:
+                return SolveResult(
+                    frame_id=fid, fits_path=args[1], solved=True,
+                    wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                    pixscale_arcsec=None, rotation_deg=None, error=None,
+                )
+            return SolveResult(
+                frame_id=fid, fits_path=args[1], solved=False,
+                wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                pixscale_arcsec=None, rotation_deg=None, error="no solution",
+            )
+
+        with patch("seestack.solve.runner.solve_one", fake_solve_one):
+            summary = run_qc_and_solve(
+                proj, run_qc=False, run_solve=True, serial=True,
+                use_solve_hints=False,
+            )
+    finally:
+        proj.close()
+
+    assert summary["solve_total"] == 4
+    assert summary["solve_done"] == 4, "every frame was attempted"
+    assert summary["solve_ok"] == 1, "only one frame came back with a usable WCS"
+
+
+def test_run_qc_and_solve_reports_zero_located_when_nothing_solves(tmp_path):
+    """The all-failed case is the one the honest count exists for."""
+    from seestack.io.scanner import run_qc_and_solve
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for i in range(3):
+            f = tmp_path / f"{i}.fit"
+            f.write_bytes(b"")
+            proj.add_frame(FrameRow(source_path=str(f)))
+
+        def fake_solve_one(*args):
+            return SolveResult(
+                frame_id=args[0], fits_path=args[1], solved=False,
+                wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                pixscale_arcsec=None, rotation_deg=None, error="no solution",
+            )
+
+        with patch("seestack.solve.runner.solve_one", fake_solve_one):
+            summary = run_qc_and_solve(
+                proj, run_qc=False, run_solve=True, serial=True,
+                use_solve_hints=False,
+            )
+    finally:
+        proj.close()
+
+    assert summary["solve_done"] == 3 and summary["solve_ok"] == 0

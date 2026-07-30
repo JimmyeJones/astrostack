@@ -5,8 +5,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  JobRow, JobsView, bootstrapRescueNote, bootstrapRescuedCount, buildMasterSummary,
-  friendlyJobError, jobKindLabel, pipelineSummary, processTargetSummary, reprocessSummary,
+  JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
+  bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobKindLabel,
+  pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
 } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
@@ -203,6 +204,26 @@ describe("JobsView process_target result actions", () => {
     expect(link).toHaveAttribute("href", "/targets/M_42/history");
   });
 
+  it("says when auto-grade put subs back, beside the count it dropped", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-back", kind: "process_target", target: "M_42", state: "done",
+        result: {
+          stacked: true, solved_accepted: 8, auto_graded: 2, auto_regraded_back: 1,
+          stack: { n_frames_used: 8, run_id: 7 },
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    await screen.findByRole("link", { name: "View result" });
+    expect(screen.getByText("Stacked 8 frames into a new master (auto-grade dropped 2)."))
+      .toBeInTheDocument();
+    expect(screen.getByText(
+      "Put 1 sub back: with more of your night to compare against, it's "
+      + "no longer an outlier.",
+    )).toBeInTheDocument();
+  });
+
   it("shows the 'cut your noise ~N×' payoff on a healthy finished stack", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({
@@ -383,6 +404,113 @@ describe("bootstrapRescueNote", () => {
   });
 });
 
+describe("qcSolveSummary", () => {
+  it("states what the job checked and what it located", () => {
+    expect(qcSolveSummary({
+      qc_total: 42, qc_done: 42, solve_total: 42, solve_done: 42, solve_ok: 40,
+    })).toBe("Checked 42 subs. Located 40 of 42 in the sky — 2 couldn't be placed.");
+  });
+
+  it("celebrates a clean sweep", () => {
+    expect(qcSolveSummary({
+      qc_total: 12, qc_done: 12, solve_total: 12, solve_done: 12, solve_ok: 12,
+    })).toBe("Checked 12 subs. Located all 12 of them in the sky.");
+  });
+
+  it("never passes off 'attempted' as 'located'", () => {
+    // solve_done reaches solve_total even when every solve failed — the honest
+    // figure is solve_ok, and this is the case the whole helper exists for.
+    expect(qcSolveSummary({
+      qc_total: 30, qc_done: 30, solve_total: 30, solve_done: 30, solve_ok: 0,
+    })).toBe("Checked 30 subs. None of the 30 could be placed in the sky.");
+  });
+
+  it("omits the located clause entirely on an older backend with no solve_ok", () => {
+    expect(qcSolveSummary({
+      qc_total: 8, qc_done: 8, solve_total: 8, solve_done: 8,
+    })).toBe("Checked 8 subs.");
+  });
+
+  it("says so when there was nothing left to do", () => {
+    expect(qcSolveSummary({
+      qc_total: 0, qc_done: 0, solve_total: 0, solve_done: 0, solve_ok: 0,
+    })).toBe("Everything was already checked and located — nothing new to do.");
+  });
+
+  it("singularises one sub", () => {
+    expect(qcSolveSummary({ qc_total: 1, solve_total: 1, solve_ok: 1 }))
+      .toBe("Checked 1 sub. Located it in the sky.");
+    expect(qcSolveSummary({ qc_total: 1, solve_total: 1, solve_ok: 0 }))
+      .toBe("Checked 1 sub. It couldn't be placed in the sky.");
+  });
+
+  it("stays null on a result that carries none of the counts", () => {
+    expect(qcSolveSummary({})).toBeNull();
+    expect(qcSolveSummary({ qc_total: "lots" })).toBeNull();
+  });
+});
+
+describe("qcSolveNudge", () => {
+  it("points at the deep-image rescue when most subs couldn't be placed", () => {
+    expect(qcSolveNudge({ solve_total: 40, solve_ok: 3 }))
+      ?.toContain("Rescue faint fields with a deep-image solve");
+  });
+
+  it("doesn't lecture over a couple of stragglers on a good night", () => {
+    expect(qcSolveNudge({ solve_total: 40, solve_ok: 38 })).toBeNull();
+    expect(qcSolveNudge({ solve_total: 40, solve_ok: 40 })).toBeNull();
+  });
+
+  it("stays quiet when the bootstrap already rescued them", () => {
+    expect(qcSolveNudge({
+      solve_total: 40, solve_ok: 3, bootstrap_propagated: 35,
+    })).toBeNull();
+  });
+
+  it("stays quiet with nothing to judge", () => {
+    expect(qcSolveNudge({})).toBeNull();
+    expect(qcSolveNudge({ solve_total: 40 })).toBeNull();  // older backend
+  });
+});
+
+describe("autoRegradedBackNote", () => {
+  it("reads the single-target job's own count", () => {
+    expect(autoRegradedBackCount({ auto_regraded_back: 3 })).toBe(3);
+    expect(autoRegradedBackNote({ auto_regraded_back: 3 })).toBe(
+      "Put 3 subs back: with more of your night to compare against, they're "
+      + "no longer outliers.",
+    );
+  });
+
+  it("sums the scan's per-target map", () => {
+    expect(autoRegradedBackCount({ auto_regraded_back: { "M 42": 2, "M 31": 4 } }))
+      .toBe(6);
+    expect(autoRegradedBackNote({ auto_regraded_back: { "M 42": 2, "M 31": 4 } }))
+      ?.toContain("Put 6 subs back");
+  });
+
+  it("singularises one restored sub", () => {
+    expect(autoRegradedBackNote({ auto_regraded_back: 1 })).toBe(
+      "Put 1 sub back: with more of your night to compare against, it's "
+      + "no longer an outlier.",
+    );
+  });
+
+  it("stays silent when auto-grade gave nothing back", () => {
+    expect(autoRegradedBackNote({})).toBeNull();
+    expect(autoRegradedBackNote({ auto_regraded_back: 0 })).toBeNull();
+    expect(autoRegradedBackNote({ auto_regraded_back: {} })).toBeNull();
+    // An older backend that only reports rejections says nothing either.
+    expect(autoRegradedBackNote({ auto_graded: 4 })).toBeNull();
+  });
+
+  it("tolerates junk values rather than printing NaN", () => {
+    expect(autoRegradedBackCount({ auto_regraded_back: "some" })).toBe(0);
+    expect(autoRegradedBackCount({ auto_regraded_back: { "M 42": "x", "M 31": 2 } }))
+      .toBe(2);
+  });
+});
+
 describe("JobsView pipeline result actions", () => {
   function renderJobsRouted() {
     const qc = new QueryClient();
@@ -431,6 +559,20 @@ describe("JobsView pipeline result actions", () => {
     )).toBeInTheDocument();
   });
 
+  it("says when auto-grade handed subs back on a finished scan", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-3", kind: "pipeline", target: null, state: "done",
+        result: { scanned: 40, auto_regraded_back: { "M 42": 3 } },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "Put 3 subs back: with more of your night to compare against, they're "
+      + "no longer outliers.",
+    )).toBeInTheDocument();
+  });
+
   it("credits the rescue on a Check & locate job that otherwise says nothing", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({
@@ -442,7 +584,7 @@ describe("JobsView pipeline result actions", () => {
     expect(await screen.findByText(/Located 12 more subs/)).toBeInTheDocument();
   });
 
-  it("says nothing on a Check & locate job the bootstrap didn't touch", async () => {
+  it("says nothing about a rescue on a Check & locate job the bootstrap didn't touch", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({
         id: "qs-2", kind: "qc_solve", target: "M 42", state: "done",
@@ -452,6 +594,40 @@ describe("JobsView pipeline result actions", () => {
     renderJobsRouted();
     await screen.findByText("M 42");
     expect(screen.queryByText(/Located .* more sub/)).not.toBeInTheDocument();
+  });
+
+  it("gives a Check & locate job a real outcome instead of a bare 'done'", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "qs-3", kind: "qc_solve", target: "M 42", state: "done",
+        result: {
+          qc_total: 42, qc_done: 42, solve_total: 42, solve_done: 42, solve_ok: 40,
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "Checked 42 subs. Located 40 of 42 in the sky — 2 couldn't be placed.",
+    )).toBeInTheDocument();
+    // Two stragglers out of 42 is a normal night — no lecture.
+    expect(screen.queryByText(/Rescue faint fields/)).not.toBeInTheDocument();
+  });
+
+  it("nudges the deep-image rescue when a star-poor field mostly failed", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "qs-4", kind: "qc_solve", target: "M 42", state: "done",
+        result: {
+          qc_total: 40, qc_done: 40, solve_total: 40, solve_done: 40, solve_ok: 2,
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "Checked 40 subs. Located 2 of 40 in the sky — 38 couldn't be placed.",
+    )).toBeInTheDocument();
+    expect(screen.getByText(/Rescue faint fields with a deep-image solve/))
+      .toBeInTheDocument();
   });
 });
 

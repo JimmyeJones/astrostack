@@ -6013,8 +6013,49 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-07-30, spotted while shipping the auto-grade reconsider pass v0.221.0) — say when
-  auto-grade *gives a sub back*, not only when it takes one away.** *(Friendliness + trust — PRIORITY 3; size S.)*
+- **NEW (Builder 2026-07-30, found while shipping the Check & locate outcome line v0.222.2) — the legacy desktop
+  dialog reports "solved N/M" from a *progress counter*, so it claims a perfect solve on a field where nothing
+  located.** *(Correctness of a user-facing figure — but in the **deprioritised** desktop GUI, so low priority;
+  size XS.)* `seestack/gui/library_dialog.py:147` prints
+  `f", solved {summary['solve_done']}/{summary['solve_total']}"`. `solve_done` is `_map_jobs`' progress counter —
+  frames *attempted* — so it reaches `solve_total` even when every solve failed; the line reads "solved 40/40" on a
+  star-poor field that located nothing. This is the exact defect the web Jobs page just avoided: `run_qc_and_solve`
+  now also returns an honest **`solve_ok`** (results that came back with a usable WCS), so the fix is to read that
+  instead and fall back to omitting the clause if it's absent. Left unfixed here deliberately — the desktop GUI is
+  historical (`PLAN.md`-era) and its only tests are the three Qt ones, so a drive-by change at merge time wasn't
+  worth it; take it if you're already in that file. Confidence: traced (the counter semantics are proven by
+  `tests/test_solve_runner.py::test_run_qc_and_solve_reports_the_frames_it_actually_located`).
+- **NEW IDEA (Builder 2026-07-30, follow-on to the "Share your sky" poster v0.223.0) — let the recap say *what* you
+  shot, not only how much.** *(Friendliness / enjoy + share — PRIORITY 3; size S–M.)* The poster now carries the
+  quantities (nights, integration, targets, subs) and the biggest project, which is the honest core — but the thing
+  a beginner most wants to point at is the *names*: "M 31, M 42, the Pleiades and 5 more". `summarize_library`
+  already ranks every imaged target by integration, so a "what you pointed at" line is a couple of fields away, and
+  `objectinfo.py` could add the filed "favourite constellation" stat from the same rows. Two further slices the
+  shipped version deliberately left: an explicit **this-year vs all-time** toggle (the night count is already a
+  trailing window — `window_months` is on the payload and plumbed through the endpoint, it just has no UI), and
+  baking the poster through the existing `submit_editor_share` path so it lands in the same place as a shared
+  picture. **Care:** the poster's whole virtue is that it's uncluttered — add *one* line, not a table, and keep the
+  self-hiding contract (a library with one target must not read as a boast about one target).
+- ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the auto-grade reconsider pass v0.221.0) — say when
+  auto-grade *gives a sub back*, not only when it takes one away.**~~ — **SHIPPED v0.222.1** (Builder 2026-07-30,
+  branch `claude/relaxed-turing-judl31`). `_auto_grade_target` (`webapp/pipeline.py`) now returns a small
+  `AutoGradeCounts(rejected, restored)` NamedTuple instead of a bare rejected count, and all three job bodies that
+  surface a summary (the whole-library scan, `qc_solve`, `process_target`) record an additive `auto_regraded_back`
+  key beside the existing `auto_graded` — a per-target map on the scan, a plain count on the single-target jobs,
+  exactly mirroring the `bootstrap_rescued`/`bootstrap_propagated` pair. The Jobs page renders it through two new
+  pure helpers next to their bootstrap siblings (`autoRegradedBackCount` reads **both** shapes,
+  `autoRegradedBackNote` writes the sentence): *"Put 3 subs back: with more of your night to compare against,
+  they're no longer outliers."* It shows on all three surfaces — Process target, the scan, and Check & locate,
+  which previously had nothing at all to say unless the plate-solve bootstrap engaged. Self-hiding: no re-accepts,
+  a zero, an empty map, or an older backend that doesn't send the key all render nothing rather than a misleading
+  "put 0 back", and the key is omitted from the summary entirely when nothing came back. Tests:
+  `tests/webapp/test_auto_grade.py` (+2 — a scan that hands a typical early reject back reports
+  `auto_regraded_back == {"M_42": 1}` and omits `auto_graded`; an ordinary reject-only scan omits the new key —
+  plus the existing re-accept test now asserts both directions of the returned counts),
+  `Jobs.test.tsx` (+7 — both payload shapes, singular/plural, the four silent cases, junk-tolerance, and rendered
+  lines on a Process-target and a scan job). Upgrade-safe: additive summary field + frontend-only rendering, no
+  config/DB/on-disk/API-shape/default change; an old persisted job row simply lacks the key. *(Original idea kept
+  below for provenance.)*
   v0.221.0 made auto-grade's rejections reversible: on each re-grade it reconsiders its own `auto:grade` rejects
   against the now-larger population and re-accepts the ones that are no longer outliers. That's the right
   behaviour, but it is currently **invisible** — `_auto_grade_target` logs the re-accepts and returns only the
@@ -6026,9 +6067,27 @@ to **Shipped**.)_
   plain line on the Jobs result — *"Put 3 subs back: with more of your night to compare against, they're no longer
   outliers."* Frontend-only beyond the one summary field; the counts already exist. Pairs with the v0.221.1
   bootstrap-rescue note as the other half of "automation explains itself".
-- **NEW IDEA (Builder 2026-07-30, spotted while adding the `qc_solve` job result block in v0.221.1) — give a
-  finished Check/Plate-solve job a real one-line outcome, not a bare "done".** *(Friendliness — PRIORITY 3; size
-  S.)* Every other finished job kind now states its outcome in plain language (`process_target`, `pipeline`,
+- ~~**NEW IDEA (Builder 2026-07-30, spotted while adding the `qc_solve` job result block in v0.221.1) — give a
+  finished Check/Plate-solve job a real one-line outcome, not a bare "done".**~~ — **SHIPPED v0.222.2** (Builder
+  2026-07-30, branch `claude/relaxed-turing-judl31`). Two pure helpers in `routes/Jobs.tsx` next to their
+  `bootstrapRescueNote` siblings: `qcSolveSummary` — *"Checked 42 subs. Located 40 of 42 in the sky — 2 couldn't
+  be placed."* — and `qcSolveNudge`, which points at the opt-in *"Rescue faint fields with a deep-image solve"*
+  setting **only** when at least half the subs couldn't be placed (a couple of stragglers on a good night get no
+  lecture) and stays quiet when the bootstrap already rescued them.
+  **The idea as filed would have shipped a wrong number, and that's the substance of this task.** It proposed
+  reporting `solve_done`, but that is the *progress counter* (`_map_jobs`' `done`) — it reaches `solve_total` even
+  when every single solve failed, so a star-poor field where nothing located would have been reported as *"located
+  40 of 40"*. `run_qc_and_solve` (`seestack/io/scanner.py`) therefore gained an additive **`solve_ok`**: the count
+  of results that came back genuinely located, using the same bar `apply_solve_result_to_db` uses to write a WCS
+  (`result.solved` **and** a usable `wcs_text` — so ASTAP's "success with an unreadable sidecar", which the DB
+  layer records as a failure, is counted as one here too). The whole located clause is omitted rather than guessed
+  when `solve_ok` is absent, so an older persisted job row degrades to *"Checked 42 subs."* instead of a fabricated
+  figure. Tests: `tests/test_solve_runner.py` (+2 — a mixed batch where `solve_done == 4` but only one frame is
+  really located, and the all-failed case), `Jobs.test.tsx` (+13 — the mixed/clean-sweep/none-located/older-backend/
+  nothing-to-do/singular/no-counts summary cases, the four nudge cases, and two rendered job rows). Upgrade-safe:
+  additive summary key + frontend rendering only, no config/DB/on-disk/API-shape/default change. *(Original idea
+  kept below for provenance.)* Every other finished job kind now states its outcome in plain language
+  (`process_target`, `pipeline`,
   `reprocess_all`, `build_master`), but `qc_solve` had **no result renderer at all** until v0.221.1 added one for
   the bootstrap-rescue case alone — so a user who runs "Check & locate" and *isn't* rescued still gets nothing.
   `run_qc_and_solve` already returns `qc_done`/`qc_total`/`solve_done`/`solve_total`, so the line is a pure helper
@@ -9908,10 +9967,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   genuinely absent 2026-07-24: no endpoint ranks *owned* targets by tonight-suitability — `/suggest` excludes the
   library, `/next-session` is single-target.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Your year in space": a one-tap, shareable recap poster of everything
-  you've captured (this year / all-time), turning the raw stats the app already tracks into something a beginner is
-  proud to post.** *(Pillar: enjoy + share — priority 3; explicitly on the beginner-bar list "enjoy, and share a good
-  image". Size M.)* Distinct from the existing single-night "Last night" card and from the raw imaging log/calendar
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-24) — "Your year in space": a one-tap, shareable recap poster of everything
+  you've captured, turning the raw stats the app already tracks into something a beginner is proud to post.**~~ —
+  **SHIPPED v0.223.0** as **"Share your sky"** (Builder 2026-07-30, branch `claude/relaxed-turing-judl31`).
+  **Scoped against what already exists** (the idea predates it): the *page* half — total integration, targets imaged,
+  subs kept, first light, biggest project, hero grid — has been live as **"Your sky, so far"** (`SkySoFar.tsx` +
+  `/api/library/summary`) for a while, so re-building it would have been churn. The genuinely missing half was the
+  one the idea is named for: **you can't show it to anyone.** So this ships the share step and nothing else.
+  **Engine** — new pure `seestack/recap.py` (no `webapp` imports, no network, no bundled asset — Pillow's built-in
+  scalable font, exactly like `nameplate.py`): a `RecapFacts` dataclass, `recap_stats` (the big `(value, label)`
+  pairs), `recap_caption` (the copy-paste blurb — *"12 nights under the sky · 8h 20m of light · 4 targets · biggest
+  project: M 31 (4h 12m)"*), `recap_top_project_line`, `recap_since_line`, and `draw_recap_poster` → a 1080²
+  social-ready image with the user's **own best picture** cover-cropped and veiled behind the numbers. Every figure
+  is optional and a missing one is **dropped, not printed as a zero** ("0 nights" reads as a bug, not a beginning),
+  and the stat grid is vertically centred with the provenance lines bottom-anchored so a one-night library looks
+  composed rather than top-heavy. The "biggest project" line uses a middle dot because the built-in font has **no
+  U+2014 glyph** — an em dash rendered as a visible tofu box on the finished poster (caught by rendering it and
+  looking; now pinned by a test).
+  **Webapp** — two read-only endpoints on the existing stats router: `GET /api/recap` (figures + caption, with
+  `has_anything:false` on an untouched library so the card self-hides) and `GET /api/recap.jpg` (the rendered
+  poster). Both reuse the roll-ups the Dashboard already pays for — `summarize_library` for the totals and the
+  activity calendar's night count via a new `_cached_activity_calendar` helper extracted from the heatmap endpoint,
+  so a recap costs no extra project opens. An unreadable/deleted preview falls through to the next hero and then to
+  the plain backdrop rather than 500-ing.
+  **Frontend** — a self-hiding `ShareYourSkyCard` on "Your sky, so far": Download poster (`<a download>`) + Copy
+  caption (falling back to showing the caption when the clipboard is blocked, mirroring History's "Copy caption").
+  Tests: `tests/test_recap.py` (+18), `tests/webapp/test_recap.py` (+7 — empty library self-hide, figures + caption,
+  window clamp, square JPEG, empty-library render, hero backdrop composited, unreadable preview survives),
+  `ShareYourSkyCard.test.tsx` (+6). Upgrade-safe: two additive read-only endpoints + one card; no config/DB/on-disk/
+  API-shape/default change, nothing written to the library (a display-time render, like the share export).
+  **Left for a later slice:** "favourite constellation", an explicit this-year/all-time toggle, and baking the
+  poster through `submit_editor_share`. *(Original idea kept below for provenance.)* *(Pillar: enjoy + share —
+  priority 3; explicitly on the beginner-bar list "enjoy, and share a good image". Size M.)* Distinct from the existing single-night "Last night" card and from the raw imaging log/calendar
   (both already proposed/built): this is a *celebratory* summary — total nights out, total integration hours, number of
   targets, favourite constellation, your best picture (thumbnail), and a fun highlight or two ("your longest single
   target: M31, 6.2 h across 5 nights"). One warm sentence of copy, no jargon. It composes data the app **already
