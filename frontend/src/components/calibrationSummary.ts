@@ -19,23 +19,37 @@ import { calibrationLabel } from "./CalibrationBadge";
 // different exposure — build a master bias and it'll be reused automatically". It
 // only ever replaces the *generic* uncalibrated copy (never the calibrated line),
 // so a concrete fix is shown when the library holds a nearly-usable master.
+// `skipped` (optional) is what the run itself *recorded*: the saved calibration
+// picks its unattended stack had to drop, already written as plain-language
+// sentences by the backend ("Your saved master dark wasn't used: it's no longer in
+// your calibration library."). It comes back as its own field rather than folded
+// into `text`, because it answers a different question — `text` says what this
+// picture *got*, the skip line says what the user *asked for and didn't get* — and
+// because it matters even on a calibrated run: a bound flat is no excuse for
+// silently dropping the dark they picked. Unlike `advice` (re-derived from the
+// library) it is recorded evidence, and it's the only thing that can explain a
+// master deleted *after* it was chosen.
 export function calibrationSummaryText(
   cards: { key: string; value: string | number | boolean }[],
   advice?: string | null,
-): { text: string; calibrated: boolean } | null {
+  skipped?: string[] | null,
+): { text: string; calibrated: boolean; skipped?: string } | null {
   if (cards.length === 0) return null;
+  const skips = (skipped ?? []).map((s) => s.trim()).filter(Boolean);
+  const skipText = skips.length ? skips.join(" ") : undefined;
   const card = cards.find((c) => c.key === "CALSTAT");
   const label = calibrationLabel(card ? String(card.value) : null);
   if (label) {
-    return { text: `Calibrated with your ${label}.`, calibrated: true };
+    return { text: `Calibrated with your ${label}.`, calibrated: true, skipped: skipText };
   }
   if (advice && advice.trim()) {
-    return { text: advice.trim(), calibrated: false };
+    return { text: advice.trim(), calibrated: false, skipped: skipText };
   }
   return {
     text:
       "No calibration masters were applied — build or pick a master dark/flat " +
       "in Calibration to cut thermal noise and vignetting.",
     calibrated: false,
+    skipped: skipText,
   };
 }

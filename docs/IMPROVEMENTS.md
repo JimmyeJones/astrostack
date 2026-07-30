@@ -6013,8 +6013,59 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-07-30, spotted while shipping the saved-master binder v0.214.0) — record on the *run*
-  when a saved calibration master was skipped, so History can say why instead of only the server log.** v0.214.0
+- **NEW IDEA (Builder 2026-07-30, spotted while shipping the skipped-master note v0.216.0) — the skip reason only
+  reaches a user who opens the History *Info* panel; put it where the walk-away user actually lands.** v0.216.0
+  records, per run, the calibration masters a saved pick had to skip, and the History Info panel now says so. But the
+  hands-off user's natural landing spots are the **Jobs page** ("Process target" result) and the **Target page's**
+  newest-run area — neither of which shows it, and neither of which the user has to expand. So the very person the
+  note exists for (someone who walked away and came back to a finished picture) is still the one least likely to see
+  it. **Idea:** feed the same recorded `calibration_skipped` list — it's already on the run info payload, and the job
+  result already carries the run id — into (a) `JobResultActions`' Process-target summary as an orange line next to
+  the existing thin-stack warning, and (b) the Target page's newest-run block. Pure display re-use of a field that
+  already exists; no new endpoint, no new recording. **Care:** don't nag — show it once per surface, and keep it out
+  of the way when the run *was* otherwise calibrated. (S, friendliness + trust — PRIORITY 3.)
+- **NEW IDEA (Builder 2026-07-30, spotted while shipping the master-coverage roll-up v0.217.0) — make the "no master
+  covers this target" nudge *actionable*, and say **why** each miss misses.** v0.217.0 tells a beginner which of
+  their targets no master reaches, which is the diagnosis — but the cure is still "go read the build form and work
+  out what numbers to use". Two slices, both small and both reusing machinery that already exists:
+  **(a) name the reason per miss.** The tooltip lists the targets a master can't be applied to; it doesn't say
+  whether the blocker is exposure, gain, temperature or frame size. `_match_distance` and `dims_conflict` already
+  know, so `master_coverage` could return a short reason per missed target (*"M 13 — your subs are 10 s, this dark is
+  30 s"*, *"different camera or binning"*) instead of a bare name. That turns the roll-up from a list into an
+  explanation.
+  **(b) a "Build a dark for these" shortcut.** Beside the uncovered nudge, a button that pre-fills the build form
+  with the *target's own* exposure/gain — exactly the numbers `seestack/stackhealth.py::recommended_dark_spec`
+  already computes for the v0.186.0 "How to add darks" guide (`DarkSpec` → *"10 s at gain 80"*). It can't shoot the
+  darks for them, but it can name the numbers and pre-name the master, which is where a beginner stalls. Together
+  with (a) this closes the loop the app currently leaves open: *told me a target isn't covered → told me why → told
+  me exactly what to shoot*. **Care:** the build form still needs a real folder of dark frames, so the button must
+  read as "set this up", never as "do it now" — and it must stay silent when nothing is uncovered. (S–M each,
+  friendliness + autonomy — PRIORITY 3.)
+- ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the saved-master binder v0.214.0) — record on the *run*
+  when a saved calibration master was skipped, so History can say why instead of only the server log.**~~ —
+  **SHIPPED v0.216.0** (Builder 2026-07-30, branch `claude/relaxed-turing-rrutdf`; tested).
+  `_apply_saved_calibration_masters` (`webapp/pipeline.py`) now **returns** the skips it made as finished,
+  second-person sentences (`_skip_sentence`/`_dims_reason`) — *"Your saved master dark wasn't used: it's no longer in
+  your calibration library."* / *"…it's 1080×1920 pixels, but this target's subs are 480×320."* — and `_stack_target`
+  stamps them on the finished run under a new project-meta key
+  (`CALIBRATION_SKIPPED_META_PREFIX` + run id, a JSON list), the same additive per-run note mechanism the auto-edit
+  note/sky-cast/colour-cal already use. `GET …/stack-runs/{id}/info` reads them back as an additive
+  `calibration_skipped: string[]` (`_run_calibration_skipped`), and the History Info panel renders them as their own
+  **yellow** line beneath the calibration status via `calibrationSummaryText(cards, advice, skipped)` — which now
+  returns the skip separately from `text`, because the two answer different questions (*what this picture got* vs
+  *what the user asked for and didn't get*) and because a skipped pick matters **even on a calibrated run**: a bound
+  flat is no excuse for silently dropping the dark they chose. This is *recorded* evidence rather than the v0.215.1
+  `diagnose_uncalibrated` inference, so it is the only signal that can explain a master **deleted** after it was
+  picked (the library holds nothing left to infer from). Fail-soft throughout: stamping is wrapped in a suppress, a
+  run that skipped nothing writes no key, and an older run reads back `[]` — so every existing History line is
+  byte-identical. Upgrade-safe: additive meta key + additive response field + an optional third helper argument (the
+  editor's `calibrationSummaryText(cards)` caller is untouched); no config/DB-schema/on-disk/default/`StackOptions`
+  change. Tests: `tests/webapp/test_auto_stack_saved_masters.py` (+4 — a deleted master's exact sentence, a
+  wrong-size master naming both frame sizes, a fully-bound run recording nothing, and only-the-skipped-slot when
+  another master binds), `tests/webapp/test_stack_render.py` (+2 — the info payload carries a stamped reason; an
+  ordinary/older run reports `[]`), `History.test.tsx` (+5 — the skip line beside an uncalibrated *and* a calibrated
+  run, multi-skip joining with blanks dropped, unset when nothing was skipped, plus a component test that the Info
+  panel shows it). *(Original idea kept for provenance.)* v0.214.0
   makes the walk-away auto-stack honour a target's saved master picks, and deliberately **fail-soft** per slot: a
   master deleted since it was saved, or one whose dimensions don't match the subs, is skipped with a
   `log.warning` rather than failing the overnight job. That's the right runtime behaviour — but the *user* still
@@ -6028,8 +6079,34 @@ to **Shipped**.)_
   *"…it's 1080×1920 but these subs are 480×320."* Additive + read-only on the display side; the only care needed
   is keeping `StackOptions` JSON-safe and the run-record shape backward-compatible. (S–M, friendliness + trust —
   PRIORITY 3.)
-- **NEW IDEA (Builder 2026-07-30, same run) — a "do my masters actually cover my targets?" line on the Calibration
-  page.** The Calibration page lists the masters you've built, but nothing connects them back to the library: a
+- ~~**NEW IDEA (Builder 2026-07-30, same run) — a "do my masters actually cover my targets?" line on the Calibration
+  page.**~~ — **SHIPPED v0.217.0** (Builder 2026-07-30, branch `claude/relaxed-turing-rrutdf`; tested). New pure
+  `calibration.master_coverage(library_root, masters, targets)` answers it for the whole library at once, and it
+  measures coverage with **the unattended binder's own confidence gate** (`auto_bind_master_paths`, mapped back to
+  master ids via `master_id_for_path`) — so the roll-up promises exactly what the app will do **on its own**, never
+  something the user would still have to pick by hand. It takes plain target dicts (`COVERAGE_TARGET_KEYS`), so it
+  stays pure and unit-testable without a Library/Project, and it never raises: a probe that fails leaves that target
+  uncovered rather than 500-ing the page. New read-only `GET /api/calibration/coverage`
+  (`webapp/routers/calibration.py`) does the per-target frame read and returns `{n_targets, masters:[{id, name, kind,
+  n_covered, covered, missed}], uncovered}`; because it opens every target's project SQLite (unlike the
+  registry-only master list) it is **cached on the app exactly like the Dashboard roll-ups** — signature keyed on
+  each target's activity + accepted-frame count *and* the master registry, 60 s TTL — and one unreadable target is
+  skipped rather than taking the page down. Frontend: three pure, tested copy helpers
+  (`components/calibrationCoverage.ts` — `masterCoverageLine`, `masterMissesTooltip`, `uncoveredTargetsNote`) drive a
+  per-master line under each name on the Calibration page (*"Covers 4 of your 6 targets"*, yellow *"Doesn't match any
+  of your 6 targets yet"*, with the misses named on hover) plus a self-hiding yellow Alert naming the targets **no**
+  master reaches and the one plain next step (*"build a dark from frames shot the same way — same exposure, gain and
+  camera"*). Its own query at a 60 s poll, so a slow walk never holds up the master list. **The copy only promises
+  hands-off use when it's true:** the payload carries `auto_apply` (the live `auto_bind_calibration` setting, read
+  outside the cache since it changes only the wording), so with auto-calibration **off — the default** — the nudge
+  ends *"then pick it on the Stack form (or turn on auto-calibration in Settings to have it applied for you)"*
+  rather than claiming the app will do it. Upgrade-safe: additive endpoint + additive frontend, read-only throughout; no
+  config/DB-schema/on-disk/default/existing-API-shape change. Tests: `tests/webapp/test_calibration.py` (+6 — one
+  dark covering two 10 s targets and missing the 60 s one, a wrong-camera master covering nothing, the no-masters and
+  no-targets edges, and the endpoint end-to-end on the real fixture library), `calibrationCoverage.test.ts` (+11 —
+  all three helpers incl. singular/plural and the self-hiding cases), `Calibration.test.tsx` (+2 — the coverage line
+  and uncovered nudge render; nothing is said when every target is covered). *(Original idea kept for provenance.)*
+  The Calibration page lists the masters you've built, but nothing connects them back to the library: a
   beginner who built one 30 s dark has no idea it covers four of their six targets and misses the two they shot at
   10 s (or the ones from a second Seestar). They only discover it target-by-target, on the Stack form or after an
   uncalibrated result. **Idea:** a read-only roll-up — for each master, the count of library targets it can

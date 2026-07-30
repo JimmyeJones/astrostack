@@ -218,3 +218,93 @@ def test_manual_options_do_not_resolve_saved_master_ids(solved_library, monkeypa
 
     assert captured["opts"].sigma_kappa == 4.0
     assert captured["opts"].dark_path is None
+
+
+# --- The run records *why* a saved pick was skipped -------------------------
+#
+# The skips above are deliberately fail-soft, but they leave the user with a
+# less-calibrated picture and the reason only in the server log — which a
+# beginner will never read. ``_stack_target`` stamps the reasons on the run so
+# History can say them out loud.
+
+
+def _recorded_skips(data_root, run_id: int = 1) -> list[str]:
+    """The plain-language skip reasons stamped on a run, as History reads them."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(lib.list_targets()[0].safe_name)
+        try:
+            raw = proj.get_meta(
+                f"{pipeline.CALIBRATION_SKIPPED_META_PREFIX}{run_id}")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    return json.loads(raw) if raw else []
+
+
+def test_deleted_saved_master_records_why_on_the_run(solved_library, monkeypatch):
+    """A master deleted since it was saved: the run must say so, naming the slot."""
+    root = solved_library / "library"
+    dark = _register(root, "dark", name="Doomed Dark")
+    calibration.delete_master(root, dark["id"])
+
+    _stack_with_saved_defaults(
+        solved_library, {"dark_master_id": dark["id"]}, monkeypatch)
+
+    skips = _recorded_skips(solved_library)
+    assert len(skips) == 1
+    assert skips[0] == ("Your saved master dark wasn't used: it's no longer in "
+                        "your calibration library.")
+
+
+def test_wrong_size_saved_master_records_both_sizes(solved_library, monkeypatch):
+    """A master built for another camera: the reason names both frame sizes, so a
+    beginner can see *which* pick doesn't fit these subs."""
+    root = solved_library / "library"
+    wrong = _register(root, "flat", name="Other Camera",
+                      width=FRAME_W // 2, height=FRAME_H // 2)
+
+    _stack_with_saved_defaults(
+        solved_library, {"flat_master_id": wrong["id"]}, monkeypatch)
+
+    skips = _recorded_skips(solved_library)
+    assert len(skips) == 1
+    assert skips[0] == (
+        f"Your saved master flat wasn't used: it's {FRAME_W // 2}×"
+        f"{FRAME_H // 2} pixels, but this target's subs are {FRAME_W}×{FRAME_H}.")
+
+
+def test_a_run_that_applies_every_saved_pick_records_nothing(
+        solved_library, monkeypatch):
+    """No skip, no key — so an ordinary run's History line is exactly as before."""
+    root = solved_library / "library"
+    dark = _register(root, "dark", name="Good Dark")
+
+    opts = _stack_with_saved_defaults(
+        solved_library, {"dark_master_id": dark["id"]}, monkeypatch)
+
+    assert opts.dark_path  # it really did bind
+    assert _recorded_skips(solved_library) == []
+
+
+def test_only_the_skipped_slot_is_recorded_when_another_binds(
+        solved_library, monkeypatch):
+    """A bound flat is no excuse for silently dropping the dark the user picked:
+    the surviving pick calibrates the run, and the dropped one still reports."""
+    root = solved_library / "library"
+    dark = _register(root, "dark", name="Gone Dark")
+    calibration.delete_master(root, dark["id"])
+    flat = _register(root, "flat", name="Fine Flat", exposure_s=None)
+
+    opts = _stack_with_saved_defaults(
+        solved_library,
+        {"dark_master_id": dark["id"], "flat_master_id": flat["id"]},
+        monkeypatch,
+    )
+
+    assert opts.dark_path is None
+    assert opts.flat_path and opts.flat_path.endswith(flat["filename"])
+    skips = _recorded_skips(solved_library)
+    assert len(skips) == 1
+    assert skips[0].startswith("Your saved master dark wasn't used:")

@@ -1149,3 +1149,120 @@ def test_stack_with_calibration_master_runs(client, solved_library, tmp_path):
     # The run record should remember which dark was applied.
     runs = client.get("/api/targets/M_42/stack-runs").json()
     assert len(runs) >= 1
+
+
+# --- "Do my masters actually cover my targets?" -----------------------------
+#
+# The Calibration page lists the masters you've built but never connects them
+# back to the library, so a beginner discovers a gap target-by-target (on the
+# Stack form, or after an uncalibrated result). ``master_coverage`` answers it
+# once, using the *unattended binder's* own confidence gate so the roll-up
+# promises exactly what the app will do on its own.
+
+
+def _coverage_master(root: Path, kind: str, *, name: str, exposure_s=10.0,
+                     gain=80.0, width=480, height=320, temp=-10.0) -> dict:
+    from seestack.calibrate.masters import MasterMeta
+
+    arr = np.full((height, width), 7.0, dtype=np.float32)
+    meta = MasterMeta(kind, 5, width, height, "median", exposure_s=exposure_s,
+                      gain=gain, sensor_temp_c=temp)
+    return calibration.register_master(root, name=name, array=arr, meta=meta)
+
+
+def _coverage_target(name: str, *, exposure_s=10.0, gain=80.0, temp=-10.0,
+                     width=480, height=320) -> dict:
+    return {"name": name, "safe_name": name.replace(" ", "_"),
+            "exposure_s": exposure_s, "gain": gain, "sensor_temp_c": temp,
+            "width_px": width, "height_px": height}
+
+
+def test_master_coverage_counts_the_targets_a_master_reaches(tmp_path):
+    """The headline number: one 10 s dark covers the two 10 s targets and misses
+    the 60 s one — the answer the page currently makes you work out per target."""
+    root = tmp_path / "library"
+    dark = _coverage_master(root, "dark", name="10s dark", exposure_s=10.0)
+    masters = calibration.list_masters(root)
+
+    cov = calibration.master_coverage(root, masters, [
+        _coverage_target("M 42"),
+        _coverage_target("NGC 7000"),
+        _coverage_target("Long Sub", exposure_s=60.0),
+    ])
+
+    assert cov["n_targets"] == 3
+    row = next(r for r in cov["masters"] if r["id"] == dark["id"])
+    assert row["kind"] == "dark"
+    assert row["n_covered"] == 2
+    assert row["covered"] == ["M 42", "NGC 7000"]
+    assert row["missed"] == ["Long Sub"]  # 6× the exposure, no bias to scale with
+    assert cov["uncovered"] == ["Long Sub"]
+
+
+def test_master_coverage_flags_a_target_no_master_reaches(tmp_path):
+    """A second camera (or a binning change) is the case a beginner never sees
+    coming: the master looks fine on the page but fits none of those subs."""
+    root = tmp_path / "library"
+    _coverage_master(root, "dark", name="S50 dark", width=1080, height=1920)
+    masters = calibration.list_masters(root)
+
+    cov = calibration.master_coverage(
+        root, masters, [_coverage_target("M 13", width=480, height=320)])
+
+    assert cov["masters"][0]["n_covered"] == 0
+    assert cov["uncovered"] == ["M 13"]
+
+
+def test_master_coverage_with_no_masters_reports_every_target_uncovered(tmp_path):
+    """The empty-library case: no rows, and every target is honestly uncovered."""
+    root = tmp_path / "library"
+
+    cov = calibration.master_coverage(root, [], [
+        _coverage_target("M 42"), _coverage_target("M 31")])
+
+    assert cov["masters"] == []
+    assert cov["uncovered"] == ["M 42", "M 31"]
+    assert cov["n_targets"] == 2
+
+
+def test_master_coverage_with_no_targets_is_empty_not_an_error(tmp_path):
+    """A fresh install has masters and no targets — the roll-up must still answer
+    (every master covers nothing) rather than divide by zero."""
+    root = tmp_path / "library"
+    _coverage_master(root, "flat", name="Flat", exposure_s=None)
+    masters = calibration.list_masters(root)
+
+    cov = calibration.master_coverage(root, masters, [])
+
+    assert cov["n_targets"] == 0
+    assert cov["uncovered"] == []
+    assert cov["masters"][0]["n_covered"] == 0
+    assert cov["masters"][0]["missed"] == []
+
+
+def test_calibration_coverage_endpoint_reports_the_librarys_targets(
+        client, solved_library, tmp_path):
+    """End-to-end: the endpoint reads each target's own frames and reports a
+    master built to match them as covering both fixture targets."""
+    root = solved_library / "library"
+    # The fixture's subs are 480×320 raw, 10 s at gain 80, −10 °C.
+    dark = _coverage_master(root, "dark", name="Matching dark")
+
+    body = client.get("/api/calibration/coverage").json()
+
+    assert body["n_targets"] == 2
+    row = next(r for r in body["masters"] if r["id"] == dark["id"])
+    assert row["n_covered"] == 2
+    assert sorted(row["covered"]) == ["M_42", "NGC_7000"]
+    assert body["uncovered"] == []
+    # Auto-calibration is off by default, so the page must not promise hands-off
+    # use — a covered master still has to be picked on the Stack form.
+    assert body["auto_apply"] is False
+
+
+def test_calibration_coverage_endpoint_with_no_masters(client):
+    """A library with no masters yet — a plain, honest empty answer, not a 500,
+    with every target it does know about reported as covered by nothing."""
+    body = client.get("/api/calibration/coverage").json()
+    assert body["masters"] == []
+    assert len(body["uncovered"]) == body["n_targets"]

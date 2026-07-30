@@ -759,6 +759,12 @@ export interface StackRunInfo {
   // holds a master that's usable but for one concrete, fixable thing; the generic
   // "build or pick a master" copy is used otherwise.
   calibration_advice?: string | null;
+  // Plain-language reasons this run had to *skip* a calibration master the user
+  // explicitly saved for the target — e.g. one deleted since it was saved, or one
+  // built for another camera. Recorded by the run itself (not inferred), so it's
+  // the only signal that can explain a dropped pick; empty/absent on runs that
+  // skipped nothing and on runs from before this was recorded.
+  calibration_skipped?: string[] | null;
   processing?: StackProcessingStep[];
   cards: StackInfoCard[];
 }
@@ -1143,6 +1149,28 @@ export interface CalibrationMaster {
   height_px: number;
   created_utc: string;
   exists: boolean;
+}
+
+// "Do my masters actually cover my targets?" — for each master, how many of the
+// library's targets the *unattended* binder would apply it to (so the roll-up
+// promises exactly what the app does on its own), plus the targets no master
+// covers at all.
+export interface CalibrationCoverage {
+  n_targets: number;
+  masters: {
+    id: number;
+    name: string;
+    kind: string;
+    n_covered: number;
+    covered: string[];
+    missed: string[];
+  }[];
+  uncovered: string[];
+  // Whether auto-calibration is actually switched on. With it off (the default) a
+  // "covered" master is one the app *can* apply — the user still picks it on the
+  // Stack form — so the page must not promise it will be used automatically.
+  // Optional: an older backend omits it (treated as off).
+  auto_apply?: boolean;
 }
 
 export interface CalibrationSuggestions {
@@ -1773,6 +1801,7 @@ export const api = {
 
   // calibration masters (library-level dark/flat frames)
   listCalibrationMasters: () => req<CalibrationMaster[]>("/api/calibration/masters"),
+  calibrationCoverage: () => req<CalibrationCoverage>("/api/calibration/coverage"),
   calibrationSuggestions: (safe: string) =>
     req<CalibrationSuggestions>(`/api/targets/${safe}/calibration-suggestions`),
   buildCalibrationMaster: (body: {

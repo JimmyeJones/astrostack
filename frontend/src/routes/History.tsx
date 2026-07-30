@@ -384,12 +384,24 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
         );
       })()}
       {(() => {
-        const cal = calibrationSummaryText(data.cards, data.calibration_advice);
+        const cal = calibrationSummaryText(
+          data.cards, data.calibration_advice, data.calibration_skipped);
         if (!cal) return null;
         return (
-          <Text size="xs" c="dimmed">
-            {cal.text}
-          </Text>
+          <Stack gap={2}>
+            <Text size="xs" c="dimmed">
+              {cal.text}
+            </Text>
+            {/* A calibration master the user explicitly chose but this run had to
+                drop — the unattended binder skips it rather than failing the
+                overnight job, so this is the only place the user learns why their
+                picture is less calibrated than they asked for. */}
+            {cal.skipped ? (
+              <Text size="xs" c="yellow.7" fw={600}>
+                {cal.skipped}
+              </Text>
+            ) : null}
+          </Stack>
         );
       })()}
       {weightingSummaryText(data.weighting, data.n_frames) ? (

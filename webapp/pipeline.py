@@ -1794,11 +1794,20 @@ _SAVED_MASTER_BINDINGS = (
     ("bias_master_id", "bias_path", "bias"),
 )
 
+#: Project-meta key prefix (``…:<run_id>``) under which a run records the saved
+#: calibration picks its unattended stack had to *skip*, as a JSON list of
+#: plain-language sentences. The skip itself is deliberately fail-soft (see
+#: :func:`_apply_saved_calibration_masters`), but the user still ends up with a
+#: less-calibrated picture than they asked for and a beginner won't read the
+#: server log — so History reads this back and says why. Additive: an older run
+#: simply has no such key and the History line stays exactly as it was.
+CALIBRATION_SKIPPED_META_PREFIX = "calibration_skipped:"
+
 
 def _apply_saved_calibration_masters(
     settings: Settings, proj: Any, opts_dict: dict[str, Any],
     master_ids: dict[str, Any],
-) -> None:
+) -> list[str]:
     """Bind the calibration masters the user *explicitly chose and saved* for this
     target to an unattended stack (mutates ``opts_dict``).
 
@@ -1823,11 +1832,16 @@ def _apply_saved_calibration_masters(
     dimension check only refuses on a **positive** conflict (both sides known and
     different); when either side never recorded its size we trust the explicit pick,
     exactly as the manual Stack form does.
+
+    Returns the plain-language reasons for any picks it skipped (empty when every
+    saved pick bound, or when there was nothing to bind), so the caller can stamp
+    them on the run record and History can explain the uncalibrated result instead
+    of leaving the reason in the server log.
     """
     from webapp import calibration
 
     if any(opts_dict.get(k) for _, k, _ in _SAVED_MASTER_BINDINGS):
-        return  # a path is already set (reused run options) — leave it alone
+        return []  # a path is already set (reused run options) — leave it alone
 
     dims: tuple[int | None, int | None] | None = None
 
@@ -1844,6 +1858,7 @@ def _apply_saved_calibration_masters(
         return calibration.dims_conflict(entry, *_sub_dims())
 
     bound: list[str] = []
+    skipped: list[str] = []
     for id_key, path_key, word in _SAVED_MASTER_BINDINGS:
         mid = master_ids.get(id_key)
         if mid in (None, "", "none"):
@@ -1854,17 +1869,22 @@ def _apply_saved_calibration_masters(
         except (TypeError, ValueError, OSError) as exc:  # noqa: PERF203
             log.warning("saved %s master %r for %s is unusable: %s",
                         word, mid, opts_dict.get("output_name", "?"), exc)
+            skipped.append(_skip_sentence(
+                word, "it couldn't be read from your calibration library"))
             continue
         if entry is None or path is None:
             log.warning("saved %s master %r for %s no longer exists — "
                         "stacking without it", word, mid,
                         opts_dict.get("output_name", "?"))
+            skipped.append(_skip_sentence(
+                word, "it's no longer in your calibration library"))
             continue
         if _dims_conflict(entry):
             log.warning("saved %s master %r is %sx%s, but this target's subs are "
                         "%sx%s — skipping it rather than failing the stack", word,
                         mid, entry.get("width_px"), entry.get("height_px"),
                         *_sub_dims())
+            skipped.append(_skip_sentence(word, _dims_reason(entry, _sub_dims())))
             continue
         opts_dict[path_key] = str(path)
         bound.append(word)
@@ -1875,6 +1895,24 @@ def _apply_saved_calibration_masters(
         # engine to exposure-scale a dark that isn't there. Mirror
         # ``_auto_bind_calibration``'s handling of the same stray flag.
         opts_dict.pop("scale_dark_to_light", None)
+    return skipped
+
+
+def _skip_sentence(word: str, reason: str) -> str:
+    """One plain-language sentence for a saved calibration pick that was skipped.
+
+    Written for a beginner reading the History Info panel, not for the log: it
+    names *which* pick was dropped and why, in the second person, so the reader
+    knows their explicit choice didn't silently apply."""
+    return f"Your saved master {word} wasn't used: {reason}."
+
+
+def _dims_reason(entry: dict[str, Any],
+                 sub_dims: tuple[int | None, int | None]) -> str:
+    """The size-mismatch half of :func:`_skip_sentence` (both sides are known —
+    :func:`calibration.dims_conflict` only fires on a positive conflict)."""
+    return (f"it's {entry.get('width_px')}×{entry.get('height_px')} pixels, but "
+            f"this target's subs are {sub_dims[0]}×{sub_dims[1]}")
 
 
 def _auto_bind_calibration(settings: Settings, proj: Any, opts_dict: dict[str, Any]) -> None:
@@ -1988,10 +2026,11 @@ def _stack_target(
             # below the ~11-frame κ-σ threshold. Only when nothing explicit was set,
             # so a saved per-target default / the manual form is never overridden.
             opts_dict["auto_reject"] = True
+        calibration_skipped: list[str] = []
         if saved_master_ids:
             # The user's own "Save as defaults" calibration picks win over the
             # auto-picker below (which self-skips once a path is set).
-            _apply_saved_calibration_masters(
+            calibration_skipped = _apply_saved_calibration_masters(
                 settings, proj, opts_dict, saved_master_ids)
         if auto_bind_calibration:
             _auto_bind_calibration(settings, proj, opts_dict)
@@ -2022,6 +2061,15 @@ def _stack_target(
             # handler clears the pre-stack marker for that survivable case).
             proj.set_meta(AUTO_STACK_ATTEMPT_META_KEY,
                           str(_solved_accepted_count(proj)))
+            # Stamp any saved calibration picks this run had to skip, so History
+            # can say *why* the picture came out less calibrated than the user
+            # asked for. Best-effort and additive: a run that skipped nothing
+            # writes no key, so every existing run reads back as it does today.
+            if calibration_skipped and result.run_id is not None:
+                with contextlib.suppress(Exception):
+                    proj.set_meta(
+                        f"{CALIBRATION_SKIPPED_META_PREFIX}{result.run_id}",
+                        json.dumps(calibration_skipped))
     finally:
         proj.close()
     lib.refresh_target_stats(safe)

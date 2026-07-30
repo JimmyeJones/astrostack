@@ -5,7 +5,9 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CalibrationView } from "./Calibration";
 import * as client from "../api/client";
-import type { CalibrationMaster } from "../api/client";
+import type { CalibrationCoverage, CalibrationMaster } from "../api/client";
+
+const NO_COVERAGE: CalibrationCoverage = { n_targets: 0, masters: [], uncovered: [] };
 
 function mk(over: Partial<CalibrationMaster>): CalibrationMaster {
   return {
@@ -32,6 +34,7 @@ afterEach(() => vi.restoreAllMocks());
 describe("CalibrationView", () => {
   it("lists masters and submits a build", async () => {
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
     const build = vi.spyOn(client.api, "buildCalibrationMaster")
       .mockResolvedValue({ job_id: "j1" });
     renderView();
@@ -48,6 +51,7 @@ describe("CalibrationView", () => {
 
   it("gives the icon-only delete button an accessible name", async () => {
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
     renderView();
     await waitFor(() => expect(screen.getByText("Dark 30s")).toBeInTheDocument());
     // Icon-only ActionIcon must be reachable by an accessible name (aria-label),
@@ -55,5 +59,44 @@ describe("CalibrationView", () => {
     expect(
       screen.getByRole("button", { name: /Delete master Dark 30s/ }),
     ).toBeInTheDocument();
+  });
+
+  it("tells the user which of their targets each master actually covers", async () => {
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue({
+      n_targets: 6,
+      masters: [{
+        id: 1, name: "Dark 30s", kind: "dark", n_covered: 4,
+        covered: ["M 42", "M 31", "M 45", "NGC 7000"], missed: ["M 13", "M 51"],
+      }],
+      uncovered: ["M 13", "M 51"],
+    });
+    renderView();
+
+    await waitFor(() =>
+      expect(screen.getByText("Covers 4 of your 6 targets")).toBeInTheDocument());
+    // And the gap the user would otherwise only discover after an uncalibrated
+    // result, with a plain next step.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/2 of your 6 targets have no matching master/),
+      ).toBeInTheDocument());
+  });
+
+  it("stays quiet about coverage when every target is already covered", async () => {
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue({
+      n_targets: 2,
+      masters: [{
+        id: 1, name: "Dark 30s", kind: "dark", n_covered: 2,
+        covered: ["M 42", "M 31"], missed: [],
+      }],
+      uncovered: [],
+    });
+    renderView();
+
+    await waitFor(() =>
+      expect(screen.getByText("Covers all 2 of your targets")).toBeInTheDocument());
+    expect(screen.queryByText(/no matching master/)).not.toBeInTheDocument();
   });
 });

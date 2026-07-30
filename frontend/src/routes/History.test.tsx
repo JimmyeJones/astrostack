@@ -158,6 +158,26 @@ describe("HistoryView", () => {
       ).toBeInTheDocument());
   });
 
+  it("tells the user when a saved calibration pick was skipped by the run", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 840, weighting: null,
+      calibration_skipped: [
+        "Your saved master dark wasn't used: it's no longer in your calibration library.",
+      ],
+      cards: [{ key: "STACKER", value: "sigma-clip", comment: "stacking method" }],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Your saved master dark wasn't used: it's no longer in your/),
+      ).toBeInTheDocument());
+  });
+
   it("shows the quality-weighting summary when present", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
@@ -614,6 +634,44 @@ describe("calibrationSummaryText", () => {
       text: "Calibrated with your master dark and master flat.",
       calibrated: true,
     });
+  });
+  it("reports a saved calibration pick the run had to skip", () => {
+    const skip =
+      "Your saved master dark wasn't used: it's no longer in your calibration library.";
+    const r = calibrationSummaryText([{ key: "STACKER", value: "mean" }], null, [skip]);
+    expect(r?.calibrated).toBe(false);
+    expect(r?.skipped).toBe(skip);
+    // The status line still says what the picture *got*; the skip line says what
+    // the user asked for and didn't get.
+    expect(r?.text).toMatch(/No calibration masters were applied/);
+  });
+  it("reports a skipped pick even when the run IS calibrated by another master", () => {
+    const skip =
+      "Your saved master dark wasn't used: it's 1080×1920 pixels, but this " +
+      "target's subs are 480×320.";
+    const r = calibrationSummaryText([{ key: "CALSTAT", value: "flat" }], null, [skip]);
+    expect(r).toEqual({
+      text: "Calibrated with your master flat.",
+      calibrated: true,
+      skipped: skip,
+    });
+  });
+  it("joins several skipped picks into one line and ignores blank entries", () => {
+    const r = calibrationSummaryText([{ key: "STACKER", value: "mean" }], null, [
+      "Your saved master dark wasn't used: it's no longer in your calibration library.",
+      "   ",
+      "Your saved master flat wasn't used: it couldn't be read from your calibration library.",
+    ]);
+    expect(r?.skipped).toBe(
+      "Your saved master dark wasn't used: it's no longer in your calibration library. " +
+        "Your saved master flat wasn't used: it couldn't be read from your calibration library.",
+    );
+  });
+  it("leaves the skip line unset for a run that skipped nothing", () => {
+    expect(calibrationSummaryText([{ key: "STACKER", value: "mean" }], null, [])?.skipped)
+      .toBeUndefined();
+    expect(calibrationSummaryText([{ key: "STACKER", value: "mean" }])?.skipped)
+      .toBeUndefined();
   });
 });
 
