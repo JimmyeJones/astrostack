@@ -6013,6 +6013,36 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-07-30, spotted while shipping the auto-grade reconsider pass v0.221.0) — say when
+  auto-grade *gives a sub back*, not only when it takes one away.** *(Friendliness + trust — PRIORITY 3; size S.)*
+  v0.221.0 made auto-grade's rejections reversible: on each re-grade it reconsiders its own `auto:grade` rejects
+  against the now-larger population and re-accepts the ones that are no longer outliers. That's the right
+  behaviour, but it is currently **invisible** — `_auto_grade_target` logs the re-accepts and returns only the
+  *rejected* count, so the scan/QC job summary's `auto_graded` figure and the Target page's reject breakdown never
+  mention it. The frame simply reappears. The app is otherwise scrupulous about narrating what automation did (the
+  down-weighting sentence, the "N not located yet" bucket, the rejection-clipped trust line, and now the
+  bootstrap-rescue note), so this is a hole in an established pattern. **Slice:** have `_auto_grade_target` return
+  (or record) both counts, add an additive `auto_regraded_back` summary key alongside `auto_graded`, and render one
+  plain line on the Jobs result — *"Put 3 subs back: with more of your night to compare against, they're no longer
+  outliers."* Frontend-only beyond the one summary field; the counts already exist. Pairs with the v0.221.1
+  bootstrap-rescue note as the other half of "automation explains itself".
+- **NEW IDEA (Builder 2026-07-30, spotted while adding the `qc_solve` job result block in v0.221.1) — give a
+  finished Check/Plate-solve job a real one-line outcome, not a bare "done".** *(Friendliness — PRIORITY 3; size
+  S.)* Every other finished job kind now states its outcome in plain language (`process_target`, `pipeline`,
+  `reprocess_all`, `build_master`), but `qc_solve` had **no result renderer at all** until v0.221.1 added one for
+  the bootstrap-rescue case alone — so a user who runs "Check & locate" and *isn't* rescued still gets nothing.
+  `run_qc_and_solve` already returns `qc_done`/`qc_total`/`solve_done`/`solve_total`, so the line is a pure helper
+  away: *"Checked 42 subs and located 40 of them — 2 couldn't be placed in the sky."* (with the existing
+  plate-solve nudge when the located count is low). Extend the `qcSolveSummary`-shaped helper next to
+  `bootstrapRescueNote` in `routes/Jobs.tsx`, unit-tested like its siblings. Purely additive, no backend change.
+- **NEW IDEA (Builder 2026-07-30, follow-on to the sample first-run tour v0.222.0) — extend the tour to the two
+  screens it deliberately skipped: History/Gallery ("this is where your finished pictures live") and the export
+  step.** *(Friendliness / onboarding — PRIORITY 3; size S.)* v0.222.0 coaches Target → Stack → Editor, which is the
+  spine of the journey, but a newcomer who finishes the demo edit still lands on History/Gallery with no idea that
+  it's the permanent home of every run, or that "Export" is what turns the recipe into a shareable picture. The
+  component is already built and step-keyed (`SampleTourStep` + `SAMPLE_TOUR_COPY`), each step dismisses
+  independently, and the sample-detection is one prop — so this is copy plus two mount points. Keep the same bar:
+  one calm sentence, sample-only, dismissible.
 - ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the skipped-master note v0.216.0) — the skip reason only
   reaches a user who opens the History *Info* panel; put it where the walk-away user actually lands.**~~ — **SHIPPED
   v0.217.1** (Builder 2026-07-30, branch `claude/relaxed-turing-ai56dq`). Both surfaces named in the idea now show it,
@@ -9795,9 +9825,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   why stacking matters; sane default (no options to pick), plain language, reversible (Remove sample still cleans it
   all up). Testable via the existing job/stack test harness. (S, friendliness/onboarding — PRIORITY 3.)
 
-- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.199.0 sample demo) — a lightweight guided "first-run tour"
+- ~~**NEW IDEA (Builder 2026-07-24, follow-on to the v0.199.0 sample demo) — a lightweight guided "first-run tour"
   overlay that only shows while the *sample* target is active, coaching the newcomer through QC → Stack → Edit →
-  Export with one plain sentence per screen.** *(Pillar: 3 friendliness / understand-and-learn; size M.)* **The gap:**
+  Export with one plain sentence per screen.**~~ — **SHIPPED v0.222.0** (Builder 2026-07-30, branch
+  `claude/relaxed-turing-xuihhk`). A new `SampleTourNote` (`frontend/src/components/SampleTourNote.tsx`) renders a
+  small, non-modal, dismissible `Alert` on the **Target**, **Stack** and **Editor** screens — and *only* when the
+  sample demo is loaded **and** the target on screen is that sample, so a real target never sees a word of it. Each
+  step says what the screen is for and where to go next in one calm, jargon-free paragraph (the target page: "green
+  ones are kept … nothing here changes your files"; Stack: "adding frames together averages the noise away — that's
+  the whole trick"; Editor: "your stack is linear and dark until it's stretched … nothing you do here is
+  permanent"). **Implemented frontend-only** — no new endpoint or flag was needed: it compares the route's `safe`
+  against the `safe` already returned by `GET /api/sample`, reusing the `["sample"]` query key the onboarding card
+  owns. Each step dismisses **independently** and persists in `localStorage` (defensively guarded, so a
+  disabled/blocked store degrades to "doesn't stay dismissed" rather than breaking the page), and the query is
+  `enabled`-gated on "not dismissed **and** a target is resolved", so an established user's page loads cost nothing.
+  Removing the sample removes the whole tour with it. Upgrade-safe: display-only, additive, off for everyone who
+  hasn't tapped "Try it". Tests: `SampleTourNote.test.tsx` (+7 — all three steps coach on the sample; silent on a
+  real target; silent when the sample was never loaded/was removed; nothing rendered and nothing fetched before the
+  route resolves; dismissing one step persists but leaves the others; renders and dismisses even when
+  `localStorage` throws; and a copy guard that every step stays jargon-free). *(Original idea kept below for
+  provenance.)* *(Pillar: 3 friendliness / understand-and-learn; size M.)* **The gap:**
   the sample demo gives a beginner real data to poke at, but the *screens themselves* are still unlabelled — a first-
   timer on the Target/QC/Stack/Editor pages doesn't necessarily know what they're looking at or what to click next.
   The Scout's original sample idea called for "each screen with a one-line 'this is what you'll see with your own

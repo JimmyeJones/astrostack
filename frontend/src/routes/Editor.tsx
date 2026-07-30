@@ -16,6 +16,7 @@ import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { ObjectInfoCard } from "../components/ObjectInfoCard";
+import { SampleTourNote } from "../components/SampleTourNote";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
 import { QueryError } from "../components/QueryError";
@@ -1187,6 +1188,11 @@ export function EditorView() {
             loading={saveRecipe.isPending} onClick={() => saveRecipe.mutate()}>Save</Button>
         </Group>
       </Group>
+
+      {/* First-run coaching, on the sample demo only (see SampleTourNote): the
+          editor is where a beginner most needs to be told the stack is linear
+          and nothing here is permanent. */}
+      <SampleTourNote step="editor" safe={safe} />
 
       {/* "What am I looking at?" — the same offline catalog card as the Target
           page, shown here where a beginner is admiring the finished picture and
