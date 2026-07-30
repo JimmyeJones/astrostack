@@ -6013,6 +6013,34 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-07-30, spotted while shipping the skipped-master note v0.216.0) — the skip reason only
+  reaches a user who opens the History *Info* panel; put it where the walk-away user actually lands.** v0.216.0
+  records, per run, the calibration masters a saved pick had to skip, and the History Info panel now says so. But the
+  hands-off user's natural landing spots are the **Jobs page** ("Process target" result) and the **Target page's**
+  newest-run area — neither of which shows it, and neither of which the user has to expand. So the very person the
+  note exists for (someone who walked away and came back to a finished picture) is still the one least likely to see
+  it. **Idea:** feed the same recorded `calibration_skipped` list — it's already on the run info payload, and the job
+  result already carries the run id — into (a) `JobResultActions`' Process-target summary as an orange line next to
+  the existing thin-stack warning, and (b) the Target page's newest-run block. Pure display re-use of a field that
+  already exists; no new endpoint, no new recording. **Care:** don't nag — show it once per surface, and keep it out
+  of the way when the run *was* otherwise calibrated. (S, friendliness + trust — PRIORITY 3.)
+- **NEW IDEA (Builder 2026-07-30, spotted while shipping the master-coverage roll-up v0.217.0) — make the "no master
+  covers this target" nudge *actionable*, and say **why** each miss misses.** v0.217.0 tells a beginner which of
+  their targets no master reaches, which is the diagnosis — but the cure is still "go read the build form and work
+  out what numbers to use". Two slices, both small and both reusing machinery that already exists:
+  **(a) name the reason per miss.** The tooltip lists the targets a master can't be applied to; it doesn't say
+  whether the blocker is exposure, gain, temperature or frame size. `_match_distance` and `dims_conflict` already
+  know, so `master_coverage` could return a short reason per missed target (*"M 13 — your subs are 10 s, this dark is
+  30 s"*, *"different camera or binning"*) instead of a bare name. That turns the roll-up from a list into an
+  explanation.
+  **(b) a "Build a dark for these" shortcut.** Beside the uncovered nudge, a button that pre-fills the build form
+  with the *target's own* exposure/gain — exactly the numbers `seestack/stackhealth.py::recommended_dark_spec`
+  already computes for the v0.186.0 "How to add darks" guide (`DarkSpec` → *"10 s at gain 80"*). It can't shoot the
+  darks for them, but it can name the numbers and pre-name the master, which is where a beginner stalls. Together
+  with (a) this closes the loop the app currently leaves open: *told me a target isn't covered → told me why → told
+  me exactly what to shoot*. **Care:** the build form still needs a real folder of dark frames, so the button must
+  read as "set this up", never as "do it now" — and it must stay silent when nothing is uncovered. (S–M each,
+  friendliness + autonomy — PRIORITY 3.)
 - ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the saved-master binder v0.214.0) — record on the *run*
   when a saved calibration master was skipped, so History can say why instead of only the server log.**~~ —
   **SHIPPED v0.216.0** (Builder 2026-07-30, branch `claude/relaxed-turing-rrutdf`; tested).
