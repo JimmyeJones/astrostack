@@ -80,8 +80,22 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
-**⚡ IMMEDIATE PRIORITY (refreshed 2026-07-30) — that queue is DRAINED; every ⭐ item
-this section used to list is now fixed and verified.** Don't go looking for them: the
+**⚡ IMMEDIATE PRIORITY (refreshed 2026-07-30, later) — NEW OWNER-REPORTED REGRESSION is now
+front-of-queue.** The S30 owner deployed v0.222.0 on real data and a deep ~400-sub **mosaic** that
+his *previous* install rendered clean now comes out with a **"multicolour grid" + extra chroma noise
+keyed to the mosaic panel seams**. Traced to the on-by-default Auto path: `auto_recipe` reads
+`sky_sigma` over the *whole union canvas* (seams + ragged border inflate it), misreads a deep mosaic
+as a noisy thin stack, and over-fires the new v0.220.0 `detail.chroma_denoise` wide-kernel colour
+smoothing, which smears colour across panels with differing colour offsets. Mosaic *blend* is
+unchanged since v0.184.10 — this is purely the new colour op. **Fix it first** (verify with a synthetic
+2×N-panel mosaic repro, then measure the noise crossfade on a high-coverage interior / make
+`chroma_denoise` seam-aware / damp it on mosaics — owner prefers it NOT firing on a deep mosaic). Full
+entry + repro spec at the top of `docs/IMPROVEMENTS.md` → "Bugs (fix these first)". An owner-requested
+**Auto auto-crop toggle** is also filed (top of "Features that serve real workflows"). Everything
+below was the previously-drained queue —
+
+that queue is DRAINED; every ⭐ item
+this section used to list is now fixed and verified. Don't go looking for them: the
 S30 wrong-FOV solves, the ASTAP ladder, the faint-field stack-then-solve bootstrap and
 the Seestar ingest/upgrade-heal shipped in v0.184–v0.210; the whole **one-click Auto
 colour/brightness breakage** chain then shipped in v0.210.5–v0.213.0 — SCNR's magenta
