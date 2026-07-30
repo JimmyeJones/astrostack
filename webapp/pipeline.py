@@ -1841,16 +1841,7 @@ def _apply_saved_calibration_masters(
         return dims
 
     def _dims_conflict(entry: dict[str, Any]) -> bool:
-        mw, mh = entry.get("width_px"), entry.get("height_px")
-        if mw is None or mh is None:
-            return False  # the master never recorded its size — can't disprove it
-        w, h = _sub_dims()
-        if w is None or h is None:
-            return False  # the subs' size is unknown — nothing to compare against
-        try:
-            return int(mw) != int(w) or int(mh) != int(h)
-        except (TypeError, ValueError):
-            return False
+        return calibration.dims_conflict(entry, *_sub_dims())
 
     bound: list[str] = []
     for id_key, path_key, word in _SAVED_MASTER_BINDINGS:

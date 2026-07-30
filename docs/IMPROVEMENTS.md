@@ -8081,6 +8081,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   older client ignores the new keys; a newer client against an older backend simply can't disprove anything and flags
   nothing). **Still open:** the narrower *bias-shape-vs-dark* inert case (a bias whose shape doesn't match the
   **dark** it's paired with, rather than the frames) — same idea, different comparison.
+  **▶ THE AFTER-THE-FACT HALF SHIPPED TOO, v0.215.1** (Builder 2026-07-30, same branch; tested). Pick-time is only
+  half the story: the walk-away user never opens the Stack form, so they meet the problem as an uncalibrated result
+  in History next to a library that visibly *holds* a dark. `calibration.diagnose_uncalibrated` — the
+  "why was my stack uncalibrated?" advice already rendered on the run's History card via
+  `calibrationSummaryText(cards, calibration_advice)` — only recognised **one** signature (a gain/temp-matching dark
+  at the wrong exposure with no bias to scale it) and fell back to the generic "build or pick a master" copy for
+  everything else, which reads as a bug when a master is sitting right there. It now takes the target's
+  `width_px`/`height_px` and detects the **wrong-camera/binning** signature first (`_wrong_size_advice`): *"Your
+  master dark was built at 1080×1920, but this target's frames are 480×320 — a different camera or binning mode, so
+  it can't be applied. Build a master dark from frames shot the same way as these subs."* (plural variant when
+  several all conflict). Checked **before** the exposure signature, since advising "build a bias to scale it" is
+  false while the dark can't be applied at all; and only when **every** master of that kind conflicts — with one
+  usable master left, size isn't why the stack was uncalibrated. The three size gates (unattended auto-binder, saved-
+  pick binder, this diagnosis) now share one `calibration.dims_conflict` rule so they can never disagree.
+  `_uncalibrated_advice` (`webapp/routers/stack.py`) passes the modal frame dims. Tests:
+  `tests/webapp/test_calibration.py` (+6 — the advice fires, outranks the exposure advice, needs *every* master to
+  conflict, stays silent when either side's size is unknown, the plural flat wording, and `dims_conflict`'s
+  one-sidedness), `tests/webapp/test_stack_render.py` (+1 endpoint — a wrong-size dark yields the new advice). One
+  pre-existing endpoint test registered its "mismatched dark" as a **4×4** master against 480×320 frames — an
+  unrealistic fixture that the new (correct) signature now pre-empts; it was re-registered at the target's real frame
+  size so it still exercises the exposure signature it was written for. Upgrade-safe: additive keyword args with
+  `None` defaults (an omitted size skips the new signature entirely), advisory string only, no
+  config/DB/API-shape/default change.
   `CalibrationMasters.calibration_warnings()` already produces the right
   plain-language advisories ("Master dark is 30s but your subs are 10s — its pedestal will be over-subtracted on every
   frame…"; the temperature-mismatch line), and this run's fix keeps them honest. But they only reach the *stack log* —
