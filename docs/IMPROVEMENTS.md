@@ -9744,6 +9744,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   handling for raw OSC video, an optional final unsharp, disk crop/centre, a quality histogram, and drizzle-upscale.
   *(Original spec kept below for provenance.)*
 
+- ~~**Closing the loop on a dropped Moon/Sun video: the scan correctly reports "nothing found", so nothing tells the
+  user their capture is usable.**~~ — **SHIPPED v0.224.1** (Builder 2026-07-30, branch
+  `claude/relaxed-turing-31k4wp`). Spotted immediately after shipping the "Stack video" feature above: a `*_video/`
+  folder is the one thing a beginner can drop into the watched folder that the deep-sky scan will legitimately walk
+  straight past (it holds no stackable subs), so "Scan incoming" finds **zero targets** and the natural conclusion is
+  that the app can't use the file. A self-hiding `VideoCapturesCard` now sits on the Dashboard under "Last night":
+  when the incoming folder holds any video capture it says what's waiting in plain language ("You have a Moon video
+  waiting — we can turn it into one sharp picture." / "2 of your 3 Moon and Sun videos haven't been stacked yet"),
+  badges how many are still to do, and links to `/moon-sun`. It renders **nothing at all** for a deep-sky-only user
+  (the overwhelmingly common case) and stays silent if the endpoint errors, so it can't add clutter or a broken box to
+  the Dashboard. Frontend-only and additive — it reuses the `GET /api/videos` the Moon & Sun page already calls, on a
+  60 s `staleTime` so the Dashboard doesn't re-walk the incoming folder on every poll. Tests:
+  `VideoCapturesCard.test.tsx` (+8 — the four sentence shapes as a pure function, the nudge + badge + link, badge
+  dropped once everything is stacked, self-hide on empty and on error). (S, friendliness — PRIORITY 3.)
+
 - **Slices (b)/(c) of "Stack video" (follow-on to the shipped v0.224.0 slice (a)).** Deliberately left out of the
   first slice, in rough value order: **(b1)** show the *sharpness distribution* of the capture so the user can see
   whether 15 % or 50 % is the right cut for *their* video (the engine already computes every frame's score — it just
