@@ -471,6 +471,9 @@ export interface LibraryRecap {
   total_integration_s: number;
   top_target_name: string | null;
   top_target_integration_s: number | null;
+  /** "Also shot: M 42, NGC 7000 and 5 more" — what else you pointed at, or ""
+   * on a one-target library. Optional: an older backend omits it. */
+  also_shot?: string;
 }
 
 export interface DashboardStats {

@@ -50,6 +50,11 @@ class LibrarySummary:
     longest_target: SummaryTarget | None
     most_imaged_target: SummaryTarget | None
     heroes: list[SummaryTarget] = field(default_factory=list)
+    # Every imaged target, ranked by integration (biggest project first) — the
+    # names of what you pointed at, whether or not it has a finished picture yet.
+    # ``heroes`` is the same ranking narrowed to targets with a preview on disk,
+    # so it can't answer "what did I shoot?" for a target still waiting to stack.
+    imaged_ranked: list[SummaryTarget] = field(default_factory=list)
 
 
 def _to_summary_target(t: TargetEntry, has_preview: bool) -> SummaryTarget:
@@ -107,14 +112,21 @@ def summarize_library(
             return None
         return _to_summary_target(t, preview_exists(t.last_stack_preview))
 
+    by_exposure = sorted(
+        imaged, key=lambda t: float(t.total_exposure_s or 0.0), reverse=True,
+    )
     # Heroes: imaged targets that still have a finished picture on disk, ranked
     # by integration (your biggest projects first), capped for a sane response.
     heroes = [
         _to_summary_target(t, True)
-        for t in sorted(
-            imaged, key=lambda t: float(t.total_exposure_s or 0.0), reverse=True,
-        )
+        for t in by_exposure
         if preview_exists(t.last_stack_preview)
+    ][: max(0, hero_limit)]
+    # The same ranking over *every* imaged target — used to name what you
+    # pointed at, including targets that haven't been stacked into a picture yet.
+    imaged_ranked = [
+        _to_summary_target(t, preview_exists(t.last_stack_preview))
+        for t in by_exposure
     ][: max(0, hero_limit)]
 
     return LibrarySummary(
@@ -125,4 +137,5 @@ def summarize_library(
         longest_target=with_preview(longest),
         most_imaged_target=with_preview(most_imaged),
         heroes=heroes,
+        imaged_ranked=imaged_ranked,
     )

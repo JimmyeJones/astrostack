@@ -124,3 +124,26 @@ def test_recap_poster_survives_an_unreadable_preview(client, solved_library):
     assert r.status_code == 200
     with Image.open(io.BytesIO(r.content)) as img:
         assert img.size[0] == img.size[1]
+
+
+def test_recap_names_the_other_targets_you_shot(client, solved_library):
+    """The recap says *what* you pointed at, not only how much — and never
+    repeats the biggest project, which has its own line."""
+    b = client.get("/api/recap").json()
+    names = [t["name"] for t in client.get("/api/targets").json()]
+    assert b["n_targets"] == 2
+    line = b["also_shot"]
+    assert line.startswith("Also shot: ")
+    # The one target that isn't the biggest project — named, and only that one.
+    others = [n for n in names if n != b["top_target_name"]]
+    assert len(others) == 1
+    assert line == f"Also shot: {others[0]}"
+    assert b["top_target_name"] not in line
+    # …and the caption carries it too, after the biggest project.
+    assert b["caption"].endswith(f"also shot: {others[0]}")
+
+
+def test_recap_also_shot_is_empty_on_a_library_with_nothing_else(client):
+    """An untouched library has nothing else to name, so the line self-hides
+    rather than reading "Also shot:" with a dangling colon."""
+    assert client.get("/api/recap").json()["also_shot"] == ""
