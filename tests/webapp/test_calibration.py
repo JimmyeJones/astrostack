@@ -874,6 +874,101 @@ def test_diagnose_none_without_a_dark_or_exposure(tmp_path):
         calibration.list_masters(root), exposure_s=None, gain=80.0) is None
 
 
+def test_diagnose_flags_a_wrong_camera_dark(tmp_path):
+    """The library visibly holds a dark, yet the stack came out uncalibrated —
+    because that dark was built at another frame size and is refused outright.
+    The generic "build or pick a master" copy reads as a bug in that state."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=10.0, gain=80.0, width=1080, height=1920)
+
+    advice = calibration.diagnose_uncalibrated(
+        calibration.list_masters(root), exposure_s=10.0, gain=80.0,
+        width_px=480, height_px=320)
+
+    assert advice is not None
+    assert "1080×1920" in advice and "480×320" in advice
+    assert "binning" in advice
+
+
+def test_diagnose_wrong_size_advice_beats_the_exposure_advice(tmp_path):
+    """A master that can't be applied at all outranks "build a bias to scale it" —
+    scaling a dark the engine will refuse wouldn't calibrate anything."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=30.0, gain=80.0, width=1080, height=1920)
+
+    advice = calibration.diagnose_uncalibrated(
+        calibration.list_masters(root), exposure_s=10.0, gain=80.0,
+        width_px=480, height_px=320)
+
+    assert advice is not None
+    assert "master bias" not in advice
+    assert "binning" in advice
+
+
+def test_diagnose_wrong_size_needs_every_master_to_conflict(tmp_path):
+    """With one usable dark left, the size isn't why the stack was uncalibrated —
+    fall through to the exposure signature (or to the generic copy)."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=30.0, gain=80.0, width=1080, height=1920)
+    _register(root, "dark", exposure_s=30.0, gain=80.0, width=480, height=320)
+
+    advice = calibration.diagnose_uncalibrated(
+        calibration.list_masters(root), exposure_s=10.0, gain=80.0,
+        width_px=480, height_px=320)
+
+    assert advice is not None
+    assert "binning" not in advice
+    assert "master bias" in advice  # the pre-existing exposure signature
+
+
+def test_diagnose_wrong_size_is_silent_without_known_dimensions(tmp_path):
+    """Unchanged behaviour when the size can't be judged: an older master that
+    never recorded its dimensions, or a target whose frames didn't either."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=10.0, gain=80.0, width=1080, height=1920)
+    masters = calibration.list_masters(root)
+
+    # The target's frames never recorded a size.
+    assert calibration.diagnose_uncalibrated(
+        masters, exposure_s=10.0, gain=80.0,
+        width_px=None, height_px=None) is None
+    # …and neither did the master.
+    for m in masters:
+        m["width_px"] = m["height_px"] = None
+    assert calibration.diagnose_uncalibrated(
+        masters, exposure_s=10.0, gain=80.0,
+        width_px=480, height_px=320) is None
+
+
+def test_diagnose_flags_wrong_camera_flats_in_the_plural(tmp_path):
+    """Several flats, none of which fit — say so once, without naming a size that
+    is only one of several."""
+    root = tmp_path / "lib"
+    _register(root, "flat", exposure_s=2.0, gain=80.0, width=1080, height=1920)
+    _register(root, "flat", exposure_s=3.0, gain=80.0, width=2080, height=3840)
+
+    advice = calibration.diagnose_uncalibrated(
+        calibration.list_masters(root), exposure_s=10.0, gain=80.0,
+        width_px=480, height_px=320)
+
+    assert advice is not None
+    assert "None of your master flats" in advice
+    assert "480×320" in advice
+
+
+def test_dims_conflict_only_refuses_a_provable_mismatch():
+    """The one shared rule every size gate uses, so the binders and the diagnosis
+    can never disagree about which masters fit."""
+    fits = {"width_px": 480, "height_px": 320}
+    assert calibration.dims_conflict(fits, 480, 320) is False
+    assert calibration.dims_conflict(fits, 1080, 1920) is True
+    assert calibration.dims_conflict(fits, None, 320) is False
+    assert calibration.dims_conflict({"width_px": None, "height_px": None},
+                                     480, 320) is False
+    assert calibration.dims_conflict({"width_px": "?", "height_px": "?"},
+                                     480, 320) is False
+
+
 def test_calibration_suggestions_endpoint(client, solved_library):
     from seestack.calibrate.masters import MasterMeta
     from seestack.io.library import Library
@@ -905,6 +1000,52 @@ def test_calibration_suggestions_endpoint(client, solved_library):
     assert body["params"]["exposure_s"] == 30.0
     assert body["dark_master_id"] == good["id"]
     assert body["n_frames"] >= 1
+
+
+def test_calibration_suggestions_reports_the_targets_frame_size(client, solved_library):
+    """The Stack form needs the subs' size to warn that a master built for another
+    camera/binning can't be applied — the engine refuses it and fails the whole
+    stack, so an advisory after the fact is too late."""
+    from tests.webapp.conftest import FRAME_H, FRAME_W
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    body = client.get(f"/api/targets/{safe}/calibration-suggestions").json()
+
+    assert body["params"]["width_px"] == FRAME_W
+    assert body["params"]["height_px"] == FRAME_H
+
+
+def test_calibration_suggestions_frame_size_is_none_when_unrecorded(
+        client, solved_library):
+    """A target whose frames never recorded a size reports None rather than
+    guessing — the form then can't disprove any master, so it flags none."""
+    from seestack.io.library import Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, width_px=None, height_px=None)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/calibration-suggestions").json()
+
+    assert body["params"]["width_px"] is None
+    assert body["params"]["height_px"] is None
+
+
+def test_modal_dim_ignores_strays_and_unknowns():
+    """The *modal* size, so one mis-ingested frame from another camera doesn't
+    move the size every master is judged against."""
+    assert calibration.modal_dim([1080, 1080, 1080, 540]) == 1080
+    assert calibration.modal_dim([None, 1080, "bad", 1080]) == 1080
+    assert calibration.modal_dim([]) is None
+    assert calibration.modal_dim([None, None]) is None
 
 
 def test_build_master_endpoint(client, data_root, tmp_path):

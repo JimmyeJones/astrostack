@@ -1146,7 +1146,13 @@ export interface CalibrationMaster {
 }
 
 export interface CalibrationSuggestions {
-  params: { exposure_s: number | null; gain: number | null; sensor_temp_c: number | null };
+  params: {
+    exposure_s: number | null; gain: number | null; sensor_temp_c: number | null;
+    // The target's modal raw frame size, so the form can flag a master built
+    // for a different camera/binning (which would fail the stack outright).
+    // Optional: an older backend omits them.
+    width_px?: number | null; height_px?: number | null;
+  };
   dark_master_id: number | null;
   flat_master_id: number | null;
   flat_dark_master_id: number | null;

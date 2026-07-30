@@ -74,6 +74,13 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     frames and ranks the library's masters against them, so a beginner doesn't
     have to know which dark/flat goes with which lights. Purely advisory — the
     Stack form still lets the user pick anything (or nothing).
+
+    ``params`` also carries the target's **modal raw frame dimensions**
+    (``width_px``/``height_px``, ``None`` when the frames never recorded a size).
+    A master built for a different camera or binning is not merely a poor match —
+    ``CalibrationMasters.validate`` refuses it and the whole stack fails — so the
+    form needs the subs' size to say so at pick time rather than letting the job
+    die with a cryptic error. Additive keys; an older client just ignores them.
     """
     settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
@@ -89,6 +96,8 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     masters = calibration.list_masters(settings.resolved_library_root)
     rec = calibration.recommend_masters(
         masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c)
+    rec["params"]["width_px"] = calibration.modal_dim([f.width_px for f in frames])
+    rec["params"]["height_px"] = calibration.modal_dim([f.height_px for f in frames])
     rec["n_frames"] = len(frames)
     return rec
 

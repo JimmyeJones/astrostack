@@ -1771,30 +1771,110 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
         n = len(xs)
         return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2.0
 
-    def _mode_dim(vals: list[Any]) -> int | None:
-        """Most common frame dimension — the size ``run_stack`` will validate
-        calibration masters against. Used to reject a wrong-camera master
-        before it can hard-fail the unattended stack."""
-        counts: dict[int, int] = {}
-        for v in vals:
-            if v is None:
-                continue
-            try:
-                k = int(v)
-            except (TypeError, ValueError):
-                continue
-            counts[k] = counts.get(k, 0) + 1
-        return max(counts, key=lambda k: counts[k]) if counts else None
-
     masters = calibration.list_masters(settings.resolved_library_root)
     return calibration.auto_bind_master_paths(
         settings.resolved_library_root, masters,
         exposure_s=_med([f.exposure_s for f in frames]),
         gain=_med([f.gain for f in frames]),
         sensor_temp_c=_med([f.sensor_temp_c for f in frames]),
-        width_px=_mode_dim([f.width_px for f in frames]),
-        height_px=_mode_dim([f.height_px for f in frames]),
+        width_px=calibration.modal_dim([f.width_px for f in frames]),
+        height_px=calibration.modal_dim([f.height_px for f in frames]),
     )
+
+
+#: The per-target "Save as defaults" calibration picks (see
+#: ``routers/stack.py::_MASTER_ID_KEYS``) mapped to the ``StackOptions`` path key
+#: each resolves to, plus a human word for the log line. They are *ids*, not
+#: paths: the file is always resolved server-side from the library's own master
+#: registry, so a saved default can never smuggle a raw filesystem path into a run.
+_SAVED_MASTER_BINDINGS = (
+    ("dark_master_id", "dark_path", "dark"),
+    ("flat_master_id", "flat_path", "flat"),
+    ("flat_dark_master_id", "flat_dark_path", "flat-dark"),
+    ("bias_master_id", "bias_path", "bias"),
+)
+
+
+def _apply_saved_calibration_masters(
+    settings: Settings, proj: Any, opts_dict: dict[str, Any],
+    master_ids: dict[str, Any],
+) -> None:
+    """Bind the calibration masters the user *explicitly chose and saved* for this
+    target to an unattended stack (mutates ``opts_dict``).
+
+    "Save as defaults" on the Stack form persists the four master picks alongside
+    the engine options, and the toast promises they "drive auto-stacking for this
+    target" — but the walk-away path (watcher auto-stack / Process target) used to
+    drop them, because they aren't ``StackOptions`` fields and only the separate,
+    off-by-default ``auto_bind_calibration`` applied any calibration at all (and
+    that *auto-picks* masters, ignoring the user's choice). So a beginner who chose
+    their darks once still got uncalibrated walk-away stacks. This resolves the
+    saved ids to server-side paths — the same ``calibration`` registry lookup the
+    manual Stack form's trigger uses — so an explicit pick wins.
+
+    Runs *before* :func:`_auto_bind_calibration`, which self-skips once any
+    calibration path is set, so the user's choice beats the auto-picker.
+
+    Deliberately fail-soft, per slot: a master that was deleted since it was saved
+    (or whose file has gone) is skipped with a warning rather than failing the whole
+    unattended run, and a master whose *recorded dimensions* provably disagree with
+    the target's subs is skipped too — binding it would make ``run_stack`` hard-fail
+    at ``CalibrationMasters.validate``, turning a walk-away stack into an error. The
+    dimension check only refuses on a **positive** conflict (both sides known and
+    different); when either side never recorded its size we trust the explicit pick,
+    exactly as the manual Stack form does.
+    """
+    from webapp import calibration
+
+    if any(opts_dict.get(k) for _, k, _ in _SAVED_MASTER_BINDINGS):
+        return  # a path is already set (reused run options) — leave it alone
+
+    dims: tuple[int | None, int | None] | None = None
+
+    def _sub_dims() -> tuple[int | None, int | None]:
+        """The subs' modal raw dimensions, read once and only when needed."""
+        nonlocal dims
+        if dims is None:
+            frames = list(proj.iter_frames(accepted_only=True))
+            dims = (calibration.modal_dim([f.width_px for f in frames]),
+                    calibration.modal_dim([f.height_px for f in frames]))
+        return dims
+
+    def _dims_conflict(entry: dict[str, Any]) -> bool:
+        return calibration.dims_conflict(entry, *_sub_dims())
+
+    bound: list[str] = []
+    for id_key, path_key, word in _SAVED_MASTER_BINDINGS:
+        mid = master_ids.get(id_key)
+        if mid in (None, "", "none"):
+            continue
+        try:
+            entry = calibration.get_master(settings.resolved_library_root, int(mid))
+            path = calibration.master_path(settings.resolved_library_root, int(mid))
+        except (TypeError, ValueError, OSError) as exc:  # noqa: PERF203
+            log.warning("saved %s master %r for %s is unusable: %s",
+                        word, mid, opts_dict.get("output_name", "?"), exc)
+            continue
+        if entry is None or path is None:
+            log.warning("saved %s master %r for %s no longer exists — "
+                        "stacking without it", word, mid,
+                        opts_dict.get("output_name", "?"))
+            continue
+        if _dims_conflict(entry):
+            log.warning("saved %s master %r is %sx%s, but this target's subs are "
+                        "%sx%s — skipping it rather than failing the stack", word,
+                        mid, entry.get("width_px"), entry.get("height_px"),
+                        *_sub_dims())
+            continue
+        opts_dict[path_key] = str(path)
+        bound.append(word)
+    if bound:
+        log.info("applied saved calibration masters: %s", ", ".join(bound))
+    elif opts_dict.get("scale_dark_to_light"):
+        # No saved dark survived, so a saved ``scale_dark_to_light`` would ask the
+        # engine to exposure-scale a dark that isn't there. Mirror
+        # ``_auto_bind_calibration``'s handling of the same stray flag.
+        opts_dict.pop("scale_dark_to_light", None)
 
 
 def _auto_bind_calibration(settings: Settings, proj: Any, opts_dict: dict[str, Any]) -> None:
@@ -1880,12 +1960,22 @@ def _stack_target(
     # would only be a leaked client value. Strip the base defensively.
     opts_dict = strip_non_form_keys(settings.default_stack_options)
     proj = lib.open_target(safe)
+    # The calibration-master *ids* the user saved for this target, if any. Only
+    # ever taken from the per-target "Save as defaults" blob (never the global
+    # config), so a crafted settings PUT can't reach the calibration registry.
+    saved_master_ids: dict[str, Any] = {}
     try:
         if options is None:
             raw = proj.get_meta(STACK_DEFAULTS_META_KEY)
             if raw:
                 with contextlib.suppress(json.JSONDecodeError):
-                    opts_dict.update(json.loads(raw))
+                    saved = json.loads(raw)
+                    opts_dict.update(saved)
+                    if isinstance(saved, dict):
+                        saved_master_ids = {
+                            k: saved[k] for k, _, _ in _SAVED_MASTER_BINDINGS
+                            if saved.get(k) is not None
+                        }
         else:
             opts_dict.update(options)
         if output_name is not None:
@@ -1898,6 +1988,11 @@ def _stack_target(
             # below the ~11-frame κ-σ threshold. Only when nothing explicit was set,
             # so a saved per-target default / the manual form is never overridden.
             opts_dict["auto_reject"] = True
+        if saved_master_ids:
+            # The user's own "Save as defaults" calibration picks win over the
+            # auto-picker below (which self-skips once a path is set).
+            _apply_saved_calibration_masters(
+                settings, proj, opts_dict, saved_master_ids)
         if auto_bind_calibration:
             _auto_bind_calibration(settings, proj, opts_dict)
         if opts_dict.get("max_workers") is None and settings.cpu_workers:

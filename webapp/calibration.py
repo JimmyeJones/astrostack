@@ -187,6 +187,46 @@ def resolve_master_paths(
     )
 
 
+def modal_dim(vals: list[Any]) -> int | None:
+    """Most common frame dimension in *vals* (ignoring unknowns), or ``None``.
+
+    A target's frames can carry the odd stray size (a mis-ingested file, a frame
+    from another camera), so the *modal* value — not the first or the max — is the
+    size ``run_stack`` will validate calibration masters against. Used both to
+    reject a wrong-camera master before it can hard-fail an unattended stack and
+    to tell the Stack form which masters can't apply to this target."""
+    counts: dict[int, int] = {}
+    for v in vals:
+        if v is None:
+            continue
+        try:
+            k = int(v)
+        except (TypeError, ValueError):
+            continue
+        counts[k] = counts.get(k, 0) + 1
+    return max(counts, key=lambda k: counts[k]) if counts else None
+
+
+def dims_conflict(
+    master: dict[str, Any], width_px: int | None, height_px: int | None,
+) -> bool:
+    """True when *master* was provably built for a different frame size.
+
+    Deliberately one-sided: a master that never recorded its dimensions, or a
+    target whose frames never recorded theirs, cannot be *disproved*, so it is not
+    a conflict. Every caller that refuses a master on size shares this rule — the
+    unattended binder, the saved-pick binder, and the "why was my stack
+    uncalibrated?" diagnosis — so they can never disagree about which masters fit.
+    """
+    mw, mh = master.get("width_px"), master.get("height_px")
+    if mw is None or mh is None or width_px is None or height_px is None:
+        return False
+    try:
+        return int(mw) != int(width_px) or int(mh) != int(height_px)
+    except (TypeError, ValueError):
+        return False
+
+
 def _match_distance(
     master: dict[str, Any], *, exposure_s: float | None,
     gain: float | None, sensor_temp_c: float | None, kind: str,
@@ -566,29 +606,83 @@ def _bias_match_confident(
     return dist <= _AUTO_BIND_BIAS_MAX_DIST
 
 
+def _wrong_size_advice(
+    masters: list[dict[str, Any]], *, width_px: int | None, height_px: int | None,
+) -> str | None:
+    """Advice for the "you *have* masters, but they're for another camera" case.
+
+    A master whose dimensions don't match the frames is refused outright — the
+    unattended binders skip it and ``CalibrationMasters.validate`` would fail the
+    run — so the stack comes out uncalibrated while the library visibly holds a
+    dark/flat. That reads as a bug to a beginner, and the generic "build or pick a
+    master" copy doesn't explain it. Only fires when **every** master of that kind
+    conflicts: with one usable master left, the size isn't why the stack was
+    uncalibrated.
+    """
+    if width_px is None or height_px is None:
+        return None
+    for kind in ("dark", "flat"):
+        owned = [m for m in masters
+                 if m.get("kind") == kind and m.get("exists", True)]
+        if not owned or not all(
+                dims_conflict(m, width_px, height_px) for m in owned):
+            continue
+        build = (f"Build a master {kind} from frames shot the same way as these "
+                 f"subs.")
+        if len(owned) == 1:
+            m = owned[0]
+            return (
+                f"Your master {kind} was built at "
+                f"{m.get('width_px')}×{m.get('height_px')}, but this target's "
+                f"frames are {width_px}×{height_px} — a different camera or "
+                f"binning mode, so it can't be applied. {build}"
+            )
+        return (
+            f"None of your master {kind}s match this target's frames "
+            f"({width_px}×{height_px}) — they were built for a different camera "
+            f"or binning mode, so none can be applied. {build}"
+        )
+    return None
+
+
 def diagnose_uncalibrated(
     masters: list[dict[str, Any]], *,
     exposure_s: float | None = None, gain: float | None = None,
     sensor_temp_c: float | None = None,
+    width_px: int | None = None, height_px: int | None = None,
 ) -> str | None:
     """A *specific*, actionable hint for why an unattended stack came out
     uncalibrated — when the library holds a master that's usable but for one
     concrete, fixable thing.
 
-    Today it detects the single signature that v0.103.11–0.103.12 narrowed the
-    still-uncalibrated dark case down to: the library's best-matching master
-    **dark** confidently matches the subs' gain/temperature but its **exposure**
-    is mismatched (so :func:`auto_bind_master_paths` won't bind it directly), and
-    there is **no confident master bias** to exposure-scale it against (with one,
-    v0.103.12 would have scaled the dark and the stack would *be* calibrated). The
-    fix is concrete — build a master bias — after which the exposure-scaling reuses
-    the existing dark automatically, so tell the walk-away user exactly that rather
-    than the generic "build or pick a master dark/flat".
+    Two signatures are detected, most-blocking first:
+
+    * **Wrong camera/binning** (:func:`_wrong_size_advice`): every master dark (or
+      flat) the library owns was built at a different frame size, so none of them
+      *can* apply. Checked first because no other advice is true while the master
+      is unusable — and because it's the one case where the user can see a master
+      sitting right there in the library.
+    * **Exposure-mismatched dark with no bias to scale it** — the signature
+      v0.103.11–0.103.12 narrowed the still-uncalibrated dark case down to: the
+      library's best-matching master **dark** confidently matches the subs'
+      gain/temperature but its **exposure** is mismatched (so
+      :func:`auto_bind_master_paths` won't bind it directly), and there is **no
+      confident master bias** to exposure-scale it against (with one, v0.103.12
+      would have scaled the dark and the stack would *be* calibrated). The fix is
+      concrete — build a master bias — after which the exposure-scaling reuses the
+      existing dark automatically.
+
+    ``width_px``/``height_px`` are the target's modal raw frame dimensions; when
+    either is unknown the size signature is skipped and behaviour is unchanged.
 
     Returns the advice string, or ``None`` when no specific advice applies (the
     caller then falls back to the generic copy). Pure and never raises — a master
     with unusable fields is simply skipped, mirroring the auto-bind helpers.
     """
+    size_advice = _wrong_size_advice(
+        masters, width_px=width_px, height_px=height_px)
+    if size_advice:
+        return size_advice
     if not exposure_s or exposure_s <= 0:
         return None
     rec = recommend_masters(masters, exposure_s=exposure_s, gain=gain,

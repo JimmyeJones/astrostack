@@ -1347,7 +1347,9 @@ def _uncalibrated_advice(request: Request, safe: str) -> str | None:
             [f.sensor_temp_c for f in frames if f.sensor_temp_c is not None])
         masters = calibration.list_masters(settings.resolved_library_root)
         return calibration.diagnose_uncalibrated(
-            masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c)
+            masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c,
+            width_px=calibration.modal_dim([f.width_px for f in frames]),
+            height_px=calibration.modal_dim([f.height_px for f in frames]))
     except Exception:  # noqa: BLE001 — advice is optional; never fail the info read
         return None
 

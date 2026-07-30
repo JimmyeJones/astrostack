@@ -6013,8 +6013,59 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-07-29, observed while fixing the "Save as defaults drops master picks" bug, v0.210.15) —
-  let the walk-away auto-stack honour a target's *saved* calibration masters, not just `auto_bind_calibration`.**
+- **NEW IDEA (Builder 2026-07-30, spotted while shipping the saved-master binder v0.214.0) — record on the *run*
+  when a saved calibration master was skipped, so History can say why instead of only the server log.** v0.214.0
+  makes the walk-away auto-stack honour a target's saved master picks, and deliberately **fail-soft** per slot: a
+  master deleted since it was saved, or one whose dimensions don't match the subs, is skipped with a
+  `log.warning` rather than failing the overnight job. That's the right runtime behaviour — but the *user* still
+  ends up with an uncalibrated stack and no on-screen reason, and a beginner won't read the server log. The
+  v0.215.1 `diagnose_uncalibrated` size signature covers the common wrong-camera case *by inference* (it
+  re-derives the conflict from the library), but it can't know that **this run** had an explicit saved pick that
+  was dropped, and it says nothing at all about a **deleted** master. **Idea:** have
+  `_apply_saved_calibration_masters` return the skips it made and stamp them on the run record (a short
+  `calibration_skipped` note in the run's meta/`options_json`, or a FITS `HISTORY` card), then surface it in the
+  History card's calibration line — *"Your saved master dark wasn't used: it was removed from your library."* /
+  *"…it's 1080×1920 but these subs are 480×320."* Additive + read-only on the display side; the only care needed
+  is keeping `StackOptions` JSON-safe and the run-record shape backward-compatible. (S–M, friendliness + trust —
+  PRIORITY 3.)
+- **NEW IDEA (Builder 2026-07-30, same run) — a "do my masters actually cover my targets?" line on the Calibration
+  page.** The Calibration page lists the masters you've built, but nothing connects them back to the library: a
+  beginner who built one 30 s dark has no idea it covers four of their six targets and misses the two they shot at
+  10 s (or the ones from a second Seestar). They only discover it target-by-target, on the Stack form or after an
+  uncalibrated result. **Idea:** a read-only roll-up — for each master, the count of library targets it can
+  confidently bind to — reusing machinery that is now all in one place: `calibration.modal_dim` (the target's frame
+  size), `calibration.dims_conflict` (the shared hard gate), and `auto_bind_master_paths`' existing confidence
+  gates. Render one plain line per master (*"covers 4 of your 6 targets"*, with the misses named on hover) plus a
+  gentle nudge when a target is covered by nothing. **Why it clears the beginner bar:** it answers "have I built the
+  right calibration frames?" — a question the app currently makes you answer six times — with no jargon and no
+  knobs. **Cost care:** it walks every target's accepted frames, so cache it like the other Dashboard roll-ups
+  (bounded probe + short TTL) rather than computing it per page load. Additive read-only endpoint + one line per
+  master; no schema/config/default/API-shape change. (M, friendliness + autonomy — PRIORITY 3.)
+- ~~**NEW IDEA (Builder 2026-07-29, observed while fixing the "Save as defaults drops master picks" bug, v0.210.15) —
+  let the walk-away auto-stack honour a target's *saved* calibration masters, not just `auto_bind_calibration`.**~~ —
+  **SHIPPED v0.214.0** (Builder 2026-07-30, branch `claude/relaxed-turing-m9ayja`; tested). `_stack_target`
+  (`webapp/pipeline.py`) now captures the four `*_master_id` picks out of the **per-target** "Save as defaults" blob
+  (never the global `default_stack_options`, so a crafted settings PUT still can't reach the calibration registry) and
+  hands them to a new `_apply_saved_calibration_masters`, which resolves each id against the library's own master
+  registry and sets the corresponding `dark_path`/`flat_path`/`flat_dark_path`/`bias_path`. It runs **before**
+  `_auto_bind_calibration`, which already self-skips once any calibration path is set — so the user's explicit pick
+  beats the auto-picker, and the "Save as defaults" toast's promise ("…drive auto-stacking for this target") is finally
+  true of the calibration picks too (its copy + the button tooltip now say so explicitly).
+  **Deliberately fail-soft, per slot**, because this runs on the walk-away path where an exception is a failed
+  overnight job: a master deleted (or whose file has gone) since it was saved is skipped with a warning rather than
+  raising; a saved master whose **recorded dimensions provably disagree** with the target's subs is skipped too —
+  binding it would hard-fail `run_stack` at `CalibrationMasters.validate`, which is strictly worse than the
+  uncalibrated stack the user got before. That dimension gate refuses only on a *positive* conflict (both sides known
+  and different); when either side never recorded a size we trust the explicit pick, exactly as the manual Stack form
+  does. A stray `scale_dark_to_light` with no dark bound is dropped, mirroring `_auto_bind_calibration`.
+  `_mode_dim` was lifted out of `_confident_master_binding` to module level so both share one definition.
+  **§9 upgrade-safe:** it fires only for a target whose *own* saved defaults carry a real master id — a state only a
+  post-v0.210.15 "Save as defaults" click can create — so no existing install silently starts calibrating; an old
+  defaults blob with no id keys stacks byte-identically (covered by a test). No config/DB-schema/API-shape/on-disk
+  change, no default flip. Tests: `tests/webapp/test_auto_stack_saved_masters.py` (+8; four fail-before/pass-after —
+  the saved dark+flat reaching the run, the saved pick beating a closer auto-pick, a dims-unrecorded master still
+  binding, the stray-flag drop — plus four guards that must *not* change: a deleted master, a wrong-size master, a
+  no-ids blob, and the manual-options path). *(Original idea kept for provenance.)*
   Now that "Save as defaults" persists the four `*_master_id` picks (v0.210.15), a beginner reasonably expects "I
   chose my darks once → every future auto-stack of this target uses them". But the unattended path
   (`webapp/pipeline.py::_resolve_stack_options` → `coerce_stack_options`) drops the saved ids and only applies
@@ -8037,10 +8088,50 @@ problems. Dogfood it every big-picture run and fix root causes.
   exposure-matched dark. Regression: `frontend/src/routes/Stack.test.tsx` (+1 — an exposure-matched 30 s dark shot 15°C
   warmer warns on temperature with *no* exposure warning). Upgrade-safe: frontend-only, additive, reuses data already in
   the suggestions payload; no API/schema/default change.
-  **Still open (the (c) slice):** the **loaded-but-inert** master notice — a bias whose shape doesn't match the dark, or
-  a master whose dimensions don't match the target's frames, with a "this master won't be used because it doesn't match
-  your camera/binning" note. That one needs the backend to expose per-master dims-vs-target validity (the frontend can't
-  tell a shape mismatch from the current payload), so it's a separate S–M slice.
+  **▶ SLICE (c) — the wrong-camera/binning half SHIPPED v0.215.0** (Builder 2026-07-30, branch
+  `claude/relaxed-turing-m9ayja`; tested). A master whose dimensions don't match the target's frames is not merely a
+  poor match — `CalibrationMasters.validate` **refuses** it, so the whole stack job dies with an error a beginner
+  can't decode (and, since v0.214.0, the walk-away auto-stack silently *skips* it, so "I added darks" quietly isn't
+  true). Both now get said out loud at pick time. **Backend:** `GET /api/targets/{safe}/calibration-suggestions`
+  gained `params.width_px` / `params.height_px` — the target's **modal** raw frame size via a new shared
+  `webapp/calibration.py::modal_dim` (lifted out of `pipeline._confident_master_binding`, so one mis-ingested frame
+  from another camera can't move the size every master is judged against). Additive keys; the masters payload already
+  carried each master's own dims, so that's all the frontend needed. **Frontend:** a pure, unit-tested
+  `frontend/src/calibrationFit.ts` (`masterFitsFrames` / `masterSizeWarning` / `masterOptionSuffix`) drives (i) a
+  **red** inline alert under each of the four master selects naming both sizes and saying the stack would fail, and
+  (ii) a "— wrong size for this target" suffix in the picker itself, so a mismatched master reads as unusable
+  *before* it's chosen (and never carries the ★ recommended badge). Deliberately one-sided, mirroring the server-side
+  gate: an older master that recorded no size, or a target whose frames never recorded one, can't be disproved and is
+  never flagged. Tests: `calibrationFit.test.ts` (+7), `Stack.test.tsx` (+2 — a 1080×1920 dark on 480×320 subs warns
+  *and* is marked in the picker; a matching dark stays silent), `tests/webapp/test_calibration.py` (+3 — the frame
+  size is reported, is `None` when unrecorded, and `modal_dim` ignores strays/unknowns). Upgrade-safe: two additive
+  response fields + display-only frontend; no config/DB-schema/on-disk/default change and no API-shape break (an
+  older client ignores the new keys; a newer client against an older backend simply can't disprove anything and flags
+  nothing). **Still open:** the narrower *bias-shape-vs-dark* inert case (a bias whose shape doesn't match the
+  **dark** it's paired with, rather than the frames) — same idea, different comparison.
+  **▶ THE AFTER-THE-FACT HALF SHIPPED TOO, v0.215.1** (Builder 2026-07-30, same branch; tested). Pick-time is only
+  half the story: the walk-away user never opens the Stack form, so they meet the problem as an uncalibrated result
+  in History next to a library that visibly *holds* a dark. `calibration.diagnose_uncalibrated` — the
+  "why was my stack uncalibrated?" advice already rendered on the run's History card via
+  `calibrationSummaryText(cards, calibration_advice)` — only recognised **one** signature (a gain/temp-matching dark
+  at the wrong exposure with no bias to scale it) and fell back to the generic "build or pick a master" copy for
+  everything else, which reads as a bug when a master is sitting right there. It now takes the target's
+  `width_px`/`height_px` and detects the **wrong-camera/binning** signature first (`_wrong_size_advice`): *"Your
+  master dark was built at 1080×1920, but this target's frames are 480×320 — a different camera or binning mode, so
+  it can't be applied. Build a master dark from frames shot the same way as these subs."* (plural variant when
+  several all conflict). Checked **before** the exposure signature, since advising "build a bias to scale it" is
+  false while the dark can't be applied at all; and only when **every** master of that kind conflicts — with one
+  usable master left, size isn't why the stack was uncalibrated. The three size gates (unattended auto-binder, saved-
+  pick binder, this diagnosis) now share one `calibration.dims_conflict` rule so they can never disagree.
+  `_uncalibrated_advice` (`webapp/routers/stack.py`) passes the modal frame dims. Tests:
+  `tests/webapp/test_calibration.py` (+6 — the advice fires, outranks the exposure advice, needs *every* master to
+  conflict, stays silent when either side's size is unknown, the plural flat wording, and `dims_conflict`'s
+  one-sidedness), `tests/webapp/test_stack_render.py` (+1 endpoint — a wrong-size dark yields the new advice). One
+  pre-existing endpoint test registered its "mismatched dark" as a **4×4** master against 480×320 frames — an
+  unrealistic fixture that the new (correct) signature now pre-empts; it was re-registered at the target's real frame
+  size so it still exercises the exposure signature it was written for. Upgrade-safe: additive keyword args with
+  `None` defaults (an omitted size skips the new signature entirely), advisory string only, no
+  config/DB/API-shape/default change.
   `CalibrationMasters.calibration_warnings()` already produces the right
   plain-language advisories ("Master dark is 30s but your subs are 10s — its pedestal will be over-subtracted on every
   frame…"; the temperature-mismatch line), and this run's fix keeps them honest. But they only reach the *stack log* —

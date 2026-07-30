@@ -10,6 +10,8 @@ from seestack.io.library import Library
 from seestack.io.project import StackRunRow
 from seestack.render.thumbnail import render_stack_png
 
+from .conftest import FRAME_H, FRAME_W
+
 
 def _make_run_with_fits(data_root, safe: str) -> tuple[str, str]:
     """Create a 3-channel FITS cube + a placeholder preview; register a run."""
@@ -839,16 +841,53 @@ def test_stack_info_advises_a_bias_when_only_a_mismatched_dark_exists(
     finally:
         lib.close()
 
+    # Built at the target's own frame size, so the *only* thing wrong with it is
+    # the exposure — otherwise the wrong-camera signature would (correctly) win.
     calibration.register_master(
         solved_library / "library", name="Mismatched dark",
-        array=np.full((4, 4), 1.0, dtype=np.float32),
-        meta=MasterMeta("dark", 5, 4, 4, "median", exposure_s=30.0, gain=80.0))
+        array=np.full((FRAME_H, FRAME_W), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, FRAME_W, FRAME_H, "median",
+                        exposure_s=30.0, gain=80.0))
 
     body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
     advice = body["calibration_advice"]
     assert advice is not None
     assert "master bias" in advice
     assert "30s" in advice and "10s" in advice
+
+
+def test_stack_info_explains_a_wrong_camera_master(client, solved_library):
+    """The library visibly holds a dark, yet the stack is uncalibrated — because
+    that dark was built for another camera/binning and is refused outright. Say
+    that, instead of the generic "build or pick a master" copy."""
+    from webapp import calibration
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["STACKER"] = "sigma-clip"
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    # Exposure-matched, so only the frame size is wrong.
+    calibration.register_master(
+        solved_library / "library", name="S50 dark",
+        array=np.full((1920, 1080), 1.0, dtype=np.float32),
+        meta=MasterMeta("dark", 5, 1080, 1920, "median",
+                        exposure_s=10.0, gain=80.0))
+
+    advice = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["calibration_advice"]
+    assert advice is not None
+    assert "1080×1920" in advice and f"{FRAME_W}×{FRAME_H}" in advice
+    assert "binning" in advice
 
 
 def _write_reel_beside(fits_path: str, n: int = 5, suffix: str = "_progress.webp"):
