@@ -46,6 +46,7 @@ const KIND_LABEL: Record<string, string> = {
   editor_batch: "Batch export",
   build_master: "Building calibration master",
   channel_combine: "Channel combine",
+  video_stack: "Stacking Moon/Sun video",
 };
 
 /** Human-readable name for an engine job kind (pure, tested). */

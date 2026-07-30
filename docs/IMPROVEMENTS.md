@@ -9690,8 +9690,70 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-REQUESTED — "Stack video": lucky-imaging stack of the Seestar's Solar/
-  Lunar video captures (already sitting in `incoming/` as `*_video/` folders).**
+- ~~**⭐ OWNER-REQUESTED — "Stack video": lucky-imaging stack of the Seestar's Solar/
+  Lunar video captures.**~~ — **SLICE (a) SHIPPED v0.224.0** (Builder 2026-07-30, branch
+  `claude/relaxed-turing-31k4wp`). The owner's Moon/Sun videos were completely invisible in the app: the FITS scanner
+  skips `*_video/` folders by design, so a beginner with a lunar capture on their NAS had no way to turn it into a
+  picture. Now a **Moon & Sun** page (`/moon-sun`) lists every `*_video/` capture in the watched folder and turns one
+  into a single sharp still with one button.
+  **Engine — new self-contained `seestack/video/` package** (no deep-sky machinery reused: no plate-solve — a lunar
+  disk has no stars — no calibration masters, and emphatically *not* the auto STF/SCNR/gradient chain, which anchors
+  the **sky** at 6 % grey and would blow a disk that fills the frame to white):
+  * `ffmpeg.py` — `probe_video` (ffprobe → dimensions/frame count/fps, with a `duration × fps` fallback for
+    containers that omit `nb_frames`) and `iter_frames`, which pipes raw `rgb24` off ffmpeg's stdout and yields
+    **one frame at a time**. A minute of 1080p is ~1800 frames / ~11 GB of pixels, so nothing may buffer the video;
+    abandoning the generator kills the decoder in a `finally`, and stderr goes to `DEVNULL` rather than an undrained
+    pipe that could deadlock. Binaries are found on `PATH` or via `SEESTACK_FFMPEG_PATH`/`SEESTACK_FFPROBE_PATH`.
+  * `lucky.py` — **two streaming passes**: grade every frame (keeping only a scalar), then re-decode and stack the
+    keepers. Decoding twice is the cheap option — holding the best *N* frames would cost *N* frames of RAM and a
+    single pass can't know what "best" means yet — and it keeps the memory bound flat regardless of video length.
+    Sharpness is **mean squared Laplacian ÷ mean brightness²**: the normalisation is load-bearing, since a thin cloud
+    or the Seestar's auto-exposure changes the level between frames and an un-normalised Laplacian ranks the
+    *brightest* frames sharpest — exactly the wrong ones (regression:
+    `test_sharpness_is_not_fooled_by_a_brighter_exposure`). Keepers are aligned to the first kept frame by whole-frame
+    phase correlation (a disk is one big high-contrast object, so a global correlation beats anything star-based),
+    sub-pixel-shifted with `cval=np.nan` so a vacated edge is honest "no coverage" rather than a dark band, and
+    summed through the existing NaN-aware `WeightedSumAccumulator`. A shift beyond 15 % of the short edge is treated
+    as a failed correlation and the frame is left out (and *said* so, in the result's warnings). Long captures are
+    evenly sampled down to `max_frames` with a plain-language note.
+  * `discover.py` — finds `*_video/` folders (depth ≤ 2) holding a real video file, labels `Lunar_`/`Solar_` as
+    **"Moon"/"Sun"**, and mints a sanitised id. The FITS scanner's `_sub`/output folders are never claimed.
+  * `normalize_for_display` — the disk-appropriate render: a linear 1st→99.9th-percentile rescale (the high anchor is
+    a percentile, not the max, so one hot pixel can't crush the disk).
+  **Webapp:** `webapp/video.py` (job body + a self-contained result store at `<data_root>/video/<id>/` holding
+  `stack.png`, `stack.tiff`, `meta.json` — these captures never become library targets, so none of the per-target
+  project/DB machinery applies) and `webapp/routers/video.py` (`GET /api/videos`, `POST /api/videos/{id}/stack`,
+  `GET …/preview.png`, `GET …/download.tiff`). Captures are addressed by sanitised id and re-discovered server-side
+  every call — **no filesystem path ever comes from the client** — and the requested filename is matched against the
+  discovered basenames. `available: false` + a plain-language `hint` when ffmpeg is absent, so the page explains
+  itself instead of offering a button that can only fail.
+  **Frontend:** `MoonSun.tsx` at `/moon-sun` (nav "Moon & Sun") — one card per capture with the finished still, the
+  honest "stacked the sharpest N of M frames — about √N× cleaner than a single frame" summary, PNG + 16-bit TIFF
+  downloads, and the single real decision phrased as three presets ("Only the very best (15%)" / "Best few (30%) —
+  recommended" / "Half of them (50%)") rather than a raw percentage. `ffmpeg` added to `docker/Dockerfile` (the
+  owner pre-approved it — a plain offline codec, no runtime download, nothing leaves the box), to the CI workflow,
+  and to `scripts/agent-setup.sh`.
+  **Tests (+41):** `tests/test_video_lucky.py` (+20, driving real ffmpeg-encoded synthetic captures via a new
+  `tests/videosynth.py` — decode/stride identity across passes, the exposure-invariance regression, keeps-the-sharpest,
+  noise averages down, alignment recovers detail a drifting disk would smear, uncovered-≠-black, too-few-frames,
+  even-sampling note, progress/cancel, display render), `tests/test_video_discover.py` (+10), the webapp
+  `tests/webapp/test_video_api.py` (+11, including a crafted-id traversal attempt and a `file_name` escape attempt),
+  and `frontend/src/routes/MoonSun.test.tsx` (+10). Upgrade-safe: new module + new endpoints + a new opt-in data
+  sub-directory created on first use; no config/DB/API-shape/on-disk change and no default flipped.
+  **Still open — slice (b)/(c)** (filed as their own entry below): a keep-% fine-tune slider, per-frame colour/debayer
+  handling for raw OSC video, an optional final unsharp, disk crop/centre, a quality histogram, and drizzle-upscale.
+  *(Original spec kept below for provenance.)*
+
+- **Slices (b)/(c) of "Stack video" (follow-on to the shipped v0.224.0 slice (a)).** Deliberately left out of the
+  first slice, in rough value order: **(b1)** show the *sharpness distribution* of the capture so the user can see
+  whether 15 % or 50 % is the right cut for *their* video (the engine already computes every frame's score — it just
+  isn't returned); **(b2)** an optional gentle final unsharp/wavelet on the result (the editor can already sharpen,
+  so this is convenience, not capability); **(b3)** raw-OSC video handling (if a Seestar ever writes a Bayer video,
+  today's `rgb24` decode would need a debayer path — verify before building, the current captures are ordinary
+  colour video); **(c)** disk crop/centre so the still isn't mostly black sky, and drizzle-upscale. Explicitly **not**
+  wanted (pro territory, per the original spec): multi-point planetary alignment and derotation.
+  (S–M each, beginner-feature/workflow — PRIORITY 2/3.)
+
   The owner shoots the Moon/Sun with the Seestar, which drops a **video file
   (.mp4/.avi/.mov)** into a `Lunar_video/` / `Solar_video/` folder — currently the
   scanner **skips** these (`_VIDEO_SUFFIX`, `seestack/io/scanner.py`). Give the owner

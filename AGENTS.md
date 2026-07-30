@@ -401,8 +401,10 @@ python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,web]"
 
 # Headless container extras: PySide6/pytest-qt need libEGL at import time even
-# though the webapp never opens a window. (Install once per fresh container.)
-apt-get update && apt-get install -y libegl1 libgl1 libxkbcommon0
+# though the webapp never opens a window. ffmpeg is the decoder behind "Stack
+# video" (Moon/Sun captures) — bundled in the Docker image; without it the
+# tests/test_video_*.py files skip. (Install once per fresh container.)
+apt-get update && apt-get install -y libegl1 libgl1 libxkbcommon0 ffmpeg
 
 # Frontend
 cd frontend && npm install

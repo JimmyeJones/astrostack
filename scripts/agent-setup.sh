@@ -27,6 +27,15 @@ if ! ldconfig -p 2>/dev/null | grep -q 'libEGL\.so\.1'; then
   fi
 fi
 
+# 1b. ffmpeg — the decoder behind "Stack video" (Moon/Sun captures). Bundled in
+#     the Docker image; without it here the video tests skip, so install it if we
+#     can. Non-fatal either way.
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  if ! { apt-get update && apt-get install -y --no-install-recommends ffmpeg; }; then
+    echo "warn: could not install ffmpeg — tests/test_video_*.py will skip."
+  fi
+fi
+
 # 2. Python engine + webapp. pyproject pins >=3.12,<3.13 — prefer python3.12.
 PY=python3.12
 command -v "$PY" >/dev/null 2>&1 || PY=python3
