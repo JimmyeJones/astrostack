@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Target } from "../api/client";
 import { CleanupSuggestionsCard } from "../components/CleanupSuggestionsCard";
+import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { MergeSuggestionsCard } from "../components/MergeSuggestionsCard";
 import { QueryError } from "../components/QueryError";
 import { UploadFits } from "../components/UploadFits";
@@ -196,6 +197,12 @@ export function Library() {
 
       {targets.length === 0 ? (
         <Stack>
+          {/* The getting-started map lives on the Dashboard, but Library is just
+              as likely a first landing (it's where the subs go), and an empty
+              list is exactly where the "what do I do now?" question lands. The
+              card self-hides on an established install and once dismissed, so
+              repeating it here can't nag anyone. */}
+          <FirstImageCard />
           <Card withBorder padding="xl">
             <Stack align="center" gap="sm">
               <IconStars size={48} color="var(--mantine-color-dark-3)" />

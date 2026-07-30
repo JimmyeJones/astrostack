@@ -67,6 +67,15 @@ describe("autoSummaryPhrases", () => {
     expect(autoSummaryPhrases(ops, SPECS)).toEqual(["removed the green cast"]);
   });
 
+  it("names the colour-blotch smoother (detail.chroma_denoise) in plain language", () => {
+    // Auto appends it on a *noisy* stack, after sharpen; the summary must read as
+    // a plain sentence, not fall back to the bare op id.
+    const ops = [op("detail.sharpen"), op("detail.chroma_denoise")];
+    expect(autoSummaryPhrases(ops, SPECS)).toEqual([
+      "sharpened detail", "evened out the patchy sky colour",
+    ]);
+  });
+
   it("names the mosaic border trim (geometry.crop) in plain language", () => {
     // Auto appends a final crop on a mosaic; the summary must read cleanly, not
     // fall back to a bare "crop".

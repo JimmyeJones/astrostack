@@ -542,6 +542,59 @@ def test_auto_denoise_is_capped_below_the_glass_smooth_end():
     assert hf_noise(capped) > 1.5 * hf_noise(glass)
 
 
+def test_auto_colour_blotch_smoothing_rides_the_same_noise_crossfade():
+    """The other half of the denoise cap: what a thin stack's sky actually shows
+    after the wavelet pass is a low-frequency *colour* drift, which the wavelet
+    can't reach. Auto now flattens it with ``detail.chroma_denoise`` — but only on
+    a stack it measures as noisy, so a clean stack's one-click recipe is unchanged,
+    and never above the ``_AUTO_CHROMA_MAX`` ceiling."""
+    from seestack.edit.presets import _AUTO_CHROMA_MAX, auto_recipe
+
+    rng = np.random.default_rng(1)
+    clean = np.full((120, 160, 3), 0.05, np.float32)
+    clean[50:70, 70:90] += 0.5
+    noisy = np.clip(clean + rng.normal(0, 0.06, clean.shape).astype("float32"), 0, None)
+
+    clean_ids = [o.id for o in auto_recipe(clean).ops]
+    assert "detail.chroma_denoise" not in clean_ids  # a clean stack is untouched
+
+    rec = auto_recipe(noisy)
+    op = next((o for o in rec.ops if o.id == "detail.chroma_denoise"), None)
+    assert op is not None
+    assert 0.0 < float(op.params["strength"]) <= _AUTO_CHROMA_MAX
+    ids = [o.id for o in rec.ops]
+    # It runs after everything whose behaviour is derived from the data at apply
+    # time (the auto curve, the sharpen), so it can't perturb their anchors.
+    for earlier in ("tone.stretch", "tone.saturation", "tone.curves"):
+        assert ids.index(earlier) < ids.index("detail.chroma_denoise")
+
+
+def test_auto_colour_blotch_smoothing_cannot_change_the_brightness_it_renders():
+    """Rendering the full Auto recipe with and without its colour-smoothing op
+    must give bit-identical *luminance* — the op only ever moves colour, so it can
+    never soften a star, an edge or the grain in the one-click result."""
+    from seestack.edit.pipeline import apply_recipe
+    from seestack.edit.presets import auto_recipe
+    from seestack.edit.registry import EditContext, luminance
+
+    rng = np.random.default_rng(9)
+    base = np.full((120, 160, 3), 0.03, np.float32)
+    base[50:70, 70:90] += 0.25
+    noisy = np.clip(base + rng.normal(0, 0.06, base.shape).astype("float32"), 0, None)
+
+    full = auto_recipe(noisy)
+    assert any(o.id == "detail.chroma_denoise" for o in full.ops)
+    without = Recipe(ops=[o for o in full.ops if o.id != "detail.chroma_denoise"])
+    with_op = apply_recipe(noisy.copy(), full, EditContext())
+    plain = apply_recipe(noisy.copy(), without, EditContext())
+    assert float(np.nanmax(np.abs(luminance(with_op) - luminance(plain)))) < 1e-6
+    # …but it did do something: the colour offsets are measurably less spread out.
+    def spread(img):
+        y = luminance(img)
+        return float(np.nanstd(img[..., 1] - y))
+    assert spread(with_op) < spread(plain)
+
+
 def test_auto_recipe_sharpen_radius_from_fwhm():
     """Auto's sharpen radius should track the target's own star size (median FWHM
     → Gaussian σ, clamped to the op's step/range), not a fixed 2.0 guess. A clean
@@ -762,6 +815,12 @@ def test_auto_edit_summary_note():
 
     # An empty (all-disabled / no-op) recipe has nothing to explain → None.
     assert auto_edit_summary(Recipe(ops=[]), {"sky": 0.1}) is None
+
+    # The colour-blotch smoother has its own plain-language phrase (no raw op id),
+    # so a noisy stack's unattended note explains that step too.
+    recipe4 = Recipe(ops=[OpInstance(id="detail.chroma_denoise", params={})])
+    assert auto_edit_summary(recipe4, None) == (
+        "Auto-edited: evened out the patchy sky colour.")
 
 
 def test_noise_fraction_crossfade_math():

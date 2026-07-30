@@ -114,4 +114,30 @@ describe("Library", () => {
     // The upload card is present (its file picker button anchors it).
     expect(screen.getByRole("button", { name: /Choose FITS files/i })).toBeInTheDocument();
   });
+
+  it("shows the getting-started map on an empty library, and not once it has targets", async () => {
+    // Library is as likely a first landing as the Dashboard (it's where the subs
+    // go), so the "Your first image" checklist belongs on its empty state too.
+    vi.spyOn(client.api, "getSystem").mockResolvedValue({
+      version: "0.0.0", data_root: "/data", cpu_count: 4, cpu_workers: 3,
+      gpu_available: false, disk: {}, memory: {}, watcher_enabled: true,
+      astap: { found: false, path: null, star_db_found: false },
+    } as never);
+    vi.spyOn(client.api, "getStats").mockResolvedValue({
+      n_targets: 0, n_frames: 0, n_frames_accepted: 0, total_exposure_s: 0,
+      integration_hours: 0, acceptance_rate: null, n_stack_runs: 0,
+      n_targets_with_stacks: 0, active_jobs: 0, recent_stacks: [], disk: {},
+    } as never);
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([]);
+    const { unmount } = renderLibrary();
+    await waitFor(() =>
+      expect(screen.getByTestId("first-image-card")).toBeInTheDocument());
+    unmount();
+
+    // With targets present the empty state (and the card with it) is gone.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Andromeda", [])]);
+    renderLibrary();
+    await waitFor(() => expect(screen.getByText("Andromeda")).toBeInTheDocument());
+    expect(screen.queryByTestId("first-image-card")).not.toBeInTheDocument();
+  });
 });

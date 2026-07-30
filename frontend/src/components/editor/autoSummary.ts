@@ -9,6 +9,7 @@ const OP_PHRASES: Record<string, string> = {
   "background.subtract": "removed the background gradient",
   "tone.color_calibrate": "balanced the colour",
   "detail.denoise": "reduced noise",
+  "detail.chroma_denoise": "evened out the patchy sky colour",
   "tone.stretch": "applied a natural stretch",
   "tone.curves": "added a gentle contrast curve",
   "tone.scnr": "removed the green cast",

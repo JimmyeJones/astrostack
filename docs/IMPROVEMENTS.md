@@ -8652,6 +8652,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **MEASURED NON-BUG — don't "fix" SCNR's noise-protection sigma to use `ctx.scaled_px` (Builder 2026-07-30, spotted
+  and measured while shipping the colour-blotch smoother v0.220.0).** `_scnr`'s noise-protected estimator smooths
+  green and the R/B neutral with a **fixed** `_SCNR_NOISE_SIGMA = 3.0` px (`seestack/edit/ops/tone.py`), unlike every
+  other spatial editor knob (sharpen radius, bilateral extent, deconv PSF, and now the chroma radius), which is
+  scaled by `ctx.scaled_px` for preview↔export parity. That asymmetry looks like a parity bug and isn't — **it is the
+  better of the two**, because the proxy is *stride*-decimated (`edit/proxy.py`), so a proxy pixel carries the same
+  per-pixel noise as a full-res one and the estimator's bias depends on how many *samples* the kernel averages, not
+  what physical area it spans. Measured on a realistic 1080×1920 stretched sky (400 stars, real broad green
+  structure, σ 0.03) against a ×3 stride proxy, comparing each proxy render to the *decimated export*: the shipped
+  fixed 3 px gives **mean-abs green difference 0.0019 (1.06 % of sky) with zero mean bias**, while scaling the sigma
+  to 1 px gives **0.0039 (2.17 %) with a −0.12 % green bias** — i.e. scaling would roughly *double* the
+  preview↔export mismatch and reintroduce part of the magenta bias v0.210.5 removed. Leave it alone; if it's ever
+  revisited, the honest shape is `max(floor, scaled)` with a floor high enough to still cancel noise, and it needs a
+  measurement, not a one-line flip. Confidence: measured. (No action — filed so a future audit doesn't re-chase it.)
+
 - **NEW OBSERVATION (Builder 2026-07-30, measured while unstarving the per-frame object mask, v0.213.0) — the
   per-frame flatten still absorbs ~55 % of a nebula that fills most of the frame, and nothing tells the user.**
   *(Image-quality + friendliness; size S for the nudge, M for a real fix; PRIORITY 3–4.)* Measured on a synthetic
@@ -8681,8 +8696,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   visible as the part of the extended mask that does not move with dither across a session — i.e. a stack-level
   (not per-sub) determination, which is also how a real defect/glow map would be built (see the persistent
   defect-map idea below). Only worth doing if a real Seestar sub shows meaningful amp glow. Confidence: measured.
-- **NEW IDEA (Builder 2026-07-29, split out while capping the Auto denoise strength) — a low-frequency
-  *chroma-blotch* reducer for the Auto recipe.** The 2026-07-26 audit measured that on a thin S30 stack the visible
+- ~~**NEW IDEA (Builder 2026-07-29, split out while capping the Auto denoise strength) — a low-frequency
+  *chroma-blotch* reducer for the Auto recipe.**~~ — **SHIPPED v0.220.0** (Builder 2026-07-30, branch
+  `agent/chroma-blotch-reducer`; measured + regression-tested). New editor op **`detail.chroma_denoise`
+  ("Colour-blotch smoothing", `seestack/edit/ops/detail.py`)**: it splits the image into Rec.709 luminance `Y` plus
+  each channel's own chroma residual `d_c = C − Y`, smooths **only** `d_c` with a wide kernel, and recombines
+  `C' = Y + d_c'`. Because the luminance weights sum to 1, `Σ w_c·d_c ≡ 0` everywhere and the smoothing is linear
+  with one shared kernel — so the output's luminance is the input's **bit-for-bit** (measured max |ΔY| = 3e-8, float32
+  rounding). That is the property that makes it safe on the on-by-default Auto path: it cannot soften a star, an edge
+  or the grain; only colour can move. **Measured** on a synthetic S30 sky carrying a 25 px-scale green/magenta drift:
+  at full strength the sky's colour spread drops **32–39 %** (R/G/B) and its low-frequency component **~22 %**, while
+  a *faint* (0.6σ) extended nebula keeps **~89 %** of its own hue at radius 24 (and ~72 % at radius 48 — which is why
+  24 px is the shipped default). `protect_stars` (default on) tapers the effect off above the sky so a wide chroma
+  kernel can't smear a red star's hue outward — measured 0 % vs **11 %** star R/G shift with it off — and self-disables
+  when the sky has no measurable spread. NaN-aware by normalised convolution (blurred data ÷ blurred coverage), so a
+  mosaic gap neither bleeds a fill value into its neighbours nor stops being NaN. The radius is a full-res pixel
+  measure scaled by `ctx.scaled_px`, so the live preview smooths the same *physical* area as the export. Speed: a true
+  `gaussian_filter` at these widths cost 2.7 s (radius 16) → 8.8 s (radius 48) on a full-res 1080×1920 stack, so the
+  kernel is three box passes (the standard O(1)-per-pixel Gaussian approximation) — **0.77 s regardless of radius**,
+  with results indistinguishable from the true Gaussian, and the coverage denominator is computed once and skipped
+  entirely on a fully-covered frame. **Auto integration:** it rides the *same* measured-noise crossfade as
+  `detail.denoise` (`_AUTO_CHROMA_MAX = 0.5` × `noise_frac`), so a stack Auto reads as clean gets the op **not at
+  all** — a clean stack's one-click result is byte-for-byte what it was — and it is appended **last** among the
+  tone/detail ops, after `tone.curves`/`detail.sharpen`, so it cannot perturb the anchors those two derive from the
+  data at apply time. It is the direct follow-on to the v0.210.6 denoise cap, whose comment already named this defect.
+  Tests: new `tests/test_edit_chroma_denoise.py` (+9 — exact identity at strength 0, bit-exact luminance, the blotch
+  measurably flattened, monotone strength, NaN gaps preserved with no inward bleed, star protection on vs off, faint
+  extended colour surviving, proxy-radius parity, degenerate/all-NaN inputs) and `tests/test_edit_engine.py` (+2 —
+  the crossfade gating/ceiling/ordering, and an end-to-end render proving the op changes colour without changing
+  luminance), plus the plain-language phrase in both the Python and frontend "what Auto did" maps
+  (`test_auto_edit_summary_note`, `autoSummary.test.ts`). Upgrade-safe: a new additive op (descriptor-driven, so it
+  surfaces in the editor with no frontend work) and an additive Auto step that only fires on a stack Auto already
+  classifies as noisy; no config/DB/on-disk/API-shape change and no `StackOptions` change. *(Original idea kept for
+  provenance.)* The 2026-07-26 audit measured that on a thin S30 stack the visible
   sky defect after denoise isn't fine grain (wavelet handles that) but a **low-frequency colour blotch** — patches of
   the sky drift green/magenta over ~tens of px (sky chroma-MAD ≈ 0.048), which the wavelet denoise leaves untouched
   because it only shrinks fine scales. Cranking wavelet strength to "fix" it just waxes the luminance grain (the bug we
@@ -10297,8 +10343,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   controls, using the clipboard API with a "Copied!" confirmation; (c, follow-on) offer the same caption in the
   share-image flow so the picture and its words travel together. Keeps the beginner-feature pipeline stocked with a
   pure *share/understand* capability distinct from the image-side share features already filed.
-- **FOLLOW-ON to "Your first image" (Builder 2026-07-30, slice (c) of the shipped v0.219.0 card) — show the same
-  checklist on the *empty* Library and Gallery states, where a first-time user is at least as likely to land.** The
+- ~~**FOLLOW-ON to "Your first image" (Builder 2026-07-30, slice (c) of the shipped v0.219.0 card) — show the same
+  checklist on the *empty* Library and Gallery states, where a first-time user is at least as likely to land.**~~ —
+  **SHIPPED v0.220.1** (Builder 2026-07-30, branch `agent/chroma-blotch-reducer`; tested). `FirstImageCard` now also
+  renders (a) at the top of **Library**'s `targets.length === 0` empty state — the page a beginner most plausibly
+  opens first, since it's where the subs go — and (b) under **Gallery**'s empty message, but *only* when the gallery
+  is genuinely empty: a search or a method/calibration filter that happens to match nothing leaves it hidden, because
+  that user already has pictures and "here's how to make your first one" would read as a non-sequitur. Pure re-use of
+  the existing self-contained component — it keeps its own `localStorage` guards, so an established install (every
+  step already ticked, `firstImageStarted` never set) and a dismissed card stay invisible on all three surfaces, and
+  the three routes are separate pages so nothing double-renders on one screen. Frontend-only, read-only, additive; no
+  API/schema/config/default change. Tests: `Library.test.tsx` (+1 — shown on an empty library, gone once it has
+  targets), `Gallery.test.tsx` (+1 — shown on a truly empty gallery, hidden when a non-matching search is what
+  emptied it). *(Original idea kept for provenance.)* The
   card is on the Dashboard only. A beginner who opens Library first (reasonable — it's where the subs go) sees an
   empty list and no map. The card is already self-contained, read-only and self-hiding, so this is an import and a
   render guard (`n_targets === 0`), not new machinery; the only care needed is that a user who scrolls past both

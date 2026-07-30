@@ -366,4 +366,41 @@ describe("Gallery batch apply", () => {
     expect(links).toHaveLength(1);
     expect(links[0]).toHaveAttribute("href", "/targets/M_42/stack?from=1");
   });
+
+  it("shows the getting-started map on a truly empty gallery, not on a filtered-empty one", async () => {
+    // A first-time user who lands on Gallery before stacking anything sees an
+    // empty page; the "Your first image" checklist is the answer to "what now?".
+    // But a *search* that matches nothing must not get the same pitch — the user
+    // clearly already has pictures, they just filtered them out.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [] });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getSystem").mockResolvedValue({
+      version: "0.0.0", data_root: "/data", cpu_count: 4, cpu_workers: 3,
+      gpu_available: false, disk: {}, memory: {}, watcher_enabled: true,
+      astap: { found: false, path: null, star_db_found: false },
+    } as never);
+    vi.spyOn(client.api, "getStats").mockResolvedValue({
+      n_targets: 0, n_frames: 0, n_frames_accepted: 0, total_exposure_s: 0,
+      integration_hours: 0, acceptance_rate: null, n_stack_runs: 0,
+      n_targets_with_stacks: 0, active_jobs: 0, recent_stacks: [], disk: {},
+    } as never);
+
+    const { unmount } = renderGallery();
+    await waitFor(() =>
+      expect(screen.getByTestId("first-image-card")).toBeInTheDocument());
+    unmount();
+
+    // With pictures present, a search that matches nothing empties the grid — but
+    // that user is not at the start of the journey, so no checklist.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [item(1)] });
+    renderGallery();
+    await waitFor(() => expect(screen.getByPlaceholderText(/Search/i)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/Search/i), {
+      target: { value: "nothing-matches-this" },
+    });
+    await waitFor(() =>
+      expect(screen.getByText(/No images match/)).toBeInTheDocument());
+    expect(screen.queryByTestId("first-image-card")).not.toBeInTheDocument();
+  });
 });
