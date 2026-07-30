@@ -1271,6 +1271,7 @@ export interface UploadResult {
   rejected: { name: string; reason: string }[]; // not FITS / unsafe / no room
   bytes_written: number;
   job_id: string | null;
+  folders?: string[];  // top-level folders kept from a folder drop (may be absent)
 }
 
 function encodeRecipe(recipe: Recipe): string {
@@ -1588,6 +1589,7 @@ export const api = {
     fileList: File[],
     target: string,
     onProgress?: (loaded: number, total: number) => void,
+    preserveFolders = false,
   ) => {
     // Multipart upload via XHR (not fetch) so we can report *upload* progress —
     // fetch exposes no upload-progress event, and a beginner sending several GB
@@ -1595,6 +1597,12 @@ export const api = {
     // multipart boundary Content-Type from the FormData body.
     const form = new FormData();
     if (target.trim()) form.append("target", target.trim());
+    // Ask the server to keep the dropped folder's *directories* rather than
+    // flattening them into filenames, so the scanner's Seestar folder convention
+    // makes the real targets (M 31_sub → "M 31") instead of one Unsorted pile.
+    // Only sent when we actually have folder paths, so a plain multi-file pick
+    // posts exactly the body it always did.
+    if (preserveFolders) form.append("preserve_folders", "true");
     // Send the file's folder-relative path when we have one (a folder drop bakes
     // it into ``name``; a ``webkitdirectory`` input exposes ``webkitRelativePath``)
     // so the server can keep two same-named subs from different session folders
