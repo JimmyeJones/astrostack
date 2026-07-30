@@ -819,18 +819,22 @@ def _acquisition_reason(
     weighted 1.0 per relative unit, temperature 0.1 per °C — see
     :func:`_match_distance`) and fall back to a generic clause when neither side
     recorded enough to point at one."""
-    mgain, mtemp = master.get("gain"), master.get("sensor_temp_c")
+    # Parse once and carry the floats into the copy: a registry value that is a
+    # numeric *string* must not format-crash after passing the distance maths.
+    mgain = mtemp = None
     gain_d = temp_d = 0.0
-    if gain is not None and mgain is not None:
+    if gain is not None and master.get("gain") is not None:
         with contextlib.suppress(TypeError, ValueError):
-            gain_d = abs(float(mgain) - gain) / max(abs(gain), 1.0)
-    if sensor_temp_c is not None and mtemp is not None:
+            mgain = float(master["gain"])
+            gain_d = abs(mgain - gain) / max(abs(gain), 1.0)
+    if sensor_temp_c is not None and master.get("sensor_temp_c") is not None:
         with contextlib.suppress(TypeError, ValueError):
-            temp_d = 0.1 * abs(float(mtemp) - sensor_temp_c)
-    if gain_d >= temp_d and gain_d > 0:
+            mtemp = float(master["sensor_temp_c"])
+            temp_d = 0.1 * abs(mtemp - sensor_temp_c)
+    if gain_d >= temp_d and gain_d > 0 and mgain is not None:
         return f"it was shot at gain {mgain:g}, your subs at gain {gain:g}"
-    if temp_d > 0:
-        return (f"its sensor was {float(mtemp):g}°C, your subs were "
+    if temp_d > 0 and mtemp is not None:
+        return (f"its sensor was {mtemp:g}°C, your subs were "
                 f"{float(sensor_temp_c):g}°C")
     return "it wasn't shot the same way as these subs"
 
