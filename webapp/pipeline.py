@@ -103,6 +103,12 @@ def _pipeline_body(
         if settings.auto_qc or settings.auto_solve:
             graded: dict[str, int] = {}
             qc_errors: dict[str, str] = {}
+            # Subs the stack-then-solve bootstrap rescued per target (it can only
+            # engage when most subs failed to plate-solve). The single-target
+            # jobs already return run_qc_and_solve's summary verbatim, but the
+            # scan loop discarded it — so the walk-away path, which is exactly
+            # where the rescue happens unattended, had no way to say so.
+            rescued: dict[str, int] = {}
             for safe in touched_names:
                 if job.cancel_requested():
                     # Surface the cancel at the top level so JobManager._run's
@@ -114,7 +120,7 @@ def _pipeline_body(
                 try:
                     proj = lib.open_target(safe)
                     try:
-                        run_qc_and_solve(
+                        qc_summary = run_qc_and_solve(
                             proj,
                             astap_path=settings.astap_path,
                             astap_fov_deg=settings.astap_fov_deg,
@@ -129,6 +135,9 @@ def _pipeline_body(
                             progress=_progress(jm, job),
                             should_stop=job.cancel_requested,
                         )
+                        n_rescued = int((qc_summary or {}).get("bootstrap_propagated") or 0)
+                        if n_rescued > 0:
+                            rescued[safe] = n_rescued
                         if settings.auto_grade_frames and settings.auto_qc:
                             n = _auto_grade_target(proj, settings)
                             if n:
@@ -154,6 +163,8 @@ def _pipeline_body(
                     qc_errors[safe] = str(exc)
             if graded:
                 summary["auto_graded"] = graded
+            if rescued:
+                summary["bootstrap_rescued"] = rescued
             if qc_errors:
                 summary["qc_errors"] = qc_errors
 

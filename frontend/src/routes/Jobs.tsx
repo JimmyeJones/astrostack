@@ -201,6 +201,40 @@ export function processTargetSummary(r: Record<string, unknown>): {
   return { line, stacked, thin: null, cleaned: null };
 }
 
+/** How many subs the stack-then-solve bootstrap rescued in this job result, or
+ * 0 when it never engaged (pure, tested).
+ *
+ * The bootstrap only engages when *most* subs failed to plate-solve on their own:
+ * it stacks the un-located ones into a deeper image, solves that once, and
+ * propagates the result back. Single-target jobs (`qc_solve`, `process_target`)
+ * carry the engine's own `bootstrap_propagated`; the whole-library scan reports
+ * `bootstrap_rescued` as a per-target map. Both shapes are read here so one
+ * helper covers every surface. */
+export function bootstrapRescuedCount(r: Record<string, unknown>): number {
+  const direct = Number(r.bootstrap_propagated ?? 0) || 0;
+  const perTarget = r.bootstrap_rescued && typeof r.bootstrap_rescued === "object"
+    ? Object.values(r.bootstrap_rescued as Record<string, unknown>)
+        .reduce<number>((sum, n) => sum + (Number(n) || 0), 0)
+    : 0;
+  return Math.max(0, direct + perTarget);
+}
+
+/** The plain-language credit for that rescue, or null when it didn't happen.
+ *
+ * Without this the beginner who turned the setting on (because their faint
+ * targets came out noisy) just sees a suddenly-thicker stack with no idea why —
+ * and the Target page's "N not located yet" badge silently drops instead of
+ * saying what fixed it. Says what happened in one calm sentence, no jargon. */
+export function bootstrapRescueNote(r: Record<string, unknown>): string | null {
+  const n = bootstrapRescuedCount(r);
+  if (n <= 0) return null;
+  return n === 1
+    ? "Located 1 more sub by combining your un-located frames into a deeper "
+      + "image — it's in your stack now."
+    : `Located ${n} more subs by combining your un-located frames into a `
+      + "deeper image — they're in your stack now.";
+}
+
 /** Plain-language outcome of a finished "Build master" job (pure, tested). A
  * beginner building a master from a Dark/Flat folder should see how many of
  * their frames were actually combined — and, when some were set aside (wrong
@@ -286,9 +320,13 @@ function JobResultActions({ job }: { job: Job }) {
         : runId != null
           ? `/targets/${job.target}/edit/${runId}`
           : `/targets/${job.target}/history`;
+    const rescue = bootstrapRescueNote(r);
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm">{line}</Text>
+        {/* Credit the stack-then-solve rescue where the result lands, so a
+            suddenly-thicker stack has a visible cause. */}
+        {rescue ? <Text size="xs" c="dimmed">{rescue}</Text> : null}
         {thin ? (
           <Alert color={thin.level === "single" ? "orange" : "yellow"} p="xs"
             title="Very few frames stacked">
@@ -339,9 +377,11 @@ function JobResultActions({ job }: { job: Job }) {
   if (job.kind === "pipeline") {
     const { line, held } = pipelineSummary(r);
     const autoEdited = Number(r.auto_edited ?? 0) || 0;
+    const rescue = bootstrapRescueNote(r);
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm">{line}</Text>
+        {rescue ? <Text size="xs" c="dimmed">{rescue}</Text> : null}
         {held.length ? (
           <Alert color="blue" variant="light" p="xs"
             title="Waiting for more of your subs to be located">
@@ -374,6 +414,19 @@ function JobResultActions({ job }: { job: Job }) {
             </Button>
           </Group>
         ) : null}
+      </Stack>
+    );
+  }
+  if (job.kind === "qc_solve") {
+    // A Check/Plate-solve job otherwise finishes with a bare "done". The one
+    // thing worth saying here is the rescue: the user ran Plate Solve *because*
+    // subs weren't located, so "12 more are located now" is the answer they came
+    // for. Nothing to say when the bootstrap didn't engage — stay quiet.
+    const rescue = bootstrapRescueNote(r);
+    if (!rescue) return null;
+    return (
+      <Stack gap={2} mt="xs">
+        <Text size="sm">{rescue}</Text>
       </Stack>
     );
   }

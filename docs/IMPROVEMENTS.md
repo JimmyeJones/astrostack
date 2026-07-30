@@ -6753,8 +6753,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   been validated on real faint-field data — the bootstrap may cover enough of the owner's cases that the full-rotation
   path isn't needed.
 
-- **IMPROVEMENT IDEA (Builder 2026-07-25) — surface the stack-then-solve bootstrap's rescue on the job/Target
-  summary so the user sees it worked ("N subs located via a deep-image solve").** *(Friendliness / trust —
+- ~~**IMPROVEMENT IDEA (Builder 2026-07-25) — surface the stack-then-solve bootstrap's rescue on the job/Target
+  summary so the user sees it worked ("N subs located via a deep-image solve").**~~ — **SHIPPED v0.221.1**
+  (Builder 2026-07-30, branch `claude/relaxed-turing-xuihhk`). The rescue now says so wherever the job lands.
+  **Webapp:** the single-target jobs (`qc_solve`, `process_target`) already returned `run_qc_and_solve`'s summary
+  verbatim, so its `bootstrap_propagated` was on the wire and simply unrendered — but the whole-library **scan**
+  loop *discarded* the per-target summary, which is exactly the walk-away path where the rescue happens unattended.
+  `_pipeline_body` now keeps it and rolls the counts up into an additive `summary["bootstrap_rescued"]` map
+  (`{safe: n}`), omitted entirely when the bootstrap never engaged or propagated nothing — no misleading zero.
+  **Frontend:** two pure helpers in `routes/Jobs.tsx` — `bootstrapRescuedCount` (reads both shapes: the
+  single-target `bootstrap_propagated` and the scan's per-target map, tolerating junk values rather than printing
+  `NaN`) and `bootstrapRescueNote` (one calm sentence, singularised for one sub: *"Located 12 more subs by
+  combining your un-located frames into a deeper image — they're in your stack now."*). Rendered on the
+  Process-target result, the scan result, and a **new** `qc_solve` result block — a Check/Plate-solve job used to
+  finish with a bare "done", and the rescue is precisely the answer the user ran it for. Self-hiding: nothing is
+  said when the bootstrap didn't engage. Upgrade-safe: additive summary key + display-only frontend, no
+  config/DB-schema/on-disk/API-shape/default change; `astap_bootstrap_solve` stays off by default. Tests:
+  `tests/webapp/test_bootstrap_rescue_summary.py` (+3 — the scan reports the per-target rescue; the key is absent
+  when the bootstrap never engaged; an engaged-but-propagated-nothing run doesn't claim a rescue) and
+  `Jobs.test.tsx` (+8 — both payload shapes, singular/plural, silence, junk tolerance, and the rendered scan /
+  `qc_solve` / no-rescue cases). *(Original idea kept below for provenance.)* *(Friendliness / trust —
   PRIORITY 3; size S.)* **What prompts it:** the v0.210.0 bootstrap writes `wcs_json` back to rescued subs and
   `run_qc_and_solve` already returns `bootstrap_engaged` / `bootstrap_solved` / `bootstrap_propagated` in its
   summary, but nothing surfaces that to the user — a beginner who turned the setting on (because their faint

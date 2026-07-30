@@ -5,8 +5,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  JobRow, JobsView, buildMasterSummary, friendlyJobError, jobKindLabel, pipelineSummary,
-  processTargetSummary, reprocessSummary,
+  JobRow, JobsView, bootstrapRescueNote, bootstrapRescuedCount, buildMasterSummary,
+  friendlyJobError, jobKindLabel, pipelineSummary, processTargetSummary, reprocessSummary,
 } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
@@ -344,6 +344,45 @@ describe("pipelineSummary", () => {
   });
 });
 
+describe("bootstrapRescueNote", () => {
+  it("reads the single-target job's own propagated count", () => {
+    expect(bootstrapRescuedCount({ bootstrap_engaged: true, bootstrap_propagated: 12 }))
+      .toBe(12);
+    expect(bootstrapRescueNote({ bootstrap_propagated: 12 })).toBe(
+      "Located 12 more subs by combining your un-located frames into a deeper "
+      + "image — they're in your stack now.",
+    );
+  });
+
+  it("sums the scan's per-target map", () => {
+    expect(bootstrapRescuedCount({ bootstrap_rescued: { "M 42": 8, "NGC 7000": 3 } }))
+      .toBe(11);
+    expect(bootstrapRescueNote({ bootstrap_rescued: { "M 42": 8, "NGC 7000": 3 } }))
+      ?.toContain("Located 11 more subs");
+  });
+
+  it("singularises one rescued sub", () => {
+    expect(bootstrapRescueNote({ bootstrap_propagated: 1 })).toBe(
+      "Located 1 more sub by combining your un-located frames into a deeper "
+      + "image — it's in your stack now.",
+    );
+  });
+
+  it("stays silent when the bootstrap never engaged or rescued nothing", () => {
+    expect(bootstrapRescueNote({})).toBeNull();
+    expect(bootstrapRescueNote({ bootstrap_engaged: true, bootstrap_propagated: 0 }))
+      .toBeNull();
+    expect(bootstrapRescueNote({ bootstrap_rescued: {} })).toBeNull();
+  });
+
+  it("tolerates junk values rather than printing NaN", () => {
+    expect(bootstrapRescuedCount({ bootstrap_propagated: "lots" })).toBe(0);
+    expect(bootstrapRescuedCount({ bootstrap_rescued: "nope" })).toBe(0);
+    expect(bootstrapRescuedCount({ bootstrap_rescued: { "M 42": "x", "M 31": 2 } }))
+      .toBe(2);
+  });
+});
+
 describe("JobsView pipeline result actions", () => {
   function renderJobsRouted() {
     const qc = new QueryClient();
@@ -376,6 +415,43 @@ describe("JobsView pipeline result actions", () => {
     expect(screen.getByText("Waiting for more of your subs to be located")).toBeInTheDocument();
     const link = screen.getByRole("link", { name: "M 42" });
     expect(link).toHaveAttribute("href", "/targets/M 42");
+  });
+
+  it("credits the stack-then-solve rescue on a finished scan", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-2", kind: "pipeline", target: null, state: "done",
+        result: { scanned: 40, auto_stacked: ["M 42"], bootstrap_rescued: { "M 42": 12 } },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "Located 12 more subs by combining your un-located frames into a deeper "
+      + "image — they're in your stack now.",
+    )).toBeInTheDocument();
+  });
+
+  it("credits the rescue on a Check & locate job that otherwise says nothing", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "qs-1", kind: "qc_solve", target: "M 42", state: "done",
+        result: { qc_done: 40, bootstrap_engaged: true, bootstrap_propagated: 12 },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(/Located 12 more subs/)).toBeInTheDocument();
+  });
+
+  it("says nothing on a Check & locate job the bootstrap didn't touch", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "qs-2", kind: "qc_solve", target: "M 42", state: "done",
+        result: { qc_done: 40, solve_done: 40 },
+      }),
+    ]);
+    renderJobsRouted();
+    await screen.findByText("M 42");
+    expect(screen.queryByText(/Located .* more sub/)).not.toBeInTheDocument();
   });
 });
 
