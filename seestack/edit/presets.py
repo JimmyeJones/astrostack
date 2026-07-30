@@ -135,6 +135,17 @@ _NOISE_HI = 0.028
 # glass-smooth end; the editor still lets the user push denoise higher by hand.
 _AUTO_DENOISE_MAX = 0.6
 
+# Ceiling on the *one-click* Auto colour-blotch smoothing (``detail.chroma_denoise``).
+# That op is the other half of the cap above: what the wavelet denoise leaves on a
+# thin stack is a low-frequency *colour* drift, not fine grain, so Auto now averages
+# the chroma instead of waxing the luminance. It rides the same measured-noise
+# crossfade as denoise — a stack Auto reads as clean gets the op *not at all*, so a
+# clean stack's one-click result is byte-for-byte what it was. Measured on a
+# synthetic S30 sky carrying a 25 px-scale colour drift: at this ceiling it takes
+# ~20 % off the sky's colour spread while a faint (0.6σ) extended nebula keeps ~95 %
+# of its own colour, and the luminance is provably untouched (see the op).
+_AUTO_CHROMA_MAX = 0.5
+
 
 def _noise_fraction(sky_sigma: float) -> float:
     """Map the measured background σ to a 0..1 crossfade weight: 0 at/below the
@@ -340,6 +351,7 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # Crossfade weights: an unmeasurable image is treated as clean (sharpen full,
     # no denoise) — matching the old boolean fallback.
     denoise_strength = 0.0
+    chroma_strength = 0.0
     sharpen_amount = 0.5
     if rgb is not None:
         a = analyze_proxy(rgb)
@@ -365,6 +377,12 @@ def auto_recipe(rgb: np.ndarray | None = None,
             _, suggested = suggest_denoise_strength(rgb)
             base = suggested if suggested is not None else 0.5
             denoise_strength = round(base * noise_frac, 3)
+            # The *colour* half of the same problem, on the same crossfade: what a
+            # noisy stack's sky shows after the wavelet pass is a low-frequency
+            # green/magenta drift the wavelet can't reach (it only shrinks fine
+            # scales). Ease it in with the noise, capped at _AUTO_CHROMA_MAX. A
+            # clean stack (noise_frac == 0) never gets the op at all.
+            chroma_strength = round(_AUTO_CHROMA_MAX * noise_frac, 3)
 
     # SCNR before the saturation boost caps the green channel to the R/B neutral
     # so the boost lifts real colour, not the residual OSC green cast. Gentle
@@ -432,6 +450,15 @@ def auto_recipe(rgb: np.ndarray | None = None,
     if sharpen_amount >= 0.05:  # sharpening clean data helps; noisy data hurts
         radius = _sharpen_radius_from_fwhm(median_fwhm)
         ops.append(("detail.sharpen", {"amount": sharpen_amount, "radius": radius}))
+    # Colour-blotch smoothing goes *last* among the tone/detail ops, deliberately.
+    # It only ever rewrites colour (the luminance it returns is bit-identical to
+    # its input), so running it after the saturation boost and the auto-contrast
+    # curve means (a) it flattens the patchiness those two have already amplified
+    # rather than a version of it that's about to be scaled up, and (b) it cannot
+    # perturb the *data-driven* anchors ``tone.curves``/``detail.sharpen`` derive
+    # at apply time — so every other part of Auto behaves exactly as it did.
+    if chroma_strength >= 0.05:
+        ops.append(("detail.chroma_denoise", {"strength": chroma_strength}))
     # Trim the ragged, low-coverage mosaic border last (after tone/detail ops), so
     # the auto result is cleanly framed. Only supplied when the trim is meaningful.
     if trim_crop is not None:
@@ -498,6 +525,7 @@ _AUTO_OP_PHRASES: dict[str, str] = {
     "background.subtract": "removed the background gradient",
     "tone.color_calibrate": "balanced the colour",
     "detail.denoise": "reduced noise",
+    "detail.chroma_denoise": "evened out the patchy sky colour",
     "tone.stretch": "applied a natural stretch",
     "tone.curves": "added a gentle contrast curve",
     "tone.scnr": "removed the green cast",
