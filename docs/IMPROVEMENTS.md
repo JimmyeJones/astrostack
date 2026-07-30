@@ -6013,6 +6013,29 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW (Builder 2026-07-30, found while shipping the Check & locate outcome line v0.222.2) — the legacy desktop
+  dialog reports "solved N/M" from a *progress counter*, so it claims a perfect solve on a field where nothing
+  located.** *(Correctness of a user-facing figure — but in the **deprioritised** desktop GUI, so low priority;
+  size XS.)* `seestack/gui/library_dialog.py:147` prints
+  `f", solved {summary['solve_done']}/{summary['solve_total']}"`. `solve_done` is `_map_jobs`' progress counter —
+  frames *attempted* — so it reaches `solve_total` even when every solve failed; the line reads "solved 40/40" on a
+  star-poor field that located nothing. This is the exact defect the web Jobs page just avoided: `run_qc_and_solve`
+  now also returns an honest **`solve_ok`** (results that came back with a usable WCS), so the fix is to read that
+  instead and fall back to omitting the clause if it's absent. Left unfixed here deliberately — the desktop GUI is
+  historical (`PLAN.md`-era) and its only tests are the three Qt ones, so a drive-by change at merge time wasn't
+  worth it; take it if you're already in that file. Confidence: traced (the counter semantics are proven by
+  `tests/test_solve_runner.py::test_run_qc_and_solve_reports_the_frames_it_actually_located`).
+- **NEW IDEA (Builder 2026-07-30, follow-on to the "Share your sky" poster v0.223.0) — let the recap say *what* you
+  shot, not only how much.** *(Friendliness / enjoy + share — PRIORITY 3; size S–M.)* The poster now carries the
+  quantities (nights, integration, targets, subs) and the biggest project, which is the honest core — but the thing
+  a beginner most wants to point at is the *names*: "M 31, M 42, the Pleiades and 5 more". `summarize_library`
+  already ranks every imaged target by integration, so a "what you pointed at" line is a couple of fields away, and
+  `objectinfo.py` could add the filed "favourite constellation" stat from the same rows. Two further slices the
+  shipped version deliberately left: an explicit **this-year vs all-time** toggle (the night count is already a
+  trailing window — `window_months` is on the payload and plumbed through the endpoint, it just has no UI), and
+  baking the poster through the existing `submit_editor_share` path so it lands in the same place as a shared
+  picture. **Care:** the poster's whole virtue is that it's uncluttered — add *one* line, not a table, and keep the
+  self-hiding contract (a library with one target must not read as a boast about one target).
 - ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the auto-grade reconsider pass v0.221.0) — say when
   auto-grade *gives a sub back*, not only when it takes one away.**~~ — **SHIPPED v0.222.1** (Builder 2026-07-30,
   branch `claude/relaxed-turing-judl31`). `_auto_grade_target` (`webapp/pipeline.py`) now returns a small
