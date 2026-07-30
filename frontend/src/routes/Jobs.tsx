@@ -235,6 +235,76 @@ export function bootstrapRescueNote(r: Record<string, unknown>): string | null {
       + "deeper image — they're in your stack now.";
 }
 
+/** Plain-language outcome of a finished "Quality check & plate-solve" job
+ * (pure, tested), or null when the result carries nothing to report.
+ *
+ * Every other finished job kind states its outcome in plain language; this one
+ * used to show a bare "done" unless the stack-then-solve bootstrap happened to
+ * engage, so a user who pressed "Check & locate" and waited had no idea what
+ * came of it.
+ *
+ * Honest about the numbers: `solve_done`/`qc_done` are *progress* counters
+ * (frames attempted), so a field where every solve failed still finishes with
+ * `solve_done === solve_total`. The located figure therefore comes from
+ * `solve_ok` — the count of frames that really came back with a usable plate
+ * solution — and the whole located clause is omitted on an older backend that
+ * doesn't report it, rather than passing off "attempted" as "located". */
+export function qcSolveSummary(r: Record<string, unknown>): string | null {
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const qcTotal = n(r.qc_total);
+  const solveTotal = n(r.solve_total);
+  if (qcTotal == null && solveTotal == null) return null;  // older backend
+
+  const sentences: string[] = [];
+  if (qcTotal != null && qcTotal > 0) {
+    sentences.push(`Checked ${qcTotal} sub${qcTotal === 1 ? "" : "s"}.`);
+  }
+  const ok = n(r.solve_ok);
+  if (solveTotal != null && solveTotal > 0 && ok != null) {
+    const missed = Math.max(0, solveTotal - ok);
+    if (missed === 0) {
+      sentences.push(solveTotal === 1
+        ? "Located it in the sky."
+        : `Located all ${solveTotal} of them in the sky.`);
+    } else if (ok > 0) {
+      sentences.push(`Located ${ok} of ${solveTotal} in the sky — ${missed} `
+        + "couldn't be placed.");
+    } else {
+      sentences.push(solveTotal === 1
+        ? "It couldn't be placed in the sky."
+        : `None of the ${solveTotal} could be placed in the sky.`);
+    }
+  }
+  if (!sentences.length) {
+    // Everything had already been checked and located: a real, reassuring
+    // outcome rather than a bare "done".
+    return "Everything was already checked and located — nothing new to do.";
+  }
+  return sentences.join(" ");
+}
+
+/** The follow-up guidance for a Check & locate job that left a lot of subs
+ * un-located, or null when there's nothing worth saying (pure, tested).
+ *
+ * An un-located sub can't stack, so a mostly-failed solve is the single most
+ * common reason a beginner's picture stays thin and noisy — and the app already
+ * has the cure (the opt-in deep-image rescue). Only speaks up when the miss rate
+ * is high enough to actually be the problem; a couple of stragglers on an
+ * otherwise good night are normal and get no lecture. Stays silent when the
+ * bootstrap already rescued them — that note says its own piece. */
+export function qcSolveNudge(r: Record<string, unknown>): string | null {
+  const total = typeof r.solve_total === "number" ? r.solve_total : 0;
+  const ok = typeof r.solve_ok === "number" ? r.solve_ok : null;
+  if (ok == null || total <= 0) return null;
+  const missed = Math.max(0, total - ok);
+  if (missed === 0 || missed < total / 2) return null;
+  if (bootstrapRescuedCount(r) > 0) return null;
+  return "Subs that can't be placed in the sky are left out of your stack. "
+    + "This is usual on a faint or star-poor target — turning on "
+    + "\"Rescue faint fields with a deep-image solve\" in Settings lets the app "
+    + "locate them together instead of one at a time.";
+}
+
 /** How many subs auto-grade *put back* in this job result, or 0 when it gave
  * none back (pure, tested).
  *
@@ -456,17 +526,22 @@ function JobResultActions({ job }: { job: Job }) {
     );
   }
   if (job.kind === "qc_solve") {
-    // A Check/Plate-solve job otherwise finishes with a bare "done". The one
-    // thing worth saying here is the rescue: the user ran Plate Solve *because*
-    // subs weren't located, so "12 more are located now" is the answer they came
-    // for. Nothing to say when the bootstrap didn't engage — stay quiet.
+    // A Check/Plate-solve job used to finish with a bare "done" unless the
+    // stack-then-solve bootstrap happened to engage. Lead with what the job
+    // actually did (checked N, located M), then the rescue — the user ran this
+    // *because* subs weren't located, so "12 more are located now" is the answer
+    // they came for — then the guidance when most subs still couldn't be placed.
+    const summary = qcSolveSummary(r);
     const rescue = bootstrapRescueNote(r);
     const putBack = autoRegradedBackNote(r);
-    if (!rescue && !putBack) return null;
+    const nudge = qcSolveNudge(r);
+    if (!summary && !rescue && !putBack) return null;
     return (
       <Stack gap={2} mt="xs">
+        {summary ? <Text size="sm">{summary}</Text> : null}
         {rescue ? <Text size="sm">{rescue}</Text> : null}
         {putBack ? <Text size="sm">{putBack}</Text> : null}
+        {nudge ? <Text size="xs" c="dimmed">{nudge}</Text> : null}
       </Stack>
     );
   }

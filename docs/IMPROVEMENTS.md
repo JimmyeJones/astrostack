@@ -6044,9 +6044,27 @@ to **Shipped**.)_
   plain line on the Jobs result — *"Put 3 subs back: with more of your night to compare against, they're no longer
   outliers."* Frontend-only beyond the one summary field; the counts already exist. Pairs with the v0.221.1
   bootstrap-rescue note as the other half of "automation explains itself".
-- **NEW IDEA (Builder 2026-07-30, spotted while adding the `qc_solve` job result block in v0.221.1) — give a
-  finished Check/Plate-solve job a real one-line outcome, not a bare "done".** *(Friendliness — PRIORITY 3; size
-  S.)* Every other finished job kind now states its outcome in plain language (`process_target`, `pipeline`,
+- ~~**NEW IDEA (Builder 2026-07-30, spotted while adding the `qc_solve` job result block in v0.221.1) — give a
+  finished Check/Plate-solve job a real one-line outcome, not a bare "done".**~~ — **SHIPPED v0.222.2** (Builder
+  2026-07-30, branch `claude/relaxed-turing-judl31`). Two pure helpers in `routes/Jobs.tsx` next to their
+  `bootstrapRescueNote` siblings: `qcSolveSummary` — *"Checked 42 subs. Located 40 of 42 in the sky — 2 couldn't
+  be placed."* — and `qcSolveNudge`, which points at the opt-in *"Rescue faint fields with a deep-image solve"*
+  setting **only** when at least half the subs couldn't be placed (a couple of stragglers on a good night get no
+  lecture) and stays quiet when the bootstrap already rescued them.
+  **The idea as filed would have shipped a wrong number, and that's the substance of this task.** It proposed
+  reporting `solve_done`, but that is the *progress counter* (`_map_jobs`' `done`) — it reaches `solve_total` even
+  when every single solve failed, so a star-poor field where nothing located would have been reported as *"located
+  40 of 40"*. `run_qc_and_solve` (`seestack/io/scanner.py`) therefore gained an additive **`solve_ok`**: the count
+  of results that came back genuinely located, using the same bar `apply_solve_result_to_db` uses to write a WCS
+  (`result.solved` **and** a usable `wcs_text` — so ASTAP's "success with an unreadable sidecar", which the DB
+  layer records as a failure, is counted as one here too). The whole located clause is omitted rather than guessed
+  when `solve_ok` is absent, so an older persisted job row degrades to *"Checked 42 subs."* instead of a fabricated
+  figure. Tests: `tests/test_solve_runner.py` (+2 — a mixed batch where `solve_done == 4` but only one frame is
+  really located, and the all-failed case), `Jobs.test.tsx` (+13 — the mixed/clean-sweep/none-located/older-backend/
+  nothing-to-do/singular/no-counts summary cases, the four nudge cases, and two rendered job rows). Upgrade-safe:
+  additive summary key + frontend rendering only, no config/DB/on-disk/API-shape/default change. *(Original idea
+  kept below for provenance.)* Every other finished job kind now states its outcome in plain language
+  (`process_target`, `pipeline`,
   `reprocess_all`, `build_master`), but `qc_solve` had **no result renderer at all** until v0.221.1 added one for
   the bootstrap-rescue case alone — so a user who runs "Check & locate" and *isn't* rescued still gets nothing.
   `run_qc_and_solve` already returns `qc_done`/`qc_total`/`solve_done`/`solve_total`, so the line is a pure helper

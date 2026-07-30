@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
   bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobKindLabel,
-  pipelineSummary, processTargetSummary, reprocessSummary,
+  pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
 } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
@@ -404,6 +404,75 @@ describe("bootstrapRescueNote", () => {
   });
 });
 
+describe("qcSolveSummary", () => {
+  it("states what the job checked and what it located", () => {
+    expect(qcSolveSummary({
+      qc_total: 42, qc_done: 42, solve_total: 42, solve_done: 42, solve_ok: 40,
+    })).toBe("Checked 42 subs. Located 40 of 42 in the sky — 2 couldn't be placed.");
+  });
+
+  it("celebrates a clean sweep", () => {
+    expect(qcSolveSummary({
+      qc_total: 12, qc_done: 12, solve_total: 12, solve_done: 12, solve_ok: 12,
+    })).toBe("Checked 12 subs. Located all 12 of them in the sky.");
+  });
+
+  it("never passes off 'attempted' as 'located'", () => {
+    // solve_done reaches solve_total even when every solve failed — the honest
+    // figure is solve_ok, and this is the case the whole helper exists for.
+    expect(qcSolveSummary({
+      qc_total: 30, qc_done: 30, solve_total: 30, solve_done: 30, solve_ok: 0,
+    })).toBe("Checked 30 subs. None of the 30 could be placed in the sky.");
+  });
+
+  it("omits the located clause entirely on an older backend with no solve_ok", () => {
+    expect(qcSolveSummary({
+      qc_total: 8, qc_done: 8, solve_total: 8, solve_done: 8,
+    })).toBe("Checked 8 subs.");
+  });
+
+  it("says so when there was nothing left to do", () => {
+    expect(qcSolveSummary({
+      qc_total: 0, qc_done: 0, solve_total: 0, solve_done: 0, solve_ok: 0,
+    })).toBe("Everything was already checked and located — nothing new to do.");
+  });
+
+  it("singularises one sub", () => {
+    expect(qcSolveSummary({ qc_total: 1, solve_total: 1, solve_ok: 1 }))
+      .toBe("Checked 1 sub. Located it in the sky.");
+    expect(qcSolveSummary({ qc_total: 1, solve_total: 1, solve_ok: 0 }))
+      .toBe("Checked 1 sub. It couldn't be placed in the sky.");
+  });
+
+  it("stays null on a result that carries none of the counts", () => {
+    expect(qcSolveSummary({})).toBeNull();
+    expect(qcSolveSummary({ qc_total: "lots" })).toBeNull();
+  });
+});
+
+describe("qcSolveNudge", () => {
+  it("points at the deep-image rescue when most subs couldn't be placed", () => {
+    expect(qcSolveNudge({ solve_total: 40, solve_ok: 3 }))
+      ?.toContain("Rescue faint fields with a deep-image solve");
+  });
+
+  it("doesn't lecture over a couple of stragglers on a good night", () => {
+    expect(qcSolveNudge({ solve_total: 40, solve_ok: 38 })).toBeNull();
+    expect(qcSolveNudge({ solve_total: 40, solve_ok: 40 })).toBeNull();
+  });
+
+  it("stays quiet when the bootstrap already rescued them", () => {
+    expect(qcSolveNudge({
+      solve_total: 40, solve_ok: 3, bootstrap_propagated: 35,
+    })).toBeNull();
+  });
+
+  it("stays quiet with nothing to judge", () => {
+    expect(qcSolveNudge({})).toBeNull();
+    expect(qcSolveNudge({ solve_total: 40 })).toBeNull();  // older backend
+  });
+});
+
 describe("autoRegradedBackNote", () => {
   it("reads the single-target job's own count", () => {
     expect(autoRegradedBackCount({ auto_regraded_back: 3 })).toBe(3);
@@ -515,7 +584,7 @@ describe("JobsView pipeline result actions", () => {
     expect(await screen.findByText(/Located 12 more subs/)).toBeInTheDocument();
   });
 
-  it("says nothing on a Check & locate job the bootstrap didn't touch", async () => {
+  it("says nothing about a rescue on a Check & locate job the bootstrap didn't touch", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({
         id: "qs-2", kind: "qc_solve", target: "M 42", state: "done",
@@ -525,6 +594,40 @@ describe("JobsView pipeline result actions", () => {
     renderJobsRouted();
     await screen.findByText("M 42");
     expect(screen.queryByText(/Located .* more sub/)).not.toBeInTheDocument();
+  });
+
+  it("gives a Check & locate job a real outcome instead of a bare 'done'", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "qs-3", kind: "qc_solve", target: "M 42", state: "done",
+        result: {
+          qc_total: 42, qc_done: 42, solve_total: 42, solve_done: 42, solve_ok: 40,
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "Checked 42 subs. Located 40 of 42 in the sky — 2 couldn't be placed.",
+    )).toBeInTheDocument();
+    // Two stragglers out of 42 is a normal night — no lecture.
+    expect(screen.queryByText(/Rescue faint fields/)).not.toBeInTheDocument();
+  });
+
+  it("nudges the deep-image rescue when a star-poor field mostly failed", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "qs-4", kind: "qc_solve", target: "M 42", state: "done",
+        result: {
+          qc_total: 40, qc_done: 40, solve_total: 40, solve_done: 40, solve_ok: 2,
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "Checked 40 subs. Located 2 of 40 in the sky — 38 couldn't be placed.",
+    )).toBeInTheDocument();
+    expect(screen.getByText(/Rescue faint fields with a deep-image solve/))
+      .toBeInTheDocument();
   });
 });
 
