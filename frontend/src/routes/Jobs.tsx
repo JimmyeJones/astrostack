@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type Job } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
 import { StackNoiseBadge } from "../components/StackNoiseBadge";
 import { thinStackWarning, type ThinStackWarning } from "../components/target/thinStack";
 import { rejectionNote } from "../components/target/rejectionNote";
@@ -304,6 +305,14 @@ function JobResultActions({ job }: { job: Job }) {
         {job.target && stacked && runId != null ? (
           <StackNoiseBadge safe={job.target} runId={runId}
             nFrames={Number(stack.n_frames_used ?? 0) || null} />
+        ) : null}
+        {/* A calibration master the user explicitly saved but this unattended run
+            had to drop. The binder is fail-soft by design, so this is the only
+            cue the walk-away user gets that their picture is less calibrated than
+            they asked for — and this page, not History's Info panel, is where
+            they land. Self-hides on a run that skipped nothing. */}
+        {job.target && stacked && runId != null ? (
+          <CalibrationSkippedNote safe={job.target} runId={runId} />
         ) : null}
         {to ? (
           <Group>

@@ -6013,8 +6013,17 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-07-30, spotted while shipping the skipped-master note v0.216.0) — the skip reason only
-  reaches a user who opens the History *Info* panel; put it where the walk-away user actually lands.** v0.216.0
+- ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the skipped-master note v0.216.0) — the skip reason only
+  reaches a user who opens the History *Info* panel; put it where the walk-away user actually lands.**~~ — **SHIPPED
+  v0.217.1** (Builder 2026-07-30, branch `claude/relaxed-turing-ai56dq`). Both surfaces named in the idea now show it,
+  via one small shared component `CalibrationSkippedNote` (`frontend/src/components/CalibrationSkippedNote.tsx`):
+  (a) the Jobs page's "Process target" result, right under the noise payoff, and (b) the Target page's newest-run
+  block. It re-uses the `calibration_skipped` field already on the run-info payload (no new endpoint, no new
+  recording) and shares the Editor's `["stack-run-info", …]` query key so a run isn't fetched twice. Best-effort and
+  self-hiding: a run that skipped nothing, an older backend that doesn't report skips, and a failed fetch all render
+  nothing rather than an error — so it can't nag. Tests: `CalibrationSkippedNote.test.tsx` (+5 — one skip, several
+  joined, skipped-nothing, older backend, fetch failure), `Jobs.test.tsx` (+1), `Target.test.tsx` (+2). Upgrade-safe:
+  frontend-only, no config/DB/API-shape/default change. *(Original idea kept below for provenance.)* v0.216.0
   records, per run, the calibration masters a saved pick had to skip, and the History Info panel now says so. But the
   hands-off user's natural landing spots are the **Jobs page** ("Process target" result) and the **Target page's**
   newest-run area — neither of which shows it, and neither of which the user has to expand. So the very person the
@@ -6024,8 +6033,31 @@ to **Shipped**.)_
   the existing thin-stack warning, and (b) the Target page's newest-run block. Pure display re-use of a field that
   already exists; no new endpoint, no new recording. **Care:** don't nag — show it once per surface, and keep it out
   of the way when the run *was* otherwise calibrated. (S, friendliness + trust — PRIORITY 3.)
-- **NEW IDEA (Builder 2026-07-30, spotted while shipping the master-coverage roll-up v0.217.0) — make the "no master
-  covers this target" nudge *actionable*, and say **why** each miss misses.** v0.217.0 tells a beginner which of
+- ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the master-coverage roll-up v0.217.0) — make the "no master
+  covers this target" nudge *actionable*, and say **why** each miss misses.**~~ — **SHIPPED v0.218.0** (Builder
+  2026-07-30, branch `claude/relaxed-turing-ai56dq`), both slices.
+  **(a) every miss now names its blocker.** A new pure `coverage_miss_reason` (`webapp/calibration.py`) mirrors the
+  unattended binder's own gates, most-decisive-first — file missing → frame size (*"it was built at 1080×1920, your
+  subs are 480×320 — a different camera or binning"*) → gain/temperature (*"it was shot at gain 400, your subs at
+  gain 80"*, whichever term dominates the combined match distance) → a dark's exposure (*"your subs are 10s, this
+  dark is 30s — build a master bias and AstroStack can scale it to your subs"*). It returns `None` when the master
+  clears every gate on its own, which `master_coverage` turns into the honest *"another of your dark masters is a
+  closer match"* — or, for a bias passed over because a dark was bound, *"a master dark was used instead — a dark
+  already includes the bias"*, since blaming the bias would be a lie. Served as an additive
+  `masters[].missed_detail: [{name, reason}]` and rendered one-per-line in the existing tooltip (`pre-line`).
+  **(b) the uncovered nudge now names the numbers to shoot at.** `master_coverage` also returns
+  `uncovered_detail: [{name, exposure_s, gain}]` — the uncovered targets' own recorded acquisition numbers — and
+  `uncoveredDarkSpecHint` turns them into *"Shoot them at 10s at gain 80 — that's what those subs were shot at."*,
+  or, when they disagree, the honest *"those subs weren't all shot the same way (10s at gain 80; 30s at gain 200), so
+  they need a dark each"*. It degrades to the existing generic wording when the subs recorded nothing, so it never
+  invents a number. *(The build form takes a folder, not an exposure/gain, so there is nothing to pre-fill —
+  naming the numbers is the actionable half, and it reads as "set this up", not "do it now".)*
+  Tests: `tests/webapp/test_calibration.py` (+7 — exposure gap, size-conflict precedence, flat gain, the `None`
+  "nothing wrong with it" signal, end-to-end reasons in roll-up order, the bias-passed-over-for-a-dark case, the
+  uncovered specs, plus an endpoint check that the reasons survive), `calibrationCoverage.test.ts` (+7).
+  Upgrade-safe: additive payload fields only (an older client ignores them; the tooltip falls back to the bare name
+  list on an older backend), no config/DB/on-disk/default change. *(Original idea kept below for provenance.)*
+  v0.217.0 tells a beginner which of
   their targets no master reaches, which is the diagnosis — but the cure is still "go read the build form and work
   out what numbers to use". Two slices, both small and both reusing machinery that already exists:
   **(a) name the reason per miss.** The tooltip lists the targets a master can't be applied to; it doesn't say
@@ -10265,8 +10297,47 @@ problems. Dogfood it every big-picture run and fix root causes.
   controls, using the clipboard API with a "Copied!" confirmation; (c, follow-on) offer the same caption in the
   share-image flow so the picture and its words travel together. Keeps the beginner-feature pipeline stocked with a
   pure *share/understand* capability distinct from the image-side share features already filed.
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your first image": a dismissible, self-checking end-to-end
-  getting-started guide that walks a brand-new user from empty app → shared picture.** *(Friendliness + autonomy /
+- **FOLLOW-ON to "Your first image" (Builder 2026-07-30, slice (c) of the shipped v0.219.0 card) — show the same
+  checklist on the *empty* Library and Gallery states, where a first-time user is at least as likely to land.** The
+  card is on the Dashboard only. A beginner who opens Library first (reasonable — it's where the subs go) sees an
+  empty list and no map. The card is already self-contained, read-only and self-hiding, so this is an import and a
+  render guard (`n_targets === 0`), not new machinery; the only care needed is that a user who scrolls past both
+  copies doesn't see it twice on one screen. (S, friendliness — PRIORITY 3.)
+- **NEW IDEA (Builder 2026-07-30, spotted while building the "Your first image" card) — the checklist can't see the
+  last two steps of the journey (edit + share) because nothing cheap reports them.** `/api/stats` knows frames,
+  accepted frames and stack runs, but not "this user has saved an edit recipe" or "this user has exported/shared a
+  picture" — both of which live in per-run project meta and would need a per-run walk to count. **Idea:** have the
+  library-level roll-up that `_rollup_stacks` already does (it opens each target's project anyway, and is cached)
+  also count runs that carry a saved recipe and runs that have a share/export artifact, and serve them as two
+  additive `n_edited_runs` / `n_shared_runs` counters. That's one cheap addition to a walk that already happens, and
+  it would let the first-image card carry the *whole* journey — plus give the Dashboard an honest "you've finished N
+  of your M stacks" signal. **Care:** measure the added cost on a library with many runs before shipping; if it
+  isn't free, don't do it (the roll-up is on the Dashboard's hot poll). (S–M, friendliness — PRIORITY 3.)
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Your first image": a dismissible, self-checking end-to-end
+  getting-started guide that walks a brand-new user from empty app → shared picture.**~~ — **SHIPPED v0.219.0**
+  (Builder 2026-07-30, branch `claude/relaxed-turing-ai56dq`), slices (a) + (b). A `FirstImageCard`
+  (`frontend/src/components/dashboard/FirstImageCard.tsx`) now sits at the top of the Dashboard with **four** ordered
+  plain-language steps — *point AstroStack at your subs* → *let it work out where each frame points* → *let it check
+  and grade your frames* → *stack them into your first picture* — each with a one-sentence jargon-free hint, a link
+  to the page that does it, and a tick it sets itself. The pure `firstImageSteps(system, stats)` helper reads only
+  `GET /api/system` and `GET /api/stats`, which the Dashboard already fetches, so there is **no new endpoint, no new
+  engine math and nothing written anywhere**; missing data reads as "not done", so it never claims progress it can't
+  see. The card leads with the single next step (`firstImageNextStep`) rather than four at once, shows a progress bar,
+  and when the last step ticks it turns into a one-line well-done pointing at the Gallery.
+  **The upgrade-safety detail that matters:** it must never congratulate the owner — who has thousands of subs and
+  hundreds of stacks — on their "first" picture. So it only ever renders after it has seen this install *mid-journey*
+  (a `firstImageStarted` localStorage flag set the first time a step is open); an established box has every step
+  ticked on first render, never sets the flag, and never sees the card at all. Dismissal (`firstImageDismissed`) is
+  permanent, and both flags are defensively guarded so a disabled/broken localStorage can't break the Dashboard.
+  *(Deliberately four steps, not five: "an edit recipe / share exists" is not on any payload the Dashboard already
+  fetches, and adding a per-run meta walk to `/api/stats` for it would cost more than it's worth — the well-done line
+  points at the editor and sharing instead. Slice (c), the same card on the empty Library state, is filed below.)*
+  Tests: `firstImageSteps.test.ts` (+9 — order, fresh install, all-ticked, mid-journey next-step, ASTAP missing,
+  star-DB missing, the one-sided unreported-star-DB rule, undefined data, and that every step has copy + a link),
+  `FirstImageCard.test.tsx` (+8 — fresh install, partial ticks with only the open step linked, the
+  established-install silence, the congratulation, the started-flag write, hide-this, stays-hidden, and loading).
+  Upgrade-safe: frontend-only, read-only, additive; no config/DB/API-shape/default change.
+  *(Original idea kept below for provenance.)* *(Friendliness + autonomy /
   "understand the app" pillar, PRIORITY 2–3; size M; fully offline, additive, read-only — no new deps.)* **Why a
   beginner wants it:** the very first time someone opens AstroStack they face a wall of screens (Dashboard, Library,
   Calibration, Stack, Editor, History, Storage) with no map of the journey. Today the only first-run help is the
@@ -13543,6 +13614,23 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.219.0** — NEW beginner feature "Your first image": a self-checking four-step map of the journey (point at your
+  subs → locate → check & grade → stack) on the Dashboard, each step ticking itself off from `/api/system` +
+  `/api/stats` (no new endpoint), leading with the single next thing to do and turning into a one-line well-done at
+  the end. Never appears on an established install (it only renders once it has seen this box mid-journey), and
+  dismissal is permanent. Tests: `firstImageSteps.test.ts` (+9), `FirstImageCard.test.tsx` (+8).
+- **v0.218.0** — The master-coverage roll-up now *explains* itself: each missed target carries a plain-language
+  reason from the binder's own gates (`coverage_miss_reason` — frame size / gain / temperature / a dark's exposure,
+  and the honest "another master is a closer match" / "a dark already includes the bias" when nothing is wrong with
+  the master itself), shown one per line in the tooltip; and the "no master covers this" nudge names the exposure/gain
+  to shoot the darks at, or says outright when the uncovered subs weren't all shot the same way. Additive payload
+  fields (`missed_detail`, `uncovered_detail`). Tests: `tests/webapp/test_calibration.py` (+7),
+  `calibrationCoverage.test.ts` (+7).
+- **v0.217.1** — The skipped-calibration-master note now reaches the walk-away user: the same recorded
+  `calibration_skipped` sentences the History *Info* panel shows are now also on the Jobs page's "Process target"
+  result and the Target page's newest-run block, via one shared self-hiding `CalibrationSkippedNote` component
+  (best-effort — a clean run, an older backend, or a failed fetch all render nothing). Tests:
+  `CalibrationSkippedNote.test.tsx` (+5), `Jobs.test.tsx` (+1), `Target.test.tsx` (+2).
 - **v0.213.0** — ⭐⭐ Fixed the PER-FRAME background flatten's starved object mask — the last stacking-engine source of
   the "one corner is washed out" final picture. `_build_object_mask_for_bg` now detrends by a robust low-order
   tile-median sky poly (shared `seestack/bg/sky_poly.py`), drops noise-sized detections, and adds a cheap

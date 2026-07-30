@@ -107,6 +107,42 @@ describe("TargetView noise-reduction payoff", () => {
   });
 });
 
+describe("TargetView skipped-calibration note", () => {
+  it("tells the user on the target page that the newest run dropped a saved master", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 9, integration_s: 400, n_frames: 40, cards: [],
+      calibration_skipped: [
+        "Your saved master flat wasn't used: it was built for a different camera.",
+      ],
+    } as never);
+
+    renderTarget();
+
+    expect(
+      await screen.findByText(/Your saved master flat wasn't used/),
+    ).toBeInTheDocument();
+  });
+
+  it("stays silent when the newest run skipped nothing", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 9, integration_s: 400, n_frames: 40, cards: [],
+      calibration_skipped: [],
+    } as never);
+
+    renderTarget();
+
+    await screen.findByRole("button", { name: "Process this target" });
+    await waitFor(() => expect(client.api.stackRunInfo).toHaveBeenCalled());
+    expect(screen.queryByTestId("calibration-skipped-note")).not.toBeInTheDocument();
+  });
+});
+
 describe("TargetView latest-picture download", () => {
   it("offers a PNG or JPEG download of the latest stack's picture", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());

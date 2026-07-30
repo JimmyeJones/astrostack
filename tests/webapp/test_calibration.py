@@ -1240,6 +1240,141 @@ def test_master_coverage_with_no_targets_is_empty_not_an_error(tmp_path):
     assert cov["masters"][0]["missed"] == []
 
 
+# --- ...and *why* each miss misses ------------------------------------------
+#
+# The roll-up above is the diagnosis ("this dark reaches 2 of your 3 targets");
+# the cure was still "go read the build form and work out what numbers to use".
+# ``coverage_miss_reason`` names the blocker the gates already know about, so the
+# list becomes something a beginner can act on.
+
+
+def test_miss_reason_names_the_exposure_gap_for_a_dark(tmp_path):
+    """The commonest beginner miss: one dark, subs shot at another exposure. The
+    clause must carry *both* numbers and the fix (a bias lets us scale it)."""
+    root = tmp_path / "library"
+    _coverage_master(root, "dark", name="30s dark", exposure_s=30.0)
+    master = calibration.list_masters(root)[0]
+
+    reason = calibration.coverage_miss_reason(
+        master, exposure_s=10.0, gain=80.0, sensor_temp_c=-10.0,
+        width_px=480, height_px=320)
+
+    assert reason is not None
+    assert "10s" in reason and "30s" in reason
+    assert "master bias" in reason
+
+
+def test_miss_reason_names_a_frame_size_conflict_first(tmp_path):
+    """A second camera/binning is decisive — it must win over any other clause,
+    and name both sizes so the user can tell which scope it came from."""
+    root = tmp_path / "library"
+    _coverage_master(root, "dark", name="S50 dark", width=1080, height=1920,
+                     exposure_s=30.0, gain=200.0)
+    master = calibration.list_masters(root)[0]
+
+    reason = calibration.coverage_miss_reason(
+        master, exposure_s=10.0, gain=80.0, sensor_temp_c=-10.0,
+        width_px=480, height_px=320)
+
+    assert reason is not None
+    assert "1080×1920" in reason and "480×320" in reason
+    assert "camera or binning" in reason
+
+
+def test_miss_reason_names_the_gain_for_a_flat(tmp_path):
+    """A flat is exposure-independent, so the only thing that can disqualify it
+    (size aside) is the rig it was shot on — say which gain."""
+    root = tmp_path / "library"
+    _coverage_master(root, "flat", name="Flat", exposure_s=2.0, gain=400.0)
+    master = calibration.list_masters(root)[0]
+
+    reason = calibration.coverage_miss_reason(
+        master, exposure_s=10.0, gain=80.0, sensor_temp_c=-10.0,
+        width_px=480, height_px=320)
+
+    assert reason is not None
+    assert "gain 400" in reason and "gain 80" in reason
+
+
+def test_miss_reason_is_none_when_the_master_itself_fits(tmp_path):
+    """`None` is the "nothing wrong with this master" signal the caller needs, so
+    it can say "another master won" instead of inventing a defect."""
+    root = tmp_path / "library"
+    _coverage_master(root, "dark", name="10s dark", exposure_s=10.0)
+    master = calibration.list_masters(root)[0]
+
+    assert calibration.coverage_miss_reason(
+        master, exposure_s=10.0, gain=80.0, sensor_temp_c=-10.0,
+        width_px=480, height_px=320) is None
+
+
+def test_master_coverage_explains_every_miss(tmp_path):
+    """End-to-end through the roll-up: each missed target carries its own reason,
+    in the same order as the bare `missed` list it explains."""
+    root = tmp_path / "library"
+    dark = _coverage_master(root, "dark", name="10s dark", exposure_s=10.0)
+    masters = calibration.list_masters(root)
+
+    cov = calibration.master_coverage(root, masters, [
+        _coverage_target("M 42"),
+        _coverage_target("Long Sub", exposure_s=60.0),
+        _coverage_target("Other Cam", width=1080, height=1920),
+    ])
+
+    row = next(r for r in cov["masters"] if r["id"] == dark["id"])
+    assert row["missed"] == ["Long Sub", "Other Cam"]
+    assert [d["name"] for d in row["missed_detail"]] == ["Long Sub", "Other Cam"]
+    assert "60s" in row["missed_detail"][0]["reason"]
+    assert "camera or binning" in row["missed_detail"][1]["reason"]
+
+
+def test_master_coverage_says_a_bias_was_passed_over_for_a_dark(tmp_path):
+    """A bias that fits perfectly is still "missed" whenever a dark was bound —
+    a dark already carries the bias. Blaming the bias would be a lie."""
+    root = tmp_path / "library"
+    _coverage_master(root, "dark", name="10s dark", exposure_s=10.0)
+    bias = _coverage_master(root, "bias", name="Bias", exposure_s=0.0)
+    masters = calibration.list_masters(root)
+
+    cov = calibration.master_coverage(root, masters, [_coverage_target("M 42")])
+
+    row = next(r for r in cov["masters"] if r["id"] == bias["id"])
+    assert row["missed"] == ["M 42"]
+    assert "a dark already includes the bias" in row["missed_detail"][0]["reason"]
+
+
+def test_master_coverage_reports_what_an_uncovered_target_was_shot_at(tmp_path):
+    """"Build a dark from frames shot the same way" is only actionable if you know
+    *which* way — so the roll-up carries each uncovered target's own numbers."""
+    root = tmp_path / "library"
+
+    cov = calibration.master_coverage(root, [], [
+        _coverage_target("M 42", exposure_s=10.0, gain=80.0),
+        _coverage_target("Long Sub", exposure_s=60.0, gain=200.0),
+    ])
+
+    assert cov["uncovered"] == ["M 42", "Long Sub"]
+    assert cov["uncovered_detail"] == [
+        {"name": "M 42", "exposure_s": 10.0, "gain": 80.0},
+        {"name": "Long Sub", "exposure_s": 60.0, "gain": 200.0},
+    ]
+
+
+def test_calibration_coverage_endpoint_serves_the_miss_reasons(
+        client, solved_library, tmp_path):
+    """The reasons must survive the endpoint (they're what the tooltip shows)."""
+    root = solved_library / "library"
+    # The fixture's subs are 10 s; this dark is 30 s, so it reaches neither.
+    dark = _coverage_master(root, "dark", name="30s dark", exposure_s=30.0)
+
+    body = client.get("/api/calibration/coverage").json()
+
+    row = next(r for r in body["masters"] if r["id"] == dark["id"])
+    assert row["n_covered"] == 0
+    assert len(row["missed_detail"]) == len(row["missed"]) == 2
+    assert all("30s" in d["reason"] for d in row["missed_detail"])
+
+
 def test_calibration_coverage_endpoint_reports_the_librarys_targets(
         client, solved_library, tmp_path):
     """End-to-end: the endpoint reads each target's own frames and reports a
