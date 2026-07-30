@@ -8451,6 +8451,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **NEW OBSERVATION (Builder 2026-07-30, measured while unstarving the per-frame object mask, v0.213.0) — the
+  per-frame flatten still absorbs ~55 % of a nebula that fills most of the frame, and nothing tells the user.**
+  *(Image-quality + friendliness; size S for the nudge, M for a real fix; PRIORITY 3–4.)* Measured on a synthetic
+  M42-shaped scene (a bright nebula spanning ~80 % of a 540×960 frame, 12 % LP gradient): the nebula keeps
+  **41.6/44.0/42.2 %** of its R/G/B amplitude through `subtract_background` — *ratios intact, so no colour damage*,
+  but a lot of flux gone. The pre-v0.213.0 mask kept 47.1/46.7/47.6 %, i.e. this is a pre-existing limitation of
+  fitting a 128 px mesh through a frame-filling object, not something the mask fix introduced (it moved the number by
+  5 points while removing the gradient starvation that was far more damaging). `bg/per_frame.py`'s own module
+  docstring already names the situation and the remedy — *"if the nebula fills more than ~half the frame … turn bg
+  flatten OFF (`mode='off'`) and remove residual gradients on the final stack instead"* — but a beginner will never
+  read that, and nothing in the app detects it. **Two shapes, both cheap:** (a) *detect and say so* — the object mask
+  now knows how much of the frame is structure, so a stack whose per-frame masks routinely cover most of the frame
+  could stamp a plain-language note on the run ("this target fills the frame — AstroStack turned per-frame flattening
+  down so it wouldn't eat the nebula"); (b) *act on it* — auto-fall-back to `mode='off'` (leaving the final gradient
+  pass to do the work) when the mask covers more than ~half the frame for most subs. (b) changes stacking behaviour,
+  so it needs a measurement harness and probably owner sign-off; (a) is additive and safe. Confidence: measured.
+
+- **NEW OBSERVATION (Builder 2026-07-30, same run) — a genuinely mesh-scale sky feature (amp glow in a corner) is
+  partly masked as "object" by the block-averaged extended pass, so ~⅓ of it survives the flatten.**
+  *(Image-quality; size S–M; PRIORITY 4.)* Measured by adding a sharp exponential corner glow (150 ADU peak, not
+  representable by the deg-2 detrend) to a realistic sub: the mask covers 60.6 % of the glow corner vs 3.1 % of the
+  far corner, and after `subtract_background` the corner sky sits at **+50 ADU** instead of ~0. **Not a regression** —
+  the pre-v0.213.0 mask left +52 ADU on the same scene (and, with a gradient present, left the *opposite* corner at
+  +57 ADU where the new mask leaves +9) — but it is the known cost of the `_EXT_NOISE_FLOOR = 0.5·σ` floor on the
+  extended pass: anything smooth, bright and above half a sub's sigma reads as structure. **Fix direction if it ever
+  matters:** the discriminator is that amp glow is *fixed to the sensor* while a nebula is fixed to the sky, so it is
+  visible as the part of the extended mask that does not move with dither across a session — i.e. a stack-level
+  (not per-sub) determination, which is also how a real defect/glow map would be built (see the persistent
+  defect-map idea below). Only worth doing if a real Seestar sub shows meaningful amp glow. Confidence: measured.
 - **NEW IDEA (Builder 2026-07-29, split out while capping the Auto denoise strength) — a low-frequency
   *chroma-blotch* reducer for the Auto recipe.** The 2026-07-26 audit measured that on a thin S30 stack the visible
   sky defect after denoise isn't fine grain (wavelet handles that) but a **low-frequency colour blotch** — patches of
@@ -10130,8 +10160,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   annotations endpoint); (c) frontend overlay + toggle on the History/result card; (d, follow-on) bake the bar into
   the share JPEG/wallpaper export so a shared image carries its scale. Clears the beginner bar: sane default,
   plain-language, no expert knobs.
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "Tonight's subs look soft — check focus": an early, actionable
-  focus/dew nudge fired on a fresh session's *first few* subs, comparing them to this target's own best nights.**
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-23) — "Tonight's subs look soft — check focus": an early, actionable
+  focus/dew nudge fired on a fresh session's *first few* subs, comparing them to this target's own best nights.**~~ —
+  **LARGELY ALREADY SHIPPED — curated by the Builder 2026-07-30** (grep before re-building, per the staleness warning
+  at the top of this section). Two shipped surfaces already cover this idea's substance, both driven by the same
+  per-frame `fwhm_px` this entry proposes to use: (1) `seestack/session_recap.py::_fwhm_quality_drift` →
+  `SessionRecap.quality_drift` — the newest session's median FWHM vs the target's **best prior session**, gated on
+  `SESSION_QUALITY_MIN_FRAMES = 4` measured subs and on clearing **both** a relative (`FWHM_DRIFT_RATIO = 1.25`) and an
+  absolute (`FWHM_DRIFT_ABS_PX = 0.6`) floor — i.e. exactly the proposed "softer than your usual on this target"
+  comparison, and it fires as soon as 4 subs of the new night are QC'd (so it *is* actionable mid-session); and
+  (2) the "Focus & sharpness through the night" trend (`FOCUS_TREND_*` + `FocusTrendCard`), which shows *within*-night
+  drift. **Residual delta, if a future run wants it (S, and marginal):** fire at 3 subs rather than 4, add the
+  star-count-drop signal as a second trigger, and word the copy as an actionable *rig* nudge ("check focus or wipe dew
+  off the lens") rather than a neutral report. Not worth a run on its own — it is copy + two constants on top of
+  shipped machinery. *(Original idea kept below for provenance.)*
   *(Autonomy + friendliness / "get a good image" pillar, PRIORITY 2–3; size M; offline, additive, read-only, no new
   deps.)* **Why a beginner wants it:** the most heartbreaking Seestar outcome is coming back to a whole night of
   subs that were all soft — the lens dewed over, or focus drifted at the start — and finding it only *after* the
