@@ -551,17 +551,14 @@ def _fallback_site_lon(request: Request, lib, targets) -> float | None:  # noqa:
     return lon
 
 
-@router.get("/api/activity-calendar", response_model=ActivityCalendarOut)
-def get_activity_calendar(request: Request, months: int = 12) -> ActivityCalendarOut:
-    """The library's imaging activity as a calendar heatmap — one cell per
-    observing night, shaded by that night's total capture time. Read-only
-    aggregation over the frames tables, cached on the app between scans. Nights
-    are bucketed noon-to-noon in the observer's local time (from ``site_lon`` when
-    set, else a frame's ``SITELONG`` header, else UTC), so a single midnight-
-    spanning session lands in one cell."""
-    months = max(1, min(24, months))
-    settings = deps.get_settings(request)
+def _cached_activity_calendar(request: Request, months: int):
+    """The trailing-window activity calendar, from the app cache when warm.
 
+    Extracted so the recap poster can reuse the *same* cached result as the
+    Dashboard heatmap — opening every project to read capture timestamps is the
+    expensive part, and asking for a night count shouldn't pay for it twice.
+    """
+    settings = deps.get_settings(request)
     lib = deps.open_library(request)
     try:
         targets = lib.list_targets()
@@ -581,14 +578,26 @@ def get_activity_calendar(request: Request, months: int = 12) -> ActivityCalenda
         cache = getattr(request.app.state, "activity_calendar_cache", None)
         now = time.monotonic()
         if cache and cache["sig"] == sig and (now - cache["at"]) < _ACTIVITY_CACHE_TTL_S:
-            cal = cache["data"]
-        else:
-            cal = _collect_activity_calendar(
-                lib, targets, today=today, months=months, lon_deg=lon)
-            request.app.state.activity_calendar_cache = {
-                "sig": sig, "at": now, "data": cal}
+            return cache["data"]
+        cal = _collect_activity_calendar(
+            lib, targets, today=today, months=months, lon_deg=lon)
+        request.app.state.activity_calendar_cache = {
+            "sig": sig, "at": now, "data": cal}
+        return cal
     finally:
         lib.close()
+
+
+@router.get("/api/activity-calendar", response_model=ActivityCalendarOut)
+def get_activity_calendar(request: Request, months: int = 12) -> ActivityCalendarOut:
+    """The library's imaging activity as a calendar heatmap — one cell per
+    observing night, shaded by that night's total capture time. Read-only
+    aggregation over the frames tables, cached on the app between scans. Nights
+    are bucketed noon-to-noon in the observer's local time (from ``site_lon`` when
+    set, else a frame's ``SITELONG`` header, else UTC), so a single midnight-
+    spanning session lands in one cell."""
+    months = max(1, min(24, months))
+    cal = _cached_activity_calendar(request, months)
 
     return ActivityCalendarOut(
         start_date=cal.start_date,
@@ -605,6 +614,149 @@ def get_activity_calendar(request: Request, months: int = 12) -> ActivityCalenda
         total_exposure_s=cal.total_exposure_s,
         nights_this_month=cal.nights_this_month,
         best_streak_nights=cal.best_streak_nights,
+    )
+
+
+# --- "Share your sky": a recap poster of everything you've captured ---------
+#
+# The numbers a hobbyist is quietly proud of (nights out, integration, targets,
+# subs kept, biggest project) already exist on the "Your sky, so far" page — but
+# only as a web page nobody else can see. These two read-only endpoints turn the
+# same figures into something shareable: the copy-paste caption, and a square
+# poster with the user's own best picture as the backdrop.
+
+
+class RecapStatOut(BaseModel):
+    value: str
+    label: str
+
+
+class RecapOut(BaseModel):
+    """The shareable recap of the whole library.
+
+    ``has_anything`` is false until some light has been collected — the caller's
+    cue to hide the share card entirely rather than offer an empty poster."""
+
+    has_anything: bool
+    caption: str
+    since: str
+    stats: list[RecapStatOut] = []
+    window_months: int
+    n_nights: int
+    n_targets: int
+    n_subs_kept: int
+    total_integration_s: float
+    top_target_name: str | None = None
+    top_target_integration_s: float | None = None
+
+
+def _recap_facts(request: Request, months: int):
+    """Collect the recap facts from the roll-ups the app already serves.
+
+    Registry-only for the totals/standouts (:func:`summarize_library`), plus the
+    activity calendar's night count — both read through their existing caches, so
+    a recap costs nothing the Dashboard hasn't already paid for.
+    """
+    from seestack.library_summary import summarize_library
+    from seestack.recap import RecapFacts
+
+    lib = deps.open_library(request)
+    try:
+        summary = summarize_library(
+            lib.list_targets(),
+            preview_exists=lambda p: bool(p) and Path(p).exists(),
+        )
+    finally:
+        lib.close()
+    cal = _cached_activity_calendar(request, months)
+    top = summary.longest_target
+    return summary, RecapFacts(
+        total_integration_s=summary.total_integration_s,
+        n_targets=summary.n_targets_imaged,
+        n_subs_kept=summary.n_subs_kept,
+        n_nights=cal.n_nights,
+        window_months=months,
+        first_light_utc=summary.first_light_utc,
+        top_target_name=top.name if top is not None else None,
+        top_target_integration_s=top.total_exposure_s if top is not None else None,
+    )
+
+
+@router.get("/api/recap", response_model=RecapOut)
+def get_recap(request: Request, months: int = 12) -> RecapOut:
+    """The shareable "your sky, so far" recap — the poster's own figures plus the
+    copy-paste caption to post beside it. Read-only; returns
+    ``has_anything=false`` (and empty text) on a library that hasn't collected
+    any light yet, so the share card self-hides instead of offering a blank
+    poster."""
+    from seestack.recap import recap_caption, recap_since_line, recap_stats
+
+    months = max(1, min(24, months))
+    summary, facts = _recap_facts(request, months)
+    stats = recap_stats(facts)
+    return RecapOut(
+        has_anything=bool(stats),
+        caption=recap_caption(facts),
+        since=recap_since_line(facts),
+        stats=[RecapStatOut(value=v, label=lbl) for v, lbl in stats],
+        window_months=months,
+        n_nights=facts.n_nights or 0,
+        n_targets=summary.n_targets_imaged,
+        n_subs_kept=summary.n_subs_kept,
+        total_integration_s=summary.total_integration_s,
+        top_target_name=facts.top_target_name,
+        top_target_integration_s=facts.top_target_integration_s,
+    )
+
+
+def _recap_hero(request: Request, summary):
+    """The user's own best picture for the poster backdrop, or ``None``.
+
+    The heroes are already ranked by integration, so the first one that still has
+    a readable preview on disk is "your biggest finished project". Best-effort:
+    an unreadable or deleted preview simply falls through to the next, and an
+    all-empty list gives the poster its plain deep-space background rather than
+    an error."""
+    from PIL import Image
+
+    lib = deps.open_library(request)
+    try:
+        by_safe = {t.safe_name: t for t in lib.list_targets()}
+        for hero in summary.heroes:
+            entry = by_safe.get(hero.safe)
+            path = getattr(entry, "last_stack_preview", None) if entry else None
+            if not path:
+                continue
+            try:
+                with Image.open(path) as img:
+                    return img.convert("RGB")
+            except Exception:  # noqa: BLE001 — a bad preview must not sink the poster
+                continue
+    finally:
+        lib.close()
+    return None
+
+
+@router.get("/api/recap.jpg")
+def get_recap_poster(request: Request, months: int = 12) -> Response:
+    """Download the recap as one square, social-ready JPEG.
+
+    Rendered on demand from the same figures ``/api/recap`` reports, over the
+    user's own best picture. Nothing is written to the library — this is a
+    display-time render, like the share export."""
+    import io
+
+    from seestack.recap import draw_recap_poster
+
+    months = max(1, min(24, months))
+    summary, facts = _recap_facts(request, months)
+    poster = draw_recap_poster(facts, hero=_recap_hero(request, summary))
+    buf = io.BytesIO()
+    poster.save(buf, format="JPEG", quality=92)
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/jpeg",
+        headers={"Content-Disposition": 'attachment; filename="my-sky-so-far.jpg"'},
     )
 
 

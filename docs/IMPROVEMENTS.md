@@ -9944,10 +9944,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   genuinely absent 2026-07-24: no endpoint ranks *owned* targets by tonight-suitability — `/suggest` excludes the
   library, `/next-session` is single-target.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-24) — "Your year in space": a one-tap, shareable recap poster of everything
-  you've captured (this year / all-time), turning the raw stats the app already tracks into something a beginner is
-  proud to post.** *(Pillar: enjoy + share — priority 3; explicitly on the beginner-bar list "enjoy, and share a good
-  image". Size M.)* Distinct from the existing single-night "Last night" card and from the raw imaging log/calendar
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-24) — "Your year in space": a one-tap, shareable recap poster of everything
+  you've captured, turning the raw stats the app already tracks into something a beginner is proud to post.**~~ —
+  **SHIPPED v0.223.0** as **"Share your sky"** (Builder 2026-07-30, branch `claude/relaxed-turing-judl31`).
+  **Scoped against what already exists** (the idea predates it): the *page* half — total integration, targets imaged,
+  subs kept, first light, biggest project, hero grid — has been live as **"Your sky, so far"** (`SkySoFar.tsx` +
+  `/api/library/summary`) for a while, so re-building it would have been churn. The genuinely missing half was the
+  one the idea is named for: **you can't show it to anyone.** So this ships the share step and nothing else.
+  **Engine** — new pure `seestack/recap.py` (no `webapp` imports, no network, no bundled asset — Pillow's built-in
+  scalable font, exactly like `nameplate.py`): a `RecapFacts` dataclass, `recap_stats` (the big `(value, label)`
+  pairs), `recap_caption` (the copy-paste blurb — *"12 nights under the sky · 8h 20m of light · 4 targets · biggest
+  project: M 31 (4h 12m)"*), `recap_top_project_line`, `recap_since_line`, and `draw_recap_poster` → a 1080²
+  social-ready image with the user's **own best picture** cover-cropped and veiled behind the numbers. Every figure
+  is optional and a missing one is **dropped, not printed as a zero** ("0 nights" reads as a bug, not a beginning),
+  and the stat grid is vertically centred with the provenance lines bottom-anchored so a one-night library looks
+  composed rather than top-heavy. The "biggest project" line uses a middle dot because the built-in font has **no
+  U+2014 glyph** — an em dash rendered as a visible tofu box on the finished poster (caught by rendering it and
+  looking; now pinned by a test).
+  **Webapp** — two read-only endpoints on the existing stats router: `GET /api/recap` (figures + caption, with
+  `has_anything:false` on an untouched library so the card self-hides) and `GET /api/recap.jpg` (the rendered
+  poster). Both reuse the roll-ups the Dashboard already pays for — `summarize_library` for the totals and the
+  activity calendar's night count via a new `_cached_activity_calendar` helper extracted from the heatmap endpoint,
+  so a recap costs no extra project opens. An unreadable/deleted preview falls through to the next hero and then to
+  the plain backdrop rather than 500-ing.
+  **Frontend** — a self-hiding `ShareYourSkyCard` on "Your sky, so far": Download poster (`<a download>`) + Copy
+  caption (falling back to showing the caption when the clipboard is blocked, mirroring History's "Copy caption").
+  Tests: `tests/test_recap.py` (+18), `tests/webapp/test_recap.py` (+7 — empty library self-hide, figures + caption,
+  window clamp, square JPEG, empty-library render, hero backdrop composited, unreadable preview survives),
+  `ShareYourSkyCard.test.tsx` (+6). Upgrade-safe: two additive read-only endpoints + one card; no config/DB/on-disk/
+  API-shape/default change, nothing written to the library (a display-time render, like the share export).
+  **Left for a later slice:** "favourite constellation", an explicit this-year/all-time toggle, and baking the
+  poster through `submit_editor_share`. *(Original idea kept below for provenance.)* *(Pillar: enjoy + share —
+  priority 3; explicitly on the beginner-bar list "enjoy, and share a good image". Size M.)* Distinct from the existing single-night "Last night" card and from the raw imaging log/calendar
   (both already proposed/built): this is a *celebratory* summary — total nights out, total integration hours, number of
   targets, favourite constellation, your best picture (thumbnail), and a fun highlight or two ("your longest single
   target: M31, 6.2 h across 5 nights"). One warm sentence of copy, no jargon. It composes data the app **already
