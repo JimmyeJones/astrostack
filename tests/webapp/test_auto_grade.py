@@ -260,6 +260,19 @@ def test_pipeline_leaves_frames_alone_when_disabled(built_library, data_root):
         lib.close()
 
 
+def _flat_metrics(fwhm: float) -> dict:
+    """Metrics where **only** FWHM varies. The other four are byte-identical
+    across the population, so their robust scale is zero and grading skips them
+    — the frame's fate depends on one axis the test controls exactly."""
+    return {
+        "fwhm_px": fwhm,
+        "star_count": 400,
+        "sky_adu_median": 1200.0,
+        "eccentricity_median": 0.40,
+        "transparency_score": 5000.0,
+    }
+
+
 def _seed_ramp(data_root, safe: str = "M_42") -> int:
     """Seed a bimodal "cloud rolled through for part of the night" population:
     a tight-good core plus a continuous ramp tail. Removing the worst tightens
@@ -312,7 +325,14 @@ def test_auto_grade_cumulative_cap_holds_across_repeated_scans(
     """Re-grading a target on every scan (a dripping Seestar session) must not
     let the cumulative auto-rejected fraction exceed the documented 25% cap.
     Before the cumulative-cap fix a single pass rejected 20% but the per-scan
-    cascade converged at ~29% — over the rail."""
+    cascade converged at ~29% — over the rail.
+
+    Since the ``reconsider`` change the cascade doesn't merely stay *capped*, it
+    stops happening: each scan grades over the same invariant population (the
+    accepted frames plus auto-grade's own rejects), so the decision is a fixed
+    point and every scan after the first is a no-op on unchanged data. Both
+    properties are asserted — the ≤25% rail (the original regression) and the
+    convergence that now enforces it."""
     from seestack.qc.grading import MAX_REJECT_FRACTION
 
     total = _seed_ramp(data_root)
@@ -320,27 +340,131 @@ def test_auto_grade_cumulative_cap_holds_across_repeated_scans(
     cap = int(total * MAX_REJECT_FRACTION)
 
     per_scan = []
+    rejected_sets = []
     lib = Library.open_or_create(data_root / "library")
     try:
         for _ in range(8):  # simulate repeated ingest scans re-grading
             proj = lib.open_target("M_42")
             try:
                 per_scan.append(pipeline._auto_grade_target(proj, settings))
+                rejected_sets.append({
+                    f.id for f in proj.iter_frames()
+                    if not f.accept
+                    and (f.reject_reason or "").startswith("auto:grade")
+                })
             finally:
                 proj.close()
+    finally:
+        lib.close()
+    cumulative = len(rejected_sets[-1])
+
+    # The first pass does the work…
+    assert per_scan[0] > 0, per_scan
+    # …and, with no new subs arriving, later scans change nothing at all: no
+    # further rejections and no reject↔re-accept churn of the same frames.
+    assert per_scan[1:] == [0] * 7, per_scan
+    assert all(s == rejected_sets[0] for s in rejected_sets), rejected_sets
+    # The running total stays at or below the documented cap.
+    assert 0 < cumulative <= cap, (cumulative, cap, per_scan)
+
+
+def test_auto_grade_re_accepts_a_frame_the_bigger_population_no_longer_flags(
+        built_library, data_root):
+    """A machine decision must not be permanent. A frame auto-rejected early —
+    graded against a small, tight population — comes back once enough ordinary
+    subs arrive that it is no longer an outlier.
+
+    Before the ``reconsider`` change ``apply_grade_report`` only ever set
+    ``accept=False``, so that early reject stayed rejected forever and the user
+    silently lost a good sub."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
         proj = lib.open_target("M_42")
         try:
-            cumulative = sum(
-                1 for f in proj.iter_frames()
-                if not f.accept and (f.reject_reason or "").startswith("auto:grade")
-            )
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, **_flat_metrics(3.00))
+            # A tight 14-sub opening population, plus one sub that is a clear
+            # outlier *against that population only*.
+            for i in range(14):
+                proj.add_frame(FrameRow(source_path=f"/synthetic/early_{i:02d}.fit",
+                                        **_flat_metrics(3.00 + 0.01 * i)))
+            borderline = proj.add_frame(FrameRow(
+                source_path="/synthetic/borderline.fit", **_flat_metrics(4.2)))
         finally:
             proj.close()
     finally:
         lib.close()
 
-    # The cascade must actually be exercised — more than one scan rejected
-    # frames (the second pass re-centres and flags the next tier)…
-    assert sum(1 for n in per_scan if n > 0) >= 2, per_scan
-    # …but the running total is held at or below the documented cap.
-    assert 0 < cumulative <= cap, (cumulative, cap, per_scan)
+    settings = Settings(data_root=str(data_root), auto_grade_frames=True)
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            pipeline._auto_grade_target(proj, settings)
+            f = proj.get_frame(borderline)
+            assert not f.accept and (f.reject_reason or "").startswith("auto:grade")
+            # The night goes on: 60 more subs arrive, scattered widely enough
+            # that 4.2 px is unremarkable.
+            for i in range(60):
+                proj.add_frame(FrameRow(
+                    source_path=f"/synthetic/later_{i:03d}.fit",
+                    **_flat_metrics(3.0 + 0.85 * (i % 4))))
+            pipeline._auto_grade_target(proj, settings)
+            back = proj.get_frame(borderline)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    assert back.accept, "the early auto-grade reject should have been re-accepted"
+    assert not back.reject_reason
+    assert not back.user_override
+
+
+def test_auto_grade_never_re_accepts_a_user_or_streak_rejection(
+        built_library, data_root):
+    """Re-acceptance is scoped to auto-grade's *own* machine decisions: a frame
+    the user set aside, and one the streak detector rejected, both stay rejected
+    however typical the population makes them look — while an ``auto:grade``
+    reject sitting right beside them (same metrics) does come back, proving the
+    pass really ran."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, **_flat_metrics(3.0))
+            for i in range(40):
+                proj.add_frame(FrameRow(source_path=f"/synthetic/ok_{i:03d}.fit",
+                                        **_flat_metrics(3.0 + 0.02 * (i % 5))))
+            mine = proj.add_frame(FrameRow(source_path="/synthetic/mine.fit",
+                                           **_flat_metrics(3.02)))
+            streaked = proj.add_frame(FrameRow(source_path="/synthetic/streak.fit",
+                                               **_flat_metrics(3.02)))
+            machine = proj.add_frame(FrameRow(source_path="/synthetic/machine.fit",
+                                              **_flat_metrics(3.02)))
+            proj.update_frame(mine, accept=False, reject_reason="manual",
+                              user_override=True)
+            proj.update_frame(streaked, accept=False, reject_reason="auto:streak")
+            proj.update_frame(machine, accept=False,
+                              reject_reason="auto:grade:fwhm_px")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    settings = Settings(data_root=str(data_root), auto_grade_frames=True)
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            pipeline._auto_grade_target(proj, settings)
+            assert proj.get_frame(machine).accept, "auto:grade reject should return"
+            assert not proj.get_frame(mine).accept
+            assert proj.get_frame(mine).reject_reason == "manual"
+            assert not proj.get_frame(streaked).accept
+            assert proj.get_frame(streaked).reject_reason == "auto:streak"
+        finally:
+            proj.close()
+    finally:
+        lib.close()

@@ -6998,8 +6998,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   caller are byte-for-byte unchanged). Tests: `rejectionNote.test.ts` (+10), `Jobs.test.tsx` (+3 — min/max note,
   κ-σ %, thin-stack suppression), `test_stack_pipeline.py` (+1 StackResult-mirrors-persisted, +2 assertions on the
   plain-mean case).
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — auto-grade should be able to *re-accept* a frame it earlier rejected once
-  a larger population no longer flags it (machine decisions shouldn't be permanent).** *(Autonomy; pillar 2; size
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — auto-grade should be able to *re-accept* a frame it earlier rejected once
+  a larger population no longer flags it (machine decisions shouldn't be permanent).**~~ — **SHIPPED v0.221.0**
+  (Builder 2026-07-30, branch `claude/relaxed-turing-xuihhk`). Built exactly the Builder design note below — one
+  deterministic grading pass over the **combined, invariant** population, driving both directions. **Engine**
+  (`seestack/qc/grading.py`): `grade_frames` grew an optional `reconsider: list[FrameRow]` — the target's own
+  `auto:grade` rejects — which rejoin *both* the population statistics and the `considered` set exactly as if
+  accepted (copied via `dataclasses.replace`, never mutated; a `user_override` or id-less row is dropped, and an id
+  already present in `frames` is de-duplicated). New `GradeReport.re_accept: list[int]` names every reconsidered
+  frame the pass did **not** flag, and new `apply_grade_reaccepts(project, report)` puts those back
+  (`accept=True`, `reject_reason=None`) — re-checking current state so it only ever touches a frame that is still
+  rejected, still carries an `auto:grade` reason, and still has no `user_override`; a manual or `auto:streak`
+  rejection is never undone by automation. The recommendation sort also gained a `frame_id` tiebreak so which
+  frames the cap keeps can't depend on the order the caller handed the rows in (a reconsidered row arrives at the
+  end of `considered`, so a z-score tie at the cap boundary would otherwise flip a frame in and out between scans).
+  **Webapp** (`webapp/pipeline.py::_auto_grade_target`): passes its `auto:grade` rejects as `reconsider` and applies
+  both directions — and, as the design note required, the v0.175.1 external `budget` truncation is **removed in the
+  same change** rather than layered on (grading over the combined set makes `grade_frames`' own
+  `int(len(considered)·MAX_REJECT_FRACTION)` cap measure against the original population directly, so keeping both
+  would double-cap). **Why it can't oscillate:** the combined set is invariant under auto-grade's own moves (a frame
+  only ever swaps halves), so the pass is a fixed point — the strengthened cumulative-cap regression now asserts
+  that directly (first scan decides; the next 7 change *nothing*, same reject set every time), which is a stronger
+  property than the old "the cascade is capped". Upgrade-safe: gated behind `auto_grade_frames` (off by default),
+  additive-only signatures with defaults, no config/DB-schema/on-disk/API-shape change (`GradeReportOut` maps
+  fields explicitly, so the new `re_accept` field never reaches the wire), and the interactive
+  `/auto-grade/apply` endpoint passes no `reconsider` so its behaviour is byte-for-byte unchanged. Tests, all
+  fail-before/pass-after: `tests/test_qc_grading.py` (+6 — re-accepts a frame the bigger population no longer
+  flags; a still-bad frame stays rejected and never lands in `re_accept`; user decisions are ignored; the
+  fixed-point property across repeated grading; the cap measured against the original 60-frame population; and
+  `apply_grade_reaccepts` puts back only auto-grade rejects, skipping `auto:streak`/user/already-accepted rows, and
+  is idempotent) and `tests/webapp/test_auto_grade.py` (+2 and 1 strengthened — an early reject returns once 60
+  ordinary subs arrive; a user reject and an `auto:streak` reject stay put while an `auto:grade` reject beside them
+  comes back; the cumulative-cap test now also asserts convergence). *(Original idea + design note kept below for
+  provenance.)* *(Autonomy; pillar 2; size
   S–M; opt-in, off by default — only bites installs that turned `auto_grade_frames` on.)* Found while shipping the
   auto-grade cumulative-cap fix (v0.175.1): `apply_grade_report` (`seestack/qc/grading.py`) only ever sets
   `accept=False` — it **never re-accepts** a frame it previously auto-rejected — and `grade_frames` never
