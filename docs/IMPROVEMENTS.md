@@ -6013,6 +6013,34 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-07-30, spotted while shipping the saved-master binder v0.214.0) — record on the *run*
+  when a saved calibration master was skipped, so History can say why instead of only the server log.** v0.214.0
+  makes the walk-away auto-stack honour a target's saved master picks, and deliberately **fail-soft** per slot: a
+  master deleted since it was saved, or one whose dimensions don't match the subs, is skipped with a
+  `log.warning` rather than failing the overnight job. That's the right runtime behaviour — but the *user* still
+  ends up with an uncalibrated stack and no on-screen reason, and a beginner won't read the server log. The
+  v0.215.1 `diagnose_uncalibrated` size signature covers the common wrong-camera case *by inference* (it
+  re-derives the conflict from the library), but it can't know that **this run** had an explicit saved pick that
+  was dropped, and it says nothing at all about a **deleted** master. **Idea:** have
+  `_apply_saved_calibration_masters` return the skips it made and stamp them on the run record (a short
+  `calibration_skipped` note in the run's meta/`options_json`, or a FITS `HISTORY` card), then surface it in the
+  History card's calibration line — *"Your saved master dark wasn't used: it was removed from your library."* /
+  *"…it's 1080×1920 but these subs are 480×320."* Additive + read-only on the display side; the only care needed
+  is keeping `StackOptions` JSON-safe and the run-record shape backward-compatible. (S–M, friendliness + trust —
+  PRIORITY 3.)
+- **NEW IDEA (Builder 2026-07-30, same run) — a "do my masters actually cover my targets?" line on the Calibration
+  page.** The Calibration page lists the masters you've built, but nothing connects them back to the library: a
+  beginner who built one 30 s dark has no idea it covers four of their six targets and misses the two they shot at
+  10 s (or the ones from a second Seestar). They only discover it target-by-target, on the Stack form or after an
+  uncalibrated result. **Idea:** a read-only roll-up — for each master, the count of library targets it can
+  confidently bind to — reusing machinery that is now all in one place: `calibration.modal_dim` (the target's frame
+  size), `calibration.dims_conflict` (the shared hard gate), and `auto_bind_master_paths`' existing confidence
+  gates. Render one plain line per master (*"covers 4 of your 6 targets"*, with the misses named on hover) plus a
+  gentle nudge when a target is covered by nothing. **Why it clears the beginner bar:** it answers "have I built the
+  right calibration frames?" — a question the app currently makes you answer six times — with no jargon and no
+  knobs. **Cost care:** it walks every target's accepted frames, so cache it like the other Dashboard roll-ups
+  (bounded probe + short TTL) rather than computing it per page load. Additive read-only endpoint + one line per
+  master; no schema/config/default/API-shape change. (M, friendliness + autonomy — PRIORITY 3.)
 - ~~**NEW IDEA (Builder 2026-07-29, observed while fixing the "Save as defaults drops master picks" bug, v0.210.15) —
   let the walk-away auto-stack honour a target's *saved* calibration masters, not just `auto_bind_calibration`.**~~ —
   **SHIPPED v0.214.0** (Builder 2026-07-30, branch `claude/relaxed-turing-m9ayja`; tested). `_stack_target`
