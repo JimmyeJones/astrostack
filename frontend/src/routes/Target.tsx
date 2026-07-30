@@ -26,6 +26,7 @@ import { MoonInterferenceCard } from "../components/MoonInterferenceCard";
 import { DeepeningReelCard } from "../components/DeepeningReelCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
+import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
 import { StackNoiseBadge } from "../components/StackNoiseBadge";
 import { FirstLookCard } from "../components/FirstLookCard";
 import { WallpaperMenu } from "../components/WallpaperMenu";
@@ -893,6 +894,12 @@ export function TargetView() {
       {latestRun?.has_preview ? (
         <StackNoiseBadge safe={safe} runId={latestRun.id}
           nFrames={latestRun.n_frames_used ?? null} />
+      ) : null}
+      {/* A calibration master the user explicitly saved that the newest run had
+          to drop — recorded by the unattended stack and, until now, only visible
+          if they expanded History's Info panel. Self-hides on a clean run. */}
+      {latestRun ? (
+        <CalibrationSkippedNote safe={safe} runId={latestRun.id} />
       ) : null}
       {/* Per-target personal-record beat: celebrate when the newest stack came
           out sharper than any previous stack of this target (self-hides on the

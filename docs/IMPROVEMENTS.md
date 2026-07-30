@@ -6013,8 +6013,17 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-07-30, spotted while shipping the skipped-master note v0.216.0) — the skip reason only
-  reaches a user who opens the History *Info* panel; put it where the walk-away user actually lands.** v0.216.0
+- ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the skipped-master note v0.216.0) — the skip reason only
+  reaches a user who opens the History *Info* panel; put it where the walk-away user actually lands.**~~ — **SHIPPED
+  v0.217.1** (Builder 2026-07-30, branch `claude/relaxed-turing-ai56dq`). Both surfaces named in the idea now show it,
+  via one small shared component `CalibrationSkippedNote` (`frontend/src/components/CalibrationSkippedNote.tsx`):
+  (a) the Jobs page's "Process target" result, right under the noise payoff, and (b) the Target page's newest-run
+  block. It re-uses the `calibration_skipped` field already on the run-info payload (no new endpoint, no new
+  recording) and shares the Editor's `["stack-run-info", …]` query key so a run isn't fetched twice. Best-effort and
+  self-hiding: a run that skipped nothing, an older backend that doesn't report skips, and a failed fetch all render
+  nothing rather than an error — so it can't nag. Tests: `CalibrationSkippedNote.test.tsx` (+5 — one skip, several
+  joined, skipped-nothing, older backend, fetch failure), `Jobs.test.tsx` (+1), `Target.test.tsx` (+2). Upgrade-safe:
+  frontend-only, no config/DB/API-shape/default change. *(Original idea kept below for provenance.)* v0.216.0
   records, per run, the calibration masters a saved pick had to skip, and the History Info panel now says so. But the
   hands-off user's natural landing spots are the **Jobs page** ("Process target" result) and the **Target page's**
   newest-run area — neither of which shows it, and neither of which the user has to expand. So the very person the
@@ -13543,6 +13552,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.217.1** — The skipped-calibration-master note now reaches the walk-away user: the same recorded
+  `calibration_skipped` sentences the History *Info* panel shows are now also on the Jobs page's "Process target"
+  result and the Target page's newest-run block, via one shared self-hiding `CalibrationSkippedNote` component
+  (best-effort — a clean run, an older backend, or a failed fetch all render nothing). Tests:
+  `CalibrationSkippedNote.test.tsx` (+5), `Jobs.test.tsx` (+1), `Target.test.tsx` (+2).
 - **v0.213.0** — ⭐⭐ Fixed the PER-FRAME background flatten's starved object mask — the last stacking-engine source of
   the "one corner is washed out" final picture. `_build_object_mask_for_bg` now detrends by a robust low-order
   tile-median sky poly (shared `seestack/bg/sky_poly.py`), drops noise-sized detections, and adds a cheap

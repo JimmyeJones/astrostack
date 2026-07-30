@@ -234,6 +234,27 @@ describe("JobsView process_target result actions", () => {
     expect(screen.queryByTestId("stack-noise-badge")).not.toBeInTheDocument();
   });
 
+  it("says here — not only in History's Info panel — that a saved master was skipped", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-skip", kind: "process_target", target: "M_42", state: "done",
+        result: { stacked: true, solved_accepted: 40, stack: { n_frames_used: 40, run_id: 12 } },
+      }),
+    ]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 12, integration_s: 400, n_frames: 40, cards: [],
+      calibration_skipped: [
+        "Your saved master dark wasn't used: it's no longer in your calibration library.",
+      ],
+    } as never);
+    renderJobsRouted();
+    await screen.findByRole("link", { name: "View result" });
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Your saved master dark wasn't used/),
+      ).toBeInTheDocument());
+  });
+
   it("offers 'Open target' (not a result link) when nothing was stacked", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({
