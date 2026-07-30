@@ -9,6 +9,9 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type CalibrationMaster } from "../api/client";
+import {
+  masterCoverageLine, masterMissesTooltip, uncoveredTargetsNote,
+} from "../components/calibrationCoverage";
 
 const KIND_COLORS: Record<string, string> = { dark: "indigo", flat: "teal", bias: "grape" };
 
@@ -89,9 +92,26 @@ export function CalibrationView() {
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["calibration-masters"] });
+  // "Do my masters actually cover my targets?" — read-only, and deliberately its
+  // own query so a slow walk over every target's frames never holds up the master
+  // list. It walks project SQLite, so it's polled far more gently than the list.
+  const coverage = useQuery({
+    queryKey: ["calibration-coverage"],
+    queryFn: api.calibrationCoverage,
+    refetchInterval: 60_000,
+  });
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["calibration-masters"] });
+    qc.invalidateQueries({ queryKey: ["calibration-coverage"] });
+  };
 
   const list = masters.data ?? [];
+  const nTargets = coverage.data?.n_targets ?? 0;
+  const coverageById = new Map(
+    (coverage.data?.masters ?? []).map((m) => [m.id, m]),
+  );
+  const uncovered = coverage.data ? uncoveredTargetsNote(coverage.data) : null;
 
   return (
     <Stack>
@@ -101,6 +121,14 @@ export function CalibrationView() {
         out vignetting and dust shadows. Build them here, then pick them in the Stack form.
         Masters must match the frames' sensor size (no binning change).
       </Alert>
+
+      {/* The gap that actually costs picture quality: a target no master reaches.
+          Self-hiding — nothing is said when everything is covered. */}
+      {uncovered ? (
+        <Alert icon={<IconInfoCircle size={16} />} color="yellow" variant="light">
+          {uncovered}
+        </Alert>
+      ) : null}
 
       <BuildForm onDone={refresh} />
 
@@ -134,6 +162,24 @@ export function CalibrationView() {
                       {!m.exists ? (
                         <Badge size="xs" color="red" variant="light">file missing</Badge>
                       ) : null}
+                      {/* Which of the user's targets this master can actually be
+                          applied to — the question the page otherwise makes them
+                          answer one target at a time. */}
+                      {(() => {
+                        const row = coverageById.get(m.id);
+                        if (!row) return null;
+                        const line = masterCoverageLine(row, nTargets);
+                        if (!line) return null;
+                        const misses = masterMissesTooltip(row, nTargets);
+                        const text = (
+                          <Text size="xs" c={row.n_covered === 0 ? "yellow.7" : "dimmed"}>
+                            {line}
+                          </Text>
+                        );
+                        return misses ? (
+                          <Tooltip label={misses} multiline w={260}>{text}</Tooltip>
+                        ) : text;
+                      })()}
                     </Table.Td>
                     <Table.Td>
                       <Badge color={KIND_COLORS[m.kind] ?? "gray"} variant="light">{m.kind}</Badge>

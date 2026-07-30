@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -100,6 +101,84 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     rec["params"]["height_px"] = calibration.modal_dim([f.height_px for f in frames])
     rec["n_frames"] = len(frames)
     return rec
+
+
+# The coverage roll-up opens every target's project SQLite and reads its accepted
+# frames, so — unlike the registry-only master list — it is *not* free. Cache it on
+# the app exactly like the Dashboard roll-ups do: the signature keys on each
+# target's activity + accepted-frame count and on the master registry itself, so a
+# fresh scan, a new master, or a deleted one invalidates it promptly; the TTL is
+# the backstop for anything the signature misses.
+_COVERAGE_CACHE_TTL_S = 60.0
+
+
+@router.get("/api/calibration/coverage")
+def calibration_coverage(request: Request) -> dict[str, Any]:
+    """"Do my masters actually cover my targets?" — a read-only roll-up.
+
+    For each master, how many of the library's targets the *unattended* binder
+    would apply it to (and which it misses), plus the targets no master covers at
+    all. It answers in one place a question the app currently makes a beginner
+    answer target-by-target, on the Stack form or after an uncalibrated result.
+
+    ``auto_apply`` reports whether ``auto_bind_calibration`` is actually on, so the
+    page can promise "AstroStack will apply it for you" only when that's true. With
+    it off (the default) a covered master is one the app *can* use — the user still
+    picks it on the Stack form or saves it as the target's default — and the copy
+    must say so rather than over-promising.
+
+    Never raises on a bad target: a project that can't be opened is skipped, so
+    one damaged target can't take the whole page down.
+    """
+    settings = deps.get_settings(request)
+    lib = deps.open_library(request)
+    try:
+        targets = lib.list_targets()
+        masters = calibration.list_masters(settings.resolved_library_root)
+        sig = (
+            tuple(sorted((t.safe_name, t.last_activity_utc or "",
+                          t.n_frames_accepted) for t in targets)),
+            tuple(sorted((int(m.get("id", -1)), bool(m.get("exists", True)))
+                         for m in masters)),
+        )
+        cache = getattr(request.app.state, "calibration_coverage_cache", None)
+        now = time.monotonic()
+        if cache and cache["sig"] == sig and (now - cache["at"]) < _COVERAGE_CACHE_TTL_S:
+            data = cache["data"]
+        else:
+            rows = [_target_acquisition(lib, t) for t in targets]
+            data = calibration.master_coverage(
+                settings.resolved_library_root, masters,
+                [r for r in rows if r is not None])
+            request.app.state.calibration_coverage_cache = {
+                "sig": sig, "at": now, "data": data}
+        # Read live rather than cached: the setting can be flipped between polls
+        # and it only changes the *wording*, never the (expensive) coverage maths.
+        return {**data, "auto_apply": bool(settings.auto_bind_calibration)}
+    finally:
+        lib.close()
+
+
+def _target_acquisition(lib: Any, entry: Any) -> dict[str, Any] | None:
+    """One target's acquisition signature for :func:`calibration.master_coverage`,
+    or ``None`` when its project can't be read (skip it rather than 500)."""
+    try:
+        proj = lib.open_target(entry.safe_name)
+        try:
+            frames = list(proj.iter_frames(accepted_only=True))
+        finally:
+            proj.close()
+    except Exception:  # noqa: BLE001 — one unreadable target must not sink the page
+        return None
+    return {
+        "name": entry.name, "safe_name": entry.safe_name,
+        "exposure_s": _median([f.exposure_s for f in frames if f.exposure_s]),
+        "gain": _median([f.gain for f in frames if f.gain is not None]),
+        "sensor_temp_c": _median(
+            [f.sensor_temp_c for f in frames if f.sensor_temp_c is not None]),
+        "width_px": calibration.modal_dim([f.width_px for f in frames]),
+        "height_px": calibration.modal_dim([f.height_px for f in frames]),
+    }
 
 
 @router.delete("/api/calibration/masters/{master_id}")

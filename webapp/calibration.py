@@ -729,6 +729,89 @@ def _fmt_seconds(value: float) -> str:
     return f"{value:g}s"
 
 
+#: One target's acquisition signature, as :func:`master_coverage` needs it: the
+#: same five numbers every other binder gates on (median exposure/gain/sensor
+#: temperature of the accepted subs, plus their modal raw frame size). A plain
+#: dict keeps the helper pure and unit-testable without a Library/Project.
+COVERAGE_TARGET_KEYS = (
+    "name", "safe_name", "exposure_s", "gain", "sensor_temp_c",
+    "width_px", "height_px",
+)
+
+
+def master_coverage(
+    library_root: str | Path,
+    masters: list[dict[str, Any]],
+    targets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Which of the user's targets each master can actually calibrate.
+
+    The Calibration page lists the masters you've built, but nothing connects them
+    back to the library: a beginner who built one 30 s dark has no idea it covers
+    four of their six targets and misses the two they shot at 10 s (or the ones
+    from a second Seestar). Today they only find out target-by-target, on the
+    Stack form or after an uncalibrated result — six times over.
+
+    "Covers" is deliberately the **strict, unattended** test: a master counts for a
+    target only if :func:`auto_bind_master_paths` — the same confidence gate the
+    walk-away auto-stack binds through — would apply it. So the roll-up promises
+    exactly what the app will actually do on its own, never something the user
+    would have to pick by hand. That also means a target whose subs recorded no
+    exposure/gain is judged on what *is* known, exactly as an unattended stack
+    would judge it.
+
+    ``targets`` are plain dicts (see :data:`COVERAGE_TARGET_KEYS`) so this stays a
+    pure read-only function over the registry — the caller does the per-target
+    frame read. Returns::
+
+        {"n_targets": int,
+         "masters": [{"id", "name", "kind", "n_covered", "covered", "missed"}, …],
+         "uncovered": [target names with no master at all]}
+
+    ``masters`` keeps the input order (the registry's newest-first), and every
+    name list is in the caller's target order, so the display is stable between
+    polls. Never raises: a master whose file has gone simply covers nothing.
+    """
+    bound_ids: list[set[int]] = []
+    for t in targets:
+        try:
+            paths = auto_bind_master_paths(
+                library_root, masters,
+                exposure_s=t.get("exposure_s"), gain=t.get("gain"),
+                sensor_temp_c=t.get("sensor_temp_c"),
+                width_px=t.get("width_px"), height_px=t.get("height_px"),
+            )
+        except Exception:  # noqa: BLE001 — a roll-up is a nicety, never a 500
+            log.warning("master coverage probe failed for %r", t.get("name"))
+            paths = {}
+        ids = set()
+        for key in ("dark_path", "flat_path", "flat_dark_path", "bias_path"):
+            mid = master_id_for_path(library_root, paths.get(key))
+            if mid is not None:
+                ids.add(mid)
+        bound_ids.append(ids)
+
+    names = [str(t.get("name") or t.get("safe_name") or "?") for t in targets]
+    rows: list[dict[str, Any]] = []
+    for m in masters:
+        try:
+            mid = int(m["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        covered = [n for n, ids in zip(names, bound_ids) if mid in ids]
+        missed = [n for n, ids in zip(names, bound_ids) if mid not in ids]
+        rows.append({
+            "id": mid, "name": str(m.get("name") or f"master {mid}"),
+            "kind": str(m.get("kind") or "?"),
+            "n_covered": len(covered), "covered": covered, "missed": missed,
+        })
+    return {
+        "n_targets": len(targets),
+        "masters": rows,
+        "uncovered": [n for n, ids in zip(names, bound_ids) if not ids],
+    }
+
+
 # A flat-dark must match the *flat's* exposure closely (it removes the flat's own
 # dark-current/bias pedestal). Only recommend one whose match distance clears
 # this bar, so we never suggest, say, a 300 s dark for a 2 s flat.

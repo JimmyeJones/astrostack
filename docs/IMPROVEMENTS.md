@@ -6051,8 +6051,34 @@ to **Shipped**.)_
   *"…it's 1080×1920 but these subs are 480×320."* Additive + read-only on the display side; the only care needed
   is keeping `StackOptions` JSON-safe and the run-record shape backward-compatible. (S–M, friendliness + trust —
   PRIORITY 3.)
-- **NEW IDEA (Builder 2026-07-30, same run) — a "do my masters actually cover my targets?" line on the Calibration
-  page.** The Calibration page lists the masters you've built, but nothing connects them back to the library: a
+- ~~**NEW IDEA (Builder 2026-07-30, same run) — a "do my masters actually cover my targets?" line on the Calibration
+  page.**~~ — **SHIPPED v0.217.0** (Builder 2026-07-30, branch `claude/relaxed-turing-rrutdf`; tested). New pure
+  `calibration.master_coverage(library_root, masters, targets)` answers it for the whole library at once, and it
+  measures coverage with **the unattended binder's own confidence gate** (`auto_bind_master_paths`, mapped back to
+  master ids via `master_id_for_path`) — so the roll-up promises exactly what the app will do **on its own**, never
+  something the user would still have to pick by hand. It takes plain target dicts (`COVERAGE_TARGET_KEYS`), so it
+  stays pure and unit-testable without a Library/Project, and it never raises: a probe that fails leaves that target
+  uncovered rather than 500-ing the page. New read-only `GET /api/calibration/coverage`
+  (`webapp/routers/calibration.py`) does the per-target frame read and returns `{n_targets, masters:[{id, name, kind,
+  n_covered, covered, missed}], uncovered}`; because it opens every target's project SQLite (unlike the
+  registry-only master list) it is **cached on the app exactly like the Dashboard roll-ups** — signature keyed on
+  each target's activity + accepted-frame count *and* the master registry, 60 s TTL — and one unreadable target is
+  skipped rather than taking the page down. Frontend: three pure, tested copy helpers
+  (`components/calibrationCoverage.ts` — `masterCoverageLine`, `masterMissesTooltip`, `uncoveredTargetsNote`) drive a
+  per-master line under each name on the Calibration page (*"Covers 4 of your 6 targets"*, yellow *"Doesn't match any
+  of your 6 targets yet"*, with the misses named on hover) plus a self-hiding yellow Alert naming the targets **no**
+  master reaches and the one plain next step (*"build a dark from frames shot the same way — same exposure, gain and
+  camera"*). Its own query at a 60 s poll, so a slow walk never holds up the master list. **The copy only promises
+  hands-off use when it's true:** the payload carries `auto_apply` (the live `auto_bind_calibration` setting, read
+  outside the cache since it changes only the wording), so with auto-calibration **off — the default** — the nudge
+  ends *"then pick it on the Stack form (or turn on auto-calibration in Settings to have it applied for you)"*
+  rather than claiming the app will do it. Upgrade-safe: additive endpoint + additive frontend, read-only throughout; no
+  config/DB-schema/on-disk/default/existing-API-shape change. Tests: `tests/webapp/test_calibration.py` (+6 — one
+  dark covering two 10 s targets and missing the 60 s one, a wrong-camera master covering nothing, the no-masters and
+  no-targets edges, and the endpoint end-to-end on the real fixture library), `calibrationCoverage.test.ts` (+11 —
+  all three helpers incl. singular/plural and the self-hiding cases), `Calibration.test.tsx` (+2 — the coverage line
+  and uncovered nudge render; nothing is said when every target is covered). *(Original idea kept for provenance.)*
+  The Calibration page lists the masters you've built, but nothing connects them back to the library: a
   beginner who built one 30 s dark has no idea it covers four of their six targets and misses the two they shot at
   10 s (or the ones from a second Seestar). They only discover it target-by-target, on the Stack form or after an
   uncalibrated result. **Idea:** a read-only roll-up — for each master, the count of library targets it can
