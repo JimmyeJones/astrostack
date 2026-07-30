@@ -235,7 +235,7 @@ export function StackView() {
     mutationFn: () => api.putStackDefaults(safe, values),
     onSuccess: () => notifications.show({
       title: "Saved as defaults",
-      message: "These options will pre-fill this form and drive auto-stacking for this target.",
+      message: "These options — including your calibration picks — will pre-fill this form and drive auto-stacking for this target.",
       color: "teal",
     }),
     onError: (e: Error) => notifications.show({ message: `Save failed: ${e.message}`, color: "red" }),
@@ -1139,7 +1139,7 @@ export function StackView() {
           ) : null}
 
           <Group justify="flex-end" mt="sm">
-            <Tooltip label="Remember these options for this target — they pre-fill this form and are used when auto-stacking is on">
+            <Tooltip label="Remember these options (and your calibration picks) for this target — they pre-fill this form and are used when auto-stacking is on">
               <Button variant="default" onClick={() => saveDefaults.mutate()} loading={saveDefaults.isPending}>
                 Save as defaults
               </Button>

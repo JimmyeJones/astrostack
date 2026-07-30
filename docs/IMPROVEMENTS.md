@@ -6013,8 +6013,31 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-07-29, observed while fixing the "Save as defaults drops master picks" bug, v0.210.15) —
-  let the walk-away auto-stack honour a target's *saved* calibration masters, not just `auto_bind_calibration`.**
+- ~~**NEW IDEA (Builder 2026-07-29, observed while fixing the "Save as defaults drops master picks" bug, v0.210.15) —
+  let the walk-away auto-stack honour a target's *saved* calibration masters, not just `auto_bind_calibration`.**~~ —
+  **SHIPPED v0.214.0** (Builder 2026-07-30, branch `claude/relaxed-turing-m9ayja`; tested). `_stack_target`
+  (`webapp/pipeline.py`) now captures the four `*_master_id` picks out of the **per-target** "Save as defaults" blob
+  (never the global `default_stack_options`, so a crafted settings PUT still can't reach the calibration registry) and
+  hands them to a new `_apply_saved_calibration_masters`, which resolves each id against the library's own master
+  registry and sets the corresponding `dark_path`/`flat_path`/`flat_dark_path`/`bias_path`. It runs **before**
+  `_auto_bind_calibration`, which already self-skips once any calibration path is set — so the user's explicit pick
+  beats the auto-picker, and the "Save as defaults" toast's promise ("…drive auto-stacking for this target") is finally
+  true of the calibration picks too (its copy + the button tooltip now say so explicitly).
+  **Deliberately fail-soft, per slot**, because this runs on the walk-away path where an exception is a failed
+  overnight job: a master deleted (or whose file has gone) since it was saved is skipped with a warning rather than
+  raising; a saved master whose **recorded dimensions provably disagree** with the target's subs is skipped too —
+  binding it would hard-fail `run_stack` at `CalibrationMasters.validate`, which is strictly worse than the
+  uncalibrated stack the user got before. That dimension gate refuses only on a *positive* conflict (both sides known
+  and different); when either side never recorded a size we trust the explicit pick, exactly as the manual Stack form
+  does. A stray `scale_dark_to_light` with no dark bound is dropped, mirroring `_auto_bind_calibration`.
+  `_mode_dim` was lifted out of `_confident_master_binding` to module level so both share one definition.
+  **§9 upgrade-safe:** it fires only for a target whose *own* saved defaults carry a real master id — a state only a
+  post-v0.210.15 "Save as defaults" click can create — so no existing install silently starts calibrating; an old
+  defaults blob with no id keys stacks byte-identically (covered by a test). No config/DB-schema/API-shape/on-disk
+  change, no default flip. Tests: `tests/webapp/test_auto_stack_saved_masters.py` (+8; four fail-before/pass-after —
+  the saved dark+flat reaching the run, the saved pick beating a closer auto-pick, a dims-unrecorded master still
+  binding, the stray-flag drop — plus four guards that must *not* change: a deleted master, a wrong-size master, a
+  no-ids blob, and the manual-options path). *(Original idea kept for provenance.)*
   Now that "Save as defaults" persists the four `*_master_id` picks (v0.210.15), a beginner reasonably expects "I
   chose my darks once → every future auto-stack of this target uses them". But the unattended path
   (`webapp/pipeline.py::_resolve_stack_options` → `coerce_stack_options`) drops the saved ids and only applies
