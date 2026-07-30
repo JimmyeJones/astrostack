@@ -71,6 +71,37 @@ when you take it.
 > slider drag) and FIXED (see the struck flaky-test entry below); a frontend/API click-path audit filed its own
 > entries below.
 
+- **⭐⭐ OWNER-REPORTED REGRESSION (2026-07-30, S30 owner, real data) — the one-click Auto result on a deep MOSAIC
+  now shows a "multicolour grid" + extra chroma noise that the pre-v0.220 chain did NOT.** The owner deployed
+  v0.222.0 (up from ~v0.158) and re-scanned; a ~400-sub Virgo-area **mosaic** that his *previous* install rendered
+  clean (dark, seamless, neutral colour, round stars) now comes out grainy with a visible **coloured grid keyed to
+  the mosaic panel seams** — same subs, only ~20 fewer frames used (negligible; not a data-loss issue). Two
+  before/after un-edited (= one-click Auto; the owner does no manual edit) exports of the *same* field were provided.
+  **Stacking / mosaic blend is NOT the cause** — `seestack/stack/mosaic.py` + `seestack/stack/photometric.py` are
+  unchanged since v0.184.10, long before the owner's old install; the only relevant new machinery on the Auto path is
+  the colour work shipped v0.210.5–v0.220.0. **Root-cause hypothesis (traced through `auto_recipe`, needs a
+  synthetic-mosaic repro to confirm & bisect):** the new `detail.chroma_denoise` op (v0.220.0, on the on-by-default
+  Auto chain) fires too hard on mosaics. `auto_recipe` (`seestack/edit/presets.py:358`) reads `sky_sigma` from
+  `analyze_proxy(rgb)` over the **whole union canvas** — which on a mosaic includes the ragged low-coverage borders
+  and per-panel seam steps → **inflated `sky_sigma`** → `noise_frac` high → `chroma_strength = _AUTO_CHROMA_MAX *
+  noise_frac` high (`:385`) → the wide-kernel chroma smoothing (`:460–461`) runs at strength and **smears colour
+  across panels that carry slightly different colour offsets, leaving a low-frequency colour step at every seam = the
+  grid.** (Its NaN-awareness handles the *outer* mosaic gaps but not the *interior* coverage/colour discontinuities
+  between overlapping panels.) So a genuinely deep mosaic is misread as a noisy thin stack and gets an op it
+  shouldn't. **Fix direction (Builder — verify by repro FIRST, do not blind-flip):** measure the Auto noise crossfade
+  on a **high-coverage interior** region of a mosaic (exclude the seams / low-coverage border), and/or make
+  `chroma_denoise` **seam-aware** (refuse to smooth across coverage/colour discontinuities the same way it already
+  refuses to bleed across NaN gaps), and/or damp `chroma_strength` when `is_mosaic` and per-panel colour offsets are
+  present. The owner strongly preferred the old (op-absent) output, so **erring toward NOT firing on a deep mosaic is
+  the safe default.** **Repro to build:** a 2×N-panel synthetic S30 mosaic, each panel deep (low real σ) but given a
+  small per-panel chroma offset + a modest coverage taper at the seams; run `get_proxy → auto_recipe → apply_recipe`;
+  assert (a) `chroma_strength` stays low on the deep mosaic and (b) no colour step appears at a panel boundary
+  (measure chroma variance across a seam line vs within a panel). Severity **high** (degrades the final image on a
+  live install, on-by-default path); confidence **high** on the mechanism, **medium** that it is the *sole*
+  contributor — while you have the synthetic mosaic, bisect the v0.158→v0.220 colour changes (SCNR, the per-frame /
+  final gradient flatten) on it to be sure none of those also add a per-panel colour step. Owner is on this build now,
+  so this is **front-of-queue**.
+
 - ~~**⭐⭐ MEASURED (2026-07-26 quality audit) — the one-click Auto result is purple-one-side / green-or-blown-the-other
   on any stack with a residual sky gradient: the Auto recipe's luminance-mode gradient removal + per-channel STF
   turn ordinary light pollution into a strong spatial COLOUR split.**~~ — **FIXED v0.211.0** (Builder 2026-07-29,
@@ -9689,6 +9720,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **⭐ OWNER-REQUESTED (2026-07-30) — let the user turn OFF the Auto auto-crop; make the ragged-border trim a
+  toggle.** The one-click Auto chain ends with a `geometry.crop` op (`seestack/edit/presets.py:462–466`,
+  `trim_crop`) that trims the ragged, low-coverage mosaic/dither border so the result is cleanly framed. The owner
+  **does not like Auto cropping his images automatically** and wants to keep the full frame. Add a user-facing
+  setting — **"Auto-crop ragged border" (default ON**, so nobody else's result changes) — that, when off, drops the
+  `geometry.crop` op from the recipe so the full uncropped frame is kept. Surface it (a) as a per-run toggle in the
+  Auto/one-click UI *and* (b) as a library-level default the owner can set once (mirror how other Auto defaults are
+  stored). Keep it beginner-simple: one clearly-labelled switch, a short "keeps the full frame including uneven
+  edges" hint. Wire it through `auto_recipe`/`analyze_auto_inputs` as a plumbed flag (don't hard-remove the op), and
+  respect it on both the preview and the full-res export path so what the user sees matches what they save. Small,
+  self-contained, high owner-satisfaction.
 
 - ~~**⭐ OWNER-REQUESTED — "Stack video": lucky-imaging stack of the Seestar's Solar/
   Lunar video captures.**~~ — **SLICE (a) SHIPPED v0.224.0** (Builder 2026-07-30, branch
