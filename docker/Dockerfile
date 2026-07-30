@@ -16,9 +16,12 @@ RUN npm run build -- --outDir /build/dist --emptyOutDir
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim AS runtime
 
-# OS libraries the engine needs (Pillow, scikit-image, numpy/scipy runtime).
+# OS libraries the engine needs (Pillow, scikit-image, numpy/scipy runtime), plus
+# ffmpeg — the decoder for the Seestar's Solar/Lunar *video* captures ("Stack
+# video"). It's a plain offline codec: nothing is downloaded at runtime and
+# nothing leaves the box; the engine only ever shells out to it locally.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libgl1 libglib2.0-0 libgomp1 \
+        libgl1 libglib2.0-0 libgomp1 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -71,8 +71,39 @@ when you take it.
 > slider drag) and FIXED (see the struck flaky-test entry below); a frontend/API click-path audit filed its own
 > entries below.
 
-- **⭐⭐ OWNER-REPORTED REGRESSION (2026-07-30, S30 owner, real data) — the one-click Auto result on a deep MOSAIC
-  now shows a "multicolour grid" + extra chroma noise that the pre-v0.220 chain did NOT.** The owner deployed
+- ~~**⭐⭐ OWNER-REPORTED REGRESSION (2026-07-30, S30 owner, real data) — the one-click Auto result on a deep MOSAIC
+  now shows a "multicolour grid" + extra chroma noise that the pre-v0.220 chain did NOT.**~~ — **ROOT CAUSE FIXED v0.225.0**
+  (Builder 2026-07-30, branch `claude/relaxed-turing-31k4wp`). The filed hypothesis was **confirmed by repro and
+  measured**: `analyze_proxy` (`seestack/edit/presets.py`) measured "how noisy is this stack?" as
+  `1.4826·MAD` of the sky's **levels** — which counts every *large-scale* structure in the frame as if it were
+  grain. A mosaic's per-panel level/colour offsets (exactly what photometric matching leaves at the seams) are
+  large-scale structure, so a deep, genuinely clean mosaic read as one of the noisiest images the app had ever
+  seen. **Measured on a synthetic 4-panel S30 mosaic** (identical pixel noise σ = 0.004, only per-panel level +
+  chroma offsets added): `sky_sigma` **0.0078 as a single field → 0.0299 as a mosaic**, i.e. `noise_frac`
+  **0.00 → 1.00**, which pushed `chroma_strength` to the full `_AUTO_CHROMA_MAX` **0.5**, drove `sharpen_amount`
+  to **0.0**, and cut the saturation boost — the deep mosaic was being processed as though it were a thin, noisy
+  single sub. A residual light-pollution gradient did the same thing on a *single field* (σ 0.0078 → 0.0666).
+  **The fix:** `sky_sigma` is now measured **locally**, from the MAD of adjacent-pixel differences
+  (`seestack.edit.noise.estimate_noise_sigma` — the same estimator already behind the editor's "From your image"
+  denoise suggestion, so the two halves of the crossfade finally measure the same thing), rescaled by a documented
+  `_SKY_HALF_MAD_SCALE = 0.593` so it lands on the *old* scale and every constant calibrated against it
+  (`_NOISE_LO`/`_NOISE_HI`, the `> 0.02` "noisy" verdict, the `× 6.0` saturation term) keeps its meaning.
+  Neighbouring pixels differ by noise whatever slow structure the frame carries, so the estimate is blind to
+  gradients and seams. **Result:** the deep mosaic now reads **0.0073** (vs 0.0077 as a single field) — the op is
+  **not emitted at all**, sharpening and saturation come back, and its Auto recipe is parameter-for-parameter the
+  same as the identical stack laid out as a single field. A genuinely noisy mosaic (σ = 0.05) still reads
+  **0.066** and still gets denoise + chroma smoothing, so the fix doesn't swing the other way.
+  **Upgrade safety:** on a structure-free frame the new and old numbers agree to within 3 % at every σ from 0.004
+  to 0.09 (pinned by a parametrized test), so an ordinary single-field stack's one-click Auto is unchanged.
+  Tests (`tests/test_auto_noise_measure.py`, +12; four fail before / pass after): old-vs-new agreement on pure
+  noise at five σ, panel offsets not counted as noise, the deep mosaic getting no `chroma_denoise` **and** keeping
+  its sharpen, the same-recipe-either-layout property, a noisy mosaic still denoised, a gradient not counted as
+  noise, a ragged NaN border not inflating the measurement, and the unmeasurable-reads-as-clean convention.
+  No config/DB/API-shape/on-disk change and no default flipped. **Still open (follow-up, filed as its own entry
+  below):** the backlog's "confidence medium that this is the *sole* contributor" — the v0.158→v0.220 colour
+  changes (SCNR, per-frame / final gradient flatten) have **not** been bisected on the synthetic mosaic, so if the
+  owner still sees a seam grid on v0.225.0 that bisect is the next step.
+  *(Original entry kept below for provenance.)* The owner deployed
   v0.222.0 (up from ~v0.158) and re-scanned; a ~400-sub Virgo-area **mosaic** that his *previous* install rendered
   clean (dark, seamless, neutral colour, round stars) now comes out grainy with a visible **coloured grid keyed to
   the mosaic panel seams** — same subs, only ~20 fewer frames used (negligible; not a data-loss issue). Two
@@ -101,6 +132,18 @@ when you take it.
   contributor — while you have the synthetic mosaic, bisect the v0.158→v0.220 colour changes (SCNR, the per-frame /
   final gradient flatten) on it to be sure none of those also add a per-panel colour step. Owner is on this build now,
   so this is **front-of-queue**.
+
+- **Follow-up to the v0.225.0 mosaic-Auto fix — bisect the rest of the v0.158→v0.220 colour chain on a synthetic
+  mosaic.** The measured root cause (noise misread → `detail.chroma_denoise` at full strength) is fixed and the op
+  no longer fires on a deep mosaic, but the original entry rated confidence only **medium** that it was the *sole*
+  contributor to the owner's seam grid. **Do this only if the owner reports the grid persists on v0.225.0** — the
+  synthetic 4-panel mosaic scene now lives in `tests/test_auto_noise_measure.py::_scene(mosaic=True)`, so the
+  bisect is cheap: run `get_proxy → auto_recipe → apply_recipe` with SCNR, the per-frame flatten and
+  `remove_final_gradient` individually disabled and measure the chroma step across a panel boundary vs within a
+  panel. Note the shipped fix's own measurement found the *absolute* seam step is dominated by the injected panel
+  offsets themselves (the smoother reduces it), so any further work should measure the **visible plateau/edge
+  structure** the smoother creates, not the raw step. (M, image quality — PRIORITY 1/4.)
+
 
 - ~~**⭐⭐ MEASURED (2026-07-26 quality audit) — the one-click Auto result is purple-one-side / green-or-blown-the-other
   on any stack with a residual sky gradient: the Auto recipe's luminance-mode gradient removal + per-channel STF
@@ -9733,8 +9776,85 @@ problems. Dogfood it every big-picture run and fix root causes.
   respect it on both the preview and the full-res export path so what the user sees matches what they save. Small,
   self-contained, high owner-satisfaction.
 
-- **⭐ OWNER-REQUESTED — "Stack video": lucky-imaging stack of the Seestar's Solar/
-  Lunar video captures (already sitting in `incoming/` as `*_video/` folders).**
+- ~~**⭐ OWNER-REQUESTED — "Stack video": lucky-imaging stack of the Seestar's Solar/
+  Lunar video captures.**~~ — **SLICE (a) SHIPPED v0.224.0** (Builder 2026-07-30, branch
+  `claude/relaxed-turing-31k4wp`). The owner's Moon/Sun videos were completely invisible in the app: the FITS scanner
+  skips `*_video/` folders by design, so a beginner with a lunar capture on their NAS had no way to turn it into a
+  picture. Now a **Moon & Sun** page (`/moon-sun`) lists every `*_video/` capture in the watched folder and turns one
+  into a single sharp still with one button.
+  **Engine — new self-contained `seestack/video/` package** (no deep-sky machinery reused: no plate-solve — a lunar
+  disk has no stars — no calibration masters, and emphatically *not* the auto STF/SCNR/gradient chain, which anchors
+  the **sky** at 6 % grey and would blow a disk that fills the frame to white):
+  * `ffmpeg.py` — `probe_video` (ffprobe → dimensions/frame count/fps, with a `duration × fps` fallback for
+    containers that omit `nb_frames`) and `iter_frames`, which pipes raw `rgb24` off ffmpeg's stdout and yields
+    **one frame at a time**. A minute of 1080p is ~1800 frames / ~11 GB of pixels, so nothing may buffer the video;
+    abandoning the generator kills the decoder in a `finally`, and stderr goes to `DEVNULL` rather than an undrained
+    pipe that could deadlock. Binaries are found on `PATH` or via `SEESTACK_FFMPEG_PATH`/`SEESTACK_FFPROBE_PATH`.
+  * `lucky.py` — **two streaming passes**: grade every frame (keeping only a scalar), then re-decode and stack the
+    keepers. Decoding twice is the cheap option — holding the best *N* frames would cost *N* frames of RAM and a
+    single pass can't know what "best" means yet — and it keeps the memory bound flat regardless of video length.
+    Sharpness is **mean squared Laplacian ÷ mean brightness²**: the normalisation is load-bearing, since a thin cloud
+    or the Seestar's auto-exposure changes the level between frames and an un-normalised Laplacian ranks the
+    *brightest* frames sharpest — exactly the wrong ones (regression:
+    `test_sharpness_is_not_fooled_by_a_brighter_exposure`). Keepers are aligned to the first kept frame by whole-frame
+    phase correlation (a disk is one big high-contrast object, so a global correlation beats anything star-based),
+    sub-pixel-shifted with `cval=np.nan` so a vacated edge is honest "no coverage" rather than a dark band, and
+    summed through the existing NaN-aware `WeightedSumAccumulator`. A shift beyond 15 % of the short edge is treated
+    as a failed correlation and the frame is left out (and *said* so, in the result's warnings). Long captures are
+    evenly sampled down to `max_frames` with a plain-language note.
+  * `discover.py` — finds `*_video/` folders (depth ≤ 2) holding a real video file, labels `Lunar_`/`Solar_` as
+    **"Moon"/"Sun"**, and mints a sanitised id. The FITS scanner's `_sub`/output folders are never claimed.
+  * `normalize_for_display` — the disk-appropriate render: a linear 1st→99.9th-percentile rescale (the high anchor is
+    a percentile, not the max, so one hot pixel can't crush the disk).
+  **Webapp:** `webapp/video.py` (job body + a self-contained result store at `<data_root>/video/<id>/` holding
+  `stack.png`, `stack.tiff`, `meta.json` — these captures never become library targets, so none of the per-target
+  project/DB machinery applies) and `webapp/routers/video.py` (`GET /api/videos`, `POST /api/videos/{id}/stack`,
+  `GET …/preview.png`, `GET …/download.tiff`). Captures are addressed by sanitised id and re-discovered server-side
+  every call — **no filesystem path ever comes from the client** — and the requested filename is matched against the
+  discovered basenames. `available: false` + a plain-language `hint` when ffmpeg is absent, so the page explains
+  itself instead of offering a button that can only fail.
+  **Frontend:** `MoonSun.tsx` at `/moon-sun` (nav "Moon & Sun") — one card per capture with the finished still, the
+  honest "stacked the sharpest N of M frames — about √N× cleaner than a single frame" summary, PNG + 16-bit TIFF
+  downloads, and the single real decision phrased as three presets ("Only the very best (15%)" / "Best few (30%) —
+  recommended" / "Half of them (50%)") rather than a raw percentage. `ffmpeg` added to `docker/Dockerfile` (the
+  owner pre-approved it — a plain offline codec, no runtime download, nothing leaves the box), to the CI workflow,
+  and to `scripts/agent-setup.sh`.
+  **Tests (+41):** `tests/test_video_lucky.py` (+20, driving real ffmpeg-encoded synthetic captures via a new
+  `tests/videosynth.py` — decode/stride identity across passes, the exposure-invariance regression, keeps-the-sharpest,
+  noise averages down, alignment recovers detail a drifting disk would smear, uncovered-≠-black, too-few-frames,
+  even-sampling note, progress/cancel, display render), `tests/test_video_discover.py` (+10), the webapp
+  `tests/webapp/test_video_api.py` (+11, including a crafted-id traversal attempt and a `file_name` escape attempt),
+  and `frontend/src/routes/MoonSun.test.tsx` (+10). Upgrade-safe: new module + new endpoints + a new opt-in data
+  sub-directory created on first use; no config/DB/API-shape/on-disk change and no default flipped.
+  **Still open — slice (b)/(c)** (filed as their own entry below): a keep-% fine-tune slider, per-frame colour/debayer
+  handling for raw OSC video, an optional final unsharp, disk crop/centre, a quality histogram, and drizzle-upscale.
+  *(Original spec kept below for provenance.)*
+
+- ~~**Closing the loop on a dropped Moon/Sun video: the scan correctly reports "nothing found", so nothing tells the
+  user their capture is usable.**~~ — **SHIPPED v0.224.1** (Builder 2026-07-30, branch
+  `claude/relaxed-turing-31k4wp`). Spotted immediately after shipping the "Stack video" feature above: a `*_video/`
+  folder is the one thing a beginner can drop into the watched folder that the deep-sky scan will legitimately walk
+  straight past (it holds no stackable subs), so "Scan incoming" finds **zero targets** and the natural conclusion is
+  that the app can't use the file. A self-hiding `VideoCapturesCard` now sits on the Dashboard under "Last night":
+  when the incoming folder holds any video capture it says what's waiting in plain language ("You have a Moon video
+  waiting — we can turn it into one sharp picture." / "2 of your 3 Moon and Sun videos haven't been stacked yet"),
+  badges how many are still to do, and links to `/moon-sun`. It renders **nothing at all** for a deep-sky-only user
+  (the overwhelmingly common case) and stays silent if the endpoint errors, so it can't add clutter or a broken box to
+  the Dashboard. Frontend-only and additive — it reuses the `GET /api/videos` the Moon & Sun page already calls, on a
+  60 s `staleTime` so the Dashboard doesn't re-walk the incoming folder on every poll. Tests:
+  `VideoCapturesCard.test.tsx` (+8 — the four sentence shapes as a pure function, the nudge + badge + link, badge
+  dropped once everything is stacked, self-hide on empty and on error). (S, friendliness — PRIORITY 3.)
+
+- **Slices (b)/(c) of "Stack video" (follow-on to the shipped v0.224.0 slice (a)).** Deliberately left out of the
+  first slice, in rough value order: **(b1)** show the *sharpness distribution* of the capture so the user can see
+  whether 15 % or 50 % is the right cut for *their* video (the engine already computes every frame's score — it just
+  isn't returned); **(b2)** an optional gentle final unsharp/wavelet on the result (the editor can already sharpen,
+  so this is convenience, not capability); **(b3)** raw-OSC video handling (if a Seestar ever writes a Bayer video,
+  today's `rgb24` decode would need a debayer path — verify before building, the current captures are ordinary
+  colour video); **(c)** disk crop/centre so the still isn't mostly black sky, and drizzle-upscale. Explicitly **not**
+  wanted (pro territory, per the original spec): multi-point planetary alignment and derotation.
+  (S–M each, beginner-feature/workflow — PRIORITY 2/3.)
+
   The owner shoots the Moon/Sun with the Seestar, which drops a **video file
   (.mp4/.avi/.mov)** into a `Lunar_video/` / `Solar_video/` folder — currently the
   scanner **skips** these (`_VIDEO_SUFFIX`, `seestack/io/scanner.py`). Give the owner

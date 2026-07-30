@@ -1,6 +1,6 @@
 import { AppShell, Badge, Box, Burger, Button, Group, NavLink, ScrollArea, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { IconActivity, IconAward, IconDatabase, IconFileText, IconFlask, IconGauge, IconLayoutGrid, IconMoon, IconPalette, IconPhoto, IconRadar2, IconSettings, IconSparkles, IconStars, IconTelescope } from "@tabler/icons-react";
+import { IconActivity, IconAward, IconDatabase, IconFileText, IconFlask, IconGauge, IconLayoutGrid, IconMoon, IconPalette, IconPhoto, IconRadar2, IconSettings, IconSparkles, IconStars, IconTelescope, IconVideo } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink as RouterNavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
@@ -120,6 +120,7 @@ export function App() {
     { to: "/best", label: "My best pictures", icon: <IconAward size={18} /> },
     { to: "/sky-so-far", label: "Your sky, so far", icon: <IconSparkles size={18} /> },
     { to: "/tonight", label: "Tonight", icon: <IconMoon size={18} /> },
+    { to: "/moon-sun", label: "Moon & Sun", icon: <IconVideo size={18} /> },
     { to: "/sky", label: "Sky Map", icon: <IconRadar2 size={18} /> },
     { to: "/jobs", label: "Jobs", icon: <IconActivity size={18} /> },
     { to: "/calibration", label: "Calibration", icon: <IconFlask size={18} /> },

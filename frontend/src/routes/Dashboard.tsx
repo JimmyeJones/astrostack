@@ -21,6 +21,7 @@ import { LibraryProgressCard } from "../components/LibraryProgressCard";
 import { QueryError } from "../components/QueryError";
 import { SampleImageCard } from "../components/SampleImageCard";
 import { SuggestTargetsCard } from "../components/SuggestTargetsCard";
+import { VideoCapturesCard } from "../components/VideoCapturesCard";
 import { BestPicturesStrip } from "../components/BestPicturesStrip";
 import { ImagingLogButton } from "../components/ImagingLogButton";
 
@@ -194,6 +195,8 @@ export function Dashboard() {
       </SimpleGrid>
 
       <LastNightCard />
+
+      <VideoCapturesCard />
 
       <ImagingCalendarCard />
 

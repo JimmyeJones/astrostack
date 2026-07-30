@@ -1168,6 +1168,49 @@ export interface CalibrationMaster {
   exists: boolean;
 }
 
+// A Seestar Moon/Sun video capture sitting in the incoming folder (a `*_video/`
+// folder the deep-sky scanner skips), and its finished lucky-imaging still if
+// one has been made.
+export interface VideoFile {
+  name: string;
+  size_bytes: number;
+}
+
+export interface VideoResult {
+  created_utc: string;
+  source_name: string;
+  width: number;
+  height: number;
+  keep_percent: number;
+  n_graded: number;
+  n_kept: number;
+  n_stacked: number;
+  n_align_failed: number;
+  stride: number;
+  warnings: string[];
+  preview_url: string;
+  tiff_url: string;
+}
+
+export interface VideoCapture {
+  id: string;
+  label: string;
+  kind: "lunar" | "solar" | "other";
+  folder_name: string;
+  files: VideoFile[];
+  total_bytes: number;
+  result: VideoResult | null;
+}
+
+export interface VideoList {
+  // False when the container has no ffmpeg — the page shows `hint` instead of
+  // offering a button that could only fail.
+  available: boolean;
+  hint: string | null;
+  incoming_dir: string;
+  captures: VideoCapture[];
+}
+
 // "Do my masters actually cover my targets?" — for each master, how many of the
 // library's targets the *unattended* binder would apply it to (so the roll-up
 // promises exactly what the app does on its own), plus the targets no master
@@ -1841,4 +1884,13 @@ export const api = {
   }),
   deleteCalibrationMaster: (id: number) =>
     req<{ deleted: number }>(`/api/calibration/masters/${id}`, { method: "DELETE" }),
+
+  // Moon & Sun — lucky-imaging stacks of the Seestar's *_video captures
+  listVideoCaptures: () => req<VideoList>("/api/videos"),
+  stackVideoCapture: (
+    id: string,
+    body: { keep_percent: number; file_name?: string; align?: boolean },
+  ) => req<{ job_id: string }>(`/api/videos/${encodeURIComponent(id)}/stack`, {
+    method: "POST", body: JSON.stringify(body),
+  }),
 };

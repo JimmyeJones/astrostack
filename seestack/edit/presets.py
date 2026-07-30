@@ -92,14 +92,45 @@ def preset_recipe(preset_id: str) -> Recipe | None:
     return Recipe(ops=[OpInstance(id=o.id, params=dict(o.params)) for o in p["ops"]])
 
 
+#: The old ``sky_sigma`` was ``1.4826·MAD`` of the sky *levels* — i.e. the MAD of
+#: the **lower half** of the sky's value distribution, which reads ``0.593·σ`` for
+#: Gaussian noise rather than ``σ``. Every constant downstream of ``sky_sigma``
+#: (``_NOISE_LO``/``_NOISE_HI``, the ``> 0.02`` "noisy" verdict, the ``× 6.0``
+#: saturation term) was calibrated against that scale, so the local estimator that
+#: replaced it is reported on the same scale via this factor. Pinned by
+#: ``test_sky_sigma_matches_the_old_level_mad_on_pure_noise``: on structure-free
+#: noise the two agree to within 2 % at every σ, so an ordinary single-field
+#: stack's one-click Auto is unchanged.
+_SKY_HALF_MAD_SCALE = 0.593
+
+
 def analyze_proxy(rgb: np.ndarray) -> dict[str, Any]:
     """Cheap content analysis of a proxy used to tailor the auto recipe:
     sky level, sky-noise fraction, and a coarse 'noisy' verdict.
 
-    Stats are computed on the whole-image-normalized luminance over the *sky*
-    side only (pixels at/below the robust median), so bright stars/targets don't
-    masquerade as noise.
+    The sky *level* is the robust median of the whole-image-normalized luminance.
+
+    The sky *noise* is measured **locally**, from the MAD of adjacent-pixel
+    differences (``seestack.edit.noise.estimate_noise_sigma``), not from the
+    spread of the sky's levels. That distinction is the whole point: the spread of
+    levels also counts every *large-scale* structure in the frame — a residual
+    light-pollution gradient, and above all a **mosaic's per-panel level/colour
+    offsets** — so a deep, genuinely clean mosaic used to read as one of the
+    noisiest images the app had ever seen (measured: σ 0.030 vs 0.008 for the
+    identical stack laid out as a single field), which drove ``auto_recipe`` to
+    fire the wide-kernel ``detail.chroma_denoise`` at full strength and smear
+    colour across the panel seams — the owner's "multicolour grid". Neighbouring
+    pixels differ by *noise*, whatever slow structure the frame carries, so the
+    local estimator is blind to gradients and seams while agreeing with the old
+    one on structure-free noise. It is also the same estimator behind the
+    editor's "From your image" denoise suggestion, so the two halves of the
+    crossfade now measure the same thing.
+
+    Stars and the target can't masquerade as noise either: the MAD is robust to
+    the minority of large jumps at their edges.
     """
+    from seestack.edit.noise import estimate_noise_sigma
+
     arr = np.asarray(rgb, dtype=np.float32)
     lum = arr[..., :3].mean(axis=2) if arr.ndim == 3 else arr
     finite = lum[np.isfinite(lum)]
@@ -110,11 +141,10 @@ def analyze_proxy(rgb: np.ndarray) -> dict[str, Any]:
         return {"sky": 0.1, "sky_sigma": 0.0, "noisy": False}
     norm = np.clip((finite - lo) / (hi - lo), 0.0, 1.0)
     med = float(np.median(norm))
-    sky = norm[norm <= med]                       # the sky population
-    if sky.size:
-        sky_sigma = float(1.4826 * np.median(np.abs(sky - np.median(sky))))
-    else:
-        sky_sigma = 0.0
+    local = estimate_noise_sigma(arr)
+    # Unmeasurable (too few finite pixels, no dynamic range) reads as clean —
+    # the same convention the rest of the auto chain uses for "can't tell".
+    sky_sigma = float(_SKY_HALF_MAD_SCALE * local) if local is not None else 0.0
     return {"sky": med, "sky_sigma": sky_sigma, "noisy": sky_sigma > 0.02}
 
 
