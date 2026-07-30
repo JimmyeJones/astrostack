@@ -71,8 +71,39 @@ when you take it.
 > slider drag) and FIXED (see the struck flaky-test entry below); a frontend/API click-path audit filed its own
 > entries below.
 
-- **⭐⭐ OWNER-REPORTED REGRESSION (2026-07-30, S30 owner, real data) — the one-click Auto result on a deep MOSAIC
-  now shows a "multicolour grid" + extra chroma noise that the pre-v0.220 chain did NOT.** The owner deployed
+- ~~**⭐⭐ OWNER-REPORTED REGRESSION (2026-07-30, S30 owner, real data) — the one-click Auto result on a deep MOSAIC
+  now shows a "multicolour grid" + extra chroma noise that the pre-v0.220 chain did NOT.**~~ — **ROOT CAUSE FIXED v0.225.0**
+  (Builder 2026-07-30, branch `claude/relaxed-turing-31k4wp`). The filed hypothesis was **confirmed by repro and
+  measured**: `analyze_proxy` (`seestack/edit/presets.py`) measured "how noisy is this stack?" as
+  `1.4826·MAD` of the sky's **levels** — which counts every *large-scale* structure in the frame as if it were
+  grain. A mosaic's per-panel level/colour offsets (exactly what photometric matching leaves at the seams) are
+  large-scale structure, so a deep, genuinely clean mosaic read as one of the noisiest images the app had ever
+  seen. **Measured on a synthetic 4-panel S30 mosaic** (identical pixel noise σ = 0.004, only per-panel level +
+  chroma offsets added): `sky_sigma` **0.0078 as a single field → 0.0299 as a mosaic**, i.e. `noise_frac`
+  **0.00 → 1.00**, which pushed `chroma_strength` to the full `_AUTO_CHROMA_MAX` **0.5**, drove `sharpen_amount`
+  to **0.0**, and cut the saturation boost — the deep mosaic was being processed as though it were a thin, noisy
+  single sub. A residual light-pollution gradient did the same thing on a *single field* (σ 0.0078 → 0.0666).
+  **The fix:** `sky_sigma` is now measured **locally**, from the MAD of adjacent-pixel differences
+  (`seestack.edit.noise.estimate_noise_sigma` — the same estimator already behind the editor's "From your image"
+  denoise suggestion, so the two halves of the crossfade finally measure the same thing), rescaled by a documented
+  `_SKY_HALF_MAD_SCALE = 0.593` so it lands on the *old* scale and every constant calibrated against it
+  (`_NOISE_LO`/`_NOISE_HI`, the `> 0.02` "noisy" verdict, the `× 6.0` saturation term) keeps its meaning.
+  Neighbouring pixels differ by noise whatever slow structure the frame carries, so the estimate is blind to
+  gradients and seams. **Result:** the deep mosaic now reads **0.0073** (vs 0.0077 as a single field) — the op is
+  **not emitted at all**, sharpening and saturation come back, and its Auto recipe is parameter-for-parameter the
+  same as the identical stack laid out as a single field. A genuinely noisy mosaic (σ = 0.05) still reads
+  **0.066** and still gets denoise + chroma smoothing, so the fix doesn't swing the other way.
+  **Upgrade safety:** on a structure-free frame the new and old numbers agree to within 3 % at every σ from 0.004
+  to 0.09 (pinned by a parametrized test), so an ordinary single-field stack's one-click Auto is unchanged.
+  Tests (`tests/test_auto_noise_measure.py`, +12; four fail before / pass after): old-vs-new agreement on pure
+  noise at five σ, panel offsets not counted as noise, the deep mosaic getting no `chroma_denoise` **and** keeping
+  its sharpen, the same-recipe-either-layout property, a noisy mosaic still denoised, a gradient not counted as
+  noise, a ragged NaN border not inflating the measurement, and the unmeasurable-reads-as-clean convention.
+  No config/DB/API-shape/on-disk change and no default flipped. **Still open (follow-up, filed as its own entry
+  below):** the backlog's "confidence medium that this is the *sole* contributor" — the v0.158→v0.220 colour
+  changes (SCNR, per-frame / final gradient flatten) have **not** been bisected on the synthetic mosaic, so if the
+  owner still sees a seam grid on v0.225.0 that bisect is the next step.
+  *(Original entry kept below for provenance.)* The owner deployed
   v0.222.0 (up from ~v0.158) and re-scanned; a ~400-sub Virgo-area **mosaic** that his *previous* install rendered
   clean (dark, seamless, neutral colour, round stars) now comes out grainy with a visible **coloured grid keyed to
   the mosaic panel seams** — same subs, only ~20 fewer frames used (negligible; not a data-loss issue). Two
@@ -101,6 +132,18 @@ when you take it.
   contributor — while you have the synthetic mosaic, bisect the v0.158→v0.220 colour changes (SCNR, the per-frame /
   final gradient flatten) on it to be sure none of those also add a per-panel colour step. Owner is on this build now,
   so this is **front-of-queue**.
+
+- **Follow-up to the v0.225.0 mosaic-Auto fix — bisect the rest of the v0.158→v0.220 colour chain on a synthetic
+  mosaic.** The measured root cause (noise misread → `detail.chroma_denoise` at full strength) is fixed and the op
+  no longer fires on a deep mosaic, but the original entry rated confidence only **medium** that it was the *sole*
+  contributor to the owner's seam grid. **Do this only if the owner reports the grid persists on v0.225.0** — the
+  synthetic 4-panel mosaic scene now lives in `tests/test_auto_noise_measure.py::_scene(mosaic=True)`, so the
+  bisect is cheap: run `get_proxy → auto_recipe → apply_recipe` with SCNR, the per-frame flatten and
+  `remove_final_gradient` individually disabled and measure the chroma step across a panel boundary vs within a
+  panel. Note the shipped fix's own measurement found the *absolute* seam step is dominated by the injected panel
+  offsets themselves (the smoother reduces it), so any further work should measure the **visible plateau/edge
+  structure** the smoother creates, not the raw step. (M, image quality — PRIORITY 1/4.)
+
 
 - ~~**⭐⭐ MEASURED (2026-07-26 quality audit) — the one-click Auto result is purple-one-side / green-or-blown-the-other
   on any stack with a residual sky gradient: the Auto recipe's luminance-mode gradient removal + per-channel STF

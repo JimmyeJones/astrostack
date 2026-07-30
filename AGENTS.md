@@ -80,18 +80,20 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
-**⚡ IMMEDIATE PRIORITY (refreshed 2026-07-30, later) — NEW OWNER-REPORTED REGRESSION is now
-front-of-queue.** The S30 owner deployed v0.222.0 on real data and a deep ~400-sub **mosaic** that
-his *previous* install rendered clean now comes out with a **"multicolour grid" + extra chroma noise
-keyed to the mosaic panel seams**. Traced to the on-by-default Auto path: `auto_recipe` reads
-`sky_sigma` over the *whole union canvas* (seams + ragged border inflate it), misreads a deep mosaic
-as a noisy thin stack, and over-fires the new v0.220.0 `detail.chroma_denoise` wide-kernel colour
-smoothing, which smears colour across panels with differing colour offsets. Mosaic *blend* is
-unchanged since v0.184.10 — this is purely the new colour op. **Fix it first** (verify with a synthetic
-2×N-panel mosaic repro, then measure the noise crossfade on a high-coverage interior / make
-`chroma_denoise` seam-aware / damp it on mosaics — owner prefers it NOT firing on a deep mosaic). Full
-entry + repro spec at the top of `docs/IMPROVEMENTS.md` → "Bugs (fix these first)". An owner-requested
-**Auto auto-crop toggle** is also filed (top of "Features that serve real workflows"). Everything
+**⚡ IMMEDIATE PRIORITY (refreshed 2026-07-30, latest) — the owner-reported mosaic
+"multicolour grid" regression is FIXED (v0.225.0); its root cause was confirmed by repro
+and measured.** `analyze_proxy` measured sky noise as the MAD of the sky's *levels*, which
+counts a mosaic's per-panel level/colour offsets (and any residual gradient) as grain — so a
+deep, clean mosaic read as one of the noisiest images the app had seen (`sky_sigma` 0.0078 as
+a single field → 0.0299 as a mosaic), fired `detail.chroma_denoise` at its full ceiling and lost
+its sharpening. `sky_sigma` is now measured **locally** (MAD of adjacent-pixel differences), which
+is blind to seams and gradients and agrees with the old number to within 3 % on structure-free
+noise, so ordinary single-field stacks are unchanged. **One follow-up remains, and only if the
+owner still sees a grid on v0.225.0:** bisect the rest of the v0.158→v0.220 colour chain (SCNR,
+per-frame / final gradient flatten) on the synthetic mosaic scene now in
+`tests/test_auto_noise_measure.py` — filed in `docs/IMPROVEMENTS.md`. An owner-requested
+**Auto auto-crop toggle** is filed and unstarted (top of "Features that serve real workflows") —
+that is the highest-value owner-facing item now. Everything
 below was the previously-drained queue —
 
 that queue is DRAINED; every ⭐ item
