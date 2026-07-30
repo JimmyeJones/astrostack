@@ -177,7 +177,12 @@ export function CalibrationView() {
                           </Text>
                         );
                         return misses ? (
-                          <Tooltip label={misses} multiline w={260}>{text}</Tooltip>
+                          // `pre-line` so the per-target reasons stay one to a
+                          // line instead of running together into a paragraph.
+                          <Tooltip label={misses} multiline w={300}
+                            styles={{ tooltip: { whiteSpace: "pre-line" } }}>
+                            {text}
+                          </Tooltip>
                         ) : text;
                       })()}
                     </Table.Td>

@@ -19,6 +19,7 @@ read→mutate→write sequence).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -739,6 +740,101 @@ COVERAGE_TARGET_KEYS = (
 )
 
 
+def coverage_miss_reason(
+    master: dict[str, Any], *,
+    exposure_s: float | None = None,
+    gain: float | None = None,
+    sensor_temp_c: float | None = None,
+    width_px: int | None = None,
+    height_px: int | None = None,
+) -> str | None:
+    """*Why* the unattended binder can't apply ``master`` to these subs, in one
+    plain-language clause — or ``None`` when nothing about the master itself
+    disqualifies it.
+
+    :func:`master_coverage` can tell a beginner *which* of their targets a master
+    misses; that's the diagnosis, but the cure is still "go read the build form and
+    work out what numbers to use". The gates already know the answer — a frame-size
+    conflict, a gain the dark was never shot at, an exposure too far off to trust —
+    so this names it: *"your subs are 10s, this dark is 30s"*.
+
+    Mirrors :func:`auto_bind_master_paths`' gates exactly (same thresholds, same
+    one-sided "can't be disproved isn't a conflict" rule) and is checked most-
+    decisive-first, so the clause names the blocker the user would have to fix
+    first. ``None`` means every gate passes on its own — the master was simply
+    passed over for a closer one of its kind, which only the caller (who knows what
+    *was* bound) can phrase. Pure, so it needs no library on disk; never raises.
+    """
+    if not master.get("exists", True):
+        return "its file is missing from your calibration library"
+
+    # 1. Frame size — the most decisive blocker (a wrong-size master can't be
+    #    applied at all, whatever else matches).
+    mw, mh = master.get("width_px"), master.get("height_px")
+    if dims_conflict(master, width_px, height_px):
+        return (f"it was built at {mw}×{mh}, your subs are {width_px}×{height_px} "
+                f"— a different camera or binning")
+    if (width_px is not None and height_px is not None
+            and (mw is None or mh is None)):
+        return ("it doesn't record the frame size it was built at, so AstroStack "
+                "can't confirm it fits your subs")
+
+    kind = str(master.get("kind") or "")
+    # 2. Gain / sensor temperature — the shared confidence gate for every kind.
+    confident = {
+        "dark": _dark_match_confident, "flat": _flat_match_confident,
+        "bias": _bias_match_confident,
+    }.get(kind)
+    if confident is not None and not confident(
+            master, gain=gain, sensor_temp_c=sensor_temp_c):
+        return _acquisition_reason(master, gain=gain, sensor_temp_c=sensor_temp_c)
+
+    # 3. Exposure — darks only (a flat/bias is exposure-independent).
+    if kind == "dark":
+        if not exposure_s:
+            return ("your subs don't record their exposure, so a dark can't be "
+                    "matched to them safely")
+        dexp = master.get("exposure_s")
+        try:
+            dexp = float(dexp) if dexp is not None else None
+        except (TypeError, ValueError):
+            dexp = None
+        if not dexp or dexp <= 0:
+            return ("it doesn't record its own exposure, so it can't be matched to "
+                    "your subs safely")
+        if abs(dexp - exposure_s) / exposure_s > _AUTO_BIND_EXP_MISMATCH_FRAC:
+            return (f"your subs are {_fmt_seconds(exposure_s)}, this dark is "
+                    f"{_fmt_seconds(dexp)} — build a master bias and AstroStack "
+                    f"can scale it to your subs")
+    return None
+
+
+def _acquisition_reason(
+    master: dict[str, Any], *, gain: float | None, sensor_temp_c: float | None,
+) -> str:
+    """The gain/temperature half of :func:`coverage_miss_reason`: whichever of the
+    two actually differs, named with both numbers.
+
+    The gate is a *combined* distance, so name the term that dominates it (gain is
+    weighted 1.0 per relative unit, temperature 0.1 per °C — see
+    :func:`_match_distance`) and fall back to a generic clause when neither side
+    recorded enough to point at one."""
+    mgain, mtemp = master.get("gain"), master.get("sensor_temp_c")
+    gain_d = temp_d = 0.0
+    if gain is not None and mgain is not None:
+        with contextlib.suppress(TypeError, ValueError):
+            gain_d = abs(float(mgain) - gain) / max(abs(gain), 1.0)
+    if sensor_temp_c is not None and mtemp is not None:
+        with contextlib.suppress(TypeError, ValueError):
+            temp_d = 0.1 * abs(float(mtemp) - sensor_temp_c)
+    if gain_d >= temp_d and gain_d > 0:
+        return f"it was shot at gain {mgain:g}, your subs at gain {gain:g}"
+    if temp_d > 0:
+        return (f"its sensor was {float(mtemp):g}°C, your subs were "
+                f"{float(sensor_temp_c):g}°C")
+    return "it wasn't shot the same way as these subs"
+
+
 def master_coverage(
     library_root: str | Path,
     masters: list[dict[str, Any]],
@@ -773,6 +869,7 @@ def master_coverage(
     polls. Never raises: a master whose file has gone simply covers nothing.
     """
     bound_ids: list[set[int]] = []
+    bound_dark: list[bool] = []
     for t in targets:
         try:
             paths = auto_bind_master_paths(
@@ -790,6 +887,7 @@ def master_coverage(
             if mid is not None:
                 ids.add(mid)
         bound_ids.append(ids)
+        bound_dark.append(bool(paths.get("dark_path")))
 
     names = [str(t.get("name") or t.get("safe_name") or "?") for t in targets]
     rows: list[dict[str, Any]] = []
@@ -798,17 +896,48 @@ def master_coverage(
             mid = int(m["id"])
         except (KeyError, TypeError, ValueError):
             continue
+        kind = str(m.get("kind") or "?")
         covered = [n for n, ids in zip(names, bound_ids) if mid in ids]
         missed = [n for n, ids in zip(names, bound_ids) if mid not in ids]
+        # Why each miss misses. A bare list of names is the diagnosis; the reason
+        # is what turns it into something the user can act on. `None` back from
+        # the pure helper means the master clears every gate on its own, so it was
+        # passed over rather than rejected — only we know what won instead.
+        detail = []
+        for t, ids, has_dark in zip(targets, bound_ids, bound_dark, strict=True):
+            if mid in ids:
+                continue
+            name = str(t.get("name") or t.get("safe_name") or "?")
+            reason = coverage_miss_reason(
+                m, exposure_s=t.get("exposure_s"), gain=t.get("gain"),
+                sensor_temp_c=t.get("sensor_temp_c"),
+                width_px=t.get("width_px"), height_px=t.get("height_px"),
+            )
+            if reason is None:
+                reason = (
+                    "a master dark was used instead — a dark already includes "
+                    "the bias" if kind == "bias" and has_dark
+                    else f"another of your {kind} masters is a closer match")
+            detail.append({"name": name, "reason": reason})
         rows.append({
             "id": mid, "name": str(m.get("name") or f"master {mid}"),
-            "kind": str(m.get("kind") or "?"),
+            "kind": kind,
             "n_covered": len(covered), "covered": covered, "missed": missed,
+            "missed_detail": detail,
         })
     return {
         "n_targets": len(targets),
         "masters": rows,
         "uncovered": [n for n, ids in zip(names, bound_ids) if not ids],
+        # The *numbers* an uncovered target would need a dark shot at — the point
+        # a beginner actually stalls at ("build a dark from frames shot the same
+        # way" doesn't say which way). Same source as the rest of the roll-up, so
+        # it can never disagree with it; additive, so an older client ignores it.
+        "uncovered_detail": [
+            {"name": n, "exposure_s": t.get("exposure_s"), "gain": t.get("gain")}
+            for n, t, ids in zip(names, targets, bound_ids, strict=True)
+            if not ids
+        ],
     }
 
 

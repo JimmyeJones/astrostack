@@ -32,6 +32,32 @@ describe("masterMissesTooltip", () => {
   it("stays quiet when the master covers everything", () => {
     expect(masterMissesTooltip({ missed: [] }, 6)).toBeNull();
   });
+  it("says why each target misses, one per line, when the backend explains", () => {
+    const tip = masterMissesTooltip({
+      missed: ["M 13", "M 51"],
+      missed_detail: [
+        { name: "M 13", reason: "your subs are 10s, this dark is 30s" },
+        { name: "M 51", reason: "a different camera or binning" },
+      ],
+    }, 6);
+    expect(tip).toBe(
+      "Can't be applied to:\nM 13 — your subs are 10s, this dark is 30s\n"
+      + "M 51 — a different camera or binning");
+  });
+  it("falls back to the bare name list on an older backend", () => {
+    expect(masterMissesTooltip({ missed: ["M 13"], missed_detail: [] }, 6))
+      .toBe("Can't be applied to: M 13");
+  });
+  it("ignores a malformed detail entry rather than printing 'undefined'", () => {
+    const tip = masterMissesTooltip({
+      missed: ["M 13", "M 51"],
+      missed_detail: [
+        { name: "M 13", reason: "" },
+        { name: "M 51", reason: "a different camera or binning" },
+      ],
+    }, 6);
+    expect(tip).toBe("Can't be applied to:\nM 51 — a different camera or binning");
+  });
 });
 
 describe("uncoveredTargetsNote", () => {
@@ -57,6 +83,42 @@ describe("uncoveredTargetsNote", () => {
     });
     expect(on).toMatch(/AstroStack will apply it for you/);
     expect(on).not.toMatch(/Stack form/);
+  });
+  it("names the exposure/gain to shoot the darks at when the subs agree", () => {
+    const note = uncoveredTargetsNote({
+      uncovered: ["M 13", "M 51"], n_targets: 6,
+      uncovered_detail: [
+        { name: "M 13", exposure_s: 10, gain: 80 },
+        { name: "M 51", exposure_s: 10, gain: 80 },
+      ],
+    });
+    expect(note).toMatch(/Shoot them at 10s at gain 80/);
+  });
+  it("is honest that differently-shot subs need a dark each", () => {
+    const note = uncoveredTargetsNote({
+      uncovered: ["M 13", "M 51"], n_targets: 6,
+      uncovered_detail: [
+        { name: "M 13", exposure_s: 10, gain: 80 },
+        { name: "M 51", exposure_s: 30, gain: 200 },
+      ],
+    });
+    expect(note).toMatch(/weren't all shot the same way/);
+    expect(note).toMatch(/10s at gain 80; 30s at gain 200/);
+  });
+  it("stays generic rather than inventing numbers the subs never recorded", () => {
+    const note = uncoveredTargetsNote({
+      uncovered: ["M 13"], n_targets: 6,
+      uncovered_detail: [{ name: "M 13", exposure_s: null, gain: null }],
+    });
+    expect(note).not.toMatch(/Shoot them at/);
+    expect(note).toMatch(/same exposure, gain and camera/);
+  });
+  it("names the exposure alone when the gain wasn't recorded", () => {
+    const note = uncoveredTargetsNote({
+      uncovered: ["M 13"], n_targets: 6,
+      uncovered_detail: [{ name: "M 13", exposure_s: 10, gain: null }],
+    });
+    expect(note).toMatch(/Shoot them at 10s —/);
   });
   it("stays silent when every target is covered", () => {
     expect(uncoveredTargetsNote({ uncovered: [], n_targets: 6 })).toBeNull();

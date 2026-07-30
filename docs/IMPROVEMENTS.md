@@ -6033,8 +6033,31 @@ to **Shipped**.)_
   the existing thin-stack warning, and (b) the Target page's newest-run block. Pure display re-use of a field that
   already exists; no new endpoint, no new recording. **Care:** don't nag — show it once per surface, and keep it out
   of the way when the run *was* otherwise calibrated. (S, friendliness + trust — PRIORITY 3.)
-- **NEW IDEA (Builder 2026-07-30, spotted while shipping the master-coverage roll-up v0.217.0) — make the "no master
-  covers this target" nudge *actionable*, and say **why** each miss misses.** v0.217.0 tells a beginner which of
+- ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the master-coverage roll-up v0.217.0) — make the "no master
+  covers this target" nudge *actionable*, and say **why** each miss misses.**~~ — **SHIPPED v0.218.0** (Builder
+  2026-07-30, branch `claude/relaxed-turing-ai56dq`), both slices.
+  **(a) every miss now names its blocker.** A new pure `coverage_miss_reason` (`webapp/calibration.py`) mirrors the
+  unattended binder's own gates, most-decisive-first — file missing → frame size (*"it was built at 1080×1920, your
+  subs are 480×320 — a different camera or binning"*) → gain/temperature (*"it was shot at gain 400, your subs at
+  gain 80"*, whichever term dominates the combined match distance) → a dark's exposure (*"your subs are 10s, this
+  dark is 30s — build a master bias and AstroStack can scale it to your subs"*). It returns `None` when the master
+  clears every gate on its own, which `master_coverage` turns into the honest *"another of your dark masters is a
+  closer match"* — or, for a bias passed over because a dark was bound, *"a master dark was used instead — a dark
+  already includes the bias"*, since blaming the bias would be a lie. Served as an additive
+  `masters[].missed_detail: [{name, reason}]` and rendered one-per-line in the existing tooltip (`pre-line`).
+  **(b) the uncovered nudge now names the numbers to shoot at.** `master_coverage` also returns
+  `uncovered_detail: [{name, exposure_s, gain}]` — the uncovered targets' own recorded acquisition numbers — and
+  `uncoveredDarkSpecHint` turns them into *"Shoot them at 10s at gain 80 — that's what those subs were shot at."*,
+  or, when they disagree, the honest *"those subs weren't all shot the same way (10s at gain 80; 30s at gain 200), so
+  they need a dark each"*. It degrades to the existing generic wording when the subs recorded nothing, so it never
+  invents a number. *(The build form takes a folder, not an exposure/gain, so there is nothing to pre-fill —
+  naming the numbers is the actionable half, and it reads as "set this up", not "do it now".)*
+  Tests: `tests/webapp/test_calibration.py` (+7 — exposure gap, size-conflict precedence, flat gain, the `None`
+  "nothing wrong with it" signal, end-to-end reasons in roll-up order, the bias-passed-over-for-a-dark case, the
+  uncovered specs, plus an endpoint check that the reasons survive), `calibrationCoverage.test.ts` (+7).
+  Upgrade-safe: additive payload fields only (an older client ignores them; the tooltip falls back to the bare name
+  list on an older backend), no config/DB/on-disk/default change. *(Original idea kept below for provenance.)*
+  v0.217.0 tells a beginner which of
   their targets no master reaches, which is the diagnosis — but the cure is still "go read the build form and work
   out what numbers to use". Two slices, both small and both reusing machinery that already exists:
   **(a) name the reason per miss.** The tooltip lists the targets a master can't be applied to; it doesn't say
@@ -13552,6 +13575,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.218.0** — The master-coverage roll-up now *explains* itself: each missed target carries a plain-language
+  reason from the binder's own gates (`coverage_miss_reason` — frame size / gain / temperature / a dark's exposure,
+  and the honest "another master is a closer match" / "a dark already includes the bias" when nothing is wrong with
+  the master itself), shown one per line in the tooltip; and the "no master covers this" nudge names the exposure/gain
+  to shoot the darks at, or says outright when the uncovered subs weren't all shot the same way. Additive payload
+  fields (`missed_detail`, `uncovered_detail`). Tests: `tests/webapp/test_calibration.py` (+7),
+  `calibrationCoverage.test.ts` (+7).
 - **v0.217.1** — The skipped-calibration-master note now reaches the walk-away user: the same recorded
   `calibration_skipped` sentences the History *Info* panel shows are now also on the Jobs page's "Process target"
   result and the Target page's newest-run block, via one shared self-hiding `CalibrationSkippedNote` component

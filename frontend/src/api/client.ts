@@ -1164,8 +1164,16 @@ export interface CalibrationCoverage {
     n_covered: number;
     covered: string[];
     missed: string[];
+    // Why each missed target misses, in one plain-language clause ("your subs are
+    // 10s, this dark is 30s"). Optional: an older backend sends only `missed`, so
+    // the tooltip falls back to the bare name list.
+    missed_detail?: { name: string; reason: string }[];
   }[];
   uncovered: string[];
+  // The acquisition numbers each uncovered target would need a dark shot at —
+  // what turns "build a matching dark" into something a beginner can act on.
+  // Optional: an older backend omits it and the nudge stays generic.
+  uncovered_detail?: { name: string; exposure_s: number | null; gain: number | null }[];
   // Whether auto-calibration is actually switched on. With it off (the default) a
   // "covered" master is one the app *can* apply — the user still picks it on the
   // Stack form — so the page must not promise it will be used automatically.

@@ -33,20 +33,30 @@ export function masterCoverageLine(
 }
 
 /** The targets this master can't be applied to, as tooltip copy — or null when it
- *  covers everything (nothing to explain) or there are no targets at all. */
+ *  covers everything (nothing to explain) or there are no targets at all.
+ *
+ *  When the backend says *why* each one misses (`missed_detail`, v0.218+), each
+ *  target gets its own line naming the blocker — "M 13 — your subs are 10s, this
+ *  dark is 30s" — which is the difference between a list the user can only read
+ *  and one they can act on. An older backend sends only the names, so the bare
+ *  comma list stays as the fallback. */
 export function masterMissesTooltip(
-  row: Pick<MasterRow, "missed">,
+  row: Pick<MasterRow, "missed"> & Partial<Pick<MasterRow, "missed_detail">>,
   nTargets: number,
 ): string | null {
   if (nTargets <= 0 || row.missed.length === 0) return null;
-  return `Can't be applied to: ${row.missed.join(", ")}`;
+  const detail = (row.missed_detail ?? []).filter((d) => d?.name && d?.reason);
+  if (detail.length === 0) return `Can't be applied to: ${row.missed.join(", ")}`;
+  const lines = detail.map((d) => `${d.name} — ${d.reason}`);
+  return `Can't be applied to:\n${lines.join("\n")}`;
 }
 
 /** The gentle nudge for targets no master reaches at all — the gap that actually
  *  costs the user picture quality. Null when everything is covered (or there's
  *  nothing to cover), so the page stays quiet when there's no problem. */
 export function uncoveredTargetsNote(
-  coverage: Pick<CalibrationCoverage, "uncovered" | "n_targets" | "auto_apply">,
+  coverage: Pick<CalibrationCoverage, "uncovered" | "n_targets" | "auto_apply">
+    & Partial<Pick<CalibrationCoverage, "uncovered_detail">>,
 ): string | null {
   const { uncovered, n_targets: nTargets } = coverage;
   if (nTargets <= 0 || uncovered.length === 0) return null;
@@ -64,6 +74,32 @@ export function uncoveredTargetsNote(
       + "to have it applied for you)";
   return (
     `${lead} — build a dark from frames shot the same way (same exposure, gain `
-    + `and camera), ${then}.`
+    + `and camera), ${then}.${uncoveredDarkSpecHint(coverage.uncovered_detail)}`
+  );
+}
+
+/** "Shot the same way" is only actionable if you know *which* way. This turns the
+ *  uncovered targets' own recorded exposure/gain into the numbers to shoot at —
+ *  one spec when they agree, an honest "different settings" list when they don't
+ *  (one dark can't cover both). Empty string when nothing was recorded, so the
+ *  nudge degrades to its generic wording rather than inventing a number. */
+export function uncoveredDarkSpecHint(
+  detail: CalibrationCoverage["uncovered_detail"],
+): string {
+  const specs = new Map<string, string>();
+  for (const d of detail ?? []) {
+    if (!d || d.exposure_s == null || !(d.exposure_s > 0)) continue;
+    const exp = `${Number(d.exposure_s.toFixed(3))}s`;
+    const label = d.gain == null ? exp : `${exp} at gain ${Number(d.gain)}`;
+    specs.set(label, label);
+  }
+  const labels = [...specs.values()];
+  if (labels.length === 0) return "";
+  if (labels.length === 1) {
+    return ` Shoot them at ${labels[0]} — that's what those subs were shot at.`;
+  }
+  return (
+    ` Those subs weren't all shot the same way (${labels.join("; ")}), so they `
+    + `need a dark each — one dark only matches subs shot at its own settings.`
   );
 }
