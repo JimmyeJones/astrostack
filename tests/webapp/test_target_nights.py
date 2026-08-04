@@ -134,3 +134,64 @@ def test_set_aside_night_is_undoable_via_bulk_accept(
                 json={"action": "accept", "ids": changed})
     nights = client.get("/api/targets/M_42/nights").json()
     assert nights[0]["n_kept"] == 3 and nights[0]["n_set_aside"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Which night is it? — the observing-night date, not the raw UTC date
+# ---------------------------------------------------------------------------
+
+def test_night_date_is_the_local_evening_not_the_utc_date(
+    client, solved_library, data_root
+):
+    """Regression: a session that starts at 21:00 local in the Americas is already
+    *tomorrow* in UTC, so labelling the night from ``start_utc`` named the wrong
+    day. The night is bucketed noon-to-noon in the observer's local time instead
+    (the same convention the imaging calendar uses)."""
+    client.put("/api/settings", json={"site_lon": -122.3})   # Seattle, UTC−8
+    _stamp(data_root, "M_42", {
+        0: {"timestamp_utc": "2026-07-09T05:00:00+00:00"},   # 8 Jul 21:00 local
+        1: {"timestamp_utc": "2026-07-09T05:30:00+00:00"},
+        2: {"timestamp_utc": "2026-07-09T06:00:00+00:00"},
+    })
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert len(nights) == 1
+    # The raw UTC stamp still says the 9th — that's the honest capture time...
+    assert nights[0]["start_utc"].startswith("2026-07-09")
+    # ...but the night the owner was out is the evening of the 8th.
+    assert nights[0]["night_date"] == "2026-07-08"
+
+
+def test_night_date_agrees_with_the_imaging_calendar(client, solved_library, data_root):
+    """The Target page's Nights card and the Dashboard's imaging calendar must
+    never name the same session's night differently — they now resolve the site
+    longitude through one shared helper, so this holds by construction."""
+    client.put("/api/settings", json={"site_lon": -122.3})
+    _stamp(data_root, "M_42", {
+        0: {"timestamp_utc": "2026-07-09T05:00:00+00:00"},
+        1: {"timestamp_utc": "2026-07-09T05:30:00+00:00"},
+        2: {"timestamp_utc": "2026-07-09T06:00:00+00:00"},
+    })
+    nights = client.get("/api/targets/M_42/nights").json()
+    cal = client.get("/api/activity-calendar").json()
+    cal_dates = {n["date"] for n in cal["nights"]}
+    assert {n["night_date"] for n in nights} <= cal_dates
+
+
+def test_configured_longitude_decides_which_night_a_session_belongs_to(
+    client, solved_library, data_root, monkeypatch
+):
+    """The same UTC stamp lands on a different observing night for a far-east
+    observer than it does under the UTC fallback — proof the setting is honoured
+    rather than the label being UTC by another name."""
+    import webapp.site_location as site_location
+    monkeypatch.setattr(site_location, "detect_site_from_library", lambda lib, **k: None)
+    _stamp(data_root, "M_42", {
+        0: {"timestamp_utc": "2026-07-09T05:00:00+00:00"},
+        1: {"timestamp_utc": "2026-07-09T05:30:00+00:00"},
+        2: {"timestamp_utc": "2026-07-09T06:00:00+00:00"},
+    })
+    # No location anywhere → UTC noon-to-noon: 05:00 UTC belongs to the 8th.
+    assert client.get("/api/targets/M_42/nights").json()[0]["night_date"] == "2026-07-08"
+    # +150° (~UTC+10) → 15:00 local, i.e. the afternoon *of* the 9th's night.
+    client.put("/api/settings", json={"site_lon": 150.0})
+    assert client.get("/api/targets/M_42/nights").json()[0]["night_date"] == "2026-07-09"

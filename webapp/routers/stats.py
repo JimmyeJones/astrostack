@@ -17,7 +17,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from webapp import deps
-from webapp.site_location import detect_site_from_library
+from webapp.site_location import resolve_site_lon
 
 router = APIRouter(tags=["stats"])
 
@@ -533,24 +533,6 @@ def _collect_activity_calendar(lib, targets, *, today, months, lon_deg):
     return finalize_calendar(acc, today=today, months=months)
 
 
-def _fallback_site_lon(request: Request, lib, targets) -> float | None:  # noqa: ANN001
-    """Longitude (deg) sniffed from a solved frame's ``SITELONG`` header, for when
-    Settings has no location. A beginner rarely sets one, so without this the
-    calendar buckets nights UTC-noon-to-noon and a far-east/west observer's
-    late-evening subs can land on the wrong calendar day. Cached on the app (keyed
-    on the target set, same TTL as the calendar) so a locationless library isn't
-    re-probed on every dashboard load."""
-    tsig = tuple(sorted((t.safe_name, t.last_activity_utc or "") for t in targets))
-    cache = getattr(request.app.state, "activity_lon_cache", None)
-    now = time.monotonic()
-    if cache and cache["sig"] == tsig and (now - cache["at"]) < _ACTIVITY_CACHE_TTL_S:
-        return cache["lon"]
-    site = detect_site_from_library(lib)
-    lon = site[1] if site is not None else None
-    request.app.state.activity_lon_cache = {"sig": tsig, "at": now, "lon": lon}
-    return lon
-
-
 def _cached_activity_calendar(request: Request, months: int):
     """The trailing-window activity calendar, from the app cache when warm.
 
@@ -564,10 +546,9 @@ def _cached_activity_calendar(request: Request, months: int):
         targets = lib.list_targets()
         # Explicit Settings longitude wins; otherwise sniff it from a frame's FITS
         # header (the common Seestar case), so noon-to-noon bucketing is right out
-        # of the box even when the owner never configured a location.
-        lon = settings.site_lon
-        if lon is None:
-            lon = _fallback_site_lon(request, lib, targets)
+        # of the box even when the owner never configured a location. Shared with
+        # the Target page's Nights card so the two never name a night differently.
+        lon = resolve_site_lon(request, lib, settings.site_lon)
         offset_h = (lon / 15.0) if lon is not None else 0.0
         today = (datetime.now(timezone.utc) + timedelta(hours=offset_h)).date()
 

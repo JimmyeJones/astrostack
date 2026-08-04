@@ -6375,8 +6375,38 @@ to **Shipped**.)_
   stacks that previously ran uncalibrated — that's a behaviour change; gate it so it only bites targets whose
   defaults carry a real id, and add an upgrade test). Also tighten the "Save as defaults" toast to say the picks are
   *remembered/pre-filled* rather than implying they already drive auto-stack. (M, autonomy — PRIORITY 2.)
-- **NEW IDEA (Builder 2026-07-29, observed while fixing the west-of-UTC night-labelling bug, v0.210.16) — QA the
-  other planner/date surfaces for the same UTC-vs-local labelling drift.** The "Plan your next night" card named the
+- ~~**NEW IDEA (Builder 2026-07-29, observed while fixing the west-of-UTC night-labelling bug, v0.210.16) — QA the
+  other planner/date surfaces for the same UTC-vs-local labelling drift.**~~ — **SWEEP DONE, one real bug found and
+  FIXED v0.229.1** (Builder 2026-08-04, branch `claude/relaxed-turing-1hy1y1`). Every surface the entry named was
+  audited; **the Target page's "Nights" card was genuinely wrong** and the rest were already correct.
+  **The bug:** `NightsCard.formatNightDate` labelled each night from the UTC date of its *first sub*
+  (`start_utc`), but a session that starts at 21:00 local anywhere in the Americas is **already tomorrow in UTC** —
+  so a Seattle owner's night of 8 Jul was captioned "9 Jul 2026", and it **disagreed with the Dashboard's own
+  imaging calendar**, which has always bucketed nights noon-to-noon in local time
+  (`seestack/activity_calendar.night_date_of`). Every evening session west of UTC was mislabelled, not an edge case.
+  **The fix — one source of truth for "which night is this?".** A new shared
+  `webapp/site_location.resolve_site_lon(request, lib, configured_lon)` holds the resolution the calendar had
+  privately: explicit `site_lon` wins, else the longitude sniffed from a frame's `SITELONG` header, else `None`
+  (UTC), cached on the app keyed on the target set. `stats.py` now calls it (its private `_fallback_site_lon` is
+  gone — behaviour identical), and `GET /api/targets/{safe}/nights` calls the *same* helper and stamps each night
+  with an additive `night_date` (ISO `YYYY-MM-DD`) from `night_date_of`. So the two cards can no longer disagree by
+  construction. The frontend gained a pure `nightDateLabel(n)` that prefers `night_date` and falls back to
+  `start_utc`, so an older backend renders exactly as before. `start_utc`/`end_utc` are untouched — they are the
+  honest capture times and the "Set aside night" identifiers.
+  **Audited and found already correct (don't re-chase):** the "Plan your next night" card + its `.ics` (fixed in
+  v0.210.16 — local date, UTC kept as a hover tooltip); the imaging-calendar grid (`activityCalendar.ts`, which
+  correctly does UTC maths on the `YYYY-MM-DD` strings the *server* already bucketed); the Tonight page's window
+  rows and `tonight.ts::formatClock`/`isoDate` (local wall-clock); `focusTrend.ts::formatClockUtc` (labelled "UTC"
+  in the copy, so honest); and `webapp/ics.py`'s `DTSTART`, which is correctly a `Z`-suffixed UTC instant the
+  calendar app renders locally.
+  **Tests (+8):** `tests/webapp/test_target_nights.py` (+3 — a 05:00-UTC session under `site_lon=-122.3` labels as
+  the 8th while `start_utc` still says the 9th; the Nights dates are a subset of the imaging calendar's; and the
+  same stamp buckets differently under a far-east longitude vs the UTC fallback, proving the setting is honoured),
+  `NightsCard.test.tsx` (+4 — `nightDateLabel` prefers `night_date`, falls back on an older backend, dashes when
+  neither is usable, and the rendered card shows the evening rather than the UTC roll-over date). The three
+  activity-calendar longitude tests were re-pointed at the shared helper's module (same assertions).
+  Upgrade-safe: additive response field, additive frontend helper, no config/DB/on-disk/API-shape/default change.
+  *(Original idea kept below.)* The "Plan your next night" card named the
   wrong night for owners west of UTC because it formatted `dark_start` in UTC. The same class of bug can hide
   anywhere a UTC timestamp is rendered as a *date* the user plans around: the Tonight page's window rows, the imaging
   calendar/streak cells, "Continue tonight", NightsCard, the `.ics` export's DTSTART, and any "next N nights" list.
