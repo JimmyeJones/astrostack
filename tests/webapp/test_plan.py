@@ -524,3 +524,58 @@ def test_tonight_detects_site_from_fits_header(tmp_path: Path, monkeypatch):
     assert body["location_source"] == "fits"
     assert abs(body["observer"]["lat_deg"] - 48.0) < 1e-6
     assert abs(body["observer"]["lon_deg"] - 11.0) < 1e-6
+
+
+# ---- "Best use of your scope right now" (/api/plan/best-tonight) -------------
+
+# Around M 42's transit from London — the one library target these fixtures have.
+JAN_MIDNIGHT = "2026-01-16T00:00:00+00:00"
+
+
+def test_best_tonight_ranks_the_users_own_targets(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/best-tonight",
+                      params={"when": JAN_MIDNIGHT, "min_alt": 20}).json()
+    assert body["location_source"] == "settings"
+    assert body["observer"]["lat_deg"] == 51.5
+    assert body["dark_now"] is True
+    assert body["dark_minutes_left"] > 0
+    pick = next(p for p in body["picks"] if p["safe"] == "M_42")
+    # It only ever ranks the user's *own* targets — never the bundled catalog.
+    owned = {t["safe_name"] for t in client.get("/api/targets").json()}
+    assert {p["safe"] for p in body["picks"]} <= owned
+    assert pick["altitude_now_deg"] is not None
+    assert 0.0 < pick["noise_gain"] <= 1.0
+    assert "M_42" in pick["reason"]
+    assert "up right now" in pick["reason"]
+
+
+def test_best_tonight_without_location_still_answers_the_depth_half(client, solved_library):
+    """No site configured and no SITELAT in the synth headers: rather than 500 or
+    go blank, it ranks on "would more subs help?" and says the placement is
+    unknown."""
+    body = client.get("/api/plan/best-tonight", params={"when": JAN_MIDNIGHT}).json()
+    assert body["location_source"] == "none"
+    assert body["observer"] is None
+    assert body["dark_now"] is False
+    assert body["picks"], "the depth-only half is still worth answering"
+    assert all(p["altitude_now_deg"] is None for p in body["picks"])
+    assert "Set your location in Settings" in body["picks"][0]["reason"]
+
+
+def test_best_tonight_honours_the_limit_and_rejects_a_bad_when(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/best-tonight",
+                      params={"when": JAN_MIDNIGHT, "min_alt": 20, "limit": 1}).json()
+    assert len(body["picks"]) <= 1
+    assert client.get("/api/plan/best-tonight",
+                      params={"when": "not-a-time"}).status_code == 422
+
+
+def test_best_tonight_goes_quiet_when_nothing_is_up(client, solved_library):
+    """A floor nothing clears leaves an empty list, so the card can just hide
+    itself instead of recommending something that isn't there."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/best-tonight",
+                      params={"when": JAN_MIDNIGHT, "min_alt": 80}).json()
+    assert body["picks"] == []

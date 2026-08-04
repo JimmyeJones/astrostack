@@ -21,6 +21,7 @@ from seestack.nightplan import (
     moon_illumination,
     moon_is_waxing,
     next_observing_windows,
+    noise_gain_from_more_time,
     plan_tonight,
     suggest_targets,
 )
@@ -972,3 +973,174 @@ def test_moon_interference_evaluates_during_darkness_not_page_load():
     mi = moon_interference(_NJ, ra_deg=300.0, dec_deg=-20.0, when_utc=noon)
     hour = datetime.fromisoformat(mi.at_utc).hour  # UTC ~ 04-06h = night at -74°
     assert hour < 12
+
+
+# ---- "Best use of your scope right now" (rank_targets_now) -------------------
+
+def _lib(safe: str, name: str, ra: float, dec: float, hours: float) -> LibraryTarget:
+    return LibraryTarget(safe=safe, name=name, ra_deg=ra, dec_deg=dec,
+                         frames_accepted=int(hours * 120), total_exposure_s=hours * 3600.0)
+
+
+def test_noise_gain_follows_the_root_n_maths_and_falls_with_depth():
+    """The honest "would another hour help?" number: noise ∝ 1/√t, so the gain
+    from one more hour is 1 − √(t/(t+1)) — big on a thin target, small on a deep
+    one, and strictly decreasing in between."""
+    gains = [noise_gain_from_more_time(h * 3600.0) for h in (0.0, 0.75, 1.0, 3.0, 20.0)]
+    # Nothing captured yet → the first hour is an unbounded improvement.
+    assert gains[0] == 1.0
+    assert gains[1] == pytest.approx(1 - (0.75 / 1.75) ** 0.5, abs=1e-6)
+    assert gains[2] == pytest.approx(1 - (1 / 2) ** 0.5, abs=1e-6)
+    # Strictly decreasing with depth, and always a fraction.
+    assert gains[1] > gains[2] > gains[3] > gains[4] > 0.0
+    assert all(0.0 <= g <= 1.0 for g in gains)
+    # A zero-length extra session buys nothing.
+    assert noise_gain_from_more_time(3600.0, extra_hours=0.0) == 0.0
+
+
+def test_best_tonight_prefers_the_shallow_target_over_the_deep_one():
+    """Both up, same patch of sky: the one that would gain most from another hour
+    wins. That's the whole point — it's about the best *use* of tonight, not the
+    prettiest object."""
+    # Two targets a couple of degrees apart, so placement is effectively identical
+    # and only the captured depth can separate them.
+    thin = _lib("thin", "Thin", 10.7, 41.3, hours=0.75)
+    deep = _lib("deep", "Deep", 12.5, 41.5, hours=30.0)
+    plan = np_plan.rank_targets_now(LONDON, JAN_EVENING, [deep, thin])
+    assert [p.safe for p in plan.picks][0] == "thin"
+    assert plan.picks[0].score > plan.picks[-1].score
+
+
+def test_best_tonight_drops_a_target_that_is_not_up():
+    """A target below the horizon right now is never tonight's best use of the
+    scope, however little of it you've captured."""
+    below = _lib("below", "Below", 83.8, -75.0, hours=0.1)   # far south from London
+    plan = np_plan.rank_targets_now(LONDON, JAN_EVENING, [below])
+    assert plan.picks == []
+
+
+def test_best_tonight_reason_is_plain_language_and_actionable():
+    """The card shows this sentence verbatim, so it must name where the target is,
+    how long it stays up, what you already have, and what an hour buys."""
+    plan = np_plan.rank_targets_now(LONDON, JAN_EVENING,
+                                    [_lib("m31", "M 31", 10.7, 41.3, hours=0.75)])
+    reason = plan.picks[0].reason
+    assert "M 31" in reason
+    assert "° up right now" in reason
+    assert "stays shootable for another" in reason
+    assert "cut its noise about" in reason
+    # No jargon a beginner would have to look up.
+    assert "altitude" not in reason.lower()
+    assert "SNR" not in reason
+
+
+def test_best_tonight_falls_back_to_depth_alone_with_no_location():
+    """A fresh install with no site configured (and no SITELAT in any header) can
+    still answer the useful half — but must not imply the target is up."""
+    plan = np_plan.rank_targets_now(None, JAN_EVENING, [
+        _lib("deep", "Deep", 83.8, -5.4, hours=30.0),
+        _lib("thin", "Thin", 10.7, 41.3, hours=0.5),
+    ])
+    assert plan.observer is None
+    assert plan.dark_now is False
+    assert [p.safe for p in plan.picks] == ["thin", "deep"]
+    assert all(p.altitude_now_deg is None for p in plan.picks)
+    assert "Set your location in Settings" in plan.picks[0].reason
+
+
+def test_best_tonight_penalises_a_target_the_moon_is_sitting_on():
+    """A faint target beside a bright Moon is not tonight's best use of the scope,
+    however well-placed it is — and the ranking must apply the *same* penalty
+    ``/tonight`` does, so the two surfaces can't contradict each other."""
+    # A near-full Moon night, and a target right next to it vs one far away.
+    full_moon = datetime(2026, 1, 3, 22, 0, tzinfo=timezone.utc)
+    illum = moon_illumination(full_moon)
+    assert illum > 0.9, "pick a night the Moon actually matters on"
+    # The shared penalty is the contract: strongest when close + bright, gone
+    # once the Moon is far away, and scaled by how long the Moon is even up.
+    assert np_plan.moon_penalty(5.0, 1.0) > np_plan.moon_penalty(50.0, 1.0)
+    assert np_plan.moon_penalty(90.0, 1.0) == 0.0
+    assert np_plan.moon_penalty(5.0, 1.0, 0.0) == 0.0
+
+    near = np_plan.rank_targets_now(LONDON, full_moon,
+                                    [_lib("near", "Near", 100.0, 22.0, hours=0.75)])
+    pick = near.picks[0]
+    # The score really is docked: it lands below the un-penalised sky × depth the
+    # same altitude and window would otherwise earn.
+    unpenalised = 100.0 * np_plan._sky_component(
+        pick.altitude_now_deg, pick.minutes_usable_left, near.min_altitude_deg,
+    ) * np_plan._depth_component(0.75 * 3600.0)
+    assert 0.0 < pick.score < unpenalised
+    # ...and the card says so in plain words rather than silently down-ranking.
+    assert "Moon" in pick.reason
+
+
+def test_best_tonight_says_why_it_cannot_place_a_target():
+    """The two "we can't tell you where it is" cases need different copy: no site
+    configured is fixable in Settings; no astronomical darkness at all (a
+    high-latitude summer) is not, and telling that user to open Settings would be
+    a wild goose chase."""
+    targets = [_lib("m31", "M 31", 10.7, 41.3, hours=0.75)]
+    no_site = np_plan.rank_targets_now(None, JAN_EVENING, targets)
+    assert "Set your location in Settings" in no_site.picks[0].reason
+
+    tromso = Observer(lat_deg=69.7, lon_deg=19.0, elevation_m=10.0)
+    midsummer = datetime(2026, 6, 21, 22, 0, tzinfo=timezone.utc)
+    no_dark = np_plan.rank_targets_now(tromso, midsummer, targets)
+    assert no_dark.dark_now is False
+    assert "no astronomical darkness" in no_dark.picks[0].reason
+    assert "Settings" not in no_dark.picks[0].reason
+
+
+def test_best_tonight_never_says_you_have_zero_minutes():
+    """"You've got 0 min on it" reads as a bug; a target with nothing captured
+    says so in words."""
+    fresh = np_plan.rank_targets_now(None, JAN_EVENING,
+                                     [_lib("new", "New", 10.7, 41.3, hours=0.0)])
+    assert "haven't captured any of New yet" in fresh.picks[0].reason
+    assert "0 min" not in fresh.picks[0].reason
+
+
+def test_best_tonight_is_empty_with_no_library_targets():
+    assert np_plan.rank_targets_now(LONDON, JAN_EVENING, []).picks == []
+
+
+def test_best_tonight_ignores_a_target_with_no_position():
+    """A target that never plate-solved has no sky position, so it can't be ranked
+    (and must not crash the surface)."""
+    unsolved = LibraryTarget(safe="u", name="Unsolved", ra_deg=None, dec_deg=None,
+                             frames_accepted=10, total_exposure_s=600.0)
+    assert np_plan.rank_targets_now(LONDON, JAN_EVENING, [unsolved]).picks == []
+
+
+def test_best_tonight_says_nothing_when_the_night_is_all_but_over():
+    """Twenty minutes before dawn there's no point starting anything — the surface
+    goes quiet rather than recommending a session that can't happen."""
+    window = np_plan._find_dark_window(LONDON, JAN_EVENING)
+    assert window is not None
+    from datetime import timedelta
+    almost_dawn = window.end - timedelta(minutes=5)
+    plan = np_plan.rank_targets_now(LONDON, almost_dawn,
+                                    [_lib("m31", "M 31", 10.7, 41.3, hours=0.5)])
+    assert plan.picks == []
+    assert plan.dark_minutes_left < 20.0
+
+
+def test_best_tonight_before_dusk_plans_the_whole_coming_window():
+    """Asked in daylight it still answers, but honestly: it quotes the altitude the
+    target *reaches* tonight rather than pretending to a "right now" read."""
+    afternoon = datetime(2026, 1, 15, 14, 0, tzinfo=timezone.utc)  # London, still light
+    plan = np_plan.rank_targets_now(LONDON, afternoon,
+                                    [_lib("m31", "M 31", 10.7, 41.3, hours=0.5)])
+    assert plan.dark_now is False
+    assert plan.picks, "a pre-dusk request should still plan the coming night"
+    assert "climbs to" in plan.picks[0].reason
+    assert plan.picks[0].altitude_now_deg is not None
+
+
+def test_best_tonight_honours_the_limit_and_sorts_best_first():
+    targets = [_lib(f"t{i}", f"T{i}", 10.7 + i * 0.5, 41.3, hours=0.5 + i)
+               for i in range(5)]
+    plan = np_plan.rank_targets_now(LONDON, JAN_EVENING, targets, limit=2)
+    assert len(plan.picks) == 2
+    assert plan.picks[0].score >= plan.picks[1].score

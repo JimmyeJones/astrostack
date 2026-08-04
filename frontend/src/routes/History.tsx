@@ -282,20 +282,36 @@ export function frameAccountingNote(
   if (failed <= 0) return null;
   const used = offered - failed;
   const nf = (n: number) => n.toLocaleString();
-  const text =
-    `${nf(used)} of ${nf(offered)} subs combined · ` +
-    `${nf(failed)} couldn't be aligned`;
+  // Split the gap into the two causes that need *different* fixes. A sub whose
+  // file simply wasn't on disk (cleared Stage-1 cache while the originals sit on
+  // an offline share, an unmounted drive, moved files) is a storage problem —
+  // sending that user to re-solve frames or hunt for mixed targets wastes their
+  // evening. Absent on older masters → 0, so those read exactly as before.
+  const unreadable = typeof fa.n_unreadable === "number" && fa.n_unreadable > 0
+    ? Math.min(fa.n_unreadable, failed)
+    : 0;
+  const unaligned = failed - unreadable;
+  const causes: string[] = [];
+  if (unreadable > 0) causes.push(`${nf(unreadable)} couldn't be read`);
+  if (unaligned > 0) causes.push(`${nf(unaligned)} couldn't be aligned`);
+  const text = `${nf(used)} of ${nf(offered)} subs combined · ${causes.join(" · ")}`;
   // Guide a fix only when it's a materially large share and not a tiny stack
   // (one dud sub out of five is 20% but not worth a scary nudge).
-  const fraction = failed / offered;
-  const concern = offered >= 10 && fraction >= 0.2;
-  const guidance = concern
-    ? "Many subs didn't line up to the reference — this usually means two " +
-      "targets' frames are in one folder, or some plate-solved to the wrong " +
-      "place. Open the Frames table, sort by RA/Dec, and reject or re-solve the " +
-      "ones whose centre is far from the rest."
-    : null;
-  return { text, concern, guidance };
+  const missingConcern = offered >= 10 && unreadable / offered >= 0.05;
+  const alignConcern = offered >= 10 && unaligned / offered >= 0.2;
+  // When both fired, guide toward whichever explains more of the loss.
+  const guidance = missingConcern && unreadable >= unaligned
+    ? "Those subs' files weren't there when the stack ran — most often the " +
+      "Stage-1 cache was cleared while the originals live on a drive or network " +
+      "share that's offline. Reconnect the drive (or re-copy the files), scan " +
+      "again, then re-stack to get them back."
+    : alignConcern
+      ? "Many subs didn't line up to the reference — this usually means two " +
+        "targets' frames are in one folder, or some plate-solved to the wrong " +
+        "place. Open the Frames table, sort by RA/Dec, and reject or re-solve the " +
+        "ones whose centre is far from the rest."
+      : null;
+  return { text, concern: guidance !== null, guidance };
 }
 
 // One-line honest signal when sub-pixel refine had to leave some subs *only

@@ -161,7 +161,7 @@ export function reprocessSummary(r: Record<string, unknown>): {
  * bare "done" and no idea where the result is (or why there isn't one). */
 export function processTargetSummary(r: Record<string, unknown>): {
   line: string; stacked: boolean; thin: ThinStackWarning | null;
-  cleaned: string | null;
+  cleaned: string | null; missing: string | null;
 } {
   const stacked = Boolean(r.stacked);
   const solved = Number(r.solved_accepted ?? 0);
@@ -186,7 +186,16 @@ export function processTargetSummary(r: Record<string, unknown>): {
       typeof stack.rejection_fraction === "number" ? stack.rejection_fraction : null,
       Number(stack.n_frames_used ?? 0) || null,
     );
-    return { line: `${line}.`, stacked, thin, cleaned };
+    // The walk-away user's only cue that a chunk of their subs simply weren't on
+    // disk (Stage-1 cache cleared while the originals sit on an offline share, a
+    // drive unmounted). Without it a storage problem reads as a thin stack with
+    // no reason. Self-omits when everything was readable, and on an older
+    // backend that doesn't report it.
+    const missing = missingSubsNote(
+      Number(stack.n_unreadable ?? 0) || 0,
+      Number(stack.n_offered ?? 0) || 0,
+    );
+    return { line: `${line}.`, stacked, thin, cleaned, missing };
   }
   const reason = typeof r.stack_skipped_reason === "string"
     ? r.stack_skipped_reason : null;
@@ -199,7 +208,26 @@ export function processTargetSummary(r: Record<string, unknown>): {
   } else {
     line = "Finished, but no stack was produced.";
   }
-  return { line, stacked, thin: null, cleaned: null };
+  return { line, stacked, thin: null, cleaned: null, missing: null };
+}
+
+/** Plain-language note when some of a target's subs had no file on disk at all
+ * when the stack ran, so they couldn't be combined (pure, tested).
+ *
+ * `readable_frame_path` falls back from the Stage-1 cache to the original
+ * source, and the stacker quietly skips a frame with neither — so a cleared
+ * cache plus an offline NAS share (or an unmounted drive) silently thins the
+ * stack. The engine now counts them up front; this turns the count into the one
+ * sentence that names the cause *and* the fix. Returns null when nothing was
+ * missing, or when the count/total isn't reported (older backend). */
+export function missingSubsNote(nUnreadable: number, nOffered: number): string | null {
+  if (!Number.isFinite(nUnreadable) || nUnreadable <= 0) return null;
+  if (!Number.isFinite(nOffered) || nOffered <= 0) return null;
+  const missing = Math.min(Math.round(nUnreadable), Math.round(nOffered));
+  const nf = (n: number) => n.toLocaleString();
+  return `${nf(missing)} of ${nf(nOffered)} subs couldn't be read — their files `
+    + "weren't on disk. If they live on a drive or network share, check it's "
+    + "connected, then scan and stack again.";
 }
 
 /** How many subs the stack-then-solve bootstrap rescued in this job result, or
@@ -410,7 +438,7 @@ function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;
   const r = job.result as Record<string, unknown>;
   if (job.kind === "process_target") {
-    const { line, stacked, thin, cleaned } = processTargetSummary(r);
+    const { line, stacked, thin, cleaned, missing } = processTargetSummary(r);
     // Deep-link straight to the finished run's editor when we know its id
     // (v0.85.3+ backend); fall back to the target's History on an older backend.
     const stack = r.stack && typeof r.stack === "object"
@@ -438,6 +466,14 @@ function JobResultActions({ job }: { job: Job }) {
           <Alert color={thin.level === "single" ? "orange" : "yellow"} p="xs"
             title="Very few frames stacked">
             <Text size="xs">{thin.message}</Text>
+          </Alert>
+        ) : null}
+        {/* Names a storage problem as a storage problem — otherwise a cleared
+            cache over an offline share just looks like a mysteriously thin
+            stack. Shown above the reassuring notes because it's actionable. */}
+        {missing ? (
+          <Alert color="yellow" p="xs" title="Some subs couldn't be read">
+            <Text size="xs">{missing}</Text>
           </Alert>
         ) : null}
         {/* The honest "we quietly removed the trails" trust cue — self-omits on a

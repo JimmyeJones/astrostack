@@ -903,6 +903,41 @@ describe("frameAccountingNote", () => {
     const fa = frameAccountingNote({ n_offered: 10, n_align_failed: 99 });
     expect(fa!.text).toBe("0 of 10 subs combined · 10 couldn't be aligned");
   });
+  it("names missing files as missing files, not as an alignment failure", () => {
+    // A cleared Stage-1 cache over an offline share: sending this user to
+    // re-solve frames or hunt for mixed targets wastes their evening.
+    const fa = frameAccountingNote({
+      n_offered: 500, n_align_failed: 142, n_unreadable: 142,
+    });
+    expect(fa!.text).toBe("358 of 500 subs combined · 142 couldn't be read");
+    expect(fa!.concern).toBe(true);
+    expect(fa!.guidance).toContain("weren't there");
+    expect(fa!.guidance).toContain("offline");
+    expect(fa!.guidance).not.toContain("Frames table");
+  });
+  it("reports both causes when the loss was mixed", () => {
+    const fa = frameAccountingNote({
+      n_offered: 500, n_align_failed: 150, n_unreadable: 40,
+    });
+    expect(fa!.text).toBe(
+      "350 of 500 subs combined · 40 couldn't be read · 110 couldn't be aligned");
+    // Alignment explains more of the loss here, so that's the fix to guide.
+    expect(fa!.guidance).toContain("Frames table");
+  });
+  it("stays quiet about a stray unreadable sub in a big stack", () => {
+    const fa = frameAccountingNote({
+      n_offered: 2000, n_align_failed: 1, n_unreadable: 1,
+    });
+    expect(fa!.text).toBe("1,999 of 2,000 subs combined · 1 couldn't be read");
+    expect(fa!.concern).toBe(false);
+    expect(fa!.guidance).toBeNull();
+  });
+  it("clamps an unreadable count that exceeds the failures", () => {
+    const fa = frameAccountingNote({
+      n_offered: 100, n_align_failed: 5, n_unreadable: 80,
+    });
+    expect(fa!.text).toBe("95 of 100 subs combined · 5 couldn't be read");
+  });
 });
 
 describe("roughlyAlignedNote", () => {

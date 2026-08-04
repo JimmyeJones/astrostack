@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
   bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobKindLabel,
+  missingSubsNote,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
 } from "./Jobs";
 import * as client from "../api/client";
@@ -825,7 +826,7 @@ describe("processTargetSummary", () => {
       stacked: true, solved_accepted: 8, stack: { n_frames_used: 8 },
     })).toEqual({
       line: "Stacked 8 frames into a new master.", stacked: true, thin: null,
-      cleaned: null,
+      cleaned: null, missing: null,
     });
   });
   it("names the outlier clean-up a small auto-stack made with min/max", () => {
@@ -864,7 +865,7 @@ describe("processTargetSummary", () => {
     expect(processTargetSummary({ stacked: true, solved_accepted: 5 }))
       .toEqual({
         line: "Stacked 5 frames into a new master.", stacked: true, thin: null,
-        cleaned: null,
+        cleaned: null, missing: null,
       });
   });
   it("flags a thin stack (very few frames combined) so it isn't shown as a clean result", () => {
@@ -880,6 +881,24 @@ describe("processTargetSummary", () => {
       stacked: true, solved_accepted: 20, stack: { n_frames_used: 20 },
     }).thin).toBeNull();
   });
+  it("names subs that couldn't be read at all, and how to get them back", () => {
+    const { missing } = processTargetSummary({
+      stacked: true, solved_accepted: 358,
+      stack: { n_frames_used: 358, n_offered: 500, n_unreadable: 142 },
+    });
+    expect(missing).toContain("142 of 500 subs couldn't be read");
+    expect(missing).toContain("connected");
+  });
+  it("says nothing about missing subs when every file was there", () => {
+    expect(processTargetSummary({
+      stacked: true, solved_accepted: 20,
+      stack: { n_frames_used: 20, n_offered: 20, n_unreadable: 0 },
+    }).missing).toBeNull();
+    // ...or when the backend is too old to report it at all.
+    expect(processTargetSummary({
+      stacked: true, solved_accepted: 20, stack: { n_frames_used: 20 },
+    }).missing).toBeNull();
+  });
   it("explains a skip with nothing plate-solved to stack", () => {
     expect(processTargetSummary({
       stacked: false, stack_skipped_reason: "no_solved_frames",
@@ -889,15 +908,37 @@ describe("processTargetSummary", () => {
       stacked: false,
       thin: null,
       cleaned: null,
+      missing: null,
     });
   });
   it("explains a cancellation and an unknown non-stacked outcome", () => {
     expect(processTargetSummary({ stacked: false, stack_skipped_reason: "cancelled" }))
-      .toEqual({ line: "Cancelled before stacking.", stacked: false, thin: null, cleaned: null });
+      .toEqual({
+        line: "Cancelled before stacking.", stacked: false, thin: null,
+        cleaned: null, missing: null,
+      });
     expect(processTargetSummary({ stacked: false }))
       .toEqual({
         line: "Finished, but no stack was produced.", stacked: false, thin: null,
-        cleaned: null,
+        cleaned: null, missing: null,
       });
+  });
+});
+
+describe("missingSubsNote", () => {
+  it("stays silent when nothing was missing or nothing was reported", () => {
+    expect(missingSubsNote(0, 500)).toBeNull();
+    expect(missingSubsNote(5, 0)).toBeNull();
+    expect(missingSubsNote(NaN, 500)).toBeNull();
+    expect(missingSubsNote(5, NaN)).toBeNull();
+  });
+  it("names the count, the total and the fix", () => {
+    const note = missingSubsNote(1420, 5000)!;
+    expect(note).toContain("1,420 of 5,000 subs couldn't be read");
+    expect(note).toContain("weren't on disk");
+    expect(note).toContain("scan and stack again");
+  });
+  it("never claims more missing subs than were offered", () => {
+    expect(missingSubsNote(99, 10)).toContain("10 of 10 subs");
   });
 });

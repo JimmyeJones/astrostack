@@ -91,9 +91,9 @@ is blind to seams and gradients and agrees with the old number to within 3 % on 
 noise, so ordinary single-field stacks are unchanged. **One follow-up remains, and only if the
 owner still sees a grid on v0.225.0:** bisect the rest of the v0.158→v0.220 colour chain (SCNR,
 per-frame / final gradient flatten) on the synthetic mosaic scene now in
-`tests/test_auto_noise_measure.py` — filed in `docs/IMPROVEMENTS.md`. An owner-requested
-**Auto auto-crop toggle** is filed and unstarted (top of "Features that serve real workflows") —
-that is the highest-value owner-facing item now. Everything
+`tests/test_auto_noise_measure.py` — filed in `docs/IMPROVEMENTS.md`. *(The owner-requested
+**Auto auto-crop toggle** this paragraph used to point at as "filed and unstarted" **shipped in
+v0.226.0** — don't go looking for it. Refreshed 2026-08-04.)* Everything
 below was the previously-drained queue —
 
 that queue is DRAINED; every ⭐ item
