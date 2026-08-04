@@ -30,6 +30,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   so you never idle; otherwise leave ideation to the Scout and keep shipping.
 - **Priority order (from AGENTS.md §1) governs this list.** Work the top sections
   first. The editor is priority 1.
+- **Keep a shipped item's original spec *indented* under it.** When an item ships,
+  strike the headline, write the SHIPPED paragraph, and keep the original spec
+  **as an indented continuation** (two spaces), never as a fresh top-level
+  `- **…**` bullet. A top-level copy is indistinguishable from open work: every
+  way an agent triages this file — reading a section, or grepping `^- \*\*` for
+  unclaimed items — surfaces it as a live idea, and runs have been spent
+  re-picking features that shipped months earlier. Indented, the "is this open?"
+  question is answerable by shape alone.
 
 ---
 
@@ -7764,33 +7772,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   `auto_reject=True`; after saving *any* per-target default the form falls back to the dataclass `False`, so a
   user who took control keeps their choice). _(PRIORITY 2 autonomy — turns the shipped-but-dormant smart default
   into the beginner's real default, upgrade-safely.)_ Original spec kept for provenance:
-- **NEW (Scout 2026-07-21d) — make smart `auto_reject` the *beginner default* so a default stack actually
-  removes a lone satellite/plane trail on small sub counts.** `StackOptions.auto_reject` (shipped v0.143.0)
-  resolves rejection from the sub count — order-statistic min/max below the κ-effective threshold
-  (`_auto_kappa_min_frames(3.0) = 11`), weight-respecting κ-σ at/above it — *precisely so a beginner never has
-  to know κ-σ vs min/max* (its own help text says so). **But it defaults `False` in the dataclass and
-  `Settings.default_stack_options` is an empty dict, so every default stack a beginner triggers still uses plain
-  κ-σ** (`sigma_clip=True`). κ-σ is mathematically blind to a *lone* outlier below ~11 frames (a single point's
-  z-score against stats that include it stays below κ), so a short session / first-light stack of, say, 6–10
-  subs with one satellite trail silently keeps the trail — a wrong-ish image on the exact path autonomy is meant
-  to own. Verified: `get_stack_defaults` (`webapp/routers/stack.py:126`) starts from `settings.default_stack_
-  options` (empty) merged over the dataclass defaults, and `default_stack_options` is `Field(default_factory=
-  dict)` (`webapp/config.py:148`), so nothing turns it on. **The §9 tension is real** — flipping the *dataclass*
-  default would change what a running install's default stack does (a default-behaviour flip §9 forbids) and
-  would alter old run records' byte-for-byte options. So do it at the **webapp default layer, not the engine
-  default**, in one of two upgrade-safe shapes: (a) in `get_stack_defaults`, when the target has **no saved
-  per-target defaults and `default_stack_options` is empty**, default `auto_reject` to `True` in the returned
-  form values only (the persisted engine default and any explicitly-saved config are untouched; a user who ever
-  saved defaults keeps exactly what they saved); or (b) seed `default_stack_options={"auto_reject": True}` at
-  **first-run bootstrap for a *fresh* install only** (guard on a brand-new state dir / config absent), so
-  existing installs are byte-for-byte unchanged and only new users get the smart default. Prefer (a) — it needs
-  no bootstrap plumbing, is trivially reversible (uncheck the box), and the Stack form already shows the
-  "Auto outlier removal" checkbox so the user sees and controls it. Add an upgrade test that an *existing*
-  config with a saved `default_stack_options` (or a saved per-target default) is unaffected, and that a
-  never-configured target now returns `auto_reject=True`. Keep the dataclass default `False` (run records +
-  `estimate_stack` + any script that constructs `StackOptions()` directly stay identical). _(S–M; PRIORITY 2
-  autonomy — turns a shipped-but-dormant smart default into the beginner's real default, upgrade-safely; this is
-  the "smarter, well-defaulted auto-stack" §1 explicitly asks for.)_
+  - **NEW (Scout 2026-07-21d) — make smart `auto_reject` the *beginner default* so a default stack actually
+    removes a lone satellite/plane trail on small sub counts.** `StackOptions.auto_reject` (shipped v0.143.0)
+    resolves rejection from the sub count — order-statistic min/max below the κ-effective threshold
+    (`_auto_kappa_min_frames(3.0) = 11`), weight-respecting κ-σ at/above it — *precisely so a beginner never has
+    to know κ-σ vs min/max* (its own help text says so). **But it defaults `False` in the dataclass and
+    `Settings.default_stack_options` is an empty dict, so every default stack a beginner triggers still uses plain
+    κ-σ** (`sigma_clip=True`). κ-σ is mathematically blind to a *lone* outlier below ~11 frames (a single point's
+    z-score against stats that include it stays below κ), so a short session / first-light stack of, say, 6–10
+    subs with one satellite trail silently keeps the trail — a wrong-ish image on the exact path autonomy is meant
+    to own. Verified: `get_stack_defaults` (`webapp/routers/stack.py:126`) starts from `settings.default_stack_
+    options` (empty) merged over the dataclass defaults, and `default_stack_options` is `Field(default_factory=
+    dict)` (`webapp/config.py:148`), so nothing turns it on. **The §9 tension is real** — flipping the *dataclass*
+    default would change what a running install's default stack does (a default-behaviour flip §9 forbids) and
+    would alter old run records' byte-for-byte options. So do it at the **webapp default layer, not the engine
+    default**, in one of two upgrade-safe shapes: (a) in `get_stack_defaults`, when the target has **no saved
+    per-target defaults and `default_stack_options` is empty**, default `auto_reject` to `True` in the returned
+    form values only (the persisted engine default and any explicitly-saved config are untouched; a user who ever
+    saved defaults keeps exactly what they saved); or (b) seed `default_stack_options={"auto_reject": True}` at
+    **first-run bootstrap for a *fresh* install only** (guard on a brand-new state dir / config absent), so
+    existing installs are byte-for-byte unchanged and only new users get the smart default. Prefer (a) — it needs
+    no bootstrap plumbing, is trivially reversible (uncheck the box), and the Stack form already shows the
+    "Auto outlier removal" checkbox so the user sees and controls it. Add an upgrade test that an *existing*
+    config with a saved `default_stack_options` (or a saved per-target default) is unaffected, and that a
+    never-configured target now returns `auto_reject=True`. Keep the dataclass default `False` (run records +
+    `estimate_stack` + any script that constructs `StackOptions()` directly stay identical). _(S–M; PRIORITY 2
+    autonomy — turns a shipped-but-dormant smart default into the beginner's real default, upgrade-safely; this is
+    the "smarter, well-defaulted auto-stack" §1 explicitly asks for.)_
 - **NEW (Scout 2026-07-21b) — auto-detect a master-dark ↔ light *exposure* mismatch and guide the fix, so a
   beginner reusing a dark library doesn't silently get a wrong calibration.** `CalibrationMasters.validate`
   (`seestack/calibrate/apply.py`) only checks the master's *shape* against the frames — it never compares the
@@ -9356,23 +9364,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   rejected), and `test_tiny_target_below_small_floor_is_not_reconciled` (2 subs never reconciled). Severity:
   image-quality/trust — a beginner's first short session on NGC 4565 / NGC 891 / the Sombrero's dust lane no
   longer silently vanishes to "0 frames used". Original spec kept for provenance:
-- **IMPROVEMENT IDEA (Scout 2026-07-21) — a small target of a *stationary* elongated object (edge-on galaxy)
-  can have every sub auto-rejected as a "streak" with no reconcile-floor escape.** *(Image-quality / trust,
-  PRIORITY 4; size S–M.)* **Why:** the streak detector (`qc/streaks.py`) is shape-based and per-frame — it
-  flags any bright, long, elongated connected component, which is exactly what an edge-on galaxy (NGC 4565,
-  NGC 891) or a bright dust lane *is* on essentially every sub. `reconcile_streak_rejections`
-  (`qc/runner.py:146-165`) is the safety net that un-rejects a mass streak-flag, but it only engages when
-  `>= 10` eligible frames exist, so on a **small** target (a first short session, `< 10` subs) it never fires
-  and the whole target is silently discarded to `auto:streak` — the beginner sees "0 frames used" on a real
-  object with no explanation. **Fix direction (needs care — leave to Builder):** either lower/scale the
-  reconcile floor for very small targets, or add a "if *nearly all* frames flagged and the flagged component
-  is in the *same* position frame-to-frame, it's a real object, not transient debris → un-flag" heuristic
-  (the streak metrics + WCS/centroid are already computed). Guard it to only ever *un*-reject (never newly
-  reject), mirroring the existing reconcile contract, and respect `user_override`. **Testable:** synthesise a
-  handful of frames with a fixed elongated bright blob, assert they aren't all left `auto:streak`. Pairs well
-  with the "Why were some frames left out?" card above, which would otherwise honestly-but-uselessly report
-  "all your frames were trailed". Upgrade-safe: un-reject-only, additive, opt-in behaviour; no schema/config/
-  API/default change.
+  - **IMPROVEMENT IDEA (Scout 2026-07-21) — a small target of a *stationary* elongated object (edge-on galaxy)
+    can have every sub auto-rejected as a "streak" with no reconcile-floor escape.** *(Image-quality / trust,
+    PRIORITY 4; size S–M.)* **Why:** the streak detector (`qc/streaks.py`) is shape-based and per-frame — it
+    flags any bright, long, elongated connected component, which is exactly what an edge-on galaxy (NGC 4565,
+    NGC 891) or a bright dust lane *is* on essentially every sub. `reconcile_streak_rejections`
+    (`qc/runner.py:146-165`) is the safety net that un-rejects a mass streak-flag, but it only engages when
+    `>= 10` eligible frames exist, so on a **small** target (a first short session, `< 10` subs) it never fires
+    and the whole target is silently discarded to `auto:streak` — the beginner sees "0 frames used" on a real
+    object with no explanation. **Fix direction (needs care — leave to Builder):** either lower/scale the
+    reconcile floor for very small targets, or add a "if *nearly all* frames flagged and the flagged component
+    is in the *same* position frame-to-frame, it's a real object, not transient debris → un-flag" heuristic
+    (the streak metrics + WCS/centroid are already computed). Guard it to only ever *un*-reject (never newly
+    reject), mirroring the existing reconcile contract, and respect `user_override`. **Testable:** synthesise a
+    handful of frames with a fixed elongated bright blob, assert they aren't all left `auto:streak`. Pairs well
+    with the "Why were some frames left out?" card above, which would otherwise honestly-but-uselessly report
+    "all your frames were trailed". Upgrade-safe: un-reject-only, additive, opt-in behaviour; no schema/config/
+    API/default change.
 
 - ~~**NEW (Scout 2026-07-21) — coverage-leveling bins by the quality-*weight* sum, not the true per-pixel
   *frame count*, so on a quality-weighted mosaic the panel-step removal groups pixels by a fuzzed
@@ -11893,35 +11901,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   `tests/webapp/test_plan.py` (+4 — windows for a library target, no-location self-hide, unknown-target 404,
   never-rising empty), frontend `nextSession.test.ts` (+14) & `NextSessionCard.test.tsx` (+4). Beginner bar ✔ (one
   card, zero knobs, plain language, directly actionable next clear night). *(Original spec kept for provenance.)*
-- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Plan your next night on *this* target": a per-target card that
-  turns the goal-gap into one concrete, dated next session.** *(Beginner feature; PRIORITY 2 autonomy / 3
-  friendliness; size M.)* The two hardest beginner questions after a session are answered *separately* today and
-  never joined: the readiness card says *"you're 2 h short of a good M31"* (goal gap, from `total_exposure_s` vs
-  the per-type `goal_s`), and the **night planner** (`webapp/routers/plan.py` + `seestack/nightplan.py`) can say
-  *"the next dark window when M31 is well-placed is Thursday 22:40 → 02:10"* — but the beginner has to hold a
-  number in their head and go cross-reference a separate page. **Feature:** a small read-only **"Plan your next
-  night"** card on the Target page that *joins* them into one plain sentence anchored to this object: e.g.
-  *"About 2 clear hours to go for a good M31 (~120 more subs). Your next good window: Thu 21 Jul, 22:40 → 02:10 —
-  M31 climbs above 40°, Moon down. That window covers it."* or, when the gap is bigger than one night,
-  *"~5 h to go — more than one night. Next 3 good windows: Thu, Sat, Mon."* It is the *actionable* companion to
-  the retrospective cards (focus/haze/integration trends look **backward**; this looks **forward** and tells the
-  beginner exactly when to point the scope again). **Reuses existing pieces, no new engine math:** the goal gap =
-  `max(0, goal_s − total_exposure_s)` (readiness card already computes both); "subs to go" = gap ÷ the target's
-  median accepted sub-exposure; the window(s) come straight from `nightplan`'s existing `_find_dark_window` +
-  `_observability_batch` (already power the planner), filtered to *this* target's RA/Dec and horizon. **Beginner
-  bar ✔:** one card, zero knobs, sane default (auto-picked window from the planner's own scoring), plain language,
-  directly actionable on the next clear night; serves the autonomy + friendliness pillars ("it just told me what
-  to do next"). **Guardrails:** additive/read-only, best-effort — self-hide when the target has no goal gap (done),
-  no site location set (`site_lat`/`site_lon` unset → no windows to compute; show only the "X h to go" clause), or
-  no upcoming dark window in the planner's horizon (say *"no good window in the next N nights — try again when the
-  Moon's out of the way"* rather than blanks); off nothing; no schema/config/API-shape/default change. **Builder
-  slice:** (a) a pure `nextSessionPlan(gap_s, subExposureS, windows)` helper → `{hoursToGo, subsToGo, windows[]}`
-  (unit-tested for done / one-night / multi-night / no-location / no-window cases); (b) `GET
-  /api/targets/{safe}/next-session` → `NextSessionOut | None` reusing the nightplan observability batch for the
-  target's own RA/Dec (read-only; `null` = self-hide); (c) a `NextSessionCard` on the Target page rendering the
-  sentence + the dated window(s), reusing the readiness card's goal-gap figures the page already loads. Keeps the
-  beginner-feature pipeline stocked with a *forward-looking, autonomy* feature to balance the recent run of
-  retrospective trend cards.
+  - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Plan your next night on *this* target": a per-target card that
+    turns the goal-gap into one concrete, dated next session.** *(Beginner feature; PRIORITY 2 autonomy / 3
+    friendliness; size M.)* The two hardest beginner questions after a session are answered *separately* today and
+    never joined: the readiness card says *"you're 2 h short of a good M31"* (goal gap, from `total_exposure_s` vs
+    the per-type `goal_s`), and the **night planner** (`webapp/routers/plan.py` + `seestack/nightplan.py`) can say
+    *"the next dark window when M31 is well-placed is Thursday 22:40 → 02:10"* — but the beginner has to hold a
+    number in their head and go cross-reference a separate page. **Feature:** a small read-only **"Plan your next
+    night"** card on the Target page that *joins* them into one plain sentence anchored to this object: e.g.
+    *"About 2 clear hours to go for a good M31 (~120 more subs). Your next good window: Thu 21 Jul, 22:40 → 02:10 —
+    M31 climbs above 40°, Moon down. That window covers it."* or, when the gap is bigger than one night,
+    *"~5 h to go — more than one night. Next 3 good windows: Thu, Sat, Mon."* It is the *actionable* companion to
+    the retrospective cards (focus/haze/integration trends look **backward**; this looks **forward** and tells the
+    beginner exactly when to point the scope again). **Reuses existing pieces, no new engine math:** the goal gap =
+    `max(0, goal_s − total_exposure_s)` (readiness card already computes both); "subs to go" = gap ÷ the target's
+    median accepted sub-exposure; the window(s) come straight from `nightplan`'s existing `_find_dark_window` +
+    `_observability_batch` (already power the planner), filtered to *this* target's RA/Dec and horizon. **Beginner
+    bar ✔:** one card, zero knobs, sane default (auto-picked window from the planner's own scoring), plain language,
+    directly actionable on the next clear night; serves the autonomy + friendliness pillars ("it just told me what
+    to do next"). **Guardrails:** additive/read-only, best-effort — self-hide when the target has no goal gap (done),
+    no site location set (`site_lat`/`site_lon` unset → no windows to compute; show only the "X h to go" clause), or
+    no upcoming dark window in the planner's horizon (say *"no good window in the next N nights — try again when the
+    Moon's out of the way"* rather than blanks); off nothing; no schema/config/API-shape/default change. **Builder
+    slice:** (a) a pure `nextSessionPlan(gap_s, subExposureS, windows)` helper → `{hoursToGo, subsToGo, windows[]}`
+    (unit-tested for done / one-night / multi-night / no-location / no-window cases); (b) `GET
+    /api/targets/{safe}/next-session` → `NextSessionOut | None` reusing the nightplan observability batch for the
+    target's own RA/Dec (read-only; `null` = self-hide); (c) a `NextSessionCard` on the Target page rendering the
+    sentence + the dated window(s), reusing the readiness card's goal-gap figures the page already loads. Keeps the
+    beginner-feature pipeline stocked with a *forward-looking, autonomy* feature to balance the recent run of
+    retrospective trend cards.
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-21) — surface "N subs the auto-stack quietly demoted" on the result, so the
   beginner trusts (and understands) quality weighting.**~~ — **SHIPPED v0.159.5** (Builder 2026-07-22, branch
   `claude/pensive-faraday-dks31d`). The backend half was *already* done — `webapp/routers/stack.py` parses
@@ -12083,41 +12091,41 @@ problems. Dogfood it every big-picture run and fix root causes.
   multi-frame animation + cache reuse, rebuilds when a stack is added, unknown-target 404), frontend
   `deepeningReel.test.ts` (+8) & `DeepeningReelCard.test.tsx` (+2). Beginner bar ✔ (one card, zero knobs, auto
   caption + plain language, the most share-worthy multi-night arc). *(Original spec kept below for provenance.)*
-- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Your target, night after night": a looping timelapse of the
-  same object getting deeper each time you re-stack.** *(Beginner feature; PRIORITY 3 friendliness /
-  enjoy-share; size M.)* When a beginner shoots the same target across several clear nights and re-stacks, the
-  app **already keeps every previous result**: `output.py::_archive_existing_outputs` renames each prior
-  `{base}_preview.png` (+ `.fits`) to a **timestamped** `{base}_{YYYYMMDD_HHMMSS}_preview.png` sibling rather
-  than overwriting it — so a target's `output/` folder holds a chronological series of that target's stacks,
-  oldest → newest, one per re-stack. Nothing surfaces that series. **Feature:** a read-only **"Your target,
-  night after night"** card on the Target/History page that assembles those archived previews (in timestamp
-  order) into one short looping animation — the picture visibly getting **cleaner and deeper** as more subs /
-  more nights pile on — under an auto-filled caption from the runs' own provenance (*"M31 · 3 stacks · 120 →
-  505 → 1,240 subs · Jul 12 → Jul 20"*, all from the `stack_runs` rows / FITS `NFRAMES`+`DATE`). This is the
-  most emotionally rewarding, share-worthy arc of the hobby ("look how far my picture has come") and it's the
-  one thing a multi-night beginner most wants to post. **Distinct from the three existing reveals:** the
-  "watch it appear" **progress reel** animates frames piling on **within one stack**; "One frame vs your
-  stack" (v0.147.0) is **raw-input → final-output**; the two-stack **compare dialog** is an A/B of two chosen
-  results. This is the **across-runs / across-nights** deepening arc — a different axis (time/integration),
-  and the only one built from the *archived history* the app silently keeps. **Fair-comparison detail to get
-  right (mirrors the one-sub-vs-stack fix):** re-render each frame of the timelapse from its stored preview
-  with the **same** display normalisation so the only visible change is noise-drop / new faint detail, not a
-  brightness/stretch jump between runs (the archived `_preview.png`s are each already autostretched to their
-  own data, so a later, deeper stack has a different black point — normalise the panels to a common stretch or
-  re-render from the archived FITS, otherwise the "getting deeper" story reads as a flicker). **Well-grounded /
-  low-risk:** the frames already exist on disk; the assembly is a pure reuse of the shipped
-  `assemble_progress_reel` (same webp/apng looping-animation writer the progress reel uses) over the archived
-  preview series; read-only, touches nothing on disk, no new dependency or network. **Guardrails:**
-  additive/reversible (a render-time view over existing files), best-effort — show the card only when a target
-  has **≥2** archived stacks (a single-stack target has no arc yet, so the card simply doesn't appear), and
-  fall back to a plain newest-preview still if a frame can't be loaded; omit the caption clause rather than
-  printing blanks when a run's `NFRAMES`/`DATE` is missing (older/edited runs still render). **Beginner bar
-  ✔:** one card, zero knobs, sane default (auto-assembled from history + auto caption), plain language; serves
-  the enjoy + share pillars §1 calls out (`annotated results`). Split for the Builder: (a) an engine/webapp
-  helper that lists a target's archived preview series in timestamp order and assembles the looping animation
-  (reuse `assemble_progress_reel`), exposed as a read-only endpoint; (b) the Target/History card that reveals
-  the `<img>` + caption (mirror the existing `ProgressReelCard` reveal pattern so History's run list doesn't
-  fetch every animation up front). Keeps the beginner-feature pipeline stocked.
+  - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Your target, night after night": a looping timelapse of the
+    same object getting deeper each time you re-stack.** *(Beginner feature; PRIORITY 3 friendliness /
+    enjoy-share; size M.)* When a beginner shoots the same target across several clear nights and re-stacks, the
+    app **already keeps every previous result**: `output.py::_archive_existing_outputs` renames each prior
+    `{base}_preview.png` (+ `.fits`) to a **timestamped** `{base}_{YYYYMMDD_HHMMSS}_preview.png` sibling rather
+    than overwriting it — so a target's `output/` folder holds a chronological series of that target's stacks,
+    oldest → newest, one per re-stack. Nothing surfaces that series. **Feature:** a read-only **"Your target,
+    night after night"** card on the Target/History page that assembles those archived previews (in timestamp
+    order) into one short looping animation — the picture visibly getting **cleaner and deeper** as more subs /
+    more nights pile on — under an auto-filled caption from the runs' own provenance (*"M31 · 3 stacks · 120 →
+    505 → 1,240 subs · Jul 12 → Jul 20"*, all from the `stack_runs` rows / FITS `NFRAMES`+`DATE`). This is the
+    most emotionally rewarding, share-worthy arc of the hobby ("look how far my picture has come") and it's the
+    one thing a multi-night beginner most wants to post. **Distinct from the three existing reveals:** the
+    "watch it appear" **progress reel** animates frames piling on **within one stack**; "One frame vs your
+    stack" (v0.147.0) is **raw-input → final-output**; the two-stack **compare dialog** is an A/B of two chosen
+    results. This is the **across-runs / across-nights** deepening arc — a different axis (time/integration),
+    and the only one built from the *archived history* the app silently keeps. **Fair-comparison detail to get
+    right (mirrors the one-sub-vs-stack fix):** re-render each frame of the timelapse from its stored preview
+    with the **same** display normalisation so the only visible change is noise-drop / new faint detail, not a
+    brightness/stretch jump between runs (the archived `_preview.png`s are each already autostretched to their
+    own data, so a later, deeper stack has a different black point — normalise the panels to a common stretch or
+    re-render from the archived FITS, otherwise the "getting deeper" story reads as a flicker). **Well-grounded /
+    low-risk:** the frames already exist on disk; the assembly is a pure reuse of the shipped
+    `assemble_progress_reel` (same webp/apng looping-animation writer the progress reel uses) over the archived
+    preview series; read-only, touches nothing on disk, no new dependency or network. **Guardrails:**
+    additive/reversible (a render-time view over existing files), best-effort — show the card only when a target
+    has **≥2** archived stacks (a single-stack target has no arc yet, so the card simply doesn't appear), and
+    fall back to a plain newest-preview still if a frame can't be loaded; omit the caption clause rather than
+    printing blanks when a run's `NFRAMES`/`DATE` is missing (older/edited runs still render). **Beginner bar
+    ✔:** one card, zero knobs, sane default (auto-assembled from history + auto caption), plain language; serves
+    the enjoy + share pillars §1 calls out (`annotated results`). Split for the Builder: (a) an engine/webapp
+    helper that lists a target's archived preview series in timestamp order and assembles the looping animation
+    (reuse `assemble_progress_reel`), exposed as a read-only endpoint; (b) the Target/History card that reveals
+    the `<img>` + caption (mirror the existing `ProgressReelCard` reveal pattern so History's run list doesn't
+    fetch every animation up front). Keeps the beginner-feature pipeline stocked.
 - ~~**NEW (Scout 2026-07-21) — "Focus & sharpness through the night" trend card (per-session FWHM sparkline +
   plain verdict).**~~ — **SHIPPED v0.152.0** (Builder 2026-07-21, branch `claude/pensive-faraday-fvpbvd`).
   Built exactly the Scout's slice across all three layers. **Engine:** `seestack/session_recap.py::focus_trend`
@@ -12141,23 +12149,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   `focusTrend.test.ts` (+10) & `FocusTrendCard.test.tsx` (+2 — sparkline+verdict render / null self-hides).
   Beginner bar ✔ (one card, zero knobs, auto verdict + plain language, actionable next-night advice).
   *(Original spec kept below for provenance.)*
-- **NEW (Scout 2026-07-21) — "Focus & sharpness through the night" trend card (per-session FWHM sparkline +
-  plain verdict).** *(Beginner feature; PRIORITY 3 friendliness / trust; size M.)* The app already measures
-  per-frame **FWHM** (star size = sharpness) and each frame's **timestamp**, and shows them as a sortable
-  column + a rejection metric on the Target page — but there is **no time view**: a beginner can't see at a
-  glance whether their stars stayed sharp all night or **drifted soft** partway through (dew on the lens,
-  temperature/focus drift — a real, common Seestar failure on long unattended sessions). Add a small
-  **sparkline of FWHM vs capture time** (grouped per night) on the Target/session view with a one-line
-  plain verdict: e.g. *"Sharp all night ✓ (FWHM ~2.8px, steady)"* or *"Focus softened after 01:30 — likely
-  dew or temperature drift; those subs were auto-down-weighted in your stack. Next time, a dew heater / lens
-  wipe helps."* All from data we already store (`FrameRow.fwhm_px` + `timestamp_utc`), so it's a read-only
-  visualization — no new engine work, no new capture step. It clears the beginner bar (understandable,
-  actionable on the *next* clear night, sane default = auto-verdict, no expert knobs) and deepens trust by
-  showing *why* some subs counted less. **Builder slice:** (a) a `stats`/`targets` endpoint (or reuse the
-  frames list) returning `[{t, fwhm}]` for accepted frames; (b) a `FocusTrendCard` (Mantine sparkline +
-  a pure `focusVerdict(points)` helper, unit-tested for the steady / drift / too-few-points cases); (c) mount
-  it on Target. Keep it hidden when <~5 timestamped frames carry FWHM (nothing to trend). Additive/off-nothing,
-  no schema/config/API-shape change.
+  - **NEW (Scout 2026-07-21) — "Focus & sharpness through the night" trend card (per-session FWHM sparkline +
+    plain verdict).** *(Beginner feature; PRIORITY 3 friendliness / trust; size M.)* The app already measures
+    per-frame **FWHM** (star size = sharpness) and each frame's **timestamp**, and shows them as a sortable
+    column + a rejection metric on the Target page — but there is **no time view**: a beginner can't see at a
+    glance whether their stars stayed sharp all night or **drifted soft** partway through (dew on the lens,
+    temperature/focus drift — a real, common Seestar failure on long unattended sessions). Add a small
+    **sparkline of FWHM vs capture time** (grouped per night) on the Target/session view with a one-line
+    plain verdict: e.g. *"Sharp all night ✓ (FWHM ~2.8px, steady)"* or *"Focus softened after 01:30 — likely
+    dew or temperature drift; those subs were auto-down-weighted in your stack. Next time, a dew heater / lens
+    wipe helps."* All from data we already store (`FrameRow.fwhm_px` + `timestamp_utc`), so it's a read-only
+    visualization — no new engine work, no new capture step. It clears the beginner bar (understandable,
+    actionable on the *next* clear night, sane default = auto-verdict, no expert knobs) and deepens trust by
+    showing *why* some subs counted less. **Builder slice:** (a) a `stats`/`targets` endpoint (or reuse the
+    frames list) returning `[{t, fwhm}]` for accepted frames; (b) a `FocusTrendCard` (Mantine sparkline +
+    a pure `focusVerdict(points)` helper, unit-tested for the steady / drift / too-few-points cases); (c) mount
+    it on Target. Keep it hidden when <~5 timestamped frames carry FWHM (nothing to trend). Additive/off-nothing,
+    no schema/config/API-shape change.
 - ~~**NEW (Scout 2026-07-21, follow-on to the v0.148.1 sub-preview fix) — put a number on the "one frame vs your
   stack" reveal: "stacking cut your noise ~N×".**~~ — **SHIPPED v0.162.0** (Builder 2026-07-22, branch
   `claude/pensive-faraday-2iu86x`). The reveal card now shows a concrete, shareable number — *"Stacking your 228
@@ -12321,20 +12329,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   north_up only for jpeg), `History.test.tsx` (+1 — the JPEG link carries north_up once the toggle is on).
   Python + tsc + vitest + vite build green. _(PRIORITY 3 friendliness / enjoy-share — completes the "share it
   oriented like the reference photos" story.)_ Original spec kept for provenance:
-- **NEW (Builder 2026-07-21, follow-up to the shipped North-up view slice v0.148.0) — offer the North-up
-  orientation on the *download/share* image, not just the History Adjust view.** v0.148.0 orients the live
-  render + lightbox (`render` endpoint `north_up=`) but deliberately leaves the canonical JPEG/PNG downloads and
-  the stored preview WCS-aligned (baking rotation into the stored preview would mis-place the Sky-map overlay,
-  which positions the preview via its grid WCS). The remaining beginner value is *sharing* the oriented picture:
-  add a North-up option to the **share JPEG** path (`download_stack_run` `kind="jpeg"` / the share flow) that
-  reads the run's `stack_north_up_deg` and rotates the display bytes before JPEG-encoding — reusing the shipped
-  `rotate_image_north_up` — so a beginner posts a conventionally-oriented image. The engine + sign are already
-  shipped and tested, so this is just wiring a second surface (a new `north_up` query param + a share-panel
-  toggle) with its own endpoint test. **Guard the editor-export surface separately:** a display-space editor
-  export that applied a geometry op (crop/rotate) no longer matches its master WCS, so either don't offer it
-  there or recompute from the edited framing — the Scout's #9 spec flags this. Additive/upgrade-safe (new
-  optional param, off by default). _(S–M; PRIORITY 3 friendliness / enjoy-share — completes the "share it
-  oriented like the reference photos" story the #9 spec envisioned.)_
+  - **NEW (Builder 2026-07-21, follow-up to the shipped North-up view slice v0.148.0) — offer the North-up
+    orientation on the *download/share* image, not just the History Adjust view.** v0.148.0 orients the live
+    render + lightbox (`render` endpoint `north_up=`) but deliberately leaves the canonical JPEG/PNG downloads and
+    the stored preview WCS-aligned (baking rotation into the stored preview would mis-place the Sky-map overlay,
+    which positions the preview via its grid WCS). The remaining beginner value is *sharing* the oriented picture:
+    add a North-up option to the **share JPEG** path (`download_stack_run` `kind="jpeg"` / the share flow) that
+    reads the run's `stack_north_up_deg` and rotates the display bytes before JPEG-encoding — reusing the shipped
+    `rotate_image_north_up` — so a beginner posts a conventionally-oriented image. The engine + sign are already
+    shipped and tested, so this is just wiring a second surface (a new `north_up` query param + a share-panel
+    toggle) with its own endpoint test. **Guard the editor-export surface separately:** a display-space editor
+    export that applied a geometry op (crop/rotate) no longer matches its master WCS, so either don't offer it
+    there or recompute from the edited framing — the Scout's #9 spec flags this. Additive/upgrade-safe (new
+    optional param, off by default). _(S–M; PRIORITY 3 friendliness / enjoy-share — completes the "share it
+    oriented like the reference photos" story the #9 spec envisioned.)_
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #8) — "One frame vs your stack": a side-by-side / split-slider
   reveal of a single raw sub next to the finished stack, so a beginner *sees* — and can share — exactly what
   stacking bought them.**~~ — **SHIPPED v0.147.0** (Builder 2026-07-21, branch `claude/pensive-faraday-dvg3ul`;
@@ -12510,24 +12518,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   (+1 — `png_bytes_to_jpeg` bakes the footer / empty→no-op / same size), `tests/webapp/test_stack_render.py`
   (+1 — `?nameplate=true` yields a distinct captioned JPEG), `stackRenderUrl.test.ts` (+1 — the param, combining
   with north_up and never on non-JPEG artifacts). _(Original spec kept for provenance below.)_
-- **NEW (Builder 2026-07-21, follow-up to shipped nameplate v0.146.0) — offer the acquisition nameplate on the
-  *non-editor* "Download JPEG" path too, so a beginner who never opens the editor still gets the captioned
-  look — original spec kept for provenance.** v0.146.0 wired the nameplate into the **editor** share flow (`editor/share` → `write_share_jpeg`).
-  But the History / Target **"Download JPEG"** button uses a *different* surface — `stack.py`'s
-  `download_image?kind=jpeg` transcodes the stored preview PNG via `png_bytes_to_jpeg`
-  (`webapp/routers/stack.py:863`) and never touches the editor — so the most direct "I just want to share my
-  finished picture" path is exactly the one still missing the caption bar. **Idea:** thread the same opt-in
-  nameplate through that path: give `png_bytes_to_jpeg(..., nameplate=None)` the same optional
-  `NameplateFields` param `write_share_jpeg` already has (draw the footer on the transcoded RGB before
-  encoding — `draw_nameplate` already takes a PIL image), and have the `download_image` endpoint build the
-  fields from the run's provenance (reuse `pipeline._nameplate_fields`, or lift it to a shared helper) when a
-  `nameplate=1` query param / request flag is set. The pure `draw_nameplate` + `NameplateFields` engine work
-  is **already shipped and tested** — this is just extending it to the second encoder + one endpoint + a small
-  frontend affordance on the History/Target JPEG button. **Beginner bar ✔** (same one-toggle affordance,
-  extended to the place a beginner most reaches for a shareable file). Additive/upgrade-safe: new optional
-  param defaulting to today's behaviour (no nameplate), off by default, no schema/API-shape/default change.
-  _(S, PRIORITY 3 friendliness / share — completes the nameplate story for the non-editor download; builds
-  directly on the shipped v0.146.0 engine helpers so it's low-risk.)_
+  - **NEW (Builder 2026-07-21, follow-up to shipped nameplate v0.146.0) — offer the acquisition nameplate on the
+    *non-editor* "Download JPEG" path too, so a beginner who never opens the editor still gets the captioned
+    look — original spec kept for provenance.** v0.146.0 wired the nameplate into the **editor** share flow (`editor/share` → `write_share_jpeg`).
+    But the History / Target **"Download JPEG"** button uses a *different* surface — `stack.py`'s
+    `download_image?kind=jpeg` transcodes the stored preview PNG via `png_bytes_to_jpeg`
+    (`webapp/routers/stack.py:863`) and never touches the editor — so the most direct "I just want to share my
+    finished picture" path is exactly the one still missing the caption bar. **Idea:** thread the same opt-in
+    nameplate through that path: give `png_bytes_to_jpeg(..., nameplate=None)` the same optional
+    `NameplateFields` param `write_share_jpeg` already has (draw the footer on the transcoded RGB before
+    encoding — `draw_nameplate` already takes a PIL image), and have the `download_image` endpoint build the
+    fields from the run's provenance (reuse `pipeline._nameplate_fields`, or lift it to a shared helper) when a
+    `nameplate=1` query param / request flag is set. The pure `draw_nameplate` + `NameplateFields` engine work
+    is **already shipped and tested** — this is just extending it to the second encoder + one endpoint + a small
+    frontend affordance on the History/Target JPEG button. **Beginner bar ✔** (same one-toggle affordance,
+    extended to the place a beginner most reaches for a shareable file). Additive/upgrade-safe: new optional
+    param defaulting to today's behaviour (no nameplate), off by default, no schema/API-shape/default change.
+    _(S, PRIORITY 3 friendliness / share — completes the nameplate story for the non-editor download; builds
+    directly on the shipped v0.146.0 engine helpers so it's low-risk.)_
 - **NEW BEGINNER FEATURE (Scout 2026-07-21 #5) — "Night by night": a per-target breakdown of every
   imaging night, so a beginner can see which nights were good and set a clouded-out night aside.** —
   **SLICES (a)+(b)+(c) SHIPPED v0.144.0** (Builder 2026-07-21, branch `claude/pensive-faraday-enl8ut`).
@@ -13662,8 +13670,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
-- **NEW IDEA (Builder 2026-08-04, cost me most of a run) — the "*(Original spec kept for provenance.)*" copies are
-  indistinguishable from open work, so a Builder scanning this file re-picks already-shipped features.**
+- ~~**NEW IDEA (Builder 2026-08-04, cost me most of a run) — the "*(Original spec kept for provenance.)*" copies are
+  indistinguishable from open work, so a Builder scanning this file re-picks already-shipped features.**~~ —
+  **DONE v0.229.5** (Builder 2026-08-04, branch `claude/relaxed-turing-15aq36`) — and confirmed first-hand: this
+  run lost time to the same tax before finding this entry, re-checking "Focus & sharpness through the night" and
+  "You beat your best!" against the code only to find them long shipped. Took the filed remedy (indent, don't
+  delete). The seven genuine offenders were found **by shape, not by eye** — an un-struck top-level `- **…**`
+  bullet whose headline is character-for-character the headline of the struck, SHIPPED bullet immediately above
+  it, which is what a provenance copy is and nothing else is — and each was indented two spaces so it reads as a
+  continuation of the entry that shipped it. Nothing was deleted or reworded: the diff is 157 lines moved right,
+  and every original spec is still there to read. The seven: `auto_reject` beginner default (v0.149.0), the
+  stationary-elongated-object streak target, "Plan your next night on *this* target" (v0.156.0), "Your target,
+  night after night", "Focus & sharpness through the night" (v0.152.0), the North-up export offer, and the
+  nameplate-on-export offer. A re-run of the detector reports **0 remaining**, so a `^- \*\*` scan of this file
+  now lists only genuinely open work. The convention is also written into the conventions block at the top, so
+  new entries land indented from the start rather than needing another sweep.
+  *(Original idea kept below for provenance.)*
   *(Maintainability / agent-efficiency; size S — a formatting pass, no code.)* When an item ships, the convention is
   to strike the headline, write the SHIPPED paragraph, and keep the original spec below it. But that original is
   re-pasted as its own **top-level, un-struck `- **…**` bullet**, so every way an agent triages this file — reading
