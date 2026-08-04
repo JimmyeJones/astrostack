@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { api, type LibrarySessionRecap } from "../api/client";
 import { formatIntegration } from "../format";
 import { describeRejects } from "./SessionRecapCard";
+import { formatNightDate } from "./NightsCard";
 
 /** The Dashboard recap paragraph: what the whole library's last night brought in
  *  across every target, how much was kept vs. set aside (and why). Pure and
@@ -27,6 +28,24 @@ export function describeLibraryNight(r: LibrarySessionRecap): string {
   return out;
 }
 
+/** The night this card is recapping, as a friendly "8 Jul 2026", or `null` when
+ *  there is nothing datable to show.
+ *
+ *  It reads the server's **observing-night** date — the same noon-to-noon local
+ *  bucket the imaging calendar, the per-target Nights card and the "Last
+ *  session" recap use. The card used to slice the date out of `end_utc`, which
+ *  is wrong twice over for an observer west of UTC: a session that runs past
+ *  local midnight *ends* on the following UTC day, so the label named tomorrow
+ *  and disagreed with the calendar squares right beside it. Falling back to
+ *  `start_utc` (not `end_utc`) keeps an older backend at least labelling from
+ *  the night's beginning. Pure and unit-testable. */
+export function lastNightLabel(
+  r: Pick<LibrarySessionRecap, "night_date" | "start_utc">,
+): string | null {
+  const label = formatNightDate(r.night_date ?? r.start_utc);
+  return label === "—" ? null : label;
+}
+
 /**
  * "Last night" — a small, persistent, plain-language Dashboard card answering
  * the first question a walk-away user has on return: *what did last night give
@@ -45,7 +64,7 @@ export function LastNightCard() {
   const r = q.data;
   if (!r || r.n_frames === 0) return null;
   const keptPct = r.n_frames > 0 ? Math.round((r.n_kept / r.n_frames) * 100) : 0;
-  const night = r.end_utc ? r.end_utc.slice(0, 10) : null;
+  const night = lastNightLabel(r);
   return (
     <Paper withBorder p="sm" radius="md">
       <Group gap="sm" wrap="nowrap" align="flex-start">

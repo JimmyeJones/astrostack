@@ -110,3 +110,74 @@ def test_last_night_counts_a_target_revisited_across_a_gap(client, built_library
     m42_contrib = next(t for t in body["targets"] if t["safe"] == m42)
     assert m42_contrib["n_frames"] == 6  # both batches, not just the dawn one
     assert body["start_utc"] == dusk.isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Which night was it? — the observing night, not the UTC date the session ended
+# ---------------------------------------------------------------------------
+
+def test_last_night_names_the_local_observing_night_not_the_utc_roll_over(
+    client, built_library
+):
+    """Regression: the card labelled the night by slicing ``end_utc``, so a
+    session that ran past local midnight — which *ends* on the following UTC day
+    — named tomorrow, and disagreed with the imaging calendar squares beside it.
+    The night is now bucketed noon-to-noon in the observer's local time."""
+    from seestack.io.library import Library
+
+    client.put("/api/settings", json={"site_lon": -122.3})   # Seattle, UTC−8
+    start = dt.datetime(2026, 7, 9, 5, 0, 0, tzinfo=dt.timezone.utc)  # 8 Jul 21:00 local
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _add_night(lib, "M_42", start, n=6)
+    finally:
+        lib.close()
+
+    body = client.get("/api/last-night").json()
+    assert body is not None
+    # The raw stamps still say the 9th — that's the honest capture time...
+    assert body["start_utc"].startswith("2026-07-09")
+    # ...but the night the owner was out is the evening of the 8th.
+    assert body["night_date"] == "2026-07-08"
+
+
+def test_last_night_agrees_with_the_imaging_calendar(client, built_library):
+    """The Dashboard shows this card and the imaging calendar on one screen, so
+    they must never name the same session's night differently."""
+    from seestack.io.library import Library
+
+    client.put("/api/settings", json={"site_lon": -122.3})
+    start = dt.datetime(2026, 7, 9, 5, 0, 0, tzinfo=dt.timezone.utc)
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _add_night(lib, "M_42", start, n=6)
+    finally:
+        lib.close()
+
+    night_date = client.get("/api/last-night").json()["night_date"]
+    cal_dates = {n["date"] for n in client.get("/api/activity-calendar").json()["nights"]}
+    assert night_date in cal_dates
+
+
+def test_last_night_date_follows_a_longitude_change_without_waiting_out_the_cache(
+    client, built_library, monkeypatch
+):
+    """The recap itself is cached for a minute, but the night label must not be:
+    changing the site longitude re-buckets the same session immediately."""
+    import webapp.site_location as site_location
+
+    from seestack.io.library import Library
+
+    monkeypatch.setattr(site_location, "detect_site_from_library", lambda lib, **k: None)
+    start = dt.datetime(2026, 7, 9, 5, 0, 0, tzinfo=dt.timezone.utc)
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _add_night(lib, "M_42", start, n=6)
+    finally:
+        lib.close()
+
+    # No location anywhere → UTC noon-to-noon: 05:00 UTC belongs to the 8th.
+    assert client.get("/api/last-night").json()["night_date"] == "2026-07-08"
+    # +150° (~UTC+10) → 15:00 local, i.e. the afternoon *of* the 9th's night.
+    client.put("/api/settings", json={"site_lon": 150.0})
+    assert client.get("/api/last-night").json()["night_date"] == "2026-07-09"
