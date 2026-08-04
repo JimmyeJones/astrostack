@@ -11,7 +11,11 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
-from seestack.io.project import FrameRow, readable_frame_path
+from seestack.io.project import (
+    FrameRow,
+    count_unreadable_frames,
+    readable_frame_path,
+)
 from seestack.render.thumbnail import THUMB_VERSION, generate_thumbnail, thumbs_dir
 from seestack.solve.astap import (
     SOLVE_SETUP_ASTAP_MISSING,
@@ -206,6 +210,21 @@ def reject_summary(safe: str, request: Request) -> dict:
         # rather than "not located yet", so the breakdown doesn't nudge a
         # plate-solve on a corrupt file (or double-count it against the callout).
         n_unreadable = proj.count_accepted_unreadable()
+        # Preflight: accepted subs the database still lists but whose files are
+        # *gone right now* — neither the Stage-1 cache nor the original source is
+        # on disk (cache cleared while the originals sit on an offline share, a
+        # drive unmounted, files moved). Every consumer falls back through
+        # ``readable_frame_path`` and then quietly skips them, so today the user
+        # only finds out when a walk-away stack comes out thin. Counting them
+        # here — one ``stat()`` per accepted frame, on a page-load fetch, not a
+        # poll — lets the Target page say so while it's still actionable.
+        # Measured: 44 ms for 5 000 present frames (139 ms if every one is gone,
+        # which costs two stats each), so it stays well inside a page load even on
+        # the owner's deepest target.
+        # Deliberately kept *out* of ``summary``: it's a transient storage state
+        # (reconnect the drive and it's gone), not a reason a frame was dropped,
+        # and folding it into the buckets would double-count QC errors.
+        n_missing_files = count_unreadable_frames(proj.iter_frames(accepted_only=True))
     finally:
         proj.close()
         lib.close()
@@ -221,6 +240,11 @@ def reject_summary(safe: str, request: Request) -> dict:
         # explained, not counted as "used".
         "summary": summarize_rejections(counts, n_accepted, n_unsolved,
                                         n_unreadable),
+        # Additive storage preflight (see above). ``n_accepted`` is the denominator
+        # the count was taken over, so the caller can phrase "N of M" without a
+        # second request; both are omitted by older backends, so the UI self-hides.
+        "n_missing_files": n_missing_files,
+        "n_accepted": n_accepted,
     }
 
 

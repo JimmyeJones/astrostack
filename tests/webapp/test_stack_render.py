@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from unittest import mock
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from seestack.calibrate.masters import MasterMeta
@@ -145,6 +147,121 @@ def test_load_stack_rgb_uses_full_max_width_and_preserves_star_flux(tmp_path):
     # The star's flux is area-averaged into an output pixel, not dropped
     # (fail-before: the odd-coord star vanished, peak ≈ the 0.02 background).
     assert float(np.nanmax(rgb)) > 1.0
+
+
+def _whole_cube_load_stack_rgb(fits_path, *, max_width):
+    """The pre-v0.232.0 shape of ``load_stack_rgb``, transcribed verbatim:
+    materialise the entire cube as float32, transpose, then area-average every
+    channel. Deliberately shares **no** code with the implementation under test —
+    it is the independent reference the memory-bounded per-channel read has to
+    reproduce bit-for-bit."""
+    from PIL import Image
+
+    def _downscale(rgb, new_w, new_h):
+        out = np.empty((new_h, new_w, rgb.shape[2]), dtype=np.float32)
+        for ch in range(rgb.shape[2]):
+            plane = rgb[..., ch]
+            finite = np.isfinite(plane)
+            filled = np.where(finite, plane, 0.0).astype(np.float32, copy=False)
+            mask = finite.astype(np.float32)
+            num = np.asarray(
+                Image.fromarray(filled, mode="F").resize((new_w, new_h), Image.BOX),
+                dtype=np.float32)
+            den = np.asarray(
+                Image.fromarray(mask, mode="F").resize((new_w, new_h), Image.BOX),
+                dtype=np.float32)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                res = num / den
+            res[den <= 0.0] = np.nan
+            out[..., ch] = res
+        return out
+
+    arr = np.asarray(fits.getdata(fits_path), dtype=np.float32)
+    if arr.ndim == 3:
+        rgb = np.transpose(arr, (1, 2, 0))
+        if rgb.shape[2] == 1:
+            rgb = np.repeat(rgb, 3, axis=2)
+        elif rgb.shape[2] > 3:
+            rgb = rgb[..., :3]
+    else:
+        rgb = np.stack([arr, arr, arr], axis=-1)
+    w = rgb.shape[1]
+    if w > max_width:
+        new_w = max_width
+        new_h = max(1, int(round(rgb.shape[0] * max_width / w)))
+        rgb = _downscale(rgb, new_w, new_h)
+    return rgb
+
+
+@pytest.mark.parametrize("shape", [(3, 200, 640), (1, 120, 400), (140, 500)])
+def test_load_stack_rgb_is_unchanged_by_the_per_channel_read(tmp_path, shape):
+    """v0.232.0 reads the master one channel at a time off the memory map and
+    decimates each plane as it goes, instead of materialising the whole cube as
+    float32 first (measured: peak anonymous RSS 342 MB → 148 MB on a 144 MB
+    master). The pixels must be *bit-for-bit* what the whole-cube path produced —
+    the decimation's NaN semantics are load-bearing for mosaics, so parity is the
+    whole point. Covers a colour cube, a 1-channel cube (greyed to RGB) and 2-D
+    mono."""
+    from seestack.render.thumbnail import load_stack_rgb
+
+    rng = np.random.default_rng(7)
+    data = rng.normal(1000.0, 40.0, shape).astype(np.float32)
+    data[..., :17] = np.nan                 # a ragged uncovered strip
+    if len(shape) == 3:                     # a fully-uncovered block in one panel
+        data[:, :9, :] = np.nan
+    else:
+        data[:9, :] = np.nan
+    fp = tmp_path / "master.fits"
+    fits.PrimaryHDU(data=data).writeto(fp)
+
+    got, display_space = load_stack_rgb(fp, max_width=100)
+    want = _whole_cube_load_stack_rgb(fp, max_width=100)
+    assert display_space is False
+    assert got.shape == want.shape
+    assert np.array_equal(got, want, equal_nan=True)
+    assert got.dtype == np.float32
+
+
+def test_load_stack_rgb_never_materialises_the_whole_cube(tmp_path):
+    """The regression guard: with ``fits.getdata`` unavailable the loader can only
+    answer by slicing the memory map, so a future refactor can't quietly go back
+    to reading the whole canvas into RAM."""
+    from astropy.io import fits as _fits
+
+    from seestack.render.thumbnail import load_stack_rgb
+
+    cube = np.full((3, 80, 300), 0.25, dtype=np.float32)
+    fp = tmp_path / "m.fits"
+    _fits.PrimaryHDU(data=cube).writeto(fp)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("load_stack_rgb must not read the whole cube")
+
+    with mock.patch.object(_fits, "getdata", _boom):
+        rgb, _ = load_stack_rgb(fp, max_width=50)
+    assert rgb.shape == (round(80 * 50 / 300), 50, 3)
+    assert np.allclose(rgb, 0.25)
+
+
+def test_load_stack_rgb_keeps_an_undecimated_master_readable_after_close(tmp_path):
+    """A master narrower than ``max_width`` skips the downscale — the returned
+    array must still be a real float32 copy, not a view onto the memory map of a
+    file that has since been closed."""
+    from seestack.render.thumbnail import load_stack_rgb
+
+    cube = np.full((3, 8, 12), 3.0, dtype=np.float32)
+    cube[:, 0, 0] = np.nan
+    fp = tmp_path / "small.fits"
+    fits.PrimaryHDU(data=cube).writeto(fp)
+
+    rgb, _ = load_stack_rgb(fp, max_width=1024)
+    assert rgb.shape == (8, 12, 3) and rgb.dtype == np.float32
+    assert np.isnan(rgb[0, 0]).all()
+    assert float(np.nanmax(rgb)) == 3.0
+    # Mutating it must not touch the file (a memmap view would write through).
+    rgb[1, 1] = 99.0
+    again, _ = load_stack_rgb(fp, max_width=1024)
+    assert float(again[1, 1, 0]) == 3.0
 
 
 def test_render_display_space_fits_is_verbatim(tmp_path):

@@ -215,67 +215,110 @@ def load_stack_rgb(
     from seestack.stack.output import fits_is_display_space
 
     display_space = fits_is_display_space(fits_path)
-    arr = np.asarray(_fits.getdata(fits_path), dtype=np.float32)
-    if arr.ndim == 3:                       # (channels, H, W) → (H, W, channels)
-        rgb = np.transpose(arr, (1, 2, 0))
-        if rgb.shape[2] == 1:
-            rgb = np.repeat(rgb, 3, axis=2)
-        elif rgb.shape[2] > 3:
-            rgb = rgb[..., :3]
-    else:                                   # 2-D mono → grey RGB
-        rgb = np.stack([arr, arr, arr], axis=-1)
+    # Read the master **one channel at a time off the memory map**, and decimate
+    # each plane as it is read. The old shape — ``asarray(getdata(...),
+    # float32)`` on the whole cube, then a per-channel downscale — allocated the
+    # entire canvas twice over before a single output pixel existed: FITS is
+    # big-endian, so the dtype cast is a full copy *and* byte-swap of every
+    # channel, and the per-channel NaN mask/fill then added their own full-plane
+    # temporaries on top of it. Measured on a 144 MB master (4000×3000 × 3 ch,
+    # decimated to 1024 px), peak **anonymous** RSS — the kind that actually OOMs,
+    # as opposed to the evictable file-backed pages a memmap touches: **+342 MB
+    # before, +148 MB after**. It scales with the canvas, so a 150 MP mosaic
+    # preview costs ~1.9 GB of transient allocation instead of ~4.3 GB on the
+    # RAM-capped NAS whose stack path is memory-bounded on purpose. The
+    # arithmetic is untouched — each channel sees exactly the pixels it saw
+    # before — so the result is bit-for-bit identical (pinned by a parity test).
+    with _fits.open(fits_path, memmap=True) as hdul:
+        # First HDU carrying pixels — what ``getdata`` used to pick for us.
+        # Touching ``.data`` on a memmapped HDU doesn't read it, so the scan is
+        # as cheap as it looks.
+        data = next((h.data for h in hdul if h.data is not None), None)
+        if data is None:
+            raise ValueError(f"{fits_path}: FITS carries no image data")
+        if data.ndim == 3 and data.shape[0] > 1:   # (channels, H, W)
+            planes = [data[c] for c in range(min(data.shape[0], 3))]
+            n_out, grey = len(planes), False
+        else:
+            # A 1-channel cube or a 2-D mono image is greyscale — decimate the
+            # single plane once and repeat it, as the old ``np.repeat`` /
+            # ``np.stack([arr, arr, arr])`` did.
+            planes = [data[0] if data.ndim == 3 else data]
+            n_out, grey = 3, True
 
-    w = rgb.shape[1]
-    if w > max_width:
-        # Downscale to the full ``max_width`` with a NaN-aware area (box) average,
-        # not nearest-neighbour striding. Striding (a) only reached ``ceil(w/
-        # max_width)`` integer steps — a 1080-wide Seestar stack strode to 540 px,
-        # not 1024, visibly coarser than the box-averaged baked preview beside it —
-        # and (b) *dropped* samples: a FWHM≈2 px star could lose up to half its flux
-        # depending on subpixel phase, so stars aliased/twinkled. The area average
-        # spreads each star's flux instead. NaN (uncovered / mosaic-gap) is treated
-        # as no-coverage, so an output pixel is the mean of the finite samples under
-        # it and stays NaN only where every contributing input pixel was NaN — the
-        # property striding was originally chosen to preserve.
-        new_w = max_width
-        new_h = max(1, int(round(rgb.shape[0] * max_width / w)))
-        rgb = _nan_aware_area_downscale(rgb, new_w, new_h)
+        h, w = planes[0].shape
+        if w > max_width:
+            # Downscale to the full ``max_width`` with a NaN-aware area (box)
+            # average, not nearest-neighbour striding. Striding (a) only reached
+            # ``ceil(w/max_width)`` integer steps — a 1080-wide Seestar stack
+            # strode to 540 px, not 1024, visibly coarser than the box-averaged
+            # baked preview beside it — and (b) *dropped* samples: a FWHM≈2 px
+            # star could lose up to half its flux depending on subpixel phase, so
+            # stars aliased/twinkled. The area average spreads each star's flux
+            # instead. NaN (uncovered / mosaic-gap) is treated as no-coverage, so
+            # an output pixel is the mean of the finite samples under it and
+            # stays NaN only where every contributing input pixel was NaN — the
+            # property striding was originally chosen to preserve.
+            new_w = max_width
+            new_h = max(1, int(round(h * max_width / w)))
+        else:
+            new_w, new_h = w, h
+
+        rgb = np.empty((new_h, new_w, n_out), dtype=np.float32)
+        for i, plane in enumerate(planes):
+            rgb[..., i] = _nan_aware_area_downscale_plane(plane, new_w, new_h)
+        if grey:                            # the same plane in all three channels
+            rgb[..., 1] = rgb[..., 0]
+            rgb[..., 2] = rgb[..., 0]
     return rgb, display_space
 
 
-def _nan_aware_area_downscale(rgb: np.ndarray, new_w: int, new_h: int) -> np.ndarray:
-    """Area-average an ``(H, W, C)`` float image down to ``(new_h, new_w, C)``,
+def _nan_aware_area_downscale_plane(
+    plane: np.ndarray, new_w: int, new_h: int,
+) -> np.ndarray:
+    """Area-average one ``(H, W)`` float plane down to ``(new_h, new_w)``,
     treating NaN as *no coverage*.
 
     Each output pixel is the mean of the **finite** input samples under it (via
-    PIL's BOX/area filter on the NaN→0 image divided by the same filter on a
+    PIL's BOX/area filter on the NaN→0 plane divided by the same filter on a
     finite-sample mask), and is NaN only where every contributing input pixel was
     NaN. This spreads a star's flux across the downscale rather than dropping it
     (what nearest striding did, causing aliasing/twinkle) while keeping genuine
-    coverage gaps as NaN for the NaN-aware stretch downstream. Channels are
-    processed one at a time to keep peak memory near the input size on a
-    RAM-capped host.
+    coverage gaps as NaN for the NaN-aware stretch downstream.
+
+    Accepts a memory-mapped, big-endian plane straight off the FITS HDU: nothing
+    here needs the whole cube resident, which is what keeps a giant mosaic's
+    preview inside the RAM budget. A no-op size (``new_w``/``new_h`` equal to the
+    input) still returns a plain float32 copy, so the caller never hands a memmap
+    view back to a caller that outlives the open file.
     """
     from PIL import Image
 
-    h, w, c = rgb.shape
-    out = np.empty((new_h, new_w, c), dtype=np.float32)
-    for ch in range(c):
-        plane = rgb[..., ch]
-        finite = np.isfinite(plane)
-        filled = np.where(finite, plane, 0.0).astype(np.float32, copy=False)
-        mask = finite.astype(np.float32)
-        num = np.asarray(
-            Image.fromarray(filled, mode="F").resize((new_w, new_h), Image.BOX),
-            dtype=np.float32)
-        den = np.asarray(
-            Image.fromarray(mask, mode="F").resize((new_w, new_h), Image.BOX),
-            dtype=np.float32)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            res = num / den
-        res[den <= 0.0] = np.nan          # a fully-uncovered block stays a gap
-        out[..., ch] = res
-    return out
+    h, w = plane.shape
+    finite = np.isfinite(plane)
+    # ``np.where`` on a big-endian plane against a float32 zero yields a native
+    # float32 array — one conversion, no separate byte-swap pass.
+    filled = np.where(finite, plane, np.float32(0.0)).astype(np.float32, copy=False)
+    if (new_w, new_h) == (w, h):
+        return np.where(finite, filled, np.float32(np.nan))
+    # The two full-plane buffers are built and released one at a time: PIL copies
+    # the array it is handed, so holding the filled plane, its mask, and both PIL
+    # images at once would keep four full planes alive to produce two small ones.
+    num = np.asarray(
+        Image.fromarray(np.ascontiguousarray(filled), mode="F")
+        .resize((new_w, new_h), Image.BOX),
+        dtype=np.float32)
+    del filled
+    mask = finite.astype(np.float32)
+    del finite
+    den = np.asarray(
+        Image.fromarray(mask, mode="F").resize((new_w, new_h), Image.BOX),
+        dtype=np.float32)
+    del mask
+    with np.errstate(invalid="ignore", divide="ignore"):
+        res = num / den
+    res[den <= 0.0] = np.nan              # a fully-uncovered block stays a gap
+    return res
 
 
 def render_stack_png(
@@ -436,10 +479,22 @@ def stack_coverage_mask(fits_path: str | Path) -> np.ndarray:
     """
     from astropy.io import fits as _fits
 
-    arr = np.asarray(_fits.getdata(fits_path), dtype=np.float32)
-    if arr.ndim == 3:                       # (channels, H, W) → covered = any channel finite
-        return np.isfinite(arr).any(axis=0)
-    return np.isfinite(arr)                 # 2-D mono
+    # Reduced straight off the memory map, one channel at a time. The float32
+    # cast the old shape did was pure waste here — ``isfinite`` needs no
+    # conversion, and on a big-endian FITS that cast copied and byte-swapped the
+    # *whole* cube to answer a boolean question. Measured on the same 144 MB
+    # master, peak anonymous RSS **+201 MB before, +41 MB after**. Same mask,
+    # same "any channel finite" rule.
+    with _fits.open(fits_path, memmap=True) as hdul:
+        data = next((h.data for h in hdul if h.data is not None), None)
+        if data is None:
+            raise ValueError(f"{fits_path}: FITS carries no image data")
+        if data.ndim == 3:                  # (channels, H, W) → any channel finite
+            mask = np.isfinite(data[0])
+            for c in range(1, data.shape[0]):
+                mask |= np.isfinite(data[c])
+            return mask
+        return np.isfinite(data)            # 2-D mono (a fresh array, not a view)
 
 
 def overlay_rgba_png(preview_png: bytes, coverage_mask: np.ndarray) -> bytes:

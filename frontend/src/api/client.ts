@@ -1467,6 +1467,11 @@ export const api = {
       // Plain-language grouped "why were some frames left out?" breakdown
       // (v0.159.2+). Older backends omit it, so it's optional.
       summary?: RejectionSummary;
+      // Storage preflight (v0.232.0+): accepted subs whose files aren't on disk
+      // right now, and the accepted total they were counted over. Older backends
+      // omit both, so the callout self-hides.
+      n_missing_files?: number;
+      n_accepted?: number;
     }>(
       `/api/targets/${safe}/frames/reject-summary`,
     ),
