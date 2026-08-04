@@ -3,20 +3,35 @@ import { IconMoonStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type LibrarySessionRecap } from "../api/client";
-import { formatIntegration } from "../format";
+import {
+  formatIntegration, formatNightDate, formatNightDayMonth, isRecentNight,
+} from "../format";
 import { describeRejects } from "./SessionRecapCard";
-import { formatNightDate } from "./NightsCard";
 
 /** The Dashboard recap paragraph: what the whole library's last night brought in
  *  across every target, how much was kept vs. set aside (and why). Pure and
- *  offline so it's unit-testable without rendering. */
-export function describeLibraryNight(r: LibrarySessionRecap): string {
+ *  offline so it's unit-testable without rendering.
+ *
+ *  The card is *not* time-boxed — it shows the most recent night whenever that
+ *  was — so after a fortnight of cloud the opening clause has to stop saying
+ *  "Last night you captured…", which is simply untrue and reads as though the
+ *  app has lost track of the date. Beyond the night just gone it names the night
+ *  instead ("On 8 Jul you captured…"). `now` is injectable so the wording is
+ *  deterministic under test. */
+export function describeLibraryNight(
+  r: LibrarySessionRecap,
+  now: Date = new Date(),
+): string {
   const subs = r.n_frames === 1 ? "sub" : "subs";
   const where =
     r.n_targets === 1
       ? `on ${r.targets[0]?.name ?? "one target"}`
       : `across ${r.n_targets} targets`;
-  let out = `Last night you captured ${r.n_frames} ${subs} ${where} (${formatIntegration(
+  const night = r.night_date ?? r.start_utc;
+  const day = formatNightDayMonth(night, now);
+  const lead =
+    isRecentNight(night, now) || !day ? "Last night you" : `On ${day} you`;
+  let out = `${lead} captured ${r.n_frames} ${subs} ${where} (${formatIntegration(
     r.session_exposure_s,
   )}).`;
   if (r.n_set_aside === 0) {

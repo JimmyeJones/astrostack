@@ -4,26 +4,11 @@ import { IconCalendarStar } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type NightSummary } from "../api/client";
-import { formatIntegration } from "../format";
+import { formatIntegration, formatNightDate } from "../format";
 
-const MONTHS_ABBR = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
-/**
- * A friendly night date ("8 Jul 2026") from an ISO-8601 UTC stamp. We read the
- * date parts straight off the string rather than via `Date`, so the night label
- * never shifts across a timezone boundary (mirrors `formatMonthYear`).
- */
-export function formatNightDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
-  if (!m) return "—";
-  const monthIdx = parseInt(m[2], 10) - 1;
-  if (monthIdx < 0 || monthIdx > 11) return "—";
-  return `${parseInt(m[3], 10)} ${MONTHS_ABBR[monthIdx]} ${m[1]}`;
-}
+// `formatNightDate` moved to `format.ts` (so the night-recency helpers there can
+// share its month table) and is re-exported here for its long-standing callers.
+export { formatNightDate };
 
 /**
  * The label for one night, preferring the server's **observing-night** date over

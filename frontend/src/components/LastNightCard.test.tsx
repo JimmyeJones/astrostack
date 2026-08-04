@@ -63,9 +63,13 @@ describe("lastNightLabel", () => {
   });
 });
 
+// The morning after the fixture's 8 Jul night — so "Last night" is honest and
+// the existing phrasing assertions stay deterministic whatever day the suite runs.
+const MORNING_AFTER = new Date("2026-07-09T09:00:00Z");
+
 describe("describeLibraryNight", () => {
   it("phrases a multi-target night with the kept-vs-set-aside breakdown", () => {
-    expect(describeLibraryNight(recap())).toBe(
+    expect(describeLibraryNight(recap(), MORNING_AFTER)).toBe(
       "Last night you captured 10 subs across 2 targets (2.0 h). " +
         "8 kept; 2 set aside (2 trailed).",
     );
@@ -77,7 +81,7 @@ describe("describeLibraryNight", () => {
       session_exposure_s: 60, reject_buckets: {},
       targets: [tgt({ n_frames: 6 })],
     });
-    expect(describeLibraryNight(r)).toBe(
+    expect(describeLibraryNight(r, MORNING_AFTER)).toBe(
       "Last night you captured 6 subs on M 31 (1 min). All 6 were kept.",
     );
   });
@@ -85,7 +89,39 @@ describe("describeLibraryNight", () => {
   it("uses the singular for a one-sub night", () => {
     const r = recap({ n_targets: 1, n_frames: 1, n_kept: 1, n_set_aside: 0,
       reject_buckets: {}, targets: [tgt({ n_frames: 1 })] });
-    expect(describeLibraryNight(r)).toContain("captured 1 sub on M 31");
+    expect(describeLibraryNight(r, MORNING_AFTER)).toContain("captured 1 sub on M 31");
+  });
+
+  it("still says 'Last night' during the evening of the night itself", () => {
+    // A walk-away user checking mid-session: the night bucket is today's date.
+    expect(describeLibraryNight(recap(), new Date("2026-07-08T23:30:00Z")))
+      .toContain("Last night you captured");
+  });
+
+  it("names the date instead of claiming 'last night' after a spell of cloud", () => {
+    // The card isn't time-boxed — it shows the most recent night whenever that
+    // was — so a fortnight later "Last night you captured" is simply untrue.
+    expect(describeLibraryNight(recap(), new Date("2026-07-23T09:00:00Z"))).toBe(
+      "On 8 Jul you captured 10 subs across 2 targets (2.0 h). " +
+        "8 kept; 2 set aside (2 trailed).",
+    );
+  });
+
+  it("adds the year once the night is no longer this year", () => {
+    expect(describeLibraryNight(recap(), new Date("2027-01-05T09:00:00Z")))
+      .toContain("On 8 Jul 2026 you captured");
+  });
+
+  it("buckets by the observing night, not the raw UTC start", () => {
+    // 05:00 UTC on the 9th is still the night OF the 8th for a US observer; the
+    // server says so, and the recency test must follow that, not the stamp.
+    const r = recap({ night_date: "2026-07-08", start_utc: "2026-07-09T05:00:00+00:00" });
+    expect(describeLibraryNight(r, MORNING_AFTER)).toContain("Last night you captured");
+  });
+
+  it("keeps the warm wording when the night can't be dated at all", () => {
+    const r = recap({ night_date: null, start_utc: null });
+    expect(describeLibraryNight(r, MORNING_AFTER)).toContain("Last night you captured");
   });
 });
 

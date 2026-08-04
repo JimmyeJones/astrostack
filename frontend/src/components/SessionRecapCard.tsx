@@ -2,7 +2,7 @@ import { Badge, Group, Paper, Stack, Text } from "@mantine/core";
 import { IconMoonStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type SessionQualityDrift, type SessionRecap } from "../api/client";
-import { formatIntegration } from "../format";
+import { formatIntegration, formatNightDayMonth, isRecentNight } from "../format";
 import { nightDateLabel } from "./NightsCard";
 
 // Plain-language names for the reject buckets the backend groups into, in the
@@ -27,10 +27,19 @@ export function describeRejects(buckets: Record<string, number>): string {
 
 /** The recap paragraph a beginner reads on return: what last session added, how
  *  much was kept vs. set aside (and why), and where the target stands now.
- *  Pure and offline so it's unit-testable without rendering. */
-export function describeSession(r: SessionRecap): string {
+ *  Pure and offline so it's unit-testable without rendering.
+ *
+ *  "Last session" is only warm wording while it *was* the last session — this
+ *  card keeps showing the most recent one however long ago that was, so beyond
+ *  the night just gone it dates itself instead ("Your session on 8 Jul added…").
+ *  `now` is injectable so the wording is deterministic under test. */
+export function describeSession(r: SessionRecap, now: Date = new Date()): string {
   const subs = r.n_frames === 1 ? "sub" : "subs";
-  let out = `Last session added ${r.n_frames} ${subs} (${formatIntegration(r.session_exposure_s)}).`;
+  const night = r.night_date ?? r.start_utc;
+  const day = formatNightDayMonth(night, now);
+  const lead =
+    isRecentNight(night, now) || !day ? "Last session" : `Your session on ${day}`;
+  let out = `${lead} added ${r.n_frames} ${subs} (${formatIntegration(r.session_exposure_s)}).`;
   if (r.n_set_aside === 0) {
     out += ` All ${r.n_kept} were kept.`;
   } else {
@@ -43,12 +52,20 @@ export function describeSession(r: SessionRecap): string {
 
 /** A gentle, plain-language heads-up when the newest session is materially softer
  *  than the target's best previous one — a whole-session focus/seeing dip that
- *  auto-grade (relative *within* a session) can't catch. Pure and unit-testable. */
-export function describeQualityDrift(d: SessionQualityDrift): string {
+ *  auto-grade (relative *within* a session) can't catch. Pure and unit-testable.
+ *
+ *  `recent` mirrors the recap sentence above it: once the session it describes
+ *  is no longer the night just gone, "last session's stars" becomes "that
+ *  session's stars" so the two lines never disagree about when this happened. */
+export function describeQualityDrift(
+  d: SessionQualityDrift,
+  recent: boolean = true,
+): string {
   const latest = d.latest_fwhm_px.toFixed(1);
   const best = d.baseline_fwhm_px.toFixed(1);
+  const whose = recent ? "last session's" : "that session's";
   return (
-    `Heads up: last session's stars are softer than your usual best ` +
+    `Heads up: ${whose} stars are softer than your usual best ` +
     `(${latest} px vs ${best} px FWHM) — worth checking focus.`
   );
 }
@@ -95,7 +112,10 @@ export function SessionRecapCard({ safe }: { safe: string }) {
           </Group>
           <Text size="sm" c="dimmed">{describeSession(r)}</Text>
           {r.quality_drift && (
-            <Text size="sm" c="yellow.7">{describeQualityDrift(r.quality_drift)}</Text>
+            <Text size="sm" c="yellow.7">
+              {describeQualityDrift(
+                r.quality_drift, isRecentNight(r.night_date ?? r.start_utc))}
+            </Text>
           )}
         </Stack>
       </Group>
