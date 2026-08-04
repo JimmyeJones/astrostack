@@ -1048,6 +1048,33 @@ def test_best_tonight_falls_back_to_depth_alone_with_no_location():
     assert "Set your location in Settings" in plan.picks[0].reason
 
 
+def test_best_tonight_penalises_a_target_the_moon_is_sitting_on():
+    """A faint target beside a bright Moon is not tonight's best use of the scope,
+    however well-placed it is — and the ranking must apply the *same* penalty
+    ``/tonight`` does, so the two surfaces can't contradict each other."""
+    # A near-full Moon night, and a target right next to it vs one far away.
+    full_moon = datetime(2026, 1, 3, 22, 0, tzinfo=timezone.utc)
+    illum = moon_illumination(full_moon)
+    assert illum > 0.9, "pick a night the Moon actually matters on"
+    # The shared penalty is the contract: strongest when close + bright, gone
+    # once the Moon is far away, and scaled by how long the Moon is even up.
+    assert np_plan.moon_penalty(5.0, 1.0) > np_plan.moon_penalty(50.0, 1.0)
+    assert np_plan.moon_penalty(90.0, 1.0) == 0.0
+    assert np_plan.moon_penalty(5.0, 1.0, 0.0) == 0.0
+
+    near = np_plan.rank_targets_now(LONDON, full_moon,
+                                    [_lib("near", "Near", 100.0, 22.0, hours=0.75)])
+    pick = near.picks[0]
+    # The score really is docked: it lands below the un-penalised sky × depth the
+    # same altitude and window would otherwise earn.
+    unpenalised = 100.0 * np_plan._sky_component(
+        pick.altitude_now_deg, pick.minutes_usable_left, near.min_altitude_deg,
+    ) * np_plan._depth_component(0.75 * 3600.0)
+    assert 0.0 < pick.score < unpenalised
+    # ...and the card says so in plain words rather than silently down-ranking.
+    assert "Moon" in pick.reason
+
+
 def test_best_tonight_says_why_it_cannot_place_a_target():
     """The two "we can't tell you where it is" cases need different copy: no site
     configured is fixable in Settings; no astronomical darkness at all (a
