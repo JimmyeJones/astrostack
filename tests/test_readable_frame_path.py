@@ -14,7 +14,11 @@ disabling the frame.
 
 from __future__ import annotations
 
-from seestack.io.project import FrameRow, readable_frame_path
+from seestack.io.project import (
+    FrameRow,
+    count_unreadable_frames,
+    readable_frame_path,
+)
 from seestack.qc.runner import build_qc_arglist
 from seestack.solve.runner import build_solve_arglist
 
@@ -94,3 +98,26 @@ def test_solve_arglist_falls_back_to_source_when_cache_is_gone(tmp_path):
     args = build_solve_arglist(_Project([live, dead]))
     assert {a[0] for a in args} == {1}
     assert args[0][1] == str(src)
+
+
+# ---- counting the ones with nothing readable left ----------------------------
+
+def test_count_unreadable_frames_counts_only_the_ones_with_no_file(tmp_path):
+    """A frame is unreadable only when *neither* path exists — a dangling cache
+    with a live source still counts as readable (that's the whole point of the
+    fallback)."""
+    src = tmp_path / "src.fit"
+    src.write_bytes(b"s")
+    cache = tmp_path / "cache.fit"
+    cache.write_bytes(b"c")
+    frames = [
+        _frame(1, cached_path=str(cache), source_path=str(src)),        # both there
+        _frame(2, cached_path=str(tmp_path / "gone.fit"), source_path=str(src)),
+        _frame(3, cached_path=str(tmp_path / "x.fit"),
+               source_path=str(tmp_path / "y.fit")),                    # neither
+    ]
+    assert count_unreadable_frames(frames) == 1
+
+
+def test_count_unreadable_frames_is_zero_for_an_empty_list():
+    assert count_unreadable_frames([]) == 0

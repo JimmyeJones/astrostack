@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -672,10 +673,26 @@ def _score(max_alt: float, minutes_above: float, dark_minutes: float,
         alt_component = float(np.clip((max_alt - min_alt) / (alt_cap - min_alt), 0.0, 1.0))
     window_component = float(np.clip(minutes_above / dark_minutes, 0.0, 1.0))
     base = 0.5 * alt_component + 0.5 * window_component
-    proximity = float(np.clip((60.0 - moon_sep) / 60.0, 0.0, 1.0))
-    moon_penalty = (0.4 * float(np.clip(moon_illum, 0.0, 1.0)) * proximity
-                    * float(np.clip(moon_up_fraction, 0.0, 1.0)))
-    return round(100.0 * base * (1.0 - moon_penalty), 1)
+    return round(100.0 * base * (1.0 - moon_penalty(moon_sep, moon_illum,
+                                              moon_up_fraction)), 1)
+
+
+def moon_penalty(moon_sep_deg: float, moon_illum: float,
+                 moon_up_fraction: float = 1.0) -> float:
+    """0..0.4 "how much does the Moon spoil this target tonight?" factor.
+
+    A bright Moon close to the target subtracts up to 40%; a faint or far one
+    barely matters. ``moon_up_fraction`` is the share of the target's usable
+    window during which the Moon is actually above the horizon, so a bright Moon
+    that has already set (or hasn't yet risen) doesn't dock the score.
+
+    Public and single-definition on purpose: both the whole-night plan score and
+    the "point here right now" ranking apply the *same* penalty, so the two
+    surfaces can never disagree about whether the Moon is in the way.
+    """
+    proximity = float(np.clip((60.0 - moon_sep_deg) / 60.0, 0.0, 1.0))
+    return (0.4 * float(np.clip(moon_illum, 0.0, 1.0)) * proximity
+            * float(np.clip(moon_up_fraction, 0.0, 1.0)))
 
 
 def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWindow,
@@ -1188,3 +1205,325 @@ def _angular_sep_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
     r1, d1, r2, d2 = map(np.radians, (ra1, dec1, ra2, dec2))
     cos_sep = np.sin(d1) * np.sin(d2) + np.cos(d1) * np.cos(d2) * np.cos(r1 - r2)
     return float(np.degrees(np.arccos(np.clip(cos_sep, -1.0, 1.0))))
+
+
+# ---- "What's worth pointing at right now?" ----------------------------------
+#
+# ``plan_tonight`` answers "what's up *tonight*" across the whole catalog. This
+# answers the narrower question a beginner actually asks on a suddenly-clear
+# evening: *of the targets I already have, which one is up right now and would
+# most benefit from another hour?* It only ever ranks the user's own library —
+# it's about deepening what you've started, not discovering something new.
+
+# The extra session the recommendation is phrased around. One hour is the unit a
+# beginner can actually decide to spend tonight.
+_EXTRA_HOURS = 1.0
+# A ≥15% noise cut from that extra hour reads as "clearly worth more time"; past
+# that the recommendation is already as strong as it gets, so the depth term
+# saturates instead of endlessly favouring the emptiest target.
+_WORTHWHILE_NOISE_GAIN = 0.15
+# Usable dark minutes left that count as a full session's worth of sky. Two hours
+# is a good Seestar night; beyond it the window term stops adding.
+_FULL_SESSION_MINUTES = 120.0
+# Don't suggest starting something with less sky left than this — by the time the
+# scope is out and settled the window has closed.
+_MIN_USEFUL_MINUTES = 20.0
+
+
+def noise_gain_from_more_time(total_exposure_s: float,
+                              extra_hours: float = _EXTRA_HOURS) -> float:
+    """Fractional noise reduction from adding ``extra_hours`` to what's captured.
+
+    Stacked noise falls as ``1/√t``, so going from ``t`` to ``t + h`` multiplies
+    the remaining noise by ``√(t / (t + h))`` — a fractional cut of
+    ``1 − √(t / (t + h))``. That is the same honest √N language the app already
+    uses for "stacking cut your noise ~N×", and it is exactly what makes "would
+    more subs help?" answerable in plain words: an hour on a 45-minute target cuts
+    its noise by about a third, an hour on a 20-hour target by about 2%.
+
+    Returns 1.0 for a target with nothing usable captured yet (the first hour is
+    an unbounded improvement) and clamps into ``[0, 1]``. Pure — no ephemeris, no
+    astropy — so the "how much would this help?" half is testable on its own.
+    """
+    t_h = max(0.0, float(total_exposure_s or 0.0)) / 3600.0
+    h = max(0.0, float(extra_hours))
+    if h <= 0.0:
+        return 0.0
+    if t_h <= 0.0:
+        return 1.0
+    return float(np.clip(1.0 - math.sqrt(t_h / (t_h + h)), 0.0, 1.0))
+
+
+def _depth_component(total_exposure_s: float) -> float:
+    """0..1 "would more subs clearly help?" term (see ``noise_gain_from_more_time``)."""
+    gain = noise_gain_from_more_time(total_exposure_s)
+    return float(np.clip(gain / _WORTHWHILE_NOISE_GAIN, 0.0, 1.0))
+
+
+def _sky_component(altitude_now_deg: float | None, minutes_left: float,
+                   min_altitude_deg: float) -> float:
+    """0..1 "is it worth pointing at *now*?" term.
+
+    Half altitude (how high it is at this moment, ramped from the usable floor to
+    the 70° above which a small scope gains nothing more) and half remaining
+    window (how much of tonight's darkness it still clears the floor for, capped
+    at a full session). Zero when it is below the floor now, or when there isn't
+    enough sky left to be worth starting.
+    """
+    if minutes_left < _MIN_USEFUL_MINUTES:
+        return 0.0
+    if altitude_now_deg is None or altitude_now_deg < min_altitude_deg:
+        return 0.0
+    alt_cap = 70.0
+    if min_altitude_deg >= alt_cap:
+        alt_component = 1.0
+    else:
+        alt_component = float(np.clip(
+            (altitude_now_deg - min_altitude_deg) / (alt_cap - min_altitude_deg),
+            0.0, 1.0))
+    window_component = float(np.clip(minutes_left / _FULL_SESSION_MINUTES, 0.0, 1.0))
+    return 0.5 * alt_component + 0.5 * window_component
+
+
+def _hours_phrase(hours: float) -> str:
+    """"45 min" / "1 h 20 m" / "6 h" — a duration a beginner reads at a glance."""
+    total_min = int(round(max(0.0, hours) * 60.0))
+    if total_min < 60:
+        return f"{total_min} min"
+    h, m = divmod(total_min, 60)
+    return f"{h} h" if m == 0 else f"{h} h {m} m"
+
+
+@dataclass
+class TonightPick:
+    """One of the user's own targets, judged as "worth pointing at right now"."""
+
+    safe: str
+    name: str
+    ra_deg: float
+    dec_deg: float
+    # Altitude at the moment the ranking was made. None when no location is known
+    # (the depth-only fallback) — never a fabricated number.
+    altitude_now_deg: float | None
+    # Usable dark minutes left tonight during which it clears the altitude floor.
+    minutes_usable_left: float
+    hours_captured: float
+    frames_accepted: int
+    # Fractional noise cut one more hour would buy (see ``noise_gain_from_more_time``).
+    noise_gain: float
+    score: float
+    # One plain-language sentence the UI can show verbatim.
+    reason: str
+
+
+@dataclass
+class TonightNow:
+    """The "best use of your scope right now" answer for one observer."""
+
+    generated_utc: str
+    # None when no observer location could be resolved — the picks are then ranked
+    # on depth alone and say so.
+    observer: dict | None
+    # Whether ``generated_utc`` falls inside tonight's astronomical darkness.
+    dark_now: bool
+    # Usable darkness left tonight in minutes (0 when unknown / none).
+    dark_minutes_left: float
+    min_altitude_deg: float
+    picks: list[TonightPick] = field(default_factory=list)
+
+
+def _altitudes_at(ras_deg, decs_deg, observer: Observer, when_utc: datetime):  # noqa: ANN001, ANN202
+    """Altitude (deg) of each target at one instant — the "right now" read."""
+    from astropy import units as u
+    from astropy.coordinates import AltAz, SkyCoord
+    from astropy.time import Time
+
+    t = Time(when_utc.astimezone(timezone.utc).replace(tzinfo=None), scale="utc")
+    frame = AltAz(obstime=t, location=observer.earth_location())
+    coords = SkyCoord(ra=np.asarray(ras_deg) * u.deg,
+                      dec=np.asarray(decs_deg) * u.deg, frame="icrs")
+    return np.atleast_1d(np.asarray(coords.transform_to(frame).alt.deg, dtype=float))
+
+
+def rank_targets_now(
+    observer: Observer | None,
+    when_utc: datetime,
+    library_targets: list[LibraryTarget],
+    *,
+    min_altitude_deg: float = 30.0,
+    horizon: HorizonProfile | None = None,
+    limit: int = 3,
+) -> TonightNow:
+    """Rank the user's *own* targets by "worth pointing at right now".
+
+    The score is ``sky × depth``: how well-placed the target is at this moment
+    (:func:`_sky_component` — altitude now, and how much usable darkness it has
+    left tonight) multiplied by how much another hour would actually buy
+    (:func:`_depth_component`, from the √N noise maths). Both terms matter, and
+    multiplying means a target that fails either one drops out rather than being
+    averaged up by the other: an already-deep target that's beautifully placed
+    isn't tonight's best use of the scope, and neither is a barely-started one
+    that's below the trees.
+
+    Degrades rather than erroring:
+
+    * **No observer location** (a fresh install with nothing configured and no
+      SITELAT in any header) → the sky term is unavailable, so the list is ranked
+      on depth alone, ``altitude_now_deg`` stays ``None``, and each reason says the
+      placement isn't known. That's still the useful half of the answer.
+    * **No darkness tonight** (high-latitude summer) → the same depth-only
+      ranking with ``dark_now`` false.
+    * **Before tonight's darkness starts** → ranks against the *whole* coming
+      window (there's no "now" altitude worth quoting yet, so the target's best
+      altitude in that window is used).
+
+    Read-only and additive: it never starts a capture, changes a setting, or
+    writes anything. Returns at most ``limit`` picks, best first, and drops any
+    target that scores 0 (below the floor, no usable sky left, or nothing to gain)
+    so the caller can simply hide the surface when the list is empty.
+    """
+    _configure_iers_offline()
+    now = when_utc.astimezone(timezone.utc)
+    usable = [t for t in library_targets
+              if t.ra_deg is not None and t.dec_deg is not None]
+
+    plan = TonightNow(
+        generated_utc=now.isoformat(),
+        observer=asdict(observer) if observer is not None else None,
+        dark_now=False,
+        dark_minutes_left=0.0,
+        min_altitude_deg=float(min_altitude_deg),
+    )
+    if not usable:
+        return plan
+
+    window = _find_dark_window(observer, now) if observer is not None else None
+    if observer is None or window is None:
+        # Two different "we can't place these" cases, and the copy must say which:
+        # no site configured (fixable in Settings) vs no astronomical darkness at
+        # all tonight (high-latitude summer — nothing the user can do about it).
+        plan.picks = _depth_only_picks(
+            usable, limit,
+            hint=("Set your location in Settings and this can also tell you "
+                  "whether it's up right now."
+                  if observer is None else
+                  "There's no astronomical darkness where you are tonight, so "
+                  "this can't say what's well-placed."),
+        )
+        return plan
+
+    # The part of tonight's darkness that is still ahead. Before dusk this is the
+    # whole window ("here's what tonight is for"); mid-night it's what's left.
+    rem_start = max(window.start, now)
+    plan.dark_now = window.start <= now <= window.end
+    plan.dark_minutes_left = round(
+        max(0.0, (window.end - rem_start).total_seconds() / 60.0), 1)
+    if plan.dark_minutes_left < _MIN_USEFUL_MINUTES:
+        return plan  # Night's over (or all but) — nothing worth starting.
+
+    remaining = DarkWindow(start=rem_start, end=window.end,
+                           sun_alt_threshold_deg=window.sun_alt_threshold_deg)
+    illum = moon_illumination(now)
+    ras = [float(t.ra_deg) for t in usable]
+    decs = [float(t.dec_deg) for t in usable]
+    obs = _observability_batch(ras, decs, observer, remaining, min_altitude_deg,
+                               illum, horizon=horizon)
+    # "Right now" altitude only means something once it's actually dark; before
+    # dusk quote the best altitude the target reaches in the coming window instead.
+    alts = _altitudes_at(ras, decs, observer, now) if plan.dark_now else None
+
+    picks: list[TonightPick] = []
+    for i, (t, o) in enumerate(zip(usable, obs, strict=True)):
+        alt_now = float(alts[i]) if alts is not None else o.max_altitude_deg
+        # The same Moon penalty ``/tonight`` applies, so the two surfaces can't
+        # disagree: recommending a faint target sitting beside a full Moon over
+        # one in clean sky is exactly the advice that loses a beginner's trust.
+        spoil = moon_penalty(o.moon_separation_deg, illum,
+                             1.0 if o.moon_up_fraction is None else o.moon_up_fraction)
+        sky = _sky_component(alt_now, o.minutes_above_min_alt,
+                             min_altitude_deg) * (1.0 - spoil)
+        depth = _depth_component(t.total_exposure_s)
+        score = round(100.0 * sky * depth, 1)
+        if score <= 0.0:
+            continue
+        hours = max(0.0, float(t.total_exposure_s or 0.0)) / 3600.0
+        gain = noise_gain_from_more_time(t.total_exposure_s)
+        picks.append(TonightPick(
+            safe=t.safe, name=t.name, ra_deg=float(t.ra_deg), dec_deg=float(t.dec_deg),
+            altitude_now_deg=round(alt_now, 1),
+            minutes_usable_left=o.minutes_above_min_alt,
+            hours_captured=round(hours, 2),
+            frames_accepted=int(t.frames_accepted or 0),
+            noise_gain=round(gain, 3),
+            score=score,
+            reason=_pick_reason(t.name, alt_now, o.minutes_above_min_alt, hours,
+                                gain, placed_now=plan.dark_now, moon_spoil=spoil),
+        ))
+    picks.sort(key=lambda p: (-p.score, -(p.altitude_now_deg or 0.0)))
+    plan.picks = picks[:max(0, int(limit))]
+    return plan
+
+
+def _depth_only_picks(targets: list[LibraryTarget], limit: int, *,
+                      hint: str) -> list[TonightPick]:
+    """Rank on "would more subs help?" alone — the no-location / no-darkness path.
+
+    Honest about what it doesn't know: ``altitude_now_deg`` stays ``None`` and
+    ``hint`` (appended to every reason) says *why* the placement is unknown,
+    rather than implying the target is up.
+    """
+    picks: list[TonightPick] = []
+    for t in targets:
+        depth = _depth_component(t.total_exposure_s)
+        if depth <= 0.0:
+            continue
+        hours = max(0.0, float(t.total_exposure_s or 0.0)) / 3600.0
+        gain = noise_gain_from_more_time(t.total_exposure_s)
+        picks.append(TonightPick(
+            safe=t.safe, name=t.name, ra_deg=float(t.ra_deg), dec_deg=float(t.dec_deg),
+            altitude_now_deg=None,
+            minutes_usable_left=0.0,
+            hours_captured=round(hours, 2),
+            frames_accepted=int(t.frames_accepted or 0),
+            noise_gain=round(gain, 3),
+            score=round(100.0 * depth, 1),
+            reason=(
+                f"{_have_phrase(hours, t.name)} — another hour would cut its "
+                f"noise about {round(gain * 100)}%. {hint}"
+            ),
+        ))
+    picks.sort(key=lambda p: (-p.score, -p.hours_captured))
+    return picks[:max(0, int(limit))]
+
+
+# Above this share of the score lost to the Moon, say so — below it the Moon is a
+# detail the beginner doesn't need in a one-sentence recommendation.
+_MOON_WORTH_MENTIONING = 0.12
+
+
+def _pick_reason(name: str, altitude_deg: float, minutes_left: float,
+                 hours_captured: float, gain: float, *, placed_now: bool,
+                 moon_spoil: float = 0.0) -> str:
+    """The one plain-language sentence the card shows — no jargon, no numbers the
+    user can't act on."""
+    where = (f"{name} is {round(altitude_deg)}° up right now" if placed_now
+             else f"{name} climbs to {round(altitude_deg)}° tonight")
+    window = _hours_phrase(minutes_left / 60.0)
+    have = _have_phrase(hours_captured, "it", capitalise=False)
+    moon = (" The Moon is fairly close to it tonight, so expect a brighter sky."
+            if moon_spoil >= _MOON_WORTH_MENTIONING else "")
+    return (f"{where} and stays shootable for another {window}. "
+            f"So far {have} — another hour would cut its noise about "
+            f"{round(gain * 100)}%.{moon}")
+
+
+def _have_phrase(hours: float, subject: str, *, capitalise: bool = True) -> str:
+    """"You've got 45 min on M 31" — or, under a minute, words instead of a "0 min"
+    that reads as a bug rather than a fact."""
+    if hours <= 0.0:
+        text = f"you haven't captured any of {subject} yet"
+    elif hours * 60.0 < 1.0:
+        text = f"you've barely started on {subject}"
+    else:
+        text = f"you've got {_hours_phrase(hours)} on {subject}"
+    return text[0].upper() + text[1:] if capitalise else text

@@ -1336,6 +1336,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     if "NOFFERED" in header:
         frame_accounting = {}
         for hk, k in (("NOFFERED", "n_offered"), ("NALIGNFL", "n_align_failed"),
+                      ("NUNREAD", "n_unreadable"),
                       ("NROUGHAL", "n_roughly_aligned")):
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 frame_accounting[k] = int(header[hk])

@@ -8,6 +8,9 @@ files exist and contain reasonable data.
 This is the test that proves the headline feature works.
 """
 
+from pathlib import Path
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 
@@ -250,6 +253,73 @@ def test_stack_reports_a_sub_that_could_not_be_aligned(tmp_path):
         header = fits.getheader(result.fits_path)
         assert int(header["NOFFERED"]) == 5
         assert int(header["NALIGNFL"]) == 1
+    finally:
+        proj.close()
+
+
+def test_stack_counts_subs_whose_file_is_no_longer_on_disk(tmp_path):
+    """A frame whose Stage-1 cache *and* source have both vanished (cleared cache
+    over an offline NAS share, an unmounted drive, moved files) is silently
+    skipped by the aligner. run_stack now counts it separately from a genuine
+    alignment failure and stamps NUNREAD, so the user is pointed at their storage
+    rather than at mixed targets / bad plate-solves.
+
+    Regression: before this change the loss showed up only as ``n_align_failed``,
+    whose guidance sends the user to re-solve perfectly good frames.
+    """
+    proj = _build_project(tmp_path, n=5)
+    try:
+        # Delete one frame's only copy on disk, exactly as clearing the Stage-1
+        # cache with the originals unreachable would leave it.
+        gone = next(f for f in proj.iter_frames() if f.source_path.endswith("f0.fit"))
+        Path(gone.source_path).unlink()
+
+        result = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                              output_name="missing"))
+        assert result.n_offered == 5
+        assert result.n_frames_used == 4
+        assert result.n_align_failed == 1
+        assert result.n_unreadable == 1
+        from astropy.io import fits
+        header = fits.getheader(result.fits_path)
+        assert int(header["NUNREAD"]) == 1
+        assert int(header["NALIGNFL"]) == 1
+    finally:
+        proj.close()
+
+
+def test_stack_reports_zero_unreadable_when_every_file_is_present(tmp_path):
+    """The happy case still stamps NUNREAD=0 — a recorded 0 is what lets a
+    consumer tell "nothing was missing" apart from "this master predates the
+    check" (an absent card)."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                              output_name="allthere"))
+        assert result.n_unreadable == 0
+        from astropy.io import fits
+        assert int(fits.getheader(result.fits_path)["NUNREAD"]) == 0
+    finally:
+        proj.close()
+
+
+def test_unreadable_count_never_exceeds_the_frames_actually_lost(tmp_path):
+    """The preflight is a snapshot: a share that comes back before the worker
+    reads the frame means a "missing" sub still stacks. The reported count is
+    clamped to the real gap so "couldn't be read" can never exceed the subs that
+    dropped out (which would read as a nonsensical negative align failure)."""
+    from seestack.stack import stacker as stacker_mod
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        # Pretend the preflight found every frame missing, then let them all
+        # stack normally (the files are in fact present).
+        with patch.object(stacker_mod, "count_unreadable_frames", return_value=4):
+            result = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                                  output_name="cameback"))
+        assert result.n_frames_used == 4
+        assert result.n_align_failed == 0
+        assert result.n_unreadable == 0
     finally:
         proj.close()
 

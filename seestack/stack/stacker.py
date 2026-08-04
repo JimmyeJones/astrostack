@@ -38,7 +38,12 @@ import numpy as np
 
 from seestack.bg.per_frame import BackgroundOptions
 from seestack.core.xp import GPU_AVAILABLE
-from seestack.io.project import FrameRow, Project, readable_frame_path
+from seestack.io.project import (
+    FrameRow,
+    Project,
+    count_unreadable_frames,
+    readable_frame_path,
+)
 from seestack.stack.accumulator import (
     MinMaxRejectAccumulator,
     WeightedSumAccumulator,
@@ -501,6 +506,14 @@ class StackResult:
     # nothing-aligned run that returns before the passes complete.
     n_offered: int = 0
     n_align_failed: int = 0
+    # Of ``n_align_failed``, how many were simply **not on disk** when the run
+    # started — neither the Stage-1 cache nor the original source file existed
+    # (a cleared cache while the originals sit on an offline NAS share, an
+    # unmounted drive, moved files). A subset of ``n_align_failed``, measured by
+    # a cheap stat() preflight over the same frame list the passes iterate, so a
+    # walk-away stack can say "142 of your 500 subs couldn't be read" instead of
+    # blaming alignment for a storage problem. 0 when everything was readable.
+    n_unreadable: int = 0
     # How many contributing subs sub-pixel refine had to leave *only roughly
     # aligned* (its measured shift exceeded ``SUBPIXEL_SHIFT_CAP_PX``, so the
     # frame stacked unshifted → possibly soft/doubled stars). 0 when refine was
@@ -890,6 +903,7 @@ def _build_output_header_meta(
     rstats: "RejectionStats | None" = None,
     weights_applied: bool = True,
     n_roughly_aligned: int = 0,
+    n_unreadable: int = 0,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -1014,6 +1028,15 @@ def _build_output_header_meta(
         n_failed = max(0, n_offered - int(n_used))
         meta["NOFFERED"] = (int(n_offered), "subs offered to the stacker")
         meta["NALIGNFL"] = (int(n_failed), "subs that could not be aligned")
+        # How many of those failures were simply *missing files* — neither the
+        # Stage-1 cache nor the original source was on disk when the run started
+        # (a cleared cache plus an offline NAS share, an unmounted drive, moved
+        # files). Without this the whole gap reads as "couldn't be aligned",
+        # which sends the user hunting for mixed targets or bad plate-solves
+        # when the real fix is to plug the drive back in. Stamped alongside
+        # NALIGNFL (0 included) so its absence means "older master", not "none".
+        meta["NUNREAD"] = (int(max(0, n_unreadable)),
+                           "subs whose file was not on disk")
     # Sub-pixel refine accounting: how many contributing subs the refine step
     # had to leave *only roughly aligned* (its measured shift exceeded the cap,
     # so the frame stacked unshifted). Softer/doubled stars the user sees but
@@ -1183,6 +1206,21 @@ def run_stack(
                 with_fwhm[n_keep - 1].fwhm_px or 0.0,
             )
             frames = kept + without_fwhm
+
+    # Readability preflight over the *final* frame list (post lucky-imaging), so
+    # the run can name a storage problem instead of leaving it to look like an
+    # alignment one. ``_align_for_stack`` already skips a frame with nothing to
+    # read, silently, as a benign failure — a target whose Stage-1 cache was
+    # cleared while its originals sit on an offline share therefore produces a
+    # thin stack (or "no frames could be aligned") with no plain-language reason.
+    # One stat() per frame, off the pixel hot path.
+    n_unreadable = count_unreadable_frames(frames)
+    if n_unreadable:
+        log.warning(
+            "%d of %d subs have no readable file (neither the Stage-1 cache nor "
+            "the original source is on disk) — they cannot be stacked",
+            n_unreadable, len(frames),
+        )
 
     # Build the per-frame weight map. Defaults to all-1.0 unless quality_weighted.
     wstats: WeightingStats | None = None
@@ -1674,11 +1712,16 @@ def run_stack(
     # fall-back-to-mean when n < 3) does apply the weights.
     weights_applied = not (eff.min_max_reject and not options.drizzle and n >= 3)
     n_roughly = len(roughly_ids)
+    # Never claim more unreadable subs than actually dropped out of the stack: a
+    # frame the preflight found missing whose share came back before its worker
+    # read it would otherwise make "couldn't be read" exceed the whole gap.
+    n_unreadable = min(n_unreadable, max(0, len(frames) - n_used))
     header_meta = _build_output_header_meta(project, frames, eff, n_used, wstats,
                                             calibration=calibration, pstats=pstats,
                                             rstats=rej_stats,
                                             weights_applied=weights_applied,
-                                            n_roughly_aligned=n_roughly)
+                                            n_roughly_aligned=n_roughly,
+                                            n_unreadable=n_unreadable)
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     if stack_fwhm is not None:
@@ -1807,6 +1850,7 @@ def run_stack(
         excluded_frames=excluded_frames,
         n_offered=len(frames),
         n_align_failed=max(0, len(frames) - n_used),
+        n_unreadable=n_unreadable,
         n_roughly_aligned=n_roughly,
         run_id=run_id,
         rejection_mode=rej_stats.mode if _rej_recorded else None,

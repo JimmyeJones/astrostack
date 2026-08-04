@@ -6095,6 +6095,30 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-08-04, spotted while shipping the unreadable-subs preflight v0.230.2) — tell the user
+  their files are gone *before* they walk away, not after the stack comes out thin.** *(Autonomy / trust —
+  PRIORITY 2; size S; additive, read-only.)* v0.230.2 counts the frames whose Stage-1 cache *and* source have both
+  vanished, but it only does so **inside `run_stack`** — so the earliest a user learns that half their library is
+  on an unplugged drive is when a walk-away stack finishes thin. The same `count_unreadable_frames(frames)` helper
+  (`seestack/io/project.py`) is a plain `stat()` per row and could run on the **Target page** (or the scan
+  summary), where the number is *actionable before* the evening is spent: *"142 of this target's 500 subs are
+  listed but their files aren't on disk — reconnect the drive and scan again."* **Slice:** a read-only count on the
+  target-detail payload (or fold it into the existing reject-summary, which the Target page already fetches) plus
+  one self-hiding line reusing the wording already written for `missingSubsNote`. **Care:** on a 5,000-sub target
+  that's 5,000 stats on a hot poll — measure it, and if it isn't nearly free, cache it per scan or compute it only
+  on demand behind a button. **Deliberately not done in v0.230.2** to keep that change to the surfaces that report
+  a *finished* run.
+- **NEW IDEA (Builder 2026-08-04, spotted while shipping "Point here right now" v0.231.0) — say "another hour
+  would cut its noise about N%" in *one* voice across the app.** *(Friendliness / trust — PRIORITY 3; size S;
+  pure dedup with a real user payoff.)* The new `nightplan.noise_gain_from_more_time(t)` = `1 − √(t/(t+1))` is the
+  honest, beginner-legible answer to "would more subs help?", and the best-tonight card now says it in plain
+  words. But the app has **several other places that answer the same question in different currencies** — the
+  per-target integration goal / "is it enough yet?" readiness verdict, the `integrationTrend` line, and the
+  "cut your noise ~N×" at-completion badge — each with its own framing. A beginner reading two of them shouldn't
+  have to reconcile them. **Slice:** reuse the one helper (or its frontend mirror) so the readiness surface can
+  add the same sentence, and check the wordings agree on the *direction* and *magnitude* of the claim. **Care:**
+  don't collapse genuinely different questions into one — "have I shot enough?" (a goal) and "would another hour
+  help?" (a marginal return) are related but not the same; this is about the *marginal-return* sentence only.
 - **NEW (Builder 2026-07-30, found while shipping the Check & locate outcome line v0.222.2) — the legacy desktop
   dialog reports "solved N/M" from a *progress counter*, so it claims a perfect solve on a field where nothing
   located.** *(Correctness of a user-facing figure — but in the **deprioritised** desktop GUI, so low priority;
@@ -7531,8 +7555,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   is not re-offered indefinitely and reads as an honest failure. Upgrade-safe: no schema/API/default change (only
   a reason string on an already-nullable column). Keeps the unattended pipeline from burning cycles on a frame it
   can never use and makes the "why was this left out?" accounting honest.
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — before an unattended stack, count how many accepted+solved subs are
-  actually *readable on disk*, and say so honestly instead of silently shipping a thin/failed stack.** *(Autonomy /
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — before an unattended stack, count how many accepted+solved subs are
+  actually *readable on disk*, and say so honestly instead of silently shipping a thin/failed stack.**~~ —
+  **SHIPPED v0.230.2** (Builder 2026-08-04, branch `claude/relaxed-turing-c5ylqp`), all three slices. **(a) Engine:**
+  a pure `count_unreadable_frames(frames)` beside `readable_frame_path` (`seestack/io/project.py`) — one `stat()`
+  per frame, counting the frames with *neither* their Stage-1 cache nor their original source on disk. `run_stack`
+  runs it as a preflight over the **final** frame list (post lucky-imaging, so it counts exactly what the passes
+  will iterate), logs a warning, and carries it as `StackResult.n_unreadable` + a new `NUNREAD` FITS card beside
+  `NOFFERED`/`NALIGNFL`. It's a strict subset of `n_align_failed` — `_align_for_stack` already returns `None` for a
+  frame with nothing to read — and is **clamped to the real gap** (`len(frames) − n_used`) so a share that comes
+  back before the worker reads the frame can't leave "couldn't be read" exceeding the subs that actually dropped
+  out. **(b) Surfacing:** `webapp/routers/stack.py` parses `NUNREAD` into the run-info `frame_accounting`;
+  `_stack_target`'s summary carries `n_unreadable`. The **History** card's `frameAccountingNote` now splits the gap
+  into its two causes — *"358 of 500 subs combined · 142 couldn't be read"* — and, crucially, gives the **right**
+  guidance for each: a missing-file loss points at the storage ("the Stage-1 cache was cleared while the originals
+  live on a drive or share that's offline — reconnect it, scan again, then re-stack"), where the old wording sent
+  that user to the Frames table to hunt for mixed targets and re-solve perfectly good subs. A new `missingSubsNote`
+  puts the same sentence in a yellow alert on the Jobs **Process target** result, which is where the walk-away user
+  actually lands. **Self-hiding and upgrade-safe:** everything additive (new dataclass field defaulting to 0, new
+  header card, new optional response key, new UI line); an older master carries no `NUNREAD`, reads as 0, and the
+  History note is byte-for-byte its old text; no config/DB/on-disk/API-shape change and no default flipped.
+  Tests: `tests/test_stack_pipeline.py` (+3 — a frame whose only copy is deleted is counted and stamped, the happy
+  case still stamps `NUNREAD=0` so "nothing missing" is distinguishable from "older master", and the clamp holds
+  when the preflight over-reports), `tests/test_readable_frame_path.py` (+2 on the helper — a dangling cache with a
+  live source is *not* unreadable; empty list), `tests/webapp/test_stack_render.py` (+2 — the card rides through
+  the info endpoint / an older master omits the key), `History.test.tsx` (+4 — missing files named as such with
+  storage guidance, a mixed loss reporting both causes and guiding the dominant one, a stray missing sub staying
+  quiet, the clamp) and `Jobs.test.tsx` (+5 on `missingSubsNote` + the Process-target line).
+  *(Original spec kept for provenance.)* *(Autonomy /
   trust — the honest-accounting arc; PRIORITY 2; size S–M.)* **What prompted it:** while tracing the ⭐ stale-cache
   bug above I confirmed the unattended chains (watcher auto-stack / Process target) select frames purely on DB
   truthiness (`f.cached_path or f.source_path`) and only discover a missing file per-frame *inside* the worker,
@@ -12704,8 +12754,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   bulk "set this night aside" reject + re-stack wiring (its own commit — the only non-read-only slice).
   _(M–L, split as above; PRIORITY 2–3, beginner feature — keeps the pipeline stocked; builds directly on
   shipped `session_recap` infra so it's low-risk.)_
-- **NEW BEGINNER FEATURE (Scout 2026-07-21 #4) — "Up now, and worth more time": tell the beginner which of
-  *their own* targets is best-placed right this minute and would most benefit from more subs.** A beginner on a
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #4) — "Up now, and worth more time": tell the beginner which of
+  *their own* targets is best-placed right this minute and would most benefit from more subs.**~~ —
+  **SHIPPED v0.231.0** (Builder 2026-08-04, branch `claude/relaxed-turing-c5ylqp`), all three of the Scout's slices.
+  **(a) Engine** (`seestack/nightplan.py`): `rank_targets_now(observer, when_utc, library_targets, …) -> TonightNow`
+  scores each of the user's **own** targets as `sky × depth`. The *sky* half reuses the planner's tested machinery —
+  `_find_dark_window` truncated to the darkness still **ahead**, then `_observability_batch` over that remainder
+  (so the horizon mask and the min-altitude floor behave exactly as on `/tonight`), plus one new `_altitudes_at`
+  for the "how high is it *this minute*" read. The *depth* half is a new pure `noise_gain_from_more_time(t)` =
+  `1 − √(t/(t+1))`, i.e. the fraction one more hour would cut the noise by — the same honest √N language the app
+  already uses for "stacking cut your noise ~N×", saturating at a 15% gain so it doesn't endlessly favour the
+  emptiest target. **Multiplying** the two is the whole point: a beautifully-placed but already-deep target is not
+  tonight's best use of the scope, and neither is a barely-started one that's below the trees. Each pick carries one
+  plain-language sentence — *"M 31 is 62° up right now and stays shootable for another 3 h 20 m. So far you've got
+  45 min on it — another hour would cut its noise about 35%."* **(b) Backend:** read-only
+  `GET /api/plan/best-tonight` (`when`/`min_alt`/`limit`), resolving the site through the same `_resolve_observer`
+  every planning surface uses. **(c) Frontend:** a self-hiding `PointHereTonightCard` on the Dashboard — headline,
+  altitude badge, the sentence, and one **Open <target>** button (only the leader gets buttons; the point is one
+  clear recommendation, not another ranked list), refreshed every 10 min.
+  **Degrades instead of erroring, exactly as the Scout asked:** no location set → ranked on "would more subs help?"
+  alone with `altitude_now_deg` **null** and copy that says the placement isn't known (never implying it's up);
+  no darkness tonight (high-latitude summer) → the same; asked before dusk → plans the whole coming window and
+  says "climbs to N°" rather than faking a now-reading; under 20 minutes of dark left, or nothing above the floor →
+  empty `picks` and the card renders nothing. An older backend 404s the endpoint and the card stays silent.
+  Upgrade-safe: additive read-only endpoint + new component, no config/DB/on-disk/API-shape change, no default
+  flipped, and it never starts a capture. Tests: `tests/test_nightplan.py` (+12 — the √N maths and its monotonicity,
+  shallow-beats-deep at matched placement, a below-the-horizon target dropped, the reason's plain-language contract,
+  the no-location fallback, empty library, an unsolved target ignored, the near-dawn silence, the pre-dusk wording,
+  limit/ordering, the two different "can't place it" explanations, and never saying "you've got 0 min on it"),
+  `tests/webapp/test_plan.py` (+4) and `PointHereTonightCard.test.tsx` (+11).
+  *(Original spec kept for provenance.)* A beginner on a
   suddenly-clear night faces a blank decision: *what do I point at to get the best return tonight?* The app
   already knows everything needed to answer it — each target's plate-solved RA/Dec, its integration time so far
   and sub count (Library / `project.sqlite`), and the visibility maths the **Tonight planner** already runs
@@ -14494,6 +14572,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.231.1** — "Point here right now" now respects the Moon: the whole-night plan's proximity penalty is
+  extracted into one shared `nightplan.moon_penalty` and applied to the right-now sky term too, so a faint target
+  sitting beside a full Moon can't out-rank one in clean sky — and the card says "the Moon is fairly close to it
+  tonight" instead of silently down-ranking. Tests: `tests/test_nightplan.py` (+1).
+- **v0.231.0** — NEW beginner feature "Point here right now": a Dashboard card that picks, from the user's *own*
+  targets, the one that's best-placed at this moment **and** would gain most from another hour — scored as
+  (altitude now + dark sky left) × the √N noise cut one more hour would buy — with a one-sentence plain-language
+  why and a single Open button. New read-only `GET /api/plan/best-tonight`; self-hides when there's nothing to
+  recommend, and degrades to the "worth more time" half (never claiming a target is up) when no site is known.
+  Tests: +16 Python, +11 frontend.
+- **v0.230.2** — Honest accounting for subs that simply **weren't on disk**: a `count_unreadable_frames` preflight in
+  `run_stack` (+ `StackResult.n_unreadable` and a `NUNREAD` header card) splits the offered-vs-combined gap into
+  "couldn't be read" and "couldn't be aligned", so a cleared Stage-1 cache over an offline share reads as the storage
+  problem it is — with the reconnect-and-rescan fix — instead of sending the user to re-solve good frames. Surfaced on
+  the History card and as a Jobs Process-target alert. Tests: +7 Python, +9 frontend.
 - **v0.219.0** — NEW beginner feature "Your first image": a self-checking four-step map of the journey (point at your
   subs → locate → check & grade → stack) on the Dashboard, each step ticking itself off from `/api/system` +
   `/api/stats` (no new endpoint), leading with the single next thing to do and turning into a one-line well-done at
