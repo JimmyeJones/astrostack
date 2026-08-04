@@ -8,13 +8,49 @@ import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type UploadResult } from "../api/client";
 
-// Match the server's accepted FITS suffixes (seestack.io.ingest.FITS_SUFFIXES).
-const FITS_ACCEPT = ".fit,.fits,.fts";
+// Match the server's accepted FITS suffixes (seestack.io.ingest.FITS_SUFFIXES),
+// plus the .zip the server unpacks for us.
+const UPLOAD_ACCEPT = ".fit,.fits,.fts,.zip";
 
 /** True when the filename is one the server will accept — so we don't bother
  *  uploading a stray .txt/.jpg the user grabbed alongside their subs. */
 export function isFitsFilename(name: string): boolean {
   return /\.(fit|fits|fts)$/i.test(name);
+}
+
+/** True for a ``.zip`` — the server unpacks it and keeps the folders inside, so
+ *  "right-click → compress your Seestar folder" is one upload instead of
+ *  thousands. */
+export function isZipFilename(name: string): boolean {
+  return /\.zip$/i.test(name);
+}
+
+/** Everything the server accepts: raw subs, or a zip of them. */
+export function isUploadableFilename(name: string): boolean {
+  return isFitsFilename(name) || isZipFilename(name);
+}
+
+/** Plain-language "N files ready" line for a pick that may mix subs and zips. */
+export function pickedReadyLabel(files: { name: string }[]): string {
+  const zips = files.filter((f) => isZipFilename(f.name)).length;
+  const subs = files.length - zips;
+  const parts: string[] = [];
+  if (subs) parts.push(`${subs} FITS ${subs === 1 ? "file" : "files"}`);
+  if (zips) parts.push(`${zips} .zip ${zips === 1 ? "archive" : "archives"}`);
+  return parts.join(" and ");
+}
+
+/** "We'll unpack it" reassurance for a picked ``.zip``, or "" when none was
+ *  picked. A zip *is* a folder, so its structure always survives the trip —
+ *  that's what makes the targets come out right instead of one Unsorted pile. */
+export function zipUnpackNote(files: { name: string }[], target = ""): string {
+  const zips = files.filter((f) => isZipFilename(f.name)).length;
+  if (!zips) return "";
+  const noun = zips === 1 ? "archive" : "archives";
+  const named = target.trim();
+  const where = named ? ` “${named}”` : "";
+  return `We’ll unpack your ${noun} on the server and keep the folders inside${where}` +
+    `${named ? "" : ", so they come in as separate targets"}.`;
 }
 
 /** Minimal shape of the (non-standard but universally-supported) HTML5
@@ -213,6 +249,9 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
   // so the scanner's Seestar convention makes the right targets. A plain
   // multi-file pick carries none, and then nothing about the request changes.
   const folders = pickedFolders(files);
+  // A picked .zip carries no relative path, so it contributes no `folders` — the
+  // server always keeps the structure *inside* an archive, and this says so.
+  const zipNote = zipUnpackNote(files, target);
 
   const upload = useMutation({
     mutationFn: () =>
@@ -232,10 +271,10 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
 
   const onPick = (picked: File[] | null) => {
     if (!picked) return;
-    const fits = picked.filter((f) => isFitsFilename(f.name));
+    const usable = picked.filter((f) => isUploadableFilename(f.name));
     setResult(null);
-    setFiles(fits);
-    const dropped = picked.length - fits.length;
+    setFiles(usable);
+    const dropped = picked.length - usable.length;
     if (dropped > 0) {
       notifications.show({
         message: `Ignored ${dropped} non-FITS ${dropped === 1 ? "file" : "files"}.`,
@@ -279,14 +318,15 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
     <Stack gap="xs">
       <Text size="xs" c={dragActive ? "blue" : "dimmed"}>
         {dragActive
-          ? "Drop your FITS files or folder here…"
-          : "Drag your Seestar FITS files (or a whole target folder) here, or choose them below."}
+          ? "Drop your FITS files, folder or .zip here…"
+          : "Drag your Seestar FITS files (a whole target folder, or a .zip of one) here, "
+            + "or choose them below."}
       </Text>
       <Group gap="xs" wrap="wrap" align="flex-end">
-        <FileButton onChange={onPick} accept={FITS_ACCEPT} multiple>
+        <FileButton onChange={onPick} accept={UPLOAD_ACCEPT} multiple>
           {(props) => (
             <Button {...props} variant="light" leftSection={<IconFileUpload size={16} />}>
-              Choose FITS files…
+              Choose FITS or .zip…
             </Button>
           )}
         </FileButton>
@@ -333,16 +373,17 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
       {files.length > 0 && !upload.isPending ? (
         <Stack gap={2}>
           <Text size="xs" c="dimmed">
-            {files.length} FITS {files.length === 1 ? "file" : "files"} ready
+            {pickedReadyLabel(files)} ready
             {target.trim()
               ? ` — will go into “${target.trim()}”`
-              : folders.length
+              : folders.length || zipNote
                 ? ""
                 : " — will go to Unsorted"}.
           </Text>
           {folders.length ? (
             <Text size="xs" c="dimmed">{folderPreserveNote(folders, target)}</Text>
           ) : null}
+          {zipNote ? <Text size="xs" c="dimmed">{zipNote}</Text> : null}
         </Stack>
       ) : null}
 
@@ -403,7 +444,9 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
         <Text size="sm" c="dimmed">
           No NAS share needed — pick your Seestar FITS files (or a whole folder) and they’ll
           drop straight into the pipeline. Drop a folder and its structure is kept, so each
-          target comes in under its own name.
+          target comes in under its own name. On a slow connection, right-click your Seestar
+          folder → compress and drop the <b>.zip</b> instead: it uploads as one file and we
+          unpack it here.
         </Text>
         {body}
       </Stack>

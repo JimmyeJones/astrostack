@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import io
+import shutil
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -13,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(1, str(Path(__file__).resolve().parents[1]))
 from synth import write_seestar_fits  # noqa: E402
 
+from webapp.routers import upload as upload_mod  # noqa: E402
 from webapp.routers.upload import (  # noqa: E402
     confined_dest,
     is_fits_name,
@@ -542,5 +546,257 @@ def test_uploaded_seestar_folders_become_the_right_targets(
     # The two uploaded folders became their own real targets (rather than every
     # sub landing in one "Unsorted" pile). Other fixture targets may also be
     # present in incoming/, so assert on ours specifically.
+    assert {"M 31", "M 13"} <= names
+    assert "Unsorted" not in names
+
+
+# ---------------------------------------------------------------------------
+# .zip uploads — one request instead of thousands of multipart parts
+# ---------------------------------------------------------------------------
+
+def _zip_bytes(members: dict[str, bytes]) -> bytes:
+    """Build an in-memory ``.zip`` from ``{arcname: content}``."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for arcname, content in members.items():
+            zf.writestr(arcname, content)
+    return buf.getvalue()
+
+
+def test_upload_unpacks_a_zip_of_a_seestar_folder(client, data_root, tmp_path) -> None:
+    """The headline case: a beginner right-click-compresses their Seestar folder
+    and drops the single ``.zip`` in. Its FITS land keeping the archive's own
+    directories — so the scanner's ``M 31_sub`` → *M 31* convention still fires —
+    and the archive itself is not left on the NAS."""
+    write_seestar_fits(tmp_path / "a.fit", width=64, height=64, n_stars=5, seed=1)
+    write_seestar_fits(tmp_path / "b.fit", width=64, height=64, n_stars=8, seed=2)
+    a = (tmp_path / "a.fit").read_bytes()
+    b = (tmp_path / "b.fit").read_bytes()
+    blob = _zip_bytes({
+        "M 31_sub/": b"",                 # a directory entry — ignored, not a file
+        "M 31_sub/Light_0001.fit": a,
+        "M 31_sub/Light_0002.fit": b,
+    })
+    r = client.post(
+        "/api/upload",
+        files=[("files", ("seestar.zip", blob, "application/zip"))],
+    )
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert {f["name"] for f in payload["saved"]} == {
+        "M 31_sub/Light_0001.fit", "M 31_sub/Light_0002.fit"}
+    assert payload["rejected"] == []
+    assert payload["folders"] == ["M 31_sub"]
+    assert payload["job_id"]  # a scan was enqueued to ingest the unpacked subs
+    assert payload["bytes_written"] == len(a) + len(b)
+
+    inc = data_root / "incoming"
+    assert (inc / "M 31_sub" / "Light_0001.fit").read_bytes() == a
+    assert (inc / "M 31_sub" / "Light_0002.fit").read_bytes() == b
+    # The archive itself never stays behind, and no .part sidecar is orphaned.
+    assert list(inc.glob("**/*.zip")) == []
+    assert list(inc.glob("**/*.part")) == []
+
+
+def test_zip_lands_inside_a_named_target_folder(client, data_root, tmp_path) -> None:
+    blob = _zip_bytes({"night1/Light_0001.fit": _fits_bytes(tmp_path)})
+    r = client.post(
+        "/api/upload",
+        data={"target": "M_99"},
+        files=[("files", ("subs.zip", blob, "application/zip"))],
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["target"] == "M_99"
+    assert (data_root / "incoming" / "M_99" / "night1" / "Light_0001.fit").exists()
+
+
+def test_zip_member_traversal_never_escapes_the_destination(
+    client, data_root, tmp_path
+) -> None:
+    """A hostile archive's ``..``/absolute entries are refused — nothing is ever
+    written outside ``incoming/`` (we never call ``extractall``), and an absolute
+    member is dropped rather than quietly re-rooted into a real ``etc/`` folder."""
+    good = _fits_bytes(tmp_path)
+    blob = _zip_bytes({
+        "../../../../evil.fit": good,
+        "/etc/evil.fit": good,
+        "M 31_sub/Light_0001.fit": good,
+    })
+    r = client.post(
+        "/api/upload",
+        files=[("files", ("hostile.zip", blob, "application/zip"))],
+    )
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    # The one legitimate member still lands; both hostile entries are refused.
+    assert [f["name"] for f in payload["saved"]] == ["M 31_sub/Light_0001.fit"]
+    reasons = [f["reason"] for f in payload["rejected"]]
+    assert any("2 entr" in reason and "unsafe name" in reason for reason in reasons), reasons
+    assert not (data_root / "evil.fit").exists()
+    assert not (data_root.parent / "evil.fit").exists()
+    assert not Path("/etc/evil.fit").exists()
+    assert not (data_root / "incoming" / "etc").exists()
+    assert not (data_root / "incoming" / "evil.fit").exists()
+
+
+def test_zip_non_fits_members_are_reported_as_one_line(client, data_root, tmp_path) -> None:
+    """A zipped capture folder is full of thumbnails and logs — those are left out
+    and summarised in a single plain-language line, not thousands of rows."""
+    good = _fits_bytes(tmp_path)
+    blob = _zip_bytes({
+        "M 31_sub/Light_0001.fit": good,
+        "M 31_sub/thumbnail.jpg": b"jpeg",
+        "M 31_sub/log.txt": b"text",
+    })
+    r = client.post("/api/upload", files=[("files", ("mixed.zip", blob, "application/zip"))])
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert [f["name"] for f in payload["saved"]] == ["M 31_sub/Light_0001.fit"]
+    assert len(payload["rejected"]) == 1
+    assert payload["rejected"][0]["name"] == "mixed.zip"
+    assert "2 other file(s)" in payload["rejected"][0]["reason"]
+    assert not (data_root / "incoming" / "M 31_sub" / "thumbnail.jpg").exists()
+
+
+def test_a_file_that_is_not_really_a_zip_is_reported_plainly(client, data_root) -> None:
+    r = client.post(
+        "/api/upload",
+        files=[("files", ("broken.zip", b"not a zip at all", "application/zip"))],
+    )
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert payload["saved"] == []
+    assert payload["job_id"] is None  # nothing landed → no scan
+    assert len(payload["rejected"]) == 1
+    assert "not a readable .zip file" in payload["rejected"][0]["reason"]
+    assert list((data_root / "incoming").glob("**/*.part")) == []
+
+
+def test_zip_member_already_present_is_skipped(client, data_root, tmp_path) -> None:
+    blob = _zip_bytes({"M 31_sub/Light_0001.fit": _fits_bytes(tmp_path)})
+    files = [("files", ("subs.zip", blob, "application/zip"))]
+    first = client.post("/api/upload", files=files)
+    assert first.status_code == 200, first.text
+    assert len(first.json()["saved"]) == 1
+    second = client.post("/api/upload", files=files)
+    assert second.status_code == 200, second.text
+    payload = second.json()
+    assert payload["saved"] == []
+    assert [f["name"] for f in payload["skipped"]] == ["M 31_sub/Light_0001.fit"]
+    assert payload["job_id"] is None
+
+
+def test_a_zip_bomb_is_refused_before_anything_is_written(
+    client, data_root, tmp_path, monkeypatch
+) -> None:
+    """The uncompressed total is checked against the free space *before* the first
+    member is written — otherwise a highly-compressible archive fills the NAS."""
+    blob = _zip_bytes({"M 31_sub/Light_0001.fit": _fits_bytes(tmp_path)})
+
+    real_disk_usage = shutil.disk_usage
+
+    class _Tiny:
+        # Enough room for the archive itself, nowhere near the reserve once the
+        # members' uncompressed total is counted.
+        total = free = used = upload_mod._DISK_RESERVE_BYTES + len(blob) + 16
+
+    def fake_disk_usage(path):  # noqa: ANN001
+        p = Path(path)
+        inc = (data_root / "incoming").resolve()
+        if p.resolve() == inc or inc in p.resolve().parents:
+            return _Tiny
+        return real_disk_usage(path)
+
+    monkeypatch.setattr(upload_mod.shutil, "disk_usage", fake_disk_usage)
+    r = client.post("/api/upload", files=[("files", ("bomb.zip", blob, "application/zip"))])
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert payload["saved"] == []
+    assert [f["reason"] for f in payload["rejected"]] == ["not enough disk space"]
+    assert not (data_root / "incoming" / "M 31_sub").exists()
+    assert list((data_root / "incoming").glob("**/*.part")) == []
+
+
+def test_zip_member_cap_reports_what_it_left_out(
+    client, data_root, tmp_path, monkeypatch
+) -> None:
+    good = _fits_bytes(tmp_path)
+    blob = _zip_bytes({f"M 31_sub/Light_{i:04d}.fit": good for i in range(4)})
+    monkeypatch.setattr(upload_mod, "_ZIP_MAX_MEMBERS", 2)
+    r = client.post("/api/upload", files=[("files", ("big.zip", blob, "application/zip"))])
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert len(payload["saved"]) == 2
+    assert len(payload["rejected"]) == 1
+    assert "only the first 2 files" in payload["rejected"][0]["reason"]
+    assert "2 more left out" in payload["rejected"][0]["reason"]
+
+
+def test_extract_member_stops_at_the_size_the_archive_declares(tmp_path) -> None:
+    """The free-space guard trusts the zip directory's ``file_size``; a member that
+    streams *more* than it declared is aborted rather than allowed to overrun it
+    (a lying central directory is the classic zip-bomb shape). Leaves no sidecar."""
+    class _FakeZip:
+        """Hands back more bytes than the ZipInfo declares."""
+
+        def open(self, info):  # noqa: ANN001, ARG002
+            return io.BytesIO(b"x" * 4096)
+
+    info = zipfile.ZipInfo("Light_0001.fit")
+    info.file_size = 8  # declared far smaller than what the stream yields
+    dest = tmp_path / "Light_0001.fit"
+    with pytest.raises(ValueError):
+        upload_mod._extract_member(_FakeZip(), info, dest)
+    assert not dest.exists()
+    assert list(tmp_path.glob("*.part")) == []
+
+
+def test_extract_member_writes_a_well_formed_entry(tmp_path) -> None:
+    """Companion to the cap test: a member whose stream matches its declared size
+    lands complete and atomically (no leftover sidecar)."""
+    payload = b"y" * 300
+
+    class _FakeZip:
+        def open(self, info):  # noqa: ANN001, ARG002
+            return io.BytesIO(payload)
+
+    info = zipfile.ZipInfo("Light_0001.fit")
+    info.file_size = len(payload)
+    dest = tmp_path / "Light_0001.fit"
+    assert upload_mod._extract_member(_FakeZip(), info, dest) == len(payload)
+    assert dest.read_bytes() == payload
+    assert list(tmp_path.glob("*.part")) == []
+
+
+@pytest.mark.parametrize("name,ok", [
+    ("subs.zip", True), ("SUBS.ZIP", True),
+    ("x.fit", False), ("x.zip.fit", False), ("x", False), ("archive.tar.gz", False),
+])
+def test_is_zip_name(name: str, ok: bool) -> None:
+    assert upload_mod.is_zip_name(name) is ok
+
+
+def test_uploaded_zip_becomes_the_right_targets(client, data_root, tmp_path) -> None:
+    """End-to-end: run the real scanner over what a dropped ``.zip`` landed and
+    confirm the Seestar folder convention produced the true targets."""
+    from seestack.io.library import Library
+    from seestack.io.scanner import scan_and_organize
+
+    write_seestar_fits(tmp_path / "a.fit", width=64, height=64, n_stars=5, seed=1)
+    write_seestar_fits(tmp_path / "b.fit", width=64, height=64, n_stars=8, seed=2)
+    blob = _zip_bytes({
+        "MyWorks/M 31_sub/Light_0001.fit": (tmp_path / "a.fit").read_bytes(),
+        "MyWorks/M 13_sub/Light_0001.fit": (tmp_path / "b.fit").read_bytes(),
+    })
+    r = client.post("/api/upload", files=[("files", ("seestar.zip", blob, "application/zip"))])
+    assert r.status_code == 200, r.text
+    assert len(r.json()["saved"]) == 2
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, data_root / "incoming")
+        names = {t.name for t in lib.list_targets()}
+    finally:
+        lib.close()
     assert {"M 31", "M 13"} <= names
     assert "Unsorted" not in names
