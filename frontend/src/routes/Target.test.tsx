@@ -482,6 +482,54 @@ describe("TargetView QC-uncheckable callout", () => {
   });
 });
 
+describe("TargetView missing-files preflight", () => {
+  it("warns before the stack when accepted subs aren't on disk", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ reusable: true })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1, {})]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: {}, total: 0, n_missing_files: 142, n_accepted: 500,
+    });
+
+    renderTarget();
+
+    expect(
+      await screen.findByText("142 of 500 subs aren't on disk"),
+    ).toBeInTheDocument();
+    // Names the fix, not just the symptom — the drive is still there to reconnect.
+    expect(screen.getByText(/check it's connected/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Check again" }),
+    ).toBeInTheDocument();
+  });
+
+  it("stays quiet when every accepted sub is readable", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ reusable: true })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1, {})]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: {}, total: 0, n_missing_files: 0, n_accepted: 500,
+    });
+
+    renderTarget();
+
+    await screen.findByText("M42");
+    expect(screen.queryByText(/aren't on disk/)).not.toBeInTheDocument();
+  });
+
+  it("stays quiet on an older backend that doesn't report the counts", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ reusable: true })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1, {})]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({ counts: {}, total: 0 });
+
+    renderTarget();
+
+    await screen.findByText("M42");
+    expect(screen.queryByText(/aren't on disk/)).not.toBeInTheDocument();
+  });
+});
+
 describe("TargetView mixed-pointings callout", () => {
   const cluster = (n: number, ra: number, dec: number, startId: number): Frame[] =>
     Array.from({ length: n }, (_, i) =>
