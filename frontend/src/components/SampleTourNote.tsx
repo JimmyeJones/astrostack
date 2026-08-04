@@ -30,7 +30,7 @@ import { api } from "../api/client";
  */
 
 /** The screens the tour covers, in the order a beginner meets them. */
-export type SampleTourStep = "target" | "stack" | "editor";
+export type SampleTourStep = "target" | "stack" | "editor" | "history";
 
 interface StepCopy {
   title: string;
@@ -63,6 +63,21 @@ export const SAMPLE_TOUR_COPY: Record<SampleTourStep, StepCopy> = {
       + "point, then nudge anything you like — every change is a step you can "
       + "undo or reorder, and your stacked data is never overwritten. Export "
       + "when it looks right.",
+  },
+  // The end of the journey. The first three steps hand a newcomer from screen to
+  // screen but stop at the editor, so nobody ever tells them where a finished
+  // picture *goes* — or that Export is what turns their edit into a file they can
+  // share. This is that last sentence. It also names the Gallery rather than
+  // getting its own note there: the Gallery is a whole-library screen, so it
+  // can't honestly claim "you're looking at the sample".
+  history: {
+    title: "Every picture you make is kept here",
+    body: "Each stack you run is saved on this page for good — with the settings "
+      + "it used — so you can re-open one in the editor, compare two attempts, or "
+      + "download it later. Nothing is ever overwritten: stacking again just adds "
+      + "another entry. Use Export in the editor to turn an edit into a picture "
+      + "file you can share, and Gallery in the sidebar to see the finished ones "
+      + "from every target together.",
   },
 };
 

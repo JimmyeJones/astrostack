@@ -29,6 +29,7 @@ import { ProgressReelCard } from "../components/ProgressReelCard";
 import { OneFrameVsStackCard } from "../components/OneFrameVsStackCard";
 import { SharePictureButton } from "../components/SharePictureButton";
 import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
+import { SampleTourNote } from "../components/SampleTourNote";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { sharePictureText } from "../share";
 import { Sparkline } from "../components/Sparkline";
@@ -1128,6 +1129,10 @@ export function HistoryView() {
           <Button component={Link} to={`/targets/${safe}/stack`}>New stack</Button>
         </Group>
       </Group>
+      {/* First-run coaching, on the sample demo only (see SampleTourNote): the
+          last step of the tour — where finished pictures live, and what Export
+          is for. */}
+      <SampleTourNote step="history" safe={safe} />
       {trend.length >= 2 ? (
         <Card withBorder padding="sm" radius="md">
           <Group justify="space-between" wrap="nowrap" gap="md">
