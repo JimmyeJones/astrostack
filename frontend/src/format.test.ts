@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { formatIntegration, formatMonthYear } from "./format";
+import {
+  formatIntegration, formatMonthYear, formatNightDate, formatNightDayMonth,
+  isRecentNight, nightAgeDays,
+} from "./format";
 
 describe("formatIntegration", () => {
   it("formats each unit range", () => {
@@ -43,5 +46,85 @@ describe("formatMonthYear", () => {
     expect(formatMonthYear("")).toBe("—");
     expect(formatMonthYear("not-a-date")).toBe("—");
     expect(formatMonthYear("2026-13-01T00:00:00Z")).toBe("—");
+  });
+});
+
+describe("formatNightDate", () => {
+  it("formats a night date or UTC stamp as a friendly day-month-year", () => {
+    expect(formatNightDate("2026-07-08")).toBe("8 Jul 2026");
+    expect(formatNightDate("2026-07-08T22:00:00+00:00")).toBe("8 Jul 2026");
+    expect(formatNightDate("2026-12-31T01:00:00+00:00")).toBe("31 Dec 2026");
+  });
+
+  it("returns an em dash for null / malformed input", () => {
+    expect(formatNightDate(null)).toBe("—");
+    expect(formatNightDate("nope")).toBe("—");
+    expect(formatNightDate("2026-13-01T00:00:00Z")).toBe("—");
+    expect(formatNightDate("2026-07-00T00:00:00Z")).toBe("—");
+  });
+});
+
+describe("nightAgeDays", () => {
+  const morningAfter = new Date("2026-07-09T09:00:00Z");
+
+  it("counts whole calendar days back to the observing night", () => {
+    expect(nightAgeDays("2026-07-09", morningAfter)).toBe(0);
+    expect(nightAgeDays("2026-07-08", morningAfter)).toBe(1);
+    expect(nightAgeDays("2026-06-25", morningAfter)).toBe(14);
+  });
+
+  it("counts across a month and a year boundary", () => {
+    expect(nightAgeDays("2026-06-30", new Date("2026-07-01T09:00:00Z"))).toBe(1);
+    expect(nightAgeDays("2025-12-31", new Date("2026-01-01T09:00:00Z"))).toBe(1);
+  });
+
+  it("reads the date off a full UTC stamp too", () => {
+    expect(nightAgeDays("2026-07-08T22:00:00+00:00", morningAfter)).toBe(1);
+  });
+
+  it("is null when there is no datable night", () => {
+    expect(nightAgeDays(null, morningAfter)).toBeNull();
+    expect(nightAgeDays("", morningAfter)).toBeNull();
+    expect(nightAgeDays("nope", morningAfter)).toBeNull();
+    expect(nightAgeDays("2026-13-01", morningAfter)).toBeNull();
+  });
+});
+
+describe("isRecentNight", () => {
+  const morningAfter = new Date("2026-07-09T09:00:00Z");
+
+  it("is true for tonight's own session and the night just gone", () => {
+    expect(isRecentNight("2026-07-09", morningAfter)).toBe(true);
+    expect(isRecentNight("2026-07-08", morningAfter)).toBe(true);
+  });
+
+  it("is false once a night is older than that", () => {
+    expect(isRecentNight("2026-07-07", morningAfter)).toBe(false);
+    expect(isRecentNight("2026-06-25", morningAfter)).toBe(false);
+  });
+
+  it("keeps the warm wording when the night is undatable or in the future", () => {
+    // Undatable → we have nothing better to say; a future stamp (clock skew)
+    // must not announce a date that hasn't happened yet.
+    expect(isRecentNight(null, morningAfter)).toBe(true);
+    expect(isRecentNight("nope", morningAfter)).toBe(true);
+    expect(isRecentNight("2026-07-20", morningAfter)).toBe(true);
+  });
+});
+
+describe("formatNightDayMonth", () => {
+  it("drops the year while the night is in the current year", () => {
+    expect(formatNightDayMonth("2026-07-08", new Date("2026-07-23T09:00:00Z")))
+      .toBe("8 Jul");
+  });
+
+  it("keeps the year once the night is not this year", () => {
+    expect(formatNightDayMonth("2026-07-08", new Date("2027-01-05T09:00:00Z")))
+      .toBe("8 Jul 2026");
+  });
+
+  it("is null when the night can't be dated", () => {
+    expect(formatNightDayMonth(null, new Date("2026-07-23T09:00:00Z"))).toBeNull();
+    expect(formatNightDayMonth("nope", new Date("2026-07-23T09:00:00Z"))).toBeNull();
   });
 });

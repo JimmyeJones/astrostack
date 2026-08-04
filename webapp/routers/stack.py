@@ -1091,6 +1091,21 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
                     headers={"Cache-Control": "no-store"})
 
 
+# Both sides of the noise measurement are bounded to this square, taken from the
+# centre of each image — enough background to estimate σ robustly, small enough
+# that a giant mosaic master costs a patch rather than a canvas.
+_NOISE_CROP_PX = 1024
+
+
+def _crop_origin(h: int, w: int, size: int = _NOISE_CROP_PX) -> tuple[int, int]:
+    """Top-left corner of the central ``size``² crop of an ``h``×``w`` image.
+
+    Shared by the master's windowed read and the sub's in-memory crop so the two
+    sides are measured over the *same* part of the field, whichever route the
+    pixels arrived by."""
+    return max(0, (h - size) // 2), max(0, (w - size) // 2)
+
+
 def _measure_noise_ratio(fits_path: str, sub_path: str, pattern: str) -> float | None:
     """Background-noise reduction factor between one sub and the linear master.
 
@@ -1113,24 +1128,43 @@ def _measure_noise_ratio(fits_path: str, sub_path: str, pattern: str) -> float |
     except Exception:  # noqa: BLE001 — an unreadable master → no honest number
         return None
 
-    def _central_crop(rgb: np.ndarray, size: int = 1024) -> np.ndarray:
-        h, w = rgb.shape[:2]
-        y0 = max(0, (h - size) // 2)
-        x0 = max(0, (w - size) // 2)
+    def _central_crop(rgb: np.ndarray, size: int = _NOISE_CROP_PX) -> np.ndarray:
+        y0, x0 = _crop_origin(*rgb.shape[:2], size=size)
         return rgb[y0:y0 + size, x0:x0 + size]
 
     try:
-        # Linear master (native res; NaN preserved for uncovered pixels).
-        arr = np.asarray(_fits.getdata(fits_path), dtype=np.float32)
-        if arr.ndim == 3:                       # (channels, H, W) → (H, W, channels)
-            stack_rgb = np.transpose(arr, (1, 2, 0))
-            if stack_rgb.shape[2] == 1:
-                stack_rgb = np.repeat(stack_rgb, 3, axis=2)
-            elif stack_rgb.shape[2] > 3:
-                stack_rgb = stack_rgb[..., :3]
-        else:                                   # 2-D mono → grey RGB
-            stack_rgb = np.stack([arr, arr, arr], axis=-1)
-        stack_rgb = _central_crop(stack_rgb)
+        # Linear master (native res; NaN preserved for uncovered pixels). Read
+        # **only the central crop** off the memory-mapped HDU: this endpoint is
+        # fetched eagerly on every Target-page load and every finished-Jobs card,
+        # and `getdata(...)` + `asarray(dtype=float32)` materialises the *whole*
+        # master first (FITS is big-endian, so the dtype cast is a full copy and
+        # byte-swap, not a view) — 1.8 GB of transient allocation for a 150 MP
+        # mosaic on the RAM-capped NAS, to measure a 1024² patch. Slicing the
+        # memmap first touches only the pages the crop covers (measured: 46 MB →
+        # 0 MB peak on a 48 MB master). Same pixels, same ratio.
+        with _fits.open(fits_path, memmap=True) as hdul:
+            # First HDU carrying pixels — what `getdata` used to pick for us.
+            # Touching `.data` on a memmapped HDU doesn't read it, so this scan
+            # stays as cheap as the crop it's about to take.
+            data = next((h.data for h in hdul if h.data is not None), None)
+            if data is None:
+                return None
+            if data.ndim == 3:                  # (channels, H, W)
+                y0, x0 = _crop_origin(data.shape[1], data.shape[2])
+                arr = np.asarray(
+                    data[:, y0:y0 + _NOISE_CROP_PX, x0:x0 + _NOISE_CROP_PX],
+                    dtype=np.float32)
+                stack_rgb = np.transpose(arr, (1, 2, 0))
+                if stack_rgb.shape[2] == 1:
+                    stack_rgb = np.repeat(stack_rgb, 3, axis=2)
+                elif stack_rgb.shape[2] > 3:
+                    stack_rgb = stack_rgb[..., :3]
+            else:                               # 2-D mono → grey RGB
+                y0, x0 = _crop_origin(data.shape[0], data.shape[1])
+                arr = np.asarray(
+                    data[y0:y0 + _NOISE_CROP_PX, x0:x0 + _NOISE_CROP_PX],
+                    dtype=np.float32)
+                stack_rgb = np.stack([arr, arr, arr], axis=-1)
 
         # Linear sub: debayer at native res (no decimation), same central crop.
         sub_raw, info = load_seestar_raw(sub_path, debayer=False, out_dtype=np.float32)
