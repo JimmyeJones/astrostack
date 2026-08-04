@@ -8365,8 +8365,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
-- **NEW IDEA (Builder 2026-08-04, spotted while making the night-labelling family agree) — the two recap cards
-  still *say* "Last night" / "Last session" even when the night they're describing was weeks ago.**
+- ~~**NEW IDEA (Builder 2026-08-04, spotted while making the night-labelling family agree) — the two recap cards
+  still *say* "Last night" / "Last session" even when the night they're describing was weeks ago.**~~ —
+  **SHIPPED v0.229.5** (Builder 2026-08-04, branch `claude/relaxed-turing-15aq36`). Both recap sentences now
+  date themselves once the night they describe is no longer the night just gone: the Dashboard reads *"On 8 Jul
+  you captured 10 subs across 2 targets (2.0 h)."* and the Target card *"Your session on 8 Jul added 27 subs…"*,
+  while a genuinely recent night keeps the warm "Last night you captured…" / "Last session added…" wording
+  byte-for-byte. The softness nudge beneath the session recap follows the same call ("that session's stars" once
+  it isn't last night's) so the two lines can never disagree about when it happened.
+  **Built as pure helpers in `frontend/src/format.ts`** — `nightAgeDays` (whole calendar days back to the
+  observing night), `isRecentNight` (age ≤ 1) and `formatNightDayMonth` ("8 Jul", gaining the year once it isn't
+  this year, so an old night can't read as a recent one). Both sides are compared as plain **calendar dates**:
+  the `night_date` the server sends is already a local noon-to-noon bucket and `now` is read in the browser's
+  zone, so no timezone arithmetic can shift the verdict by a day — and the helpers read the date parts straight
+  off the string, never through `Date`, exactly as `formatNightDate` does. `formatNightDate` itself moved into
+  `format.ts` (re-exported from `NightsCard` so every existing caller and test is untouched) so the recency
+  helpers share its one month table rather than duplicating it.
+  **Deliberately conservative both ways:** an undatable night (an older backend sending no `night_date` and no
+  start time) keeps the warm wording rather than inventing a date, and a night stamped in the *future* (clock
+  skew) does too rather than announcing a date that hasn't happened. `now` is an injectable parameter on all
+  three sentence helpers — the existing phrasing assertions were pinned to a fixed "morning after" date rather
+  than left riding the real clock, which is what made them silently time-dependent in the first place.
+  Frontend-only, additive: no API/schema/config/default change, and the card headings (which already carry the
+  full date) are unchanged. **Tests (+18):** `format.test.ts` (+13 across the three new helpers plus the moved
+  `formatNightDate` — day counting across month and year boundaries, reading a full UTC stamp, undatable input,
+  the recent/stale/future/undatable verdicts, and the year appearing only when needed), `LastNightCard.test.tsx`
+  (+5 — still "Last night" mid-session and the morning after, the dated sentence a fortnight later, the year on
+  a cross-year night, bucketing by the observing night rather than the raw UTC start, and the undatable
+  fallback), `SessionRecapCard.test.tsx` (+4 — the dated sentence, the cross-year year, the undatable fallback,
+  and the drift nudge switching to "that session's stars").
+  *(Original idea kept below for provenance.)*
   *(Friendliness — PRIORITY 3; size S.)* `describeLibraryNight` opens with *"Last night you captured 10 subs…"* and
   `describeSession` with *"Last session added 27 subs…"*, but neither card is time-boxed: after a fortnight of cloud
   the Dashboard still greets the owner with "Last night you captured…", which is simply untrue and reads as though

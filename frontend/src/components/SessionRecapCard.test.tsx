@@ -46,9 +46,13 @@ describe("describeRejects", () => {
   });
 });
 
+// The morning after the fixture's 8 Jul night — so "Last session" is honest and
+// the existing phrasing assertions stay deterministic whatever day the suite runs.
+const MORNING_AFTER = new Date("2026-07-09T09:00:00Z");
+
 describe("describeSession", () => {
   it("phrases the kept-vs-set-aside recap with a reason breakdown", () => {
-    expect(describeSession(recap())).toBe(
+    expect(describeSession(recap(), MORNING_AFTER)).toBe(
       "Last session added 10 subs (2 min). 8 kept; 2 set aside (2 trailed). " +
         "Total on this target: 2 min.",
     );
@@ -57,14 +61,33 @@ describe("describeSession", () => {
   it("says all kept when nothing was set aside", () => {
     const r = recap({ n_frames: 3, n_kept: 3, n_set_aside: 0, reject_buckets: {},
       session_exposure_s: 30, kept_exposure_s: 30, total_kept_exposure_s: 30 });
-    expect(describeSession(r)).toBe(
+    expect(describeSession(r, MORNING_AFTER)).toBe(
       "Last session added 3 subs (30 s). All 3 were kept. Total on this target: 30 s.",
     );
   });
 
   it("uses the singular for a one-sub session", () => {
     const r = recap({ n_frames: 1, n_kept: 1, n_set_aside: 0, reject_buckets: {} });
-    expect(describeSession(r)).toContain("added 1 sub (");
+    expect(describeSession(r, MORNING_AFTER)).toContain("added 1 sub (");
+  });
+
+  it("dates itself instead of saying 'Last session' weeks later", () => {
+    // The card always shows the most recent session, so after a cloudy fortnight
+    // "Last session added…" reads as though the app lost track of the date.
+    expect(describeSession(recap(), new Date("2026-07-23T09:00:00Z"))).toBe(
+      "Your session on 8 Jul added 10 subs (2 min). 8 kept; 2 set aside (2 trailed). " +
+        "Total on this target: 2 min.",
+    );
+  });
+
+  it("adds the year once the session is no longer this year", () => {
+    expect(describeSession(recap(), new Date("2027-01-05T09:00:00Z")))
+      .toContain("Your session on 8 Jul 2026 added");
+  });
+
+  it("keeps the warm wording when the night can't be dated at all", () => {
+    const r = recap({ night_date: null, start_utc: null });
+    expect(describeSession(r, MORNING_AFTER)).toContain("Last session added");
   });
 });
 
@@ -79,6 +102,17 @@ describe("describeQualityDrift", () => {
       "Heads up: last session's stars are softer than your usual best " +
         "(5.2 px vs 3.4 px FWHM) — worth checking focus.",
     );
+  });
+
+  it("says 'that session' once the session it describes is no longer last night", () => {
+    // Must agree with the recap sentence right above it, which has already
+    // stopped calling an old session "last session".
+    expect(
+      describeQualityDrift({
+        kind: "fwhm", latest_fwhm_px: 5.2, baseline_fwhm_px: 3.4,
+        n_latest: 8, n_baseline: 8,
+      }, false),
+    ).toContain("Heads up: that session's stars are softer");
   });
 });
 
