@@ -139,6 +139,12 @@ class SessionRecapOut(BaseModel):
     total_kept_exposure_s: float
     start_utc: str | None = None
     end_utc: str | None = None
+    # The *observing night* this session belongs to, as ISO ``YYYY-MM-DD`` — the
+    # same noon-to-noon local bucket the Nights card and the imaging calendar use,
+    # so the surfaces can't disagree about which night a session was. Additive and
+    # optional: ``None`` when the start time can't be parsed, and an older frontend
+    # simply shows no date at all, exactly as it did before.
+    night_date: str | None = None
     reject_buckets: dict[str, int] = {}
     quality_drift: SessionQualityDriftOut | None = None
 

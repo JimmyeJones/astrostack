@@ -3,6 +3,7 @@ import { IconMoonStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type SessionQualityDrift, type SessionRecap } from "../api/client";
 import { formatIntegration } from "../format";
+import { nightDateLabel } from "./NightsCard";
 
 // Plain-language names for the reject buckets the backend groups into, in the
 // order we like to list them. Anything not here (e.g. "set aside by you",
@@ -52,6 +53,20 @@ export function describeQualityDrift(d: SessionQualityDrift): string {
   );
 }
 
+/** The card's heading, naming the *observing night* the session belongs to —
+ *  "Last session — 8 Jul 2026" — so a beginner can tell whether "27 subs kept"
+ *  was last night or three weeks ago, and can line the recap up with the Nights
+ *  rows below it (which label the same way). Falls back to the bare "Last
+ *  session" when the night can't be dated (an older backend sending no
+ *  `night_date` and no start time, or frames with no capture time) rather than
+ *  showing an em-dash placeholder. Pure and unit-testable. */
+export function sessionRecapTitle(
+  r: Pick<SessionRecap, "night_date" | "start_utc">,
+): string {
+  const label = nightDateLabel(r);
+  return label === "—" ? "Last session" : `Last session — ${label}`;
+}
+
 /**
  * "Last session" recap — a small, persistent, plain-language card answering the
  * first question a walk-away user has on return: *what did last night give me?*
@@ -75,7 +90,7 @@ export function SessionRecapCard({ safe }: { safe: string }) {
           color="var(--mantine-color-violet-5)" />
         <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
           <Group gap="xs" justify="space-between" wrap="nowrap">
-            <Text size="sm" fw={500}>Last session</Text>
+            <Text size="sm" fw={500}>{sessionRecapTitle(r)}</Text>
             <Badge variant="light" color="violet" size="sm">{keptPct}% kept</Badge>
           </Group>
           <Text size="sm" c="dimmed">{describeSession(r)}</Text>
