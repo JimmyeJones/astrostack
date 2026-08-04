@@ -1,8 +1,9 @@
 import { Card, Group, Image, SimpleGrid, Text, Title } from "@mantine/core";
+import { IconStarFilled } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { bestPictureReason } from "./bestPictures";
+import { bestPictureReason, pinnedNote } from "./bestPictures";
 
 // How many pictures the Dashboard strip previews — a distilled taste of the full
 // "My best pictures" wall, not the whole thing.
@@ -31,6 +32,7 @@ export function BestPicturesStrip() {
       <SimpleGrid cols={{ base: 2, sm: 4 }}>
         {items.map((pic) => {
           const reason = bestPictureReason(pic);
+          const pinned = pinnedNote(pic);
           return (
             <Card
               key={`${pic.safe}-${pic.run_id}`} withBorder padding="xs" radius="md"
@@ -40,7 +42,16 @@ export function BestPicturesStrip() {
                 <Image src={pic.preview_url} h={120} fit="contain" bg="#000"
                   alt={pic.target_name} />
               </Card.Section>
-              <Text fw={600} size="sm" truncate mt={6}>{pic.target_name}</Text>
+              {/* A pinned favourite leads the strip; a tiny star (with the same
+                  explanation the wall gives) answers "why is that one first?"
+                  without spending a badge row on this compact card. */}
+              <Group gap={4} wrap="nowrap" mt={6}>
+                {pinned ? (
+                  <IconStarFilled size={11} title={pinned}
+                    style={{ flexShrink: 0, color: "var(--mantine-color-yellow-5)" }} />
+                ) : null}
+                <Text fw={600} size="sm" truncate>{pic.target_name}</Text>
+              </Group>
               {reason ? (
                 <Text size="xs" c="dimmed" truncate title={reason}>{reason}</Text>
               ) : null}
