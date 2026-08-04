@@ -57,6 +57,14 @@ export function noteAction(
       // Most subs failed to plate-solve; Settings shows the ASTAP star-database
       // status and how to install it, which is what lets far more subs locate.
       return { label: "Check your star database in Settings →", href: "/settings" };
+    case "restack":
+      // The stack's outlier removal couldn't bite at this frame count; the fix
+      // is one switch on the Stack form ("Auto outlier removal"), so send them
+      // straight there rather than describing where it lives.
+      return {
+        label: "Re-stack with Auto outlier removal →",
+        href: `/targets/${safe}/stack`,
+      };
     default:
       return null;
   }
