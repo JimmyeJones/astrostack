@@ -8365,6 +8365,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **NEW IDEA (Builder 2026-08-04, spotted while making the night-labelling family agree) — the two recap cards
+  still *say* "Last night" / "Last session" even when the night they're describing was weeks ago.**
+  *(Friendliness — PRIORITY 3; size S.)* `describeLibraryNight` opens with *"Last night you captured 10 subs…"* and
+  `describeSession` with *"Last session added 27 subs…"*, but neither card is time-boxed: after a fortnight of cloud
+  the Dashboard still greets the owner with "Last night you captured…", which is simply untrue and reads as though
+  the app has lost track. Both cards now carry the server's `night_date` (v0.229.2 / v0.229.4), so the fix is cheap
+  and needs no new data: when the night is not within the last ~36 h, phrase it as the date instead — *"On 8 Jul you
+  captured 10 subs across 2 targets (2.0 h)"* / *"Your last session, on 8 Jul, added 27 subs"* — and keep the warm
+  "Last night" wording only when it's actually last night. Pure string helpers, already unit-tested files; the
+  "now" must be injectable so the tests stay deterministic (the existing helpers are pure and take no clock, so add
+  an optional `now` parameter rather than reading `Date.now()` inside). Self-hiding behaviour is unchanged.
+
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — put a plain-language "what does *not located yet* mean?" explainer next to
   the unsolved-subs badges, so a beginner who sees "200 not located yet" understands it's usually normal and knows
   the one thing to try, instead of reading it as a scary error.**~~ — **SHIPPED v0.199.1** (Builder 2026-07-24, branch
@@ -13622,6 +13634,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW IDEA (Builder 2026-08-04, cost me most of a run) — the "*(Original spec kept for provenance.)*" copies are
+  indistinguishable from open work, so a Builder scanning this file re-picks already-shipped features.**
+  *(Maintainability / agent-efficiency; size S — a formatting pass, no code.)* When an item ships, the convention is
+  to strike the headline, write the SHIPPED paragraph, and keep the original spec below it. But that original is
+  re-pasted as its own **top-level, un-struck `- **…**` bullet**, so every way an agent triages this file — reading
+  the section, or grepping `^- \*\*` for unclaimed items — surfaces it as a live idea. This run that cost real time:
+  the "Focus & sharpness through the night" card, the "Plan your next night on *this* target" card and the "make
+  smart `auto_reject` the beginner default" item all read as open, and all three had shipped months earlier (v0.152.0,
+  v0.156.0, v0.149.0). Only grepping the *code* caught it — which is exactly the "grep before you build" tax AGENTS.md
+  §1 already warns about, and it is self-inflicted. **Fix:** indent provenance copies one level under their shipped
+  entry (`  - _(original spec)_ …`) or fold them into the same bullet, so they can never match a top-level scan; then
+  the "is this open?" question is answerable by shape alone. Cheap, mechanical, and it makes every future run's triage
+  faster and safer. Best done by the Scout in one curation pass — and worth adding to the conventions block at the top
+  of this file so new entries land indented from the start.
+
 - **NEW (Scout 2026-07-23) — remove or parity-pin the caller-less non-windowed `reproject_rgb` in `align.py` (latent
   CPU/GPU `cval` divergence).** *(Maintainability / latent-correctness; size S; from this run's align audit.)* The
   2026-07-23 adversarial align audit re-confirmed that the production stack uses only the **windowed** reproject path,
