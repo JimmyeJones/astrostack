@@ -182,6 +182,37 @@ def test_stack_coverage_mask_marks_nan_uncovered(tmp_path):
     assert not stack_coverage_mask(fp2)[0, 0]
 
 
+def test_stack_coverage_mask_reduces_off_the_memmap(tmp_path):
+    """v0.232.0 reduces ``isfinite`` straight off the memory map, one channel at a
+    time, instead of casting the whole big-endian cube to float32 to answer a
+    boolean question (measured: peak anonymous RSS 201 MB → 41 MB on a 144 MB
+    master). With ``fits.getdata`` unavailable the function can only answer by
+    slicing the memmap, so this pins the read shape; the mask itself must be
+    identical to what the whole-cube path produced."""
+    from unittest import mock
+
+    from astropy.io import fits
+
+    rng = np.random.default_rng(3)
+    cube = rng.normal(1.0, 0.1, (3, 24, 40)).astype(np.float32)
+    cube[:, :, 30:] = np.nan                # right strip uncovered in every channel
+    cube[0, 5, 5] = np.nan                  # ...but finite in G/B, so still covered
+    fp = tmp_path / "m.fits"
+    fits.PrimaryHDU(data=cube).writeto(fp)
+
+    want = np.isfinite(np.asarray(fits.getdata(fp), dtype=np.float32)).any(axis=0)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("stack_coverage_mask must not read the whole cube")
+
+    with mock.patch.object(fits, "getdata", _boom):
+        got = stack_coverage_mask(fp)
+    assert got.dtype == bool
+    assert np.array_equal(got, want)
+    assert got[5, 5]                        # finite in another channel → covered
+    assert not got[:, 30:].any()
+
+
 def test_overlay_rgba_png_makes_uncovered_transparent():
     """overlay_rgba_png keeps the preview RGB verbatim and punches alpha=0 on
     uncovered pixels (so a mosaic shows its footprint, not a black box)."""

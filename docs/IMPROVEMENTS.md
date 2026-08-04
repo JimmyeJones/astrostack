@@ -13879,8 +13879,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   hold a stale answer for up to the TTL), so either include `cover_stack_run_id` in the signature or keep the TTL
   short. **Gate:** time the endpoint on a realistic library first; if it's already single-digit milliseconds, don't
   build this — the current code is simpler and correct.
-- **NEW IDEA (Builder 2026-08-04, spotted while fixing the noise-ratio full-master read v0.229.6) — decimate a
-  giant master in row blocks instead of materialising the whole canvas first.** *(Performance / RAM robustness on
+- ~~**NEW IDEA (Builder 2026-08-04, spotted while fixing the noise-ratio full-master read v0.229.6) — decimate a
+  giant master in row blocks instead of materialising the whole canvas first.**~~ — **SHIPPED v0.232.1**
+  (Builder 2026-08-04, branch `claude/relaxed-turing-9owkq2`), by the **per-channel** route rather than the
+  row-blocked one the entry proposed. **Why not row blocks:** PIL's BOX filter weights *fractional* input rows at
+  each output-row edge, so a band boundary only lands on an output-row boundary when `H` is an exact multiple of
+  `new_h` — anything else would need the box weights reimplemented by hand, and the entry itself made bit-parity
+  the whole point. Per-channel gets most of the win with none of that risk. **What changed**
+  (`seestack/render/thumbnail.py`): `load_stack_rgb` opens the master `memmap=True`, picks the first HDU carrying
+  pixels (the same convention v0.229.6 established, so it chooses exactly what `getdata` used to), and runs each
+  channel through a new `_nan_aware_area_downscale_plane` **as it is read** — the whole-cube
+  `asarray(getdata(...), float32)` (a full copy *and* byte-swap of every channel, since FITS is big-endian) and
+  the transpose buffer are both gone. Inside the plane helper the two full-size buffers are built and released one
+  at a time (`num` first, then the mask), because PIL copies the array it is handed — holding the filled plane,
+  its mask and both PIL images at once kept four full planes alive to produce two small ones.
+  `stack_coverage_mask` reduces `isfinite` straight off the memmap, one channel at a time: its float32 cast was
+  pure waste, copying and byte-swapping the whole cube to answer a boolean question. **Measured before/after**
+  (144 MB master, 4000×3000 × 3 ch → 1024 px; peak **anonymous** RSS sampled at 1 ms, i.e. the allocation that
+  actually OOMs rather than the evictable file-backed pages a memmap touches): `load_stack_rgb` **342 MB → 148 MB**
+  (2.3×), `stack_coverage_mask` **201 MB → 41 MB** (4.9×). It scales with the canvas, so a 150 MP mosaic preview
+  costs ~1.9 GB of transient allocation instead of ~4.3 GB on the RAM-capped NAS. **Bit-parity, as the entry
+  demanded:** a parametrized test compares the output against a transcription of the old whole-cube path that
+  shares **no** code with the implementation (colour cube, 1-channel cube greyed to RGB, and 2-D mono; each with a
+  ragged NaN strip and a fully-uncovered block), asserting `array_equal(..., equal_nan=True)`. Tests
+  (`tests/webapp/test_stack_render.py` +5, `tests/test_thumbnail.py` +1): the three parity cases, a guard that
+  monkeypatches `fits.getdata` to raise so neither function can quietly go back to reading the whole canvas, an
+  undecimated master still returning a real copy rather than a memmap view onto a closed file, and the coverage
+  mask's own parity + memmap guard. The now-unused `(H, W, C)` `_nan_aware_area_downscale` wrapper was removed
+  rather than left as dead production code kept alive by a test. No API/schema/config/default change.
+  *(Original idea kept below for provenance.)* *(Performance / RAM robustness on
   the live NAS — PRIORITY 2/4; size M; **needs a measurement before and after**, per this section's rule.)*
   `seestack/render/thumbnail.py::load_stack_rgb` does `np.asarray(fits.getdata(path), dtype=np.float32)` and *then*
   NaN-aware area-averages down to `max_width`. Unlike the noise-ratio case just fixed, the full read here is not
@@ -13895,6 +13922,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   master (that parity test is the whole point; the decimation's NaN semantics are load-bearing for mosaics).
   **Measure first** — this section's rule — with a peak-RSS harness on a large synthetic master, and only take it
   if the win is real; the existing behaviour is correct, so this is purely about the ceiling.
+- **NEW IDEA (Builder 2026-08-04, spotted while shipping the per-channel master read v0.232.1) — the *stretch*
+  is now the biggest allocation on the full-res PNG download, not the load.** *(Performance / RAM robustness on
+  the live NAS — PRIORITY 2/4; size S–M; **measure first**, per this section's rule.)* With `load_stack_rgb`
+  bounded, `render_preview_png_full_res` (`seestack/render/thumbnail.py`) is dominated by what happens *after* the
+  load: it asks for `max_width=8000`, so on a big mosaic the decimated array is itself ~8000×6000×3 float32
+  (≈576 MB), and then `_autostretch_for_export`/`autostretch` each take a **full copy** (`img = rgb.astype(...,
+  copy=True)`), allocate an equal-sized `out`, run `np.nanpercentile` over the whole image (which sorts its own
+  copy), and the caller then builds a `np.clip(np.nan_to_num(...))` and a uint8 buffer on top — plausibly 4–5×
+  the decimated array live at once, on the endpoint a beginner hits from the "Download full-res PNG" button.
+  **Slice:** the per-channel discipline that worked for the load applies here too — the STF's statistics are
+  already computed per channel, so the stretch could write into a preallocated output plane-by-plane and take the
+  99.5th percentile on a strided sample rather than the whole array (that percentile is a *robust ceiling*, so a
+  subsample is arguably more honest than exact, but it changes pixels, so it needs its own before/after
+  comparison, not a bit-parity claim). **Gate:** measure peak anonymous RSS on a large synthetic master first
+  (the 1 ms `/proc/self/status` `RssAnon` sampler used for v0.232.1 is the right harness); take it only if the
+  win is real. The existing behaviour is correct — this is purely about the ceiling.
+- **NEW IDEA (Builder 2026-08-04, follow-on to the missing-files preflight v0.232.0) — say it once at the
+  *library* level, not once per target.** *(Autonomy / trust — PRIORITY 2; size S; additive, read-only.)* The new
+  Target-page callout tells you when *this* target's subs aren't on disk — but the cause is almost never
+  per-target: an unmounted drive or an offline NAS share takes out **every** target at once, and the owner would
+  have to open each one to discover the scale of it. The Dashboard is where that belongs: one line — *"3 200 subs
+  across 11 targets are listed but their files aren't on disk right now"* — with the same "check it's connected"
+  fix and the same self-hiding rule. **Care (this is the whole reason it isn't just "loop the endpoint"):** the
+  per-target count is one `stat()` per accepted frame, and a whole library is the sum of every target, so a
+  naive Dashboard poll would stat the entire library on every render. Measure it (the v0.232.0 measurement —
+  44 ms per 5 000 present frames, 139 ms when they're all gone — is the per-target baseline) and, if it isn't
+  nearly free at library scale, put it behind the existing 60 s roll-up cache or a "check my storage" button
+  rather than on the render path. **Also worth checking while there:** whether a *watched-folder* status check
+  (`/api/system` already reports `folders.incoming`/`folders.library` existence + writability) can catch the
+  common case — a whole share gone — far more cheaply than counting frames, and only fall back to the frame
+  count when the folders themselves look fine.
 - Profile the stack hot path on a large synthetic target; find a safe win that
   doesn't touch memory bounds or correctness. (M)
 
