@@ -6095,6 +6095,30 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-08-04, spotted while shipping the unreadable-subs preflight v0.230.2) — tell the user
+  their files are gone *before* they walk away, not after the stack comes out thin.** *(Autonomy / trust —
+  PRIORITY 2; size S; additive, read-only.)* v0.230.2 counts the frames whose Stage-1 cache *and* source have both
+  vanished, but it only does so **inside `run_stack`** — so the earliest a user learns that half their library is
+  on an unplugged drive is when a walk-away stack finishes thin. The same `count_unreadable_frames(frames)` helper
+  (`seestack/io/project.py`) is a plain `stat()` per row and could run on the **Target page** (or the scan
+  summary), where the number is *actionable before* the evening is spent: *"142 of this target's 500 subs are
+  listed but their files aren't on disk — reconnect the drive and scan again."* **Slice:** a read-only count on the
+  target-detail payload (or fold it into the existing reject-summary, which the Target page already fetches) plus
+  one self-hiding line reusing the wording already written for `missingSubsNote`. **Care:** on a 5,000-sub target
+  that's 5,000 stats on a hot poll — measure it, and if it isn't nearly free, cache it per scan or compute it only
+  on demand behind a button. **Deliberately not done in v0.230.2** to keep that change to the surfaces that report
+  a *finished* run.
+- **NEW IDEA (Builder 2026-08-04, spotted while shipping "Point here right now" v0.231.0) — say "another hour
+  would cut its noise about N%" in *one* voice across the app.** *(Friendliness / trust — PRIORITY 3; size S;
+  pure dedup with a real user payoff.)* The new `nightplan.noise_gain_from_more_time(t)` = `1 − √(t/(t+1))` is the
+  honest, beginner-legible answer to "would more subs help?", and the best-tonight card now says it in plain
+  words. But the app has **several other places that answer the same question in different currencies** — the
+  per-target integration goal / "is it enough yet?" readiness verdict, the `integrationTrend` line, and the
+  "cut your noise ~N×" at-completion badge — each with its own framing. A beginner reading two of them shouldn't
+  have to reconcile them. **Slice:** reuse the one helper (or its frontend mirror) so the readiness surface can
+  add the same sentence, and check the wordings agree on the *direction* and *magnitude* of the claim. **Care:**
+  don't collapse genuinely different questions into one — "have I shot enough?" (a goal) and "would another hour
+  help?" (a marginal return) are related but not the same; this is about the *marginal-return* sentence only.
 - **NEW (Builder 2026-07-30, found while shipping the Check & locate outcome line v0.222.2) — the legacy desktop
   dialog reports "solved N/M" from a *progress counter*, so it claims a perfect solve on a field where nothing
   located.** *(Correctness of a user-facing figure — but in the **deprioritised** desktop GUI, so low priority;
