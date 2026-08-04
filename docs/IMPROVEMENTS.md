@@ -9882,6 +9882,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   actually deciding the night) and `SessionRecapCard.test.tsx` (+3 on `sessionRecapTitle`, plus the card
   assertions updated to the dated heading). Closes the last surface in the night-labelling family.
 
+- ~~**BUG (Builder 2026-08-04, found by dogfooding the night-labelling family after the recap fix above) — the
+  Dashboard's "Last night" card dated itself from `end_utc`, so for any observer west of UTC it named **tomorrow**
+  — and disagreed with the imaging calendar squares on the same screen.**~~ — **FIXED v0.229.4** (Builder
+  2026-08-04, branch `claude/relaxed-turing-oieiow`). *(Friendliness/trust — PRIORITY 3; wrong-figure, cosmetic
+  severity but on the Dashboard's most-read line.)* `LastNightCard` rendered
+  `` `Last night · ${r.end_utc.slice(0, 10)}` `` — the raw UTC date of the session's **end**, which is wrong twice
+  over: a session that runs past local midnight ends on the *following* UTC day, and even its start is a UTC stamp
+  rather than the noon-to-noon local observing night every other surface buckets on. A Seattle owner shooting
+  21:00 → 02:00 on 8 Jul saw "Last night · 2026-07-09" beside an imaging-calendar square lit on the 8th. **The
+  fix** mirrors v0.229.1/v0.229.2 exactly: `GET /api/last-night` gains an additive optional `night_date` from one
+  `night_date_of` call through the shared `resolve_site_lon`, and the card renders it with the shared
+  `formatNightDate` ("Last night · 8 Jul 2026" instead of a bare ISO string). The date is resolved **outside** the
+  endpoint's 60 s recap cache, so changing the site longitude in Settings re-buckets the label on the next request
+  instead of waiting out the TTL. Falls back to `start_utc` — the night's *beginning*, not its end — for an older
+  backend, and shows no date at all when nothing is datable. Upgrade-safe: additive response field, no
+  config/DB/on-disk/default change. Tests: `tests/webapp/test_last_night.py` (+3 — the local-evening night for a
+  session whose UTC stamps say the next day, agreement with `/api/activity-calendar`, and a longitude change
+  taking effect through the cache) and `LastNightCard.test.tsx` (+3 on the pure `lastNightLabel`, plus the card
+  assertion updated to the friendly date). With this the whole night-labelling family — calendar, Nights, Last
+  session, Last night — agrees.
+
 - ~~**NEW IDEA (Builder 2026-07-30, follow-on to the v0.228.0 folder-structure-preserving upload) — accept a
   `.zip` of a Seestar folder in the browser upload.**~~ — **SHIPPED v0.229.0** (Builder 2026-08-04, branch
   `claude/relaxed-turing-1hy1y1`). `POST /api/upload` now **unpacks** a `.zip` instead of storing it, so

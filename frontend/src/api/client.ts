@@ -410,6 +410,7 @@ export interface LibrarySessionRecap {
   kept_exposure_s: number;
   start_utc: string | null;
   end_utc: string | null;
+  night_date?: string | null;
   targets: TargetNight[];
   reject_buckets: Record<string, number>;
 }
