@@ -711,6 +711,11 @@ export interface StackFrameAccounting {
   // Of those, how many couldn't be aligned (load failure or a footprint that
   // missed the canvas — usually a stray sub or a bad plate-solve).
   n_align_failed?: number;
+  // Of `n_align_failed`, how many had no file on disk at all when the stack ran
+  // (neither the Stage-1 cache nor the original source) — a cleared cache with
+  // the originals on an offline share, an unmounted drive, moved files. Absent
+  // on masters stacked before this was recorded.
+  n_unreadable?: number;
   // How many contributing subs sub-pixel refine had to leave *only roughly*
   // aligned (its measured shift exceeded the cap, so the frame stacked
   // unshifted → possibly soft/doubled stars). Present only when refine ran.

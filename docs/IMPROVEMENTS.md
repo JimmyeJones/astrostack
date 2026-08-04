@@ -7531,8 +7531,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   is not re-offered indefinitely and reads as an honest failure. Upgrade-safe: no schema/API/default change (only
   a reason string on an already-nullable column). Keeps the unattended pipeline from burning cycles on a frame it
   can never use and makes the "why was this left out?" accounting honest.
-- **IMPROVEMENT IDEA (Scout 2026-07-23) — before an unattended stack, count how many accepted+solved subs are
-  actually *readable on disk*, and say so honestly instead of silently shipping a thin/failed stack.** *(Autonomy /
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — before an unattended stack, count how many accepted+solved subs are
+  actually *readable on disk*, and say so honestly instead of silently shipping a thin/failed stack.**~~ —
+  **SHIPPED v0.230.2** (Builder 2026-08-04, branch `claude/relaxed-turing-c5ylqp`), all three slices. **(a) Engine:**
+  a pure `count_unreadable_frames(frames)` beside `readable_frame_path` (`seestack/io/project.py`) — one `stat()`
+  per frame, counting the frames with *neither* their Stage-1 cache nor their original source on disk. `run_stack`
+  runs it as a preflight over the **final** frame list (post lucky-imaging, so it counts exactly what the passes
+  will iterate), logs a warning, and carries it as `StackResult.n_unreadable` + a new `NUNREAD` FITS card beside
+  `NOFFERED`/`NALIGNFL`. It's a strict subset of `n_align_failed` — `_align_for_stack` already returns `None` for a
+  frame with nothing to read — and is **clamped to the real gap** (`len(frames) − n_used`) so a share that comes
+  back before the worker reads the frame can't leave "couldn't be read" exceeding the subs that actually dropped
+  out. **(b) Surfacing:** `webapp/routers/stack.py` parses `NUNREAD` into the run-info `frame_accounting`;
+  `_stack_target`'s summary carries `n_unreadable`. The **History** card's `frameAccountingNote` now splits the gap
+  into its two causes — *"358 of 500 subs combined · 142 couldn't be read"* — and, crucially, gives the **right**
+  guidance for each: a missing-file loss points at the storage ("the Stage-1 cache was cleared while the originals
+  live on a drive or share that's offline — reconnect it, scan again, then re-stack"), where the old wording sent
+  that user to the Frames table to hunt for mixed targets and re-solve perfectly good subs. A new `missingSubsNote`
+  puts the same sentence in a yellow alert on the Jobs **Process target** result, which is where the walk-away user
+  actually lands. **Self-hiding and upgrade-safe:** everything additive (new dataclass field defaulting to 0, new
+  header card, new optional response key, new UI line); an older master carries no `NUNREAD`, reads as 0, and the
+  History note is byte-for-byte its old text; no config/DB/on-disk/API-shape change and no default flipped.
+  Tests: `tests/test_stack_pipeline.py` (+3 — a frame whose only copy is deleted is counted and stamped, the happy
+  case still stamps `NUNREAD=0` so "nothing missing" is distinguishable from "older master", and the clamp holds
+  when the preflight over-reports), `tests/test_readable_frame_path.py` (+2 on the helper — a dangling cache with a
+  live source is *not* unreadable; empty list), `tests/webapp/test_stack_render.py` (+2 — the card rides through
+  the info endpoint / an older master omits the key), `History.test.tsx` (+4 — missing files named as such with
+  storage guidance, a mixed loss reporting both causes and guiding the dominant one, a stray missing sub staying
+  quiet, the clamp) and `Jobs.test.tsx` (+5 on `missingSubsNote` + the Process-target line).
+  *(Original spec kept for provenance.)* *(Autonomy /
   trust — the honest-accounting arc; PRIORITY 2; size S–M.)* **What prompted it:** while tracing the ⭐ stale-cache
   bug above I confirmed the unattended chains (watcher auto-stack / Process target) select frames purely on DB
   truthiness (`f.cached_path or f.source_path`) and only discover a missing file per-frame *inside* the worker,
@@ -14494,6 +14520,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.230.2** — Honest accounting for subs that simply **weren't on disk**: a `count_unreadable_frames` preflight in
+  `run_stack` (+ `StackResult.n_unreadable` and a `NUNREAD` header card) splits the offered-vs-combined gap into
+  "couldn't be read" and "couldn't be aligned", so a cleared Stage-1 cache over an offline share reads as the storage
+  problem it is — with the reconnect-and-rescan fix — instead of sending the user to re-solve good frames. Surfaced on
+  the History card and as a Jobs Process-target alert. Tests: +7 Python, +9 frontend.
 - **v0.219.0** — NEW beginner feature "Your first image": a self-checking four-step map of the journey (point at your
   subs → locate → check & grade → stack) on the Dashboard, each step ticking itself off from `/api/system` +
   `/api/stats` (no new endpoint), leading with the single next thing to do and turning into a one-line well-done at

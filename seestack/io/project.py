@@ -210,6 +210,26 @@ def readable_frame_path(frame: "FrameRow") -> str | None:
     return None
 
 
+def count_unreadable_frames(frames: list[FrameRow]) -> int:
+    """How many of ``frames`` have *neither* on-disk path present right now.
+
+    A frame the database still lists can become unreadable between scans — the
+    Stage-1 cache was cleared while the originals live on a NAS share that is
+    offline, a removable drive was unmounted, the files were moved. Every
+    consumer already falls back through :func:`readable_frame_path` and then
+    quietly skips a frame with nothing to read, so the loss is invisible: the
+    stack just comes out thin. Counting them up front lets the caller say so in
+    plain language instead.
+
+    Purely a ``stat()`` per frame (the same check
+    :func:`readable_frame_path` already makes per frame in the worker), so it is
+    cheap enough to run as a preflight even on a several-thousand-sub target. It
+    is a *snapshot*: a share that comes back mid-run makes the count pessimistic,
+    which is the safe direction for an advisory.
+    """
+    return sum(1 for f in frames if readable_frame_path(f) is None)
+
+
 _INSERT_COLS = [
     "source_path", "cached_path", "aligned_cache_path",
     "source_size_bytes", "source_mtime",
