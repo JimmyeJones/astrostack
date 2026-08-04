@@ -6194,14 +6194,22 @@ to **Shipped**.)_
   away: *"Checked 42 subs and located 40 of them — 2 couldn't be placed in the sky."* (with the existing
   plate-solve nudge when the located count is low). Extend the `qcSolveSummary`-shaped helper next to
   `bootstrapRescueNote` in `routes/Jobs.tsx`, unit-tested like its siblings. Purely additive, no backend change.
-- **NEW IDEA (Builder 2026-07-30, follow-on to the sample first-run tour v0.222.0) — extend the tour to the two
+- ~~**NEW IDEA (Builder 2026-07-30, follow-on to the sample first-run tour v0.222.0) — extend the tour to the two
   screens it deliberately skipped: History/Gallery ("this is where your finished pictures live") and the export
-  step.** *(Friendliness / onboarding — PRIORITY 3; size S.)* v0.222.0 coaches Target → Stack → Editor, which is the
-  spine of the journey, but a newcomer who finishes the demo edit still lands on History/Gallery with no idea that
-  it's the permanent home of every run, or that "Export" is what turns the recipe into a shareable picture. The
-  component is already built and step-keyed (`SampleTourStep` + `SAMPLE_TOUR_COPY`), each step dismisses
-  independently, and the sample-detection is one prop — so this is copy plus two mount points. Keep the same bar:
-  one calm sentence, sample-only, dismissible.
+  step.**~~ — **SHIPPED v0.229.3** (Builder 2026-08-04, branch `claude/relaxed-turing-oieiow`). The tour gained a
+  fourth step, `history`, mounted on the per-target **Stack history** page under its header — so the newcomer who
+  finishes the demo edit is finally told where the picture went: *"Every picture you make is kept here"*, that each
+  run is saved with the settings it used and nothing is ever overwritten, that **Export** in the editor is what
+  turns an edit into a shareable file, and that the **Gallery** in the sidebar collects the finished ones from every
+  target. Copy plus one mount point, exactly as filed — the component was already step-keyed, so it inherits the
+  same bar: sample-only, independently dismissible, `localStorage`-remembered, and gone the moment the sample is
+  removed. **Why one mount point and not two:** the Gallery is a *whole-library* screen with no `safe` to compare
+  against, so a note there could not honestly claim "you're looking at the sample" (an established owner who loads
+  the demo would be told their own gallery was it). Naming the Gallery from the History step covers the same gap
+  without that lie. Frontend-only and additive; no config/DB/on-disk/API-shape/default change. Tests:
+  `SampleTourNote.test.tsx` (+1 explicit, and the two loop tests — render-on-sample and the jargon-free copy bar —
+  now cover all four steps) and `History.test.tsx` (+2 — the note appears when the page's target *is* the sample,
+  and stays silent on a real target while the sample exists).
 - ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the skipped-master note v0.216.0) — the skip reason only
   reaches a user who opens the History *Info* panel; put it where the walk-away user actually lands.**~~ — **SHIPPED
   v0.217.1** (Builder 2026-07-30, branch `claude/relaxed-turing-ai56dq`). Both surfaces named in the idea now show it,
