@@ -613,15 +613,21 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   });
 
   // Pin this run as the target's showcase "cover" — the picture the Library /
-  // Dashboard tile shows — or clear it back to the newest stack.
+  // Dashboard tile shows, and the one that represents this target on the "My
+  // best pictures" wall — or clear it back to the newest stack.
   const cover = useMutation({
     mutationFn: (pin: boolean) => api.setTargetCover(safe, pin ? run.id : null),
     onSuccess: (_data, pin) => {
       qc.invalidateQueries({ queryKey: ["runs", safe] });
       qc.invalidateQueries({ queryKey: ["targets"] });
       qc.invalidateQueries({ queryKey: ["target", safe] });
+      // The wall picks its representative from the cover, so both the full wall
+      // and the Dashboard strip are stale the moment this lands.
+      qc.invalidateQueries({ queryKey: ["galleryBest"] });
       notifications.show({
-        message: pin ? "Set as the target's cover" : "Cover cleared — showing the newest stack",
+        message: pin
+          ? "Set as the target's cover — pinned to My best pictures too"
+          : "Cover cleared — showing the newest stack",
         color: "teal",
       });
     },
@@ -917,7 +923,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           {run.has_preview && (
             <Tooltip label={run.is_cover
               ? "This is the target's cover — show the newest stack instead"
-              : "Make this picture the target's cover (shown on the Library tile)"}>
+              : "Make this picture the target's cover — the one shown on the Library tile, and the one that represents this target on My best pictures (pinned, so the ranking can't hide it)"}
+              multiline w={300}>
               <Button
                 size="xs" variant={run.is_cover ? "filled" : "light"} color="yellow"
                 leftSection={run.is_cover ? <IconStarFilled size={14} /> : <IconStar size={14} />}

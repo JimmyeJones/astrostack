@@ -120,3 +120,65 @@ def test_weights_are_a_sane_blend():
     assert set(PORTFOLIO_WEIGHTS) == {"exposure", "frames", "noise", "coverage"}
     assert PORTFOLIO_WEIGHTS["exposure"] == max(PORTFOLIO_WEIGHTS.values())
     assert all(w > 0 for w in PORTFOLIO_WEIGHTS.values())
+
+
+# ---------------------------------------------------------------------------
+# Pinned favourites — a stated preference, not a quality claim.
+# ---------------------------------------------------------------------------
+
+def _deep(key="deep", *, pinned=False):
+    return PortfolioEntry(key=key, n_frames_used=500, total_exposure_s=15000,
+                          noise_sigma=0.01, coverage_max=500, pinned=pinned)
+
+
+def _shallow(key="shallow", *, pinned=False):
+    return PortfolioEntry(key=key, n_frames_used=20, total_exposure_s=600,
+                          noise_sigma=0.09, coverage_max=20, pinned=pinned)
+
+
+def test_a_pinned_favourite_leads_even_a_much_deeper_stack():
+    """The user's own pick outranks the automatic winner — that's the whole point
+    of pinning it."""
+    assert _keys([_deep(), _shallow(pinned=True)]) == ["shallow", "deep"]
+
+
+def test_pinning_does_not_change_the_score():
+    """A pin floats an entry; it never inflates the transparent quality number the
+    wall shows, so the caption stays honest."""
+    plain = rank_portfolio([_deep(), _shallow()])
+    pinned = rank_portfolio([_deep(), _shallow(pinned=True)])
+    assert {r.key: r.score for r in plain} == {r.key: r.score for r in pinned}
+
+
+def test_pinned_flag_is_echoed_on_the_ranked_entry():
+    ranked = {r.key: r.pinned for r in rank_portfolio([_deep(), _shallow(pinned=True)])}
+    assert ranked == {"shallow": True, "deep": False}
+
+
+def test_a_pinned_favourite_survives_the_limit_cut():
+    """A favourite must not be dropped by a wall of deeper stacks — the failure
+    the pin exists to prevent."""
+    entries = [_deep(f"deep{i}") for i in range(5)] + [_shallow(pinned=True)]
+    assert _keys(entries, limit=1) == ["shallow"]
+
+
+def test_several_pins_stay_ranked_among_themselves():
+    """Pinning is a band, not a shuffle: pinned entries still come best-first."""
+    entries = [_shallow("weak", pinned=True), _deep("strong", pinned=True),
+               _deep("unpinned")]
+    assert _keys(entries) == ["strong", "weak", "unpinned"]
+
+
+def test_entries_built_without_the_new_field_are_unpinned_and_rank_by_score():
+    """The default path is untouched: an entry constructed the old way (no
+    ``pinned`` argument) is unpinned, so ordering is purely the quality blend."""
+    old_style = [
+        PortfolioEntry(key="shallow", n_frames_used=20, total_exposure_s=600,
+                       noise_sigma=0.09, coverage_max=20),
+        PortfolioEntry(key="deep", n_frames_used=500, total_exposure_s=15000,
+                       noise_sigma=0.01, coverage_max=500),
+    ]
+    assert all(not e.pinned for e in old_style)
+    ranked = rank_portfolio(old_style)
+    assert [r.key for r in ranked] == ["deep", "shallow"]
+    assert all(not r.pinned for r in ranked)

@@ -54,4 +54,28 @@ describe("BestPicturesView", () => {
     await waitFor(() =>
       expect(screen.getByText(/your best pictures will gather here/i)).toBeInTheDocument());
   });
+
+  it("marks a pinned favourite so its place on the wall is explained", async () => {
+    vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
+      items: [
+        pic({ safe: "m42", target_name: "M42", run_id: 2, score: 0.4, pinned: true }),
+        pic({ safe: "m31", target_name: "M31", run_id: 1 }),
+      ],
+    });
+    renderWall();
+    await waitFor(() => expect(screen.getByText("M42")).toBeInTheDocument());
+    // Exactly one badge, on the pinned card only.
+    expect(screen.getAllByText("Pinned")).toHaveLength(1);
+    // And the wall tells everyone how to pin one of their own.
+    expect(screen.getByText(/Set as cover/)).toBeInTheDocument();
+  });
+
+  it("shows no pin badge on an ordinary auto-ranked wall", async () => {
+    vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
+      items: [pic({ safe: "m31", run_id: 1 }), pic({ safe: "m42", target_name: "M42", run_id: 2 })],
+    });
+    renderWall();
+    await waitFor(() => expect(screen.getByText("M42")).toBeInTheDocument());
+    expect(screen.queryByText("Pinned")).not.toBeInTheDocument();
+  });
 });

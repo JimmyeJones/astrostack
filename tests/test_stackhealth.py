@@ -354,3 +354,122 @@ def test_soft_stars_note_ignores_rejected_subs_for_the_sub_median():
     frames += [_fwhm_frame(8.0, accept=False) for _ in range(3)]
     notes = stack_health(_run(stack_fwhm_px=3.5), frames)
     assert "soft_stars" in _kinds(notes)
+
+
+# ---------------------------------------------------------------------------
+# κ-σ couldn't bite at this frame count (a lone trail survived, silently).
+# ---------------------------------------------------------------------------
+
+def _note(notes, kind):
+    return next((n for n in notes if n.kind == kind), None)
+
+
+def test_rejection_blind_note_fires_on_a_small_sigma_clip_stack():
+    """At n=5 a lone outlier's z-score against stats that include it is 4/√5 ≈
+    1.79 — below κ=3 — so the two-pass clip provably removed nothing, and the
+    satellite trail is in the picture with nothing else saying so."""
+    notes = stack_health(
+        _run(n_frames_used=5, rejection_mode="sigma-clip", rejection_fraction=0.0,
+             options_json='{"sigma_clip": true, "sigma_kappa": 3.0}'),
+        [_frame() for _ in range(5)],
+    )
+    note = _note(notes, "rejection_blind")
+    assert note is not None
+    assert "5 subs" in note.message
+    assert "11 frames" in note.message      # the honest κ-effective threshold
+    assert "Auto outlier removal" in note.message
+    assert note.action == "restack"
+    assert note.severity == "info"          # a nudge, never alarming
+
+
+def test_rejection_blind_note_silent_once_kappa_sigma_can_actually_clip():
+    notes = stack_health(
+        _run(n_frames_used=40, rejection_mode="sigma-clip", rejection_fraction=0.002,
+             options_json='{"sigma_clip": true, "sigma_kappa": 3.0}'),
+        [_frame() for _ in range(40)],
+    )
+    assert "rejection_blind" not in _kinds(notes)
+
+
+def test_rejection_blind_note_silent_at_exactly_the_threshold():
+    """11 frames is the first count where κ=3 can reject, so it must not fire."""
+    notes = stack_health(
+        _run(n_frames_used=11, rejection_mode="sigma-clip",
+             options_json='{"sigma_kappa": 3.0}'),
+        [_frame() for _ in range(11)],
+    )
+    assert "rejection_blind" not in _kinds(notes)
+
+
+def test_rejection_blind_note_silent_when_min_max_was_used():
+    """An auto-picked small stack uses the order-statistic drop, which *does*
+    work at n=5 — there is nothing to warn about."""
+    notes = stack_health(
+        _run(n_frames_used=5, rejection_mode="min-max-reject",
+             options_json='{"auto_reject": true, "min_max_reject": true}'),
+        [_frame() for _ in range(5)],
+    )
+    assert "rejection_blind" not in _kinds(notes)
+
+
+def test_rejection_blind_note_silent_on_a_drizzle_run():
+    notes = stack_health(
+        _run(n_frames_used=5, rejection_mode="drizzle-reject",
+             options_json='{"drizzle": true, "drizzle_reject": true}'),
+        [_frame() for _ in range(5)],
+    )
+    assert "rejection_blind" not in _kinds(notes)
+
+
+def test_rejection_blind_note_silent_when_no_rejection_pass_was_recorded():
+    """An old run (pre-schema-10) records no mode; we can't claim what its
+    rejection did or didn't do, so say nothing rather than guess."""
+    notes = stack_health(
+        _run(n_frames_used=5, rejection_mode=None),
+        [_frame() for _ in range(5)],
+    )
+    assert "rejection_blind" not in _kinds(notes)
+
+
+def test_rejection_blind_note_uses_the_run_s_own_kappa():
+    """A looser κ crosses over sooner, so the threshold — and whether the note
+    fires at all — must come from the run's stored κ, not a hard-coded 11."""
+    loose = dict(n_frames_used=8, rejection_mode="sigma-clip")
+    # κ=2 crosses over at 7 frames, so 8 subs is genuinely fine.
+    quiet = stack_health(_run(**loose, options_json='{"sigma_kappa": 2.0}'),
+                         [_frame() for _ in range(8)])
+    assert "rejection_blind" not in _kinds(quiet)
+    # The same 8-sub stack at the default κ=3 (threshold 11) still can't clip.
+    loud = stack_health(_run(**loose, options_json='{"sigma_kappa": 3.0}'),
+                        [_frame() for _ in range(8)])
+    assert _note(loud, "rejection_blind") is not None
+
+
+def test_rejection_blind_note_falls_back_to_the_default_kappa():
+    """A garbled/absent options_json shouldn't silence a real warning — every
+    shipped default has used κ=3, so assume it."""
+    for bad in ("", "not json", "[]", '{"sigma_kappa": null}',
+                '{"sigma_kappa": 0}'):
+        notes = stack_health(
+            _run(n_frames_used=4, rejection_mode="sigma-clip", options_json=bad),
+            [_frame() for _ in range(4)],
+        )
+        assert _note(notes, "rejection_blind") is not None, bad
+
+
+def test_rejection_blind_note_singularises_a_one_sub_stack():
+    note = _note(stack_health(
+        _run(n_frames_used=1, rejection_mode="sigma-clip"), [_frame()]),
+        "rejection_blind")
+    assert note is not None and "1 sub," in note.message
+
+
+def test_rejection_blind_note_ranks_below_the_calibration_next_step():
+    """Calibration is still the bigger lever; the card shows two notes, so this
+    must not displace it."""
+    notes = stack_health(
+        _run(n_frames_used=5, rejection_mode="sigma-clip", calstat=None),
+        [_frame() for _ in range(5)],
+    )
+    kinds = _kinds(notes)
+    assert kinds.index("calibration") < kinds.index("rejection_blind")

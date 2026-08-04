@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bestPictureClauses, bestPictureReason } from "./bestPictures";
+import { bestPictureClauses, bestPictureReason, isPinnedPick, pinnedNote } from "./bestPictures";
 import type { BestPicture } from "../api/client";
 
 function pic(over: Partial<BestPicture>): BestPicture {
@@ -44,5 +44,26 @@ describe("bestPictureReason", () => {
   it("returns empty when the run carries neither metric", () => {
     expect(bestPictureClauses(pic({ total_exposure_s: null, n_frames_used: 0 }))).toEqual([]);
     expect(bestPictureReason(pic({ total_exposure_s: null, n_frames_used: 0 }))).toBe("");
+  });
+});
+
+describe("isPinnedPick / pinnedNote", () => {
+  it("treats an unpinned picture as auto-ranked and says nothing about it", () => {
+    expect(isPinnedPick(pic({}))).toBe(false);
+    expect(pinnedNote(pic({}))).toBeNull();
+  });
+
+  it("tolerates an older backend that never sends the field", () => {
+    const { pinned: _drop, ...older } = pic({ pinned: false });
+    expect(isPinnedPick(older as BestPicture)).toBe(false);
+    expect(pinnedNote(older as BestPicture)).toBeNull();
+  });
+
+  it("explains a pinned favourite by name, and how to undo it", () => {
+    const note = pinnedNote(pic({ pinned: true, target_name: "M42" }));
+    expect(isPinnedPick(pic({ pinned: true }))).toBe(true);
+    expect(note).toContain("M42");
+    expect(note).toContain("cover");
+    expect(note).toMatch(/History/);
   });
 });
