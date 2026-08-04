@@ -44,6 +44,36 @@ export interface PlannedTarget {
   difficulty?: DifficultyHint | null;
 }
 
+/** One of the user's own targets, judged as "worth pointing at right now". */
+export interface TonightPick {
+  safe: string;
+  name: string;
+  ra_deg: number;
+  dec_deg: number;
+  // Altitude at the moment the ranking was made; null when no location is known
+  // (the depth-only fallback) rather than a fabricated number.
+  altitude_now_deg: number | null;
+  minutes_usable_left: number;
+  hours_captured: number;
+  frames_accepted: number;
+  // Fractional noise cut one more hour of subs would buy (0..1).
+  noise_gain: number;
+  score: number;
+  // One plain-language sentence, shown verbatim.
+  reason: string;
+}
+
+/** `GET /api/plan/best-tonight` — "best use of your scope right now". */
+export interface BestTonight {
+  location_source: "settings" | "fits" | "none";
+  observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
+  generated_utc: string;
+  dark_now: boolean;
+  dark_minutes_left: number;
+  min_altitude_deg: number;
+  picks: TonightPick[];
+}
+
 export interface NightPlan {
   location_source: "settings" | "fits" | "none";
   observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
@@ -1707,6 +1737,13 @@ export const api = {
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return req<NightPlan>(`/api/plan/tonight${suffix}`);
   },
+  // "Best use of your scope right now": the user's *own* targets ranked by how
+  // well-placed they are at this moment × how much another hour would help.
+  // Read-only; returns an empty `picks` when there's nothing worth suggesting.
+  getBestTonight: (limit?: number) =>
+    req<BestTonight>(
+      `/api/plan/best-tonight${limit != null ? `?limit=${limit}` : ""}`,
+    ),
 
   // gallery
   getGallery: () => req<{ items: GalleryItem[] }>("/api/gallery"),

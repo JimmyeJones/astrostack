@@ -14,6 +14,7 @@ import { astapReadiness, astapReadinessSignature } from "../components/dashboard
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
 import { ContinueTonightCard } from "../components/ContinueTonightCard";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
+import { PointHereTonightCard } from "../components/dashboard/PointHereTonightCard";
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import { ImagingCalendarCard } from "../components/ImagingCalendarCard";
 import { LastNightCard } from "../components/LastNightCard";
@@ -176,6 +177,11 @@ export function Dashboard() {
       <FirstImageCard />
 
       <SampleImageCard />
+
+      {/* "Point here right now": of the targets the user has already started,
+          which one is best-placed at this moment *and* would gain most from
+          another hour. Self-hides when there's nothing to recommend. */}
+      <PointHereTonightCard />
 
       <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }}>
         <StatCard icon={<IconStars size={22} color="var(--mantine-color-violet-4)" />}
