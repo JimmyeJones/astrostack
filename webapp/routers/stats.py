@@ -87,6 +87,12 @@ class LastNightResponse(BaseModel):
     kept_exposure_s: float
     start_utc: str | None = None
     end_utc: str | None = None
+    # The *observing night* this session belongs to, as ISO ``YYYY-MM-DD`` — the
+    # noon-to-noon local bucket the imaging calendar, the per-target Nights card
+    # and the "Last session" recap all use. Additive and optional: ``None`` when
+    # the start time can't be parsed, and an older frontend keeps labelling from
+    # the raw UTC stamps.
+    night_date: str | None = None
     targets: list[TargetNightOut] = []
     reject_buckets: dict[str, int] = {}
 
@@ -366,7 +372,16 @@ def get_last_night(request: Request) -> LastNightResponse | None:
     """The library's most recent capture night, combined across every target —
     the Dashboard "what did last night give me?" card. Returns ``null`` when no
     frame anywhere carries a capture timestamp. Read-only aggregation over the
-    frames table, cached on the app between scans."""
+    frames table, cached on the app between scans.
+
+    The card also gets the **observing-night** date the session belongs to,
+    bucketed noon-to-noon in the observer's local time exactly as the imaging
+    calendar and the per-target Nights / Last-session cards do. It is resolved
+    *outside* the recap cache so a longitude change in Settings takes effect on
+    the next request rather than waiting out the TTL."""
+    from seestack.activity_calendar import night_date_of
+
+    settings = deps.get_settings(request)
     lib = deps.open_library(request)
     try:
         targets = lib.list_targets()
@@ -380,11 +395,13 @@ def get_last_night(request: Request) -> LastNightResponse | None:
         else:
             recap = _collect_last_night(lib, targets)
             request.app.state.last_night_cache = {"sig": sig, "at": now, "data": recap}
+        lon = resolve_site_lon(request, lib, settings.site_lon)
     finally:
         lib.close()
 
     if recap is None:
         return None
+    night = night_date_of(recap.start_utc, lon) if recap.start_utc else None
     return LastNightResponse(
         n_targets=recap.n_targets,
         n_frames=recap.n_frames,
@@ -394,6 +411,7 @@ def get_last_night(request: Request) -> LastNightResponse | None:
         kept_exposure_s=recap.kept_exposure_s,
         start_utc=recap.start_utc,
         end_utc=recap.end_utc,
+        night_date=night.isoformat() if night is not None else None,
         targets=[
             TargetNightOut(
                 name=c.name, safe=c.safe,

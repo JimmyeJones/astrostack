@@ -347,17 +347,27 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
     in plain buckets), and the target's total integration now. Returns ``null``
     when there's nothing datable to report (no frame carries a capture time).
     Read-only aggregation over the frames table; renders the "Last session" card.
+
+    The recap also carries the **observing-night** date its session belongs to
+    (same noon-to-noon local bucketing as the Nights card and the Dashboard's
+    imaging calendar), so a beginner reading "27 subs kept" can tell whether that
+    was last night or three weeks ago — and so the two cards can never name the
+    same session's night differently.
     """
+    from seestack.activity_calendar import night_date_of
     from seestack.session_recap import session_recap
 
+    settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
         recap = session_recap(proj)
+        lon = resolve_site_lon(request, lib, settings.site_lon)
     finally:
         proj.close()
         lib.close()
     if recap is None:
         return None
+    night = night_date_of(recap.start_utc, lon) if recap.start_utc else None
     drift = recap.quality_drift
     return SessionRecapOut(
         n_frames=recap.n_frames,
@@ -368,6 +378,7 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
         total_kept_exposure_s=recap.total_kept_exposure_s,
         start_utc=recap.start_utc,
         end_utc=recap.end_utc,
+        night_date=night.isoformat() if night is not None else None,
         reject_buckets=recap.reject_buckets,
         quality_drift=(
             SessionQualityDriftOut(

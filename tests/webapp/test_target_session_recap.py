@@ -76,3 +76,80 @@ def test_session_recap_null_for_an_empty_target(client):
 def test_session_recap_unknown_target_404(client):
     r = client.get("/api/targets/does_not_exist/session-recap")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Which night was it? — the recap names its observing night, like the Nights card
+# ---------------------------------------------------------------------------
+
+def _stamp(data_root, safe: str, per_frame: dict[int, dict]) -> None:
+    """Stamp fields onto specific frames (by 0-based ordinal) of a target."""
+    from seestack.io.library import Library
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            ids = [f.id for f in proj.iter_frames()]
+            for ordinal, fields in per_frame.items():
+                proj.update_frame(ids[ordinal], **fields)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_session_recap_carries_the_observing_night_date(
+    client, solved_library, data_root
+):
+    """The recap card says *which night* it is recapping — bucketed noon-to-noon
+    in the observer's local time, so a session that starts at 21:00 local in the
+    Americas (already tomorrow in UTC) is named as the evening it really was."""
+    client.put("/api/settings", json={"site_lon": -122.3})   # Seattle, UTC−8
+    _stamp(data_root, "M_42", {
+        0: {"timestamp_utc": "2026-07-09T05:00:00+00:00"},   # 8 Jul 21:00 local
+        1: {"timestamp_utc": "2026-07-09T05:30:00+00:00"},
+        2: {"timestamp_utc": "2026-07-09T06:00:00+00:00"},
+    })
+    recap = client.get("/api/targets/M_42/session-recap").json()
+    # The raw UTC stamp still says the 9th — that's the honest capture time...
+    assert recap["start_utc"].startswith("2026-07-09")
+    # ...but the night the owner was out is the evening of the 8th.
+    assert recap["night_date"] == "2026-07-08"
+
+
+def test_session_recap_night_agrees_with_the_nights_card(
+    client, solved_library, data_root
+):
+    """The two cards sit side by side on the Target page, so they must never name
+    the same session's night differently — both resolve the site longitude
+    through the one shared helper."""
+    client.put("/api/settings", json={"site_lon": -122.3})
+    _stamp(data_root, "M_42", {
+        0: {"timestamp_utc": "2026-07-09T05:00:00+00:00"},
+        1: {"timestamp_utc": "2026-07-09T05:30:00+00:00"},
+        2: {"timestamp_utc": "2026-07-09T06:00:00+00:00"},
+    })
+    recap = client.get("/api/targets/M_42/session-recap").json()
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert recap["night_date"] == nights[0]["night_date"]
+
+
+def test_session_recap_night_follows_the_configured_longitude(
+    client, solved_library, data_root, monkeypatch
+):
+    """Proof the setting is honoured rather than the label being UTC by another
+    name: the same UTC stamp lands on a different night for a far-east observer."""
+    import webapp.site_location as site_location
+
+    monkeypatch.setattr(site_location, "detect_site_from_library", lambda lib, **k: None)
+    _stamp(data_root, "M_42", {
+        0: {"timestamp_utc": "2026-07-09T05:00:00+00:00"},
+        1: {"timestamp_utc": "2026-07-09T05:30:00+00:00"},
+        2: {"timestamp_utc": "2026-07-09T06:00:00+00:00"},
+    })
+    # No location anywhere → UTC noon-to-noon: 05:00 UTC belongs to the 8th.
+    assert client.get("/api/targets/M_42/session-recap").json()["night_date"] == "2026-07-08"
+    # +150° (~UTC+10) → 15:00 local, i.e. the afternoon *of* the 9th's night.
+    client.put("/api/settings", json={"site_lon": 150.0})
+    assert client.get("/api/targets/M_42/session-recap").json()["night_date"] == "2026-07-09"

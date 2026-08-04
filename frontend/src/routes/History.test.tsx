@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, frameAccountingNote, roughlyAlignedNote, calibrationSummaryText } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
+import { SAMPLE_TOUR_COPY } from "../components/SampleTourNote";
 import type { StackRun } from "../api/client";
 
 function mkRun(overrides: Partial<StackRun> = {}): StackRun {
@@ -1075,5 +1076,26 @@ describe("HistoryView adjustable render", () => {
     fireEvent.click(screen.getByRole("button", { name: "Adjust" }));
     await waitFor(() => expect(screen.getByText("0.50")).toBeInTheDocument());
     expect(screen.queryByLabelText("Rotate so North is up")).not.toBeInTheDocument();
+  });
+
+  it("ends the sample tour here — where a beginner's finished pictures live", async () => {
+    localStorage.clear();
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "getSampleStatus").mockResolvedValue({
+      loaded: true, safe: "M_42", n_frames: 6,
+    } as client.SampleStatus);
+    renderHistory();
+    expect(await screen.findByText(SAMPLE_TOUR_COPY.history.title)).toBeInTheDocument();
+  });
+
+  it("says nothing about the tour on a real target, even with the sample loaded", async () => {
+    localStorage.clear();
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    const sample = vi.spyOn(client.api, "getSampleStatus").mockResolvedValue({
+      loaded: true, safe: "Sample__Orion_Nebula__M42_", n_frames: 6,
+    } as client.SampleStatus);
+    renderHistory();
+    await waitFor(() => expect(sample).toHaveBeenCalled());
+    expect(screen.queryByText(SAMPLE_TOUR_COPY.history.title)).not.toBeInTheDocument();
   });
 });

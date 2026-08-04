@@ -7,6 +7,7 @@ import {
   describeQualityDrift,
   describeRejects,
   describeSession,
+  sessionRecapTitle,
 } from "./SessionRecapCard";
 import type { SessionRecap } from "../api/client";
 import * as client from "../api/client";
@@ -16,6 +17,7 @@ function recap(over: Partial<SessionRecap> = {}): SessionRecap {
     n_frames: 10, n_kept: 8, n_set_aside: 2,
     session_exposure_s: 100, kept_exposure_s: 80, total_kept_exposure_s: 130,
     start_utc: "2026-07-08T22:00:00", end_utc: "2026-07-08T22:05:00",
+    night_date: "2026-07-08",
     reject_buckets: { trailed: 2 },
     quality_drift: null,
     ...over,
@@ -80,11 +82,33 @@ describe("describeQualityDrift", () => {
   });
 });
 
+describe("sessionRecapTitle", () => {
+  it("names the observing night the server bucketed the session into", () => {
+    // 22:00 UTC on the 8th is still the night *of* the 8th for an observer east
+    // of UTC, and the server's night_date says so — the title must follow it
+    // rather than re-deriving a date from the raw UTC stamp.
+    expect(sessionRecapTitle({ night_date: "2026-07-08", start_utc: "2026-07-09T03:00:00+00:00" }))
+      .toBe("Last session — 8 Jul 2026");
+  });
+
+  it("falls back to the UTC start when an older backend sends no night_date", () => {
+    expect(sessionRecapTitle({ start_utc: "2026-07-08T22:00:00+00:00" }))
+      .toBe("Last session — 8 Jul 2026");
+    expect(sessionRecapTitle({ night_date: null, start_utc: "2026-07-08T22:00:00+00:00" }))
+      .toBe("Last session — 8 Jul 2026");
+  });
+
+  it("stays a bare heading when the night can't be dated at all", () => {
+    expect(sessionRecapTitle({ night_date: null, start_utc: null })).toBe("Last session");
+  });
+});
+
 describe("SessionRecapCard", () => {
   it("renders the recap card with a kept-percentage badge", async () => {
     vi.spyOn(client.api, "sessionRecap").mockResolvedValue(recap());
     renderCard();
-    await waitFor(() => expect(screen.getByText("Last session")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Last session — 8 Jul 2026")).toBeInTheDocument());
     expect(screen.getByText("80% kept")).toBeInTheDocument();
     expect(screen.getByText(/2 set aside \(2 trailed\)/)).toBeInTheDocument();
   });
@@ -105,7 +129,8 @@ describe("SessionRecapCard", () => {
   it("omits the nudge when quality is steady", async () => {
     vi.spyOn(client.api, "sessionRecap").mockResolvedValue(recap());
     renderCard();
-    await waitFor(() => expect(screen.getByText("Last session")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Last session — 8 Jul 2026")).toBeInTheDocument());
     expect(screen.queryByText(/worth checking focus/)).toBeNull();
   });
 
