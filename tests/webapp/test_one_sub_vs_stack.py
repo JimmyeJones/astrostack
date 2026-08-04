@@ -341,3 +341,78 @@ def test_noise_ratio_404_for_unknown_run(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r = client.get(f"/api/targets/{safe}/stack-runs/999999/one-sub-vs-stack/noise")
     assert r.status_code == 404
+
+
+def test_noise_ratio_reads_only_the_central_crop_of_the_master(
+    client, solved_library, monkeypatch,
+):
+    """The measurement must not materialise the whole master to look at a patch.
+
+    This endpoint is fetched **eagerly** — once per Target-page load and on every
+    finished "Process target" card — and it used to do
+    ``asarray(fits.getdata(path), dtype=float32)``. FITS is big-endian, so that
+    cast is a full copy and byte-swap of the entire canvas: ~1.8 GB of transient
+    allocation for a 150 MP mosaic master on the RAM-capped NAS, to measure a
+    1024² patch. Pinning it by *breaking* the whole-file read: the endpoint must
+    still produce its number with ``fits.getdata`` unavailable, which it can only
+    do by slicing the memory-mapped HDU first (fails before this fix).
+    """
+    from astropy.io import fits
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "master_big.fits"
+    finally:
+        lib.close()
+    _write_linear_master(master, sigma=2.0)
+    run_id = _register_run_with_master(solved_library, safe, master)
+
+    def _no_full_read(*a, **kw):  # pragma: no cover - only runs if the fix regresses
+        raise AssertionError("read the whole master to measure a central crop")
+
+    monkeypatch.setattr(fits, "getdata", _no_full_read)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise")
+    assert r.status_code == 200
+    assert r.json()["ratio"] is not None
+
+
+def test_noise_ratio_is_unchanged_by_the_windowed_read(client, solved_library):
+    """Same pixels, same number — the crop is the *same* patch it always was.
+
+    A master larger than the 1024 px crop on one axis exercises the offset maths
+    on the windowed read; the ratio must match the one computed from the naive
+    whole-array path over the identical central crop.
+    """
+    import numpy as np
+    from astropy.io import fits
+
+    from seestack.io.fits_loader import bilinear_debayer, load_seestar_raw
+    from seestack.qc.noise_ratio import noise_ratio
+    from webapp.routers.stack import _NOISE_CROP_PX, _crop_origin, _measure_noise_ratio
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        tdir = Path(lib.target_dir(lib.find_target(safe)))
+        frames = list(Library.open_or_create(solved_library / "library").open_target(safe)
+                      .iter_frames(accepted_only=True))
+    finally:
+        lib.close()
+    master = tdir / "master_wide.fits"
+    _write_linear_master(master, sigma=2.0, shape=(1100, 1400), seed=7)
+    sub_path = frames[0].source_path
+
+    # Naive path: whole array in, then crop — what the code used to do.
+    arr = np.asarray(fits.getdata(master), dtype=np.float32)
+    y0, x0 = _crop_origin(arr.shape[1], arr.shape[2])
+    want_stack = np.transpose(
+        arr[:, y0:y0 + _NOISE_CROP_PX, x0:x0 + _NOISE_CROP_PX], (1, 2, 0))
+    raw, info = load_seestar_raw(sub_path, debayer=False, out_dtype=np.float32)
+    sub = bilinear_debayer(raw, pattern=(info.bayer_pattern or "RGGB"))
+    sy, sx = _crop_origin(*sub.shape[:2])
+    want = noise_ratio(sub[sy:sy + _NOISE_CROP_PX, sx:sx + _NOISE_CROP_PX], want_stack)
+
+    got = _measure_noise_ratio(str(master), str(sub_path), info.bayer_pattern or "RGGB")
+    assert got == want
