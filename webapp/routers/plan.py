@@ -32,6 +32,7 @@ from seestack.nightplan import (
     moon_interference,
     next_observing_windows,
     plan_tonight,
+    rank_targets_now,
     suggest_targets,
 )
 from webapp import deps
@@ -216,6 +217,51 @@ def get_tonight(
         observer, ref, min_altitude_deg=float(min_altitude),
         library_targets=_library_targets(request),
         horizon=HorizonProfile.from_pairs(settings.horizon_profile),
+    )
+    payload = asdict(plan)
+    payload["location_source"] = location_source
+    return payload
+
+
+@router.get("/best-tonight")
+def get_best_tonight(
+    request: Request,
+    when: str | None = Query(default=None, description="ISO-8601 UTC time; defaults to now"),
+    min_alt: int | None = Query(default=None, ge=0, le=80),
+    limit: int = Query(default=3, ge=1, le=10),
+) -> dict[str, Any]:
+    """"Best use of your scope right now" — the user's *own* targets, ranked.
+
+    The companion to ``/tonight`` (which ranks everything, including the bundled
+    catalog, over the whole night): this answers the narrower question a beginner
+    asks when the sky unexpectedly clears — *of the targets I've already started,
+    which one is up right now and would most benefit from another hour?* Scored by
+    :func:`seestack.nightplan.rank_targets_now` as "how well-placed it is at this
+    moment" × "how much another hour would actually cut its noise".
+
+    Read-only: it never starts a capture or changes a setting. Degrades instead of
+    erroring — with no location resolved it still ranks on "would more subs help?"
+    alone and says so — and returns an empty ``picks`` list whenever there's
+    nothing worth suggesting, so the UI can simply hide itself.
+    """
+    settings = deps.get_settings(request)
+    if when:
+        try:
+            ref = datetime.fromisoformat(when)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
+        if ref.tzinfo is None:
+            ref = ref.replace(tzinfo=timezone.utc)
+    else:
+        ref = datetime.now(timezone.utc)
+
+    min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
+    observer, location_source = _resolve_observer(request, settings)
+    plan = rank_targets_now(
+        observer, ref, _library_targets(request),
+        min_altitude_deg=float(min_altitude),
+        horizon=HorizonProfile.from_pairs(settings.horizon_profile),
+        limit=limit,
     )
     payload = asdict(plan)
     payload["location_source"] = location_source

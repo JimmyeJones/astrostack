@@ -12730,8 +12730,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   bulk "set this night aside" reject + re-stack wiring (its own commit — the only non-read-only slice).
   _(M–L, split as above; PRIORITY 2–3, beginner feature — keeps the pipeline stocked; builds directly on
   shipped `session_recap` infra so it's low-risk.)_
-- **NEW BEGINNER FEATURE (Scout 2026-07-21 #4) — "Up now, and worth more time": tell the beginner which of
-  *their own* targets is best-placed right this minute and would most benefit from more subs.** A beginner on a
+- ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #4) — "Up now, and worth more time": tell the beginner which of
+  *their own* targets is best-placed right this minute and would most benefit from more subs.**~~ —
+  **SHIPPED v0.231.0** (Builder 2026-08-04, branch `claude/relaxed-turing-c5ylqp`), all three of the Scout's slices.
+  **(a) Engine** (`seestack/nightplan.py`): `rank_targets_now(observer, when_utc, library_targets, …) -> TonightNow`
+  scores each of the user's **own** targets as `sky × depth`. The *sky* half reuses the planner's tested machinery —
+  `_find_dark_window` truncated to the darkness still **ahead**, then `_observability_batch` over that remainder
+  (so the horizon mask and the min-altitude floor behave exactly as on `/tonight`), plus one new `_altitudes_at`
+  for the "how high is it *this minute*" read. The *depth* half is a new pure `noise_gain_from_more_time(t)` =
+  `1 − √(t/(t+1))`, i.e. the fraction one more hour would cut the noise by — the same honest √N language the app
+  already uses for "stacking cut your noise ~N×", saturating at a 15% gain so it doesn't endlessly favour the
+  emptiest target. **Multiplying** the two is the whole point: a beautifully-placed but already-deep target is not
+  tonight's best use of the scope, and neither is a barely-started one that's below the trees. Each pick carries one
+  plain-language sentence — *"M 31 is 62° up right now and stays shootable for another 3 h 20 m. So far you've got
+  45 min on it — another hour would cut its noise about 35%."* **(b) Backend:** read-only
+  `GET /api/plan/best-tonight` (`when`/`min_alt`/`limit`), resolving the site through the same `_resolve_observer`
+  every planning surface uses. **(c) Frontend:** a self-hiding `PointHereTonightCard` on the Dashboard — headline,
+  altitude badge, the sentence, and one **Open <target>** button (only the leader gets buttons; the point is one
+  clear recommendation, not another ranked list), refreshed every 10 min.
+  **Degrades instead of erroring, exactly as the Scout asked:** no location set → ranked on "would more subs help?"
+  alone with `altitude_now_deg` **null** and copy that says the placement isn't known (never implying it's up);
+  no darkness tonight (high-latitude summer) → the same; asked before dusk → plans the whole coming window and
+  says "climbs to N°" rather than faking a now-reading; under 20 minutes of dark left, or nothing above the floor →
+  empty `picks` and the card renders nothing. An older backend 404s the endpoint and the card stays silent.
+  Upgrade-safe: additive read-only endpoint + new component, no config/DB/on-disk/API-shape change, no default
+  flipped, and it never starts a capture. Tests: `tests/test_nightplan.py` (+12 — the √N maths and its monotonicity,
+  shallow-beats-deep at matched placement, a below-the-horizon target dropped, the reason's plain-language contract,
+  the no-location fallback, empty library, an unsolved target ignored, the near-dawn silence, the pre-dusk wording,
+  limit/ordering, the two different "can't place it" explanations, and never saying "you've got 0 min on it"),
+  `tests/webapp/test_plan.py` (+4) and `PointHereTonightCard.test.tsx` (+11).
+  *(Original spec kept for provenance.)* A beginner on a
   suddenly-clear night faces a blank decision: *what do I point at to get the best return tonight?* The app
   already knows everything needed to answer it — each target's plate-solved RA/Dec, its integration time so far
   and sub count (Library / `project.sqlite`), and the visibility maths the **Tonight planner** already runs
@@ -14520,6 +14548,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.231.0** — NEW beginner feature "Point here right now": a Dashboard card that picks, from the user's *own*
+  targets, the one that's best-placed at this moment **and** would gain most from another hour — scored as
+  (altitude now + dark sky left) × the √N noise cut one more hour would buy — with a one-sentence plain-language
+  why and a single Open button. New read-only `GET /api/plan/best-tonight`; self-hides when there's nothing to
+  recommend, and degrades to the "worth more time" half (never claiming a target is up) when no site is known.
+  Tests: +16 Python, +11 frontend.
 - **v0.230.2** — Honest accounting for subs that simply **weren't on disk**: a `count_unreadable_frames` preflight in
   `run_stack` (+ `StackResult.n_unreadable` and a `NUNREAD` header card) splits the offered-vs-combined gap into
   "couldn't be read" and "couldn't be aligned", so a cleared Stage-1 cache over an offline share reads as the storage
