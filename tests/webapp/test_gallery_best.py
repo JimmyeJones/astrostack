@@ -168,3 +168,113 @@ def test_best_skips_a_broken_project_without_500ing(client, solved_library):
     safes = {it["safe"] for it in r.json()["items"]}
     assert good1 in safes and good2 in safes  # healthy targets still appear
     assert bad not in safes  # the broken one is skipped
+
+
+# ---------------------------------------------------------------------------
+# The user's own pick: a target's pinned cover represents it on the wall.
+# ---------------------------------------------------------------------------
+
+def _set_cover(data_root, safe: str, run_id: int | None) -> None:
+    """Pin (or clear) a target's cover run, exactly as ``PUT /targets/{safe}/cover``
+    does — the same library-level field the Library/Dashboard tile already reads."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        lib.set_target_cover(safe, run_id)
+    finally:
+        lib.close()
+
+
+def test_a_pinned_cover_represents_its_target_instead_of_the_newest_stack(
+        client, solved_library):
+    """"Set as cover" says "this picture represents this target". The wall used to
+    ignore that and show the newest stack regardless."""
+    targets = client.get("/api/targets").json()
+    a, b = targets[0]["safe_name"], targets[1]["safe_name"]
+    favourite = _register_preview_run(
+        solved_library, a, basename="favourite", n_frames=100, exposure_s=3000,
+        noise_sigma=0.05, coverage_max=100, timestamp="2026-05-01T00:00:00Z")
+    _register_preview_run(
+        solved_library, a, basename="newer", n_frames=120, exposure_s=3600,
+        noise_sigma=0.04, coverage_max=120, timestamp="2026-05-09T00:00:00Z")
+    _register_preview_run(solved_library, b, basename="other", n_frames=80,
+                          exposure_s=2400, noise_sigma=0.06, coverage_max=80)
+    _set_cover(solved_library, a, favourite)
+
+    items = client.get("/api/gallery/best").json()["items"]
+    a_items = [it for it in items if it["safe"] == a]
+    assert len(a_items) == 1  # still exactly one representative per target
+    assert a_items[0]["run_id"] == favourite
+    assert a_items[0]["output_basename"] == "favourite"
+    assert a_items[0]["pinned"] is True
+    # An unpinned target is unaffected and says so.
+    assert [it for it in items if it["safe"] == b][0]["pinned"] is False
+
+
+def test_a_pinned_favourite_is_never_cut_by_the_ranking(client, solved_library):
+    """The pin's whole job: a modest favourite outranks a much deeper stack and
+    survives the wall's limit."""
+    targets = client.get("/api/targets").json()
+    a, b = targets[0]["safe_name"], targets[1]["safe_name"]
+    modest = _register_preview_run(solved_library, a, basename="modest",
+                                   n_frames=20, exposure_s=600, noise_sigma=0.09,
+                                   coverage_max=20)
+    _register_preview_run(solved_library, b, basename="deep", n_frames=500,
+                          exposure_s=15000, noise_sigma=0.01, coverage_max=500)
+    # Unpinned, the deep stack wins the single slot.
+    assert client.get("/api/gallery/best?limit=1").json()["items"][0]["safe"] == b
+
+    _set_cover(solved_library, a, modest)
+    top = client.get("/api/gallery/best?limit=1").json()["items"]
+    assert len(top) == 1
+    assert top[0]["safe"] == a and top[0]["run_id"] == modest
+    # Floating it never inflates the transparent score the caption shows.
+    assert top[0]["score"] < 1.0
+
+
+def test_a_cover_whose_preview_is_gone_falls_back_to_the_newest_picture(
+        client, solved_library):
+    """A pruned/edited-away cover must degrade to the newest stack, not drop the
+    target off the wall or serve a broken image."""
+    from pathlib import Path
+
+    targets = client.get("/api/targets").json()
+    a, b = targets[0]["safe_name"], targets[1]["safe_name"]
+    gone = _register_preview_run(
+        solved_library, a, basename="gone", n_frames=100, exposure_s=3000,
+        noise_sigma=0.05, coverage_max=100, timestamp="2026-05-01T00:00:00Z")
+    _register_preview_run(
+        solved_library, a, basename="newer", n_frames=120, exposure_s=3600,
+        noise_sigma=0.04, coverage_max=120, timestamp="2026-05-09T00:00:00Z")
+    _register_preview_run(solved_library, b, basename="other", n_frames=80,
+                          exposure_s=2400, noise_sigma=0.06, coverage_max=80)
+    _set_cover(solved_library, a, gone)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        Path(lib.target_dir(lib.find_target(a)) / "gone.png").unlink()
+    finally:
+        lib.close()
+
+    a_items = [it for it in client.get("/api/gallery/best").json()["items"]
+               if it["safe"] == a]
+    assert len(a_items) == 1
+    assert a_items[0]["output_basename"] == "newer"
+    assert a_items[0]["pinned"] is False
+
+
+def test_a_cover_pointing_at_a_deleted_run_falls_back_to_the_newest_picture(
+        client, solved_library):
+    """A cover id that no longer matches any run (the run was deleted) degrades
+    the same way rather than leaving the target unrepresented."""
+    targets = client.get("/api/targets").json()
+    a, b = targets[0]["safe_name"], targets[1]["safe_name"]
+    _register_preview_run(solved_library, a, basename="only", n_frames=120,
+                          exposure_s=3600, noise_sigma=0.04, coverage_max=120)
+    _register_preview_run(solved_library, b, basename="other", n_frames=80,
+                          exposure_s=2400, noise_sigma=0.06, coverage_max=80)
+    _set_cover(solved_library, a, 987654)  # no such run
+
+    a_items = [it for it in client.get("/api/gallery/best").json()["items"]
+               if it["safe"] == a]
+    assert len(a_items) == 1
+    assert a_items[0]["output_basename"] == "only"
+    assert a_items[0]["pinned"] is False

@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   Badge, Card, Center, Group, Image, Loader, SimpleGrid, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconSparkles } from "@tabler/icons-react";
+import { IconSparkles, IconStarFilled } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type BestPicture } from "../api/client";
@@ -10,7 +10,7 @@ import { sharePictureText } from "../share";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
-import { bestPictureReason } from "../components/bestPictures";
+import { bestPictureReason, pinnedNote } from "../components/bestPictures";
 
 function BestCard({ pic, rank, onView }: {
   pic: BestPicture;
@@ -18,6 +18,7 @@ function BestCard({ pic, rank, onView }: {
   onView: (pic: BestPicture) => void;
 }) {
   const reason = bestPictureReason(pic);
+  const pinned = pinnedNote(pic);
   return (
     <Card withBorder padding="md" radius="md">
       <Card.Section style={{ position: "relative" }}>
@@ -30,6 +31,19 @@ function BestCard({ pic, rank, onView }: {
           >
             #{rank}
           </Badge>
+        ) : null}
+        {/* The user's own pick. The score line can't explain why a favourite is
+            sitting above a deeper stack, so say it on the picture itself. */}
+        {pinned ? (
+          <Tooltip label={pinned} multiline w={280}>
+            <Badge
+              variant="filled" color="yellow" size="sm"
+              leftSection={<IconStarFilled size={11} />}
+              styles={{ root: { position: "absolute", top: 8, right: 8, zIndex: 2 } }}
+            >
+              Pinned
+            </Badge>
+          </Tooltip>
         ) : null}
         <Tooltip label="Click to view fullscreen" openDelay={400}>
           <Image
@@ -89,7 +103,9 @@ export function BestPicturesView() {
         <>
           <Text c="dimmed" size="sm">
             Your finest finished stacks, ranked automatically — deepest, cleanest
-            first. Click any picture to view, download, or share it.
+            first. Click any picture to view, download, or share it. Got a
+            favourite the ranking missed? Open that target's History and press
+            <b> Set as cover</b> — it'll show that picture here, always.
           </Text>
           <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>
             {items.map((pic, i) => (

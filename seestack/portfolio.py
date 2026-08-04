@@ -52,15 +52,23 @@ class PortfolioEntry:
     noise_sigma: float | None = None
     # Peak stacking coverage (how many frames overlapped at the deepest pixel).
     coverage_max: int = 0
+    # The user explicitly pinned this picture (it is its target's chosen "cover").
+    # A pin is a *preference*, not a quality signal, so it never touches the
+    # score — it only floats the entry ahead of the ranked tail so the automatic
+    # ranking can't hide the one picture the user said was their favourite.
+    pinned: bool = False
 
 
 @dataclass(frozen=True)
 class RankedEntry:
     """A scored portfolio entry. ``score`` is in [0, 1] (1 = best on every metric
-    it carries, relative to the candidate set); ``key`` echoes the input's key."""
+    it carries, relative to the candidate set); ``key`` echoes the input's key.
+    ``pinned`` echoes the input's pin so the caller can mark *why* an entry is
+    where it is (the score alone wouldn't explain a floated favourite)."""
 
     key: str
     score: float
+    pinned: bool = False
 
 
 def _valid_positive(value: float | int | None) -> bool:
@@ -114,10 +122,17 @@ def rank_portfolio(
     metric (e.g. an old run with no recorded σ) are scored over the metrics they
     do have, never penalised for the gap.
 
-    Ordering is deterministic: by score descending, breaking ties by integration
-    time, then frame count, then key — so the same collection always ranks the
-    same way. ``limit`` (if given and ≥ 0) truncates to the top N; ``limit=0``
-    returns an empty list.
+    Entries the user **pinned** (``PortfolioEntry.pinned`` — their target's chosen
+    cover picture) sort ahead of every unpinned entry, ranked among themselves by
+    the same blend. A pin is a stated preference, not a quality claim, so it never
+    changes an entry's ``score``; it only guarantees the favourite survives
+    ``limit`` instead of being cut by a wall of deeper stacks. With nothing pinned
+    (the default) the ordering is byte-for-byte what it always was.
+
+    Ordering is otherwise deterministic: by score descending, breaking ties by
+    integration time, then frame count, then key — so the same collection always
+    ranks the same way. ``limit`` (if given and ≥ 0) truncates to the top N;
+    ``limit=0`` returns an empty list.
     """
     if limit is not None and limit <= 0:
         return []
@@ -136,16 +151,18 @@ def rank_portfolio(
     }
 
     scored = [(e, _score(e, **maxes)) for e in entries]
-    # One fully-deterministic pass: highest score first, breaking ties by
-    # integration time, then frame count (both descending — negated), then key
-    # ascending. Every tie-break is total, so the same collection never reshuffles.
+    # One fully-deterministic pass: pinned favourites first (``not pinned`` sorts
+    # False < True), then highest score, breaking ties by integration time, then
+    # frame count (both descending — negated), then key ascending. Every tie-break
+    # is total, so the same collection never reshuffles.
     scored.sort(
         key=lambda es: (
+            not es[0].pinned,
             -es[1],
             -(es[0].total_exposure_s if _valid_positive(es[0].total_exposure_s) else -1.0),
             -es[0].n_frames_used,
             es[0].key,
         )
     )
-    ranked = [RankedEntry(key=e.key, score=s) for e, s in scored]
+    ranked = [RankedEntry(key=e.key, score=s, pinned=e.pinned) for e, s in scored]
     return ranked if limit is None else ranked[:limit]

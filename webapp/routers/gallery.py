@@ -162,10 +162,43 @@ class BestPicture(BaseModel):
     preview_url: str
     # Quality-blend score in [0, 1], relative to this Library's own collection.
     score: float
+    # True when this picture is the one the user pinned as its target's cover
+    # ("Set as cover" in History). A pinned picture represents its target here
+    # instead of the newest stack, and is floated above the ranked tail so the
+    # automatic ranking can never hide the favourite. False for an ordinary
+    # auto-picked entry (and ignored outright by an older frontend).
+    pinned: bool = False
 
 
 class BestPicturesResponse(BaseModel):
     items: list[BestPicture]
+
+
+def _run_has_preview(run: Any) -> bool:
+    """Whether a run has a rendered preview still on disk (a *finished picture*)."""
+    return bool(run.preview_path and Path(run.preview_path).exists())
+
+
+def _representative_run(runs: list[Any], cover_run_id: int | None) -> tuple[Any, bool]:
+    """The one picture that represents a target on the wall, plus whether the
+    user **pinned** it.
+
+    Precedence mirrors ``targets._cover_preview_path`` (what the Library /
+    Dashboard tile already does): the target's pinned cover run wins when it's set
+    *and* still has a preview on disk; otherwise the newest run with a preview,
+    exactly as before. So a cover that was pruned, or whose preview file has gone,
+    degrades silently to the newest picture rather than dropping the target off
+    the wall entirely.
+
+    ``runs`` is the project's runs newest-first (``Project.iter_stack_runs``).
+    Returns ``(None, False)`` when the target has no finished picture at all.
+    Split out so the precedence is unit-testable on plain records."""
+    if cover_run_id is not None:
+        cover = next(
+            (r for r in runs if r.id == cover_run_id and _run_has_preview(r)), None)
+        if cover is not None:
+            return cover, True
+    return next((r for r in runs if _run_has_preview(r)), None), False
 
 
 @router.get("/api/gallery/best", response_model=BestPicturesResponse)
@@ -173,18 +206,26 @@ def get_best_pictures(
     request: Request,
     limit: int = Query(BEST_PICTURES_MAX, ge=1, le=BEST_PICTURES_MAX),
 ) -> BestPicturesResponse:
-    """Auto-curated cross-target portfolio: the newest *finished* stack of every
-    target, ranked best-first by the transparent quality blend
+    """Auto-curated cross-target portfolio: one *finished* stack per target,
+    ranked best-first by the transparent quality blend
     (:func:`seestack.portfolio.rank_portfolio`). Read-only aggregation over the
     Library — no schema/state change. Self-hides (empty list) until at least
     :data:`BEST_PICTURES_MIN` targets have a finished picture, so a brand-new
-    install shows nothing rather than a wall of one."""
+    install shows nothing rather than a wall of one.
+
+    A target's representative is the run the user **pinned as its cover** ("Set as
+    cover" in History) when there is one and its preview still exists, otherwise
+    its newest run with a preview — the same precedence the Library/Dashboard tile
+    already uses, so the picture someone chose to represent a target represents it
+    on this wall too instead of being silently replaced by the newest stack. A
+    pinned entry is also floated above the ranked tail, so the automatic ranking
+    can never drop the one picture they said was their favourite."""
     from seestack.io.project import Project
     from seestack.portfolio import PortfolioEntry, rank_portfolio
 
-    # One representative per target: its newest run that actually has a rendered
-    # preview on disk (a "finished picture"), keyed so the ranker's result maps
-    # straight back to the full record.
+    # One representative per target (pinned cover, else newest with a rendered
+    # preview on disk), keyed so the ranker's result maps straight back to the
+    # full record.
     by_key: dict[str, BestPicture] = {}
     entries: list[PortfolioEntry] = []
 
@@ -203,40 +244,38 @@ def get_best_pictures(
                     proj.close()
                 continue
             try:
-                # runs are newest-first; take the newest with a preview on disk.
-                newest = next(
-                    (r for r in runs
-                     if r.preview_path and Path(r.preview_path).exists()),
-                    None,
-                )
-                if newest is None:
+                # runs are newest-first; the user's pinned cover wins over them.
+                pick, pinned = _representative_run(runs, t.cover_stack_run_id)
+                if pick is None:
                     continue
-                key = f"{t.safe_name}:{newest.id}"
+                key = f"{t.safe_name}:{pick.id}"
                 by_key[key] = BestPicture(
                     safe=t.safe_name,
                     target_name=t.name,
-                    run_id=newest.id,
-                    output_basename=newest.output_basename,
-                    timestamp_utc=newest.timestamp_utc,
-                    n_frames_used=newest.n_frames_used,
-                    canvas_w=newest.canvas_w,
-                    canvas_h=newest.canvas_h,
-                    total_exposure_s=newest.total_exposure_s,
-                    noise_sigma=newest.noise_sigma,
+                    run_id=pick.id,
+                    output_basename=pick.output_basename,
+                    timestamp_utc=pick.timestamp_utc,
+                    n_frames_used=pick.n_frames_used,
+                    canvas_w=pick.canvas_w,
+                    canvas_h=pick.canvas_h,
+                    total_exposure_s=pick.total_exposure_s,
+                    noise_sigma=pick.noise_sigma,
                     has_preview=True,
-                    has_fits=bool(newest.fits_path and Path(newest.fits_path).exists()),
-                    has_tiff=bool(newest.tiff_path and Path(newest.tiff_path).exists()),
+                    has_fits=bool(pick.fits_path and Path(pick.fits_path).exists()),
+                    has_tiff=bool(pick.tiff_path and Path(pick.tiff_path).exists()),
                     preview_url=(
-                        f"/api/targets/{t.safe_name}/stack-runs/{newest.id}/preview"
+                        f"/api/targets/{t.safe_name}/stack-runs/{pick.id}/preview"
                     ),
                     score=0.0,  # filled in from the ranking below
+                    pinned=pinned,
                 )
                 entries.append(PortfolioEntry(
                     key=key,
-                    n_frames_used=newest.n_frames_used,
-                    total_exposure_s=newest.total_exposure_s,
-                    noise_sigma=newest.noise_sigma,
-                    coverage_max=newest.coverage_max,
+                    n_frames_used=pick.n_frames_used,
+                    total_exposure_s=pick.total_exposure_s,
+                    noise_sigma=pick.noise_sigma,
+                    coverage_max=pick.coverage_max,
+                    pinned=pinned,
                 ))
             finally:
                 if proj is not None:
