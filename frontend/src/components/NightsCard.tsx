@@ -25,6 +25,21 @@ export function formatNightDate(iso: string | null | undefined): string {
   return `${parseInt(m[3], 10)} ${MONTHS_ABBR[monthIdx]} ${m[1]}`;
 }
 
+/**
+ * The label for one night, preferring the server's **observing-night** date over
+ * the raw UTC start.
+ *
+ * A session's first sub is stamped in UTC, and for any observer west of UTC an
+ * evening start is already *tomorrow* there (21:00 in the Americas is 04:00 UTC),
+ * so labelling from `start_utc` named the wrong night — and disagreed with the
+ * Dashboard's imaging calendar, which buckets noon-to-noon in local time. The
+ * backend now sends that same bucketed date as `night_date`; falling back to
+ * `start_utc` keeps an older backend rendering as it always did.
+ */
+export function nightDateLabel(n: Pick<NightSummary, "night_date" | "start_utc">): string {
+  return formatNightDate(n.night_date ?? n.start_utc);
+}
+
 /** Colour + label for a night's one-word verdict badge, or null (no badge) when
  *  there's too little measured to judge ("" verdict). Pure/testable. */
 export function verdictBadge(verdict: string): { color: string; label: string } | null {
@@ -58,7 +73,7 @@ function NightRow({
     <Table.Tr>
       <Table.Td>
         <Group gap={6} wrap="nowrap">
-          <Text size="sm">{formatNightDate(n.start_utc)}</Text>
+          <Text size="sm">{nightDateLabel(n)}</Text>
           {n.is_best ? (
             <Badge size="xs" variant="light" color="violet">sharpest</Badge>
           ) : null}
@@ -136,7 +151,7 @@ export function NightsCard({ safe }: { safe: string }) {
     mutationFn: (n: NightSummary) =>
       api.setAsideNight(safe, n.start_utc as string, n.end_utc as string),
     onSuccess: (r, n) => {
-      const label = formatNightDate(n.start_utc);
+      const label = nightDateLabel(n);
       const ids = r.changed_ids ?? [];
       notifications.show({
         message: `Set aside ${r.changed} sub${r.changed === 1 ? "" : "s"} from ${label}. Re-stack (Process target) to see the cleaner picture.`,

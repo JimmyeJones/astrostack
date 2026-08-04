@@ -2,7 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NightsCard, formatNightDate, verdictBadge } from "./NightsCard";
+import { NightsCard, formatNightDate, nightDateLabel, verdictBadge } from "./NightsCard";
 import type { NightSummary } from "../api/client";
 import * as client from "../api/client";
 
@@ -47,6 +47,25 @@ describe("formatNightDate", () => {
   });
 });
 
+describe("nightDateLabel", () => {
+  it("labels the night by the observing-night date, not the UTC start", () => {
+    // 8 Jul 21:00 in Seattle is already 9 Jul in UTC — labelling from `start_utc`
+    // named the wrong night for every observer west of UTC.
+    expect(nightDateLabel({
+      night_date: "2026-07-08", start_utc: "2026-07-09T05:00:00+00:00",
+    })).toBe("8 Jul 2026");
+  });
+  it("falls back to the UTC start when an older backend sends no night_date", () => {
+    expect(nightDateLabel({ start_utc: "2026-07-09T05:00:00+00:00" }))
+      .toBe("9 Jul 2026");
+    expect(nightDateLabel({ night_date: null, start_utc: "2026-07-09T05:00:00+00:00" }))
+      .toBe("9 Jul 2026");
+  });
+  it("returns a dash when neither is usable", () => {
+    expect(nightDateLabel({ night_date: null, start_utc: null })).toBe("—");
+  });
+});
+
 describe("verdictBadge", () => {
   it("maps each verdict to a colour + label", () => {
     expect(verdictBadge("sharp")).toEqual({ color: "teal", label: "sharp" });
@@ -72,6 +91,22 @@ describe("NightsCard", () => {
     expect(screen.getByText("soft")).toBeInTheDocument();
     expect(screen.getByText("sharp")).toBeInTheDocument();
     expect(screen.getByText("sharpest")).toBeInTheDocument();
+  });
+
+  it("shows the observing night, not the UTC date of the first sub", async () => {
+    // Both sessions start after local sunset west of UTC, so their UTC stamps
+    // roll into the next day; the card must still name the evening the owner
+    // was out (matching the Dashboard's imaging calendar).
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([
+      night({ night_date: "2026-07-08", start_utc: "2026-07-09T05:00:00+00:00" }),
+      night({ night_date: "2026-07-01", start_utc: "2026-07-02T04:30:00+00:00" }),
+    ]);
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Nights")).toBeInTheDocument());
+    expect(screen.getByText("8 Jul 2026")).toBeInTheDocument();
+    expect(screen.getByText("1 Jul 2026")).toBeInTheDocument();
+    expect(screen.queryByText("9 Jul 2026")).not.toBeInTheDocument();
+    expect(screen.queryByText("2 Jul 2026")).not.toBeInTheDocument();
   });
 
   it("renders nothing for a target with only one night (Last session covers it)", async () => {
