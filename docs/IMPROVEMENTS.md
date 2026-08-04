@@ -12220,6 +12220,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   unchanged). **Testable:** a stamped run returns the header value without touching the sub; an unstamped (old) run
   still measures live; the stamped value equals the live measurement for the same data. _(Spotted while wiring the
   at-completion badge — the measurement is correct but now runs more often than it needs to.)_
+  **▶ The expensive half is FIXED — v0.229.6** (Builder 2026-08-04, branch `claude/relaxed-turing-15aq36`), and it
+  turned out to be worse than "re-measures too often": `_measure_noise_ratio` (`webapp/routers/stack.py`) did
+  `np.asarray(fits.getdata(path), dtype=np.float32)`, which materialises the **entire** master before taking its
+  1024² central crop. FITS is big-endian, so that dtype cast is a full copy *and* byte-swap of the whole canvas —
+  **measured 46 MB of resident memory for a 48 MB master, i.e. ~1.8 GB of transient allocation for a 150 MP mosaic**,
+  on an endpoint the Target page fetches on **every load** and every finished Jobs card fetches again, on the
+  RAM-capped NAS. It now opens the master `memmap=True`, slices the crop off the memory-mapped HDU and converts only
+  that (**measured 46 MB → 0 MB peak** on the same file), picking the first HDU carrying pixels so a file whose
+  primary is empty still reads exactly as `getdata` used to choose. The crop origin moved into a shared
+  `_crop_origin` helper so the windowed master read and the sub's in-memory crop cannot drift apart and start
+  measuring different parts of the field. Same pixels, same number — pinned by a parity test against the old
+  whole-array path on a master wider than the crop. Tests (`tests/webapp/test_one_sub_vs_stack.py`, +2, both
+  fail-before/pass-after): `test_noise_ratio_reads_only_the_central_crop_of_the_master` (monkeypatches
+  `fits.getdata` to raise, so the endpoint can only answer by slicing the memmap) and
+  `test_noise_ratio_is_unchanged_by_the_windowed_read`. No API/schema/config/default change.
+  **Still open:** the caching half above — but note it is now **markedly more marginal** than when it was filed. A
+  view costs a ~12 MB crop read plus one sub, not a whole canvas, so persisting the ratio would buy a small
+  constant rather than rescuing a page load. Worth doing only if a future run is already adding a `stack_runs`
+  column for something else.
 - ~~**NEW (Scout 2026-07-21, follow-on to the v0.148.1 sub-preview fix) — put a number on the "one frame vs your
   stack" reveal: "stacking cut your noise ~N×" — original spec kept for provenance.**~~ *(Beginner feature /
   trust; PRIORITY 3; size S–M.)* Now that
@@ -13666,6 +13685,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY 3; Builder-filed 2026-07-16.)*
 
 ### Performance (only with a measurement)
+- **NEW IDEA (Builder 2026-08-04, spotted while fixing the noise-ratio full-master read v0.229.6) — decimate a
+  giant master in row blocks instead of materialising the whole canvas first.** *(Performance / RAM robustness on
+  the live NAS — PRIORITY 2/4; size M; **needs a measurement before and after**, per this section's rule.)*
+  `seestack/render/thumbnail.py::load_stack_rgb` does `np.asarray(fits.getdata(path), dtype=np.float32)` and *then*
+  NaN-aware area-averages down to `max_width`. Unlike the noise-ratio case just fixed, the full read here is not
+  obviously wasteful — a box average genuinely has to see every pixel — but the *allocation* is: FITS is
+  big-endian, so the dtype cast copies and byte-swaps the entire cube, and the `(C,H,W)→(H,W,C)` transpose then
+  feeds another full-size buffer into the resize. On a 150 MP mosaic master that is several GB of transient
+  allocation **on a preview render**, on the RAM-capped box whose stack path is memory-bounded on purpose.
+  `stack_coverage_mask` has the same shape (it reduces `isfinite` over the whole cube). **Slice:** open
+  `memmap=True` and accumulate the area average over row blocks sized to the output row stride — the reduction is
+  already a mean of finite samples per output cell, so blocking is exact, not approximate, provided a block
+  boundary falls on an output-row boundary. Assert byte-for-byte equality with the current result on a synthetic
+  master (that parity test is the whole point; the decimation's NaN semantics are load-bearing for mosaics).
+  **Measure first** — this section's rule — with a peak-RSS harness on a large synthetic master, and only take it
+  if the win is real; the existing behaviour is correct, so this is purely about the ceiling.
 - Profile the stack hot path on a large synthetic target; find a safe win that
   doesn't touch memory bounds or correctness. (M)
 
@@ -14236,6 +14271,14 @@ problems. Dogfood it every big-picture run and fix root causes.
     `coverage_max` "frames per pixel"), never the image or the weight maps — and consistent with
     `WeightedSumAccumulator`'s own `valid[..., 0]` count. Same disposition as the accumulator's documented
     channel-0 count.
+    **⚠ Justification is now STALE (Builder 2026-08-04, spotted in a stacking-engine read):** the
+    "consistent with `WeightedSumAccumulator`" half no longer holds — that accumulator was since changed to count a
+    frame when it contributed to **any** channel (`valid.any(axis=2)`, `accumulator.py`), precisely so per-channel
+    κ-σ rejection can't understate coverage. `drizzle_path.py`'s `frame_coverage` still reads channel 0 only, so
+    the drizzle and standard paths now report "frames per pixel" by **different rules**. Still diagnostic-only
+    (never the image or the weight maps), so the severity is unchanged and this is not worth a run on its own —
+    but if anyone is already in `drizzle_path.py`, make it `any`-channel in the same commit and the two paths agree
+    again. Confidence: traced (both call sites read).
   - ~~**(3)** `stack/align.py:407,466,161` — `_apply_subpixel_shift_windowed` shifts a window padded only `pad=2`
     px while the sub-pixel correction is capped at ±5 px, so a frame legitimately needing a 3–5 px shift can
     lose a thin strip of real edge data (coverage reduction at frame edges, **not** wrong pixel values).~~
