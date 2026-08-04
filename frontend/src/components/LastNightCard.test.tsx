@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LastNightCard, describeLibraryNight } from "./LastNightCard";
+import { LastNightCard, describeLibraryNight, lastNightLabel } from "./LastNightCard";
 import type { LibrarySessionRecap, TargetNight } from "../api/client";
 import * as client from "../api/client";
 
@@ -21,6 +21,7 @@ function recap(over: Partial<LibrarySessionRecap> = {}): LibrarySessionRecap {
     n_targets: 2, n_frames: 10, n_kept: 8, n_set_aside: 2,
     session_exposure_s: 7200, kept_exposure_s: 5760,
     start_utc: "2026-07-08T21:00:00+00:00", end_utc: "2026-07-08T23:05:00+00:00",
+    night_date: "2026-07-08",
     targets: [tgt({ n_frames: 6 }), tgt({ name: "M 42", safe: "M_42", n_frames: 4 })],
     reject_buckets: { trailed: 2 },
     ...over,
@@ -40,6 +41,27 @@ function renderCard() {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+describe("lastNightLabel", () => {
+  it("names the observing night the server bucketed the session into", () => {
+    // A session that runs past local midnight ENDS on the following UTC day, so
+    // the old end_utc slice named tomorrow and disagreed with the imaging
+    // calendar. The server's night_date is the one source of truth.
+    expect(lastNightLabel({
+      night_date: "2026-07-08", start_utc: "2026-07-09T05:00:00+00:00",
+    })).toBe("8 Jul 2026");
+  });
+
+  it("falls back to the night's START when an older backend sends no date", () => {
+    expect(lastNightLabel({ start_utc: "2026-07-08T21:00:00+00:00" })).toBe("8 Jul 2026");
+    expect(lastNightLabel({ night_date: null, start_utc: "2026-07-08T21:00:00+00:00" }))
+      .toBe("8 Jul 2026");
+  });
+
+  it("is null — no label at all — when the night can't be dated", () => {
+    expect(lastNightLabel({ night_date: null, start_utc: null })).toBeNull();
+  });
+});
 
 describe("describeLibraryNight", () => {
   it("phrases a multi-target night with the kept-vs-set-aside breakdown", () => {
@@ -72,7 +94,7 @@ describe("LastNightCard", () => {
     vi.spyOn(client.api, "getLastNight").mockResolvedValue(recap());
     renderCard();
     await waitFor(() =>
-      expect(screen.getByText("Last night · 2026-07-08")).toBeInTheDocument());
+      expect(screen.getByText("Last night · 8 Jul 2026")).toBeInTheDocument());
     expect(screen.getByText("80% kept")).toBeInTheDocument();
     // Per-target chips only show for a multi-target night.
     expect(screen.getByText("M 31 · 6 subs")).toBeInTheDocument();

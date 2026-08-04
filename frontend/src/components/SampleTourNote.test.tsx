@@ -28,7 +28,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("SampleTourNote", () => {
   it("coaches each screen while you're on the sample target", async () => {
-    for (const step of ["target", "stack", "editor"] as SampleTourStep[]) {
+    for (const step of ["target", "stack", "editor", "history"] as SampleTourStep[]) {
       localStorage.clear();
       mockSample();
       const { unmount } = renderNote(step, SAMPLE_SAFE);
@@ -80,6 +80,16 @@ describe("SampleTourNote", () => {
     expect(await screen.findByText(SAMPLE_TOUR_COPY.editor.title)).toBeInTheDocument();
   });
 
+  it("ends the tour where the pictures live, naming Export and the Gallery", async () => {
+    mockSample();
+    renderNote("history", SAMPLE_SAFE);
+    // The two things the first three steps never say: what Export is for, and
+    // that the Gallery collects finished pictures from every target.
+    expect(await screen.findByText(SAMPLE_TOUR_COPY.history.title)).toBeInTheDocument();
+    expect(SAMPLE_TOUR_COPY.history.body).toMatch(/Export/);
+    expect(SAMPLE_TOUR_COPY.history.body).toMatch(/Gallery/);
+  });
+
   it("still renders when localStorage is unavailable", async () => {
     const getItem = vi.spyOn(Storage.prototype, "getItem")
       .mockImplementation(() => { throw new Error("denied"); });
@@ -97,7 +107,7 @@ describe("SampleTourNote", () => {
   });
 
   it("keeps every step's copy jargon-free and actionable", () => {
-    for (const step of ["target", "stack", "editor"] as SampleTourStep[]) {
+    for (const step of ["target", "stack", "editor", "history"] as SampleTourStep[]) {
       const { title, body } = SAMPLE_TOUR_COPY[step];
       expect(title.length).toBeGreaterThan(10);
       expect(body.length).toBeGreaterThan(60);

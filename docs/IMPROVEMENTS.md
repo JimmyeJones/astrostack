@@ -6194,14 +6194,22 @@ to **Shipped**.)_
   away: *"Checked 42 subs and located 40 of them — 2 couldn't be placed in the sky."* (with the existing
   plate-solve nudge when the located count is low). Extend the `qcSolveSummary`-shaped helper next to
   `bootstrapRescueNote` in `routes/Jobs.tsx`, unit-tested like its siblings. Purely additive, no backend change.
-- **NEW IDEA (Builder 2026-07-30, follow-on to the sample first-run tour v0.222.0) — extend the tour to the two
+- ~~**NEW IDEA (Builder 2026-07-30, follow-on to the sample first-run tour v0.222.0) — extend the tour to the two
   screens it deliberately skipped: History/Gallery ("this is where your finished pictures live") and the export
-  step.** *(Friendliness / onboarding — PRIORITY 3; size S.)* v0.222.0 coaches Target → Stack → Editor, which is the
-  spine of the journey, but a newcomer who finishes the demo edit still lands on History/Gallery with no idea that
-  it's the permanent home of every run, or that "Export" is what turns the recipe into a shareable picture. The
-  component is already built and step-keyed (`SampleTourStep` + `SAMPLE_TOUR_COPY`), each step dismisses
-  independently, and the sample-detection is one prop — so this is copy plus two mount points. Keep the same bar:
-  one calm sentence, sample-only, dismissible.
+  step.**~~ — **SHIPPED v0.229.3** (Builder 2026-08-04, branch `claude/relaxed-turing-oieiow`). The tour gained a
+  fourth step, `history`, mounted on the per-target **Stack history** page under its header — so the newcomer who
+  finishes the demo edit is finally told where the picture went: *"Every picture you make is kept here"*, that each
+  run is saved with the settings it used and nothing is ever overwritten, that **Export** in the editor is what
+  turns an edit into a shareable file, and that the **Gallery** in the sidebar collects the finished ones from every
+  target. Copy plus one mount point, exactly as filed — the component was already step-keyed, so it inherits the
+  same bar: sample-only, independently dismissible, `localStorage`-remembered, and gone the moment the sample is
+  removed. **Why one mount point and not two:** the Gallery is a *whole-library* screen with no `safe` to compare
+  against, so a note there could not honestly claim "you're looking at the sample" (an established owner who loads
+  the demo would be told their own gallery was it). Naming the Gallery from the History step covers the same gap
+  without that lie. Frontend-only and additive; no config/DB/on-disk/API-shape/default change. Tests:
+  `SampleTourNote.test.tsx` (+1 explicit, and the two loop tests — render-on-sample and the jargon-free copy bar —
+  now cover all four steps) and `History.test.tsx` (+2 — the note appears when the page's target *is* the sample,
+  and stays silent on a real target while the sample exists).
 - ~~**NEW IDEA (Builder 2026-07-30, spotted while shipping the skipped-master note v0.216.0) — the skip reason only
   reaches a user who opens the History *Info* panel; put it where the walk-away user actually lands.**~~ — **SHIPPED
   v0.217.1** (Builder 2026-07-30, branch `claude/relaxed-turing-ai56dq`). Both surfaces named in the idea now show it,
@@ -8357,6 +8365,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+- **NEW IDEA (Builder 2026-08-04, spotted while making the night-labelling family agree) — the two recap cards
+  still *say* "Last night" / "Last session" even when the night they're describing was weeks ago.**
+  *(Friendliness — PRIORITY 3; size S.)* `describeLibraryNight` opens with *"Last night you captured 10 subs…"* and
+  `describeSession` with *"Last session added 27 subs…"*, but neither card is time-boxed: after a fortnight of cloud
+  the Dashboard still greets the owner with "Last night you captured…", which is simply untrue and reads as though
+  the app has lost track. Both cards now carry the server's `night_date` (v0.229.2 / v0.229.4), so the fix is cheap
+  and needs no new data: when the night is not within the last ~36 h, phrase it as the date instead — *"On 8 Jul you
+  captured 10 subs across 2 targets (2.0 h)"* / *"Your last session, on 8 Jul, added 27 subs"* — and keep the warm
+  "Last night" wording only when it's actually last night. Pure string helpers, already unit-tested files; the
+  "now" must be injectable so the tests stay deterministic (the existing helpers are pure and take no clock, so add
+  an optional `now` parameter rather than reading `Date.now()` inside). Self-hiding behaviour is unchanged.
+
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — put a plain-language "what does *not located yet* mean?" explainer next to
   the unsolved-subs badges, so a beginner who sees "200 not located yet" understands it's usually normal and knows
   the one thing to try, instead of reading it as a scary error.**~~ — **SHIPPED v0.199.1** (Builder 2026-07-24, branch
@@ -9860,14 +9880,40 @@ problems. Dogfood it every big-picture run and fix root causes.
   keep unpacking inline below a size threshold or return an empty-but-valid summary plus the job id. Worth doing
   only once someone actually uploads a big archive; a few hundred MB unpacks in seconds today.
 
-- **NEW IDEA (Builder 2026-08-04, spotted while auditing night labelling) — say the *night* on the "Last session"
-  recap card too.** *(Friendliness — PRIORITY 3; size S.)* The Nights card now names each session by its observing
-  night (v0.229.1), but the "Last session" recap card beside it shows no date at all — so a beginner reading
-  "27 subs kept, 1.4 h" can't tell whether that was last night or three weeks ago, and can't line it up with the
-  Nights row below. The backend already returns `start_utc`/`end_utc` on `/session-recap`; give it the same
-  additive `night_date` the nights endpoint now carries (one `night_date_of` call through the shared
-  `resolve_site_lon`) and render "Last session — 8 Jul 2026" with the existing `nightDateLabel`. Self-hiding when
-  undatable. Small, and it closes the last surface in the night-labelling family.
+- ~~**NEW IDEA (Builder 2026-08-04, spotted while auditing night labelling) — say the *night* on the "Last session"
+  recap card too.**~~ — **SHIPPED v0.229.2** (Builder 2026-08-04, branch `claude/relaxed-turing-oieiow`).
+  `GET /api/targets/{safe}/session-recap` now carries the same additive `night_date` the nights endpoint does —
+  one `night_date_of` call resolved through the shared `resolve_site_lon`, so the recap and the Nights rows beneath
+  it can't name the same session's night differently (pinned by a test that asserts they agree). The card's heading
+  reads **"Last session — 8 Jul 2026"** via a new pure `sessionRecapTitle` (`SessionRecapCard.tsx`), which reuses
+  `nightDateLabel` and degrades to the bare "Last session" when the night can't be dated at all rather than showing
+  an em-dash placeholder. Upgrade-safe: additive optional response field (an older frontend ignores it; a newer
+  frontend against an older backend falls back to `start_utc` exactly as the Nights card does), no config/DB/
+  on-disk/default change. Tests: `tests/webapp/test_target_session_recap.py` (+3 — the local-evening night for a
+  Seattle observer whose UTC stamp says the next day, agreement with `/nights`, and the configured longitude
+  actually deciding the night) and `SessionRecapCard.test.tsx` (+3 on `sessionRecapTitle`, plus the card
+  assertions updated to the dated heading). Closes the last surface in the night-labelling family.
+
+- ~~**BUG (Builder 2026-08-04, found by dogfooding the night-labelling family after the recap fix above) — the
+  Dashboard's "Last night" card dated itself from `end_utc`, so for any observer west of UTC it named **tomorrow**
+  — and disagreed with the imaging calendar squares on the same screen.**~~ — **FIXED v0.229.4** (Builder
+  2026-08-04, branch `claude/relaxed-turing-oieiow`). *(Friendliness/trust — PRIORITY 3; wrong-figure, cosmetic
+  severity but on the Dashboard's most-read line.)* `LastNightCard` rendered
+  `` `Last night · ${r.end_utc.slice(0, 10)}` `` — the raw UTC date of the session's **end**, which is wrong twice
+  over: a session that runs past local midnight ends on the *following* UTC day, and even its start is a UTC stamp
+  rather than the noon-to-noon local observing night every other surface buckets on. A Seattle owner shooting
+  21:00 → 02:00 on 8 Jul saw "Last night · 2026-07-09" beside an imaging-calendar square lit on the 8th. **The
+  fix** mirrors v0.229.1/v0.229.2 exactly: `GET /api/last-night` gains an additive optional `night_date` from one
+  `night_date_of` call through the shared `resolve_site_lon`, and the card renders it with the shared
+  `formatNightDate` ("Last night · 8 Jul 2026" instead of a bare ISO string). The date is resolved **outside** the
+  endpoint's 60 s recap cache, so changing the site longitude in Settings re-buckets the label on the next request
+  instead of waiting out the TTL. Falls back to `start_utc` — the night's *beginning*, not its end — for an older
+  backend, and shows no date at all when nothing is datable. Upgrade-safe: additive response field, no
+  config/DB/on-disk/default change. Tests: `tests/webapp/test_last_night.py` (+3 — the local-evening night for a
+  session whose UTC stamps say the next day, agreement with `/api/activity-calendar`, and a longitude change
+  taking effect through the cache) and `LastNightCard.test.tsx` (+3 on the pure `lastNightLabel`, plus the card
+  assertion updated to the friendly date). With this the whole night-labelling family — calendar, Nights, Last
+  session, Last night — agrees.
 
 - ~~**NEW IDEA (Builder 2026-07-30, follow-on to the v0.228.0 folder-structure-preserving upload) — accept a
   `.zip` of a Seestar folder in the browser upload.**~~ — **SHIPPED v0.229.0** (Builder 2026-08-04, branch
@@ -13588,6 +13634,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+- **NEW IDEA (Builder 2026-08-04, cost me most of a run) — the "*(Original spec kept for provenance.)*" copies are
+  indistinguishable from open work, so a Builder scanning this file re-picks already-shipped features.**
+  *(Maintainability / agent-efficiency; size S — a formatting pass, no code.)* When an item ships, the convention is
+  to strike the headline, write the SHIPPED paragraph, and keep the original spec below it. But that original is
+  re-pasted as its own **top-level, un-struck `- **…**` bullet**, so every way an agent triages this file — reading
+  the section, or grepping `^- \*\*` for unclaimed items — surfaces it as a live idea. This run that cost real time:
+  the "Focus & sharpness through the night" card, the "Plan your next night on *this* target" card and the "make
+  smart `auto_reject` the beginner default" item all read as open, and all three had shipped months earlier (v0.152.0,
+  v0.156.0, v0.149.0). Only grepping the *code* caught it — which is exactly the "grep before you build" tax AGENTS.md
+  §1 already warns about, and it is self-inflicted. **Fix:** indent provenance copies one level under their shipped
+  entry (`  - _(original spec)_ …`) or fold them into the same bullet, so they can never match a top-level scan; then
+  the "is this open?" question is answerable by shape alone. Cheap, mechanical, and it makes every future run's triage
+  faster and safer. Best done by the Scout in one curation pass — and worth adding to the conventions block at the top
+  of this file so new entries land indented from the start.
+
 - **NEW (Scout 2026-07-23) — remove or parity-pin the caller-less non-windowed `reproject_rgb` in `align.py` (latent
   CPU/GPU `cval` divergence).** *(Maintainability / latent-correctness; size S; from this run's align audit.)* The
   2026-07-23 adversarial align audit re-confirmed that the production stack uses only the **windowed** reproject path,
