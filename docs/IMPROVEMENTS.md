@@ -6398,7 +6398,9 @@ to **Shipped**.)_
   correctly does UTC maths on the `YYYY-MM-DD` strings the *server* already bucketed); the Tonight page's window
   rows and `tonight.ts::formatClock`/`isoDate` (local wall-clock); `focusTrend.ts::formatClockUtc` (labelled "UTC"
   in the copy, so honest); and `webapp/ics.py`'s `DTSTART`, which is correctly a `Z`-suffixed UTC instant the
-  calendar app renders locally.
+  calendar app renders locally. `seestack/imaging_log.py::_format_date` is UTC too, but it dates *when the stack was
+  produced*, not an observing night, so it is a different quantity and correct as-is — worth a copy tweak only if a
+  reader ever mistakes that column for the capture night.
   **Tests (+8):** `tests/webapp/test_target_nights.py` (+3 — a 05:00-UTC session under `site_lon=-122.3` labels as
   the 8th while `start_utc` still says the 9th; the Nights dates are a subset of the imaging calendar's; and the
   same stamp buckets differently under a far-east longitude vs the UTC fallback, proving the setting is honoured),
@@ -9843,6 +9845,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW IDEA (Builder 2026-08-04, follow-on to the v0.229.0 `.zip` upload) — unpack a big archive as a *job*
+  rather than inside the request.** *(Autonomy/friendliness — PRIORITY 2–3; size M.)* The zip upload streams to
+  disk and then unpacks **synchronously inside the POST**, so a multi-GB night is a long silent wait after the
+  browser's progress bar has already hit 100 % (the card does say "Uploaded — processing on the server…", which is
+  honest, but it's a blind wait) — and on a slow NAS it could out-live a reverse proxy's request timeout, which
+  would read to the user as a failed upload even though every sub landed. **Slice:** keep the streaming-to-`.part`
+  half in the request (that's the part the progress bar measures), then hand the temp archive to the existing
+  single-worker `JobManager` and return `{job_id}` immediately; the job unpacks, reports per-member outcomes as
+  job text, deletes the archive, and kicks the usual scan. The Jobs page then shows real progress instead of a
+  stalled bar. **Care:** the temp `.part` must be cleaned up by the job on *every* path (including cancel), and the
+  response shape must stay backward-compatible — an older frontend reads `saved`/`skipped`/`rejected`, so either
+  keep unpacking inline below a size threshold or return an empty-but-valid summary plus the job id. Worth doing
+  only once someone actually uploads a big archive; a few hundred MB unpacks in seconds today.
+
+- **NEW IDEA (Builder 2026-08-04, spotted while auditing night labelling) — say the *night* on the "Last session"
+  recap card too.** *(Friendliness — PRIORITY 3; size S.)* The Nights card now names each session by its observing
+  night (v0.229.1), but the "Last session" recap card beside it shows no date at all — so a beginner reading
+  "27 subs kept, 1.4 h" can't tell whether that was last night or three weeks ago, and can't line it up with the
+  Nights row below. The backend already returns `start_utc`/`end_utc` on `/session-recap`; give it the same
+  additive `night_date` the nights endpoint now carries (one `night_date_of` call through the shared
+  `resolve_site_lon`) and render "Last session — 8 Jul 2026" with the existing `nightDateLabel`. Self-hiding when
+  undatable. Small, and it closes the last surface in the night-labelling family.
 
 - ~~**NEW IDEA (Builder 2026-07-30, follow-on to the v0.228.0 folder-structure-preserving upload) — accept a
   `.zip` of a Seestar folder in the browser upload.**~~ — **SHIPPED v0.229.0** (Builder 2026-08-04, branch
