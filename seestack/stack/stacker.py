@@ -556,14 +556,20 @@ class StackEstimate:
     memory_fix: MemoryFix | None = None
 
 
-def _auto_kappa_min_frames(kappa: float) -> int:
+def kappa_min_frames(kappa: float) -> int:
     """Smallest frame count at which κ-σ can reject a *lone* outlier.
 
     A single point's z-score against statistics that still include it is at most
     ``(n−1)/√n``; that first reaches ``κ`` at ``n = ⌈((κ+√(κ²+4))/2)²⌉``. Below
     this, κ-σ is mathematically blind to a lone satellite/plane trail, so
     ``auto`` uses the order-statistic min/max drop (which removes an extreme even
-    at n=3) instead. Floored at 3 (min/max needs ≥3 to spare two samples)."""
+    at n=3) instead. Floored at 3 (min/max needs ≥3 to spare two samples).
+
+    Public because it is also the honest answer to "could this stack's rejection
+    have removed anything?" — ``seestack.stackhealth`` reads it to tell a user
+    whose small stack ran κ-σ that the pass could not, mathematically, have
+    clipped a lone satellite trail. One definition, so the note and the
+    method-picker can never disagree."""
     u = (kappa + math.sqrt(kappa * kappa + 4.0)) / 2.0
     return max(3, int(math.ceil(u * u)))
 
@@ -573,13 +579,13 @@ def _resolve_auto_reject(options: StackOptions, n: int) -> StackOptions:
 
     When ``auto_reject`` is on (and not drizzling), pick order-statistic min/max
     for small stacks — the only method that removes a lone outlier below
-    :func:`_auto_kappa_min_frames` — and weight-respecting κ-σ once the stack is
+    :func:`kappa_min_frames` — and weight-respecting κ-σ once the stack is
     large enough for κ-σ to bite. Returns ``options`` unchanged when
     ``auto_reject`` is off or drizzle is on (drizzle has its own two-pass
     rejection), so a run that doesn't opt in is byte-for-byte identical."""
     if not options.auto_reject or options.drizzle:
         return options
-    use_kappa = n >= _auto_kappa_min_frames(options.sigma_kappa)
+    use_kappa = n >= kappa_min_frames(options.sigma_kappa)
     return replace(options, sigma_clip=use_kappa, min_max_reject=not use_kappa)
 
 

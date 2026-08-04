@@ -6903,9 +6903,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
-- **NEW IDEA (Builder 2026-08-04, traced while auditing the stack dispatcher) — a user who saved stack defaults
+- ~~**NEW IDEA (Builder 2026-08-04, traced while auditing the stack dispatcher) — a user who saved stack defaults
   *before* `auto_reject` existed silently gets **no effective outlier rejection** on every small stack, and nothing
-  anywhere says so.** *(Autonomy + image quality + trust — PRIORITY 2/4; size S; advisory only, no default flip.)*
+  anywhere says so.**~~ — **SHIPPED v0.230.1** (Builder 2026-08-04, same run/branch
+  `claude/relaxed-turing-tfkv6i`, filed and built back to back). Built exactly as specced, advisory-only — **no
+  default flipped, no pixel changed**. `seestack/stack/stacker.py::_auto_kappa_min_frames` is now the public
+  `kappa_min_frames` (one definition, so the note and the method-picker can never disagree — the alternative was
+  re-deriving the closed form in a second module and letting it drift), and `seestack/stackhealth.py` gained a
+  `rejection_blind` note: *"With only 5 subs, sigma-clip outlier removal couldn't drop anything — it needs about 11
+  frames before a passing satellite or cosmic-ray hit stands out enough to clip. Re-stack with "Auto outlier
+  removal" switched on and AstroStack will use the min/max method instead, which works from 3 subs up."* It is keyed
+  off the **recorded** `rejection_mode` — the authoritative account of what actually ran — so an auto-picked small
+  stack (`min-max-reject`) and a drizzle run (`drizzle-reject`) structurally cannot trip it, and a pre-schema-10 run
+  with no recorded mode stays silent rather than guessing. The threshold comes from the run's **own** stored
+  `sigma_kappa` (a looser κ=2 crosses over at 7 frames, so an 8-sub stack there is genuinely fine and says nothing),
+  falling back to the shipped default 3.0 when `options_json` is garbled/absent. Ranked at 25 — below the
+  calibration and coverage next-steps, so it can't displace them in the card's two slots. Frontend: a `"restack"`
+  action wired to `/targets/{safe}/stack` ("Re-stack with Auto outlier removal →"), off-page so it keeps its link
+  inside the editor too. Upgrade-safe: read-only advisory over fields already stored, no config/DB/API-shape/default
+  change. Tests (+10 engine, +1 frontend): `tests/test_stackhealth.py` (fires at n=5 with the right threshold and
+  action; silent at n=40, at exactly 11, for min/max, for drizzle, and for a mode-less old run; honours a custom κ
+  both ways; falls back to κ=3 across five garbled `options_json` shapes; singularises a 1-sub stack; ranks below
+  calibration) and `StackHealthCard.test.tsx` (the new action link, including with no run id).
+  *(Original entry kept below for provenance.)*
+  *(Autonomy + image quality + trust — PRIORITY 2/4; size S; advisory only, no default flip.)*
   **The maths (verified, not guessed):** κ-σ is blind to a lone outlier below `_auto_kappa_min_frames(κ)` = **11
   frames at the default κ=3** — a single bright sample's z-score against statistics that still include it peaks at
   `(n−1)/√n`, so at n=5 a satellite trail scores **z ≈ 1.79** against a κ of 3 and survives untouched. The engine

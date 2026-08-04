@@ -83,6 +83,32 @@ _ROUGHLY_ALIGNED_NOTE_FRACTION = 0.20
 _SOFT_STARS_BLOAT_RATIO = 1.5
 _SOFT_STARS_MIN_SUB_FWHM = 5
 
+# κ-σ rejection is *mathematically* blind to a lone outlier below a frame count
+# that depends on κ (11 at the default κ=3): a single bright sample's z-score
+# against statistics that still include it peaks at (n−1)/√n, so at n=5 a
+# satellite trail scores z ≈ 1.79 against a κ of 3 and survives untouched. When a
+# run's stored κ can't be read (a garbled/absent options_json), assume the app
+# default rather than staying silent — every shipped default has used 3.0.
+_DEFAULT_SIGMA_KAPPA = 3.0
+
+
+def _run_sigma_kappa(options_json: str | None) -> float:
+    """The κ a run's κ-σ pass used, from its stored options. Falls back to the
+    app default for an unparseable/absent value — the threshold this feeds is an
+    advisory note, so a sensible default beats saying nothing."""
+    import json
+
+    try:
+        opts = json.loads(options_json) if options_json else {}
+    except (ValueError, TypeError):
+        return _DEFAULT_SIGMA_KAPPA
+    if not isinstance(opts, dict):
+        return _DEFAULT_SIGMA_KAPPA
+    kappa = opts.get("sigma_kappa")
+    if isinstance(kappa, (int, float)) and math.isfinite(kappa) and kappa > 0:
+        return float(kappa)
+    return _DEFAULT_SIGMA_KAPPA
+
 
 def _format_reject_pct(frac: float) -> str:
     """A plain, honest percentage for a rejection fraction (mirrors the History
@@ -103,7 +129,8 @@ class HealthNote:
     ``kind`` is a stable id (for tests / the frontend); ``severity`` is
     ``"good"`` | ``"info"`` (colour only, never alarming); ``action`` is an
     optional key the UI can wire to the page that already does it
-    (``"trim_border"`` | ``"calibration"`` | ``"solve_help"`` | ``None``)."""
+    (``"trim_border"`` | ``"calibration"`` | ``"solve_help"`` | ``"restack"``
+    | ``None``)."""
 
     kind: str
     severity: str
@@ -219,6 +246,40 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
                      "even rectangle."),
             action="trim_border",
         )))
+
+    # --- κ-σ couldn't bite at this frame count --------------------------------
+    # The stack ran the two-pass κ-σ clip, but with too few subs for κ-σ to reject
+    # *anything*: a lone satellite/plane trail or cosmic-ray hit needs about 11
+    # frames (at the default κ=3) before it stands out far enough from statistics
+    # that still include it. So the trail is in the final picture, and nothing else
+    # says so — the clean-up note below self-hides because the pass genuinely
+    # clipped ~nothing, which reads as "your data was clean". The cure already
+    # exists and is one switch away ("Auto outlier removal" resolves to the
+    # order-statistic min/max drop, which works from 3 subs up); both default
+    # paths turn it on for you, so this only fires for a run whose options said
+    # otherwise — a saved default from before that existed, or an explicit choice.
+    # Keyed off the *recorded* rejection mode, the authoritative account of what
+    # actually ran: an auto-picked small stack records "min-max-reject" and a
+    # drizzle run "drizzle-reject", so neither can trip this.
+    n_combined = run.n_frames_used
+    if (run.rejection_mode or "").strip() == "sigma-clip" and n_combined >= 1:
+        from seestack.stack.stacker import kappa_min_frames
+
+        need = kappa_min_frames(_run_sigma_kappa(run.options_json))
+        if n_combined < need:
+            scored.append((25, HealthNote(
+                kind="rejection_blind",
+                severity="info",
+                message=(f"With only {n_combined} sub"
+                         f"{'s' if n_combined != 1 else ''}, "
+                         "sigma-clip outlier removal couldn't drop anything — it "
+                         f"needs about {need} frames before a passing satellite or "
+                         "cosmic-ray hit stands out enough to clip. Re-stack with "
+                         "\"Auto outlier removal\" switched on and AstroStack will "
+                         "use the min/max method instead, which works from 3 subs "
+                         "up."),
+                action="restack",
+            )))
 
     # --- Star shape: elongation (unitless, gentle) -----------------------------
     med_ecc = _median_eccentricity(accepted)
