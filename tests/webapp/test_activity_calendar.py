@@ -134,8 +134,8 @@ def test_calendar_falls_back_to_sitelong_when_no_configured_lon(
     # No site_lon in Settings, but a frame's header says we're far east (+150°,
     # ~+10 h). A 03:00-UTC session then belongs to *that* calendar day's night,
     # not the previous UTC night the bare UTC fallback would assign.
-    import webapp.routers.stats as stats
-    monkeypatch.setattr(stats, "detect_site_from_library",
+    import webapp.site_location as site_location
+    monkeypatch.setattr(site_location, "detect_site_from_library",
                         lambda lib, **k: (20.0, 150.0))
     day, night = _night_of_the_session(client, built_library)
     assert night == day.isoformat()
@@ -145,8 +145,8 @@ def test_calendar_uses_utc_when_no_location_anywhere(
         client, built_library, monkeypatch):
     # No configured lon and no header site → UTC noon-to-noon: the same 03:00-UTC
     # session buckets onto the *previous* calendar day.
-    import webapp.routers.stats as stats
-    monkeypatch.setattr(stats, "detect_site_from_library", lambda lib, **k: None)
+    import webapp.site_location as site_location
+    monkeypatch.setattr(site_location, "detect_site_from_library", lambda lib, **k: None)
     day, night = _night_of_the_session(client, built_library)
     assert night == (day - timedelta(days=1)).isoformat()
 
@@ -155,12 +155,12 @@ def test_configured_site_lon_wins_and_skips_header_probe(
         client, built_library, monkeypatch):
     # An explicit Settings longitude must win over any header, and the FITS probe
     # must not run at all when a location is already configured.
-    import webapp.routers.stats as stats
+    import webapp.site_location as site_location
 
     def _boom(lib, **k):
         raise AssertionError("header probe must not run when site_lon is configured")
 
-    monkeypatch.setattr(stats, "detect_site_from_library", _boom)
+    monkeypatch.setattr(site_location, "detect_site_from_library", _boom)
     client.put("/api/settings", json={"site_lon": 150.0})
     day, night = _night_of_the_session(client, built_library)
     assert night == day.isoformat()  # +150° → same-day night, same as the fallback

@@ -352,6 +352,9 @@ export interface TargetNight {
 export interface NightSummary {
   start_utc: string | null;
   end_utc: string | null;
+  // ISO `YYYY-MM-DD` observing night (noon-to-noon local, same bucketing as the
+  // imaging calendar). Optional: an older backend doesn't send it.
+  night_date?: string | null;
   n_frames: number;
   n_kept: number;
   n_set_aside: number;

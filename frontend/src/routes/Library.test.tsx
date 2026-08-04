@@ -112,7 +112,7 @@ describe("Library", () => {
     await waitFor(() => expect(screen.getByText("No targets yet.")).toBeInTheDocument());
     expect(screen.queryByRole("link", { name: "View jobs" })).not.toBeInTheDocument();
     // The upload card is present (its file picker button anchors it).
-    expect(screen.getByRole("button", { name: /Choose FITS files/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Choose FITS or \.zip/i })).toBeInTheDocument();
   });
 
   it("shows the getting-started map on an empty library, and not once it has targets", async () => {

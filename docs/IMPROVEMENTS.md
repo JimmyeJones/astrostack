@@ -6375,8 +6375,40 @@ to **Shipped**.)_
   stacks that previously ran uncalibrated — that's a behaviour change; gate it so it only bites targets whose
   defaults carry a real id, and add an upgrade test). Also tighten the "Save as defaults" toast to say the picks are
   *remembered/pre-filled* rather than implying they already drive auto-stack. (M, autonomy — PRIORITY 2.)
-- **NEW IDEA (Builder 2026-07-29, observed while fixing the west-of-UTC night-labelling bug, v0.210.16) — QA the
-  other planner/date surfaces for the same UTC-vs-local labelling drift.** The "Plan your next night" card named the
+- ~~**NEW IDEA (Builder 2026-07-29, observed while fixing the west-of-UTC night-labelling bug, v0.210.16) — QA the
+  other planner/date surfaces for the same UTC-vs-local labelling drift.**~~ — **SWEEP DONE, one real bug found and
+  FIXED v0.229.1** (Builder 2026-08-04, branch `claude/relaxed-turing-1hy1y1`). Every surface the entry named was
+  audited; **the Target page's "Nights" card was genuinely wrong** and the rest were already correct.
+  **The bug:** `NightsCard.formatNightDate` labelled each night from the UTC date of its *first sub*
+  (`start_utc`), but a session that starts at 21:00 local anywhere in the Americas is **already tomorrow in UTC** —
+  so a Seattle owner's night of 8 Jul was captioned "9 Jul 2026", and it **disagreed with the Dashboard's own
+  imaging calendar**, which has always bucketed nights noon-to-noon in local time
+  (`seestack/activity_calendar.night_date_of`). Every evening session west of UTC was mislabelled, not an edge case.
+  **The fix — one source of truth for "which night is this?".** A new shared
+  `webapp/site_location.resolve_site_lon(request, lib, configured_lon)` holds the resolution the calendar had
+  privately: explicit `site_lon` wins, else the longitude sniffed from a frame's `SITELONG` header, else `None`
+  (UTC), cached on the app keyed on the target set. `stats.py` now calls it (its private `_fallback_site_lon` is
+  gone — behaviour identical), and `GET /api/targets/{safe}/nights` calls the *same* helper and stamps each night
+  with an additive `night_date` (ISO `YYYY-MM-DD`) from `night_date_of`. So the two cards can no longer disagree by
+  construction. The frontend gained a pure `nightDateLabel(n)` that prefers `night_date` and falls back to
+  `start_utc`, so an older backend renders exactly as before. `start_utc`/`end_utc` are untouched — they are the
+  honest capture times and the "Set aside night" identifiers.
+  **Audited and found already correct (don't re-chase):** the "Plan your next night" card + its `.ics` (fixed in
+  v0.210.16 — local date, UTC kept as a hover tooltip); the imaging-calendar grid (`activityCalendar.ts`, which
+  correctly does UTC maths on the `YYYY-MM-DD` strings the *server* already bucketed); the Tonight page's window
+  rows and `tonight.ts::formatClock`/`isoDate` (local wall-clock); `focusTrend.ts::formatClockUtc` (labelled "UTC"
+  in the copy, so honest); and `webapp/ics.py`'s `DTSTART`, which is correctly a `Z`-suffixed UTC instant the
+  calendar app renders locally. `seestack/imaging_log.py::_format_date` is UTC too, but it dates *when the stack was
+  produced*, not an observing night, so it is a different quantity and correct as-is — worth a copy tweak only if a
+  reader ever mistakes that column for the capture night.
+  **Tests (+8):** `tests/webapp/test_target_nights.py` (+3 — a 05:00-UTC session under `site_lon=-122.3` labels as
+  the 8th while `start_utc` still says the 9th; the Nights dates are a subset of the imaging calendar's; and the
+  same stamp buckets differently under a far-east longitude vs the UTC fallback, proving the setting is honoured),
+  `NightsCard.test.tsx` (+4 — `nightDateLabel` prefers `night_date`, falls back on an older backend, dashes when
+  neither is usable, and the rendered card shows the evening rather than the UTC roll-over date). The three
+  activity-calendar longitude tests were re-pointed at the shared helper's module (same assertions).
+  Upgrade-safe: additive response field, additive frontend helper, no config/DB/on-disk/API-shape/default change.
+  *(Original idea kept below.)* The "Plan your next night" card named the
   wrong night for owners west of UTC because it formatted `dark_start` in UTC. The same class of bug can hide
   anywhere a UTC timestamp is rendered as a *date* the user plans around: the Tonight page's window rows, the imaging
   calendar/streak cells, "Continue tonight", NightsCard, the `.ics` export's DTSTART, and any "next N nights" list.
@@ -9814,8 +9846,61 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-07-30, follow-on to the v0.228.0 folder-structure-preserving upload) — accept a
-  **`.zip` of a Seestar folder** in the browser upload (the last real slice-(c) item, and now much cheaper).**
+- **NEW IDEA (Builder 2026-08-04, follow-on to the v0.229.0 `.zip` upload) — unpack a big archive as a *job*
+  rather than inside the request.** *(Autonomy/friendliness — PRIORITY 2–3; size M.)* The zip upload streams to
+  disk and then unpacks **synchronously inside the POST**, so a multi-GB night is a long silent wait after the
+  browser's progress bar has already hit 100 % (the card does say "Uploaded — processing on the server…", which is
+  honest, but it's a blind wait) — and on a slow NAS it could out-live a reverse proxy's request timeout, which
+  would read to the user as a failed upload even though every sub landed. **Slice:** keep the streaming-to-`.part`
+  half in the request (that's the part the progress bar measures), then hand the temp archive to the existing
+  single-worker `JobManager` and return `{job_id}` immediately; the job unpacks, reports per-member outcomes as
+  job text, deletes the archive, and kicks the usual scan. The Jobs page then shows real progress instead of a
+  stalled bar. **Care:** the temp `.part` must be cleaned up by the job on *every* path (including cancel), and the
+  response shape must stay backward-compatible — an older frontend reads `saved`/`skipped`/`rejected`, so either
+  keep unpacking inline below a size threshold or return an empty-but-valid summary plus the job id. Worth doing
+  only once someone actually uploads a big archive; a few hundred MB unpacks in seconds today.
+
+- **NEW IDEA (Builder 2026-08-04, spotted while auditing night labelling) — say the *night* on the "Last session"
+  recap card too.** *(Friendliness — PRIORITY 3; size S.)* The Nights card now names each session by its observing
+  night (v0.229.1), but the "Last session" recap card beside it shows no date at all — so a beginner reading
+  "27 subs kept, 1.4 h" can't tell whether that was last night or three weeks ago, and can't line it up with the
+  Nights row below. The backend already returns `start_utc`/`end_utc` on `/session-recap`; give it the same
+  additive `night_date` the nights endpoint now carries (one `night_date_of` call through the shared
+  `resolve_site_lon`) and render "Last session — 8 Jul 2026" with the existing `nightDateLabel`. Self-hiding when
+  undatable. Small, and it closes the last surface in the night-labelling family.
+
+- ~~**NEW IDEA (Builder 2026-07-30, follow-on to the v0.228.0 folder-structure-preserving upload) — accept a
+  `.zip` of a Seestar folder in the browser upload.**~~ — **SHIPPED v0.229.0** (Builder 2026-08-04, branch
+  `claude/relaxed-turing-1hy1y1`). `POST /api/upload` now **unpacks** a `.zip` instead of storing it, so
+  "right-click your Seestar folder → compress → drop it in" is one request rather than thousands of multipart
+  parts. **Webapp** (`webapp/routers/upload.py`): a `.zip` among the posted files is streamed to a unique
+  `.part` sidecar **beside the destination** (same filesystem, so the free-space guard means the same thing for
+  both halves; the `.part` suffix keeps it out of the scanner's FITS glob), unpacked by a new pure
+  `extract_zip_to(zip_path, dest_root, archive_name=…)`, and then deleted — the archive itself never stays on
+  the NAS. A zip **is** a folder, so its internal directories are always kept (`preserve_folders` doesn't apply
+  to its contents): the scanner's Seestar convention then sees `M 31_sub/` and makes the real target instead of
+  one `Unsorted` pile. **Guardrails, all tested:** every member goes through the same `safe_relpath` +
+  `confined_dest` pair a folder drop uses (`extractall` is never called), an **absolute** member name is
+  refused outright rather than quietly re-rooted into a real `etc/` folder, the **uncompressed** total of the
+  members we intend to write is checked against the free-space reserve *before* the first byte lands (zip
+  bomb), each member's write is capped at the size the archive declares — which is what makes that check
+  binding rather than advisory, since a zip's central directory is just metadata — the member count is capped
+  at 20 000, and a damaged/CRC-failing entry is skipped without sinking the rest of the archive. Non-FITS,
+  unsafe-named and over-cap members are reported as **one aggregate line each** (a zipped capture folder is
+  full of thumbnails and logs; thousands of rows would bury the real outcome). Per-member outcomes join the
+  existing `saved`/`skipped`/`rejected` lists, so the response shape is unchanged. **Frontend**
+  (`UploadFits.tsx`): `.zip` added to the picker's `accept` and the client-side filter (new pure
+  `isZipFilename` / `isUploadableFilename`), a plain-language `pickedReadyLabel` ("1 FITS file and 1 .zip
+  archive"), and a `zipUnpackNote` that tells the beginner *before* they commit that the archive will be
+  unpacked here and its folders kept (naming the target folder when one was typed). Upgrade-safe: additive
+  accepted upload type, no config/DB/on-disk/API-shape/default change — an older frontend simply never sends a
+  zip. **Tests (+15):** `tests/webapp/test_upload.py` (+13 — the headline Seestar-folder zip end-to-end
+  including a real `scan_and_organize` producing *M 31*/*M 13*, landing inside a named target, traversal and
+  absolute members refused with nothing written outside `incoming/`, non-FITS members as one line, a
+  not-really-a-zip reported plainly with no scan enqueued, an already-present member skipped, a zip bomb
+  refused before any write, the member cap reporting what it left out, and two direct `_extract_member` tests
+  for the declared-size cap and the well-formed case), plus frontend `UploadFits.test.tsx` (+5 helper/render
+  cases) and a copy fix in `Library.test.tsx`. *(Original idea kept below for provenance.)*
   *(Beginner feature; PRIORITY 2–3 autonomy/friendliness; size M.)* Uploading a night of subs file-by-file over
   a browser is thousands of multipart parts; a single `.zip` is one request, and a beginner's instinct on
   Windows/macOS is to right-click → compress the folder anyway. This only became a small job now that

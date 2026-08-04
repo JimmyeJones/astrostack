@@ -5,8 +5,9 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   UploadFits, collectDroppedFiles, filesFromFolderInput, folderPreserveNote,
-  isFitsFilename, pickedFolders, readEntryFiles, uploadSummary,
-  uploadProgressLabel, uploadProgressPercent,
+  isFitsFilename, isUploadableFilename, isZipFilename, pickedFolders,
+  pickedReadyLabel, readEntryFiles, uploadSummary,
+  uploadProgressLabel, uploadProgressPercent, zipUnpackNote,
   type FsEntry,
 } from "./UploadFits";
 import type { UploadResult } from "../api/client";
@@ -80,6 +81,46 @@ describe("isFitsFilename", () => {
     expect(isFitsFilename("notes.txt")).toBe(false);
     expect(isFitsFilename("x.fit.gz")).toBe(false);
     expect(isFitsFilename("x")).toBe(false);
+  });
+});
+
+describe("zip picking helpers", () => {
+  it("recognises a .zip case-insensitively, and only by its real suffix", () => {
+    expect(isZipFilename("seestar.zip")).toBe(true);
+    expect(isZipFilename("SEESTAR.ZIP")).toBe(true);
+    expect(isZipFilename("x.zip.fit")).toBe(false);
+    expect(isZipFilename("archive.tar.gz")).toBe(false);
+  });
+
+  it("accepts both subs and zips as uploadable, and nothing else", () => {
+    expect(isUploadableFilename("Light_001.fit")).toBe(true);
+    expect(isUploadableFilename("subs.zip")).toBe(true);
+    expect(isUploadableFilename("notes.txt")).toBe(false);
+    expect(isUploadableFilename("thumb.jpg")).toBe(false);
+  });
+
+  it("labels a mixed pick in plain language, with singular/plural grammar", () => {
+    expect(pickedReadyLabel([{ name: "a.fit" }])).toBe("1 FITS file");
+    expect(pickedReadyLabel([{ name: "a.fit" }, { name: "b.fit" }])).toBe("2 FITS files");
+    expect(pickedReadyLabel([{ name: "s.zip" }])).toBe("1 .zip archive");
+    expect(pickedReadyLabel([{ name: "s.zip" }, { name: "t.zip" }])).toBe("2 .zip archives");
+    expect(pickedReadyLabel([{ name: "a.fit" }, { name: "s.zip" }]))
+      .toBe("1 FITS file and 1 .zip archive");
+    expect(pickedReadyLabel([])).toBe("");
+  });
+
+  it("promises to unpack a picked zip, and says where it will land", () => {
+    // No zip → the note self-hides entirely.
+    expect(zipUnpackNote([{ name: "a.fit" }])).toBe("");
+    expect(zipUnpackNote([{ name: "s.zip" }]))
+      .toBe("We’ll unpack your archive on the server and keep the folders inside, "
+        + "so they come in as separate targets.");
+    // With a named target the structure is kept *inside* it, so say that instead
+    // of promising separate targets.
+    expect(zipUnpackNote([{ name: "s.zip" }], " M31 "))
+      .toBe("We’ll unpack your archive on the server and keep the folders inside “M31”.");
+    expect(zipUnpackNote([{ name: "s.zip" }, { name: "t.zip" }]))
+      .toContain("unpack your archives");
   });
 });
 
@@ -196,6 +237,24 @@ describe("UploadFits", () => {
     fireEvent.drop(zone, { dataTransfer: dtWithFiles([good, bad]) });
     await waitFor(() => expect(screen.getByText(/1 FITS file ready/)).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /^Upload/ })).not.toBeDisabled();
+  });
+
+  it("accepts a dropped .zip and says it will be unpacked", async () => {
+    const spy = vi.spyOn(client.api, "uploadFits").mockResolvedValue(result());
+    renderUpload();
+    const zip = new File(["x"], "M31_sub.zip", { type: "application/zip" });
+    const zone = screen.getByText(/Drag your Seestar FITS files/);
+    fireEvent.drop(zone, { dataTransfer: dtWithFiles([zip]) });
+
+    await waitFor(() => expect(screen.getByText(/1 \.zip archive ready/)).toBeInTheDocument());
+    // The beginner is told what will happen to it before they commit.
+    expect(screen.getByText(/unpack your archive on the server/)).toBeInTheDocument();
+    // ...and it isn't mislabelled as heading for "Unsorted" — its own folders win.
+    expect(screen.queryByText(/will go to Unsorted/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Upload/ }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(spy.mock.calls[0][0].map((f) => f.name)).toEqual(["M31_sub.zip"]);
   });
 
   it("accepts a folder pick, keeping FITS files with their relative paths", async () => {
