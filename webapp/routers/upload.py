@@ -18,6 +18,13 @@ Guardrails (this is a file-writing endpoint on a live NAS):
   A folder drop can opt into keeping its **directories** (``preserve_folders``)
   so the scanner's Seestar folder convention sees ``M 31_sub/`` and makes the
   right target, instead of every object landing in one ``Unsorted`` pile.
+* **A ``.zip`` is accepted too** — one request instead of thousands of multipart
+  parts, and "right-click → compress the folder" is a beginner's instinct anyway.
+  Its members go through the *same* sanitiser and confinement as a folder drop
+  (never ``extractall``), the **uncompressed** total is checked against the free
+  space *before* anything is written (so a zip bomb can't fill the NAS), the
+  member count is capped, and each member is truncated at the size the archive
+  declares. See :func:`extract_zip_to`.
 * **Disk-space aware** — the free space is checked before each write and a clear
   "not enough room" reason is returned instead of silently filling the NAS.
 * **Resilient** — each file streams to a ``.part`` sidecar and is atomically
@@ -30,8 +37,9 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
@@ -155,6 +163,11 @@ def is_fits_name(base: str) -> bool:
     return Path(base).suffix.lower() in FITS_SUFFIXES
 
 
+def is_zip_name(base: str) -> bool:
+    """True when ``base`` is a ``.zip`` archive we should unpack rather than store."""
+    return Path(base).suffix.lower() == ".zip"
+
+
 def safe_target_dir(incoming: Path, target: str) -> Path | None:
     """Resolve the destination dir for an optional user-supplied target name.
 
@@ -268,6 +281,242 @@ async def _stream_to_disk(upload: UploadFile, dest: Path) -> int:
     return written
 
 
+# A night of Seestar subs is a few hundred files; a whole-device archive a few
+# thousand. Past this the upload is not a capture folder any more, and an
+# unbounded member loop on a NAS is worth capping (the surplus is reported, never
+# silently dropped).
+_ZIP_MAX_MEMBERS = 20000
+
+
+class ZipOutcome(NamedTuple):
+    """What unpacking one archive did — merged into the endpoint's response lists."""
+
+    saved: list[UploadedFile]
+    skipped: list[UploadedFile]
+    rejected: list[RejectedFile]
+    folders: list[str]
+    bytes_written: int
+
+
+def _extract_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo, dest: Path) -> int:
+    """Stream one archive member to ``dest`` via a ``.part`` sidecar.
+
+    Mirrors :func:`_stream_to_disk`: a unique temp file, atomically renamed only
+    once complete, removed on any failure — so a damaged archive never leaves a
+    truncated FITS for the watcher to ingest.
+
+    The write is **capped at the size the archive declares** (``file_size``). A
+    zip's directory is just metadata: a hostile archive can claim 1 KB and
+    decompress to gigabytes, and the free-space check in :func:`extract_zip_to`
+    trusts that number — so enforcing it here is what makes the check binding
+    rather than advisory. ``zipfile`` verifies the member's CRC as the stream
+    reaches EOF, so a corrupt entry raises instead of landing silently.
+    """
+    fd, tmp_name = tempfile.mkstemp(suffix=".part", prefix=dest.name + ".",
+                                    dir=str(dest.parent))
+    tmp = Path(tmp_name)
+    written = 0
+    limit = max(0, int(info.file_size))
+    try:
+        with os.fdopen(fd, "wb") as out, zf.open(info) as src:
+            while True:
+                chunk = src.read(_CHUNK)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > limit:
+                    raise ValueError("entry is bigger than the .zip declares")
+                out.write(chunk)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    try:
+        os.replace(tmp, dest)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return written
+
+
+def extract_zip_to(zip_path: Path, dest_root: Path, *, archive_name: str) -> ZipOutcome:
+    """Unpack the FITS members of ``zip_path`` under ``dest_root``, safely.
+
+    A zip **is** a folder, so its internal directories are always kept (that is
+    the whole point of accepting one — the scanner's Seestar convention then sees
+    ``M 31_sub/`` and makes the real target instead of one ``Unsorted`` pile).
+    ``preserve_folders`` therefore doesn't apply here.
+
+    Every member name goes through :func:`safe_relpath` and every write through
+    :func:`confined_dest` — the same pair a folder drop uses — so an absolute or
+    ``..``-bearing entry can never escape ``dest_root``; ``extractall`` is
+    deliberately never used. The **uncompressed** total of the members we intend
+    to write is checked against the free space *before* the first byte lands, so
+    a zip bomb is refused rather than filling the NAS, and each member is
+    truncated at its declared size (:func:`_extract_member`).
+
+    Members that aren't FITS, carry an unusable name, or fall past the member cap
+    are reported as **one aggregate line each** rather than thousands of rows — a
+    zipped capture folder is full of thumbnails and logs, and a per-file list of
+    those would bury the real outcome.
+    """
+    rejected: list[RejectedFile] = []
+    try:
+        zf = zipfile.ZipFile(zip_path)
+    except (zipfile.BadZipFile, OSError, ValueError) as e:
+        return ZipOutcome([], [], [RejectedFile(
+            name=archive_name, reason=f"not a readable .zip file ({e})")], [], 0)
+
+    saved: list[UploadedFile] = []
+    skipped: list[UploadedFile] = []
+    folders: list[str] = []
+    bytes_written = 0
+    n_not_fits = 0
+    n_unsafe = 0
+    with zf:
+        entries = [i for i in zf.infolist() if not i.is_dir()]
+        n_over_cap = max(0, len(entries) - _ZIP_MAX_MEMBERS)
+        entries = entries[:_ZIP_MAX_MEMBERS]
+
+        members: list[tuple[zipfile.ZipInfo, str]] = []
+        for info in entries:
+            # An *absolute* member name is refused outright rather than merely
+            # confined. The ZIP spec says names are relative, so ``/etc/x.fit``
+            # only shows up in a hand-crafted archive — and quietly stripping the
+            # leading slash (what :func:`safe_relpath` does, correctly, for a
+            # browser folder drop whose ``fullPath`` always starts with one) would
+            # turn it into a real ``etc/`` folder under ``incoming/``.
+            if info.filename[:1] in ("/", "\\"):
+                n_unsafe += 1
+                continue
+            rel = safe_relpath(info.filename)
+            if rel is None:
+                n_unsafe += 1
+                continue
+            if not is_fits_name(rel):
+                n_not_fits += 1
+                continue
+            members.append((info, rel))
+
+        # Free-space guard on the *uncompressed* total, before any write.
+        needed = sum(max(0, int(i.file_size)) for i, _ in members)
+        try:
+            free = shutil.disk_usage(dest_root).free
+        except OSError:
+            free = None
+        if free is not None and free - needed < _DISK_RESERVE_BYTES:
+            rejected.append(RejectedFile(name=archive_name,
+                                         reason="not enough disk space"))
+            members = []
+
+        for info, rel in members:
+            dest = confined_dest(dest_root, rel)
+            if dest is None:
+                n_unsafe += 1
+                continue
+            if dest.parent != dest_root:
+                try:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    rejected.append(RejectedFile(
+                        name=rel, reason=f"could not be saved ({e})"))
+                    continue
+                top = rel.split("/", 1)[0]
+                if top not in folders:
+                    folders.append(top)
+            if dest.exists():
+                skipped.append(UploadedFile(name=rel, bytes=dest.stat().st_size))
+                continue
+            try:
+                n = _extract_member(zf, info, dest)
+            except OSError as e:
+                reason = ("not enough disk space" if getattr(e, "errno", None) == 28
+                          else f"could not be saved ({e})")
+                rejected.append(RejectedFile(name=rel, reason=reason))
+                continue
+            except (zipfile.BadZipFile, ValueError, EOFError, RuntimeError) as e:
+                # Damaged / misdeclared / password-protected entry — skip it and
+                # keep unpacking the rest of the archive.
+                rejected.append(RejectedFile(
+                    name=rel, reason=f"damaged inside the .zip ({e})"))
+                continue
+            saved.append(UploadedFile(name=rel, bytes=n))
+            bytes_written += n
+
+    if n_not_fits:
+        rejected.append(RejectedFile(
+            name=archive_name,
+            reason=f"{n_not_fits} other file(s) inside were not FITS and were left out"))
+    if n_unsafe:
+        rejected.append(RejectedFile(
+            name=archive_name,
+            reason=f"{n_unsafe} entr(y/ies) inside had an unsafe name and were left out"))
+    if n_over_cap:
+        rejected.append(RejectedFile(
+            name=archive_name,
+            reason=(f"only the first {_ZIP_MAX_MEMBERS} files in the .zip were read "
+                    f"({n_over_cap} more left out)")))
+    return ZipOutcome(saved, skipped, rejected, folders, bytes_written)
+
+
+async def _absorb_zip(
+    upload: UploadFile,
+    archive_name: str,
+    dest_root: Path,
+    saved: list[UploadedFile],
+    skipped: list[UploadedFile],
+    rejected: list[RejectedFile],
+    folders: list[str],
+) -> int:
+    """Stream one uploaded ``.zip`` to a temp file, unpack it, then delete it.
+
+    The archive itself is *never* kept: it lands as a ``.part`` sidecar (invisible
+    to the scanner's FITS glob) beside the destination — on the same filesystem,
+    so the free-space guard means the same thing for both halves — and is removed
+    on every path. Returns the bytes actually written as FITS; the per-member
+    outcomes are appended to the caller's response lists.
+    """
+    # Same up-front disk guard the plain-file path uses, for the archive itself.
+    size = getattr(upload, "size", None)
+    try:
+        free = shutil.disk_usage(dest_root).free
+    except OSError:
+        free = None
+    if size is not None and free is not None and free - size < _DISK_RESERVE_BYTES:
+        rejected.append(RejectedFile(name=archive_name, reason="not enough disk space"))
+        return 0
+
+    fd, tmp_name = await run_in_threadpool(
+        tempfile.mkstemp, suffix=".part", prefix="upload-zip.", dir=str(dest_root))
+    tmp = Path(tmp_name)
+    fh = os.fdopen(fd, "wb")
+    try:
+        try:
+            while True:
+                chunk = await upload.read(_CHUNK)
+                if not chunk:
+                    break
+                await run_in_threadpool(fh.write, chunk)
+        finally:
+            await run_in_threadpool(fh.close)
+        outcome = await run_in_threadpool(
+            extract_zip_to, tmp, dest_root, archive_name=archive_name)
+    except OSError as e:
+        reason = ("not enough disk space" if getattr(e, "errno", None) == 28
+                  else f"could not be saved ({e})")
+        rejected.append(RejectedFile(name=archive_name, reason=reason))
+        return 0
+    finally:
+        await run_in_threadpool(tmp.unlink, True)  # missing_ok
+
+    saved.extend(outcome.saved)
+    skipped.extend(outcome.skipped)
+    rejected.extend(outcome.rejected)
+    for folder in outcome.folders:
+        if folder not in folders:
+            folders.append(folder)
+    return outcome.bytes_written
+
+
 @router.post("/api/upload", response_model=UploadResponse)
 async def upload_files(
     request: Request,
@@ -292,6 +541,13 @@ async def upload_files(
     object's subs into one ``Unsorted`` pile. Paths are sanitised per segment and
     every write is re-confirmed under the destination (:func:`safe_relpath`,
     :func:`confined_dest`).
+
+    A ``.zip`` among the files is **unpacked** rather than stored: its FITS
+    members land under the destination keeping the archive's own directories
+    (a zip is a folder, so ``preserve_folders`` doesn't apply to its contents),
+    and the archive itself is deleted. See :func:`extract_zip_to` for the
+    guardrails; per-member outcomes join the same ``saved``/``skipped``/
+    ``rejected`` lists, so the response shape is unchanged.
     """
     settings = deps.get_settings(request)
     incoming = settings.resolved_incoming_dir
@@ -334,6 +590,14 @@ async def upload_files(
             if base is None:
                 rejected.append(RejectedFile(name=upload.filename or "(unnamed)",
                                              reason="unsafe file name"))
+                continue
+            if is_zip_name(base):
+                # A zipped capture folder: unpack it in place of storing it, so
+                # the drop lands exactly like a folder drop (and its own bytes
+                # never stay on the NAS). Handled entirely below.
+                n = await _absorb_zip(upload, base, dest_root,
+                                      saved, skipped, rejected, folders)
+                bytes_written += n
                 continue
             if not is_fits_name(base):
                 rejected.append(RejectedFile(

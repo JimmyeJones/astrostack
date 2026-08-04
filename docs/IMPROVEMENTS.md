@@ -9814,8 +9814,38 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-07-30, follow-on to the v0.228.0 folder-structure-preserving upload) — accept a
-  **`.zip` of a Seestar folder** in the browser upload (the last real slice-(c) item, and now much cheaper).**
+- ~~**NEW IDEA (Builder 2026-07-30, follow-on to the v0.228.0 folder-structure-preserving upload) — accept a
+  `.zip` of a Seestar folder in the browser upload.**~~ — **SHIPPED v0.229.0** (Builder 2026-08-04, branch
+  `claude/relaxed-turing-1hy1y1`). `POST /api/upload` now **unpacks** a `.zip` instead of storing it, so
+  "right-click your Seestar folder → compress → drop it in" is one request rather than thousands of multipart
+  parts. **Webapp** (`webapp/routers/upload.py`): a `.zip` among the posted files is streamed to a unique
+  `.part` sidecar **beside the destination** (same filesystem, so the free-space guard means the same thing for
+  both halves; the `.part` suffix keeps it out of the scanner's FITS glob), unpacked by a new pure
+  `extract_zip_to(zip_path, dest_root, archive_name=…)`, and then deleted — the archive itself never stays on
+  the NAS. A zip **is** a folder, so its internal directories are always kept (`preserve_folders` doesn't apply
+  to its contents): the scanner's Seestar convention then sees `M 31_sub/` and makes the real target instead of
+  one `Unsorted` pile. **Guardrails, all tested:** every member goes through the same `safe_relpath` +
+  `confined_dest` pair a folder drop uses (`extractall` is never called), an **absolute** member name is
+  refused outright rather than quietly re-rooted into a real `etc/` folder, the **uncompressed** total of the
+  members we intend to write is checked against the free-space reserve *before* the first byte lands (zip
+  bomb), each member's write is capped at the size the archive declares — which is what makes that check
+  binding rather than advisory, since a zip's central directory is just metadata — the member count is capped
+  at 20 000, and a damaged/CRC-failing entry is skipped without sinking the rest of the archive. Non-FITS,
+  unsafe-named and over-cap members are reported as **one aggregate line each** (a zipped capture folder is
+  full of thumbnails and logs; thousands of rows would bury the real outcome). Per-member outcomes join the
+  existing `saved`/`skipped`/`rejected` lists, so the response shape is unchanged. **Frontend**
+  (`UploadFits.tsx`): `.zip` added to the picker's `accept` and the client-side filter (new pure
+  `isZipFilename` / `isUploadableFilename`), a plain-language `pickedReadyLabel` ("1 FITS file and 1 .zip
+  archive"), and a `zipUnpackNote` that tells the beginner *before* they commit that the archive will be
+  unpacked here and its folders kept (naming the target folder when one was typed). Upgrade-safe: additive
+  accepted upload type, no config/DB/on-disk/API-shape/default change — an older frontend simply never sends a
+  zip. **Tests (+15):** `tests/webapp/test_upload.py` (+13 — the headline Seestar-folder zip end-to-end
+  including a real `scan_and_organize` producing *M 31*/*M 13*, landing inside a named target, traversal and
+  absolute members refused with nothing written outside `incoming/`, non-FITS members as one line, a
+  not-really-a-zip reported plainly with no scan enqueued, an already-present member skipped, a zip bomb
+  refused before any write, the member cap reporting what it left out, and two direct `_extract_member` tests
+  for the declared-size cap and the well-formed case), plus frontend `UploadFits.test.tsx` (+5 helper/render
+  cases) and a copy fix in `Library.test.tsx`. *(Original idea kept below for provenance.)*
   *(Beginner feature; PRIORITY 2–3 autonomy/friendliness; size M.)* Uploading a night of subs file-by-file over
   a browser is thousands of multipart parts; a single `.zip` is one request, and a beginner's instinct on
   Windows/macOS is to right-click → compress the folder anyway. This only became a small job now that
