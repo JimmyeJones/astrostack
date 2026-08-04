@@ -555,6 +555,107 @@ def test_reject_summary_buckets_unreadable_subs_as_error_not_unsolved(
     assert summary["used"] == 0
 
 
+def test_reject_summary_counts_accepted_subs_whose_files_have_vanished(
+    client, built_library, data_root,
+):
+    """The storage preflight: a sub the library still lists but whose file is no
+    longer on disk (offline share, unmounted drive, cleared cache with the
+    originals gone) is silently skipped when stacking. The Target page must be
+    able to say so *before* the walk-away stack, so the endpoint reports the count
+    and the accepted total it was taken over."""
+    from pathlib import Path
+
+    from seestack.io.library import Library
+
+    body = client.get("/api/targets/M_42/frames/reject-summary").json()
+    n_accepted = body["n_accepted"]
+    assert n_accepted >= 2
+    # Everything is readable to begin with, so the callout stays hidden.
+    assert body["n_missing_files"] == 0
+
+    # Take two of the accepted subs' files away, exactly as an unmounted drive
+    # would (the row stays; the bytes don't).
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            gone = list(proj.iter_frames(accepted_only=True))[:2]
+            for frame in gone:
+                for path in (frame.cached_path, frame.source_path):
+                    if path:
+                        Path(path).unlink(missing_ok=True)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/M_42/frames/reject-summary").json()
+    assert body["n_missing_files"] == 2
+    # Accepted total is unchanged — the preflight is a *snapshot* of storage, not
+    # a reject reason, so it must not move the accounting the breakdown does.
+    assert body["n_accepted"] == n_accepted
+    assert body["summary"]["used"] + body["summary"]["dropped"] >= n_accepted
+
+
+def test_reject_summary_missing_files_ignores_rejected_subs(
+    client, built_library, data_root,
+):
+    """A rejected sub was never going to be stacked, so its file going missing is
+    not something to warn about — the count is over *accepted* subs only."""
+    from pathlib import Path
+
+    from seestack.io.library import Library
+
+    frames = client.get("/api/targets/M_42/frames").json()
+    assert len(frames) >= 2
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            first = next(iter(proj.iter_frames()))
+            proj.update_frame(first.id, accept=False, reject_reason="user")
+            for path in (first.cached_path, first.source_path):
+                if path:
+                    Path(path).unlink(missing_ok=True)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/M_42/frames/reject-summary").json()
+    assert body["n_missing_files"] == 0
+    assert body["n_accepted"] == len(frames) - 1
+
+
+def test_reject_summary_missing_files_falls_back_to_the_source_copy(
+    client, built_library, data_root,
+):
+    """A cleared Stage-1 cache is not a missing sub as long as the original is
+    still there — the count must mirror ``readable_frame_path``'s fallback, or a
+    routine cache clear would fire a scary storage warning."""
+    from pathlib import Path
+
+    from seestack.io.library import Library
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            frame = next(iter(proj.iter_frames(accepted_only=True)))
+            # Point the frame at a cache copy that doesn't exist; the source does.
+            proj.update_frame(frame.id,
+                              cached_path=str(data_root / "gone" / "cached.fit"))
+            assert Path(frame.source_path).exists()
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/M_42/frames/reject-summary").json()
+    assert body["n_missing_files"] == 0
+
+
 def test_reject_summary_groups_by_reason(client, solved_library, data_root):
     from seestack.io.library import Library
 

@@ -39,6 +39,7 @@ import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
 import { UnsolvedHelp } from "../components/target/UnsolvedHelp";
 import { SkyBrightnessNote } from "../components/target/SkyBrightnessNote";
 import { thinStackWarning } from "../components/target/thinStack";
+import { missingFilesNote } from "../components/target/missingFiles";
 import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
 import { NextBestMoveBadge } from "../components/target/NextBestMoveBadge";
 import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
@@ -369,6 +370,14 @@ export function TargetView() {
   const unsolvedCount =
     rejectSummary.data?.summary?.buckets.find((b) => b.key === "unsolved")
       ?.count ?? 0;
+  // Accepted subs whose files aren't on disk right now (offline share, unmounted
+  // drive, cleared cache with the originals gone). They're silently skipped when
+  // stacking, so without this the user only finds out an hour later, from a thin
+  // result. Self-hides when nothing is missing or an older backend omits the counts.
+  const missingFiles = missingFilesNote(
+    rejectSummary.data?.n_missing_files,
+    rejectSummary.data?.n_accepted,
+  );
   // "Was last night's sky bright?" — the honest explanation for a washed-out
   // result. Self-hiding: the endpoint returns null unless it can answer honestly.
   const skyBrightness = useQuery({
@@ -793,6 +802,21 @@ export function TargetView() {
               leftSection={<IconStack2 size={14} />}
               loading={process.isPending} onClick={() => process.mutate()}>
               Restack
+            </Button>
+          </Group>
+        </Alert>
+      ) : null}
+      {missingFiles !== null ? (
+        <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
+          title={missingFiles.title}>
+          <Text size="sm">{missingFiles.message}</Text>
+          <Group gap="xs" mt="xs">
+            <Button size="xs" variant="light" color="orange"
+              loading={rejectSummary.isFetching}
+              onClick={() => {
+                qc.invalidateQueries({ queryKey: ["reject-summary", safe] });
+              }}>
+              Check again
             </Button>
           </Group>
         </Alert>
