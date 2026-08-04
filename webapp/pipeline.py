@@ -2147,6 +2147,10 @@ def _stack_target(
         # than raising; the real StackResult always carries them.
         "n_offered": getattr(result, "n_offered", 0),
         "n_align_failed": getattr(result, "n_align_failed", 0),
+        # Of those failures, how many were simply missing files (cleared cache +
+        # offline share, unmounted drive) — so the walk-away user is pointed at
+        # the storage, not sent hunting for mixed targets or bad plate-solves.
+        "n_unreadable": getattr(result, "n_unreadable", 0),
         # The outlier-rejection tally, so the Jobs "Process target" result can
         # name the invisible clean-up (e.g. a lone satellite/plane trail that a
         # walk-away small-stack auto-picked min/max removed) right where the

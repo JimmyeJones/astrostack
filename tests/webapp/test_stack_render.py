@@ -655,6 +655,60 @@ def test_stack_info_surfaces_frame_accounting(client, solved_library):
     assert fa["n_align_failed"] == 150
 
 
+def test_stack_info_surfaces_unreadable_subs_separately(client, solved_library):
+    """The gap between offered and combined has two very different causes, and
+    the fix differs: a sub whose file wasn't on disk is a storage problem, not an
+    alignment one. The NUNREAD card rides through the info endpoint so the
+    History panel can name the right one."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["NOFFERED"] = 500
+                hdul[0].header["NALIGNFL"] = 142
+                hdul[0].header["NUNREAD"] = 142
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    fa = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["frame_accounting"]
+    assert fa["n_offered"] == 500
+    assert fa["n_align_failed"] == 142
+    assert fa["n_unreadable"] == 142
+
+
+def test_stack_info_frame_accounting_omits_unreadable_on_an_older_master(
+        client, solved_library):
+    """A master stacked before the readability preflight existed carries NOFFERED
+    but no NUNREAD — the summary still resolves, just without the extra key, so
+    the frontend's "absent means 0" fallback keeps the old wording."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["NOFFERED"] = 2000
+                hdul[0].header["NALIGNFL"] = 150
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    fa = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["frame_accounting"]
+    assert fa["n_offered"] == 2000
+    assert "n_unreadable" not in fa
+
+
 def test_stack_info_frame_accounting_absent_on_older_master(client, solved_library):
     """A master recorded before frame accounting existed has no NOFFERED card, so
     frame_accounting is None (older masters degrade gracefully)."""
