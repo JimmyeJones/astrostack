@@ -34,6 +34,7 @@ from webapp.schemas import (
     TransparencyTrendOut,
     TransparencyTrendPointOut,
 )
+from webapp.site_location import resolve_site_lon
 
 router = APIRouter(prefix="/api/targets", tags=["targets"])
 
@@ -391,19 +392,37 @@ def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
     integration, median FWHM, and a one-word verdict (sharp / soft / hazy) from
     metrics already stored, so a clouded-out or soft night is easy to spot. Purely
     informational and read-only — it never rejects anything. ``[]`` when there's
-    nothing datable (no frame carries a capture time)."""
+    nothing datable (no frame carries a capture time).
+
+    Each night also carries the **observing-night date** it belongs to, bucketed
+    noon-to-noon in the observer's local time exactly as the Dashboard's imaging
+    calendar does. Labelling from the raw UTC start instead named the *following*
+    day for any observer west of UTC — a 21:00 local start in the Americas is
+    already tomorrow in UTC — so the two cards disagreed about which night a
+    session was."""
+    from seestack.activity_calendar import night_date_of
     from seestack.session_recap import nights_breakdown
 
+    settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
         nights = nights_breakdown(proj)
+        lon = resolve_site_lon(request, lib, settings.site_lon)
     finally:
         proj.close()
         lib.close()
+
+    def _night_date(ts: str | None) -> str | None:
+        if not ts:
+            return None
+        d = night_date_of(ts, lon)
+        return d.isoformat() if d is not None else None
+
     return [
         NightSummaryOut(
             start_utc=n.start_utc,
             end_utc=n.end_utc,
+            night_date=_night_date(n.start_utc),
             n_frames=n.n_frames,
             n_kept=n.n_kept,
             n_set_aside=n.n_set_aside,

@@ -13,11 +13,16 @@ library with no site header can't turn one request into thousands of reads.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 # Cap how many frames we probe for a site location so a big library with no
 # SITELAT header anywhere can't turn one request into thousands of header reads.
 MAX_SITE_PROBE_FRAMES = 24
+
+# The detected longitude only changes when the library does, so a short app-level
+# cache keeps a locationless library from being re-probed on every page load.
+SITE_LON_CACHE_TTL_S = 120.0
 
 
 def parse_angle(value: Any) -> float | None:
@@ -99,3 +104,34 @@ def detect_site_from_library(lib, *, max_probes: int = MAX_SITE_PROBE_FRAMES  # 
             if proj is not None:
                 proj.close()
     return None
+
+
+def resolve_site_lon(request: Any, lib: Any, configured_lon: float | None) -> float | None:
+    """The observer's longitude (+E deg) to bucket **observing nights** with.
+
+    An explicit Settings location wins; otherwise the longitude is sniffed from a
+    frame's ``SITELONG`` header (the common Seestar case — a beginner rarely
+    configures one) and cached on the app for
+    :data:`SITE_LON_CACHE_TTL_S`, keyed on the target set so a scan invalidates
+    it. ``None`` means "unknown", and callers then fall back to UTC noon-to-noon.
+
+    Shared by **every surface that names a night** — the Dashboard's imaging
+    calendar and the Target page's Nights card — so the two can never disagree
+    about which night a given session belongs to. A broken library degrades to
+    ``None`` (UTC) rather than failing the request.
+    """
+    if configured_lon is not None:
+        return configured_lon
+    try:
+        targets = lib.list_targets()
+    except Exception:  # noqa: BLE001 — a broken library just means "unknown site"
+        return None
+    tsig = tuple(sorted((t.safe_name, t.last_activity_utc or "") for t in targets))
+    cache = getattr(request.app.state, "activity_lon_cache", None)
+    now = time.monotonic()
+    if cache and cache["sig"] == tsig and (now - cache["at"]) < SITE_LON_CACHE_TTL_S:
+        return cache["lon"]
+    site = detect_site_from_library(lib)
+    lon = site[1] if site is not None else None
+    request.app.state.activity_lon_cache = {"sig": tsig, "at": now, "lon": lon}
+    return lon

@@ -148,6 +148,12 @@ class NightSummaryOut(BaseModel):
 
     start_utc: str | None = None
     end_utc: str | None = None
+    # The *observing night* this session belongs to, as ISO ``YYYY-MM-DD`` — the
+    # noon-to-noon local date the imaging calendar buckets on, so the two surfaces
+    # can never name the same session's night differently. Additive and optional:
+    # ``None`` when the start time can't be parsed, and an older frontend simply
+    # keeps labelling from ``start_utc``.
+    night_date: str | None = None
     n_frames: int
     n_kept: int
     n_set_aside: int
