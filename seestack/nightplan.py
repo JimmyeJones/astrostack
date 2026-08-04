@@ -673,10 +673,26 @@ def _score(max_alt: float, minutes_above: float, dark_minutes: float,
         alt_component = float(np.clip((max_alt - min_alt) / (alt_cap - min_alt), 0.0, 1.0))
     window_component = float(np.clip(minutes_above / dark_minutes, 0.0, 1.0))
     base = 0.5 * alt_component + 0.5 * window_component
-    proximity = float(np.clip((60.0 - moon_sep) / 60.0, 0.0, 1.0))
-    moon_penalty = (0.4 * float(np.clip(moon_illum, 0.0, 1.0)) * proximity
-                    * float(np.clip(moon_up_fraction, 0.0, 1.0)))
-    return round(100.0 * base * (1.0 - moon_penalty), 1)
+    return round(100.0 * base * (1.0 - moon_penalty(moon_sep, moon_illum,
+                                              moon_up_fraction)), 1)
+
+
+def moon_penalty(moon_sep_deg: float, moon_illum: float,
+                 moon_up_fraction: float = 1.0) -> float:
+    """0..0.4 "how much does the Moon spoil this target tonight?" factor.
+
+    A bright Moon close to the target subtracts up to 40%; a faint or far one
+    barely matters. ``moon_up_fraction`` is the share of the target's usable
+    window during which the Moon is actually above the horizon, so a bright Moon
+    that has already set (or hasn't yet risen) doesn't dock the score.
+
+    Public and single-definition on purpose: both the whole-night plan score and
+    the "point here right now" ranking apply the *same* penalty, so the two
+    surfaces can never disagree about whether the Moon is in the way.
+    """
+    proximity = float(np.clip((60.0 - moon_sep_deg) / 60.0, 0.0, 1.0))
+    return (0.4 * float(np.clip(moon_illum, 0.0, 1.0)) * proximity
+            * float(np.clip(moon_up_fraction, 0.0, 1.0)))
 
 
 def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWindow,
@@ -1419,7 +1435,13 @@ def rank_targets_now(
     picks: list[TonightPick] = []
     for i, (t, o) in enumerate(zip(usable, obs, strict=True)):
         alt_now = float(alts[i]) if alts is not None else o.max_altitude_deg
-        sky = _sky_component(alt_now, o.minutes_above_min_alt, min_altitude_deg)
+        # The same Moon penalty ``/tonight`` applies, so the two surfaces can't
+        # disagree: recommending a faint target sitting beside a full Moon over
+        # one in clean sky is exactly the advice that loses a beginner's trust.
+        spoil = moon_penalty(o.moon_separation_deg, illum,
+                             1.0 if o.moon_up_fraction is None else o.moon_up_fraction)
+        sky = _sky_component(alt_now, o.minutes_above_min_alt,
+                             min_altitude_deg) * (1.0 - spoil)
         depth = _depth_component(t.total_exposure_s)
         score = round(100.0 * sky * depth, 1)
         if score <= 0.0:
@@ -1435,7 +1457,7 @@ def rank_targets_now(
             noise_gain=round(gain, 3),
             score=score,
             reason=_pick_reason(t.name, alt_now, o.minutes_above_min_alt, hours,
-                                gain, placed_now=plan.dark_now),
+                                gain, placed_now=plan.dark_now, moon_spoil=spoil),
         ))
     picks.sort(key=lambda p: (-p.score, -(p.altitude_now_deg or 0.0)))
     plan.picks = picks[:max(0, int(limit))]
@@ -1474,17 +1496,25 @@ def _depth_only_picks(targets: list[LibraryTarget], limit: int, *,
     return picks[:max(0, int(limit))]
 
 
+# Above this share of the score lost to the Moon, say so — below it the Moon is a
+# detail the beginner doesn't need in a one-sentence recommendation.
+_MOON_WORTH_MENTIONING = 0.12
+
+
 def _pick_reason(name: str, altitude_deg: float, minutes_left: float,
-                 hours_captured: float, gain: float, *, placed_now: bool) -> str:
+                 hours_captured: float, gain: float, *, placed_now: bool,
+                 moon_spoil: float = 0.0) -> str:
     """The one plain-language sentence the card shows — no jargon, no numbers the
     user can't act on."""
     where = (f"{name} is {round(altitude_deg)}° up right now" if placed_now
              else f"{name} climbs to {round(altitude_deg)}° tonight")
     window = _hours_phrase(minutes_left / 60.0)
     have = _have_phrase(hours_captured, "it", capitalise=False)
+    moon = (" The Moon is fairly close to it tonight, so expect a brighter sky."
+            if moon_spoil >= _MOON_WORTH_MENTIONING else "")
     return (f"{where} and stays shootable for another {window}. "
             f"So far {have} — another hour would cut its noise about "
-            f"{round(gain * 100)}%.")
+            f"{round(gain * 100)}%.{moon}")
 
 
 def _have_phrase(hours: float, subject: str, *, capitalise: bool = True) -> str:

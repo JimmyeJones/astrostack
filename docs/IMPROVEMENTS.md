@@ -14548,6 +14548,10 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.231.1** — "Point here right now" now respects the Moon: the whole-night plan's proximity penalty is
+  extracted into one shared `nightplan.moon_penalty` and applied to the right-now sky term too, so a faint target
+  sitting beside a full Moon can't out-rank one in clean sky — and the card says "the Moon is fairly close to it
+  tonight" instead of silently down-ranking. Tests: `tests/test_nightplan.py` (+1).
 - **v0.231.0** — NEW beginner feature "Point here right now": a Dashboard card that picks, from the user's *own*
   targets, the one that's best-placed at this moment **and** would gain most from another hour — scored as
   (altitude now + dark sky left) × the √N noise cut one more hour would buy — with a one-sentence plain-language
