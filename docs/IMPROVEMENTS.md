@@ -6903,6 +6903,55 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+- ~~**NEW IDEA (Builder 2026-08-04, traced while auditing the stack dispatcher) — a user who saved stack defaults
+  *before* `auto_reject` existed silently gets **no effective outlier rejection** on every small stack, and nothing
+  anywhere says so.**~~ — **SHIPPED v0.230.1** (Builder 2026-08-04, same run/branch
+  `claude/relaxed-turing-tfkv6i`, filed and built back to back). Built exactly as specced, advisory-only — **no
+  default flipped, no pixel changed**. `seestack/stack/stacker.py::_auto_kappa_min_frames` is now the public
+  `kappa_min_frames` (one definition, so the note and the method-picker can never disagree — the alternative was
+  re-deriving the closed form in a second module and letting it drift), and `seestack/stackhealth.py` gained a
+  `rejection_blind` note: *"With only 5 subs, sigma-clip outlier removal couldn't drop anything — it needs about 11
+  frames before a passing satellite or cosmic-ray hit stands out enough to clip. Re-stack with "Auto outlier
+  removal" switched on and AstroStack will use the min/max method instead, which works from 3 subs up."* It is keyed
+  off the **recorded** `rejection_mode` — the authoritative account of what actually ran — so an auto-picked small
+  stack (`min-max-reject`) and a drizzle run (`drizzle-reject`) structurally cannot trip it, and a pre-schema-10 run
+  with no recorded mode stays silent rather than guessing. The threshold comes from the run's **own** stored
+  `sigma_kappa` (a looser κ=2 crosses over at 7 frames, so an 8-sub stack there is genuinely fine and says nothing),
+  falling back to the shipped default 3.0 when `options_json` is garbled/absent. Ranked at 25 — below the
+  calibration and coverage next-steps, so it can't displace them in the card's two slots. Frontend: a `"restack"`
+  action wired to `/targets/{safe}/stack` ("Re-stack with Auto outlier removal →"), off-page so it keeps its link
+  inside the editor too. Upgrade-safe: read-only advisory over fields already stored, no config/DB/API-shape/default
+  change. Tests (+10 engine, +1 frontend): `tests/test_stackhealth.py` (fires at n=5 with the right threshold and
+  action; silent at n=40, at exactly 11, for min/max, for drizzle, and for a mode-less old run; honours a custom κ
+  both ways; falls back to κ=3 across five garbled `options_json` shapes; singularises a 1-sub stack; ranks below
+  calibration) and `StackHealthCard.test.tsx` (the new action link, including with no run id).
+  *(Original entry kept below for provenance.)*
+  *(Autonomy + image quality + trust — PRIORITY 2/4; size S; advisory only, no default flip.)*
+  **The maths (verified, not guessed):** κ-σ is blind to a lone outlier below `_auto_kappa_min_frames(κ)` = **11
+  frames at the default κ=3** — a single bright sample's z-score against statistics that still include it peaks at
+  `(n−1)/√n`, so at n=5 a satellite trail scores **z ≈ 1.79** against a κ of 3 and survives untouched. The engine
+  knows this and has the cure (`auto_reject` → order-statistic min/max, which bites from n=3), and **both** default
+  paths already opt in: the Stack form seeds `auto_reject: true` for a *never-configured* target
+  (`webapp/routers/stack.py:167`), and the walk-away/Process-target chain sets it when the merged options carry no
+  explicit rejection key (`webapp/pipeline.py:2081`). **The hole is the middle case:** anyone who ever pressed
+  "Save as defaults" (or set a global `default_stack_options`) before v0.143.0 has `sigma_clip: true` baked in, which
+  *is* an explicit rejection key — so both opt-ins correctly stand down, and every stack of 3–10 subs runs a full,
+  expensive two-pass κ-σ that mathematically cannot remove anything. Worse, it's **invisible**: the run records
+  `rejection_mode="sigma-clip"` with `rejection_fraction` ≈ 0, `stack_health`'s clean-up note self-hides below its
+  0.05 % floor, and the beginner just has a satellite trail in their first-light picture. (At n=3 with the plain
+  default it's starker still — the dispatcher falls through to an unrejected mean and records `rejection_mode`
+  NULL.) **Idea (advisory, upgrade-safe — do NOT blind-flip the default, §9):** add a `stack_health` note that fires
+  when a finished run used κ-σ at `n_frames_used < _auto_kappa_min_frames(sigma_kappa)` (κ read from the run's
+  `options_json`, defaulting to 3.0), saying it plainly — *"With only 7 subs, sigma-clip rejection can't remove a
+  lone satellite trail; it needs about 11 frames before an outlier stands out enough to clip. Turn on **Auto outlier
+  removal** and AstroStack will use min/max instead, which works from 3 subs up."* — wired to an action that opens
+  the target's Stack form. Optionally mirror it as an inline hint on the Stack form itself when the accepted-sub
+  count is below the threshold and κ-σ is the chosen method. **Care:** `_auto_kappa_min_frames` is private; either
+  make it public or re-derive the closed form in `stackhealth` with a cross-reference (don't import a private into
+  another module). Keep the note below the actionable calibration/solve notes in the ranking so it never buries them.
+  **Tests:** a run at n=5 with `sigma_clip` and no `auto_reject` gets the note; the same run at n=20 doesn't; a run
+  that used min/max (or `auto_reject`) never gets it; a drizzle run never gets it; a missing/garbled `options_json`
+  stays silent rather than guessing.
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-24) — auto-restack an uncalibrated target once confident calibration masters
   become available, so the darks/flats a beginner adds *after* their first stack actually get used without a manual
   reprocess.**~~ — **SHIPPED v0.189.0** (Builder 2026-07-24, branch `claude/pensive-faraday-rzctfj`; regression-tested).
@@ -11497,8 +11546,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   beginner-feature pipeline stocked with a fresh *enjoy/share* capability that no existing card covers.
 
   </details>
-- **FOLLOW-ON to "My best pictures" (Builder 2026-07-23) — a "Pin to My best" toggle so a beginner can force-include
-  a sentimental favourite the auto-ranker didn't surface.** *(Friendliness / "enjoy + share" pillar, PRIORITY 3;
+- ~~**FOLLOW-ON to "My best pictures" (Builder 2026-07-23) — a "Pin to My best" toggle so a beginner can force-include
+  a sentimental favourite the auto-ranker didn't surface.**~~ — **SHIPPED v0.230.0** (Builder 2026-08-04, branch
+  `claude/relaxed-turing-tfkv6i`). Built on the pin the app **already had** rather than the new `pinned_best` column
+  the spec proposed: "Set as cover" (v0.145.0) already stores a per-target favourite run
+  (`targets.cover_stack_run_id`), and the wall was the one surface silently ignoring it — so **no schema change, no
+  migration, no new storage, no default flip**. Two behaviours, both from that one field:
+  **(1) the cover represents its target on the wall.** `GET /api/gallery/best` used to take each target's *newest*
+  preview-having run unconditionally; a new pure `_representative_run(runs, cover_run_id)`
+  (`webapp/routers/gallery.py`) now mirrors `targets._cover_preview_path` exactly — the pinned cover wins when it's
+  set *and* still has a preview on disk, otherwise the newest run as before — so the picture someone chose to
+  represent a target represents it on the screen literally titled *My best pictures* too. A cover that was pruned,
+  or whose preview file is gone, degrades silently to the newest picture instead of dropping the target off the wall.
+  **(2) a pinned favourite is never cut by the ranking.** `seestack/portfolio.py` gains an additive
+  `PortfolioEntry.pinned` / `RankedEntry.pinned`; `rank_portfolio` sorts pinned entries ahead of the unpinned tail
+  (still best-first among themselves) so a modest favourite survives `limit` against a wall of deeper stacks — and
+  it deliberately **does not touch the score**, so the transparent "3.4 h · 500 frames" caption stays honest.
+  **Frontend:** additive `BestPicture.pinned`; pure `isPinnedPick` / `pinnedNote` helpers; a yellow **Pinned** badge
+  on the wall card whose tooltip names the target and says how to undo it; a small star on the Dashboard strip's
+  pinned card (so leading the strip isn't a mystery on a card with no room for a badge); the wall's intro copy now
+  tells a beginner *how* to pin one ("Open that target's History and press **Set as cover**"); and History's cover
+  button explains the wider promise, says "pinned to My best pictures too" on success, and invalidates
+  `["galleryBest"]` so both wall and strip refresh immediately. Upgrade-safe: one additive response field, one
+  additive dataclass field with a `False` default, no config/DB/on-disk/API-shape change — an install with nothing
+  pinned gets byte-for-byte the old ordering. Tests (+15): `tests/test_portfolio.py` (+6 — a pin leads a much deeper
+  stack, doesn't change any score, is echoed on the ranked entry, survives `limit=1`, several pins stay ranked among
+  themselves, old-style entries default unpinned), `tests/webapp/test_gallery_best.py` (+4 — the cover represents its
+  target instead of the newest stack while an unpinned target reads `pinned: false`, a favourite wins the single slot
+  it would otherwise lose, and both degraded covers — preview file deleted, run id dangling — fall back to newest with
+  `pinned: false`), plus frontend `bestPictures.test.ts` (+3, including an older backend that omits the field),
+  `BestPictures.test.tsx` (+2) and a new `BestPicturesStrip.test.tsx` (+4). *(Original spec kept below for
+  provenance — note it called for a new `pinned_best` column and a new POST; both proved unnecessary.)*
+  *(Friendliness / "enjoy + share" pillar, PRIORITY 3;
   size S–M.)* **Why:** the shipped v0.173.0 wall ranks purely on the quality proxy (integration/noise/frames/
   coverage), which is the right *default* — but a beginner's *favourite* picture isn't always their deepest one (a
   lucky comet grab, a first-ever galaxy, a shot with sentimental value). The Scout's original spec called for an
@@ -13685,6 +13764,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY 3; Builder-filed 2026-07-16.)*
 
 ### Performance (only with a measurement)
+- **NEW IDEA (Builder 2026-08-04, spotted while shipping the pinned-cover wall v0.230.0) — `GET /api/gallery/best`
+  opens *every* target's `project.sqlite` on every request, uncached, and the Dashboard hits it on every load.**
+  *(Performance — PRIORITY 2/6; size S–M; **measure first, per this section's rule — do not optimise on suspicion**.)*
+  `get_best_pictures` (`webapp/routers/gallery.py`) walks `lib.list_targets()` and does `Project.open` +
+  `iter_stack_runs` + a `Path.exists()` per candidate run for **each** target, with no cache — and there are two
+  callers per Dashboard render path: `BestPicturesStrip` (`limit=4`) and the full wall, on distinct query keys, so
+  visiting the Dashboard and then the wall pays the whole walk twice. Contrast `_rollup_stacks` and the calibration
+  coverage endpoint, which both cache (60 s TTL) precisely because they do this kind of cross-target walk. On the
+  owner's library (dozens of targets, hundreds of runs) this may already be the most expensive read on the
+  Dashboard. **Idea:** give the endpoint the same short-TTL cache the roll-up uses, keyed on a cheap Library-level
+  signature (target count + newest `last_stack_utc` + the covers), and have the strip slice the cached full result
+  rather than issuing its own request. **Care:** the cache must invalidate promptly on "Set as cover" — the wall's
+  representative now depends on it (the frontend already invalidates its own query, but a server-side TTL would
+  hold a stale answer for up to the TTL), so either include `cover_stack_run_id` in the signature or keep the TTL
+  short. **Gate:** time the endpoint on a realistic library first; if it's already single-digit milliseconds, don't
+  build this — the current code is simpler and correct.
 - **NEW IDEA (Builder 2026-08-04, spotted while fixing the noise-ratio full-master read v0.229.6) — decimate a
   giant master in row blocks instead of materialising the whole canvas first.** *(Performance / RAM robustness on
   the live NAS — PRIORITY 2/4; size M; **needs a measurement before and after**, per this section's rule.)*

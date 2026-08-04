@@ -36,3 +36,18 @@ export function bestPictureClauses(pic: BestPicture): string[] {
 export function bestPictureReason(pic: BestPicture): string {
   return bestPictureClauses(pic).join(" · ");
 }
+
+/** True when this picture is on the wall because the user pinned it as its
+ * target's cover, rather than purely on the automatic ranking. Tolerates an
+ * older backend that never sends the field (nothing is pinned there). */
+export function isPinnedPick(pic: BestPicture): boolean {
+  return pic.pinned === true;
+}
+
+/** The plain-language "why is this one here?" tooltip for a pinned picture —
+ * the wall's score line can't explain a favourite the ranking didn't choose, so
+ * say it outright. Returns null for an ordinary auto-picked entry. */
+export function pinnedNote(pic: BestPicture): string | null {
+  if (!isPinnedPick(pic)) return null;
+  return `You picked this as ${pic.target_name}'s cover, so it always has a place here — even if another stack scores higher. Unpin it from that target's History page.`;
+}

@@ -861,6 +861,11 @@ export interface BestPicture {
   preview_url: string;
   // Quality-blend score in [0, 1], relative to this Library's own collection.
   score: number;
+  // True when this is the picture the user pinned as its target's cover ("Set as
+  // cover" in History): it represents that target here instead of the newest
+  // stack, and is floated above the ranked tail so the automatic ranking can't
+  // hide it. Absent from an older backend, which never pinned anything.
+  pinned?: boolean;
 }
 
 export interface LogEntry {

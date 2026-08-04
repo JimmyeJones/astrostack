@@ -57,6 +57,16 @@ describe("noteAction", () => {
     // Still linked inside the editor — it's an off-page action.
     expect(noteAction("solve_help", "M_42", 7, true)?.href).toBe("/settings");
   });
+  it("wires restack to this target's Stack form (where the switch lives)", () => {
+    expect(noteAction("restack", "M_42", 7)).toEqual({
+      label: "Re-stack with Auto outlier removal →",
+      href: "/targets/M_42/stack",
+    });
+    // Off-page from the editor too, so it keeps its link there.
+    expect(noteAction("restack", "M_42", 7, true)?.href).toBe("/targets/M_42/stack");
+    // It doesn't need a run to point at, unlike trim_border.
+    expect(noteAction("restack", "M_42", null)?.href).toBe("/targets/M_42/stack");
+  });
   it("returns null for a note with no wired action", () => {
     expect(noteAction(null, "M_42", 7)).toBeNull();
     expect(noteAction("something_else", "M_42", 7)).toBeNull();
