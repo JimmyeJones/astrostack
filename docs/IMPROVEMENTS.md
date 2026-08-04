@@ -6095,9 +6095,30 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-08-04, spotted while shipping the unreadable-subs preflight v0.230.2) — tell the user
-  their files are gone *before* they walk away, not after the stack comes out thin.** *(Autonomy / trust —
-  PRIORITY 2; size S; additive, read-only.)* v0.230.2 counts the frames whose Stage-1 cache *and* source have both
+- ~~**NEW IDEA (Builder 2026-08-04, spotted while shipping the unreadable-subs preflight v0.230.2) — tell the user
+  their files are gone *before* they walk away, not after the stack comes out thin.**~~ — **SHIPPED v0.232.0**
+  (Builder 2026-08-04, branch `claude/relaxed-turing-9owkq2`). `GET /api/targets/{safe}/frames/reject-summary` —
+  the payload the Target page already fetches once per load — now also carries an additive `n_missing_files` (the
+  accepted subs with **neither** on-disk path present right now) and the `n_accepted` denominator it was counted
+  over. `count_unreadable_frames` was widened from `list[FrameRow]` to `Iterable[FrameRow]` (a strictly
+  backward-compatible signature change; it was a `sum()` over the argument already) so the endpoint can hand it
+  the lazy `iter_frames(accepted_only=True)` cursor and never materialise 5 000 rows. **The "measure it" caveat
+  the idea raised is answered:** 5 000 accepted frames cost **44 ms** when every file is present, **139 ms** in the
+  worst case where every one is gone (two stats each) — comfortably inside a page-load fetch, and the query is
+  *not* polled, so no cache or behind-a-button deferral was needed. Deliberately kept **out** of
+  `summarize_rejections`: a vanished file is a transient storage state (reconnect the drive and it's gone), not a
+  reason a frame was dropped, and folding it into the buckets would double-count the `qc_error` ones. **Frontend:**
+  a pure, self-hiding `missingFilesNote` (`components/target/missingFiles.ts`) turns the two numbers into the one
+  sentence that names the cause *and* the fix, in the same voice as the after-the-fact `missingSubsNote` on the
+  Jobs page, plus an orange Target-page callout with a **"Check again"** button that simply re-fetches — so
+  reconnecting the share and clicking makes the warning disappear without a rescan. Returns `null` when nothing is
+  missing, when the counts are absent (an older backend omits both fields) or garbled, and clamps a count that
+  exceeds its own denominator. Upgrade-safe: two additive response fields, no config/DB/on-disk/default change.
+  **Tests (+14):** `tests/webapp/test_api.py` (+3 — two accepted subs' files deleted are counted while the
+  accepted total and the breakdown's accounting stay put, a *rejected* sub's file vanishing is ignored, and a
+  cleared Stage-1 cache with the original still present is **not** a missing sub), `missingFiles.test.ts` (+8) and
+  `Target.test.tsx` (+3 — the callout, silence when everything is readable, silence on an older backend).
+  *(Original idea kept below for provenance.)* v0.230.2 counts the frames whose Stage-1 cache *and* source have both
   vanished, but it only does so **inside `run_stack`** — so the earliest a user learns that half their library is
   on an unplugged drive is when a walk-away stack finishes thin. The same `count_unreadable_frames(frames)` helper
   (`seestack/io/project.py`) is a plain `stat()` per row and could run on the **Target page** (or the scan

@@ -26,7 +26,7 @@ import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 log = logging.getLogger(__name__)
 
@@ -210,7 +210,7 @@ def readable_frame_path(frame: "FrameRow") -> str | None:
     return None
 
 
-def count_unreadable_frames(frames: list[FrameRow]) -> int:
+def count_unreadable_frames(frames: Iterable["FrameRow"]) -> int:
     """How many of ``frames`` have *neither* on-disk path present right now.
 
     A frame the database still lists can become unreadable between scans — the
@@ -226,6 +226,9 @@ def count_unreadable_frames(frames: list[FrameRow]) -> int:
     cheap enough to run as a preflight even on a several-thousand-sub target. It
     is a *snapshot*: a share that comes back mid-run makes the count pessimistic,
     which is the safe direction for an advisory.
+
+    Accepts any iterable of frames (a list, or a lazy ``iter_frames`` cursor) so
+    a caller that only wants the number never has to materialise the rows.
     """
     return sum(1 for f in frames if readable_frame_path(f) is None)
 
