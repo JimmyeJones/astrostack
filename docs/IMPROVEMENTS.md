@@ -9860,14 +9860,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   keep unpacking inline below a size threshold or return an empty-but-valid summary plus the job id. Worth doing
   only once someone actually uploads a big archive; a few hundred MB unpacks in seconds today.
 
-- **NEW IDEA (Builder 2026-08-04, spotted while auditing night labelling) — say the *night* on the "Last session"
-  recap card too.** *(Friendliness — PRIORITY 3; size S.)* The Nights card now names each session by its observing
-  night (v0.229.1), but the "Last session" recap card beside it shows no date at all — so a beginner reading
-  "27 subs kept, 1.4 h" can't tell whether that was last night or three weeks ago, and can't line it up with the
-  Nights row below. The backend already returns `start_utc`/`end_utc` on `/session-recap`; give it the same
-  additive `night_date` the nights endpoint now carries (one `night_date_of` call through the shared
-  `resolve_site_lon`) and render "Last session — 8 Jul 2026" with the existing `nightDateLabel`. Self-hiding when
-  undatable. Small, and it closes the last surface in the night-labelling family.
+- ~~**NEW IDEA (Builder 2026-08-04, spotted while auditing night labelling) — say the *night* on the "Last session"
+  recap card too.**~~ — **SHIPPED v0.229.2** (Builder 2026-08-04, branch `claude/relaxed-turing-oieiow`).
+  `GET /api/targets/{safe}/session-recap` now carries the same additive `night_date` the nights endpoint does —
+  one `night_date_of` call resolved through the shared `resolve_site_lon`, so the recap and the Nights rows beneath
+  it can't name the same session's night differently (pinned by a test that asserts they agree). The card's heading
+  reads **"Last session — 8 Jul 2026"** via a new pure `sessionRecapTitle` (`SessionRecapCard.tsx`), which reuses
+  `nightDateLabel` and degrades to the bare "Last session" when the night can't be dated at all rather than showing
+  an em-dash placeholder. Upgrade-safe: additive optional response field (an older frontend ignores it; a newer
+  frontend against an older backend falls back to `start_utc` exactly as the Nights card does), no config/DB/
+  on-disk/default change. Tests: `tests/webapp/test_target_session_recap.py` (+3 — the local-evening night for a
+  Seattle observer whose UTC stamp says the next day, agreement with `/nights`, and the configured longitude
+  actually deciding the night) and `SessionRecapCard.test.tsx` (+3 on `sessionRecapTitle`, plus the card
+  assertions updated to the dated heading). Closes the last surface in the night-labelling family.
 
 - ~~**NEW IDEA (Builder 2026-07-30, follow-on to the v0.228.0 folder-structure-preserving upload) — accept a
   `.zip` of a Seestar folder in the browser upload.**~~ — **SHIPPED v0.229.0** (Builder 2026-08-04, branch

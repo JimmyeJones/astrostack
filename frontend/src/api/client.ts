@@ -307,6 +307,7 @@ export interface SessionRecap {
   total_kept_exposure_s: number;
   start_utc: string | null;
   end_utc: string | null;
+  night_date?: string | null;
   reject_buckets: Record<string, number>;
   quality_drift: SessionQualityDrift | null;
 }
