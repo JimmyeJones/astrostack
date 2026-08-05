@@ -55,6 +55,77 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**⭐ STACKING-ENGINE BUG (Builder 2026-08-05, found by an engine QA pass of `seestack/bg/coverage_leveling.py`;
+  REPRODUCED) — the per-coverage sky leveling *manufactures* the coloured panel step it exists to remove, at the
+  seam with the biggest offset.**~~ — **FIXED v0.232.2** (Builder 2026-08-05, branch `claude/relaxed-turing-iv0w1h`).
+  *(Image quality / correctness on the always-run stack path — PRIORITY 1/4; mosaics.)*
+  `level_by_coverage` masks bright "objects" out of each coverage level's sky median by thresholding the luminance
+  against a **canvas-wide** `median + object_sigma·σ`. That conflates "bright because it is a star or nebula" with
+  "bright because this coverage region's residual sky sits above the rest of the canvas" — and the second is exactly
+  what the pass exists to subtract. So a mosaic's *most* offset coverage level is the level most likely to read as one
+  big object, lose its sky sample to the (4 px-dilated) mask, fall under `min_pixels_per_level`, and be **skipped
+  entirely** — keeping its full residual while every neighbouring level is pushed to zero sky. Because the offsets are
+  per channel, what it leaves behind is a **coloured step at the seam**: the pass re-creates the panel step at the
+  very boundary it was meant to flatten, and does so preferentially at the worst seam.
+  **Reproduced** on a synthetic 4-level mosaic canvas (levels 1–3 wide, level 4 a 2 px-wide overlap seam, per-level
+  sky 100/104/108/112 ADU, σ = 1): levels 1–3 leveled to ~0 while the seam kept **112.0 ADU** — the 800-pixel strip
+  cleared the 200-pixel floor on size but the global mask left it only **119** sky pixels. Measured seam step after
+  leveling: **112.0 ADU → 0.10 ADU** with the fix (~1180×).
+  **The fix**, both scoped so they can only touch levels that today get *nothing*: **(1) a level-local rescue** — a
+  level that clears the pixel floor but whose sky sample the global mask starved is re-thresholded against **its own**
+  sigma-clipped statistics (`_local_sky_mask`, computed in the level's bounding box so a big mosaic doesn't pay for a
+  full-canvas dilation per rescue). Guarded by `_RESCUE_MAX_SIGMA_RATIO = 3.0`: the level's own spread must be within
+  3× the canvas sky spread, so a coverage region genuinely *filled* by a galaxy or nebula is **not** re-measured (its
+  object level must never be read as a sky offset and subtracted). **(2) an interpolated fill** — a level that still
+  can't be measured takes the offset `np.interp`-ed from the levels that could, which is linear between them and flat
+  outside, so a filled offset can never leave the measured envelope. Leaving such a level "alone" was never neutral:
+  it strands it at a different zero point from its neighbours.
+  **Unchanged where it should be:** a level below the pixel floor *in total* is a sliver, not a panel, and is still
+  left byte-for-byte untouched; a single-field stack's one well-populated level can reach neither path, so the
+  ordinary non-mosaic result is exactly what it always was. No config/DB/API-shape/on-disk change and no default
+  flipped. **Tests** (`tests/test_coverage_leveling.py`, +5; four fail before / pass after): the swallowed seam is
+  leveled with its neighbours, the step is gone in **all three** channels, an unmeasurable level takes its neighbours'
+  offset, a level filled by structured nebulosity is *not* re-measured as sky (its flux survives), and a sub-floor
+  sliver is still untouched — plus a byte-for-byte guard that uniform coverage is unaffected.
+  **Follow-up worth a future run:** the same canvas-wide threshold starves the object mask on *every* level whose sky
+  sits high, not only the ones that fall under the floor — a level that keeps just enough pixels is still measured
+  from an unrepresentative (low-side) sample. Making the object threshold per-coverage-level from the start is the
+  root fix, but it changes levels that are leveled *today*, so it needs its own measured before/after. (M, image
+  quality — PRIORITY 4.)
+
+- ~~**⭐ STACKING-ENGINE BUG (Builder 2026-08-05, the root cause behind the entry above; MEASURED) — on a mosaic the
+  panel-to-panel level offsets, not the noise, set the object-detection threshold, so the leveling pass stops masking
+  objects at all and leaves a coloured panel step behind.**~~ — **FIXED v0.232.3** (Builder 2026-08-05, branch
+  `claude/relaxed-turing-iv0w1h`). *(Image quality / correctness on the always-run stack path — PRIORITY 1/4.)*
+  This is the follow-up filed alongside v0.232.2, done in the same run once it was measurable.
+  `level_by_coverage` masked objects with a single canvas-wide `median + object_sigma·σ` of the luminance. On the
+  mosaic this pass exists for, that σ is dominated by the **between-level offsets** — the exact residual about to be
+  subtracted — not by the grain, so the threshold floats far above the noise and stops masking anything.
+  **Measured** on a realistic 4-panel synthetic S30 canvas (600×800, per-level offsets 0/15/30/45 ADU, per-sub noise
+  σ = 2 ADU, a nebula across the middle panels, 300 stars): the global threshold landed at **72 ADU** (σ measured as
+  **19.9** against a true 2) and caught only **11 %** of the nebula, so every level's "sky" median absorbed
+  nebulosity — leaving **5.23 ADU of residual coloured panel step *after* leveling**, on a 2 ADU noise floor. The
+  same scene with no panel offsets leaves 0.36 ADU, so the pass was ~15× worse precisely where it is needed.
+  **The fix:** objects are detected against each pixel's **own coverage level's** sky. A rough per-level sky (that
+  level's sigma-clipped median) is subtracted first; the threshold is then measured on the detrended luminance, where
+  σ is grain again (**19.9 → 5.9**, catching **54 %** of the nebula). **Result: 5.23 ADU → 0.16 ADU** of residual
+  spread — indistinguishable from the offset-free case (0.12).
+  **Guard added with it:** a level whose *retained* sample is more than `_RESCUE_MAX_SIGMA_RATIO` (3×) the canvas's
+  own retained-sky spread is **not** measured — a coverage region genuinely filled by a galaxy or nebula must not
+  have the object's level read as its sky offset and subtracted. Those levels take the interpolated neighbour offset
+  from v0.232.2 instead, so their structure survives intact (pinned by a test).
+  **Unchanged where it should be:** on a **single coverage level** the detrend is one constant subtracted from the
+  pixels and the threshold alike, so the mask — and the whole result — is exactly what it always was (pinned as an
+  invariance: lifting the entire input by 500 ADU changes no output pixel beyond float32 resolution). An ordinary
+  non-mosaic stack is unaffected.
+  **No slowdown:** the added per-level locating statistics read a capped, deterministically-strided 250k-sample
+  subset (`_robust_stats`), so a 20 MP / 8-level canvas takes **9.50 s — identical to before** (14.2 s without the
+  cap). No config/DB/API-shape/on-disk change and no default flipped.
+  **Tests** (`tests/test_coverage_leveling.py`, +3; two fail before / pass after): the panel-offset scene's residual
+  spread stays under 1 ADU (it was 5.2), an unmeasurable middle level takes the offset *interpolated* between its
+  neighbours (115 from 100 and 130 — not either neighbour's value, not its own ~2750 ADU level), and a
+  single-coverage-level image is invariant to a global pedestal.
+
 > **Deep audit — FINAL-IMAGE QUALITY of the one-click auto chain MEASURED end-to-end on realistic synthetic S30
 > stacks; the deferred quality sweep is done and the owner's "results look broken" now has measured root causes
 > (Audit 2026-07-26, branch `claude/astrostack-deep-audit-485gr7`).** Baseline suites green (Python **2040 passed,
@@ -9097,6 +9168,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **NEW IDEA (Builder 2026-08-05, spotted while fixing the coverage-leveling seam bugs) — measure the residual
+  panel-seam step after leveling and *say so* when one survives.** *(Trust / friendliness — PRIORITY 3; size S–M.)*
+  The owner had to report the "multicolour grid" himself because **nothing in the app measures whether the panel
+  seams actually came out flat.** After `level_by_coverage` runs, the check is nearly free and uses numbers it has
+  already computed: each coverage level's post-leveling sky, per channel. If the spread across neighbouring levels
+  is still large compared with the frame's own noise, the seams will be visible — so record it (a nullable
+  `seam_residual` on the run record, or just the stack note) and let **"How's my stack?"** say, in plain words,
+  *"panel seams evened out"* vs *"some panel seams may still show — worth a look."* **Why it's worth having:** this
+  is the one failure mode of a mosaic that a beginner can see but can't diagnose, and the whole v0.225.0/v0.232.x
+  chain of fixes was found only because a human eyeballed an export. A number on the run makes the next regression
+  self-reporting. **Care:** it must self-hide on a single-field stack (one coverage level = nothing to compare), and
+  the verdict wording must not alarm on a level whose spread is genuinely below the noise. Additive/read-only.
+- **NEW IDEA (Builder 2026-08-05, spotted in the same file) — unify the two models of "how sky varies with coverage
+  level" in `level_by_coverage`.** *(Image quality / tidying — PRIORITY 4; size S.)* The pass now carries two: the
+  long-standing weighted **quadratic** `smooth_across_levels` fit for levels it measured, and the new `np.interp`
+  **linear** fill for levels it could not. So a filled level lands on a slightly different curve from the one its
+  measured neighbours were moved onto — small, but it is exactly the kind of low-frequency inconsistency that traces
+  the coverage map. **Slice:** fit the trend once (weighted by sky-pixel count, clamped to the measured envelope as
+  today) and evaluate it for *both* kinds of level, keeping the current behaviour when there are too few measured
+  levels to fit. **Care:** the clamp is what stops a gapped extrapolation from inventing a seam (see the shipped
+  `test_smoothing_does_not_extrapolate_a_seam_onto_a_gapped_overlap_level`) — it must survive the merge, and the
+  measured levels' own values must not move, or this stops being tidying and becomes a behaviour change.
 - **MEASURED GROUND TRUTH (Builder 2026-07-30, engine QA probe — no code change needed; recorded so no future
   run re-derives it).** Ran the real `run_stack` end-to-end on synthetic 8-sub Seestar sets (480×320, shared
   stars, independent per-sub noise) to check what the rejection modes actually do to the *final image*:
@@ -10736,45 +10830,45 @@ problems. Dogfood it every big-picture run and fix root causes.
   note), and the noise-axis "cleanest yet" is already shipped (`CleanestBadge`). (S, friendliness/enjoy — PRIORITY 3.)
   *(Original idea kept below for provenance.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!": when a fresh stack of a target you've shot before
-  comes out sharper (or deeper) than your previous best of that same target, say so with a small celebratory callout —
-  so a beginner feels the progress of adding subs / catching better seeing, and learns what "better" looks like.**
-  *(Pillar: 3 friendliness + enjoy/motivation; size S–M.)* **The gap (verified this run):** the app already keeps every
-  stack run per target (History), each with `n_frames_used`, total integration, and a median-FWHM sharpness read, and
-  it has a cross-target "My best pictures" portfolio wall and within-target *visual* timelapse/A-B views — but
-  **nothing tells a beginner, on a *new* result, that it just beat their own previous best of that target.** A hobbyist
-  re-shooting M31 across several nights has no at-a-glance "this one's your sharpest yet" signal; they'd have to eyeball
-  the History table and compare FWHM numbers themselves (which a beginner won't). That "you set a new personal best" beat
-  is one of the most motivating moments in the hobby, and the raw material is already stored. **The feature (beginner
-  idiom):** on a finished stack's result card, when its sharpness (median FWHM, lower = better) or integration depth is
-  the best among that target's prior finished runs, show one calm line — *"✨ Your sharpest M31 yet — 2.1″ stars, beating
-  your 2.4″ from 12 Jul."* / *"✨ Your deepest M42 yet — 3.1 h, more than any night before."* Says nothing (card hidden)
-  when it's the first run or not a best. **Distinct from what exists:** "My best pictures" ranks *across* targets and is
-  a browsable wall; the timelapse/A-B compare *within* one target *visually*; readiness answers "keep shooting?". This is
-  a *per-target personal-record* beat on the moment a new result lands — motivation, not a wall or a slider. **Why it
-  clears the beginner bar:** universally legible ("you beat your record"), zero jargon (it *explains* what improved in
-  plain words — sharper stars / more hours), uses data already trusted, and serves the enjoy/motivation pillar (it
-  rewards consistency, which leads to better images). **Shape for one Builder run:** a pure, unit-testable helper that,
-  given the current run's `(median_fwhm, integration_s)` and the list of the target's prior finished runs, returns
-  `None` or a `{kind: "sharpness"|"depth", phrase, prior_value, prior_date}` — reuse the History run records already
-  queried for the target page; a frontend line on the result card. **Sane default, self-hiding:** first run or no
-  improvement → nothing; a run missing an FWHM read → fall back to the depth check or stay silent, never an error.
-  Tests: first run → `None`; a sharper run → sharpness beat with the right prior; an equal/worse run → `None`; ties
-  broken conservatively (strictly-better only, so it never over-claims). Upgrade-safe: purely additive read-only
-  helper + a display line, no schema/config/default/API-shape change. *(Feasibility: reuses existing per-target run
-  queries + the FWHM/integration figures already computed, no new/heavy dependency, sane default, testable — passes
-  §4's filter.)*
-  **⚠ Builder note (2026-07-24, `claude/pensive-faraday-jauk0d`) — LARGELY COVERED already; only a marginal slice
-  remains, so DEPRIORITISED (don't rebuild the covered part).** The "cleanest yet" half is **already shipped**: the
-  History run cards render a `CleanestBadge` on the single lowest-noise run (`frontend/src/components/NoiseBadge.tsx`
-  `CleanestBadge` + `cleanestRunId`, requiring ≥2 measured runs so a lone stack is never singled out), and each card
-  also shows a per-run "cleaner/noisier than last time" `NoiseDelta`. So a beginner *already* sees which stack is their
-  best-so-far on the meaningful quality axis. What's genuinely missing is only (a) a "deepest yet" axis and (b) a
-  *celebratory phrasing* naming the prior best/date. But (a) fires on **nearly every** deeper re-stack (integration
-  almost always grows when you add a night → noisy, low signal), and (b) is a wording tweak on top of the existing
-  badge — both marginal. Note the idea's headline axis, **sharpness (median FWHM), is not per-run-persisted** (the run
-  record has no FWHM column; `StackRun` exposes only `noise_sigma`/`total_exposure_s`/`n_frames_used`), so a true
-  "sharpest yet" would first need the new idea filed below (persist per-run median FWHM). Leave this unless that lands.
+  - **NEW BEGINNER FEATURE (Scout 2026-07-23) — "You beat your best!": when a fresh stack of a target you've shot before
+    comes out sharper (or deeper) than your previous best of that same target, say so with a small celebratory callout —
+    so a beginner feels the progress of adding subs / catching better seeing, and learns what "better" looks like.**
+    *(Pillar: 3 friendliness + enjoy/motivation; size S–M.)* **The gap (verified this run):** the app already keeps every
+    stack run per target (History), each with `n_frames_used`, total integration, and a median-FWHM sharpness read, and
+    it has a cross-target "My best pictures" portfolio wall and within-target *visual* timelapse/A-B views — but
+    **nothing tells a beginner, on a *new* result, that it just beat their own previous best of that target.** A hobbyist
+    re-shooting M31 across several nights has no at-a-glance "this one's your sharpest yet" signal; they'd have to eyeball
+    the History table and compare FWHM numbers themselves (which a beginner won't). That "you set a new personal best" beat
+    is one of the most motivating moments in the hobby, and the raw material is already stored. **The feature (beginner
+    idiom):** on a finished stack's result card, when its sharpness (median FWHM, lower = better) or integration depth is
+    the best among that target's prior finished runs, show one calm line — *"✨ Your sharpest M31 yet — 2.1″ stars, beating
+    your 2.4″ from 12 Jul."* / *"✨ Your deepest M42 yet — 3.1 h, more than any night before."* Says nothing (card hidden)
+    when it's the first run or not a best. **Distinct from what exists:** "My best pictures" ranks *across* targets and is
+    a browsable wall; the timelapse/A-B compare *within* one target *visually*; readiness answers "keep shooting?". This is
+    a *per-target personal-record* beat on the moment a new result lands — motivation, not a wall or a slider. **Why it
+    clears the beginner bar:** universally legible ("you beat your record"), zero jargon (it *explains* what improved in
+    plain words — sharper stars / more hours), uses data already trusted, and serves the enjoy/motivation pillar (it
+    rewards consistency, which leads to better images). **Shape for one Builder run:** a pure, unit-testable helper that,
+    given the current run's `(median_fwhm, integration_s)` and the list of the target's prior finished runs, returns
+    `None` or a `{kind: "sharpness"|"depth", phrase, prior_value, prior_date}` — reuse the History run records already
+    queried for the target page; a frontend line on the result card. **Sane default, self-hiding:** first run or no
+    improvement → nothing; a run missing an FWHM read → fall back to the depth check or stay silent, never an error.
+    Tests: first run → `None`; a sharper run → sharpness beat with the right prior; an equal/worse run → `None`; ties
+    broken conservatively (strictly-better only, so it never over-claims). Upgrade-safe: purely additive read-only
+    helper + a display line, no schema/config/default/API-shape change. *(Feasibility: reuses existing per-target run
+    queries + the FWHM/integration figures already computed, no new/heavy dependency, sane default, testable — passes
+    §4's filter.)*
+    **⚠ Builder note (2026-07-24, `claude/pensive-faraday-jauk0d`) — LARGELY COVERED already; only a marginal slice
+    remains, so DEPRIORITISED (don't rebuild the covered part).** The "cleanest yet" half is **already shipped**: the
+    History run cards render a `CleanestBadge` on the single lowest-noise run (`frontend/src/components/NoiseBadge.tsx`
+    `CleanestBadge` + `cleanestRunId`, requiring ≥2 measured runs so a lone stack is never singled out), and each card
+    also shows a per-run "cleaner/noisier than last time" `NoiseDelta`. So a beginner *already* sees which stack is their
+    best-so-far on the meaningful quality axis. What's genuinely missing is only (a) a "deepest yet" axis and (b) a
+    *celebratory phrasing* naming the prior best/date. But (a) fires on **nearly every** deeper re-stack (integration
+    almost always grows when you add a night → noisy, low signal), and (b) is a wording tweak on top of the existing
+    badge — both marginal. Note the idea's headline axis, **sharpness (median FWHM), is not per-run-persisted** (the run
+    record has no FWHM column; `StackRun` exposes only `noise_sigma`/`total_exposure_s`/`n_frames_used`), so a true
+    "sharpest yet" would first need the new idea filed below (persist per-run median FWHM). Leave this unless that lands.
 
 - ~~**NEW IDEA (Builder 2026-07-24, `claude/pensive-faraday-jauk0d`, surfaced while scoping "You beat your best!") —
   persist a per-run *median FWHM* (typical star size) on the `stack_runs` row, so sharpness becomes a first-class,
@@ -12440,39 +12534,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   orientation only. **Slice left for a future run (filed below in Ideas):** offer a North-up-oriented
   *download/share* (the share JPEG path) so a beginner can post the oriented picture, and consider the editor
   export surface (guarding the geometry-op WCS mismatch the Scout flagged). Original spec kept for provenance:
-- **NEW BEGINNER FEATURE (Scout 2026-07-21 #9) — "North up": one-click orient the shared/exported image so
-  celestial North points up, the way every reference photo of the object is drawn.** A Seestar frames the sky
-  at whatever angle the mount happened to sit, so a beginner's finished picture often comes out rotated relative
-  to every catalog/Wikipedia image of the same object — which makes it look "off" and hard to compare, and is
-  the #1 thing that separates a snapshot from a "real" astrophoto. **The app already knows the exact rotation:**
-  the stacked `master.fits` carries the output WCS (the CD matrix), and the sky-map work already extracts a
-  `rotation_deg` from it (`webapp/routers/sky.py` / the `SkyImage` geometry helpers) — the North position angle
-  is `atan2(CD1_2, CD1_1)`-style trig on that same matrix, no plate-solve needed at view time. **Feature:** a
-  **"North up"** toggle on the share/download panel (and the History result view) that rotates the display image
-  by the stored North angle before it's written, so the shared JPEG/PNG comes out conventionally oriented. Reuse
-  the existing render path: `load_stack_rgb` → stretch → `PIL.Image.rotate(angle, expand=True, fillcolor=black)`
-  — the exposed corners fill with the **same black as uncovered/NaN pixels** (the app's existing convention), so
-  it looks intentional, not broken. **Sane default + honest behaviour to get right:** (1) show it only when the
-  run has a WCS *and* the correction is more than a couple of degrees (a near-North-up frame needs no rotation —
-  don't add interpolation blur or black corners for nothing); (2) when the angle is within ~1° of a multiple of
-  90°, snap to the exact 90° step so that common case is **lossless** (pure transpose/flip, no resample, no new
-  corners); (3) label it plainly — *"Rotate so North is up (like reference photos of this object)."* **Beginner
-  bar ✔:** one toggle, zero angles to type, a sane auto-detected default, plain language; it makes the shared
-  picture look "correct" and directly comparable to reference images — serves the *understand + enjoy + share*
-  pillars §1 calls out (`annotated results` / making a beginner's result feel legit). **Distinct from** the
-  nameplate (adds a caption), "Set as cover" (picks which image), and the sky-map overlay (places it on an atlas)
-  — this reorients the picture itself. **Well-grounded / low-risk:** the WCS + rotation extraction already exist
-  and are tested; the change is a render-time PIL rotate, read-only, touches nothing on disk permanently, no new
-  dep/network. **Guardrails:** additive/reversible (a render-time export option, off unless the toggle is on and
-  a meaningful correction exists), best-effort (no WCS or an un-parseable CD → hide the toggle, never a broken
-  render; a display-space editor export that lost its WCS simply doesn't offer it). Split for the Builder: (a) a
-  small pure helper `north_angle_deg(wcs)` + a `rotate_north_up(rgb, angle)` (with the 90°-snap lossless path)
-  in `render/` or `seestack/`, unit-tested against a known-orientation synthetic WCS pinning the **sign** (a
-  frame rotated +30° must rotate −30° back to North-up — the exact sign hazard the sky-map `_tan_wcs` item
-  flags, so pin it with a test); (b) wire the toggle into the share/download endpoint + the frontend panel,
-  reusing `write_share_jpeg`/`write_full_res_png`. _(M, split as above; PRIORITY 3 friendliness /
-  understand-enjoy-share — beginner feature; reuses the shipped WCS geometry + share-render infra, so low-risk.
-  Keeps the beginner-feature pipeline stocked.)_
+  - **NEW BEGINNER FEATURE (Scout 2026-07-21 #9) — "North up": one-click orient the shared/exported image so
+    celestial North points up, the way every reference photo of the object is drawn.** A Seestar frames the sky
+    at whatever angle the mount happened to sit, so a beginner's finished picture often comes out rotated relative
+    to every catalog/Wikipedia image of the same object — which makes it look "off" and hard to compare, and is
+    the #1 thing that separates a snapshot from a "real" astrophoto. **The app already knows the exact rotation:**
+    the stacked `master.fits` carries the output WCS (the CD matrix), and the sky-map work already extracts a
+    `rotation_deg` from it (`webapp/routers/sky.py` / the `SkyImage` geometry helpers) — the North position angle
+    is `atan2(CD1_2, CD1_1)`-style trig on that same matrix, no plate-solve needed at view time. **Feature:** a
+    **"North up"** toggle on the share/download panel (and the History result view) that rotates the display image
+    by the stored North angle before it's written, so the shared JPEG/PNG comes out conventionally oriented. Reuse
+    the existing render path: `load_stack_rgb` → stretch → `PIL.Image.rotate(angle, expand=True, fillcolor=black)`
+    — the exposed corners fill with the **same black as uncovered/NaN pixels** (the app's existing convention), so
+    it looks intentional, not broken. **Sane default + honest behaviour to get right:** (1) show it only when the
+    run has a WCS *and* the correction is more than a couple of degrees (a near-North-up frame needs no rotation —
+    don't add interpolation blur or black corners for nothing); (2) when the angle is within ~1° of a multiple of
+    90°, snap to the exact 90° step so that common case is **lossless** (pure transpose/flip, no resample, no new
+    corners); (3) label it plainly — *"Rotate so North is up (like reference photos of this object)."* **Beginner
+    bar ✔:** one toggle, zero angles to type, a sane auto-detected default, plain language; it makes the shared
+    picture look "correct" and directly comparable to reference images — serves the *understand + enjoy + share*
+    pillars §1 calls out (`annotated results` / making a beginner's result feel legit). **Distinct from** the
+    nameplate (adds a caption), "Set as cover" (picks which image), and the sky-map overlay (places it on an atlas)
+    — this reorients the picture itself. **Well-grounded / low-risk:** the WCS + rotation extraction already exist
+    and are tested; the change is a render-time PIL rotate, read-only, touches nothing on disk permanently, no new
+    dep/network. **Guardrails:** additive/reversible (a render-time export option, off unless the toggle is on and
+    a meaningful correction exists), best-effort (no WCS or an un-parseable CD → hide the toggle, never a broken
+    render; a display-space editor export that lost its WCS simply doesn't offer it). Split for the Builder: (a) a
+    small pure helper `north_angle_deg(wcs)` + a `rotate_north_up(rgb, angle)` (with the 90°-snap lossless path)
+    in `render/` or `seestack/`, unit-tested against a known-orientation synthetic WCS pinning the **sign** (a
+    frame rotated +30° must rotate −30° back to North-up — the exact sign hazard the sky-map `_tan_wcs` item
+    flags, so pin it with a test); (b) wire the toggle into the share/download endpoint + the frontend panel,
+    reusing `write_share_jpeg`/`write_full_res_png`. _(M, split as above; PRIORITY 3 friendliness /
+    understand-enjoy-share — beginner feature; reuses the shipped WCS geometry + share-render infra, so low-risk.
+    Keeps the beginner-feature pipeline stocked.)_
 - ~~**NEW (Builder 2026-07-21, follow-up to the shipped North-up view slice v0.148.0) — offer the North-up
   orientation on the *download/share* image, not just the History Adjust view.**~~ — **SHIPPED v0.150.0**
   (Builder 2026-07-21, branch `claude/pensive-faraday-dircmw`). The share-friendly **JPEG** download
@@ -12614,6 +12708,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   needs no new column — likely the smaller, safer slice. Beginner bar ✔ (same one-button affordance, extended to the
   place a beginner most wants it — their finished edit). Additive/upgrade-safe (nullable/new surface, off by default).
   _(S–M; PRIORITY 3 friendliness / enjoy-share — completes the "pin my favourite picture" story for edited results.)_
+  **⚠ Builder note (2026-08-05, `claude/relaxed-turing-iv0w1h`) — MOSTLY MOOT; verify before starting.** The
+  editor's **Apply & save** path (`submit_editor_export` → `_apply_editor_to_run`) does not produce a loose PNG: it
+  records the edited result as a **real `stack_runs` row** of its own (`notes="edited"`, its own `preview_path`), so
+  an edited picture *can* already be pinned with the existing v0.145.0 "Set as cover" button on that run's History
+  card. What is left is only the narrower case of an editor **download/share** export (PNG/JPEG, no run recorded) —
+  shape (a) — and the shortcut of offering "★ Set as cover" inside the export step rather than one click later on
+  History. Both are marginal against the shipped path, so this is **deprioritised**; don't rebuild the covered part.
 - ~~**NEW BEGINNER FEATURE (Scout 2026-07-21 #6) — "Acquisition nameplate": auto-render the shot's own
   details onto the shared image, so a beginner's post looks like a "real" astrophoto without any
   editing.**~~ — **SHIPPED v0.146.0** (Builder 2026-07-21, branch `claude/pensive-faraday-1nzegs`; all three
