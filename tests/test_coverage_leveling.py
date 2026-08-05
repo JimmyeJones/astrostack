@@ -470,3 +470,132 @@ def test_a_single_coverage_level_detects_objects_exactly_as_before():
     # 500 ADU) — a changed mask decision would move a level's median by orders
     # of magnitude more than this.
     np.testing.assert_allclose(base, lifted, rtol=0, atol=1e-2)
+
+
+# ---- did the joins actually come out flat? --------------------------------
+#
+# The leveling pass above can't always succeed — an unreadable level takes a
+# neighbour's interpolated offset, and one filled by real structure is left
+# alone on purpose — and nothing downstream ever checked the result. That is why
+# the owner's "multicolour grid" had to be reported by a human looking at an
+# export. ``measure_seam_residual`` measures what survived, in units of the
+# picture's own grain, so the app can say it out loud.
+
+def _panel_scene(offsets=(0.0, 15.0, 30.0, 45.0), noise=2.0, neb_amp=60.0,
+                 stars=300, h=600, w=800, seed=3):
+    """The realistic 4-panel canvas the v0.232.3 fix was measured on: rising
+    per-panel sky offsets, a nebula across the middle panels, stars everywhere.
+    """
+    rng = np.random.default_rng(seed)
+    cov = np.zeros((h, w), dtype=np.int32)
+    for i, cols in enumerate(np.array_split(np.arange(w), 4)):
+        cov[:, cols] = i + 1
+    rgb = rng.normal(0.0, noise, size=(h, w, 3)).astype(np.float32)
+    for lvl, off in zip((1, 2, 3, 4), offsets):
+        m = cov == lvl
+        for c in range(3):
+            rgb[..., c][m] += off
+    yy, xx = np.mgrid[0:h, 0:w]
+    neb = neb_amp * np.exp(-(((yy - h / 2) / 120.0) ** 2
+                             + ((xx - w / 2) / 200.0) ** 2))
+    for c, k in enumerate((1.0, 0.7, 0.5)):
+        rgb[..., c] += (neb * k).astype(np.float32)
+    for _ in range(stars):
+        y = int(rng.integers(6, h - 6))
+        x = int(rng.integers(6, w - 6))
+        rgb[y - 2:y + 3, x - 2:x + 3, :] += float(rng.uniform(200, 4000))
+    return rgb, cov
+
+
+def test_a_correctly_leveled_mosaic_measures_a_seam_residual_inside_its_noise():
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    rgb, cov = _panel_scene()
+    out = level_by_coverage(rgb.copy(), cov, frame_coverage=cov)
+    residual = measure_seam_residual(out, cov, frame_coverage=cov)
+    assert residual is not None
+    assert residual.n_levels == 4
+    # Comfortably inside the grain — the "panels evened out" verdict's territory
+    # (the health check calls anything under 1.0 flat).
+    assert residual.ratio < 1.0, residual
+
+
+def test_panel_offsets_left_in_place_measure_a_large_seam_residual():
+    """The measurement has to *catch* the failure it exists for: the same scene
+    with its per-panel offsets never leveled reads many times the grain."""
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    rgb, cov = _panel_scene()
+    residual = measure_seam_residual(rgb, cov, frame_coverage=cov)
+    assert residual is not None
+    assert residual.ratio > 5.0, residual
+    # And the yardstick stayed honest: the noise it divides by is the grain
+    # *within* a level (~2 ADU here), not a canvas-wide sigma that the very
+    # offsets being measured would have inflated.
+    assert residual.noise_sigma < 2.0 * 3.0, residual
+
+
+def test_one_stranded_coverage_level_is_caught():
+    """The realistic shape of the bug: everything levels except one region,
+    which keeps a step. Two grain-widths of step is already reportable."""
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    rgb, cov = _panel_scene()
+    out = level_by_coverage(rgb.copy(), cov, frame_coverage=cov)
+    flat = measure_seam_residual(out, cov, frame_coverage=cov)
+    stranded = out.copy()
+    stranded[cov == 3] += 6.0            # 3× the scene's true 2 ADU noise
+    seamed = measure_seam_residual(stranded, cov, frame_coverage=cov)
+    assert flat is not None and seamed is not None
+    assert seamed.ratio > 1.5 > flat.ratio, (flat, seamed)
+
+
+def test_a_single_coverage_level_has_no_seam_to_measure():
+    """An ordinary single-field stack has one coverage level, so there is no
+    join to compare — the measurement declines to invent a verdict (and costs
+    the stacker nothing, since it never runs there)."""
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    rng = np.random.default_rng(5)
+    rgb = rng.normal(50.0, 2.0, size=(200, 200, 3)).astype(np.float32)
+    cov = np.full((200, 200), 6, dtype=np.int32)
+    assert measure_seam_residual(rgb, cov, frame_coverage=cov) is None
+
+
+def test_the_seam_residual_is_unchanged_by_rescaling_the_picture():
+    """It is a ratio of a step to the grain, so it has to mean the same thing at
+    any exposure, gain or normalisation — otherwise a single threshold could not
+    be read as "about one grain-width" on every stack."""
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    rgb, cov = _panel_scene()
+    out = level_by_coverage(rgb.copy(), cov, frame_coverage=cov)
+    base = measure_seam_residual(out, cov, frame_coverage=cov)
+    after = measure_seam_residual(out * np.float32(37.0), cov, frame_coverage=cov)
+    assert base is not None and after is not None
+    assert after.ratio == pytest.approx(base.ratio, rel=1e-3)
+
+
+def test_a_nebula_crossing_the_panels_does_not_read_as_a_seam():
+    """Real large-scale structure spanning panels is the obvious false positive.
+    A canvas with no panel offsets at all — only a bright nebula across it —
+    must still read as flat, whatever the nebula's strength."""
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    for amp in (60.0, 400.0):
+        rgb, cov = _panel_scene(offsets=(0.0, 0.0, 0.0, 0.0), neb_amp=amp)
+        out = level_by_coverage(rgb.copy(), cov, frame_coverage=cov)
+        residual = measure_seam_residual(out, cov, frame_coverage=cov)
+        assert residual is not None and residual.ratio < 1.0, (amp, residual)
+
+
+def test_an_unmeasurable_canvas_reports_nothing_rather_than_guessing():
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    blank = np.full((40, 40, 3), np.nan, dtype=np.float32)
+    cov = np.ones((40, 40), dtype=np.int32)
+    assert measure_seam_residual(blank, cov, frame_coverage=cov) is None
+    # No covered pixels at all.
+    rgb = np.zeros((40, 40, 3), dtype=np.float32)
+    zero = np.zeros((40, 40), dtype=np.int32)
+    assert measure_seam_residual(rgb, zero, frame_coverage=zero) is None

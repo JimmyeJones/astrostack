@@ -512,6 +512,70 @@ def test_v13_project_migrates_stack_fwhm_column_additively(tmp_path):
         proj.close()
 
 
+def test_v14_project_migrates_seam_residual_column_additively(tmp_path):
+    """An older (schema 14) project — whose ``stack_runs`` predates the
+    ``seam_residual`` column — upgrades cleanly on open: existing runs read it as
+    ``None`` (unknown → the health notes self-hide rather than claim a mosaic's
+    panels did or didn't line up), and a fresh run round-trips a stamped value.
+    Guards the live-install in-place upgrade (AGENTS.md §9)."""
+    import sqlite3
+
+    from seestack.io.project import SCHEMA_VERSION, StackRunRow
+
+    project_dir = tmp_path / "v14"
+    project_dir.mkdir()
+    db_path = project_dir / "project.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        PRAGMA user_version = 14;
+        CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE stack_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp_utc TEXT NOT NULL,
+            output_basename TEXT NOT NULL, fits_path TEXT, tiff_path TEXT,
+            preview_path TEXT, n_frames_used INTEGER NOT NULL, canvas_h INTEGER NOT NULL,
+            canvas_w INTEGER NOT NULL, coverage_min INTEGER NOT NULL DEFAULT 0,
+            coverage_max INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL,
+            notes TEXT, total_exposure_s REAL, transparency_ratio REAL,
+            noise_sigma REAL, calstat TEXT, is_mosaic INTEGER, engine_version TEXT,
+            rejection_fraction REAL, rejection_mode TEXT, preview_stretch REAL,
+            preview_black REAL, n_roughly_aligned INTEGER, stack_fwhm_px REAL);
+        CREATE TABLE frames (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_path TEXT NOT NULL UNIQUE, accept INTEGER NOT NULL DEFAULT 1);
+        INSERT INTO stack_runs(timestamp_utc, output_basename, n_frames_used,
+            canvas_h, canvas_w, options_json, stack_fwhm_px)
+          VALUES('2026-01-01T00:00:00+00:00', 'old', 10, 1080, 1920, '{}', 2.1);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    proj = Project.open(project_dir)
+    try:
+        assert proj._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        old = next(iter(proj.iter_stack_runs()))
+        assert old.seam_residual is None
+        # The existing column's data survived the migration untouched.
+        assert old.stack_fwhm_px == 2.1
+        # A fresh mosaic run round-trips its measured seam residual.
+        new_id = proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc="2026-08-05T01:00:00+00:00", output_basename="new",
+            fits_path=None, tiff_path=None, preview_path=None, n_frames_used=50,
+            canvas_h=1, canvas_w=1, coverage_min=1, coverage_max=4, options_json="{}",
+            is_mosaic=True, seam_residual=0.42))
+        newest = next(r for r in proj.iter_stack_runs() if r.id == new_id)
+        assert newest.seam_residual == 0.42
+        # A single-field run leaves it unset and persists NULL, not 0.
+        none_id = proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc="2026-08-05T02:00:00+00:00", output_basename="single",
+            fits_path=None, tiff_path=None, preview_path=None, n_frames_used=5,
+            canvas_h=1, canvas_w=1, coverage_min=1, coverage_max=1, options_json="{}"))
+        none_run = next(r for r in proj.iter_stack_runs() if r.id == none_id)
+        assert none_run.seam_residual is None
+    finally:
+        proj.close()
+
+
 def test_open_closes_the_connection_when_schema_check_fails(tmp_path, monkeypatch):
     """A newer on-disk ``user_version`` makes ``_check_schema`` raise; ``open``
     must close the connection it opened before propagating, rather than leak it.

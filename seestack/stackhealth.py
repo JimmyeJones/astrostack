@@ -83,6 +83,21 @@ _ROUGHLY_ALIGNED_NOTE_FRACTION = 0.20
 _SOFT_STARS_BLOAT_RATIO = 1.5
 _SOFT_STARS_MIN_SUB_FWHM = 5
 
+# A mosaic's ``seam_residual`` is the sky step still left between coverage levels
+# divided by the picture's own grain, so the two thresholds below are read in
+# units of noise. Below the "flat" bar the joins are well inside the grain and we
+# can honestly say the panels matched; above the "visible" bar a coherent step
+# that size shows as a seam once the image is stretched. The gap between them is
+# deliberately left **silent**: real large-scale structure crossing panels (a big
+# nebula) puts a floor under the measurement that has nothing to do with seams,
+# so a middling number is genuinely ambiguous and neither claim would be honest.
+# Measured on a realistic 4-panel synthetic scene: a correctly-leveled canvas
+# reads 0.56 with a nebula across it and 0.02 without; deliberately stranding one
+# level by 2× / 3× the true noise reads 1.39 / 2.08; leaving the panel offsets in
+# entirely reads 15.7.
+_SEAM_FLAT_RATIO = 1.0
+_SEAM_VISIBLE_RATIO = 1.5
+
 # κ-σ rejection is *mathematically* blind to a lone outlier below a frame count
 # that depends on κ (11 at the default κ=3): a single bright sample's z-score
 # against statistics that still include it peaks at (n−1)/√n, so at n=5 a
@@ -335,6 +350,37 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
                      "them tight."),
             action=None,
         )))
+
+    # --- Mosaic panel seams: did the joins actually come out flat? -------------
+    # The stacker measures the sky step still left between coverage levels on a
+    # mosaic, in units of the picture's own grain. It is the one mosaic failure
+    # mode a beginner can *see* but can't name — and until this was measured, the
+    # only way it ever got noticed was the owner eyeballing an export. NULL on a
+    # single-field stack (no joins to compare) and on runs from before it was
+    # recorded, so both notes self-hide by construction.
+    seam = run.seam_residual
+    if seam is not None and math.isfinite(seam):
+        if seam >= _SEAM_VISIBLE_RATIO:
+            scored.append((40, HealthNote(
+                kind="seams",
+                severity="info",
+                message=("The panels of this mosaic didn't fully even out — where "
+                         "they join, the sky still steps by about "
+                         f"{seam:.1f}× the picture's own grain, so faint seams may "
+                         "show once it's stretched. It usually means those panels "
+                         "were shot under different sky; the editor's background "
+                         "tools can even it out further."),
+                action=None,
+            )))
+        elif seam < _SEAM_FLAT_RATIO:
+            scored.append((62, HealthNote(
+                kind="seams_flat",
+                severity="good",
+                message=("The panels of this mosaic evened out — the sky matches "
+                         "across the joins, so you shouldn't see seams between "
+                         "them."),
+                action=None,
+            )))
 
     # --- Reassurance: subs set aside is normal ---------------------------------
     n_total = len(frame_list)

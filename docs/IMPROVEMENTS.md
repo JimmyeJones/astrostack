@@ -9169,8 +9169,45 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Builder 2026-08-05, spotted while fixing the coverage-leveling seam bugs) — measure the residual
-  panel-seam step after leveling and *say so* when one survives.** *(Trust / friendliness — PRIORITY 3; size S–M.)*
+- ~~**NEW IDEA (Builder 2026-08-05, spotted while fixing the coverage-leveling seam bugs) — measure the residual
+  panel-seam step after leveling and *say so* when one survives.**~~ — **SHIPPED v0.233.0** (Builder 2026-08-05,
+  branch `claude/relaxed-turing-laiaax`). *(Trust / friendliness — PRIORITY 3.)* A mosaic's panel joins are now
+  **measured on the finished image** and reported in plain words, so the failure mode that took an owner
+  eyeballing an export to find is self-reporting from here on.
+  **Engine:** `seestack.bg.coverage_leveling.measure_seam_residual` returns a `SeamResidual` — the worst channel's
+  remaining level-to-level sky spread divided by that channel's own grain. Two design points make the number
+  trustworthy: the per-level sky uses **exactly** the estimator and the exactly the guards the leveling pass uses
+  (a shared `_LevelContext` / `_level_sky_mask` / `_sky_mode`, so the check and the pass can never disagree about
+  which levels are measurable), and the yardstick is the **median of the per-level** σ, not a canvas-wide σ — a
+  canvas-wide σ is itself inflated by the very offsets being measured, which would have deflated the ratio towards
+  1 on exactly the badly-seamed stack this exists to catch (measured: an un-leveled 4-panel scene reads **15.7**
+  with the per-level yardstick vs 2.5 with the canvas-wide one). Extracting the shared context out of
+  `level_by_coverage` is **byte-for-byte behaviour-preserving** — verified against a transcription of the previous
+  implementation across mosaic / single-field / proxy / no-smoothing / per-channel-coverage / all-NaN /
+  zero-coverage cases.
+  **Calibration** (realistic 600×800 4-panel synthetic, σ = 2 ADU, nebula + 300 stars): correctly leveled reads
+  **0.56** (0.02 with no nebula, 0.05 with a 400 ADU one — real structure crossing panels does *not* read as a
+  seam); stranding one level by 2× / 3× the noise reads **1.39 / 2.08**; leaving the panel offsets in reads
+  **15.7**. So "How's my stack?" says *"the panels evened out"* below **1.0**, *"faint seams may show — about N×
+  the picture's own grain"* at/above **1.5**, and **stays silent between** the two: a big nebula puts a floor
+  under the measurement that has nothing to do with seams, so a middling number is genuinely ambiguous and
+  neither claim would be honest.
+  **Plumbing:** a nullable `seam_residual` on the run record (schema 14 → 15, additive `ALTER TABLE`), mirrored to
+  the FITS header as `SEAMRES` and served additively on `StackRunOut`. **Free on the ordinary path** — the
+  measurement is gated on the stacker's own mosaic verdict, so a single-field stack (one coverage level, no joins)
+  never runs it and records NULL, exactly as every pre-v0.233 run does. Best-effort throughout: a diagnostic can
+  never break a finished stack. No config/API-shape/on-disk/default change; frontend untouched (the health card
+  already renders any note the backend ranks).
+  **Tests** (+18): `test_coverage_leveling.py` (+7 — a correctly-leveled mosaic measures inside its noise,
+  un-leveled offsets measure many times it *and* keep an honest yardstick, one stranded level is caught, a single
+  coverage level has nothing to measure, rescaling the picture leaves the ratio alone, a nebula crossing the
+  panels doesn't read as a seam at either strength, an unmeasurable canvas reports nothing);
+  `test_stackhealth.py` (+6 — both verdicts, the deliberately-silent middle band, single-field/NULL silence,
+  non-finite ignored, ranking below the actionable next steps); `test_stack_pipeline.py` (+2 — a real two-pointing
+  union stack records a finite residual matching its `SEAMRES` card; a single-field stack records NULL);
+  `test_project.py` (+1 — a schema-14 DB migrates additively, old runs read NULL, the existing column's data
+  survives); `test_target_stack_health.py` (+3 — both notes over the API, and the listing's nullable field).
+  *(Original idea kept below for provenance.)*
   The owner had to report the "multicolour grid" himself because **nothing in the app measures whether the panel
   seams actually came out flat.** After `level_by_coverage` runs, the check is nearly free and uses numbers it has
   already computed: each coverage level's post-leveling sky, per channel. If the spread across neighbouring levels
