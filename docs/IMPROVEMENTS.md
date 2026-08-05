@@ -9218,8 +9218,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   chain of fixes was found only because a human eyeballed an export. A number on the run makes the next regression
   self-reporting. **Care:** it must self-hide on a single-field stack (one coverage level = nothing to compare), and
   the verdict wording must not alarm on a level whose spread is genuinely below the noise. Additive/read-only.
-- **NEW IDEA (Builder 2026-08-05, spotted in the same file) — unify the two models of "how sky varies with coverage
-  level" in `level_by_coverage`.** *(Image quality / tidying — PRIORITY 4; size S.)* The pass now carries two: the
+- ~~**NEW IDEA (Builder 2026-08-05, spotted in the same file) — unify the two models of "how sky varies with coverage
+  level" in `level_by_coverage`.**~~ — **SHIPPED v0.233.1** (Builder 2026-08-05, branch
+  `claude/relaxed-turing-laiaax`). *(Image quality — PRIORITY 4.)* A level the pass could not measure is now put on
+  the **same fitted curve** its measured neighbours were moved onto, instead of on a straight line drawn between
+  them. **It is not only tidying — it was measurably wrong:** on a synthetic scene with a curved sky-vs-coverage
+  trend (offset = 100 + 3ℓ + 0.8ℓ², seven levels, level 4 filled by structure so it can't be measured) the straight
+  line put level 4 at **125.6** against a true **124.8** — **0.8 ADU of coherent step on a 1.5 ADU noise floor**,
+  left at that level's two boundaries, which is exactly the low-frequency artefact tracing the coverage map that
+  this pass exists to erase. The fitted curve lands on **124.799**.
+  **Both cares in the original entry are met:** the fitted value is clamped to the **same measured envelope** the
+  smoothed levels are, so the gapped-extrapolation guard survives intact (`test_smoothing_does_not_extrapolate_a_
+  seam_onto_a_gapped_overlap_level` still passes untouched) and a filled offset still can never leave the range
+  actually measured; and **no measured level moves** — they already took the fitted value, so the change reaches
+  only levels that today get an interpolated fill. When no fit was made at all (smoothing off, fewer than three
+  measured levels, or a degenerate fit) there is no curve to sit on and the `np.interp` fallback is kept exactly as
+  it was — so the shipped two-measured-level fill test is unchanged too. No config/DB/API-shape/on-disk change and
+  no default flipped. Tests (`tests/test_coverage_leveling.py`, +2; one fails before / passes after): the filled
+  level lands on the curve (124.8, not 125.6) **and** every measured level still lands at zero sky, plus the
+  no-fit fallback still draws the straight line.
+  *(Original idea kept below for provenance.)* The pass now carries two: the
   long-standing weighted **quadratic** `smooth_across_levels` fit for levels it measured, and the new `np.interp`
   **linear** fill for levels it could not. So a filled level lands on a slightly different curve from the one its
   measured neighbours were moved onto — small, but it is exactly the kind of low-frequency inconsistency that traces
