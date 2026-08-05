@@ -873,6 +873,42 @@ def _compute_noise_sigma(rgb: np.ndarray) -> float | None:
         return None
 
 
+def _compute_seam_residual(
+    rgb: np.ndarray,
+    coverage: np.ndarray,
+    frame_coverage: np.ndarray | None,
+    *,
+    is_mosaic: bool,
+) -> float | None:
+    """How flat this mosaic's panel joins actually came out (``None`` if N/A).
+
+    The per-coverage leveling pass pushes every coverage level's sky to zero,
+    but it can't always succeed — an unreadable level takes a neighbour's
+    interpolated offset, and one filled by real structure is deliberately left
+    alone — and until now **nothing checked the result**, so the one mosaic
+    failure mode a beginner can see but not diagnose (a coloured seam grid) was
+    found only by a human eyeballing an export.
+
+    Measured on the *finished* image, so it accounts for everything downstream
+    of leveling too. Returns the residual step in units of the picture's own
+    grain (see :class:`~seestack.bg.coverage_leveling.SeamResidual`).
+
+    Only runs on a **mosaic** canvas: a single-field stack has one coverage
+    level and therefore no joins to compare, so it costs nothing on the ordinary
+    path. Best-effort — a diagnostic must never break a finished stack.
+    """
+    if not is_mosaic:
+        return None
+    try:
+        from seestack.bg.coverage_leveling import measure_seam_residual
+
+        result = measure_seam_residual(
+            rgb, coverage, frame_coverage=frame_coverage)
+        return round(float(result.ratio), 4) if result is not None else None
+    except Exception:  # noqa: BLE001 — a diagnostic must never break the stack
+        return None
+
+
 @dataclass
 class RejectionStats:
     """How much a rejection pass actually clipped, measured while it ran.
@@ -1705,6 +1741,12 @@ def run_stack(
     # _compute_stack_fwhm) so it's comparable to the per-frame QC fwhm_px.
     stack_fwhm = _compute_stack_fwhm(
         result_image, drizzle=eff.drizzle, drizzle_scale=eff.drizzle_scale)
+    # Did the panels of this mosaic actually come out flat? Measured on the same
+    # finished image, in units of its own grain, so "How's my stack?" can say so
+    # in plain words instead of the owner having to spot a seam grid by eye.
+    # None (and free) on every single-field stack.
+    seam_residual = _compute_seam_residual(
+        result_image, coverage, frame_cov, is_mosaic=bool(is_mosaic_canvas))
     # The min/max order-statistic path combines by rank and ignores per-frame
     # weights, so weighting provenance must not be stamped when it ran (it's the
     # active path only for a non-drizzle ≥3-frame min-max-reject stack). Every
@@ -1726,6 +1768,8 @@ def run_stack(
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     if stack_fwhm is not None:
         header_meta["STKFWHM"] = (stack_fwhm, "median star FWHM, native-frame px")
+    if seam_residual is not None:
+        header_meta["SEAMRES"] = (seam_residual, "mosaic panel-seam step, in sky sigma")
     paths = write_stack_outputs(
         project_dir=project.project_dir,
         rgb=result_image,
@@ -1820,6 +1864,10 @@ def run_stack(
             # This stack's own median star size (native-frame px). NULL when too
             # few stars to fit — old runs read NULL and callers self-hide.
             stack_fwhm_px=stack_fwhm,
+            # How flat this mosaic's panel joins came out, in units of the
+            # picture's own grain. NULL on a single-field stack (no joins) and
+            # when it couldn't be measured — callers self-hide either way.
+            seam_residual=seam_residual,
         ))
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)

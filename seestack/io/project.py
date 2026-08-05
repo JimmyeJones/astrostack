@@ -30,7 +30,7 @@ from typing import Any, Iterable, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     preview_stretch REAL,
     preview_black REAL,
     n_roughly_aligned INTEGER,
-    stack_fwhm_px REAL
+    stack_fwhm_px REAL,
+    seam_residual REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -545,6 +546,20 @@ class Project:
                     "ALTER TABLE stack_runs ADD COLUMN stack_fwhm_px REAL")
             except sqlite3.OperationalError:
                 pass  # already present
+        if from_version < 15:
+            # Recorded how flat a *mosaic's* panel joins actually came out: the
+            # sky step still left between coverage levels, in units of the
+            # picture's own grain. Nothing used to check whether the leveling
+            # pass succeeded, so the one mosaic failure mode a beginner can see
+            # but not diagnose (a coloured seam grid) was only ever found by a
+            # human eyeballing an export. Additive; older runs — and every
+            # single-field stack, which has no joins to compare — stay NULL, and
+            # callers self-hide on NULL rather than guessing.
+            try:
+                self._conn.execute(
+                    "ALTER TABLE stack_runs ADD COLUMN seam_residual REAL")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -858,8 +873,9 @@ class Project:
             "  n_frames_used, canvas_h, canvas_w, coverage_min, coverage_max,"
             "  options_json, notes, total_exposure_s, transparency_ratio,"
             "  noise_sigma, calstat, is_mosaic, engine_version,"
-            "  rejection_fraction, rejection_mode, n_roughly_aligned, stack_fwhm_px"
-            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  rejection_fraction, rejection_mode, n_roughly_aligned, stack_fwhm_px,"
+            "  seam_residual"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -869,7 +885,7 @@ class Project:
                 None if run.is_mosaic is None else int(bool(run.is_mosaic)),
                 run.engine_version, run.rejection_fraction, run.rejection_mode,
                 None if run.n_roughly_aligned is None else int(run.n_roughly_aligned),
-                run.stack_fwhm_px,
+                run.stack_fwhm_px, run.seam_residual,
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -940,6 +956,10 @@ class Project:
                 stack_fwhm_px=(
                     row["stack_fwhm_px"]
                     if "stack_fwhm_px" in row.keys() else None
+                ),
+                seam_residual=(
+                    row["seam_residual"]
+                    if "seam_residual" in row.keys() else None
                 ),
             )
 
@@ -1100,6 +1120,14 @@ class StackRunRow:
     # of ``noise_sigma``: it lets the imaging log report *this stack's* sharpness
     # rather than the static target-wide frame median.
     stack_fwhm_px: float | None = None
+    # How flat this **mosaic's** panel joins came out: the sky step still left
+    # between coverage levels after the leveling pass, divided by the picture's
+    # own grain (so it means the same thing at any exposure/gain). ~0 = the
+    # panels matched; around 1 is where a seam starts to become visible once the
+    # image is stretched. None for a single-field stack (no joins to compare),
+    # when it couldn't be measured, or for runs recorded before this column
+    # existed (schema < 15) — callers self-hide rather than guess.
+    seam_residual: float | None = None
 
 
 def _to_db(value: Any) -> Any:

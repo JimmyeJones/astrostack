@@ -473,3 +473,72 @@ def test_rejection_blind_note_ranks_below_the_calibration_next_step():
     )
     kinds = _kinds(notes)
     assert kinds.index("calibration") < kinds.index("rejection_blind")
+
+
+# ---- mosaic panel seams ---------------------------------------------------
+
+def test_a_mosaic_whose_panels_evened_out_says_so():
+    """The reassurance half: a measured seam step well inside the picture's own
+    grain means the joins matched, and saying so is the whole point of measuring
+    it — the owner had to spot the *broken* case by eye because nothing ever
+    reported the good one either."""
+    note = _note(stack_health(_run(is_mosaic=True, seam_residual=0.12),
+                              [_frame() for _ in range(20)]), "seams_flat")
+    assert note is not None
+    assert note.severity == "good"
+    assert "seams" in note.message
+    assert _note(stack_health(_run(is_mosaic=True, seam_residual=0.12),
+                              [_frame()]), "seams") is None
+
+
+def test_a_mosaic_with_a_surviving_panel_step_is_named_in_plain_words():
+    """The failure this exists to catch: a coherent sky step across the joins,
+    several times the grain, which shows as a seam grid once stretched."""
+    note = _note(stack_health(_run(is_mosaic=True, seam_residual=2.6),
+                              [_frame() for _ in range(20)]), "seams")
+    assert note is not None
+    assert note.severity == "info"          # never alarming
+    assert "2.6" in note.message            # the measured figure, said out loud
+    assert "seams" in note.message
+    # and it must not simultaneously claim the panels evened out
+    assert _note(stack_health(_run(is_mosaic=True, seam_residual=2.6),
+                              [_frame()]), "seams_flat") is None
+
+
+def test_an_ambiguous_seam_measurement_says_nothing_either_way():
+    """Real large-scale structure crossing panels puts a floor under the
+    measurement that has nothing to do with seams, so a middling number is
+    genuinely ambiguous — neither claim would be honest."""
+    notes = stack_health(_run(is_mosaic=True, seam_residual=1.2),
+                         [_frame() for _ in range(20)])
+    assert _note(notes, "seams") is None
+    assert _note(notes, "seams_flat") is None
+
+
+def test_a_single_field_stack_never_mentions_seams():
+    """A single-field stack has one coverage level and therefore no joins to
+    compare, so the stacker records NULL — both notes self-hide by construction,
+    exactly as they do for runs made before this was measured."""
+    notes = stack_health(_run(seam_residual=None), [_frame() for _ in range(20)])
+    assert _note(notes, "seams") is None
+    assert _note(notes, "seams_flat") is None
+
+
+def test_a_non_finite_seam_measurement_is_ignored():
+    """A NaN/inf can only come from a broken measurement; say nothing rather
+    than render "nan× the grain"."""
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        notes = stack_health(_run(is_mosaic=True, seam_residual=bad), [_frame()])
+        assert _note(notes, "seams") is None
+        assert _note(notes, "seams_flat") is None
+
+
+def test_the_seam_warning_ranks_below_the_actionable_next_steps():
+    """It's a "worth a look" observation, not the biggest lever — calibration
+    and the unlocatable-subs note still lead, since the card shows only two."""
+    notes = stack_health(
+        _run(is_mosaic=True, seam_residual=3.0, calstat=None),
+        [_frame() for _ in range(20)],
+    )
+    kinds = _kinds(notes)
+    assert kinds.index("calibration") < kinds.index("seams")

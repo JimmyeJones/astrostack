@@ -60,6 +60,7 @@ the stacked canvas.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -158,6 +159,330 @@ def _local_sky_mask(
     return out_mask
 
 
+def _sky_mode(sky_pixels: np.ndarray) -> float | None:
+    """The SExtractor sky-mode estimate (``2.5·median − 1.5·mean``) of a sky sample.
+
+    Mode is robust to faint diffuse signal that would bias the plain median
+    upward by a coverage-dependent amount — which is exactly the residual bias
+    that re-emerges as panel steps after stretching. If the skew is implausibly
+    extreme the approximation no longer holds, so it falls back to the median;
+    its own trust criterion (mean−median within 0.3·σ) decides. Returns ``None``
+    when the sample has no usable statistics at all, so the caller can skip the
+    level rather than shift it by a nonsense offset.
+    """
+    from astropy.stats import sigma_clipped_stats
+
+    sc_mean, sc_med, sc_std = sigma_clipped_stats(sky_pixels, sigma=3.0, maxiters=5)
+    if not (np.isfinite(sc_mean) and np.isfinite(sc_med)):
+        return None
+    mode_est = 2.5 * sc_med - 1.5 * sc_mean
+    # The earlier `abs(mode−med) > 5·abs(med−mean)` form was algebraically inert
+    # (that is exactly `1.5·X > 5·X`, never true), so the backstop was dead.
+    if (not np.isfinite(mode_est)
+            or (np.isfinite(sc_std) and sc_std > 0.0
+                and abs(sc_mean - sc_med) > 0.3 * sc_std)):
+        mode_est = sc_med
+    return float(mode_est)
+
+
+@dataclass(frozen=True)
+class _LevelContext:
+    """The per-coverage-level bookkeeping both this module's passes share.
+
+    Building it is the expensive half of the work (one canvas-wide object mask
+    plus locating statistics per level), and both :func:`level_by_coverage` and
+    :func:`measure_seam_residual` need exactly the same view of the canvas — so
+    the "which pixels belong to which level, and which of them are sky" question
+    is answered once, here, and the two passes differ only in what they do with
+    the answer.
+    """
+
+    cov_int: np.ndarray        # per-pixel integer coverage level
+    valid_pix: np.ndarray      # covered AND finite
+    big_levels: list[int]      # levels with enough pixels to be worth correcting
+    luma: np.ndarray           # raw luminance (what a level-local rescue re-thresholds)
+    detect: np.ndarray         # luminance the object mask was measured on
+    object_mask: np.ndarray    # stars/nebulosity — excluded from every sky sample
+    max_level_sigma: float     # above this spread a level is structure, not sky
+    effective_min: int         # pixel floor, scaled for a strided proxy
+
+
+def _level_context(
+    img: np.ndarray,
+    coverage: np.ndarray,
+    frame_coverage: np.ndarray | None,
+    object_sigma: float,
+    min_pixels_per_level: int,
+    dilate_object_mask_px: int,
+    proxy_scale: float,
+) -> _LevelContext | None:
+    """Bin ``img`` by coverage level and locate its sky, or ``None`` if it can't.
+
+    ``None`` means there is nothing to measure at all — an all-NaN canvas, no
+    covered pixels, or degenerate luminance statistics — and every caller should
+    then leave the image exactly as it found it.
+    """
+    from astropy.stats import sigma_clipped_stats
+    from scipy.ndimage import binary_dilation
+
+    # Select the *same set* of coverage levels the full-res export would, by
+    # gating on the full-resolution-equivalent pixel count: a strided proxy pixel
+    # stands in for ``step²`` full-res pixels, so scale the floor by 1/step²
+    # (never below a handful of pixels — a median over 3 pixels is noise).
+    step = max(1, int(round(float(proxy_scale))))
+    effective_min = max(
+        _MIN_STRIDED_PIXELS, int(round(min_pixels_per_level / (step * step))))
+
+    # Bin by the true per-pixel frame count when the caller provides it (quality
+    # weighting fuzzes the weighted-sum ``coverage``); otherwise fall back to the
+    # coverage map. Unweighted stacks have ``frame_coverage == coverage``, so the
+    # fallback path is byte-for-byte unchanged.
+    cov_src = frame_coverage if frame_coverage is not None else coverage
+    if cov_src.ndim == 3:
+        # WeightedSumAccumulator's coverage is per-channel but identical across
+        # channels for our pipeline; collapse to 2D.
+        cov2d = cov_src[..., 0]
+    else:
+        cov2d = cov_src
+
+    # Luminance + object mask. We dilate the mask so star halos and nebula
+    # *edges* are also excluded — after stretching, even mildly bright pixels
+    # near a source bias the per-level median enough to show up as a step.
+    luma = (0.299 * img[..., 0] + 0.587 * img[..., 1]
+            + 0.114 * img[..., 2]).astype(np.float32, copy=False)
+    finite = np.isfinite(luma)
+    if not finite.any():
+        return None
+
+    # Bin coverage values. ``cov2d`` is the true integer frame count when the
+    # caller passed ``frame_coverage`` (already integral); on the fallback path
+    # it's the Σ-weight map, so round to the nearest integer — the
+    # **integer-rounded** bin is what carries the visible panel structure.
+    # (Binned *before* the object mask: the threshold below is measured per
+    # coverage level, so it needs the bins.)
+    cov_int = np.rint(cov2d).astype(np.int32, copy=False)
+    valid_pix = (cov_int > 0) & finite
+    if not valid_pix.any():
+        return None
+
+    # Every coverage value actually present on the canvas — taken over
+    # ``valid_pix`` rather than the sky mask so a level the object mask has
+    # entirely swallowed is still *considered* (and rescued below) instead of
+    # dropping out of the list unnoticed.
+    levels, region_counts = np.unique(cov_int[valid_pix], return_counts=True)
+    # The levels big enough to be worth correcting at all. A coverage value
+    # covering fewer than the floor's worth of pixels *in total* is a sliver, not
+    # a panel: it carries no reliable median, and it is left untouched — neither
+    # measured nor filled — exactly as it always has been.
+    big_levels = [
+        int(lv) for lv, n in zip(levels, region_counts)
+        if lv > 0 and n >= effective_min
+    ]
+
+    _, med, std = sigma_clipped_stats(luma, mask=~finite, sigma=3.0, maxiters=5)
+    if not (np.isfinite(med) and np.isfinite(std) and std > 0):
+        return None
+
+    # Detect objects against each pixel's **own coverage level's** sky, not
+    # against one canvas-wide median + σ. On the mosaic this pass exists for,
+    # the canvas-wide σ is set by the panel-to-panel level offsets rather than
+    # by the noise — the very thing we are about to subtract — which wrecks the
+    # threshold in both directions at once: it floats far above the noise, so
+    # stars and nebulosity stop being masked and leak into every level's "sky"
+    # estimate; and a level whose sky happens to sit high is flagged wholesale
+    # as one big object and loses its sky sample. Removing a rough per-level sky
+    # first puts every level on the same footing, so the threshold measures
+    # grain again. On a single-coverage-level image the detrend is one constant
+    # subtracted from both the pixels and the median, so the mask is exactly the
+    # one it has always been — an ordinary non-mosaic stack is unaffected.
+    rough_sky = np.full(luma.shape, np.float32(med), dtype=np.float32)
+    for level in big_levels:
+        region = (cov_int == level) & finite
+        med_level, _ = _robust_stats(luma[region])
+        if np.isfinite(med_level):
+            rough_sky[region] = np.float32(med_level)
+    detrended = luma - rough_sky
+    _, med_d, std_d = sigma_clipped_stats(
+        detrended, mask=~finite, sigma=3.0, maxiters=5)
+    if np.isfinite(med_d) and np.isfinite(std_d) and std_d > 0:
+        detect, med, std = detrended, float(med_d), float(std_d)
+    else:
+        # Degenerate detrend (e.g. every level perfectly flat): fall back to the
+        # canvas-wide statistics rather than refusing to mask anything.
+        detect = luma
+
+    object_mask = detect > (med + object_sigma * float(std))
+    if dilate_object_mask_px > 0:
+        object_mask = binary_dilation(object_mask, iterations=dilate_object_mask_px)
+
+    # How spread out the canvas's *retained* sky is, once the object mask has
+    # done its job — the yardstick for "does this level's sample actually look
+    # like sky?" below. Comparing a level's retained spread against the canvas's
+    # retained spread is apples to apples, and both are measured on the
+    # detrended luminance so neither carries a level's own offset.
+    sky_pix = valid_pix & ~object_mask
+    sky_sigma = float(std)
+    if sky_pix.any():
+        _, s = _robust_stats(detect[sky_pix])
+        if np.isfinite(s) and s > 0:
+            sky_sigma = float(s)
+
+    return _LevelContext(
+        cov_int=cov_int,
+        valid_pix=valid_pix,
+        big_levels=big_levels,
+        luma=luma,
+        detect=detect,
+        object_mask=object_mask,
+        max_level_sigma=_RESCUE_MAX_SIGMA_RATIO * sky_sigma,
+        effective_min=effective_min,
+    )
+
+
+def _level_sky_mask(
+    ctx: _LevelContext,
+    level: int,
+    object_sigma: float,
+    dilate_object_mask_px: int,
+) -> tuple[np.ndarray, bool] | None:
+    """One coverage level's sky pixels + whether a rescue found them.
+
+    ``None`` when the level has no usable sky at all. Applies the same two
+    guards both passes need: a level the canvas-wide object threshold has
+    *starved* is re-thresholded against its own statistics (see
+    :func:`_local_sky_mask`), and a level whose retained sample is far more
+    spread out than the canvas's own sky is refused outright — it is filled by
+    real structure, and reading an object's level as a sky offset would subtract
+    real flux.
+    """
+    region_mask = (ctx.cov_int == level) & ctx.valid_pix
+    region_sky_mask = region_mask & ~ctx.object_mask
+    rescued_level = int(region_sky_mask.sum()) < ctx.effective_min
+    if rescued_level:
+        # The global object threshold has starved this level's sky sample.
+        # Most often that is not because the region *is* an object but
+        # because its residual sky sits above the canvas-wide median + σ —
+        # the offset the leveling pass exists to subtract. Re-threshold it
+        # against its own statistics before giving up; a level that already had
+        # enough sky pixels never reaches here, so nothing that is leveled today
+        # changes.
+        rescued = _local_sky_mask(
+            ctx.luma, region_mask, object_sigma, dilate_object_mask_px,
+            ctx.max_level_sigma)
+        if rescued is None or int(rescued.sum()) < ctx.effective_min:
+            return None
+        region_sky_mask = rescued
+    # The retained sample has to look like sky before we call its mode a sky
+    # level. A coverage region genuinely *filled* by a galaxy or nebula leaves
+    # behind a sample far more spread out than the canvas's own retained sky.
+    _, level_sigma = _robust_stats(ctx.detect[region_sky_mask])
+    if not np.isfinite(level_sigma) or level_sigma > ctx.max_level_sigma:
+        return None
+    return region_sky_mask, rescued_level
+
+
+@dataclass(frozen=True)
+class SeamResidual:
+    """How flat a mosaic's panel joins actually came out, measured on the result.
+
+    ``ratio`` is the number that matters: the worst channel's remaining
+    level-to-level sky spread expressed in units of that channel's own noise. A
+    coherent step of about the grain's size is where a seam starts to become
+    visible once the picture is stretched, so ``ratio`` around 1 is the
+    interesting scale; a well-flattened mosaic measures a small fraction of it.
+    It is unit-free by construction, so it means the same thing whatever the
+    stack's exposure, gain or normalisation: rescaling the picture moves the
+    step and the grain together and leaves the number exactly where it was.
+    """
+
+    n_levels: int        # coverage levels the measurement could actually read
+    spread_adu: float    # worst channel's max−min sky level across those levels
+    noise_sigma: float   # that same channel's sky noise σ
+    ratio: float         # spread_adu / noise_sigma
+
+
+def measure_seam_residual(
+    rgb: np.ndarray,
+    coverage: np.ndarray,
+    *,
+    frame_coverage: np.ndarray | None = None,
+    object_sigma: float = 2.0,
+    min_pixels_per_level: int = 200,
+    dilate_object_mask_px: int = 4,
+    proxy_scale: float = 1.0,
+) -> SeamResidual | None:
+    """Measure the panel-seam step a *finished* mosaic still carries.
+
+    :func:`level_by_coverage` pushes every coverage level's sky to zero, but it
+    cannot always succeed: a level whose sky sample is unreadable takes a
+    neighbour's interpolated offset, and a level filled by real structure is
+    deliberately left alone. Nothing downstream checks whether the panels
+    actually came out flat — the one mosaic failure mode a beginner can *see*
+    but not diagnose — so this measures it on the result and hands back a
+    number the app can say out loud.
+
+    Run it on the image **after** leveling (and after any final gradient pass),
+    with the same coverage map. Returns ``None`` whenever there is nothing
+    meaningful to report: a single-coverage-level (ordinary single-field) stack
+    has no joins to compare, and a canvas whose levels can't be measured says
+    nothing rather than guessing.
+    """
+    img = np.asarray(rgb, dtype=np.float32)
+    ctx = _level_context(
+        img, coverage, frame_coverage, object_sigma, min_pixels_per_level,
+        dilate_object_mask_px, proxy_scale)
+    # One level is a single-field stack: no join, nothing to compare, no verdict.
+    if ctx is None or len(ctx.big_levels) < 2:
+        return None
+
+    per_level: dict[int, list[float]] = {}
+    per_level_sigma: dict[int, list[float]] = {}
+    for level in ctx.big_levels:
+        found = _level_sky_mask(ctx, level, object_sigma, dilate_object_mask_px)
+        if found is None:
+            continue
+        region_sky_mask, _rescued = found
+        skies = [_sky_mode(img[..., c][region_sky_mask]) for c in range(3)]
+        if any(s is None or not np.isfinite(s) for s in skies):
+            continue
+        per_level[level] = [float(s) for s in skies]  # type: ignore[arg-type]
+        per_level_sigma[level] = [
+            _robust_stats(img[..., c][region_sky_mask])[1] for c in range(3)]
+
+    # Two readable levels is the minimum for a *difference* to exist at all.
+    if len(per_level) < 2:
+        return None
+
+    worst: tuple[float, float, float] | None = None
+    for c in range(3):
+        vals = [per_level[lvl][c] for lvl in per_level]
+        spread = float(max(vals) - min(vals))
+        # The yardstick is the grain *within* a level, taken as the median of the
+        # per-level spreads — not the canvas-wide σ. A canvas-wide σ is itself
+        # inflated by the very level-to-level offsets being measured, so on the
+        # badly-seamed stack this check exists to catch it would quietly deflate
+        # the ratio towards 1 and understate the problem.
+        sigmas = [s[c] for s in per_level_sigma.values()
+                  if np.isfinite(s[c]) and s[c] > 0]
+        if not sigmas:
+            continue
+        sigma_c = float(np.median(sigmas))
+        ratio = spread / sigma_c
+        if worst is None or ratio > worst[0]:
+            worst = (ratio, spread, sigma_c)
+    if worst is None:
+        return None
+
+    ratio, spread, sigma = worst
+    log.info(
+        "Seam residual: %d coverage levels, worst channel spread %.4f on noise "
+        "σ %.4f (%.2f×)", len(per_level), spread, sigma, ratio,
+    )
+    return SeamResidual(
+        n_levels=len(per_level), spread_adu=spread, noise_sigma=sigma, ratio=ratio,
+    )
+
+
 def level_by_coverage(
     rgb: np.ndarray,
     coverage: np.ndarray,
@@ -213,113 +538,14 @@ def level_by_coverage(
         between the live preview and the exported image. Default ``1.0`` (the
         full-res export) leaves the behaviour unchanged.
     """
-    from astropy.stats import sigma_clipped_stats
-    from scipy.ndimage import binary_dilation
-
-    # Select the *same set* of coverage levels the full-res export would, by
-    # gating on the full-resolution-equivalent pixel count: a strided proxy pixel
-    # stands in for ``step²`` full-res pixels, so scale the floor by 1/step²
-    # (never below a handful of pixels — a median over 3 pixels is noise).
-    step = max(1, int(round(float(proxy_scale))))
-    effective_min = max(
-        _MIN_STRIDED_PIXELS, int(round(min_pixels_per_level / (step * step))))
-
     out = rgb.astype(np.float32, copy=True)
 
-    # Bin by the true per-pixel frame count when the caller provides it (quality
-    # weighting fuzzes the weighted-sum ``coverage``); otherwise fall back to the
-    # coverage map. Unweighted stacks have ``frame_coverage == coverage``, so the
-    # fallback path is byte-for-byte unchanged.
-    cov_src = frame_coverage if frame_coverage is not None else coverage
-    if cov_src.ndim == 3:
-        # WeightedSumAccumulator's coverage is per-channel but identical across
-        # channels for our pipeline; collapse to 2D.
-        cov2d = cov_src[..., 0]
-    else:
-        cov2d = cov_src
-
-    # Luminance + object mask. We dilate the mask so star halos and nebula
-    # *edges* are also excluded — after stretching, even mildly bright pixels
-    # near a source bias the per-level median enough to show up as a step.
-    luma = (0.299 * out[..., 0] + 0.587 * out[..., 1]
-            + 0.114 * out[..., 2]).astype(np.float32, copy=False)
-    finite = np.isfinite(luma)
-    if not finite.any():
+    ctx = _level_context(
+        out, coverage, frame_coverage, object_sigma, min_pixels_per_level,
+        dilate_object_mask_px, proxy_scale)
+    if ctx is None:
         return out
-
-    # Bin coverage values. ``cov2d`` is the true integer frame count when the
-    # caller passed ``frame_coverage`` (already integral); on the fallback path
-    # it's the Σ-weight map, so round to the nearest integer — the
-    # **integer-rounded** bin is what carries the visible panel structure.
-    # (Binned *before* the object mask: the threshold below is measured per
-    # coverage level, so it needs the bins.)
-    cov_int = np.rint(cov2d).astype(np.int32, copy=False)
-    valid_pix = (cov_int > 0) & finite
-    if not valid_pix.any():
-        return out
-
-    # Every coverage value actually present on the canvas — taken over
-    # ``valid_pix`` rather than the sky mask so a level the object mask has
-    # entirely swallowed is still *considered* (and rescued below) instead of
-    # dropping out of the list unnoticed.
-    levels, region_counts = np.unique(cov_int[valid_pix], return_counts=True)
-    # The levels big enough to be worth correcting at all. A coverage value
-    # covering fewer than the floor's worth of pixels *in total* is a sliver, not
-    # a panel: it carries no reliable median, and it is left untouched — neither
-    # measured nor filled — exactly as it always has been.
-    big_levels = [
-        int(lv) for lv, n in zip(levels, region_counts)
-        if lv > 0 and n >= effective_min
-    ]
-
-    _, med, std = sigma_clipped_stats(luma, mask=~finite, sigma=3.0, maxiters=5)
-    if not (np.isfinite(med) and np.isfinite(std) and std > 0):
-        return out
-
-    # Detect objects against each pixel's **own coverage level's** sky, not
-    # against one canvas-wide median + σ. On the mosaic this pass exists for,
-    # the canvas-wide σ is set by the panel-to-panel level offsets rather than
-    # by the noise — the very thing we are about to subtract — which wrecks the
-    # threshold in both directions at once: it floats far above the noise, so
-    # stars and nebulosity stop being masked and leak into every level's "sky"
-    # estimate; and a level whose sky happens to sit high is flagged wholesale
-    # as one big object and loses its sky sample. Removing a rough per-level sky
-    # first puts every level on the same footing, so the threshold measures
-    # grain again. On a single-coverage-level image the detrend is one constant
-    # subtracted from both the pixels and the median, so the mask is exactly the
-    # one it has always been — an ordinary non-mosaic stack is unaffected.
-    rough_sky = np.full(luma.shape, np.float32(med), dtype=np.float32)
-    for level in big_levels:
-        region = (cov_int == level) & finite
-        med_level, _ = _robust_stats(luma[region])
-        if np.isfinite(med_level):
-            rough_sky[region] = np.float32(med_level)
-    detrended = luma - rough_sky
-    _, med_d, std_d = sigma_clipped_stats(
-        detrended, mask=~finite, sigma=3.0, maxiters=5)
-    if np.isfinite(med_d) and np.isfinite(std_d) and std_d > 0:
-        detect, med, std = detrended, float(med_d), float(std_d)
-    else:
-        # Degenerate detrend (e.g. every level perfectly flat): fall back to the
-        # canvas-wide statistics rather than refusing to mask anything.
-        detect = luma
-
-    object_mask = detect > (med + object_sigma * float(std))
-    if dilate_object_mask_px > 0:
-        object_mask = binary_dilation(object_mask, iterations=dilate_object_mask_px)
-
-    # How spread out the canvas's *retained* sky is, once the object mask has
-    # done its job — the yardstick for "does this level's sample actually look
-    # like sky?" below. Comparing a level's retained spread against the canvas's
-    # retained spread is apples to apples, and both are measured on the
-    # detrended luminance so neither carries a level's own offset.
-    sky_pix = valid_pix & ~object_mask
-    sky_sigma = float(std)
-    if sky_pix.any():
-        _, s = _robust_stats(detect[sky_pix])
-        if np.isfinite(s) and s > 0:
-            sky_sigma = float(s)
-    max_level_sigma = _RESCUE_MAX_SIGMA_RATIO * sky_sigma
+    cov_int, valid_pix, big_levels = ctx.cov_int, ctx.valid_pix, ctx.big_levels
 
     # First pass: compute the per-channel SKY MODE for each coverage level
     # using the SExtractor approximation (2.5·median − 1.5·sigma-clipped-mean).
@@ -330,54 +556,28 @@ def level_by_coverage(
     sky_counts: dict[int, int] = {}
     n_rescued = 0
     for level in big_levels:
-        region_mask = (cov_int == level) & valid_pix
-        region_sky_mask = region_mask & ~object_mask
-        n_sky = int(region_sky_mask.sum())
-        if n_sky < effective_min:
-            # The global object threshold has starved this level's sky sample.
-            # Most often that is not because the region *is* an object but
-            # because its residual sky sits above the canvas-wide median + σ —
-            # the offset this pass exists to subtract. Re-threshold it against
-            # its own statistics before giving up (see :func:`_local_sky_mask`);
-            # a level that already had enough sky pixels never reaches here, so
-            # nothing that is leveled today changes.
-            rescued = _local_sky_mask(
-                luma, region_mask, object_sigma, dilate_object_mask_px,
-                max_level_sigma)
-            if rescued is None or int(rescued.sum()) < effective_min:
-                continue
-            region_sky_mask = rescued
-            n_sky = int(region_sky_mask.sum())
-            n_rescued += 1
-        # The retained sample has to look like sky before we call its mode a sky
-        # level. A coverage region genuinely *filled* by a galaxy or nebula
-        # leaves behind a sample far more spread out than the canvas's own
-        # retained sky; measuring it would read the object's level as this
-        # level's sky offset and subtract real flux from it. Leave those to the
-        # interpolated fill, which shifts them by their neighbours' offset and
-        # so preserves their structure.
-        _, level_sigma = _robust_stats(detect[region_sky_mask])
-        if not np.isfinite(level_sigma) or level_sigma > max_level_sigma:
+        # A starved level is re-thresholded against its own statistics, and a
+        # level too structured to be sky is refused outright — both handled by
+        # ``_level_sky_mask``, so the leveling pass and the seam-residual check
+        # can never disagree about which levels are measurable.
+        found = _level_sky_mask(ctx, level, object_sigma, dilate_object_mask_px)
+        if found is None:
+            # Unmeasurable: left to the interpolated fill below, which shifts it
+            # by its neighbours' offset and so preserves whatever structure
+            # filled it.
             continue
+        region_sky_mask, was_rescued = found
+        if was_rescued:
+            n_rescued += 1
+        n_sky = int(region_sky_mask.sum())
         ch_offsets: list[float] = []
         ok = True
         for c in range(3):
-            sky_pixels = out[..., c][region_sky_mask]
-            sc_mean, sc_med, sc_std = sigma_clipped_stats(sky_pixels, sigma=3.0, maxiters=5)
-            if not (np.isfinite(sc_mean) and np.isfinite(sc_med)):
+            mode_est = _sky_mode(out[..., c][region_sky_mask])
+            if mode_est is None:
                 ok = False
                 break
-            mode_est = 2.5 * sc_med - 1.5 * sc_mean
-            # If the skew is implausibly extreme, fall back to the median — the
-            # SExtractor approximation only holds for mild positive skew. Its own
-            # trust criterion (mean−median within 0.3·σ) is used here; the earlier
-            # `abs(mode−med) > 5·abs(med−mean)` form was algebraically inert (that
-            # is exactly `1.5·X > 5·X`, never true), so the backstop was dead.
-            if (not np.isfinite(mode_est)
-                    or (np.isfinite(sc_std) and sc_std > 0.0
-                        and abs(sc_mean - sc_med) > 0.3 * sc_std)):
-                mode_est = sc_med
-            ch_offsets.append(float(mode_est))
+            ch_offsets.append(mode_est)
         if ok:
             offsets[int(level)] = ch_offsets
             sky_counts[int(level)] = n_sky
@@ -392,6 +592,12 @@ def level_by_coverage(
     # order trend (weighted by sky pixel count) across levels and use the
     # fitted value, which kills the residual high-frequency wobble that
     # otherwise traces the coverage map.
+    # The fitted trend per channel, kept so the fill below can put an
+    # *unmeasurable* level on the very same curve the measured levels were moved
+    # onto. ``(coeffs, lo, hi)``, or None when no fit was made (too few measured
+    # levels, smoothing off, or a degenerate fit) — the fill then falls back to a
+    # straight interpolation between neighbours.
+    fitted: list[tuple[np.ndarray, float, float] | None] = [None, None, None]
     if smooth_across_levels and len(offsets) >= 3:
         lvls = np.array(sorted(offsets.keys()), dtype=np.float32)
         weights = np.array([sky_counts[int(l)] for l in lvls], dtype=np.float32)
@@ -399,11 +605,12 @@ def level_by_coverage(
             ys = np.array([offsets[int(l)][c] for l in lvls], dtype=np.float32)
             # Quadratic fit weighted by sky-pixel count — flexible enough for
             # the usual gentle dependence but won't chase per-level noise.
+            coeffs: np.ndarray | None
             try:
                 coeffs = np.polyfit(lvls, ys, deg=2, w=weights)
                 smoothed = np.polyval(coeffs, lvls)
             except (np.linalg.LinAlgError, ValueError):
-                smoothed = ys
+                coeffs, smoothed = None, ys
             # Coverage levels are often *gapped*: dense single-panel counts, then
             # a jump to the 2×/3× overlap counts, whose sky sample is far smaller.
             # A single global polynomial is dominated by the high-pixel-count
@@ -418,6 +625,8 @@ def level_by_coverage(
             # gapped-extrapolation to the real per-level spread.
             lo, hi = float(np.min(ys)), float(np.max(ys))
             smoothed = np.clip(smoothed, lo, hi)
+            if coeffs is not None:
+                fitted[c] = (coeffs, lo, hi)
             for i, l in enumerate(lvls):
                 offsets[int(l)][c] = float(smoothed[i])
 
@@ -426,15 +635,33 @@ def level_by_coverage(
     # to zero sky doesn't leave it alone in any meaningful sense — it leaves it
     # holding its full residual next to regions that no longer hold theirs, so
     # the pass manufactures a panel step (a coloured one, since the offsets are
-    # per channel) exactly where it is supposed to remove one. An interpolated
-    # neighbour offset is the best available estimate and, crucially, restores
-    # continuity across the boundary. ``np.interp`` is linear between measured
-    # levels and flat outside them, so a filled offset can never leave the
-    # envelope of what was actually measured. Levels that *were* measured keep
-    # their own (smoothed) value, so a stack in which every present level was
-    # measurable — the ordinary single-field case — is byte-for-byte unchanged.
-    # Only levels that cleared the pixel floor are filled: a sliver too small to
-    # measure is also too small to be worth shifting, and stays untouched.
+    # per channel) exactly where it is supposed to remove one. A neighbour-derived
+    # offset is the best available estimate and, crucially, restores continuity
+    # across the boundary.
+    #
+    # It is taken from the **same curve the measured levels were moved onto**.
+    # Sky-vs-coverage is a single physical trend, so evaluating the fitted
+    # quadratic at the gap keeps every level on one curve; a separate straight
+    # line between neighbours would land a filled level slightly off it wherever
+    # that trend is curved — a small low-frequency inconsistency tracing exactly
+    # the coverage map this pass exists to erase. (Measured on a synthetic
+    # quadratic sky-vs-level trend with level 4 unmeasurable: the straight line
+    # gives 125.6 against a true 124.8 — 0.8 ADU on a 1.5 ADU noise floor — while
+    # the fitted curve lands on 124.8.) The fitted value is clamped to the same
+    # measured envelope the smoothed levels are, so a filled offset still can
+    # never leave the range actually measured, and a gap outside that range can't
+    # extrapolate a seam into existence.
+    #
+    # When no fit was made — smoothing off, fewer than three measured levels, or
+    # a degenerate fit — there is no curve to sit on, and the fill falls back to
+    # ``np.interp``: linear between measured levels and flat outside them, which
+    # is likewise inside the measured envelope.
+    #
+    # Levels that *were* measured keep their own (smoothed) value either way, so
+    # a stack in which every present level was measurable — the ordinary
+    # single-field case — is byte-for-byte unchanged. Only levels that cleared
+    # the pixel floor are filled: a sliver too small to measure is also too small
+    # to be worth shifting, and stays untouched.
     measured = sorted(offsets)
     n_measured = len(measured)
     unmeasured = [lvl for lvl in big_levels if lvl not in offsets]
@@ -445,7 +672,14 @@ def level_by_coverage(
             for c in range(3)
         ]
         targets = np.array(unmeasured, dtype=np.float64)
-        filled = [np.interp(targets, xs, ys_per_channel[c]) for c in range(3)]
+        filled = []
+        for c in range(3):
+            fit = fitted[c]
+            if fit is not None:
+                coeffs, lo, hi = fit
+                filled.append(np.clip(np.polyval(coeffs, targets), lo, hi))
+            else:
+                filled.append(np.interp(targets, xs, ys_per_channel[c]))
         for i, lvl in enumerate(unmeasured):
             offsets[lvl] = [float(filled[c][i]) for c in range(3)]
 

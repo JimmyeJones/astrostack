@@ -369,6 +369,12 @@ class StackRunOut(BaseModel):
     # pre-schema-14 runs or when too few stars to fit; lets the UI show a per-run
     # sharpness readout and compare a target's stacks.
     stack_fwhm_px: float | None = None
+    # How flat this *mosaic's* panel joins came out: the sky step still left
+    # between coverage levels, in units of the picture's own grain (~0 = the
+    # panels matched; around 1 is where a seam starts to show once stretched).
+    # None for a single-field stack (no joins to compare), pre-schema-15 runs, or
+    # when it couldn't be measured — the UI self-hides rather than guessing.
+    seam_residual: float | None = None
     # Which calibration masters were applied to the lights ("dark+flat",
     # "bias+flat", "flat", …), or None when the stack was uncalibrated / for
     # pre-schema-7 runs; lets a card show a "dark+flat" chip at a glance.
