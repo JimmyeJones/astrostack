@@ -1,4 +1,8 @@
-"""GET /api/targets/{safe}/stack-health — the "How's my stack?" card."""
+"""GET /api/targets/{safe}/stack-health — the "How's my stack?" card.
+
+Also covers the run-record fields the card speaks for where the listing
+endpoint is their only other reader.
+"""
 
 from __future__ import annotations
 
@@ -95,3 +99,39 @@ def test_stack_health_surfaces_the_rejection_cleanup_note(
 def test_stack_health_unknown_target_404(client):
     r = client.get("/api/targets/does_not_exist/stack-health")
     assert r.status_code == 404
+
+
+def test_stack_health_surfaces_a_surviving_mosaic_seam(
+        client, solved_library, data_root):
+    """The measured panel-seam step reaches the card as plain language: the one
+    mosaic failure mode a beginner can see but not name."""
+    _add_run(data_root, "M_42", is_mosaic=True, coverage_min=6, coverage_max=12,
+             seam_residual=2.4)
+    body = client.get("/api/targets/M_42/stack-health").json()
+    note = next(n for n in body["notes"] if n["kind"] == "seams")
+    assert note["severity"] == "info"
+    assert "2.4" in note["message"]
+
+
+def test_stack_health_says_a_mosaic_evened_out(client, solved_library, data_root):
+    _add_run(data_root, "M_42", is_mosaic=True, coverage_min=6, coverage_max=12,
+             seam_residual=0.2)
+    body = client.get("/api/targets/M_42/stack-health").json()
+    kinds = [n["kind"] for n in body["notes"]]
+    assert "seams_flat" in kinds and "seams" not in kinds
+
+
+def test_stack_runs_listing_exposes_the_seam_residual(
+        client, solved_library, data_root):
+    """The measured figure behind the seam notes is served on the run itself
+    too, so the History surface (and anyone inspecting a mosaic) can read the
+    number rather than only the verdict. Additive and nullable: a single-field
+    run serves ``null``, which an older client simply ignores."""
+    _add_run(data_root, "M_42", is_mosaic=True, coverage_min=6, coverage_max=12,
+             seam_residual=0.37)
+    _add_run(data_root, "M_42", timestamp_utc="2026-07-13T00:00:00+00:00",
+             output_basename="single")
+    runs = client.get("/api/targets/M_42/stack-runs").json()
+    by_name = {r["output_basename"]: r for r in runs}
+    assert by_name["m42"]["seam_residual"] == 0.37
+    assert by_name["single"]["seam_residual"] is None

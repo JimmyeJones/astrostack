@@ -132,6 +132,64 @@ def test_stack_records_is_mosaic_false_for_single_field(tmp_path):
         proj.close()
 
 
+def test_a_single_field_stack_records_no_seam_residual(tmp_path):
+    """The seam check only means something where there are joins. A single-field
+    stack has one coverage level, so the stacker records NULL — and, because the
+    measurement is gated on the mosaic verdict, never pays for it at all."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                     output_name="noseam"))
+        run = next(iter(proj.iter_stack_runs()))
+        assert run.is_mosaic is False
+        assert run.seam_residual is None
+    finally:
+        proj.close()
+
+
+def test_a_mosaic_stack_records_how_flat_its_panel_joins_came_out(tmp_path):
+    """Two overlapping pointings make a real union canvas with several coverage
+    levels. The stacker measures the sky step still left across those joins and
+    stamps it on the run record (and the FITS header), so "How's my stack?" can
+    say whether the panels evened out instead of the owner having to spot a seam
+    grid by eye."""
+    from astropy.io import fits
+
+    proj = Project.create(tmp_path / "pm", name="mosaic")
+    raws = tmp_path / "mraws"
+    raws.mkdir()
+    try:
+        # Two panels offset along RA by ~a third of the frame, so their
+        # footprints overlap: the overlap is covered by twice as many frames as
+        # either panel's outer half.
+        for panel, ra in enumerate((83.6, 83.8)):
+            wcs_text = make_synth_wcs_text(ra_center_deg=ra)
+            for i in range(3):
+                path = write_seestar_fits(
+                    raws / f"p{panel}_{i}.fit", add_wcs=True,
+                    seed=40 + panel * 10 + i, n_stars=30)
+                proj.add_frame(FrameRow(
+                    source_path=str(path), cached_path=str(path),
+                    width_px=480, height_px=320, bayer_pattern="RGGB",
+                    wcs_json=wcs_text, ra_center_deg=ra, dec_center_deg=-5.4,
+                ))
+
+        result = run_stack(proj, StackOptions(
+            sigma_clip=False, max_workers=2, mosaic_canvas="union",
+            output_name="mos"))
+        run = next(iter(proj.iter_stack_runs()))
+        assert run.is_mosaic is True
+        assert run.coverage_max > run.coverage_min  # a genuine multi-level canvas
+        # Measured, finite and non-negative — a ratio of a step to the grain.
+        assert run.seam_residual is not None
+        assert run.seam_residual >= 0.0
+        # Mirrored into the self-documenting FITS header for provenance.
+        hdr = fits.getheader(str(result.fits_path))
+        assert abs(hdr["SEAMRES"] - run.seam_residual) < 1e-3
+    finally:
+        proj.close()
+
+
 def test_stack_records_rejection_tally_on_sigma_clip(tmp_path):
     """A κ-σ stack persists its outlier-rejection tally (a real fraction — 0 or
     more — and the mode), so "How's my stack?" can read what the pass did without

@@ -9169,8 +9169,73 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Builder 2026-08-05, spotted while fixing the coverage-leveling seam bugs) — measure the residual
-  panel-seam step after leveling and *say so* when one survives.** *(Trust / friendliness — PRIORITY 3; size S–M.)*
+- **NEW IDEA (Builder 2026-08-05, filed while shipping the seam-residual verdict v0.233.0) — give the "faint seams
+  may show" note somewhere to send the beginner.** *(Friendliness — PRIORITY 3; size S; frontend + one `action`
+  key.)* The new `seams` health note names the problem honestly but ends in advice with no button: *"the editor's
+  background tools can even it out further."* Every other actionable note carries an `action` key the card turns
+  into a one-click link (`trim_border` → the editor, `calibration` → the Calibration page, `solve_help` →
+  Settings, `restack` → the Stack form). A `background` action opening the editor on **that run** would close the
+  loop the same way — the beginner reads why their mosaic looks striped and lands on the tool that fixes it,
+  instead of being told a tool exists. **Care:** `noteAction` already drops a self-link when the card is rendered
+  *inside* the editor (`inEditor`), and the seam note should follow that rule; and the link must point at the
+  graded run, not the newest, since the note is about a specific stack.
+- **NEW IDEA (Builder 2026-08-05, same run) — show the measured seam number on the History run card, so two
+  mosaic stacks can be compared on it.** *(Trust — PRIORITY 3; size S; frontend-only.)* `StackRunOut.seam_residual`
+  is served but nothing renders it. The History card already shows per-run noise σ and star size as small
+  readouts, and the Compare view already answers "did my new stack get better?" on noise — panel flatness is the
+  third axis of *the same question* for anyone shooting mosaics, and it is the one they can't judge by eye on a
+  thumbnail. **Slice:** a self-hiding chip beside the existing readouts (nothing at all when the field is NULL,
+  i.e. every single-field stack and every pre-v0.233 run), reading "panels even" / "panels: check" off the same
+  two thresholds `stackhealth` uses so the two surfaces can never disagree — export the thresholds rather than
+  re-typing the numbers in TypeScript. **Care:** don't render a raw ratio as a number to a beginner; the verdict
+  is the point, and the exact figure belongs in the Info panel at most.
+- **NOTE for the "bisect the v0.158→v0.220 colour chain on a synthetic mosaic" follow-up above (Builder
+  2026-08-05).** That entry asks a future run to measure "the visible plateau/edge structure" across a panel
+  boundary with SCNR / the per-frame flatten / `remove_final_gradient` individually disabled — and warns that the
+  raw seam step is dominated by the injected offsets, so a bespoke measurement is needed. `measure_seam_residual`
+  (v0.233.0) **is** that measurement, already calibrated and tested: one unit-free number per configuration,
+  measured on the finished image with the grain as its yardstick. Whoever picks that bisect up should run it
+  rather than build a fresh harness.
+
+- ~~**NEW IDEA (Builder 2026-08-05, spotted while fixing the coverage-leveling seam bugs) — measure the residual
+  panel-seam step after leveling and *say so* when one survives.**~~ — **SHIPPED v0.233.0** (Builder 2026-08-05,
+  branch `claude/relaxed-turing-laiaax`). *(Trust / friendliness — PRIORITY 3.)* A mosaic's panel joins are now
+  **measured on the finished image** and reported in plain words, so the failure mode that took an owner
+  eyeballing an export to find is self-reporting from here on.
+  **Engine:** `seestack.bg.coverage_leveling.measure_seam_residual` returns a `SeamResidual` — the worst channel's
+  remaining level-to-level sky spread divided by that channel's own grain. Two design points make the number
+  trustworthy: the per-level sky uses **exactly** the estimator and the exactly the guards the leveling pass uses
+  (a shared `_LevelContext` / `_level_sky_mask` / `_sky_mode`, so the check and the pass can never disagree about
+  which levels are measurable), and the yardstick is the **median of the per-level** σ, not a canvas-wide σ — a
+  canvas-wide σ is itself inflated by the very offsets being measured, which would have deflated the ratio towards
+  1 on exactly the badly-seamed stack this exists to catch (measured: an un-leveled 4-panel scene reads **15.7**
+  with the per-level yardstick vs 2.5 with the canvas-wide one). Extracting the shared context out of
+  `level_by_coverage` is **byte-for-byte behaviour-preserving** — verified against a transcription of the previous
+  implementation across mosaic / single-field / proxy / no-smoothing / per-channel-coverage / all-NaN /
+  zero-coverage cases.
+  **Calibration** (realistic 600×800 4-panel synthetic, σ = 2 ADU, nebula + 300 stars): correctly leveled reads
+  **0.56** (0.02 with no nebula, 0.05 with a 400 ADU one — real structure crossing panels does *not* read as a
+  seam); stranding one level by 2× / 3× the noise reads **1.39 / 2.08**; leaving the panel offsets in reads
+  **15.7**. So "How's my stack?" says *"the panels evened out"* below **1.0**, *"faint seams may show — about N×
+  the picture's own grain"* at/above **1.5**, and **stays silent between** the two: a big nebula puts a floor
+  under the measurement that has nothing to do with seams, so a middling number is genuinely ambiguous and
+  neither claim would be honest.
+  **Plumbing:** a nullable `seam_residual` on the run record (schema 14 → 15, additive `ALTER TABLE`), mirrored to
+  the FITS header as `SEAMRES` and served additively on `StackRunOut`. **Free on the ordinary path** — the
+  measurement is gated on the stacker's own mosaic verdict, so a single-field stack (one coverage level, no joins)
+  never runs it and records NULL, exactly as every pre-v0.233 run does. Best-effort throughout: a diagnostic can
+  never break a finished stack. No config/API-shape/on-disk/default change; frontend untouched (the health card
+  already renders any note the backend ranks).
+  **Tests** (+18): `test_coverage_leveling.py` (+7 — a correctly-leveled mosaic measures inside its noise,
+  un-leveled offsets measure many times it *and* keep an honest yardstick, one stranded level is caught, a single
+  coverage level has nothing to measure, rescaling the picture leaves the ratio alone, a nebula crossing the
+  panels doesn't read as a seam at either strength, an unmeasurable canvas reports nothing);
+  `test_stackhealth.py` (+6 — both verdicts, the deliberately-silent middle band, single-field/NULL silence,
+  non-finite ignored, ranking below the actionable next steps); `test_stack_pipeline.py` (+2 — a real two-pointing
+  union stack records a finite residual matching its `SEAMRES` card; a single-field stack records NULL);
+  `test_project.py` (+1 — a schema-14 DB migrates additively, old runs read NULL, the existing column's data
+  survives); `test_target_stack_health.py` (+3 — both notes over the API, and the listing's nullable field).
+  *(Original idea kept below for provenance.)*
   The owner had to report the "multicolour grid" himself because **nothing in the app measures whether the panel
   seams actually came out flat.** After `level_by_coverage` runs, the check is nearly free and uses numbers it has
   already computed: each coverage level's post-leveling sky, per channel. If the spread across neighbouring levels
@@ -9181,8 +9246,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   chain of fixes was found only because a human eyeballed an export. A number on the run makes the next regression
   self-reporting. **Care:** it must self-hide on a single-field stack (one coverage level = nothing to compare), and
   the verdict wording must not alarm on a level whose spread is genuinely below the noise. Additive/read-only.
-- **NEW IDEA (Builder 2026-08-05, spotted in the same file) — unify the two models of "how sky varies with coverage
-  level" in `level_by_coverage`.** *(Image quality / tidying — PRIORITY 4; size S.)* The pass now carries two: the
+- ~~**NEW IDEA (Builder 2026-08-05, spotted in the same file) — unify the two models of "how sky varies with coverage
+  level" in `level_by_coverage`.**~~ — **SHIPPED v0.233.1** (Builder 2026-08-05, branch
+  `claude/relaxed-turing-laiaax`). *(Image quality — PRIORITY 4.)* A level the pass could not measure is now put on
+  the **same fitted curve** its measured neighbours were moved onto, instead of on a straight line drawn between
+  them. **It is not only tidying — it was measurably wrong:** on a synthetic scene with a curved sky-vs-coverage
+  trend (offset = 100 + 3ℓ + 0.8ℓ², seven levels, level 4 filled by structure so it can't be measured) the straight
+  line put level 4 at **125.6** against a true **124.8** — **0.8 ADU of coherent step on a 1.5 ADU noise floor**,
+  left at that level's two boundaries, which is exactly the low-frequency artefact tracing the coverage map that
+  this pass exists to erase. The fitted curve lands on **124.799**.
+  **Both cares in the original entry are met:** the fitted value is clamped to the **same measured envelope** the
+  smoothed levels are, so the gapped-extrapolation guard survives intact (`test_smoothing_does_not_extrapolate_a_
+  seam_onto_a_gapped_overlap_level` still passes untouched) and a filled offset still can never leave the range
+  actually measured; and **no measured level moves** — they already took the fitted value, so the change reaches
+  only levels that today get an interpolated fill. When no fit was made at all (smoothing off, fewer than three
+  measured levels, or a degenerate fit) there is no curve to sit on and the `np.interp` fallback is kept exactly as
+  it was — so the shipped two-measured-level fill test is unchanged too. No config/DB/API-shape/on-disk change and
+  no default flipped. Tests (`tests/test_coverage_leveling.py`, +2; one fails before / passes after): the filled
+  level lands on the curve (124.8, not 125.6) **and** every measured level still lands at zero sky, plus the
+  no-fit fallback still draws the straight line.
+  *(Original idea kept below for provenance.)* The pass now carries two: the
   long-standing weighted **quadratic** `smooth_across_levels` fit for levels it measured, and the new `np.interp`
   **linear** fill for levels it could not. So a filled level lands on a slightly different curve from the one its
   measured neighbours were moved onto — small, but it is exactly the kind of low-frequency inconsistency that traces
