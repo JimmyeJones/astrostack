@@ -32,6 +32,34 @@ def test_identify_known_target_by_name(client, solved_library):
     assert info["difficulty"]["text"]
 
 
+def test_identify_carries_the_background_mode_advice_for_a_big_nebula(
+    client, solved_library,
+):
+    # M42 is the archetype the per-frame flatten's own docstring names: an
+    # extended emission nebula, where the default per-channel sky fit bends into
+    # the nebulosity differently in each channel. The Stack form's nudge reads
+    # this field, so the endpoint must carry both the mode and the reason.
+    r = client.get("/api/targets/M_42/identify")
+    assert r.status_code == 200
+    hint = r.json()["background_mode_hint"]
+    assert hint is not None
+    assert hint["mode"] == "luminance"
+    assert "cyan cores" in hint["text"]
+
+
+def test_identify_leaves_a_galaxy_on_the_default_background_mode(
+    client, solved_library,
+):
+    # A galaxy is extended, but its channels share one shape — per-channel mode
+    # handles it correctly, so the field must stay null and no nudge is shown.
+    client.post("/api/targets", json={"name": "M 31"})
+    targets = client.get("/api/targets").json()
+    safe = next(t["safe_name"] for t in targets if t["name"] == "M 31")
+    info = client.get(f"/api/targets/{safe}/identify").json()
+    assert info is not None and info["type"] == "galaxy"
+    assert info["background_mode_hint"] is None
+
+
 def test_identify_returns_null_for_an_unmatched_target(client, solved_library):
     # A freshly created target with a non-catalog name and no solve → no card.
     client.post("/api/targets", json={"name": "backyard test field"})

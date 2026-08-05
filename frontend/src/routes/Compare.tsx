@@ -49,6 +49,27 @@ export function noiseComparison(
   return { winner, pct: Math.round((1 - lo / hi) * 100) };
 }
 
+// Compare the two stacks' panel-flatness verdicts into a plain sentence — the
+// same "answer it out loud" job `noiseComparison` does for noise, for the third
+// axis of "did my new stack get better?" that only mosaic shooters have.
+//
+// Both sides must carry a verdict the app knows (so both are mosaics the stacker
+// could measure — every single-field stack and every run made before the
+// measurement existed serves `null`), and the two must *differ*: when they agree
+// the two chips already say it and there is nothing to weigh. Deliberately no
+// magnitude — the verdicts are coarse words, and the beginner never sees the
+// ratio behind them, so "2× flatter" would be inventing precision.
+export function panelComparison(
+  a: GalleryItem, b: GalleryItem,
+): { winner: "A" | "B"; loser: "A" | "B" } | null {
+  const known = (v?: string | null) => v === "flat" || v === "check";
+  if (!known(a.seam_verdict) || !known(b.seam_verdict)) return null;
+  if (a.seam_verdict === b.seam_verdict) return null;
+  return a.seam_verdict === "flat"
+    ? { winner: "A", loser: "B" }
+    : { winner: "B", loser: "A" };
+}
+
 type CompareMode = "side" | "split" | "blink";
 
 function CardMeta({ item }: { item: GalleryItem }) {
@@ -295,6 +316,7 @@ export function CompareView() {
   }
 
   const verdict = noiseComparison(a, b);
+  const panels = panelComparison(a, b);
 
   return (
     <Stack>
@@ -317,13 +339,24 @@ export function CompareView() {
         </Group>
       </Group>
 
-      {verdict ? (
+      {verdict || panels ? (
         <Alert color="teal" variant="light" py="xs" title={undefined}>
-          <Text size="sm">
-            <b>{verdict.winner}</b> has <b>{verdict.pct}% lower</b> background noise
-            {" "}— it's the cleaner stack. (Noise σ is normalized so it's comparable
-            across gain/exposure; it isn't the only measure of a better image.)
-          </Text>
+          <Stack gap={4}>
+            {verdict ? (
+              <Text size="sm">
+                <b>{verdict.winner}</b> has <b>{verdict.pct}% lower</b> background noise
+                {" "}— it's the cleaner stack. (Noise σ is normalized so it's comparable
+                across gain/exposure; it isn't the only measure of a better image.)
+              </Text>
+            ) : null}
+            {panels ? (
+              <Text size="sm">
+                <b>{panels.winner}</b>'s mosaic panels evened out, while <b>{panels.loser}</b>'s
+                {" "}sky still steps where its panels join — so <b>{panels.loser}</b> may show
+                {" "}faint seams once it's stretched.
+              </Text>
+            ) : null}
+          </Stack>
         </Alert>
       ) : null}
 

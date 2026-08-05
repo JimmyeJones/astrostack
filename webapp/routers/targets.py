@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 
 from webapp import deps
 from webapp.schemas import (
+    BackgroundModeHintOut,
     BestFrameOut,
     CleanupSuggestionOut,
     DarkSpecOut,
@@ -337,6 +338,10 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
                                       label=info.difficulty.label,
                                       text=info.difficulty.text)
                     if info.difficulty is not None else None),
+        background_mode_hint=(
+            BackgroundModeHintOut(mode=info.background_mode_hint.mode,
+                                  text=info.background_mode_hint.text)
+            if info.background_mode_hint is not None else None),
     )
 
 
