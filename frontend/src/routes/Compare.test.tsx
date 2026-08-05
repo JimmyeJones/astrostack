@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CompareView, parseRef, compareHref, noiseComparison, compareDateLabel } from "./Compare";
+import { CompareView, parseRef, compareHref, noiseComparison, panelComparison, compareDateLabel } from "./Compare";
 import * as client from "../api/client";
 import type { GalleryItem } from "../api/client";
 
@@ -89,6 +89,35 @@ describe("noiseComparison", () => {
   });
 });
 
+describe("panelComparison", () => {
+  const withSeams = (run_id: number, verdict: string | null) => {
+    const it = item(run_id, "M_42");
+    it.seam_verdict = verdict;
+    return it;
+  };
+  it("names which mosaic's panels evened out when the two verdicts differ", () => {
+    expect(panelComparison(withSeams(1, "flat"), withSeams(2, "check")))
+      .toEqual({ winner: "A", loser: "B" });
+    expect(panelComparison(withSeams(1, "check"), withSeams(2, "flat")))
+      .toEqual({ winner: "B", loser: "A" });
+  });
+  it("stays silent when the verdicts agree — the two chips already say it", () => {
+    expect(panelComparison(withSeams(1, "flat"), withSeams(2, "flat"))).toBeNull();
+    expect(panelComparison(withSeams(1, "check"), withSeams(2, "check"))).toBeNull();
+  });
+  it("stays silent unless both sides carry a verdict", () => {
+    // A single-field stack, a pre-v0.233 run, or the deliberately silent middle
+    // band all serve null — there is nothing to weigh against.
+    expect(panelComparison(withSeams(1, null), withSeams(2, "flat"))).toBeNull();
+    expect(panelComparison(withSeams(1, "flat"), withSeams(2, null))).toBeNull();
+  });
+  it("stays silent for a verdict word it doesn't know", () => {
+    // Same rule as the chip: a future third verdict must not make an older
+    // frontend guess which way it points.
+    expect(panelComparison(withSeams(1, "flat"), withSeams(2, "sort-of"))).toBeNull();
+  });
+});
+
 describe("CompareView", () => {
   it("prompts to pick two stacks when refs are missing", async () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [] });
@@ -119,6 +148,21 @@ describe("CompareView", () => {
     renderCompare("?a=M_42:3&b=M_42:7");
     await waitFor(() => expect(screen.getByText("Panels: check")).toBeInTheDocument());
     expect(screen.getByText("Panels even")).toBeInTheDocument();
+    // ...and the page says which is which out loud, in the same voice it uses
+    // for noise, rather than leaving two chips to be decoded.
+    expect(screen.getByText(/mosaic panels evened out/)).toBeInTheDocument();
+  });
+
+  it("says nothing about panels when both mosaics landed on the same verdict", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.seam_verdict = "flat";
+    b.seam_verdict = "flat";
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    // Both chips still render; the sentence would only repeat them.
+    await waitFor(() => expect(screen.getAllByText("Panels even")).toHaveLength(2));
+    expect(screen.queryByText(/mosaic panels evened out/)).not.toBeInTheDocument();
   });
 
   it("shows no panel chip when neither stack is a mosaic", async () => {

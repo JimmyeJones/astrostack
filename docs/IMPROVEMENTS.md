@@ -55,6 +55,29 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**⭐ CALIBRATION-ENGINE BUG (Builder 2026-08-05, found by an engine QA pass of `seestack/calibrate/masters.py`;
+  REPRODUCED) — one stray frame sorted first hijacks a whole master build, and the "master built" message says
+  nothing about it.**~~ — **FIXED v0.234.2** (Builder 2026-08-05, branch `claude/relaxed-turing-k8ghhx`).
+  *(Calibration correctness / autonomy — PRIORITY 2/4.)* `build_master` set its reference shape from **whichever
+  frame loaded first** and skipped every frame that didn't match it. So a single file from another camera or
+  binning mode — an S30 sub in an S50 dark folder, a cropped/binned leftover — that happened to sort ahead of the
+  real set defined the reference, and all the genuine frames were dropped as "wrong size".
+  **Reproduced**: 1 stray 2×2 frame named `a_stray.fits` in front of five real 4×4 darks produced a **1-frame
+  master at the stray's shape**, with the five good frames listed as skipped. The build reports *success*; the
+  damage only surfaces much later, when a stack refuses the master on shape (`CalibrationMasters.validate`) — or,
+  for a user who doesn't read the skipped count, as a master built from a single un-averaged frame carrying its
+  full read noise.
+  **The fix:** the reference is now the **majority** shape across the loaded frames, with the odd ones out skipped
+  and reported exactly as before. A tie keeps the first-seen shape, which is byte-for-byte today's behaviour, and
+  a uniform set (the overwhelming common case) is completely unchanged. **Peak memory is unchanged** — the number
+  of arrays held is still bounded by `max_frames`, since the shape decision is made after the same capped load.
+  Also fixed alongside it: the master's `MasterMeta` (exposure / gain / temperature / Bayer pattern) is now
+  collected only from the frames actually combined, so a stray frame can no longer contribute its exposure to the
+  median the dark is later matched on. No config/DB/API-shape/on-disk change and no default flipped.
+  **Tests** (`tests/test_calibrate.py`, +2; the first fails before / passes after): the stray-first set builds a
+  5-frame master at the majority shape with the stray reported as the only skip and the metadata taken from the
+  real frames, and an even 2-vs-2 split still keeps the first-seen shape.
+
 - ~~**⭐ STACKING-ENGINE BUG (Builder 2026-08-05, found by an engine QA pass of `seestack/bg/coverage_leveling.py`;
   REPRODUCED) — the per-coverage sky leveling *manufactures* the coloured panel step it exists to remove, at the
   seam with the biggest offset.**~~ — **FIXED v0.232.2** (Builder 2026-08-05, branch `claude/relaxed-turing-iv0w1h`).
@@ -6166,6 +6189,30 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-08-05, follow-on to the v0.234.0 background-mode nudge) — the *editor* makes the same
+  per-channel-on-a-nebula mistake, and it now has the same catalog fact available to say so.** *(Image quality +
+  friendliness — PRIORITY 3/4; size S; the engine half already exists.)* v0.234.0 puts
+  `seestack.bg_advice.background_mode_hint` behind `GET /api/targets/{safe}/identify` and nudges the **Stack
+  form** toward Luminance for a big emission nebula. The editor's own `background.subtract` op carries the
+  identical `per_channel` default and the identical hazard on the identical targets (`edit/ops/background.py`;
+  its sibling `background.final_gradient` already defaults to `luminance`, which is the tell). The editor knows
+  which run — and therefore which target — it is editing, so the same one-sentence advice could sit beside that
+  op's Mode control, or ride the Auto recipe's own choice. **Slice:** read the existing `["identify", safe]`
+  query (already warm from the Target page) in the editor and render the same advisory line + one-click switch
+  the Stack form uses; nothing new server-side. **Care:** the editor's op runs on an *already stacked* image
+  where the per-frame flatten has been and gone, so the wording must be about this op's own fit, not about the
+  stack's; and don't change any op default — this stays a suggestion, like its Stack-form sibling.
+- **NEW IDEA (Builder 2026-08-05, spotted while fixing the majority-shape master bug v0.234.2) — say *why* a
+  master's frame count came out lower than the folder the user pointed at.** *(Friendliness / trust —
+  PRIORITY 3; size S.)* `build_master` already collects a precise `skipped` list of `(filename, reason)` —
+  `"unreadable"` or `"wrong size"` — and the v0.234.2 fix makes "wrong size" genuinely informative (it now means
+  "this frame disagrees with the majority", i.e. almost always another camera or binning mode). A user who drops
+  a mixed dark library in and gets "master built from 47 frames" has no idea 13 were set aside, or that the
+  reason is a second camera's frames sitting in the same folder. **Slice:** surface the skipped count and its
+  two buckets on the Calibration page's build result — one self-hiding line, silent when nothing was skipped —
+  in the same voice as the Target page's rejection breakdown. **Care:** don't list 13 filenames at a beginner;
+  the count plus the plain-language reason ("13 frames were a different size — they look like they came from
+  another camera or binning mode") is the actionable part.
 - ~~**NEW IDEA (Builder 2026-08-04, spotted while shipping the unreadable-subs preflight v0.230.2) — tell the user
   their files are gone *before* they walk away, not after the stack comes out thin.**~~ — **SHIPPED v0.232.0**
   (Builder 2026-08-04, branch `claude/relaxed-turing-9owkq2`). `GET /api/targets/{safe}/frames/reject-summary` —
@@ -8312,8 +8359,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   run) and keys on the sky coordinates we already have, not on the post-hoc align-failure count. **Smallest
   safe first slice:** just the detection + an amber "your batch looks like 2 targets" pre-stack warning,
   leaving the actual split/auto-select for a follow-up.
-- **Nudge `background_mode='luminance'` for extended-emission (nebula) targets.** (M,
-  autonomy/image-quality) `StackOptions.background_mode` defaults to `per_channel` and has **no**
+- ~~**Nudge `background_mode='luminance'` for extended-emission (nebula) targets.**~~ — **SHIPPED v0.234.0**
+  (Builder 2026-08-05, branch `claude/relaxed-turing-k8ghhx`). *(Autonomy + image quality — PRIORITY 2/4.)* The
+  remaining half of this item — the **data-driven auto-nudge** — now ships, via a route the entry's own
+  feasibility notes hadn't considered: **neither** SIMBAD (networked → needs sign-off) **nor** a pixel classifier
+  (an extended-flux measurement on a reference frame), but the **bundled offline catalog the app already reads**.
+  `identify_object` resolves a target's plain-language `type` *and* its major-axis `size_arcmin` with no network
+  and no image data, which is exactly the two facts the advice needs.
+  **The classifier** is a new pure `seestack/bg_advice.py::background_mode_hint(object_type, size_arcmin)` →
+  `BackgroundModeHint(mode, text)` or `None`. It advises `luminance` only when the type is extended emission
+  (`EXTENDED_EMISSION_TYPES` = `nebula`, `supernova remnant`) **and** a size of at least `MIN_EXTENDED_ARCMIN`
+  (15′, about a fifth of the Seestar frame's long edge) is known. Deliberately excluded: **galaxies** (extended,
+  but all three channels share one shape — the case per-channel mode handles correctly), **planetary nebulae**
+  (compact), clusters, star clouds. Unknown type or unknown size → `None`, never a guess. An object bigger than a
+  single frame (`framing.SEESTAR_FOV_LONG_ARCMIN`) fills every sub, so even the shared luminance model can absorb
+  some of its faint outer glow — that case gets one extra honest sentence pointing at **Background box size**
+  rather than a different recommendation, because nudging a beginner to turn the per-frame flatten *off* would
+  cost the single biggest noise win in the pipeline.
+  **Surfaced** as an additive nullable `background_mode_hint` on `ObjectInfo` / `ObjectInfoOut`
+  (`GET /api/targets/{safe}/identify`, which the Target page already fetches — the Stack form reuses the same
+  `["identify", safe]` query key, so it's usually warm), and rendered on the **Stack form** as a blue advisory
+  Alert in the established nudge house style, with a one-click **"Use Luminance background flatten"** button. The
+  button's mode name is read from the engine's own `option_labels`, so it can't drift from the control it
+  changes. The nudge self-hides when the per-frame flatten is off entirely (its mode then changes nothing), when
+  the form is already on the advised mode (the user's choice, "Reuse settings", or a previous click), and for
+  every target the catalog doesn't flag. **Nothing is applied until the button is pressed and `per_channel`
+  remains the default**, so an existing install stacks byte-for-byte as before. Upgrade-safe: one additive
+  nullable response field, no config/DB/on-disk change, no default flipped, no `StackOptions` change.
+  **Tests (+22):** `tests/test_bg_advice.py` (+9 — no guess without a type or size, a large nebula and an SNR
+  advised, galaxies/clusters/planetaries left alone, the size floor's both sides, case/whitespace-insensitive
+  type matching, the bigger-than-one-frame caveat present on one side of the FOV and absent on the other with the
+  same mode, the advice riding on a real `identify_object("M_42")`, and a catalog-wide guard that the advice
+  stays a rare exception), `tests/webapp/test_target_identify.py` (+2 — M42 carries mode+reason, M31 stays
+  `null`), `backgroundModeNudge.test.ts` (+8, including an older backend that omits the field) and
+  `Stack.test.tsx` (+4 — the nudge, the one-click switch that then hides it, silence for an unflagged target,
+  silence when the flatten is off). *(Original spec kept for provenance.)*
+  - _(orig)_ (M, autonomy/image-quality) `StackOptions.background_mode` defaults to `per_channel` and has **no**
   data-driven nudge in the Stack form (unlike sigma/drizzle/quality-weight/etc.). `bg/per_frame.py`'s
   own docstring is explicit that per-channel flatten is *wrong* on extended emission nebulae ("cyan
   cores, red halos, black holes" — different channel morphology) and that luminance mode is "required"
@@ -9169,8 +9250,23 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Builder 2026-08-05, spotted while wiring the seam note's new "Open the editor" link) — the editor's
-  background tools can't actually see the panel joins we just sent the beginner there to fix.** *(Image quality /
+- ~~**NEW IDEA (Builder 2026-08-05, spotted while wiring the seam note's new "Open the editor" link) — the editor's
+  background tools can't actually see the panel joins we just sent the beginner there to fix.**~~ — **ALREADY
+  SHIPPED; struck as stale** (Builder 2026-08-05, verified in-repo, no code change needed). Option **(a)**, the
+  entry's own preferred fix, has existed for some time: **`background.level_coverage` ("Coverage leveling")** is a
+  registered editor op (`seestack/edit/ops/background.py`) that loads the coverage map beside the run
+  (`edit/proxy.py::coverage_path_for` → `EditContext.coverage`) and runs `level_by_coverage` on the *edited*
+  image — including the proxy-scale corrections that keep preview and export masking the same halo. It already
+  honours both "care" clauses verbatim: it returns the input unchanged when `ctx.coverage is None` (every
+  pre-coverage-map run, every imported FITS) and when an earlier geometry op has changed the frame shape, so it is
+  a silent no-op rather than an error or a dead control; and on a single-coverage image `level_by_coverage`'s
+  detrend is one constant applied to pixels and threshold alike, so the result is unchanged. The one-click Auto
+  recipe *prepends* it on a mosaic (`edit/presets.py`), and `prependCoverageLeveling` does the same for the
+  built-in presets — so a beginner who follows the seam note's link and hits Auto gets the coverage pass applied
+  first, before the smooth-model gradient ops the entry worried about. **So the premise ("the editor has no tool
+  for a step between coverage levels") was wrong, and option (b) — softening the note's wording — would make it
+  *less* accurate.** Nothing to build; left struck so no future run re-derives this.
+  - _(orig)_ *(Image quality /
   honesty — PRIORITY 1/4; size M.)* v0.233.2 gives the `seams` note a button, and the button is the right one we
   have — but `edit/ops/background` fits a *smooth* model over the whole frame, which is exactly the wrong shape for
   a **step** between coverage levels. A beginner who follows the link, drags the gradient slider and watches the
@@ -9181,8 +9277,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Care:** (a) must degrade silently to a no-op when no coverage map sits beside the run (every pre-v0.233 stack,
   every imported FITS) — never an error, never a visible dead control; and it must not re-level a single-coverage
   image, where the pass is a constant subtraction and would only shift the black point.
-- **NEW IDEA (Builder 2026-08-05, same run) — let Compare *say* which mosaic's panels came out flatter, not just
-  show two chips.** *(Trust / friendliness — PRIORITY 3; size S; frontend-only.)* v0.233.4 puts a "Panels even" /
+- ~~**NEW IDEA (Builder 2026-08-05, same run) — let Compare *say* which mosaic's panels came out flatter, not just
+  show two chips.**~~ — **SHIPPED v0.234.1** (Builder 2026-08-05, branch `claude/relaxed-turing-k8ghhx`).
+  A new pure `panelComparison(a, b)` (`Compare.tsx`, beside `noiseComparison`) turns the two `seam_verdict`s into
+  one plain sentence — *"B's mosaic panels evened out, while A's sky still steps where its panels join — so A may
+  show faint seams once it's stretched"* — rendered in the **same** teal Alert as the which-is-cleaner line, so
+  the page now answers both axes in one voice instead of one out loud and one in chips. Exactly as the entry's
+  "care" note asked: **no magnitude** is invented (the verdicts are coarse words and the ratio behind them is
+  never shown), and it is silent whenever there is nothing to weigh — the verdicts agree (the two chips already
+  say it), either side carries none (every single-field stack, every pre-v0.233 run, the deliberately silent
+  middle band), or either side carries a verdict word this frontend doesn't know, which is the same
+  future-proofing rule `PanelSeamsBadge` follows. Frontend-only; no API/schema/default change. Tests (+6):
+  `panelComparison` unit cases (both orderings, agreeing verdicts, a missing verdict on either side, an unknown
+  word) plus two `CompareView` cases — the sentence appears alongside the differing chips, and doesn't when both
+  mosaics landed on the same verdict. *(Original spec kept for provenance.)*
+  - _(orig)_ *(Trust / friendliness — PRIORITY 3; size S; frontend-only.)* v0.233.4 puts a "Panels even" /
   "Panels: check" chip on both sides of the Compare view, but the page already has a house style for answering the
   comparison out loud — `noiseComparison` renders one plain sentence about which stack is cleaner. Panel flatness
   now has the same two inputs, so it can speak in the same voice ("B's panels evened out; A's still step at the

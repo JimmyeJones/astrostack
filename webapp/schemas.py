@@ -63,6 +63,17 @@ class DifficultyHintOut(BaseModel):
     text: str
 
 
+class BackgroundModeHintOut(BaseModel):
+    """A suggested per-frame background-flatten mode for a matched target.
+
+    ``mode`` is a ``StackOptions.background_mode`` value, so the Stack form can
+    wire its one-click fix straight to it rather than re-deriving the choice.
+    """
+
+    mode: str   # "luminance" today
+    text: str
+
+
 class BestFrameOut(BaseModel):
     """The target's sharpest accepted sub, for the pre-stack "First look" card.
 
@@ -101,6 +112,12 @@ class ObjectInfoOut(BaseModel):
     # honest sentence, for the vetted popular objects; ``null`` when the object
     # isn't vetted (old backends omit it — the UI treats absent as "no verdict").
     difficulty: DifficultyHintOut | None = None
+    # "Which per-frame background-flatten mode suits this target?" — set only for
+    # a catalog target that is *extended emission* and big enough for the default
+    # per-channel fit to bend into it; ``null`` for everything else, which is the
+    # overwhelming majority (old backends omit it — the UI treats absent as "no
+    # advice" and shows nothing).
+    background_mode_hint: BackgroundModeHintOut | None = None
 
 
 class IntegrationGoalOut(BaseModel):
