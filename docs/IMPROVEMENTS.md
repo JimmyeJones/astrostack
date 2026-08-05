@@ -6189,6 +6189,30 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-08-05, follow-on to the v0.234.0 background-mode nudge) — the *editor* makes the same
+  per-channel-on-a-nebula mistake, and it now has the same catalog fact available to say so.** *(Image quality +
+  friendliness — PRIORITY 3/4; size S; the engine half already exists.)* v0.234.0 puts
+  `seestack.bg_advice.background_mode_hint` behind `GET /api/targets/{safe}/identify` and nudges the **Stack
+  form** toward Luminance for a big emission nebula. The editor's own `background.subtract` op carries the
+  identical `per_channel` default and the identical hazard on the identical targets (`edit/ops/background.py`;
+  its sibling `background.final_gradient` already defaults to `luminance`, which is the tell). The editor knows
+  which run — and therefore which target — it is editing, so the same one-sentence advice could sit beside that
+  op's Mode control, or ride the Auto recipe's own choice. **Slice:** read the existing `["identify", safe]`
+  query (already warm from the Target page) in the editor and render the same advisory line + one-click switch
+  the Stack form uses; nothing new server-side. **Care:** the editor's op runs on an *already stacked* image
+  where the per-frame flatten has been and gone, so the wording must be about this op's own fit, not about the
+  stack's; and don't change any op default — this stays a suggestion, like its Stack-form sibling.
+- **NEW IDEA (Builder 2026-08-05, spotted while fixing the majority-shape master bug v0.234.2) — say *why* a
+  master's frame count came out lower than the folder the user pointed at.** *(Friendliness / trust —
+  PRIORITY 3; size S.)* `build_master` already collects a precise `skipped` list of `(filename, reason)` —
+  `"unreadable"` or `"wrong size"` — and the v0.234.2 fix makes "wrong size" genuinely informative (it now means
+  "this frame disagrees with the majority", i.e. almost always another camera or binning mode). A user who drops
+  a mixed dark library in and gets "master built from 47 frames" has no idea 13 were set aside, or that the
+  reason is a second camera's frames sitting in the same folder. **Slice:** surface the skipped count and its
+  two buckets on the Calibration page's build result — one self-hiding line, silent when nothing was skipped —
+  in the same voice as the Target page's rejection breakdown. **Care:** don't list 13 filenames at a beginner;
+  the count plus the plain-language reason ("13 frames were a different size — they look like they came from
+  another camera or binning mode") is the actionable part.
 - ~~**NEW IDEA (Builder 2026-08-04, spotted while shipping the unreadable-subs preflight v0.230.2) — tell the user
   their files are gone *before* they walk away, not after the stack comes out thin.**~~ — **SHIPPED v0.232.0**
   (Builder 2026-08-04, branch `claude/relaxed-turing-9owkq2`). `GET /api/targets/{safe}/frames/reject-summary` —
@@ -9226,8 +9250,23 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Builder 2026-08-05, spotted while wiring the seam note's new "Open the editor" link) — the editor's
-  background tools can't actually see the panel joins we just sent the beginner there to fix.** *(Image quality /
+- ~~**NEW IDEA (Builder 2026-08-05, spotted while wiring the seam note's new "Open the editor" link) — the editor's
+  background tools can't actually see the panel joins we just sent the beginner there to fix.**~~ — **ALREADY
+  SHIPPED; struck as stale** (Builder 2026-08-05, verified in-repo, no code change needed). Option **(a)**, the
+  entry's own preferred fix, has existed for some time: **`background.level_coverage` ("Coverage leveling")** is a
+  registered editor op (`seestack/edit/ops/background.py`) that loads the coverage map beside the run
+  (`edit/proxy.py::coverage_path_for` → `EditContext.coverage`) and runs `level_by_coverage` on the *edited*
+  image — including the proxy-scale corrections that keep preview and export masking the same halo. It already
+  honours both "care" clauses verbatim: it returns the input unchanged when `ctx.coverage is None` (every
+  pre-coverage-map run, every imported FITS) and when an earlier geometry op has changed the frame shape, so it is
+  a silent no-op rather than an error or a dead control; and on a single-coverage image `level_by_coverage`'s
+  detrend is one constant applied to pixels and threshold alike, so the result is unchanged. The one-click Auto
+  recipe *prepends* it on a mosaic (`edit/presets.py`), and `prependCoverageLeveling` does the same for the
+  built-in presets — so a beginner who follows the seam note's link and hits Auto gets the coverage pass applied
+  first, before the smooth-model gradient ops the entry worried about. **So the premise ("the editor has no tool
+  for a step between coverage levels") was wrong, and option (b) — softening the note's wording — would make it
+  *less* accurate.** Nothing to build; left struck so no future run re-derives this.
+  - _(orig)_ *(Image quality /
   honesty — PRIORITY 1/4; size M.)* v0.233.2 gives the `seams` note a button, and the button is the right one we
   have — but `edit/ops/background` fits a *smooth* model over the whole frame, which is exactly the wrong shape for
   a **step** between coverage levels. A beginner who follows the link, drags the gradient slider and watches the
