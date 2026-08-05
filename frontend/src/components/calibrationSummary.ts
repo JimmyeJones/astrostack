@@ -29,21 +29,43 @@ import { calibrationLabel } from "./CalibrationBadge";
 // silently dropping the dark they picked. Unlike `advice` (re-derived from the
 // library) it is recorded evidence, and it's the only thing that can explain a
 // master deleted *after* it was chosen.
+// `warnings` (optional) is the mirror image of `skipped`: masters the run *did*
+// apply that don't match the subs they calibrated (`StackRunInfo
+// .calibration_warnings` — a dark shot at another exposure, or at a very
+// different sensor temperature). That is the failure a calibrated-looking run
+// hides best: CALSTAT is stamped, the line above happily says "Calibrated with
+// your master dark + flat", and meanwhile a 30s dark's pedestal is being
+// over-subtracted out of every 10s sub. The engine has always measured it and
+// written it to the server log, which nobody running a walk-away stack reads.
+// Returned as its own field for the same reason as `skipped` — it answers "is
+// what this picture got actually right?", not "what did it get?" — and it is
+// deliberately reported even on a *calibrated* run.
 export function calibrationSummaryText(
   cards: { key: string; value: string | number | boolean }[],
   advice?: string | null,
   skipped?: string[] | null,
-): { text: string; calibrated: boolean; skipped?: string } | null {
+  warnings?: string[] | null,
+): {
+  text: string; calibrated: boolean; skipped?: string; mismatch?: string;
+} | null {
   if (cards.length === 0) return null;
   const skips = (skipped ?? []).map((s) => s.trim()).filter(Boolean);
   const skipText = skips.length ? skips.join(" ") : undefined;
+  const warns = (warnings ?? []).map((s) => s.trim()).filter(Boolean);
+  const warnText = warns.length ? warns.join(" ") : undefined;
   const card = cards.find((c) => c.key === "CALSTAT");
   const label = calibrationLabel(card ? String(card.value) : null);
   if (label) {
-    return { text: `Calibrated with your ${label}.`, calibrated: true, skipped: skipText };
+    return {
+      text: `Calibrated with your ${label}.`, calibrated: true,
+      skipped: skipText, mismatch: warnText,
+    };
   }
   if (advice && advice.trim()) {
-    return { text: advice.trim(), calibrated: false, skipped: skipText };
+    return {
+      text: advice.trim(), calibrated: false,
+      skipped: skipText, mismatch: warnText,
+    };
   }
   return {
     text:
@@ -51,5 +73,6 @@ export function calibrationSummaryText(
       "in Calibration to cut thermal noise and vignetting.",
     calibrated: false,
     skipped: skipText,
+    mismatch: warnText,
   };
 }
