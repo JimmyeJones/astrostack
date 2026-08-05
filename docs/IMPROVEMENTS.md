@@ -9169,6 +9169,34 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **NEW IDEA (Builder 2026-08-05, filed while shipping the seam-residual verdict v0.233.0) — give the "faint seams
+  may show" note somewhere to send the beginner.** *(Friendliness — PRIORITY 3; size S; frontend + one `action`
+  key.)* The new `seams` health note names the problem honestly but ends in advice with no button: *"the editor's
+  background tools can even it out further."* Every other actionable note carries an `action` key the card turns
+  into a one-click link (`trim_border` → the editor, `calibration` → the Calibration page, `solve_help` →
+  Settings, `restack` → the Stack form). A `background` action opening the editor on **that run** would close the
+  loop the same way — the beginner reads why their mosaic looks striped and lands on the tool that fixes it,
+  instead of being told a tool exists. **Care:** `noteAction` already drops a self-link when the card is rendered
+  *inside* the editor (`inEditor`), and the seam note should follow that rule; and the link must point at the
+  graded run, not the newest, since the note is about a specific stack.
+- **NEW IDEA (Builder 2026-08-05, same run) — show the measured seam number on the History run card, so two
+  mosaic stacks can be compared on it.** *(Trust — PRIORITY 3; size S; frontend-only.)* `StackRunOut.seam_residual`
+  is served but nothing renders it. The History card already shows per-run noise σ and star size as small
+  readouts, and the Compare view already answers "did my new stack get better?" on noise — panel flatness is the
+  third axis of *the same question* for anyone shooting mosaics, and it is the one they can't judge by eye on a
+  thumbnail. **Slice:** a self-hiding chip beside the existing readouts (nothing at all when the field is NULL,
+  i.e. every single-field stack and every pre-v0.233 run), reading "panels even" / "panels: check" off the same
+  two thresholds `stackhealth` uses so the two surfaces can never disagree — export the thresholds rather than
+  re-typing the numbers in TypeScript. **Care:** don't render a raw ratio as a number to a beginner; the verdict
+  is the point, and the exact figure belongs in the Info panel at most.
+- **NOTE for the "bisect the v0.158→v0.220 colour chain on a synthetic mosaic" follow-up above (Builder
+  2026-08-05).** That entry asks a future run to measure "the visible plateau/edge structure" across a panel
+  boundary with SCNR / the per-frame flatten / `remove_final_gradient` individually disabled — and warns that the
+  raw seam step is dominated by the injected offsets, so a bespoke measurement is needed. `measure_seam_residual`
+  (v0.233.0) **is** that measurement, already calibrated and tested: one unit-free number per configuration,
+  measured on the finished image with the grain as its yardstick. Whoever picks that bisect up should run it
+  rather than build a fresh harness.
+
 - ~~**NEW IDEA (Builder 2026-08-05, spotted while fixing the coverage-leveling seam bugs) — measure the residual
   panel-seam step after leveling and *say so* when one survives.**~~ — **SHIPPED v0.233.0** (Builder 2026-08-05,
   branch `claude/relaxed-turing-laiaax`). *(Trust / friendliness — PRIORITY 3.)* A mosaic's panel joins are now
