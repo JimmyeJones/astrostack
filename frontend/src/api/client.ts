@@ -884,6 +884,10 @@ export interface GalleryItem {
   transparency_ratio?: number | null;
   noise_sigma?: number | null;
   calstat?: string | null;
+  // Panel-flatness verdict for a mosaic run ("flat" | "check"), or null/absent
+  // when there's nothing honest to say. Resolved server-side from the same
+  // thresholds the "How's my stack?" seam notes use — see `StackRun`.
+  seam_verdict?: string | null;
 }
 
 export interface BestPicture {

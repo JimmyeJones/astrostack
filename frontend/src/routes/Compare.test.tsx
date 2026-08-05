@@ -108,6 +108,28 @@ describe("CompareView", () => {
     expect(screen.getByText("B")).toBeInTheDocument();
   });
 
+  it("shows each mosaic's panel-flatness verdict, the third axis of \"did it get better?\"", async () => {
+    // Noise and star size are already comparable here; panel flatness is the one
+    // a mosaic shooter can't judge by eye from two thumbnails.
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.seam_verdict = "check";
+    b.seam_verdict = "flat";
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Panels: check")).toBeInTheDocument());
+    expect(screen.getByText("Panels even")).toBeInTheDocument();
+  });
+
+  it("shows no panel chip when neither stack is a mosaic", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [item(3, "M_42", "Orion"), item(7, "M_42", "OrionV2")],
+    });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Orion")).toBeInTheDocument());
+    expect(screen.queryByText(/Panels/)).not.toBeInTheDocument();
+  });
+
   it("badges each stack's combine method", async () => {
     const a = item(3, "M_42", "Orion");
     const b = item(7, "M_42", "OrionV2");
