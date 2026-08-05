@@ -55,6 +55,29 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**⭐ CALIBRATION-ENGINE BUG (Builder 2026-08-05, found by an engine QA pass of `seestack/calibrate/masters.py`;
+  REPRODUCED) — one stray frame sorted first hijacks a whole master build, and the "master built" message says
+  nothing about it.**~~ — **FIXED v0.234.2** (Builder 2026-08-05, branch `claude/relaxed-turing-k8ghhx`).
+  *(Calibration correctness / autonomy — PRIORITY 2/4.)* `build_master` set its reference shape from **whichever
+  frame loaded first** and skipped every frame that didn't match it. So a single file from another camera or
+  binning mode — an S30 sub in an S50 dark folder, a cropped/binned leftover — that happened to sort ahead of the
+  real set defined the reference, and all the genuine frames were dropped as "wrong size".
+  **Reproduced**: 1 stray 2×2 frame named `a_stray.fits` in front of five real 4×4 darks produced a **1-frame
+  master at the stray's shape**, with the five good frames listed as skipped. The build reports *success*; the
+  damage only surfaces much later, when a stack refuses the master on shape (`CalibrationMasters.validate`) — or,
+  for a user who doesn't read the skipped count, as a master built from a single un-averaged frame carrying its
+  full read noise.
+  **The fix:** the reference is now the **majority** shape across the loaded frames, with the odd ones out skipped
+  and reported exactly as before. A tie keeps the first-seen shape, which is byte-for-byte today's behaviour, and
+  a uniform set (the overwhelming common case) is completely unchanged. **Peak memory is unchanged** — the number
+  of arrays held is still bounded by `max_frames`, since the shape decision is made after the same capped load.
+  Also fixed alongside it: the master's `MasterMeta` (exposure / gain / temperature / Bayer pattern) is now
+  collected only from the frames actually combined, so a stray frame can no longer contribute its exposure to the
+  median the dark is later matched on. No config/DB/API-shape/on-disk change and no default flipped.
+  **Tests** (`tests/test_calibrate.py`, +2; the first fails before / passes after): the stray-first set builds a
+  5-frame master at the majority shape with the stray reported as the only skip and the metadata taken from the
+  real frames, and an even 2-vs-2 split still keeps the first-seen shape.
+
 - ~~**⭐ STACKING-ENGINE BUG (Builder 2026-08-05, found by an engine QA pass of `seestack/bg/coverage_leveling.py`;
   REPRODUCED) — the per-coverage sky leveling *manufactures* the coloured panel step it exists to remove, at the
   seam with the biggest offset.**~~ — **FIXED v0.232.2** (Builder 2026-08-05, branch `claude/relaxed-turing-iv0w1h`).

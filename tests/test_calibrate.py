@@ -169,6 +169,48 @@ def test_build_master_rejects_mismatched_shape(tmp_path):
     assert meta.n_frames == 1
 
 
+def test_build_master_follows_the_majority_shape_not_the_first_frame(tmp_path):
+    # Regression: the reference shape used to be whichever frame loaded *first*,
+    # so a single stray file from another camera/binning mode sorted ahead of the
+    # real set made every genuine frame "wrong size" — a one-frame master of the
+    # wrong sensor, reported as a successful build and only failing much later
+    # when a stack refused it on shape. The majority must win instead.
+    stray = tmp_path / "a_stray.fits"
+    _write_raw(stray, np.full((2, 2), 7.0, dtype=np.float32))
+    paths = [stray]
+    for i in range(5):
+        p = tmp_path / f"b_dark_{i}.fits"
+        _write_raw(p, np.full((4, 4), 100.0, dtype=np.float32), exptime=30.0)
+        paths.append(p)
+
+    skipped: list[tuple[str, str]] = []
+    master, meta = build_master(paths, kind="dark", method="mean", skipped=skipped)
+
+    assert master.shape == (4, 4)
+    assert meta.n_frames == 5
+    np.testing.assert_allclose(master, 100.0)
+    # ...and the odd one out is the one reported as set aside.
+    assert skipped == [("a_stray.fits", "wrong size")]
+    # The metadata comes from the frames actually combined, not the stray.
+    assert meta.exposure_s == 30.0
+
+
+def test_build_master_keeps_the_first_shape_when_the_split_is_even(tmp_path):
+    # With no majority there is nothing better to go on than the order given, so
+    # the first-seen shape wins — exactly what this did before.
+    a1 = tmp_path / "a1.fits"
+    a2 = tmp_path / "a2.fits"
+    b1 = tmp_path / "b1.fits"
+    b2 = tmp_path / "b2.fits"
+    for p in (a1, a2):
+        _write_raw(p, np.full((4, 4), 100.0, dtype=np.float32))
+    for p in (b1, b2):
+        _write_raw(p, np.full((2, 2), 5.0, dtype=np.float32))
+    master, meta = build_master([a1, a2, b1, b2], kind="dark", method="mean")
+    assert master.shape == (4, 4)
+    assert meta.n_frames == 2
+
+
 def test_build_master_collects_skipped_frames(tmp_path):
     # The optional `skipped` out-param lets the caller tell the user how many of
     # their frames were set aside (and why) — a wrong-size frame and an unreadable
