@@ -977,6 +977,27 @@ describe("roughlyAlignedNote", () => {
   });
 });
 
+describe("HistoryView panel-seam chip", () => {
+  it("puts a mosaic's panel-flatness verdict on the run card", async () => {
+    // Panel flatness is the third axis of "did my new stack get better?" for
+    // anyone shooting mosaics — and the one they can't judge from a thumbnail.
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ seam_verdict: "check" })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(screen.getByText("Panels: check")).toBeInTheDocument();
+  });
+
+  it("shows no seam chip at all on an ordinary single-field stack", async () => {
+    // Every non-mosaic run and every run made before the measurement existed
+    // serves no verdict, so the card must look exactly as it always did.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(screen.queryByText(/Panels/)).not.toBeInTheDocument();
+  });
+});
+
 describe("HistoryView frame accounting", () => {
   it("surfaces a large align-failure fraction with guidance in the Info panel", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
