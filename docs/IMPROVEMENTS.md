@@ -6189,20 +6189,20 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-08-05, direct follow-on to the v0.236.0 mismatch surfacing) — catch a mismatched master
-  when the user *picks* it, not after the night is spent.** *(Autonomy + friendliness — PRIORITY 2/3; size S–M.)*
-  v0.236.0 makes the master-dark exposure/temperature mismatch visible — but only **after** a stack has run, which
-  is the wrong end of the evening: the user has already gone to bed and the picture is already mis-calibrated. Every
-  input needed to say it earlier is already at hand: the registered master carries `exposure_s` / `sensor_temp_c`
-  in its `MasterMeta` (surfaced by `webapp/calibration.py`), and the target's own frames carry theirs in the
-  project DB. **Slice:** when the Stack form's dark picker has a master selected (and in the unattended auto-binder
-  when it chooses one), compare against the target's median sub exposure/temperature and show the *same* engine
-  sentence beside the control, with the existing "turn on dark exposure-scaling" fix as a one-click button where a
-  bias makes it available. **Care:** the wording must come from `CalibrationMasters.calibration_warnings` (or a
-  shared helper split out of it) so the before and after never drift; and it stays advisory — the binder must keep
-  applying the master, because an imperfect dark still beats none. Note `_uncalibrated_advice` already does
-  something adjacent (it re-derives "you have a master dark at a different exposure" for an *uncalibrated* run), so
-  grep it first — there may be a helper to reuse rather than write.
+- **NOTE (Builder 2026-08-05, checked while shipping v0.236.0 — recorded so nobody re-treads it) — "warn about a
+  mismatched dark at *pick* time" is ALREADY BUILT; the only thing left is a wording-drift risk.** The obvious
+  follow-on to v0.236.0 looks like "say it before the night is spent, not after". It exists: `Stack.tsx` (~L357–405)
+  already computes `darkExpMismatch` and a temperature warning from `GET /api/targets/{safe}/calibration-suggestions`
+  (whose `params` carries the target's median `exposure_s` / `gain` / `sensor_temp_c` / modal dimensions) against the
+  selected master's `MasterMeta`, and offers the "add a master bias to scale it" fix. The unattended binder is also
+  gated — `_dark_match_confident` refuses a poor gain/temperature match and the caller applies the exposure gate
+  separately. So v0.236.0 closed the genuinely open half (the user who picks a mismatched dark *anyway*, or whose
+  saved default binds one, then never learns it hurt the picture). **The one real residue** is that the pick-time
+  sentence in `Stack.tsx` and the after-the-fact sentence from `CalibrationMasters.calibration_warnings` are written
+  independently, with independently-chosen thresholds (`expMismatch` in `calibrationFit.ts` vs
+  `_EXPOSURE_MISMATCH_TOL` / `_TEMP_MISMATCH_TOL_C` in `calibrate/apply.py`) — so the app can warn before and go
+  quiet after, or vice versa, on a borderline pair. Worth one small pass to make the thresholds agree (and ideally
+  serve one wording), *only* if someone is already in those files. (S, friendliness — PRIORITY 3.)
 - **NEW IDEA (Builder 2026-08-05, spotted while tracing the coverage accumulators) — the coverage map's `BUNIT`
   claims "frames" when it isn't one.** *(Trust / correctness of a diagnostic — PRIORITY 4; size S.)*
   `output._write_coverage_fits` writes `master_coverage.fits` with `BUNIT = "frames"`, but the array it gets is
