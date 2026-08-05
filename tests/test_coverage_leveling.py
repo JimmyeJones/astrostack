@@ -599,3 +599,68 @@ def test_an_unmeasurable_canvas_reports_nothing_rather_than_guessing():
     rgb = np.zeros((40, 40, 3), dtype=np.float32)
     zero = np.zeros((40, 40), dtype=np.int32)
     assert measure_seam_residual(rgb, zero, frame_coverage=zero) is None
+
+
+def _curved_trend_scene(unmeasurable_level=4, seed=19):
+    """Seven coverage levels whose sky follows a *curved* trend with the level,
+    with one middle level filled by structure so it can't be measured.
+
+    Sky-vs-coverage is one physical trend, and the pass already fits a quadratic
+    across the levels it measured. A level it could not measure has to land on
+    that same curve; a straight line drawn between its neighbours instead sits
+    off it wherever the trend bends.
+    """
+    rng = np.random.default_rng(seed)
+    h, w = 400, 700
+    cov = np.zeros((h, w), dtype=np.int32)
+    bands = np.array_split(np.arange(w), 7)
+    for i, cols in enumerate(bands):
+        cov[:, cols] = i + 1
+    rgb = rng.normal(0.0, 1.5, size=(h, w, 3)).astype(np.float32)
+    for lvl in range(1, 8):
+        for c in range(3):
+            rgb[..., c][cov == lvl] += 100.0 + 3.0 * lvl + 0.8 * lvl * lvl
+    cols = bands[unmeasurable_level - 1]
+    ramp = np.linspace(500.0, 5000.0, len(cols), dtype=np.float32)[None, :, None]
+    rgb[:, cols, :] = ramp + rng.normal(
+        0.0, 40.0, size=(h, len(cols), 3)).astype(np.float32)
+    return rgb, cov
+
+
+def test_an_unmeasurable_level_lands_on_the_same_curve_as_the_measured_ones():
+    """Regression: the fill used to draw a straight line between the neighbouring
+    *measured* offsets while every measured level was moved onto the fitted
+    quadratic — so on a curved sky-vs-coverage trend a filled level ended up
+    slightly off the curve its neighbours sit on. That is a low-frequency
+    inconsistency tracing exactly the coverage map this pass exists to erase.
+
+    On this scene the true offset at the unmeasurable level 4 is 124.8; the
+    straight line between neighbours gives 125.6 (0.8 ADU on a 1.5 ADU noise
+    floor), the fitted curve gives 124.8.
+    """
+    rgb, cov = _curved_trend_scene()
+    before = rgb.copy()
+    out = level_by_coverage(rgb.copy(), cov, frame_coverage=cov)
+
+    shifted = float(np.median(before[..., 1][cov == 4])
+                    - np.median(out[..., 1][cov == 4]))
+    assert shifted == pytest.approx(124.8, abs=0.15), shifted
+    # And the levels that *were* measured did not move as a side effect — each
+    # still lands at zero sky.
+    for lvl in (1, 2, 3, 5, 6, 7):
+        assert abs(float(np.median(out[..., 1][cov == lvl]))) < 0.5, lvl
+
+
+def test_the_fill_falls_back_to_a_straight_line_when_no_curve_was_fitted():
+    """With smoothing off there is no fitted trend to sit on, so the fill must
+    still work — straight between the measured neighbours, as it always did."""
+    rgb, cov = _curved_trend_scene()
+    before = rgb.copy()
+    out = level_by_coverage(rgb.copy(), cov, frame_coverage=cov,
+                            smooth_across_levels=False)
+    shifted = float(np.median(before[..., 1][cov == 4])
+                    - np.median(out[..., 1][cov == 4]))
+    # Halfway between the measured level-3 (116.2) and level-5 (135.0) offsets —
+    # the straight line, which is exactly the 125.6 that sits 0.8 ADU off the
+    # true 124.8 when a curve *was* fitted.
+    assert shifted == pytest.approx(125.6, abs=0.5), shifted

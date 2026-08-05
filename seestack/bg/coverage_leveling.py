@@ -593,6 +593,12 @@ def level_by_coverage(
     # order trend (weighted by sky pixel count) across levels and use the
     # fitted value, which kills the residual high-frequency wobble that
     # otherwise traces the coverage map.
+    # The fitted trend per channel, kept so the fill below can put an
+    # *unmeasurable* level on the very same curve the measured levels were moved
+    # onto. ``(coeffs, lo, hi)``, or None when no fit was made (too few measured
+    # levels, smoothing off, or a degenerate fit) — the fill then falls back to a
+    # straight interpolation between neighbours.
+    fitted: list[tuple[np.ndarray, float, float] | None] = [None, None, None]
     if smooth_across_levels and len(offsets) >= 3:
         lvls = np.array(sorted(offsets.keys()), dtype=np.float32)
         weights = np.array([sky_counts[int(l)] for l in lvls], dtype=np.float32)
@@ -600,11 +606,12 @@ def level_by_coverage(
             ys = np.array([offsets[int(l)][c] for l in lvls], dtype=np.float32)
             # Quadratic fit weighted by sky-pixel count — flexible enough for
             # the usual gentle dependence but won't chase per-level noise.
+            coeffs: np.ndarray | None
             try:
                 coeffs = np.polyfit(lvls, ys, deg=2, w=weights)
                 smoothed = np.polyval(coeffs, lvls)
             except (np.linalg.LinAlgError, ValueError):
-                smoothed = ys
+                coeffs, smoothed = None, ys
             # Coverage levels are often *gapped*: dense single-panel counts, then
             # a jump to the 2×/3× overlap counts, whose sky sample is far smaller.
             # A single global polynomial is dominated by the high-pixel-count
@@ -619,6 +626,8 @@ def level_by_coverage(
             # gapped-extrapolation to the real per-level spread.
             lo, hi = float(np.min(ys)), float(np.max(ys))
             smoothed = np.clip(smoothed, lo, hi)
+            if coeffs is not None:
+                fitted[c] = (coeffs, lo, hi)
             for i, l in enumerate(lvls):
                 offsets[int(l)][c] = float(smoothed[i])
 
@@ -627,15 +636,33 @@ def level_by_coverage(
     # to zero sky doesn't leave it alone in any meaningful sense — it leaves it
     # holding its full residual next to regions that no longer hold theirs, so
     # the pass manufactures a panel step (a coloured one, since the offsets are
-    # per channel) exactly where it is supposed to remove one. An interpolated
-    # neighbour offset is the best available estimate and, crucially, restores
-    # continuity across the boundary. ``np.interp`` is linear between measured
-    # levels and flat outside them, so a filled offset can never leave the
-    # envelope of what was actually measured. Levels that *were* measured keep
-    # their own (smoothed) value, so a stack in which every present level was
-    # measurable — the ordinary single-field case — is byte-for-byte unchanged.
-    # Only levels that cleared the pixel floor are filled: a sliver too small to
-    # measure is also too small to be worth shifting, and stays untouched.
+    # per channel) exactly where it is supposed to remove one. A neighbour-derived
+    # offset is the best available estimate and, crucially, restores continuity
+    # across the boundary.
+    #
+    # It is taken from the **same curve the measured levels were moved onto**.
+    # Sky-vs-coverage is a single physical trend, so evaluating the fitted
+    # quadratic at the gap keeps every level on one curve; a separate straight
+    # line between neighbours would land a filled level slightly off it wherever
+    # that trend is curved — a small low-frequency inconsistency tracing exactly
+    # the coverage map this pass exists to erase. (Measured on a synthetic
+    # quadratic sky-vs-level trend with level 4 unmeasurable: the straight line
+    # gives 125.6 against a true 124.8 — 0.8 ADU on a 1.5 ADU noise floor — while
+    # the fitted curve lands on 124.8.) The fitted value is clamped to the same
+    # measured envelope the smoothed levels are, so a filled offset still can
+    # never leave the range actually measured, and a gap outside that range can't
+    # extrapolate a seam into existence.
+    #
+    # When no fit was made — smoothing off, fewer than three measured levels, or
+    # a degenerate fit — there is no curve to sit on, and the fill falls back to
+    # ``np.interp``: linear between measured levels and flat outside them, which
+    # is likewise inside the measured envelope.
+    #
+    # Levels that *were* measured keep their own (smoothed) value either way, so
+    # a stack in which every present level was measurable — the ordinary
+    # single-field case — is byte-for-byte unchanged. Only levels that cleared
+    # the pixel floor are filled: a sliver too small to measure is also too small
+    # to be worth shifting, and stays untouched.
     measured = sorted(offsets)
     n_measured = len(measured)
     unmeasured = [lvl for lvl in big_levels if lvl not in offsets]
@@ -646,7 +673,14 @@ def level_by_coverage(
             for c in range(3)
         ]
         targets = np.array(unmeasured, dtype=np.float64)
-        filled = [np.interp(targets, xs, ys_per_channel[c]) for c in range(3)]
+        filled = []
+        for c in range(3):
+            fit = fitted[c]
+            if fit is not None:
+                coeffs, lo, hi = fit
+                filled.append(np.clip(np.polyval(coeffs, targets), lo, hi))
+            else:
+                filled.append(np.interp(targets, xs, ys_per_channel[c]))
         for i, lvl in enumerate(unmeasured):
             offsets[lvl] = [float(filled[c][i]) for c in range(3)]
 
