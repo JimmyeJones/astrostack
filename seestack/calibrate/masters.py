@@ -119,7 +119,9 @@ def build_master(
     ----------
     paths
         Raw single-extension FITS files (all the same kind, shape and bayer
-        pattern). Files whose shape doesn't match the first one are skipped.
+        pattern). When the set isn't uniform, the **majority** shape wins and
+        files that don't match it are skipped — so one stray frame from another
+        camera or binning mode can't hijack the build.
     kind
         'dark', 'flat' or 'bias' — recorded in the metadata.
     method
@@ -139,7 +141,7 @@ def build_master(
         Optional list to collect ``(filename, reason)`` for every frame that was
         dropped during the build — ``"unreadable"`` (failed to load) or
         ``"wrong size"`` (not a 2-D frame, or a shape that doesn't match the
-        first). Lets the caller tell the user *how many* of their frames were
+        majority). Lets the caller tell the user *how many* of their frames were
         actually used vs. silently set aside, instead of a bare success. Frames
         dropped by ``max_frames`` sampling are **not** recorded here — that's an
         intentional memory bound, not a skip. Default ``None`` = don't collect.
@@ -169,12 +171,7 @@ def build_master(
     should_stop = should_stop or (lambda: False)
     total = len(paths)
 
-    arrays: list[np.ndarray] = []
-    ref_shape: tuple[int, int] | None = None
-    exposures: list[float] = []
-    gains: list[float] = []
-    temps: list[float] = []
-    patterns: list[str] = []
+    loaded: list[tuple[str, np.ndarray, Any]] = []
     for i, p in enumerate(paths, start=1):
         if should_stop():
             log.info("master %s: build cancelled after %d/%d frames", kind, i - 1, total)
@@ -192,13 +189,35 @@ def build_master(
             if skipped is not None:
                 skipped.append((p.name, "wrong size"))
             continue
-        if ref_shape is None:
-            ref_shape = raw.shape
-        elif raw.shape != ref_shape:
+        loaded.append((p.name, raw, info))
+
+    if not loaded:
+        raise ValueError("no usable calibration frames (all failed to load or mismatched)")
+
+    # The reference shape is the **majority** one, not whichever frame happened to
+    # load first. A single stray file from another camera or binning mode sorted
+    # ahead of the real set used to define the reference and skip every genuine
+    # frame after it — leaving a one-frame master of the wrong sensor, reported as
+    # a successful build and only failing much later when a stack refuses it on
+    # shape. Ties keep the first-seen shape, which is exactly the old behaviour
+    # whenever the set is uniform (the overwhelming common case). Peak memory is
+    # unchanged: the number of arrays held is still bounded by ``max_frames``.
+    counts: dict[tuple[int, ...], int] = {}
+    for _, raw, _ in loaded:
+        counts[tuple(raw.shape)] = counts.get(tuple(raw.shape), 0) + 1
+    ref_shape = max(counts, key=lambda s: counts[s])  # first max wins on a tie
+
+    arrays: list[np.ndarray] = []
+    exposures: list[float] = []
+    gains: list[float] = []
+    temps: list[float] = []
+    patterns: list[str] = []
+    for name, raw, info in loaded:
+        if tuple(raw.shape) != ref_shape:
             log.warning("master %s: skipping %s (shape %s != %s)",
-                        kind, p.name, raw.shape, ref_shape)
+                        kind, name, raw.shape, ref_shape)
             if skipped is not None:
-                skipped.append((p.name, "wrong size"))
+                skipped.append((name, "wrong size"))
             continue
         arrays.append(raw)
         if info.exposure_s is not None:
@@ -209,9 +228,6 @@ def build_master(
             temps.append(info.sensor_temp_c)
         if info.bayer_pattern:
             patterns.append(info.bayer_pattern.upper())
-
-    if not arrays:
-        raise ValueError("no usable calibration frames (all failed to load or mismatched)")
 
     if should_stop():
         log.info("master %s: build cancelled before combine", kind)
