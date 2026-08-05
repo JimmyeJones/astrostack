@@ -67,6 +67,16 @@ describe("noteAction", () => {
     // It doesn't need a run to point at, unlike trim_border.
     expect(noteAction("restack", "M_42", null)?.href).toBe("/targets/M_42/stack");
   });
+  it("wires background (the mosaic-seam note) to the editor for this run", () => {
+    expect(noteAction("background", "M_42", 7)).toEqual({
+      label: "Open the editor to even out the background →",
+      href: "/targets/M_42/edit/7",
+    });
+    // Inside the editor the background ops are already on-screen — no self-link.
+    expect(noteAction("background", "M_42", 7, true)).toBeNull();
+    // And with no run to point at there is nothing to open.
+    expect(noteAction("background", "M_42", null)).toBeNull();
+  });
   it("returns null for a note with no wired action", () => {
     expect(noteAction(null, "M_42", 7)).toBeNull();
     expect(noteAction("something_else", "M_42", 7)).toBeNull();

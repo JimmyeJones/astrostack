@@ -221,7 +221,10 @@ class HealthNoteOut(BaseModel):
     kind: str
     severity: str          # "good" | "info" — colour only, never alarming
     message: str
-    action: str | None = None  # UI action key ("trim_border" | "calibration" | "solve_help") or null
+    # UI action key ("trim_border" | "calibration" | "solve_help" | "restack" |
+    # "background") or null. Free-form on purpose: an older frontend simply
+    # renders no link for a key it doesn't know, so adding one is upgrade-safe.
+    action: str | None = None
 
 
 class DarkSpecOut(BaseModel):
@@ -375,6 +378,13 @@ class StackRunOut(BaseModel):
     # None for a single-field stack (no joins to compare), pre-schema-15 runs, or
     # when it couldn't be measured — the UI self-hides rather than guessing.
     seam_residual: float | None = None
+    # The plain-language reading of ``seam_residual``: "flat" (the joins matched),
+    # "check" (a step big enough to show once stretched), or None when there is
+    # nothing honest to say — no measurement, or the deliberately silent middle
+    # band where large-scale structure makes the figure ambiguous. Computed
+    # server-side by the same `seestack.stackhealth.seam_verdict` the "How's my
+    # stack?" notes use, so a card chip and the health note can never disagree.
+    seam_verdict: str | None = None
     # Which calibration masters were applied to the lights ("dark+flat",
     # "bias+flat", "flat", …), or None when the stack was uncalibrated / for
     # pre-schema-7 runs; lets a card show a "dark+flat" chip at a glance.

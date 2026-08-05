@@ -9169,9 +9169,39 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Builder 2026-08-05, filed while shipping the seam-residual verdict v0.233.0) — give the "faint seams
-  may show" note somewhere to send the beginner.** *(Friendliness — PRIORITY 3; size S; frontend + one `action`
-  key.)* The new `seams` health note names the problem honestly but ends in advice with no button: *"the editor's
+- **NEW IDEA (Builder 2026-08-05, spotted while wiring the seam note's new "Open the editor" link) — the editor's
+  background tools can't actually see the panel joins we just sent the beginner there to fix.** *(Image quality /
+  honesty — PRIORITY 1/4; size M.)* v0.233.2 gives the `seams` note a button, and the button is the right one we
+  have — but `edit/ops/background` fits a *smooth* model over the whole frame, which is exactly the wrong shape for
+  a **step** between coverage levels. A beginner who follows the link, drags the gradient slider and watches the
+  seam survive learns the wrong lesson about the tool. Two honest options, in order: **(a)** an editor op that
+  re-levels by coverage — the stack already writes a coverage map beside the FITS, so the op could load it and
+  reuse `level_by_coverage` on the *edited* image, giving the seam note a tool that addresses the actual defect;
+  **(b)** failing that, soften the note's wording so it stops promising more than the background ops can deliver.
+  **Care:** (a) must degrade silently to a no-op when no coverage map sits beside the run (every pre-v0.233 stack,
+  every imported FITS) — never an error, never a visible dead control; and it must not re-level a single-coverage
+  image, where the pass is a constant subtraction and would only shift the black point.
+- **NEW IDEA (Builder 2026-08-05, same run) — let Compare *say* which mosaic's panels came out flatter, not just
+  show two chips.** *(Trust / friendliness — PRIORITY 3; size S; frontend-only.)* v0.233.4 puts a "Panels even" /
+  "Panels: check" chip on both sides of the Compare view, but the page already has a house style for answering the
+  comparison out loud — `noiseComparison` renders one plain sentence about which stack is cleaner. Panel flatness
+  now has the same two inputs, so it can speak in the same voice ("B's panels evened out; A's still step at the
+  joins") whenever the two verdicts **differ**, and stay silent when they agree or either side has none. **Care:**
+  the verdicts are deliberately coarse — don't invent a magnitude ("2× flatter") from a ratio the beginner never
+  sees; and note this only makes sense for two runs of the *same* target, which Compare doesn't require.
+
+- ~~**NEW IDEA (Builder 2026-08-05, filed while shipping the seam-residual verdict v0.233.0) — give the "faint seams
+  may show" note somewhere to send the beginner.**~~ — **SHIPPED v0.233.2** (Builder 2026-08-05, branch
+  `claude/relaxed-turing-5qxucu`). The `seams` note now carries `action="background"`, and `noteAction`
+  (`StackHealthCard.tsx`) turns it into **"Open the editor to even out the background →"** pointing at
+  `/targets/{safe}/edit/{run_id}` — `data.run_id`, i.e. the run the card actually graded, not the newest. It
+  follows the `trim_border` self-link rule exactly: rendered *inside* the editor it returns `null`, because the
+  background ops are already on-screen there, and it returns `null` when there's no run to open. The reassurance
+  half (`seams_flat`) keeps no action — there is nothing to do. Upgrade-safe: `action` is a free-form string an
+  older frontend simply renders no link for. Tests: `test_the_seam_warning_hands_over_the_tool_it_names`
+  (`tests/test_stackhealth.py`) and a `noteAction("background", …)` case covering the link, the in-editor
+  self-link drop and the no-run case (`StackHealthCard.test.tsx`). Original spec kept for provenance:
+  - _(orig)_ The new `seams` health note names the problem honestly but ends in advice with no button: *"the editor's
   background tools can even it out further."* Every other actionable note carries an `action` key the card turns
   into a one-click link (`trim_border` → the editor, `calibration` → the Calibration page, `solve_help` →
   Settings, `restack` → the Stack form). A `background` action opening the editor on **that run** would close the
@@ -9179,8 +9209,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   instead of being told a tool exists. **Care:** `noteAction` already drops a self-link when the card is rendered
   *inside* the editor (`inEditor`), and the seam note should follow that rule; and the link must point at the
   graded run, not the newest, since the note is about a specific stack.
-- **NEW IDEA (Builder 2026-08-05, same run) — show the measured seam number on the History run card, so two
-  mosaic stacks can be compared on it.** *(Trust — PRIORITY 3; size S; frontend-only.)* `StackRunOut.seam_residual`
+- ~~**NEW IDEA (Builder 2026-08-05, same run) — show the measured seam number on the History run card, so two
+  mosaic stacks can be compared on it.**~~ — **SHIPPED v0.233.3** (Builder 2026-08-05, branch
+  `claude/relaxed-turing-5qxucu`). Shipped as a **word, not a number**, exactly as the entry's "care" note asked:
+  a self-hiding `PanelSeamsBadge` chip on the History run card reading **"Panels even"** (teal) or **"Panels:
+  check"** (yellow), with the plain-language reason in its tooltip. The thresholds are *not* re-typed in
+  TypeScript — a new pure `seestack.stackhealth.seam_verdict(seam_residual)` returns `"flat"` / `"check"` /
+  `None`, the seam health notes were rewired to read their branch from it, and `StackRunOut` gained an additive
+  optional `seam_verdict` the router fills from the same call. So the chip and the "How's my stack?" note are two
+  renderings of one decision and cannot disagree — pinned by a test that walks a flat / stepped / ambiguous run
+  through **both** endpoints and asserts they agree. The deliberately silent middle band, every single-field
+  stack and every pre-v0.233 run serve `null`, so the card looks exactly as it always did there.
+  Upgrade-safe: additive nullable response field, no config/DB/on-disk/default change; an older frontend ignores
+  it and a newer frontend against an older backend just shows no chip. **Completed in v0.233.4** (same branch): the
+  same additive `seam_verdict` now rides on `GalleryItem` too, so the chip also appears on the **Gallery** card and
+  on both sides of the **Compare** view — which is where two stacks of one target actually get weighed against each
+  other, and the reason the idea asked for it. Tests:
+  `test_stack_runs_listing_reads_the_seam_figure_into_a_verdict` and
+  `test_the_run_verdict_and_the_health_note_always_agree` (`tests/webapp/test_target_stack_health.py`),
+  `PanelSeamsBadge.test.tsx` (+5, including "renders nothing for a verdict word it doesn't know" so a future
+  third verdict can't make an older frontend draw a stray chip), two `History.test.tsx` cases (the chip on a
+  mosaic card; nothing at all on an ordinary single-field stack),
+  `test_gallery_carries_the_panel_flatness_verdict` (`tests/webapp/test_gallery.py`) and two `Compare.test.tsx`
+  cases (both sides' verdicts; nothing at all when neither stack is a mosaic). Original spec kept for provenance:
+  - _(orig)_ *(Trust — PRIORITY 3; size S; frontend-only.)* `StackRunOut.seam_residual`
   is served but nothing renders it. The History card already shows per-run noise σ and star size as small
   readouts, and the Compare view already answers "did my new stack get better?" on noise — panel flatness is the
   third axis of *the same question* for anyone shooting mosaics, and it is the one they can't judge by eye on a

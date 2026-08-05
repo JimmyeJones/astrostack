@@ -13,6 +13,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
 from seestack.io.project import readable_frame_path
+from seestack.stackhealth import seam_verdict
 from webapp import deps, pipeline
 from webapp.schemas import (
     STACK_DEFAULTS_META_KEY,
@@ -398,6 +399,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             noise_sigma=r.noise_sigma,
             stack_fwhm_px=r.stack_fwhm_px,
             seam_residual=r.seam_residual,
+            seam_verdict=seam_verdict(r.seam_residual),
             calstat=r.calstat,
             options=_parse_options(r.options_json),
             engine_version=r.engine_version,
