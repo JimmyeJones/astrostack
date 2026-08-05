@@ -9169,9 +9169,18 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Builder 2026-08-05, filed while shipping the seam-residual verdict v0.233.0) — give the "faint seams
-  may show" note somewhere to send the beginner.** *(Friendliness — PRIORITY 3; size S; frontend + one `action`
-  key.)* The new `seams` health note names the problem honestly but ends in advice with no button: *"the editor's
+- ~~**NEW IDEA (Builder 2026-08-05, filed while shipping the seam-residual verdict v0.233.0) — give the "faint seams
+  may show" note somewhere to send the beginner.**~~ — **SHIPPED v0.233.2** (Builder 2026-08-05, branch
+  `claude/relaxed-turing-5qxucu`). The `seams` note now carries `action="background"`, and `noteAction`
+  (`StackHealthCard.tsx`) turns it into **"Open the editor to even out the background →"** pointing at
+  `/targets/{safe}/edit/{run_id}` — `data.run_id`, i.e. the run the card actually graded, not the newest. It
+  follows the `trim_border` self-link rule exactly: rendered *inside* the editor it returns `null`, because the
+  background ops are already on-screen there, and it returns `null` when there's no run to open. The reassurance
+  half (`seams_flat`) keeps no action — there is nothing to do. Upgrade-safe: `action` is a free-form string an
+  older frontend simply renders no link for. Tests: `test_the_seam_warning_hands_over_the_tool_it_names`
+  (`tests/test_stackhealth.py`) and a `noteAction("background", …)` case covering the link, the in-editor
+  self-link drop and the no-run case (`StackHealthCard.test.tsx`). Original spec kept for provenance:
+  - _(orig)_ The new `seams` health note names the problem honestly but ends in advice with no button: *"the editor's
   background tools can even it out further."* Every other actionable note carries an `action` key the card turns
   into a one-click link (`trim_border` → the editor, `calibration` → the Calibration page, `solve_help` →
   Settings, `restack` → the Stack form). A `background` action opening the editor on **that run** would close the
