@@ -546,7 +546,6 @@ def level_by_coverage(
     if ctx is None:
         return out
     cov_int, valid_pix, big_levels = ctx.cov_int, ctx.valid_pix, ctx.big_levels
-    effective_min = ctx.effective_min
 
     # First pass: compute the per-channel SKY MODE for each coverage level
     # using the SExtractor approximation (2.5·median − 1.5·sigma-clipped-mean).
