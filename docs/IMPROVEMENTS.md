@@ -6189,8 +6189,30 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-08-05, follow-on to the v0.234.0 background-mode nudge) — the *editor* makes the same
-  per-channel-on-a-nebula mistake, and it now has the same catalog fact available to say so.** *(Image quality +
+- ~~**NEW IDEA (Builder 2026-08-05, follow-on to the v0.234.0 background-mode nudge) — the *editor* makes the same
+  per-channel-on-a-nebula mistake, and it now has the same catalog fact available to say so.**~~ — **SHIPPED
+  v0.235.0** (Builder 2026-08-05, branch `claude/relaxed-turing-j9sf99`). Selecting **Background subtract** or
+  **Gradient removal** in the editor on a target the bundled catalog knows is a big patch of extended emission now
+  shows one plain-language line beside the op, plus a **"Use Luminance mode"** button that switches just that op.
+  The editor reads the same `["identify", safe]` query the Target/Stack pages already warm (same key, so it is
+  usually a cache hit) — **nothing new server-side**, no new endpoint, and no op default moved.
+  **The "Care" note is honoured, and it changed the design:** the server's `background_mode_hint.text` is written
+  for the Stack form — it describes the *per-frame* flatten over each sub and calls per-channel "the default" —
+  which is wrong twice over here (the image is already stacked and that pass has been and gone, and
+  `background.final_gradient`'s default is already `luminance`). So the new pure helper
+  (`frontend/src/components/editor/backgroundModeAdvice.ts`) reads only the hint's **existence** and its `mode`,
+  and writes the sentence about *this op's own fit*, naming the op's own model ("sky model" vs "gradient model").
+  It also resolves the mode the op is **actually** running at — an untouched op instance carries no `mode` param,
+  so it falls back to that op's schema default — which is what makes it speak up on an untouched
+  `background.subtract` (per_channel) and stay silent on an untouched `background.final_gradient` (luminance).
+  Silent for a target the catalog doesn't cover, for an older backend that omits the field, for ops with no Mode
+  param, and once the op is already on the advised mode. Frontend-only, additive, advisory: nothing changes until
+  the button is pressed. **Tests (+12):** `backgroundModeAdvice.test.ts` (+10 — the untouched-subtract case, the
+  gradient op naming its own model, that the server's Stack-form wording is *not* reused, silence when already on
+  luminance / on an uncovered target / on a null-or-older-backend info / on a non-background op / when the mode
+  can't be resolved at all, and the option-label lookup with its fallback) and `Editor.test.tsx` (+2 — the nudge
+  renders on a nebula and one click applies it and dismisses itself; nothing is said for an uncovered target).
+  *(Original idea kept below for provenance.)* *(Image quality +
   friendliness — PRIORITY 3/4; size S; the engine half already exists.)* v0.234.0 puts
   `seestack.bg_advice.background_mode_hint` behind `GET /api/targets/{safe}/identify` and nudges the **Stack
   form** toward Luminance for a big emission nebula. The editor's own `background.subtract` op carries the
