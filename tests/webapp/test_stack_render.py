@@ -1324,3 +1324,42 @@ def test_stack_info_calibration_skipped_is_empty_for_an_ordinary_run(
 
     body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
     assert body["calibration_skipped"] == []
+
+
+def test_stack_info_reports_a_master_that_does_not_match_the_subs(
+        client, solved_library):
+    """The mirror of the skipped-pick line: a master that *was* applied but whose
+    exposure/temperature doesn't match the subs. The run looks calibrated — that's
+    exactly why it needs saying — and the engine's measurement previously reached
+    only the server log."""
+    from webapp import pipeline
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    warning = ("Master dark is 30s but your subs are 10s — its pedestal will be "
+               "over-subtracted on every frame.")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(
+                f"{pipeline.CALIBRATION_WARNINGS_META_PREFIX}{int(run_id)}",
+                json.dumps([warning]))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["calibration_warnings"] == [warning]
+
+
+def test_stack_info_calibration_warnings_is_empty_for_an_ordinary_run(
+        client, solved_library):
+    """Upgrade-safety: a run from before this was recorded (or one whose masters
+    matched) reports an empty list, so nothing new appears on a healthy run."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["calibration_warnings"] == []

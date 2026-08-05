@@ -54,6 +54,9 @@ import { coalesceFwhm, measuredContextText } from "../components/editor/measured
 import { calibrationSummaryText } from "../components/calibrationSummary";
 import { canSharePictureFiles, sharePicture } from "../share";
 import { OpParamPanel } from "../components/editor/OpParamPanel";
+import {
+  backgroundModeAdvice, backgroundModeOptionLabel,
+} from "../components/editor/backgroundModeAdvice";
 import { PresetMenu } from "../components/editor/PresetMenu";
 import { HintLabel } from "../components/StackOptionControl";
 
@@ -185,6 +188,16 @@ export function EditorView() {
   const starSize = useQuery({
     queryKey: ["star-size-suggestion", safe],
     queryFn: () => api.starSizeSuggestion(safe),
+    staleTime: 60_000,
+  });
+  // The target's catalog identity — the same query the Target/Stack pages already
+  // warm (same key), read here only for its background-flatten advice: a big
+  // emission nebula's colours have different shapes, so fitting the sky per channel
+  // bends into it unevenly. The two background ops carry that hazard in the editor
+  // exactly as the per-frame flatten does in the Stack form.
+  const identity = useQuery({
+    queryKey: ["identify", safe],
+    queryFn: () => api.identifyTarget(safe),
     staleTime: 60_000,
   });
   // One-click "trim the ragged mosaic border": the largest well-covered rectangle
@@ -1660,9 +1673,22 @@ export function EditorView() {
                 {(() => {
                   const cards = runInfo.data?.cards;
                   if (!cards) return null;
-                  const cal = calibrationSummaryText(cards);
+                  const cal = calibrationSummaryText(
+                    cards, null, null, runInfo.data?.calibration_warnings);
                   if (!cal || !cal.calibrated) return null;
-                  return <Text size="xs" c="dimmed" mt={4}>{cal.text}</Text>;
+                  return (
+                    <>
+                      <Text size="xs" c="dimmed" mt={4}>{cal.text}</Text>
+                      {/* The one exception to "positive case only": a master that
+                          *was* applied but doesn't match the subs makes the line
+                          above misleading rather than reassuring, and it explains a
+                          crushed or grainy background the user is about to try to
+                          fix with the wrong slider. */}
+                      {cal.mismatch ? (
+                        <Text size="xs" c="yellow.7" fw={600} mt={2}>{cal.mismatch}</Text>
+                      ) : null}
+                    </>
+                  );
                 })()}
                 <Text size="10px" c="dimmed" mt={4}>
                   These steps were chosen from your image — tweak or remove any of them below.
@@ -1981,6 +2007,27 @@ export function EditorView() {
                     </Text>
                   </Alert>
                 ) : null}
+                {/* A big emission nebula's colours have different shapes, so a
+                    per-colour sky/gradient fit bends into it unevenly and leaves
+                    cyan cores and red halos. The catalog already knows which
+                    targets those are (it drives the same nudge on the Stack form);
+                    say it here too, beside the control that decides it. */}
+                {(() => {
+                  const advice = backgroundModeAdvice(
+                    identity.data, specs[selectedOp.id], selectedOp.params);
+                  if (!advice) return null;
+                  return (
+                    <Alert color="blue" variant="light" py={6} mb="xs"
+                      icon={<IconInfoCircle size={16} />}>
+                      <Text size="xs">{advice.text}</Text>
+                      <Button size="compact-xs" variant="light" mt={6}
+                        onClick={() => setParams(
+                          selectedOp.uid, { ...selectedOp.params, mode: advice.mode })}>
+                        Use {backgroundModeOptionLabel(advice.mode, specs[selectedOp.id])} mode
+                      </Button>
+                    </Alert>
+                  );
+                })()}
                 <OpParamPanel spec={specs[selectedOp.id]} params={selectedOp.params}
                   histogram={hist.data}
                   curveGhost={curveGhost} onBakeCurve={bakeAutoCurve}

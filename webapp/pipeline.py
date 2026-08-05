@@ -1862,6 +1862,15 @@ _SAVED_MASTER_BINDINGS = (
 #: simply has no such key and the History line stays exactly as it was.
 CALIBRATION_SKIPPED_META_PREFIX = "calibration_skipped:"
 
+#: Project-meta key prefix (``calibration_warnings:<run_id>``) holding a JSON list
+#: of plain-language sentences about a master that *was* applied but doesn't match
+#: the lights — a dark shot at another exposure or a very different sensor
+#: temperature, which over/under-subtracts its pedestal on every frame. The engine
+#: measures these (``CalibrationMasters.calibration_warnings``) and used to only
+#: log them; stamped here so History can say it out loud beside the picture.
+#: Additive: an older run has no such key and reads back as no warnings.
+CALIBRATION_WARNINGS_META_PREFIX = "calibration_warnings:"
+
 
 def _apply_saved_calibration_masters(
     settings: Settings, proj: Any, opts_dict: dict[str, Any],
@@ -2129,6 +2138,16 @@ def _stack_target(
                     proj.set_meta(
                         f"{CALIBRATION_SKIPPED_META_PREFIX}{result.run_id}",
                         json.dumps(calibration_skipped))
+            # Stamp the mismatches between a master that *was* applied and the
+            # lights it calibrated (a dark at the wrong exposure/temperature).
+            # Same fail-soft, additive shape as the skipped picks above: a run
+            # with a matching dark writes no key.
+            _cal_warnings = list(getattr(result, "calibration_warnings", []) or [])
+            if _cal_warnings and result.run_id is not None:
+                with contextlib.suppress(Exception):
+                    proj.set_meta(
+                        f"{CALIBRATION_WARNINGS_META_PREFIX}{result.run_id}",
+                        json.dumps(_cal_warnings))
     finally:
         proj.close()
     lib.refresh_target_stats(safe)
@@ -2157,6 +2176,11 @@ def _stack_target(
         # finished picture lands. None/None when no rejection pass ran.
         "rejection_mode": getattr(result, "rejection_mode", None),
         "rejection_fraction": getattr(result, "rejection_fraction", None),
+        # A master dark that doesn't match the subs it calibrated (wrong exposure
+        # or a very different sensor temperature). Reported on the job result too,
+        # not only on History, so the walk-away user reads it the moment the
+        # unattended stack lands rather than having to go looking.
+        "calibration_warnings": list(getattr(result, "calibration_warnings", []) or []),
     }
 
 

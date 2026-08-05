@@ -403,7 +403,8 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
       })()}
       {(() => {
         const cal = calibrationSummaryText(
-          data.cards, data.calibration_advice, data.calibration_skipped);
+          data.cards, data.calibration_advice, data.calibration_skipped,
+          data.calibration_warnings);
         if (!cal) return null;
         return (
           <Stack gap={2}>
@@ -417,6 +418,15 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
             {cal.skipped ? (
               <Text size="xs" c="yellow.7" fw={600}>
                 {cal.skipped}
+              </Text>
+            ) : null}
+            {/* And the opposite failure: a master that *was* applied but doesn't
+                match the subs (a dark at the wrong exposure/temperature). The line
+                above says "Calibrated with your master dark", so without this the
+                run looks healthy while its pedestal is wrong on every frame. */}
+            {cal.mismatch ? (
+              <Text size="xs" c="yellow.7" fw={600}>
+                {cal.mismatch}
               </Text>
             ) : null}
           </Stack>
