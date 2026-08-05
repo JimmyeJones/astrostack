@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
   bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobKindLabel,
-  missingSubsNote,
+  calibrationMismatchNote, missingSubsNote,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
 } from "./Jobs";
 import * as client from "../api/client";
@@ -826,7 +826,7 @@ describe("processTargetSummary", () => {
       stacked: true, solved_accepted: 8, stack: { n_frames_used: 8 },
     })).toEqual({
       line: "Stacked 8 frames into a new master.", stacked: true, thin: null,
-      cleaned: null, missing: null,
+      cleaned: null, missing: null, calMismatch: null,
     });
   });
   it("names the outlier clean-up a small auto-stack made with min/max", () => {
@@ -865,7 +865,7 @@ describe("processTargetSummary", () => {
     expect(processTargetSummary({ stacked: true, solved_accepted: 5 }))
       .toEqual({
         line: "Stacked 5 frames into a new master.", stacked: true, thin: null,
-        cleaned: null, missing: null,
+        cleaned: null, missing: null, calMismatch: null,
       });
   });
   it("flags a thin stack (very few frames combined) so it isn't shown as a clean result", () => {
@@ -909,19 +909,64 @@ describe("processTargetSummary", () => {
       thin: null,
       cleaned: null,
       missing: null,
+      calMismatch: null,
     });
   });
   it("explains a cancellation and an unknown non-stacked outcome", () => {
     expect(processTargetSummary({ stacked: false, stack_skipped_reason: "cancelled" }))
       .toEqual({
         line: "Cancelled before stacking.", stacked: false, thin: null,
-        cleaned: null, missing: null,
+        cleaned: null, missing: null, calMismatch: null,
       });
     expect(processTargetSummary({ stacked: false }))
       .toEqual({
         line: "Finished, but no stack was produced.", stacked: false, thin: null,
-        cleaned: null, missing: null,
+        cleaned: null, missing: null, calMismatch: null,
       });
+  });
+});
+
+describe("calibrationMismatchNote", () => {
+  it("passes the engine's sentence through and joins several", () => {
+    const exposure = "Master dark is 30s but your subs are 10s — its pedestal "
+      + "will be over-subtracted on every frame.";
+    const temp = "Master dark was shot at -10°C but your subs are at 5°C.";
+    expect(calibrationMismatchNote([exposure])).toBe(exposure);
+    expect(calibrationMismatchNote([exposure, temp])).toBe(`${exposure} ${temp}`);
+  });
+  it("stays silent on a healthy run, an older backend, and junk", () => {
+    expect(calibrationMismatchNote([])).toBeNull();
+    // An older backend omits the field entirely.
+    expect(calibrationMismatchNote(undefined)).toBeNull();
+    expect(calibrationMismatchNote(null)).toBeNull();
+    expect(calibrationMismatchNote("not a list")).toBeNull();
+    // Blanks and non-strings are dropped, not rendered as an empty warning.
+    expect(calibrationMismatchNote(["  ", 7, null])).toBeNull();
+  });
+});
+
+describe("processTargetSummary — calibration mismatch", () => {
+  it("surfaces a master that was applied but doesn't match these subs", () => {
+    const { calMismatch } = processTargetSummary({
+      stacked: true, solved_accepted: 20,
+      stack: {
+        n_frames_used: 20,
+        calibration_warnings: ["Master dark is 30s but your subs are 10s — "
+          + "its pedestal will be over-subtracted on every frame."],
+      },
+    });
+    // The line above says the stack succeeded; this is the only cue that it was
+    // calibrated *wrongly* rather than not at all.
+    expect(calMismatch).toContain("30s but your subs are 10s");
+  });
+  it("says nothing when the masters matched or the backend is older", () => {
+    expect(processTargetSummary({
+      stacked: true, solved_accepted: 20,
+      stack: { n_frames_used: 20, calibration_warnings: [] },
+    }).calMismatch).toBeNull();
+    expect(processTargetSummary({
+      stacked: true, solved_accepted: 20, stack: { n_frames_used: 20 },
+    }).calMismatch).toBeNull();
   });
 });
 

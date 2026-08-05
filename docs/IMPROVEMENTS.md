@@ -6189,6 +6189,42 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-08-05, direct follow-on to the v0.236.0 mismatch surfacing) — catch a mismatched master
+  when the user *picks* it, not after the night is spent.** *(Autonomy + friendliness — PRIORITY 2/3; size S–M.)*
+  v0.236.0 makes the master-dark exposure/temperature mismatch visible — but only **after** a stack has run, which
+  is the wrong end of the evening: the user has already gone to bed and the picture is already mis-calibrated. Every
+  input needed to say it earlier is already at hand: the registered master carries `exposure_s` / `sensor_temp_c`
+  in its `MasterMeta` (surfaced by `webapp/calibration.py`), and the target's own frames carry theirs in the
+  project DB. **Slice:** when the Stack form's dark picker has a master selected (and in the unattended auto-binder
+  when it chooses one), compare against the target's median sub exposure/temperature and show the *same* engine
+  sentence beside the control, with the existing "turn on dark exposure-scaling" fix as a one-click button where a
+  bias makes it available. **Care:** the wording must come from `CalibrationMasters.calibration_warnings` (or a
+  shared helper split out of it) so the before and after never drift; and it stays advisory — the binder must keep
+  applying the master, because an imperfect dark still beats none. Note `_uncalibrated_advice` already does
+  something adjacent (it re-derives "you have a master dark at a different exposure" for an *uncalibrated* run), so
+  grep it first — there may be a helper to reuse rather than write.
+- **NEW IDEA (Builder 2026-08-05, spotted while tracing the coverage accumulators) — the coverage map's `BUNIT`
+  claims "frames" when it isn't one.** *(Trust / correctness of a diagnostic — PRIORITY 4; size S.)*
+  `output._write_coverage_fits` writes `master_coverage.fits` with `BUNIT = "frames"`, but the array it gets is
+  the accumulator's `coverage` — Σ of per-frame *weights*. With quality weighting on that isn't a frame count, and
+  on the drizzle path it's Σ of weighted footprint overlap (fractional at any `pixfrac < 1` / `scale ≠ 1`, i.e. the
+  default). The stacker already has the honest number: `frame_coverage`, an unweighted 2-D count, added for exactly
+  this reason on the `coverage_min`/`coverage_max` diagnostics. **Care — do not just swap the array.** The same map
+  is what `level_by_coverage` bins on and what the editor loads as `EditContext.coverage`, so changing its
+  *contents* changes stacking and editor behaviour on every existing run. The safe slices are (a) fix the label
+  (`BUNIT = "weight"`, with a comment), and/or (b) write the true frame count as an **additional** HDU/plane that
+  new consumers can read while the primary stays byte-for-byte. Worth doing only alongside something else in that
+  file.
+- **NOTE (Builder 2026-08-05) — the "a 3-frame default stack gets no outlier rejection" idea (filed under Image
+  quality, Scout 2026-07-23) is largely moot for the *beginner* path; check before spending a run on it.** Verified
+  this run: the beginner never reaches the bare engine default. `webapp/routers/stack.py:168` does
+  `merged.setdefault("auto_reject", True)` for a never-configured Stack form, and `webapp/pipeline.py:~2087` sets
+  `auto_reject=True` whenever the merged options carry no explicit rejection preference — and `auto_reject`
+  resolves to **min/max** below `_auto_kappa_min_frames(κ)` (n < 11 at the default κ=3), which is exactly the
+  rejection a 3-frame stack can use. So a walk-away / one-click 3-frame stack already drops the lone trail. The
+  residual gap is only a user who *explicitly* chose κ-σ and then stacked 3 frames — a deliberate choice, and
+  changing it is the default-behaviour flip the original entry already flagged. Recommend leaving it closed unless
+  the owner asks.
 - ~~**NEW IDEA (Builder 2026-08-05, follow-on to the v0.234.0 background-mode nudge) — the *editor* makes the same
   per-channel-on-a-nebula mistake, and it now has the same catalog fact available to say so.**~~ — **SHIPPED
   v0.235.0** (Builder 2026-08-05, branch `claude/relaxed-turing-j9sf99`). Selecting **Background subtract** or
@@ -6224,8 +6260,47 @@ to **Shipped**.)_
   the Stack form uses; nothing new server-side. **Care:** the editor's op runs on an *already stacked* image
   where the per-frame flatten has been and gone, so the wording must be about this op's own fit, not about the
   stack's; and don't change any op default — this stays a suggestion, like its Stack-form sibling.
-- **NEW IDEA (Builder 2026-08-05, spotted while fixing the majority-shape master bug v0.234.2) — say *why* a
-  master's frame count came out lower than the folder the user pointed at.** *(Friendliness / trust —
+- ~~**FOUND + FIXED (Builder 2026-08-05, engine QA pass over `seestack/calibrate/`) — the app measures that your
+  master dark doesn't match your subs, then tells nobody but the server log.**~~ — **SHIPPED v0.236.0** (Builder
+  2026-08-05, branch `claude/relaxed-turing-j9sf99`). *(Calibration correctness / trust — PRIORITY 2/4;
+  wrong-result on a live install's hot path, hidden behind a healthy-looking run.)*
+  `CalibrationMasters.calibration_warnings` has always caught the two mismatches `validate()` (shape only) can't —
+  a master dark shot at a **different exposure** than the lights (its pedestal is over/under-subtracted on *every*
+  frame, crushing the background or leaving dark current behind) and one shot at a very different **sensor
+  temperature** (dark current ~doubles per 6–7 °C). `run_stack` called it and did nothing with the result but
+  `log.warning`. That is the one place a walk-away user never looks — and the run is stamped `CALSTAT`, so History
+  cheerfully reports *"Calibrated with your master dark"* over a picture whose pedestal is wrong on every frame.
+  This is the **inverse** of the already-surfaced `calibration_skipped` (a master that was *dropped*): here the
+  master was used, and that is precisely the problem.
+  **The fix carries the measurement out to the user, unchanged in wording** (it stays authored once, in the
+  engine): `StackResult.calibration_warnings` (additive field, default empty) → stamped on the run as project meta
+  under a new `calibration_warnings:<run_id>` key, mirroring the `calibration_skipped` pattern exactly → an
+  additive `calibration_warnings` field on `GET …/stack-runs/{id}/info` → a yellow line under the calibration
+  status on the **History Info panel**, the same line in the **editor's** auto-note (the one exception to that
+  note's positive-case-only rule, since the mismatch is what explains the background the user is about to fight
+  with the wrong slider), and an alert on the **Jobs** "Process target" result where the unattended stack lands.
+  **Upgrade-safe:** no DB schema change (project meta, like its sibling), no API shape change (added field), no
+  default flipped; a run recorded before this reads back as an empty list, and a result object without the
+  attribute degrades via `getattr` rather than raising mid-job. A healthy run says nothing at all — this adds no
+  reassurance line, only the warning.
+  **Tests (+13):** `tests/test_stack_pipeline.py` (+2 — a 30 s dark against 10 s subs comes back on the result;
+  a matched dark and an uncalibrated stack both stay empty), `tests/webapp/test_auto_stack_saved_masters.py`
+  (+3 — the pipeline stamps it on the run *and* returns it in the job summary, a matching master stamps nothing,
+  and an older result object without the field degrades to no warnings), `tests/webapp/test_stack_render.py`
+  (+2 — the endpoint reports it, and an ordinary/older run reports `[]`), `History.test.tsx` (+4 — three on
+  `calibrationSummaryText`'s new `mismatch` field incl. that it stays independent of `skipped`, plus a rendered
+  Info-panel test asserting both the "Calibrated with your master dark" line *and* the mismatch line), and
+  `Jobs.test.tsx` (+2 on the new pure `calibrationMismatchNote` and the `processTargetSummary` wiring).
+- ~~**NEW IDEA (Builder 2026-08-05, spotted while fixing the majority-shape master bug v0.234.2) — say *why* a
+  master's frame count came out lower than the folder the user pointed at.**~~ — **ALREADY COVERED; struck as
+  stale** (Builder 2026-08-05). Checked before starting it: the count *and* its two buckets already ship on the
+  Jobs page, where a master build's result actually lands — `buildMasterSummary` (`frontend/src/routes/Jobs.tsx`)
+  renders "Built a master dark from 47 frames · 13 frames set aside (13 wrong size)" from the `n_skipped` /
+  `skipped_buckets` the build job already returns, with tests in `Jobs.test.tsx`. The only thing the idea asked
+  for that isn't there is the *interpretation* of the bucket name ("a different size — they look like they came
+  from another camera or binning mode"), which is a copy tweak inside that one pure function, not a feature.
+  Left as a nice-to-have for whoever next touches that file rather than a backlog item.
+  *(Original idea kept below for provenance.)* *(Friendliness / trust —
   PRIORITY 3; size S.)* `build_master` already collects a precise `skipped` list of `(filename, reason)` —
   `"unreadable"` or `"wrong size"` — and the v0.234.2 fix makes "wrong size" genuinely informative (it now means
   "this frame disagrees with the majority", i.e. almost always another camera or binning mode). A user who drops

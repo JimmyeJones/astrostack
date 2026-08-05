@@ -308,3 +308,94 @@ def test_only_the_skipped_slot_is_recorded_when_another_binds(
     skips = _recorded_skips(solved_library)
     assert len(skips) == 1
     assert skips[0].startswith("Your saved master dark wasn't used:")
+
+
+# --- The run also records a master that was applied but doesn't MATCH --------
+#
+# The mirror image of the skips above: the master binds and calibrates the run,
+# so History happily reports "Calibrated with your master dark" — while a dark
+# shot at another exposure over/under-subtracts its pedestal on every frame. The
+# engine has always measured this; ``_stack_target`` stamps it so it is visible
+# somewhere other than the server log.
+
+
+def _recorded_warnings(data_root, run_id: int = 1) -> list[str]:
+    """The mismatch sentences stamped on a run, as History reads them."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(lib.list_targets()[0].safe_name)
+        try:
+            raw = proj.get_meta(
+                f"{pipeline.CALIBRATION_WARNINGS_META_PREFIX}{run_id}")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    return json.loads(raw) if raw else []
+
+
+def _stack_returning_warnings(monkeypatch, warnings: list[str]):
+    """Patch run_stack to return a result carrying ``warnings``."""
+    def fake_run_stack(proj, opts, *, progress=None, cancel=None,
+                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+        return SimpleNamespace(
+            output_dir="/tmp/x", run_id=1, n_frames_used=3, canvas_shape=(1, 1, 3),
+            cancelled=False, errors=[], excluded_frames=[],
+            calibration_warnings=list(warnings),
+        )
+
+    monkeypatch.setattr("seestack.stack.stacker.run_stack", fake_run_stack)
+
+
+def _run_stack_target(data_root):
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        safe = lib.list_targets()[0].safe_name
+        settings = Settings(data_root=str(data_root))
+        return pipeline._stack_target(settings, jm=_FakeJM(), job=Job(kind="pipeline"),
+                                      lib=lib, safe=safe)
+    finally:
+        lib.close()
+
+
+def test_a_mismatched_master_is_recorded_on_the_run_and_the_job_result(
+        solved_library, monkeypatch):
+    warning = ("Master dark is 30s but your subs are 10s — its pedestal will be "
+               "over-subtracted on every frame.")
+    _stack_returning_warnings(monkeypatch, [warning])
+
+    summary = _run_stack_target(solved_library)
+
+    # Both surfaces the walk-away user actually looks at: the Jobs result that
+    # lands when the unattended stack finishes, and History via the run record.
+    assert summary["calibration_warnings"] == [warning]
+    assert _recorded_warnings(solved_library) == [warning]
+
+
+def test_a_matching_master_records_no_mismatch(solved_library, monkeypatch):
+    """Nothing new appears on a healthy run: no key stamped, empty in the result."""
+    _stack_returning_warnings(monkeypatch, [])
+
+    summary = _run_stack_target(solved_library)
+
+    assert summary["calibration_warnings"] == []
+    assert _recorded_warnings(solved_library) == []
+
+
+def test_an_older_result_without_the_field_degrades_to_no_warnings(
+        solved_library, monkeypatch):
+    """Upgrade-safety: a result object from before this existed (no attribute)
+    must read as "nothing to say" rather than raise mid-job."""
+    def fake_run_stack(proj, opts, *, progress=None, cancel=None,
+                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+        return SimpleNamespace(
+            output_dir="/tmp/x", run_id=1, n_frames_used=3, canvas_shape=(1, 1, 3),
+            cancelled=False, errors=[], excluded_frames=[],
+        )
+
+    monkeypatch.setattr("seestack.stack.stacker.run_stack", fake_run_stack)
+
+    summary = _run_stack_target(solved_library)
+
+    assert summary["calibration_warnings"] == []
+    assert _recorded_warnings(solved_library) == []

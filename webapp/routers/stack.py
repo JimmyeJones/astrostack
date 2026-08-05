@@ -90,6 +90,34 @@ def _run_calibration_skipped(request: Request, safe: str, run_id: int) -> list[s
     return []
 
 
+def _run_calibration_warnings(request: Request, safe: str, run_id: int) -> list[str]:
+    """Plain-language mismatches between a calibration master this run *did* apply
+    and the subs it calibrated (an empty list when everything matched).
+
+    Distinct from :func:`_run_calibration_skipped`, which reports a master that was
+    **dropped**: here the master was used, and that is precisely the problem — a
+    dark shot at another exposure or a very different sensor temperature
+    over/under-subtracts its pedestal on *every* frame, crushing the background or
+    leaving dark current behind. The engine has always measured this
+    (``CalibrationMasters.calibration_warnings``) but only wrote it to the server
+    log, which nobody running a walk-away stack reads. Stamped by
+    ``pipeline._stack_target`` and read back here so History can say it out loud."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        raw = proj.get_meta(
+            f"{pipeline.CALIBRATION_WARNINGS_META_PREFIX}{run_id}")
+    finally:
+        proj.close()
+        lib.close()
+    if not raw:
+        return []
+    with contextlib.suppress(ValueError, TypeError):
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed if isinstance(item, str)]
+    return []
+
+
 def _run_auto_edit_sky_cast(request: Request, safe: str, run_id: int) -> dict | None:
     """The finished picture's residual sky-background cast (r/g/b sky medians +
     a neutral/colour verdict) measured by the unattended auto-edit, or ``None``
@@ -1382,6 +1410,11 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     # master *deleted* since it was saved. Reported even when the run *is*
     # calibrated: a bound flat doesn't excuse a silently-dropped dark.
     calibration_skipped = _run_calibration_skipped(request, safe, run_id)
+    # Mismatches in a master this run *did* apply — the opposite failure to
+    # ``calibration_skipped`` and invisible without this: the picture looks
+    # calibrated (CALSTAT is stamped) while a wrong-exposure dark quietly
+    # over-subtracts on every frame.
+    calibration_warnings = _run_calibration_warnings(request, safe, run_id)
     return {"run_id": run_id, "integration_s": integration_s,
             "n_frames": n_frames, "weighting": weighting,
             "photometric": photometric, "dark_scaling": dark_scaling,
@@ -1390,6 +1423,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             "color_cal": color_cal,
             "calibration_advice": calibration_advice,
             "calibration_skipped": calibration_skipped,
+            "calibration_warnings": calibration_warnings,
             "processing": processing, "cards": cards}
 
 

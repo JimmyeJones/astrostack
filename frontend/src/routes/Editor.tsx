@@ -1673,9 +1673,22 @@ export function EditorView() {
                 {(() => {
                   const cards = runInfo.data?.cards;
                   if (!cards) return null;
-                  const cal = calibrationSummaryText(cards);
+                  const cal = calibrationSummaryText(
+                    cards, null, null, runInfo.data?.calibration_warnings);
                   if (!cal || !cal.calibrated) return null;
-                  return <Text size="xs" c="dimmed" mt={4}>{cal.text}</Text>;
+                  return (
+                    <>
+                      <Text size="xs" c="dimmed" mt={4}>{cal.text}</Text>
+                      {/* The one exception to "positive case only": a master that
+                          *was* applied but doesn't match the subs makes the line
+                          above misleading rather than reassuring, and it explains a
+                          crushed or grainy background the user is about to try to
+                          fix with the wrong slider. */}
+                      {cal.mismatch ? (
+                        <Text size="xs" c="yellow.7" fw={600} mt={2}>{cal.mismatch}</Text>
+                      ) : null}
+                    </>
+                  );
                 })()}
                 <Text size="10px" c="dimmed" mt={4}>
                   These steps were chosen from your image — tweak or remove any of them below.

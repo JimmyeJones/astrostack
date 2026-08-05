@@ -179,6 +179,34 @@ describe("HistoryView", () => {
       ).toBeInTheDocument());
   });
 
+  it("tells the user when the master the run DID apply doesn't match the subs", async () => {
+    // The run is calibrated, so the Info panel's calibration line reads as good
+    // news. Without this the only record of a 30s dark being subtracted from 10s
+    // subs is a server log line the owner never opens.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 840, weighting: null,
+      calibration_warnings: [
+        "Master dark is 30s but your subs are 10s — its pedestal will be "
+        + "over-subtracted on every frame.",
+      ],
+      cards: [
+        { key: "STACKER", value: "sigma-clip", comment: "stacking method" },
+        { key: "CALSTAT", value: "dark", comment: "calibration masters applied" },
+      ],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Master dark is 30s but your subs are 10s/))
+        .toBeInTheDocument());
+    // Both lines show: what the picture got, and what's wrong with it.
+    expect(screen.getByText("Calibrated with your master dark.")).toBeInTheDocument();
+  });
+
   it("shows the quality-weighting summary when present", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
@@ -673,6 +701,45 @@ describe("calibrationSummaryText", () => {
       .toBeUndefined();
     expect(calibrationSummaryText([{ key: "STACKER", value: "mean" }])?.skipped)
       .toBeUndefined();
+  });
+  it("reports a master that WAS applied but doesn't match the subs", () => {
+    // The failure a calibrated-looking run hides best: the status line happily
+    // says "Calibrated with your master dark", while a 30s dark's pedestal is
+    // being over-subtracted out of every 10s sub.
+    const warn = "Master dark is 30s but your subs are 10s — its pedestal will "
+      + "be over-subtracted on every frame.";
+    const r = calibrationSummaryText(
+      [{ key: "CALSTAT", value: "dark" }], null, null, [warn]);
+    expect(r).toEqual({
+      text: "Calibrated with your master dark.",
+      calibrated: true,
+      mismatch: warn,
+    });
+  });
+  it("joins several mismatches, ignores blanks, and stays unset when there are none", () => {
+    const r = calibrationSummaryText([{ key: "CALSTAT", value: "dark" }], null, null, [
+      "Master dark is 30s but your subs are 10s.",
+      "  ",
+      "Master dark was shot at -10°C but your subs are at 5°C.",
+    ]);
+    expect(r?.mismatch).toBe(
+      "Master dark is 30s but your subs are 10s. "
+      + "Master dark was shot at -10°C but your subs are at 5°C.",
+    );
+    expect(calibrationSummaryText([{ key: "CALSTAT", value: "dark" }], null, null, [])
+      ?.mismatch).toBeUndefined();
+    // An older backend omits the field entirely.
+    expect(calibrationSummaryText([{ key: "CALSTAT", value: "dark" }])?.mismatch)
+      .toBeUndefined();
+  });
+  it("keeps the skip and mismatch lines independent — they answer different questions", () => {
+    const skip = "Your saved master flat wasn't used: it's no longer in your "
+      + "calibration library.";
+    const warn = "Master dark is 30s but your subs are 10s.";
+    const r = calibrationSummaryText(
+      [{ key: "CALSTAT", value: "dark" }], null, [skip], [warn]);
+    expect(r?.skipped).toBe(skip);
+    expect(r?.mismatch).toBe(warn);
   });
 });
 

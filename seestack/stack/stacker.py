@@ -531,6 +531,15 @@ class StackResult:
     # gate the ``stack_runs`` columns use.
     rejection_mode: str | None = None
     rejection_fraction: float | None = None
+    # Advisory (non-fatal) mismatches between the master dark and the lights it
+    # calibrated — a dark shot at a different exposure or a very different sensor
+    # temperature over/under-subtracts its pedestal on *every* frame. These used
+    # to go only to the server log, which nobody running a walk-away stack reads,
+    # so a quietly mis-calibrated picture arrived with nothing to explain it.
+    # Plain-language sentences straight from ``CalibrationMasters
+    # .calibration_warnings`` (the wording lives there, once). Empty when the dark
+    # matches, when no dark was applied, or when the headers didn't say.
+    calibration_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -1140,6 +1149,9 @@ def run_stack(
 
     # ---- 1a. Load calibration masters (once, shared across workers) --------
     calibration = None
+    # Advisory master-dark mismatches, carried out on the result so the *user*
+    # sees them (they used to reach the server log only — see StackResult).
+    calib_warnings: list[str] = []
     if options.dark_path or options.flat_path or options.bias_path:
         from seestack.calibrate.apply import CalibrationMasters
 
@@ -1157,12 +1169,14 @@ def run_stack(
             log.info("Calibration: applying %s master(s)", calibration.describe())
             # Advisory (non-fatal): a master dark whose exposure/temperature
             # doesn't match the lights silently over/under-subtracts on every
-            # frame. Surface it in the stack log rather than shipping a quietly
-            # mis-calibrated result — the reference frame's exposure/temperature
-            # stands in for the (uniform) session.
-            for _warn in calibration.calibration_warnings(
+            # frame. Log it *and* carry it out on the result, so the walk-away
+            # user who never opens the server log still learns why their picture
+            # came out crushed or grainy — the reference frame's exposure/
+            # temperature stands in for the (uniform) session.
+            calib_warnings = list(calibration.calibration_warnings(
                 ref.exposure_s, ref.sensor_temp_c
-            ):
+            ))
+            for _warn in calib_warnings:
                 log.warning("Calibration: %s", _warn)
 
     # ---- 1b. Build the output canvas --------------------------------------
@@ -1672,6 +1686,9 @@ def run_stack(
             options=options,
             cancelled=True,
             errors=errors,
+            # A cancelled run produced no picture, but the mismatch was measured
+            # before the passes ran and is just as true — say it rather than drop it.
+            calibration_warnings=calib_warnings,
         )
 
     # ---- 4.4. Per-coverage sky leveling -----------------------------------
@@ -1903,6 +1920,7 @@ def run_stack(
         run_id=run_id,
         rejection_mode=rej_stats.mode if _rej_recorded else None,
         rejection_fraction=rej_stats.fraction if _rej_recorded else None,
+        calibration_warnings=calib_warnings,
     )
 
 
