@@ -9169,6 +9169,27 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **NEW IDEA (Builder 2026-08-05, spotted while wiring the seam note's new "Open the editor" link) — the editor's
+  background tools can't actually see the panel joins we just sent the beginner there to fix.** *(Image quality /
+  honesty — PRIORITY 1/4; size M.)* v0.233.2 gives the `seams` note a button, and the button is the right one we
+  have — but `edit/ops/background` fits a *smooth* model over the whole frame, which is exactly the wrong shape for
+  a **step** between coverage levels. A beginner who follows the link, drags the gradient slider and watches the
+  seam survive learns the wrong lesson about the tool. Two honest options, in order: **(a)** an editor op that
+  re-levels by coverage — the stack already writes a coverage map beside the FITS, so the op could load it and
+  reuse `level_by_coverage` on the *edited* image, giving the seam note a tool that addresses the actual defect;
+  **(b)** failing that, soften the note's wording so it stops promising more than the background ops can deliver.
+  **Care:** (a) must degrade silently to a no-op when no coverage map sits beside the run (every pre-v0.233 stack,
+  every imported FITS) — never an error, never a visible dead control; and it must not re-level a single-coverage
+  image, where the pass is a constant subtraction and would only shift the black point.
+- **NEW IDEA (Builder 2026-08-05, same run) — let Compare *say* which mosaic's panels came out flatter, not just
+  show two chips.** *(Trust / friendliness — PRIORITY 3; size S; frontend-only.)* v0.233.4 puts a "Panels even" /
+  "Panels: check" chip on both sides of the Compare view, but the page already has a house style for answering the
+  comparison out loud — `noiseComparison` renders one plain sentence about which stack is cleaner. Panel flatness
+  now has the same two inputs, so it can speak in the same voice ("B's panels evened out; A's still step at the
+  joins") whenever the two verdicts **differ**, and stay silent when they agree or either side has none. **Care:**
+  the verdicts are deliberately coarse — don't invent a magnitude ("2× flatter") from a ratio the beginner never
+  sees; and note this only makes sense for two runs of the *same* target, which Compare doesn't require.
+
 - ~~**NEW IDEA (Builder 2026-08-05, filed while shipping the seam-residual verdict v0.233.0) — give the "faint seams
   may show" note somewhere to send the beginner.**~~ — **SHIPPED v0.233.2** (Builder 2026-08-05, branch
   `claude/relaxed-turing-5qxucu`). The `seams` note now carries `action="background"`, and `noteAction`
