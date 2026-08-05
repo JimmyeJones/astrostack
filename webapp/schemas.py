@@ -221,7 +221,10 @@ class HealthNoteOut(BaseModel):
     kind: str
     severity: str          # "good" | "info" — colour only, never alarming
     message: str
-    action: str | None = None  # UI action key ("trim_border" | "calibration" | "solve_help") or null
+    # UI action key ("trim_border" | "calibration" | "solve_help" | "restack" |
+    # "background") or null. Free-form on purpose: an older frontend simply
+    # renders no link for a key it doesn't know, so adding one is upgrade-safe.
+    action: str | None = None
 
 
 class DarkSpecOut(BaseModel):

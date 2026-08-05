@@ -145,7 +145,7 @@ class HealthNote:
     ``"good"`` | ``"info"`` (colour only, never alarming); ``action`` is an
     optional key the UI can wire to the page that already does it
     (``"trim_border"`` | ``"calibration"`` | ``"solve_help"`` | ``"restack"``
-    | ``None``)."""
+    | ``"background"`` | ``None``)."""
 
     kind: str
     severity: str
@@ -370,7 +370,9 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
                          "show once it's stretched. It usually means those panels "
                          "were shot under different sky; the editor's background "
                          "tools can even it out further."),
-                action=None,
+                # The advice names a tool, so hand the user the tool: "background"
+                # opens the editor on *this* run, where the background ops live.
+                action="background",
             )))
         elif seam < _SEAM_FLAT_RATIO:
             scored.append((62, HealthNote(

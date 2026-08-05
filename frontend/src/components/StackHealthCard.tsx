@@ -25,15 +25,17 @@ export function noteColor(severity: string): string {
  * it, so the suggestion is actionable rather than just described. Pure/testable;
  * returns `null` for a note with no wired action (e.g. a reassurance/positive
  * note). `trim_border` opens the non-destructive editor on this run (where Trim
- * border lives); `calibration` opens the Calibration page (build master darks/
- * flats); `solve_help` opens Settings (the ASTAP star-database status). All are
- * read-only navigations — nothing is changed until the user acts.
+ * border lives); `background` opens the same editor for the mosaic-seam note
+ * (where the background ops live); `calibration` opens the Calibration page
+ * (build master darks/flats); `solve_help` opens Settings (the ASTAP
+ * star-database status). All are read-only navigations — nothing is changed
+ * until the user acts.
  *
- * When the card is rendered *inside* the editor (`inEditor`), the `trim_border`
- * link would just point at the page the user is already on — and the "Trim
- * border" button is right there in the op list — so we drop that redundant
- * self-link and let the note text guide them to the button. The `calibration`
- * link still points off to the Calibration page, so it's kept.
+ * When the card is rendered *inside* the editor (`inEditor`), an editor link
+ * would just point at the page the user is already on — and the op it names is
+ * right there in the op list — so we drop that redundant self-link and let the
+ * note text guide them to the button. The `calibration` link still points off to
+ * the Calibration page, so it's kept.
  */
 export function noteAction(
   action: string | null,
@@ -49,6 +51,16 @@ export function noteAction(
       // Opening the editor needs a concrete run to edit.
       return runId != null
         ? { label: "Open the editor to trim the border →",
+            href: `/targets/${safe}/edit/${runId}` }
+        : null;
+    case "background":
+      // The mosaic-seam note ends in "the editor's background tools can even it
+      // out further" — so send them there, on *this* run rather than the newest,
+      // since the verdict is about one specific stack. Same self-link rule as
+      // `trim_border`: inside the editor the background ops are already on-screen.
+      if (inEditor) return null;
+      return runId != null
+        ? { label: "Open the editor to even out the background →",
             href: `/targets/${safe}/edit/${runId}` }
         : null;
     case "calibration":
