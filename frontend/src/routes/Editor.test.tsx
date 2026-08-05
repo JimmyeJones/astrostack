@@ -67,6 +67,17 @@ const LEVEL_COVERAGE: EditOp = {
              depends_on: null }],
 };
 
+const BG_SUBTRACT: EditOp = {
+  id: "background.subtract", label: "Background subtract", group: "background",
+  stage: "linear", proxy_safe: true, is_stretch: false,
+  help: "Subtract a per-tile sky model to flatten gradients and vignetting.",
+  params: [{ key: "mode", label: "Mode", type: "enum", group: "simple",
+             default: "per_channel", min: null, max: null, step: null,
+             options: ["per_channel", "luminance"],
+             option_labels: { per_channel: "Per channel", luminance: "Luminance" },
+             help: null, depends_on: null }],
+};
+
 const CROP: EditOp = {
   id: "geometry.crop", label: "Crop", group: "stars_geometry", stage: "nonlinear",
   proxy_safe: true, is_stretch: false, help: "Crop to a fractional rectangle.",
@@ -2158,6 +2169,55 @@ describe("EditorView", () => {
     await waitFor(() => expect(client.api.getHistogram).toHaveBeenCalled());
     expect(screen.queryByText(/No effect on this stack/i)).not.toBeInTheDocument();
   });
+
+  // --- background mode advice on a big emission nebula ---------------------
+
+  function mockBackgroundOpEditor(hinted: boolean) {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, BG_SUBTRACT]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      // No `mode` param: an untouched op runs at its schema default (per_channel),
+      // which is exactly the case worth flagging on a nebula.
+      ops: [{ uid: "b1", id: "background.subtract", enabled: true, params: {} }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M 42", name: "Orion Nebula", type: "nebula",
+      background_mode_hint: hinted
+        ? { mode: "luminance", text: "stack-form copy" } : null,
+    } as never);
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+  }
+
+  it("nudges a big emission nebula's Background subtract toward Luminance, and one click applies it",
+    async () => {
+      mockBackgroundOpEditor(true);
+      renderEditor();
+
+      fireEvent.click(await screen.findByText("Background subtract"));
+      expect(await screen.findByText(/large patch of glowing gas/i)).toBeInTheDocument();
+
+      // The button reads the mode's label off the op's own schema, and applying
+      // it switches the op — after which the nudge has nothing left to say.
+      fireEvent.click(screen.getByRole("button", { name: /Use Luminance mode/i }));
+      await waitFor(() =>
+        expect(screen.queryByText(/large patch of glowing gas/i)).not.toBeInTheDocument());
+    });
+
+  it("says nothing about background mode for a target the catalog advice doesn't cover",
+    async () => {
+      mockBackgroundOpEditor(false);
+      renderEditor();
+
+      fireEvent.click(await screen.findByText("Background subtract"));
+      await waitFor(() => expect(client.api.identifyTarget).toHaveBeenCalledWith("M_42"));
+      expect(screen.queryByText(/large patch of glowing gas/i)).not.toBeInTheDocument();
+    });
 
   // --- "don't crop my picture automatically" (owner-requested) --------------
 

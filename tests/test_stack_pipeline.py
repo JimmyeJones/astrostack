@@ -79,6 +79,55 @@ def test_stack_logs_a_mismatched_dark_exposure_warning(tmp_path, caplog):
         proj.close()
 
 
+def test_stack_carries_the_dark_mismatch_warning_out_on_the_result(tmp_path):
+    """The mismatch advisory must reach the *user*, not just the server log.
+
+    Fail-before: `run_stack` logged the warning and dropped it, so a walk-away
+    stack calibrated with a 30 s dark against 10 s subs came back looking healthy
+    (CALSTAT stamped, no error) while its pedestal was over-subtracted on every
+    frame — and the only record was a log line nobody opens."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        for f in proj.iter_frames():
+            proj.update_frame(f.id, exposure_s=10.0, sensor_temp_c=-10.0)
+        dark = np.zeros((320, 480), dtype=np.float32)
+        dark_path = tmp_path / "dark30.fits"
+        save_master(dark_path, dark,
+                    MasterMeta("dark", 5, 480, 320, "mean", exposure_s=30.0,
+                               sensor_temp_c=-10.0))
+        res = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                           dark_path=str(dark_path),
+                                           output_name="mismatch_out"))
+        assert len(res.calibration_warnings) == 1
+        assert "Master dark is 30s but your subs are 10s" in res.calibration_warnings[0]
+    finally:
+        proj.close()
+
+
+def test_stack_reports_no_calibration_warning_for_a_matching_dark(tmp_path):
+    """A dark that matches the subs says nothing — the field is empty, not a
+    reassurance line, so nothing new appears on an ordinary healthy run."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        for f in proj.iter_frames():
+            proj.update_frame(f.id, exposure_s=10.0, sensor_temp_c=-10.0)
+        dark = np.zeros((320, 480), dtype=np.float32)
+        dark_path = tmp_path / "dark10.fits"
+        save_master(dark_path, dark,
+                    MasterMeta("dark", 5, 480, 320, "mean", exposure_s=10.0,
+                               sensor_temp_c=-10.0))
+        res = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                           dark_path=str(dark_path),
+                                           output_name="match_out"))
+        assert res.calibration_warnings == []
+        # And an uncalibrated stack has nothing to say either.
+        res2 = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                            output_name="nocal_out"))
+        assert res2.calibration_warnings == []
+    finally:
+        proj.close()
+
+
 def test_stack_records_integration_time(tmp_path):
     """run_stack stamps the run record with the effective integration time
     (median sub exposure × frames combined), so the gallery/history can show it

@@ -843,6 +843,13 @@ export interface StackRunInfo {
   // the only signal that can explain a dropped pick; empty/absent on runs that
   // skipped nothing and on runs from before this was recorded.
   calibration_skipped?: string[] | null;
+  // The mirror image of `calibration_skipped`: plain-language mismatches between a
+  // master this run *did* apply and the subs it calibrated — a dark shot at another
+  // exposure (its pedestal is over/under-subtracted on every frame) or at a very
+  // different sensor temperature. Measured by the engine at stack time and recorded
+  // on the run; empty/absent when the masters matched and on runs from before this
+  // was recorded.
+  calibration_warnings?: string[] | null;
   processing?: StackProcessingStep[];
   cards: StackInfoCard[];
 }
