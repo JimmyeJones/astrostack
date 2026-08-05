@@ -12,6 +12,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type StackOptionField } from "../api/client";
 import { dependencyMet } from "../api/depends";
+import { backgroundModeLabel, backgroundModeNudge } from "../backgroundModeNudge";
 import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import { masterOptionSuffix, masterSizeWarning } from "../calibrationFit";
@@ -55,6 +56,14 @@ export function StackView() {
     queryFn: () => api.getStackDefaults(safe),
   });
   const frames = useQuery({ queryKey: ["frames", safe], queryFn: () => api.listFrames(safe) });
+  // Offline catalog identity for this target. The Target page already fetches it
+  // (same query key, so it's usually warm) — here it's read only for its
+  // background-flatten advice: a big emission nebula needs Luminance mode, and
+  // nothing else in the app would tell the user that before they stack.
+  const identity = useQuery({
+    queryKey: ["identify", safe],
+    queryFn: () => api.identifyTarget(safe),
+  });
   const masters = useQuery({
     queryKey: ["calibration-masters"],
     queryFn: api.listCalibrationMasters,
@@ -606,6 +615,14 @@ export function StackView() {
     return `Your ${run.length} frames vary a lot in transparency — the clearest sit about ${ratio.toFixed(1)}× brighter than the haziest (haze or airmass changing across nights). Turn on Photometric normalization to gain-match every frame to the run's median before combining, so the hazy subs don't weaken rejection or dim the result.`;
   })();
 
+  // Background-mode nudge: the per-frame sky flatten defaults to per-channel,
+  // which is right for star fields and wrong for a big emission nebula — there
+  // each channel's fit bends into the nebulosity by a different amount and leaves
+  // cyan cores and red halos. The knob's help text says so, but only if you go
+  // looking; this reads the target's own catalog identity and says it up front,
+  // with the one-click fix. Advisory; per-channel stays the default.
+  const bgModeNudge = backgroundModeNudge(identity.data, values);
+
   // Auto-grade hint: if the grader flags some accepted frames as likely
   // outliers, nudge the user to drop them (one click, right here) before
   // stacking junk. Advisory only; nothing is rejected until the user acts.
@@ -1017,6 +1034,16 @@ export function StackView() {
                   Turn on quality weighting
                 </Button>
               ) : null}
+            </Alert>
+          ) : null}
+
+          {bgModeNudge ? (
+            <Alert color="blue" variant="light" py={6} px="sm">
+              <Text size="xs">{bgModeNudge.text}</Text>
+              <Button size="compact-xs" variant="light" mt={6}
+                onClick={() => set("background_mode", bgModeNudge.mode)}>
+                Use {backgroundModeLabel(bgModeNudge.mode, schema.data)} background flatten
+              </Button>
             </Alert>
           ) : null}
 

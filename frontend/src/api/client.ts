@@ -318,6 +318,17 @@ export interface ObjectInfo {
   // honest sentence, for the vetted popular objects; absent/null otherwise (older
   // backends omit it — treat as "no difficulty verdict").
   difficulty?: DifficultyHint | null;
+  // Which per-frame background-flatten mode suits this target, when its catalog
+  // type/size say the default per-channel fit would bend into it; absent/null
+  // for everything else (older backends omit it — treat as "no advice").
+  background_mode_hint?: BackgroundModeHint | null;
+}
+
+export interface BackgroundModeHint {
+  // A StackOptions.background_mode value, so the Stack form's one-click fix can
+  // apply it without re-deriving the choice.
+  mode: string;
+  text: string;
 }
 
 export interface SessionQualityDrift {

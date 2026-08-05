@@ -8312,8 +8312,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   run) and keys on the sky coordinates we already have, not on the post-hoc align-failure count. **Smallest
   safe first slice:** just the detection + an amber "your batch looks like 2 targets" pre-stack warning,
   leaving the actual split/auto-select for a follow-up.
-- **Nudge `background_mode='luminance'` for extended-emission (nebula) targets.** (M,
-  autonomy/image-quality) `StackOptions.background_mode` defaults to `per_channel` and has **no**
+- ~~**Nudge `background_mode='luminance'` for extended-emission (nebula) targets.**~~ — **SHIPPED v0.234.0**
+  (Builder 2026-08-05, branch `claude/relaxed-turing-k8ghhx`). *(Autonomy + image quality — PRIORITY 2/4.)* The
+  remaining half of this item — the **data-driven auto-nudge** — now ships, via a route the entry's own
+  feasibility notes hadn't considered: **neither** SIMBAD (networked → needs sign-off) **nor** a pixel classifier
+  (an extended-flux measurement on a reference frame), but the **bundled offline catalog the app already reads**.
+  `identify_object` resolves a target's plain-language `type` *and* its major-axis `size_arcmin` with no network
+  and no image data, which is exactly the two facts the advice needs.
+  **The classifier** is a new pure `seestack/bg_advice.py::background_mode_hint(object_type, size_arcmin)` →
+  `BackgroundModeHint(mode, text)` or `None`. It advises `luminance` only when the type is extended emission
+  (`EXTENDED_EMISSION_TYPES` = `nebula`, `supernova remnant`) **and** a size of at least `MIN_EXTENDED_ARCMIN`
+  (15′, about a fifth of the Seestar frame's long edge) is known. Deliberately excluded: **galaxies** (extended,
+  but all three channels share one shape — the case per-channel mode handles correctly), **planetary nebulae**
+  (compact), clusters, star clouds. Unknown type or unknown size → `None`, never a guess. An object bigger than a
+  single frame (`framing.SEESTAR_FOV_LONG_ARCMIN`) fills every sub, so even the shared luminance model can absorb
+  some of its faint outer glow — that case gets one extra honest sentence pointing at **Background box size**
+  rather than a different recommendation, because nudging a beginner to turn the per-frame flatten *off* would
+  cost the single biggest noise win in the pipeline.
+  **Surfaced** as an additive nullable `background_mode_hint` on `ObjectInfo` / `ObjectInfoOut`
+  (`GET /api/targets/{safe}/identify`, which the Target page already fetches — the Stack form reuses the same
+  `["identify", safe]` query key, so it's usually warm), and rendered on the **Stack form** as a blue advisory
+  Alert in the established nudge house style, with a one-click **"Use Luminance background flatten"** button. The
+  button's mode name is read from the engine's own `option_labels`, so it can't drift from the control it
+  changes. The nudge self-hides when the per-frame flatten is off entirely (its mode then changes nothing), when
+  the form is already on the advised mode (the user's choice, "Reuse settings", or a previous click), and for
+  every target the catalog doesn't flag. **Nothing is applied until the button is pressed and `per_channel`
+  remains the default**, so an existing install stacks byte-for-byte as before. Upgrade-safe: one additive
+  nullable response field, no config/DB/on-disk change, no default flipped, no `StackOptions` change.
+  **Tests (+22):** `tests/test_bg_advice.py` (+9 — no guess without a type or size, a large nebula and an SNR
+  advised, galaxies/clusters/planetaries left alone, the size floor's both sides, case/whitespace-insensitive
+  type matching, the bigger-than-one-frame caveat present on one side of the FOV and absent on the other with the
+  same mode, the advice riding on a real `identify_object("M_42")`, and a catalog-wide guard that the advice
+  stays a rare exception), `tests/webapp/test_target_identify.py` (+2 — M42 carries mode+reason, M31 stays
+  `null`), `backgroundModeNudge.test.ts` (+8, including an older backend that omits the field) and
+  `Stack.test.tsx` (+4 — the nudge, the one-click switch that then hides it, silence for an unflagged target,
+  silence when the flatten is off). *(Original spec kept for provenance.)*
+  - _(orig)_ (M, autonomy/image-quality) `StackOptions.background_mode` defaults to `per_channel` and has **no**
   data-driven nudge in the Stack form (unlike sigma/drizzle/quality-weight/etc.). `bg/per_frame.py`'s
   own docstring is explicit that per-channel flatten is *wrong* on extended emission nebulae ("cyan
   cores, red halos, black holes" — different channel morphology) and that luminance mode is "required"

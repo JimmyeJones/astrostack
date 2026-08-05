@@ -1466,6 +1466,76 @@ describe("StackView", () => {
     expect(screen.queryByText(/wrong size for this target/)).not.toBeInTheDocument();
   });
 
+  // --- background-mode nudge (big emission nebula → Luminance) --------------
+
+  const bgSchema = [
+    { key: "background_flatten", label: "Background flatten", type: "bool", group: "simple",
+      default: true, min: null, max: null, step: null, options: null, help: null,
+      depends_on: null },
+    { key: "background_mode", label: "Background mode", type: "enum", group: "advanced",
+      default: "per_channel", min: null, max: null, step: null,
+      options: ["per_channel", "luminance"],
+      option_labels: { per_channel: "Per channel", luminance: "Luminance" },
+      help: null, depends_on: "background_flatten" },
+  ] as client.StackOptionField[];
+
+  const orion = (over: Partial<client.ObjectInfo> = {}): client.ObjectInfo => ({
+    id: "M42", name: "Orion Nebula", type: "nebula", constellation: "Orion",
+    constellation_abbr: "Ori", ra_deg: 83.8, dec_deg: -5.4, matched_by: "name",
+    size_arcmin: 85,
+    background_mode_hint: {
+      mode: "luminance",
+      text: "This target is a large patch of glowing gas … cyan cores and red halos …",
+    },
+    ...over,
+  });
+
+  function mockBgForm(info: client.ObjectInfo | null,
+                      defaults: Record<string, unknown> = {
+                        background_flatten: true, background_mode: "per_channel",
+                      }) {
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue(bgSchema);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(defaults);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(info);
+  }
+
+  it("nudges a big emission nebula toward Luminance background flatten", async () => {
+    mockBgForm(orion());
+    renderStack();
+    await waitFor(() =>
+      expect(screen.getByText(/cyan cores and red halos/)).toBeInTheDocument());
+    // The button names the mode using the engine's own option label.
+    expect(screen.getByRole("button", { name: "Use Luminance background flatten" }))
+      .toBeInTheDocument();
+  });
+
+  it("switches to the advised mode in one click, then hides the nudge", async () => {
+    mockBgForm(orion());
+    renderStack();
+    const btn = await screen.findByRole(
+      "button", { name: "Use Luminance background flatten" });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(screen.queryByText(/cyan cores and red halos/)).not.toBeInTheDocument());
+  });
+
+  it("says nothing for a target the catalog doesn't flag", async () => {
+    // A galaxy carries no advice — the per-channel default is right for it.
+    mockBgForm(orion({ type: "galaxy", background_mode_hint: null }));
+    renderStack();
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(screen.queryByText(/cyan cores and red halos/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing when the per-frame flatten is switched off", async () => {
+    mockBgForm(orion(), { background_flatten: false, background_mode: "per_channel" });
+    renderStack();
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(screen.queryByText(/cyan cores and red halos/)).not.toBeInTheDocument();
+  });
+
   it("falls back to the slug in the title when the target record can't be loaded", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
