@@ -9188,8 +9188,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   instead of being told a tool exists. **Care:** `noteAction` already drops a self-link when the card is rendered
   *inside* the editor (`inEditor`), and the seam note should follow that rule; and the link must point at the
   graded run, not the newest, since the note is about a specific stack.
-- **NEW IDEA (Builder 2026-08-05, same run) — show the measured seam number on the History run card, so two
-  mosaic stacks can be compared on it.** *(Trust — PRIORITY 3; size S; frontend-only.)* `StackRunOut.seam_residual`
+- ~~**NEW IDEA (Builder 2026-08-05, same run) — show the measured seam number on the History run card, so two
+  mosaic stacks can be compared on it.**~~ — **SHIPPED v0.233.3** (Builder 2026-08-05, branch
+  `claude/relaxed-turing-5qxucu`). Shipped as a **word, not a number**, exactly as the entry's "care" note asked:
+  a self-hiding `PanelSeamsBadge` chip on the History run card reading **"Panels even"** (teal) or **"Panels:
+  check"** (yellow), with the plain-language reason in its tooltip. The thresholds are *not* re-typed in
+  TypeScript — a new pure `seestack.stackhealth.seam_verdict(seam_residual)` returns `"flat"` / `"check"` /
+  `None`, the seam health notes were rewired to read their branch from it, and `StackRunOut` gained an additive
+  optional `seam_verdict` the router fills from the same call. So the chip and the "How's my stack?" note are two
+  renderings of one decision and cannot disagree — pinned by a test that walks a flat / stepped / ambiguous run
+  through **both** endpoints and asserts they agree. The deliberately silent middle band, every single-field
+  stack and every pre-v0.233 run serve `null`, so the card looks exactly as it always did there.
+  Upgrade-safe: additive nullable response field, no config/DB/on-disk/default change; an older frontend ignores
+  it and a newer frontend against an older backend just shows no chip. Tests:
+  `test_stack_runs_listing_reads_the_seam_figure_into_a_verdict` and
+  `test_the_run_verdict_and_the_health_note_always_agree` (`tests/webapp/test_target_stack_health.py`),
+  `PanelSeamsBadge.test.tsx` (+5, including "renders nothing for a verdict word it doesn't know" so a future
+  third verdict can't make an older frontend draw a stray chip) and two `History.test.tsx` cases (the chip on a
+  mosaic card; nothing at all on an ordinary single-field stack). **Left for a future run:** the Gallery and
+  Compare cards render `GalleryItem`, not `StackRun`, so carrying the chip there needs the same additive field on
+  `GalleryOut` — worth doing next time someone is in that schema, since Compare is where two mosaics actually get
+  weighed against each other. Original spec kept for provenance:
+  - _(orig)_ *(Trust — PRIORITY 3; size S; frontend-only.)* `StackRunOut.seam_residual`
   is served but nothing renders it. The History card already shows per-run noise σ and star size as small
   readouts, and the Compare view already answers "did my new stack get better?" on noise — panel flatness is the
   third axis of *the same question* for anyone shooting mosaics, and it is the one they can't judge by eye on a

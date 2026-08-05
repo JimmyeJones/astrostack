@@ -135,3 +135,54 @@ def test_stack_runs_listing_exposes_the_seam_residual(
     by_name = {r["output_basename"]: r for r in runs}
     assert by_name["m42"]["seam_residual"] == 0.37
     assert by_name["single"]["seam_residual"] is None
+
+
+def test_stack_runs_listing_reads_the_seam_figure_into_a_verdict(
+        client, solved_library, data_root):
+    """A beginner can't read "0.37× the grain", so the run also carries the
+    *word*: the same flat / check verdict the health note uses, resolved
+    server-side so a History chip never has to re-type the thresholds and the
+    two surfaces can't disagree."""
+    _add_run(data_root, "M_42", is_mosaic=True, coverage_min=6, coverage_max=12,
+             seam_residual=0.37, output_basename="flat")
+    _add_run(data_root, "M_42", timestamp_utc="2026-07-13T00:00:00+00:00",
+             is_mosaic=True, coverage_min=6, coverage_max=12,
+             seam_residual=2.4, output_basename="stepped")
+    _add_run(data_root, "M_42", timestamp_utc="2026-07-12T00:00:00+00:00",
+             is_mosaic=True, coverage_min=6, coverage_max=12,
+             seam_residual=1.2, output_basename="ambiguous")
+    _add_run(data_root, "M_42", timestamp_utc="2026-07-11T00:00:00+00:00",
+             output_basename="single")
+    by_name = {r["output_basename"]: r
+               for r in client.get("/api/targets/M_42/stack-runs").json()}
+    assert by_name["flat"]["seam_verdict"] == "flat"
+    assert by_name["stepped"]["seam_verdict"] == "check"
+    # The deliberately silent middle band and a single-field stack both say
+    # nothing at all, so the chip self-hides rather than guessing.
+    assert by_name["ambiguous"]["seam_verdict"] is None
+    assert by_name["single"]["seam_verdict"] is None
+
+
+def test_the_run_verdict_and_the_health_note_always_agree(
+        client, solved_library, data_root):
+    """The chip and the "How's my stack?" note are two renderings of one
+    measurement; they read the same thresholds, so a run the note calls stepped
+    must never be the run the chip calls even."""
+    for i, (seam, expect_kind, expect_verdict) in enumerate((
+            (0.2, "seams_flat", "flat"),
+            (2.4, "seams", "check"),
+            (1.2, None, None),
+    )):
+        rid = _add_run(data_root, "M_42", is_mosaic=True, coverage_min=6,
+                       coverage_max=12, seam_residual=seam,
+                       output_basename=f"run{i}",
+                       timestamp_utc=f"2026-07-{14 + i:02d}T00:00:00+00:00")
+        note_kinds = [n["kind"] for n in client.get(
+            f"/api/targets/M_42/stack-health?run_id={rid}").json()["notes"]]
+        runs = {r["id"]: r for r in
+                client.get("/api/targets/M_42/stack-runs").json()}
+        assert runs[rid]["seam_verdict"] == expect_verdict
+        if expect_kind is None:
+            assert "seams" not in note_kinds and "seams_flat" not in note_kinds
+        else:
+            assert expect_kind in note_kinds

@@ -98,6 +98,35 @@ _SOFT_STARS_MIN_SUB_FWHM = 5
 _SEAM_FLAT_RATIO = 1.0
 _SEAM_VISIBLE_RATIO = 1.5
 
+
+def seam_verdict(seam_residual: float | None) -> str | None:
+    """The panel-flatness verdict for a run, or ``None`` when there is nothing
+    honest to say.
+
+    ``"flat"`` — the joins are well inside the picture's own grain.
+    ``"check"`` — a coherent step big enough to show once the image is stretched.
+    ``None`` — no measurement (a single-field stack, a pre-schema-15 run, a
+    broken/non-finite figure), or the deliberately silent middle band above.
+
+    Shared by the "How's my stack?" seam notes and by the History card's chip so
+    the two surfaces read the same thresholds and can never disagree — the chip
+    must not re-type these numbers in TypeScript.
+    """
+    if seam_residual is None:
+        return None
+    try:
+        seam = float(seam_residual)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(seam):
+        return None
+    if seam >= _SEAM_VISIBLE_RATIO:
+        return "check"
+    if seam < _SEAM_FLAT_RATIO:
+        return "flat"
+    return None
+
+
 # κ-σ rejection is *mathematically* blind to a lone outlier below a frame count
 # that depends on κ (11 at the default κ=3): a single bright sample's z-score
 # against statistics that still include it peaks at (n−1)/√n, so at n=5 a
@@ -358,9 +387,12 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
     # only way it ever got noticed was the owner eyeballing an export. NULL on a
     # single-field stack (no joins to compare) and on runs from before it was
     # recorded, so both notes self-hide by construction.
+    # Both the wording here and the History card's chip read the verdict from the
+    # one shared :func:`seam_verdict`, so they can't drift apart.
     seam = run.seam_residual
-    if seam is not None and math.isfinite(seam):
-        if seam >= _SEAM_VISIBLE_RATIO:
+    verdict = seam_verdict(seam)
+    if verdict is not None:
+        if verdict == "check":
             scored.append((40, HealthNote(
                 kind="seams",
                 severity="info",
@@ -374,7 +406,7 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
                 # opens the editor on *this* run, where the background ops live.
                 action="background",
             )))
-        elif seam < _SEAM_FLAT_RATIO:
+        else:
             scored.append((62, HealthNote(
                 kind="seams_flat",
                 severity="good",

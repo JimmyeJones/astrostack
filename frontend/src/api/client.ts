@@ -680,6 +680,13 @@ export interface StackRun {
   // lower = sharper. Null for runs recorded before the column existed (schema
   // < 14) or when too few stars to fit. Comparable across a target's runs.
   stack_fwhm_px?: number | null;
+  // How flat this *mosaic's* panel joins came out, read for us by the backend:
+  // "flat" (the sky matches across the joins), "check" (a step big enough to show
+  // once stretched), or null/absent when there's nothing honest to say — a
+  // single-field stack, a pre-schema-15 run, or the ambiguous middle band. The
+  // verdict is computed server-side from the same thresholds the "How's my
+  // stack?" seam notes use, so the chip and the note can never disagree.
+  seam_verdict?: string | null;
   calstat?: string | null;
   options?: Record<string, unknown>;
   engine_version?: string | null;
