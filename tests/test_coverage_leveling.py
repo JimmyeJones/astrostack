@@ -305,29 +305,37 @@ def test_the_seam_step_is_removed_in_every_channel():
         assert abs(step) < 1.0, f"channel {c} still steps by {step:.2f} ADU"
 
 
-def test_a_level_with_no_usable_sky_sample_takes_its_neighbours_offset():
-    """When even a level-local threshold can't produce a sky sample, the level
-    is given the offset interpolated from the levels around it instead of being
-    left holding its full residual. ``np.interp`` is flat outside the measured
-    range, so the filled value can never leave the measured envelope."""
-    rng = np.random.default_rng(5)
-    h = w = 200
-    cov = np.full((h, w), 3, dtype=np.int32)
-    cov[:, :40] = 6  # a wide level with no sky in it at all
-    rgb = rng.normal(0.0, 1.0, size=(h, w, 3)).astype(np.float32) + 50.0
-    # Fill the 6-frame region with a single saturated value: the global mask
-    # flags all of it, and its own statistics are degenerate (zero spread), so
-    # the level-local rescue can't produce a sky sample either.
-    rgb[:, :40, :] = 3000.0
+def test_an_unmeasurable_level_takes_the_offset_interpolated_from_its_neighbours():
+    """The fill is an interpolation, not a nearest-neighbour copy: a level that
+    can't be measured sits between two that can, and takes the value *between*
+    their offsets. ``np.interp`` is flat outside the measured range, so a filled
+    offset can never leave the envelope of what was actually measured."""
+    rng = np.random.default_rng(23)
+    h, w = 240, 300
+    cov = np.zeros((h, w), dtype=np.int32)
+    cov[:, :100] = 2
+    cov[:, 100:200] = 4
+    cov[:, 200:] = 6
+    rgb = rng.normal(0.0, 1.0, size=(h, w, 3)).astype(np.float32)
+    rgb[:, :100, :] += 100.0
+    rgb[:, 200:, :] += 130.0
+    # The middle (4-frame) level is filled by structured nebulosity, so it can't
+    # be measured — its own retained spread is far wider than the canvas sky's.
+    ramp = np.linspace(500.0, 5000.0, 100, dtype=np.float32)[None, :, None]
+    rgb[:, 100:200, :] = ramp + rng.normal(0.0, 40.0, size=(h, 100, 3)).astype(np.float32)
+    before = rgb.copy()
 
     out = level_by_coverage(rgb.copy(), cov, frame_coverage=cov)
 
-    # The measured level lands at zero sky, as always.
-    assert abs(float(np.median(out[..., 1][cov == 3]))) < 1.0
-    # The unmeasurable level was shifted by the same (only measured) offset —
-    # so its structure is preserved but it is no longer a different zero point.
-    shifted = float(np.median(rgb[..., 1][cov == 6]) - np.median(out[..., 1][cov == 6]))
-    assert abs(shifted - 50.0) < 2.0
+    # The two measured levels land at zero sky.
+    assert abs(float(np.median(out[..., 1][cov == 2]))) < 1.5
+    assert abs(float(np.median(out[..., 1][cov == 6]))) < 1.5
+    # The middle level is shifted by the *interpolated* 115 — halfway between
+    # its neighbours' 100 and 130 — not by either neighbour's value and not by
+    # its own ~2750 ADU level.
+    shifted = float(np.median(before[..., 1][cov == 4])
+                    - np.median(out[..., 1][cov == 4]))
+    assert abs(shifted - 115.0) < 2.0
 
 
 def test_a_sliver_below_the_pixel_floor_is_still_left_untouched():
@@ -391,3 +399,74 @@ def test_a_level_filled_by_a_bright_object_is_not_re_measured_as_sky():
     shifted = float(np.median(before[..., 1][cov == 6])
                     - np.median(out[..., 1][cov == 6]))
     assert abs(shifted - 50.0) < 2.0
+
+
+def test_panel_offsets_do_not_float_the_object_threshold_above_the_objects():
+    """Regression (root cause): the object threshold used to be one canvas-wide
+    ``median + σ``. On the mosaic this pass exists for, that σ is set by the
+    panel-to-panel level offsets — the very thing about to be subtracted — not by
+    the noise, so it floats far above the grain and stops masking objects at all.
+    Every level's "sky" median then picks up whatever nebulosity crosses it, and
+    the levels the object sits on are over-subtracted: a coloured panel step
+    survives the pass that exists to remove it.
+
+    Measured on this scene before the fix: 5.2 ADU of residual spread across the
+    four levels, on a 2 ADU noise floor.
+    """
+    rng = np.random.default_rng(3)
+    h, w, noise = 600, 800, 2.0
+    cov = np.zeros((h, w), dtype=np.int32)
+    for i, cols in enumerate(np.array_split(np.arange(w), 4)):
+        cov[:, cols] = i + 1
+    rgb = rng.normal(0.0, noise, size=(h, w, 3)).astype(np.float32)
+    # Realistic panel-to-panel level offsets (15 ADU per step).
+    for lvl, off in {1: 0.0, 2: 15.0, 3: 30.0, 4: 45.0}.items():
+        m = cov == lvl
+        for c in range(3):
+            rgb[..., c][m] += off
+    # A nebula across the middle panels, and stars everywhere.
+    yy, xx = np.mgrid[0:h, 0:w]
+    neb = 60.0 * np.exp(-(((yy - h / 2) / 120.0) ** 2 + ((xx - w / 2) / 200.0) ** 2))
+    for c, k in enumerate((1.0, 0.7, 0.5)):
+        rgb[..., c] += (neb * k).astype(np.float32)
+    for _ in range(300):
+        y = int(rng.integers(6, h - 6))
+        x = int(rng.integers(6, w - 6))
+        rgb[y - 2:y + 3, x - 2:x + 3, :] += float(rng.uniform(200, 4000))
+
+    out = level_by_coverage(rgb, cov, frame_coverage=cov)
+
+    # Read each level's sky on a nebula-free, star-sparse strip along the top.
+    from astropy.stats import sigma_clipped_stats
+    strip = slice(0, 40)
+    resid = []
+    for lvl in (1, 2, 3, 4):
+        vals = out[strip][..., 1][(cov == lvl)[strip]]
+        _, med, _ = sigma_clipped_stats(vals, sigma=3.0, maxiters=5)
+        resid.append(float(med))
+    spread = max(resid) - min(resid)
+    # Comfortably inside the noise, and far below the 5.2 ADU it used to leave.
+    assert spread < 1.0, f"panel steps survive leveling: {spread:.2f} ADU"
+
+
+def test_a_single_coverage_level_detects_objects_exactly_as_before():
+    """On a uniform-coverage image the per-level detrend is one constant
+    subtracted from both the pixels and the threshold, so the object mask — and
+    therefore the whole result — is exactly what it has always been. Pinned as
+    an invariance: shifting the entire input by a constant must not change a
+    single output pixel."""
+    rng = np.random.default_rng(29)
+    h, w = 150, 200
+    rgb = rng.normal(0.0, 3.0, size=(h, w, 3)).astype(np.float32) + 20.0
+    for _ in range(20):
+        y = int(rng.integers(6, h - 6))
+        x = int(rng.integers(6, w - 6))
+        rgb[y - 2:y + 3, x - 2:x + 3, :] += 800.0
+    coverage = np.full((h, w), 4, dtype=np.int32)
+
+    base = level_by_coverage(rgb.copy(), coverage)
+    lifted = level_by_coverage(rgb.copy() + np.float32(500.0), coverage)
+    # Equal to float32 resolution at the lifted magnitude (~3e-5 relative on
+    # 500 ADU) — a changed mask decision would move a level's median by orders
+    # of magnitude more than this.
+    np.testing.assert_allclose(base, lifted, rtol=0, atol=1e-2)
