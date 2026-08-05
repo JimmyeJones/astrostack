@@ -9215,8 +9215,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Care:** (a) must degrade silently to a no-op when no coverage map sits beside the run (every pre-v0.233 stack,
   every imported FITS) — never an error, never a visible dead control; and it must not re-level a single-coverage
   image, where the pass is a constant subtraction and would only shift the black point.
-- **NEW IDEA (Builder 2026-08-05, same run) — let Compare *say* which mosaic's panels came out flatter, not just
-  show two chips.** *(Trust / friendliness — PRIORITY 3; size S; frontend-only.)* v0.233.4 puts a "Panels even" /
+- ~~**NEW IDEA (Builder 2026-08-05, same run) — let Compare *say* which mosaic's panels came out flatter, not just
+  show two chips.**~~ — **SHIPPED v0.234.1** (Builder 2026-08-05, branch `claude/relaxed-turing-k8ghhx`).
+  A new pure `panelComparison(a, b)` (`Compare.tsx`, beside `noiseComparison`) turns the two `seam_verdict`s into
+  one plain sentence — *"B's mosaic panels evened out, while A's sky still steps where its panels join — so A may
+  show faint seams once it's stretched"* — rendered in the **same** teal Alert as the which-is-cleaner line, so
+  the page now answers both axes in one voice instead of one out loud and one in chips. Exactly as the entry's
+  "care" note asked: **no magnitude** is invented (the verdicts are coarse words and the ratio behind them is
+  never shown), and it is silent whenever there is nothing to weigh — the verdicts agree (the two chips already
+  say it), either side carries none (every single-field stack, every pre-v0.233 run, the deliberately silent
+  middle band), or either side carries a verdict word this frontend doesn't know, which is the same
+  future-proofing rule `PanelSeamsBadge` follows. Frontend-only; no API/schema/default change. Tests (+6):
+  `panelComparison` unit cases (both orderings, agreeing verdicts, a missing verdict on either side, an unknown
+  word) plus two `CompareView` cases — the sentence appears alongside the differing chips, and doesn't when both
+  mosaics landed on the same verdict. *(Original spec kept for provenance.)*
+  - _(orig)_ *(Trust / friendliness — PRIORITY 3; size S; frontend-only.)* v0.233.4 puts a "Panels even" /
   "Panels: check" chip on both sides of the Compare view, but the page already has a house style for answering the
   comparison out loud — `noiseComparison` renders one plain sentence about which stack is cleaner. Panel flatness
   now has the same two inputs, so it can speak in the same voice ("B's panels evened out; A's still step at the
