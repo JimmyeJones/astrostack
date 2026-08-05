@@ -11,6 +11,7 @@ import { api, type GalleryItem, type StackOptionField } from "../api/client";
 import { sharePictureText } from "../share";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
+import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import {
@@ -144,6 +145,7 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
         <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
           <RejectionBadge options={item.options} />
           <HazyNightBadge ratio={item.transparency_ratio} />
+          <PanelSeamsBadge verdict={item.seam_verdict} />
           <CalibrationBadge calstat={item.calstat} />
           <FrameCountBadge nFramesUsed={item.n_frames_used} />
         </Group>

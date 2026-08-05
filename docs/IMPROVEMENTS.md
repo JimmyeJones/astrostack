@@ -9200,15 +9200,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   through **both** endpoints and asserts they agree. The deliberately silent middle band, every single-field
   stack and every pre-v0.233 run serve `null`, so the card looks exactly as it always did there.
   Upgrade-safe: additive nullable response field, no config/DB/on-disk/default change; an older frontend ignores
-  it and a newer frontend against an older backend just shows no chip. Tests:
+  it and a newer frontend against an older backend just shows no chip. **Completed in v0.233.4** (same branch): the
+  same additive `seam_verdict` now rides on `GalleryItem` too, so the chip also appears on the **Gallery** card and
+  on both sides of the **Compare** view — which is where two stacks of one target actually get weighed against each
+  other, and the reason the idea asked for it. Tests:
   `test_stack_runs_listing_reads_the_seam_figure_into_a_verdict` and
   `test_the_run_verdict_and_the_health_note_always_agree` (`tests/webapp/test_target_stack_health.py`),
   `PanelSeamsBadge.test.tsx` (+5, including "renders nothing for a verdict word it doesn't know" so a future
-  third verdict can't make an older frontend draw a stray chip) and two `History.test.tsx` cases (the chip on a
-  mosaic card; nothing at all on an ordinary single-field stack). **Left for a future run:** the Gallery and
-  Compare cards render `GalleryItem`, not `StackRun`, so carrying the chip there needs the same additive field on
-  `GalleryOut` — worth doing next time someone is in that schema, since Compare is where two mosaics actually get
-  weighed against each other. Original spec kept for provenance:
+  third verdict can't make an older frontend draw a stray chip), two `History.test.tsx` cases (the chip on a
+  mosaic card; nothing at all on an ordinary single-field stack),
+  `test_gallery_carries_the_panel_flatness_verdict` (`tests/webapp/test_gallery.py`) and two `Compare.test.tsx`
+  cases (both sides' verdicts; nothing at all when neither stack is a mosaic). Original spec kept for provenance:
   - _(orig)_ *(Trust — PRIORITY 3; size S; frontend-only.)* `StackRunOut.seam_residual`
   is served but nothing renders it. The History card already shows per-run noise σ and star size as small
   readouts, and the Compare view already answers "did my new stack get better?" on noise — panel flatness is the

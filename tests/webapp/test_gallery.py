@@ -9,7 +9,7 @@ from seestack.io.project import StackRunRow
 
 
 def _register_run(data_root, safe: str, options: dict,
-                  total_exposure_s: float | None = None) -> int:
+                  total_exposure_s: float | None = None, **kw) -> int:
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -21,6 +21,7 @@ def _register_run(data_root, safe: str, options: dict,
                 canvas_h=320, canvas_w=480, coverage_min=1, coverage_max=7,
                 options_json=json.dumps(options),
                 total_exposure_s=total_exposure_s,
+                **kw,
             ))
         finally:
             proj.close()
@@ -63,6 +64,25 @@ def test_gallery_surfaces_run_notes(client, solved_library):
     items = client.get("/api/gallery").json()["items"]
     mine = next(it for it in items if it["run_id"] == run_id)
     assert mine["notes"] == "best RGB v2"
+
+
+def test_gallery_carries_the_panel_flatness_verdict(client, solved_library):
+    """The Gallery and the Compare view render these items, and Compare is where
+    two stacks of one target actually get weighed against each other — so a
+    mosaic's panel flatness has to travel with the item, not only with the run
+    listing. Same server-side verdict, so no surface can disagree with another."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    flat = _register_run(solved_library, safe, {"sigma_clip": True},
+                         is_mosaic=True, seam_residual=0.3)
+    stepped = _register_run(solved_library, safe, {"sigma_clip": True},
+                            is_mosaic=True, seam_residual=2.2)
+    single = _register_run(solved_library, safe, {"sigma_clip": True})
+
+    items = {it["run_id"]: it for it in client.get("/api/gallery").json()["items"]}
+    assert items[flat]["seam_verdict"] == "flat"
+    assert items[stepped]["seam_verdict"] == "check"
+    # An ordinary single-field stack has no joins to compare — no chip at all.
+    assert items[single]["seam_verdict"] is None
 
 
 def test_gallery_reusable_flag_excludes_combine_and_editor(client, solved_library):

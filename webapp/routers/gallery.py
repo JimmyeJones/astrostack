@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
+from seestack.stackhealth import seam_verdict
 from webapp import deps
 
 router = APIRouter(tags=["gallery"])
@@ -61,6 +62,13 @@ class GalleryItem(BaseModel):
     # Which calibration masters were applied to the lights ("dark+flat", …), or
     # None when uncalibrated / pre-schema-7; drives a "dark+flat" chip.
     calstat: str | None = None
+    # How flat this *mosaic's* panel joins came out, as a word: "flat" | "check",
+    # or None when there's nothing honest to say (a single-field stack, a
+    # pre-schema-15 run, or the ambiguous middle band). Same
+    # `seestack.stackhealth.seam_verdict` call the run listing and the "How's my
+    # stack?" notes use, so every surface reads one decision; drives the
+    # "Panels even" / "Panels: check" chip on the Gallery and Compare cards.
+    seam_verdict: str | None = None
 
 
 class GalleryResponse(BaseModel):
@@ -129,6 +137,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                         transparency_ratio=run.transparency_ratio,
                         noise_sigma=run.noise_sigma,
                         calstat=run.calstat,
+                        seam_verdict=seam_verdict(run.seam_residual),
                     ))
             finally:
                 if proj is not None:
