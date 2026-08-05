@@ -243,3 +243,151 @@ def test_uncovered_region_is_left_alone():
     out = level_by_coverage(rgb, coverage)
     # Uncovered region: still NaN.
     assert np.all(np.isnan(out[:, :30, 0]))
+
+
+def _seam_scene(seam_offset=12.0, seam_width=2, h=400, w=400, seed=0):
+    """A mosaic-like canvas whose highest-coverage region is a thin seam strip.
+
+    Four coverage levels rising left to right, each with the residual sky offset
+    that this pass exists to cancel. The 4-frame overlap is a *thin strip* — the
+    shape a real panel overlap takes — so the canvas-wide object mask, dilated by
+    its default 4 px, swallows it whole.
+    """
+    rng = np.random.default_rng(seed)
+    cov = np.ones((h, w), dtype=np.int32)
+    cov[:, 100:200] = 2
+    cov[:, 200:] = 3
+    cov[:, 300:300 + seam_width] = 4
+    sky = {1: 100.0, 2: 100.0 + seam_offset / 3.0,
+           3: 100.0 + 2.0 * seam_offset / 3.0, 4: 100.0 + seam_offset}
+    rgb = np.zeros((h, w, 3), dtype=np.float32)
+    for lvl, level_sky in sky.items():
+        m = cov == lvl
+        for c in range(3):
+            rgb[..., c][m] = level_sky + rng.normal(0.0, 1.0, size=int(m.sum()))
+    return rgb, cov
+
+
+def test_a_seam_the_object_mask_swallowed_is_still_leveled():
+    """Regression: the object mask thresholds against the *canvas-wide* median,
+    so a coverage level whose residual sky sits above it reads as one big
+    "object" and loses its sky sample — and that is precisely the level with the
+    most offset to remove. Left un-leveled while its neighbours are pushed to
+    zero, it kept its full residual: a bright step at the seam, in every channel,
+    manufactured by the pass that exists to remove seams.
+    """
+    rgb, cov = _seam_scene(seam_offset=12.0)
+    seam = cov == 4
+    neighbour = cov == 3
+    # The premise: the global mask really does starve this level. It clears the
+    # 200-pixel floor on region size (800 px) yet keeps far fewer sky pixels.
+    assert int(seam.sum()) >= 200
+
+    out = level_by_coverage(rgb, cov, frame_coverage=cov)
+
+    seam_sky = float(np.median(out[..., 1][seam]))
+    neighbour_sky = float(np.median(out[..., 1][neighbour]))
+    # The seam is leveled with everything else rather than stranded at +12.
+    assert abs(seam_sky) < 1.0
+    assert abs(seam_sky - neighbour_sky) < 1.0
+
+
+def test_the_seam_step_is_removed_in_every_channel():
+    """The offsets are per channel, so a stranded level keeps a *coloured* step.
+    Check all three, not just the green the other assertions read."""
+    rgb, cov = _seam_scene(seam_offset=9.0)
+    seam = cov == 4
+    neighbour = cov == 3
+    out = level_by_coverage(rgb, cov, frame_coverage=cov)
+    for c in range(3):
+        step = (float(np.median(out[..., c][seam]))
+                - float(np.median(out[..., c][neighbour])))
+        assert abs(step) < 1.0, f"channel {c} still steps by {step:.2f} ADU"
+
+
+def test_a_level_with_no_usable_sky_sample_takes_its_neighbours_offset():
+    """When even a level-local threshold can't produce a sky sample, the level
+    is given the offset interpolated from the levels around it instead of being
+    left holding its full residual. ``np.interp`` is flat outside the measured
+    range, so the filled value can never leave the measured envelope."""
+    rng = np.random.default_rng(5)
+    h = w = 200
+    cov = np.full((h, w), 3, dtype=np.int32)
+    cov[:, :40] = 6  # a wide level with no sky in it at all
+    rgb = rng.normal(0.0, 1.0, size=(h, w, 3)).astype(np.float32) + 50.0
+    # Fill the 6-frame region with a single saturated value: the global mask
+    # flags all of it, and its own statistics are degenerate (zero spread), so
+    # the level-local rescue can't produce a sky sample either.
+    rgb[:, :40, :] = 3000.0
+
+    out = level_by_coverage(rgb.copy(), cov, frame_coverage=cov)
+
+    # The measured level lands at zero sky, as always.
+    assert abs(float(np.median(out[..., 1][cov == 3]))) < 1.0
+    # The unmeasurable level was shifted by the same (only measured) offset —
+    # so its structure is preserved but it is no longer a different zero point.
+    shifted = float(np.median(rgb[..., 1][cov == 6]) - np.median(out[..., 1][cov == 6]))
+    assert abs(shifted - 50.0) < 2.0
+
+
+def test_a_sliver_below_the_pixel_floor_is_still_left_untouched():
+    """The fill applies only to levels big enough to be worth correcting. A
+    handful of pixels at their own coverage value is a sliver, not a panel, and
+    stays byte-for-byte untouched (the long-standing contract)."""
+    rgb = np.zeros((40, 60, 3), dtype=np.float32)
+    coverage = np.full((40, 60), 5, dtype=np.int32)
+    coverage[0, :5] = 1
+    rgb[0, :5, :] = 99.0
+    # Give the bulk level a real offset, so a fill would visibly move the sliver.
+    rgb[1:, :, :] += 20.0
+    rgb[0, 5:, :] += 20.0
+    out = level_by_coverage(rgb.copy(), coverage, min_pixels_per_level=200)
+    np.testing.assert_array_equal(out[0, :5, :], rgb[0, :5, :])
+
+
+def test_uniform_coverage_is_unchanged_by_the_rescue_path():
+    """A single-field stack has one coverage level that always has plenty of sky,
+    so neither the rescue nor the fill can reach it — the ordinary
+    non-mosaic result must be byte-for-byte what it always was."""
+    rng = np.random.default_rng(11)
+    h, w = 120, 160
+    rgb = rng.normal(0.0, 4.0, size=(h, w, 3)).astype(np.float32) + 30.0
+    for _ in range(15):
+        y = int(rng.integers(6, h - 6))
+        x = int(rng.integers(6, w - 6))
+        rgb[y - 2:y + 3, x - 2:x + 3, :] += 900.0
+    coverage = np.full((h, w), 7, dtype=np.int32)
+    out = level_by_coverage(rgb.copy(), coverage)
+    # Sky at zero, stars intact and shifted by exactly the same constant.
+    assert abs(float(np.median(out[..., 1]))) < 1.0
+    delta = rgb[..., 1] - out[..., 1]
+    # One constant subtracted everywhere (to float32 resolution at star peaks).
+    assert float(delta.max() - delta.min()) < 1e-3
+
+
+def test_a_level_filled_by_a_bright_object_is_not_re_measured_as_sky():
+    """The level-local rescue must not fire on a coverage region that is filled
+    by real structure. Re-measuring one would read the *object's* own level as a
+    sky offset and subtract it — eating real flux. Such a level falls through to
+    the interpolated fill (the neighbours' offset), so its structure survives.
+    """
+    rng = np.random.default_rng(17)
+    h = w = 200
+    cov = np.full((h, w), 3, dtype=np.int32)
+    cov[:, :40] = 6
+    rgb = rng.normal(0.0, 1.0, size=(h, w, 3)).astype(np.float32) + 50.0
+    # A steep, highly structured "nebula" filling the whole 6-frame level: far
+    # more spread than the canvas sky, so it can't pass for sky.
+    ramp = np.linspace(400.0, 4000.0, 40, dtype=np.float32)[None, :, None]
+    rgb[:, :40, :] = ramp + rng.normal(0.0, 30.0, size=(h, 40, 3)).astype(np.float32)
+    before = rgb.copy()
+
+    out = level_by_coverage(rgb.copy(), cov, frame_coverage=cov)
+
+    # The sky level is leveled to zero as always.
+    assert abs(float(np.median(out[..., 1][cov == 3]))) < 1.0
+    # The object level was shifted by the sky offset (50), not by its own
+    # ~2200 ADU "level" — its flux is intact.
+    shifted = float(np.median(before[..., 1][cov == 6])
+                    - np.median(out[..., 1][cov == 6]))
+    assert abs(shifted - 50.0) < 2.0

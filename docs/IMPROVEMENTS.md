@@ -55,6 +55,44 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**⭐ STACKING-ENGINE BUG (Builder 2026-08-05, found by an engine QA pass of `seestack/bg/coverage_leveling.py`;
+  REPRODUCED) — the per-coverage sky leveling *manufactures* the coloured panel step it exists to remove, at the
+  seam with the biggest offset.**~~ — **FIXED v0.232.2** (Builder 2026-08-05, branch `claude/relaxed-turing-iv0w1h`).
+  *(Image quality / correctness on the always-run stack path — PRIORITY 1/4; mosaics.)*
+  `level_by_coverage` masks bright "objects" out of each coverage level's sky median by thresholding the luminance
+  against a **canvas-wide** `median + object_sigma·σ`. That conflates "bright because it is a star or nebula" with
+  "bright because this coverage region's residual sky sits above the rest of the canvas" — and the second is exactly
+  what the pass exists to subtract. So a mosaic's *most* offset coverage level is the level most likely to read as one
+  big object, lose its sky sample to the (4 px-dilated) mask, fall under `min_pixels_per_level`, and be **skipped
+  entirely** — keeping its full residual while every neighbouring level is pushed to zero sky. Because the offsets are
+  per channel, what it leaves behind is a **coloured step at the seam**: the pass re-creates the panel step at the
+  very boundary it was meant to flatten, and does so preferentially at the worst seam.
+  **Reproduced** on a synthetic 4-level mosaic canvas (levels 1–3 wide, level 4 a 2 px-wide overlap seam, per-level
+  sky 100/104/108/112 ADU, σ = 1): levels 1–3 leveled to ~0 while the seam kept **112.0 ADU** — the 800-pixel strip
+  cleared the 200-pixel floor on size but the global mask left it only **119** sky pixels. Measured seam step after
+  leveling: **112.0 ADU → 0.10 ADU** with the fix (~1180×).
+  **The fix**, both scoped so they can only touch levels that today get *nothing*: **(1) a level-local rescue** — a
+  level that clears the pixel floor but whose sky sample the global mask starved is re-thresholded against **its own**
+  sigma-clipped statistics (`_local_sky_mask`, computed in the level's bounding box so a big mosaic doesn't pay for a
+  full-canvas dilation per rescue). Guarded by `_RESCUE_MAX_SIGMA_RATIO = 3.0`: the level's own spread must be within
+  3× the canvas sky spread, so a coverage region genuinely *filled* by a galaxy or nebula is **not** re-measured (its
+  object level must never be read as a sky offset and subtracted). **(2) an interpolated fill** — a level that still
+  can't be measured takes the offset `np.interp`-ed from the levels that could, which is linear between them and flat
+  outside, so a filled offset can never leave the measured envelope. Leaving such a level "alone" was never neutral:
+  it strands it at a different zero point from its neighbours.
+  **Unchanged where it should be:** a level below the pixel floor *in total* is a sliver, not a panel, and is still
+  left byte-for-byte untouched; a single-field stack's one well-populated level can reach neither path, so the
+  ordinary non-mosaic result is exactly what it always was. No config/DB/API-shape/on-disk change and no default
+  flipped. **Tests** (`tests/test_coverage_leveling.py`, +5; four fail before / pass after): the swallowed seam is
+  leveled with its neighbours, the step is gone in **all three** channels, an unmeasurable level takes its neighbours'
+  offset, a level filled by structured nebulosity is *not* re-measured as sky (its flux survives), and a sub-floor
+  sliver is still untouched — plus a byte-for-byte guard that uniform coverage is unaffected.
+  **Follow-up worth a future run:** the same canvas-wide threshold starves the object mask on *every* level whose sky
+  sits high, not only the ones that fall under the floor — a level that keeps just enough pixels is still measured
+  from an unrepresentative (low-side) sample. Making the object threshold per-coverage-level from the start is the
+  root fix, but it changes levels that are leveled *today*, so it needs its own measured before/after. (M, image
+  quality — PRIORITY 4.)
+
 > **Deep audit — FINAL-IMAGE QUALITY of the one-click auto chain MEASURED end-to-end on realistic synthetic S30
 > stacks; the deferred quality sweep is done and the owner's "results look broken" now has measured root causes
 > (Audit 2026-07-26, branch `claude/astrostack-deep-audit-485gr7`).** Baseline suites green (Python **2040 passed,
