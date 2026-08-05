@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from seestack.bg_advice import BackgroundModeHint, background_mode_hint
 from seestack.framing import FramingHint, framing_hint
 from seestack.nightplan import CatalogObject, _angular_sep_deg, load_catalog
 from seestack.target_difficulty import DifficultyHint, target_difficulty
@@ -77,6 +78,10 @@ class ObjectInfo:
     framing: FramingHint | None = None  # "will it fit in one frame?" verdict
     blurb: str = ""         # plain-language "what am I looking at?" one-liner, "" if none
     difficulty: DifficultyHint | None = None  # "how hard for a Seestar?" verdict, if vetted
+    # Which per-frame background-flatten mode suits this target, when its catalog
+    # type/size say the default per-channel fit would bend into it; None
+    # otherwise (the default is fine, so there is nothing to say).
+    background_mode_hint: BackgroundModeHint | None = None
 
 
 def _norm_name(s: str) -> str:
@@ -152,4 +157,5 @@ def _to_info(obj: CatalogObject, matched_by: str) -> ObjectInfo:
         framing=framing_hint(obj.size_arcmin),
         blurb=obj.blurb,
         difficulty=target_difficulty(obj.id, obj.type),
+        background_mode_hint=background_mode_hint(obj.type, obj.size_arcmin),
     )
