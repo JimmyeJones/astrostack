@@ -505,6 +505,21 @@ def test_a_mosaic_with_a_surviving_panel_step_is_named_in_plain_words():
                               [_frame()]), "seams_flat") is None
 
 
+def test_the_seam_warning_hands_over_the_tool_it_names():
+    """The note's advice ends at "the editor's background tools can even it out
+    further" — advice with nowhere to click. Every other actionable note carries
+    an ``action`` key the card turns into a one-click link, and this one must too,
+    or the beginner is told a tool exists and left to find it."""
+    note = _note(stack_health(_run(is_mosaic=True, seam_residual=2.6),
+                              [_frame() for _ in range(20)]), "seams")
+    assert note is not None
+    assert note.action == "background"
+    # The reassurance half has nothing to do, so it stays a bare sentence.
+    flat = _note(stack_health(_run(is_mosaic=True, seam_residual=0.12),
+                              [_frame() for _ in range(20)]), "seams_flat")
+    assert flat is not None and flat.action is None
+
+
 def test_an_ambiguous_seam_measurement_says_nothing_either_way():
     """Real large-scale structure crossing panels puts a floor under the
     measurement that has nothing to do with seams, so a middling number is

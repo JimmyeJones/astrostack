@@ -12,6 +12,7 @@ import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type
 import { formatIntegration } from "../format";
 import { postCaption, formatCaptionDate } from "../components/postCaption";
 import { HazyNightBadge } from "../components/HazyNightBadge";
+import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
 import { calibrationSummaryText } from "../components/calibrationSummary";
 import { autoSkyCastCaption } from "../components/editor/skyCast";
@@ -792,6 +793,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           <FocusChip verdict={focus} />
           <RejectionBadge options={run.options} />
           <HazyNightBadge ratio={run.transparency_ratio} />
+          <PanelSeamsBadge verdict={run.seam_verdict} />
           <CalibrationBadge calstat={run.calstat} />
           <Badge variant="light">{run.n_frames_used} frames</Badge>
         </Group>
