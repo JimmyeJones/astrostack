@@ -10859,8 +10859,34 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-08-06, filed while shipping the "Crop to the Moon" v0.244.0) — cropping an existing
-  still shouldn't cost a whole re-stack.** *(Friendliness / autonomy — PRIORITY 3; size S.)* The shipped offer
+- ~~**NEW IDEA (Builder 2026-08-06, filed while shipping the "Crop to the Moon" v0.244.0) — cropping an existing
+  still shouldn't cost a whole re-stack.**~~ — **SHIPPED v0.245.0** (Builder 2026-08-06, branch
+  `claude/gallant-galileo-favvnu`). *(Friendliness / autonomy — PRIORITY 3.)* The offer under a full-frame Moon
+  still is now **"Crop it"**, and it acts on the *saved picture*: `POST /api/videos/{id}/crop` re-measures the
+  framing on `stack.tiff` (falling back to `stack.png` for a result saved before TIFFs) and slices both artifacts
+  in place, so trimming a Moon still is one instant request instead of minutes of decoding a capture that may not
+  even be on the NAS any more. **Cropping never re-renders:** each file is sliced in its *own* domain (PIL on the
+  PNG, `tifffile` on the TIFF), and quantisation is per-pixel-independent, so the kept pixels are byte-for-byte
+  the ones the full frame held — pinned by a test that finds the cropped PNG as an exact sub-rectangle of the
+  original. It is also **reversible**, which the entry's "care" note asked for: the full frame is kept beside the
+  cropped one as `stack-full.png`/`.tiff` and an **"Undo crop"** button (`…/uncrop`, offered only while the backup
+  is there — new additive `crop_restorable` field) moves it back, re-measuring the offer from the restored
+  picture rather than assuming it. A fresh stack clears any stale backup, so an undo can never hand back a
+  different render. **One real bug fixed along the way:** a cropped still is rewritten at the same URL with the
+  same `created_utc`, so the page's cache-buster (`?t=<created_utc>`) would have shown the *uncropped* picture
+  after the crop — `videoPreviewSrc` now keys on the size too, used by both the Moon & Sun page and the Gallery.
+  Cropping needs no ffmpeg (it never touches the video), so the button stays live on a container without it.
+  **Upgrade-safe:** additive endpoints and one additive response field; no default flipped (the pre-stack
+  "Crop to the Moon" checkbox is untouched), no config/DB/on-disk-layout change, and the backups appear only for
+  a still someone actually cropped. **Tests (+22):** `tests/webapp/test_video_crop.py` (+13, ffmpeg-free — builds
+  the artifacts directly: the crop trims and keeps the disk, the pixels are an exact sub-rectangle, the TIFF is
+  cropped too, undo restores byte-identically and leaves no duplicate, cropping twice / a frame-filling disk /
+  no picture / no saved full frame each fail with a line the user can act on, a TIFF-less result still crops, a
+  crafted id can't escape, meta-on-disk matches the wire, and a new still drops a stale backup),
+  `MoonSun.test.tsx` (+4 — crops in place without calling the stack endpoint, works with ffmpeg missing, undo
+  shown/hidden on `crop_restorable`) and `videoPreviewSrc.test.ts` (+4).
+  *(Original spec kept below for provenance.)*
+  *(Friendliness / autonomy — PRIORITY 3; size S.)* The shipped offer
   under a full-frame Moon still is *"Crop it and stack again"*, and "stack again" means decoding a multi-minute
   capture twice over — minutes of work to change nothing but the framing. But the crop operates on the
   **display-rendered picture**, and that picture is already on disk as `stack.png` + `stack.tiff`: `measure_framing`

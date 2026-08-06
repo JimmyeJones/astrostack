@@ -9,6 +9,9 @@ a beginner had a Moon video on their NAS and no way to turn it into a picture.
 * ``POST /api/videos/{id}/grade`` — grade only, so "how picky should I be with
   this capture?" can be answered before a stack is spent finding out.
 * ``POST /api/videos/{id}/stack`` — grade → keep the sharpest → align → average.
+* ``POST /api/videos/{id}/crop`` / ``…/uncrop`` — trim the empty sky off a
+  finished still (or put the full frame back) by slicing the saved picture, so
+  changing the framing never costs a second decode of the capture.
 * ``GET  /api/videos/{id}/preview.png`` / ``…/download.tiff`` — the result.
 
 Captures are addressed by a sanitised id and re-discovered server-side on every
@@ -95,6 +98,9 @@ class VideoResultOut(BaseModel):
     crop_trim_fraction: float = 0.0
     source_width: int = 0
     source_height: int = 0
+    #: True when this still was cropped in place and its full frame is still
+    #: saved beside it, so the crop can be undone in one click.
+    crop_restorable: bool = False
 
 
 class VideoCaptureOut(BaseModel):
@@ -201,6 +207,9 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
         crop_trim_fraction=meta.crop_trim_fraction,
         source_width=meta.source_width or meta.width,
         source_height=meta.source_height or meta.height,
+        crop_restorable=(
+            meta.crop_applied and video.has_full_frame_backup(settings, capture_id)
+        ),
     )
 
 
@@ -284,14 +293,53 @@ def stack_one_video(
     return {"job_id": job.id}
 
 
-def _result_file(request: Request, capture_id: str, name: str) -> Path:
-    settings = deps.get_settings(request)
-    # Re-derive the id through the discovery helper's sanitiser so a crafted
-    # ``capture_id`` can't escape the video results directory.
+def _safe_capture_id(capture_id: str) -> str:
+    """Re-derive an id through the discovery sanitiser, so a crafted one can't
+    escape the video results folder. Paths are always resolved server-side."""
     from seestack.video.discover import video_capture_id
 
-    safe_id = video_capture_id(capture_id)
-    path = video.result_dir(settings, safe_id) / name
+    return video_capture_id(capture_id)
+
+
+@router.post("/api/videos/{capture_id}/crop", response_model=VideoResultOut)
+def crop_one_still(capture_id: str, request: Request) -> VideoResultOut:
+    """Trim the empty sky off a finished still — no re-stack, no ffmpeg.
+
+    Cropping is a decision made *after* seeing the picture, so acting on it must
+    not cost another full decode of a multi-minute capture (which may not even be
+    on the NAS any more). The saved artifacts are sliced in place and the full
+    frame is kept beside them, so this is reversible via ``…/uncrop``.
+    """
+    settings = deps.get_settings(request)
+    safe_id = _safe_capture_id(capture_id)
+    try:
+        video.crop_saved_still(settings, safe_id)
+    except video.StillCropError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = _result_out(settings, safe_id)
+    if result is None:  # pragma: no cover - the crop just wrote it
+        raise HTTPException(status_code=404, detail="No stacked picture for this capture")
+    return result
+
+
+@router.post("/api/videos/{capture_id}/uncrop", response_model=VideoResultOut)
+def restore_one_still(capture_id: str, request: Request) -> VideoResultOut:
+    """Put the full frame back after an in-place crop."""
+    settings = deps.get_settings(request)
+    safe_id = _safe_capture_id(capture_id)
+    try:
+        video.restore_full_still(settings, safe_id)
+    except video.StillCropError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = _result_out(settings, safe_id)
+    if result is None:  # pragma: no cover - the restore just wrote it
+        raise HTTPException(status_code=404, detail="No stacked picture for this capture")
+    return result
+
+
+def _result_file(request: Request, capture_id: str, name: str) -> Path:
+    settings = deps.get_settings(request)
+    path = video.result_dir(settings, _safe_capture_id(capture_id)) / name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="No stacked picture for this capture yet")
     return path
