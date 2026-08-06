@@ -719,6 +719,32 @@ def test_auto_feedback_shifts_the_auto_recipe(client, solved_library):
     assert stretch_target_bg() == base
 
 
+def test_core_clipped_feedback_turns_on_the_stretch_highlight_hold(
+        client, solved_library):
+    """The bright-core cue reaches the served Auto recipe as the stretch's
+    ``highlights`` param — off until asked for, and walked back off by the
+    opposite cue (a beginner must be able to undo it with the same taps)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="corehold")
+
+    def stretch_highlights():
+        ops = client.post(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()["ops"]
+        params = next(o for o in ops if o["id"] == "tone.stretch")["params"]
+        return params.get("highlights", 0.0)
+
+    assert stretch_highlights() == 0.0
+    r = client.post("/api/editor/auto-preferences/feedback",
+                    json={"cue": "core_clipped"})
+    assert r.status_code == 200, r.text
+    assert "bright cores" in (r.json()["note"] or "")
+    assert stretch_highlights() > 0.0
+    # The opposite cue walks it straight back to off in one tap.
+    client.post("/api/editor/auto-preferences/feedback", json={"cue": "core_flat"})
+    assert stretch_highlights() == 0.0
+    assert client.get("/api/editor/auto-preferences").json()["neutral"] is True
+
+
 def test_auto_feedback_with_run_context_is_scoped_to_the_object_type(
         client, solved_library, monkeypatch):
     """Feedback given while editing a run is recorded into that run's archetype

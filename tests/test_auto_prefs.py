@@ -14,9 +14,14 @@ from seestack.edit.presets import auto_recipe
 
 def test_empty_and_none_profile_leave_params_unchanged():
     base = dict(target_bg=0.2, saturation=1.2, sharpen_amount=0.5,
-               denoise_strength=0.0, scnr_amount=0.7)
+               denoise_strength=0.0, scnr_amount=0.7, highlight_protect=0.0)
     for prof in (None, auto_prefs.empty_profile(), {}, {"biases": {}}):
         assert auto_prefs.apply_profile(prof, **base) == pytest.approx(base)
+    # A caller that omits the newest parameter gets it back at its own default,
+    # so an older call site keeps working and still reads as "off".
+    older_call = dict(base)
+    older_call.pop("highlight_protect")
+    assert auto_prefs.apply_profile(None, **older_call)["highlight_protect"] == 0.0
     assert auto_prefs.is_neutral(None)
     assert auto_prefs.describe_profile(None) is None
 
@@ -220,3 +225,82 @@ def test_auto_recipe_bias_can_add_denoise_to_a_clean_stack():
     assert "detail.denoise" in ids
     # still ordered correctly (linear denoise before the stretch)
     assert ids.index("detail.denoise") < ids.index("tone.stretch")
+
+
+# --- the "Core blown out" cue ------------------------------------------------
+#
+# The one-sided knob: highlight protection starts *off* (0 = the historical
+# stretch), so "core blown out" turns it up and "core looks flat" walks it back
+# toward off. There is nothing below off to ask for, which is why the bias has
+# its own floor at 0 rather than the symmetric -MAX_STEPS.
+
+def test_core_clipped_turns_highlight_protection_up():
+    prof = auto_prefs.record_feedback(None, "core_clipped")
+    out = auto_prefs.apply_profile(prof, **_BASE)
+    assert out["highlight_protect"] > 0.0
+    # ...and nothing else moved.
+    neutral = auto_prefs.apply_profile(None, **_BASE)
+    for key in ("target_bg", "saturation", "sharpen_amount", "denoise_strength",
+                "scnr_amount"):
+        assert out[key] == pytest.approx(neutral[key])
+
+
+def test_core_clipped_saturates_and_stays_in_range():
+    prof = None
+    for _ in range(8):
+        prof = auto_prefs.record_feedback(prof, "core_clipped")
+    assert prof["biases"]["highlights"] == auto_prefs.MAX_STEPS
+    assert 0.0 <= auto_prefs.apply_profile(prof, **_BASE)["highlight_protect"] <= 1.0
+
+
+def test_core_flat_walks_back_one_tap_at_a_time_and_stops_at_off():
+    """One 'looks flat' must undo exactly one 'blown out' — if the bias could go
+    negative (where the range clamp swallows it) the walk-back would silently
+    need three taps to show any effect."""
+    prof = auto_prefs.record_feedback(None, "core_clipped")
+    prof = auto_prefs.record_feedback(prof, "core_clipped")
+    two_up = auto_prefs.apply_profile(prof, **_BASE)["highlight_protect"]
+    prof = auto_prefs.record_feedback(prof, "core_flat")
+    one_up = auto_prefs.apply_profile(prof, **_BASE)["highlight_protect"]
+    assert 0.0 < one_up < two_up
+    # Back to neutral, and further taps can't push it below off.
+    for _ in range(4):
+        prof = auto_prefs.record_feedback(prof, "core_flat")
+    assert "highlights" not in prof["biases"]
+    assert auto_prefs.apply_profile(prof, **_BASE)["highlight_protect"] == 0.0
+    assert auto_prefs.is_neutral(prof)
+
+
+def test_a_garbled_store_cannot_inject_a_negative_highlight_bias():
+    """§9 loader tolerance: an out-of-range value from an older/edited store is
+    clamped into the parameter's own step range, not merely to ±MAX_STEPS."""
+    assert auto_prefs.effective_biases({"biases": {"highlights": -3}}) == {}
+    assert auto_prefs.effective_biases(
+        {"biases": {"highlights": 99}}) == {"highlights": auto_prefs.MAX_STEPS}
+
+
+def test_core_cue_is_recorded_per_object_type_like_the_others():
+    prof = auto_prefs.record_feedback(None, "core_clipped", object_type="galaxy")
+    assert auto_prefs.apply_profile(
+        prof, object_type="galaxy", **_BASE)["highlight_protect"] > 0.0
+    assert auto_prefs.apply_profile(
+        prof, object_type="cluster", **_BASE)["highlight_protect"] == 0.0
+
+
+def test_describe_profile_explains_the_held_back_core():
+    prof = auto_prefs.record_feedback(None, "core_clipped")
+    note = auto_prefs.describe_profile(prof)
+    assert note is not None and "bright cores" in note
+
+
+def test_auto_recipe_carries_the_highlight_bias_into_the_stretch():
+    rgb = _clean_img()
+    base = next(o for o in auto_recipe(rgb).ops if o.id == "tone.stretch")
+    assert base.params.get("highlights", 0.0) == 0.0     # off by default
+    prof = auto_prefs.record_feedback(None, "core_clipped")
+    prof = auto_prefs.record_feedback(prof, "core_clipped")
+    biased = next(o for o in auto_recipe(rgb, prefs=prof).ops
+                  if o.id == "tone.stretch")
+    assert biased.params["highlights"] > 0.0
+    # The stretch's own measured value is untouched by this cue.
+    assert biased.params["target_bg"] == pytest.approx(base.params["target_bg"])

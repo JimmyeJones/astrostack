@@ -41,6 +41,8 @@ _CUE_STEP: dict[str, tuple[str, int]] = {
     "too_green":       ("green",      +1),
     "undersaturated":  ("saturation", +1),
     "too_saturated":   ("saturation", -1),
+    "core_clipped":    ("highlights", +1),
+    "core_flat":       ("highlights", -1),
 }
 
 # The parameters a bias can shift. For each: the per-step magnitude and the safe
@@ -53,6 +55,7 @@ _PARAM_STEP: dict[str, float] = {
     "sharpen":    0.10,   # detail.sharpen amount
     "denoise":    0.10,   # detail.denoise strength
     "green":      0.10,   # tone.scnr amount
+    "highlights": 0.25,   # tone.stretch "hold back highlights"
 }
 _PARAM_RANGE: dict[str, tuple[float, float]] = {
     "brightness": (0.10, 0.30),
@@ -60,11 +63,27 @@ _PARAM_RANGE: dict[str, tuple[float, float]] = {
     "sharpen":    (0.00, 1.00),
     "denoise":    (0.00, 1.00),
     "green":      (0.00, 1.00),
+    "highlights": (0.00, 1.00),
 }
 
 # How many steps in either direction a bias can accumulate to. Bounds the total
 # shift (e.g. brightness ±3·0.02 = ±0.06, sharpen ±3·0.10 = ±0.30).
 MAX_STEPS = 3
+
+# Per-parameter floor on the accumulated bias, when it isn't the symmetric
+# ``-MAX_STEPS``. ``highlights`` is the one one-sided knob: Auto measures its
+# other four parameters from the image and can be nudged either way from there,
+# but highlight protection starts *off* (0 = the historical stretch), so there is
+# nothing below neutral to ask for. Its negative cue ("the core looks flat") is a
+# walk-back to neutral rather than an opposite direction — without this floor the
+# bias would keep accumulating negative steps that the range clamp swallows, so
+# the walk-back would need three taps to undo one.
+_PARAM_MIN_STEP: dict[str, int] = {"highlights": 0}
+
+
+def _clamp_step(param: str, value: int) -> int:
+    """Clamp an accumulated bias to this parameter's step range."""
+    return max(_PARAM_MIN_STEP.get(param, -MAX_STEPS), min(MAX_STEPS, int(value)))
 
 PROFILE_VERSION = 1
 
@@ -99,7 +118,7 @@ def _coerce_bucket(raw: Any) -> dict[str, Any]:
         if isinstance(raw_b, dict):
             for param, val in raw_b.items():
                 if param in _PARAM_STEP and isinstance(val, (int, float)):
-                    step = max(-MAX_STEPS, min(MAX_STEPS, int(round(val))))
+                    step = _clamp_step(param, round(val))
                     if step:
                         biases[param] = step
         raw_c = raw.get("counts")
@@ -170,7 +189,7 @@ def record_feedback(profile: dict[str, Any] | None, cue: str,
     else:
         bucket = prof
     cur = bucket["biases"].get(param, 0)
-    new = max(-MAX_STEPS, min(MAX_STEPS, cur + delta))
+    new = _clamp_step(param, cur + delta)
     if new == 0:
         bucket["biases"].pop(param, None)
     else:
@@ -195,11 +214,16 @@ def apply_profile(
     sharpen_amount: float,
     denoise_strength: float,
     scnr_amount: float,
+    highlight_protect: float = 0.0,
     object_type: str | None = None,
 ) -> dict[str, float]:
-    """Shift the five data-driven Auto parameters toward the stored taste, each
+    """Shift the data-driven Auto parameters toward the stored taste, each
     re-clamped to its safe range. An empty/None profile returns them unchanged
     (so the default Auto stays byte-for-byte identical).
+
+    ``highlight_protect`` is the ``tone.stretch`` "hold back highlights" strength;
+    it defaults to 0 (off) both here and in ``auto_recipe``, so a caller that
+    doesn't pass it — and any profile with no ``highlights`` bias — is unaffected.
 
     ``object_type`` (galaxy/nebula/cluster) selects the per-type override on top of
     the global set; ``None``/unknown uses the global set only."""
@@ -210,6 +234,7 @@ def apply_profile(
         "sharpen_amount": _nudge(sharpen_amount, "sharpen", biases),
         "denoise_strength": _nudge(denoise_strength, "denoise", biases),
         "scnr_amount": _nudge(scnr_amount, "green", biases),
+        "highlight_protect": _nudge(highlight_protect, "highlights", biases),
     }
 
 
@@ -225,6 +250,10 @@ _BIAS_PHRASE: dict[tuple[str, bool], str] = {
     ("denoise", False): "with less smoothing",
     ("green", True): "with a stronger green-cast removal",
     ("green", False): "with a lighter green-cast removal",
+    # ``highlights`` is one-sided (see ``_PARAM_MIN_STEP``): the negative cue only
+    # walks the bias back to neutral, which drops it from the profile entirely, so
+    # there is no "less than off" phrase to write.
+    ("highlights", True): "with the bright cores held back",
 }
 
 
