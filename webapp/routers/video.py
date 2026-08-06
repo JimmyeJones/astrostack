@@ -85,6 +85,16 @@ class VideoResultOut(BaseModel):
     tiff_url: str
     #: Additive: older clients ignore it, older results simply have none.
     sharpness: SharpnessProfileOut | None = None
+    #: Framing. ``crop_applied`` — this still was trimmed to the disk, so
+    #: ``width``/``height`` are the cropped size and ``source_*`` the stack's own.
+    #: ``crop_available`` — it wasn't, and there is enough empty sky around the
+    #: disk to be worth offering. All additive with neutral defaults, so a result
+    #: stacked by an older version simply reads as "not cropped, nothing to offer".
+    crop_applied: bool = False
+    crop_available: bool = False
+    crop_trim_fraction: float = 0.0
+    source_width: int = 0
+    source_height: int = 0
 
 
 class VideoCaptureOut(BaseModel):
@@ -121,6 +131,10 @@ class VideoStackRequest(BaseModel):
     #: Which file in the folder to stack (basename). Omit for the longest one.
     file_name: str | None = None
     align: bool = True
+    #: Trim the empty sky around the Moon/Sun so the picture is mostly subject.
+    #: Off by default: an omitted field must keep giving the full frame a
+    #: previous version produced.
+    crop: bool = False
 
 
 def _size_of(path: str) -> int:
@@ -182,6 +196,11 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
         preview_url=f"/api/videos/{capture_id}/preview.png",
         tiff_url=f"/api/videos/{capture_id}/download.tiff",
         sharpness=_profile_out(meta.scores, meta.keep_percent),
+        crop_applied=meta.crop_applied,
+        crop_available=meta.crop_available,
+        crop_trim_fraction=meta.crop_trim_fraction,
+        source_width=meta.source_width or meta.width,
+        source_height=meta.source_height or meta.height,
     )
 
 
@@ -260,6 +279,7 @@ def stack_one_video(
         keep_percent=req.keep_percent,
         file_name=req.file_name,
         align=req.align,
+        crop=req.crop,
     )
     return {"job_id": job.id}
 

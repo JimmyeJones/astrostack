@@ -11274,9 +11274,41 @@ problems. Dogfood it every big-picture run and fix root causes.
   on the result (the editor can already sharpen,
   so this is convenience, not capability); **(b3)** raw-OSC video handling (if a Seestar ever writes a Bayer video,
   today's `rgb24` decode would need a debayer path — verify before building, the current captures are ordinary
-  colour video); **(c)** disk crop/centre so the still isn't mostly black sky, and drizzle-upscale. Explicitly **not**
-  wanted (pro territory, per the original spec): multi-point planetary alignment and derotation.
+  colour video); ~~**(c)** disk crop/centre so the still isn't mostly black sky~~ — **CROP HALF SHIPPED v0.244.0**
+  (Builder 2026-08-06, branch `claude/gallant-galileo-syc60a`), leaving only **drizzle-upscale** open under (c).
+  Explicitly **not** wanted (pro territory, per the original spec): multi-point planetary alignment and derotation.
   (S–M each, beginner-feature/workflow — PRIORITY 2/3.)
+
+  - **SHIPPED v0.244.0 — "Crop to the Moon": trim the empty sky around a Moon/Sun still.**
+    *(Beginner feature / friendliness — PRIORITY 3.)* The Seestar frames a lunar or solar capture generously, so
+    the finished still is mostly black rectangle with a small bright disk in it — the picture the owner downloads,
+    shares or sets as a wallpaper. New pure engine module `seestack/video/framing.py::measure_framing` locates the
+    disk on the *display-rendered* still (robust sky/peak percentiles → a threshold at 25 % of the way to the
+    disk level → row/column profiles with a ≥0.4 %-of-the-line floor so a hot pixel can't stretch the box), adds a
+    6 %-of-the-disk margin, and reports how much of the frame a crop would trim. `crop_to_disk` then *slices* —
+    it never touches a pixel, and the crop is applied **after** `normalize_for_display`, so the tone mapping still
+    measures the whole frame and cropping can only change what is in the picture, never how bright it is.
+    **It declines rather than guesses:** a disk that already fills the frame (a close-up Sun), a blank or
+    blown-out frame, a lone hot pixel, and any crop that would trim under 15 % of the frame all come back
+    "not worthwhile" and the picture is left exactly as it was — and if a crop *was* asked for, the run says why
+    in plain language instead of silently no-op-ing.
+    **Webapp:** `POST /api/videos/{id}/stack` gained `crop: bool = False` (opt-in, so an omitted field keeps the
+    picture a previous version produced), and the result carries `crop_applied` / `crop_available` /
+    `crop_trim_fraction` / `source_width` / `source_height`. The framing is measured on **every** stack whether or
+    not a crop was asked for, which is what lets a finished still say "about 78 % of this picture is empty sky" to
+    someone who didn't know to ask beforehand. **Frontend:** a plain-language "Crop to the Moon/Sun" checkbox on
+    the stack form, plus a one-click *"Crop it and stack again"* offer under a full-frame still — the same shape
+    as the shipped "Try 50% instead" nudge — and a line saying what a cropped still trimmed and what size it came
+    from. Upgrade-safe: new optional request field, additive response fields with neutral defaults, new optional
+    `meta.json` keys (a still stacked by v0.224–v0.243 reads as "not cropped, nothing to offer" — pinned by a
+    test that deletes them), no default flipped, no on-disk layout change.
+    **Tests (+22):** `tests/test_video_framing.py` (+12 — finds a realistic disk and keeps the whole limb, follows
+    an off-centre disk, crops pixels-identically, and declines on a frame-filling disk / blank / blown-out /
+    hot-pixel / NaN-uncovered / greyscale / tiny inputs), `tests/webapp/test_video_api.py` (+5 — a full-frame
+    still offers the crop, cropping trims the sky and the PNG *and* TIFF are both the cropped size with the disk
+    still in them, an omitted field changes nothing, an old `meta.json` reads as uncropped, and a frame-filling
+    disk says why it wasn't cropped), `MoonSun.test.tsx` (+5 groups covering the pure `subjectNoun` /
+    `cropSuggestion` / `cropNote` helpers, the one-click offer, the checkbox, and an older backend).
 
   The owner shoots the Moon/Sun with the Seestar, which drops a **video file
   (.mp4/.avi/.mov)** into a `Lunar_video/` / `Solar_video/` folder — currently the
