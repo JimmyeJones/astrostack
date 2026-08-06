@@ -6189,8 +6189,29 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-08-06, traced while auditing the stack dispatcher) — a walk-away stack of a *small*
-  night silently discards the quality weighting the user asked for, and nothing anywhere says so.**
+- ~~**NEW IDEA (Builder 2026-08-06, traced while auditing the stack dispatcher) — a walk-away stack of a *small*
+  night silently discards the quality weighting the user asked for, and nothing anywhere says so.**~~ —
+  **SHIPPED v0.238.0** (Builder 2026-08-06, branch `claude/gallant-galileo-kdy4gc`). Confirmed end-to-end, not
+  just traced: a 5-frame `auto_reject` stack with `quality_weighted=True` really does resolve to min/max and
+  stamp nothing at all. The engine now records the *reason* alongside the (still correctly omitted) `WGTMODE`:
+  `WGTSKIP="minmax"`, `WGTSKAUT` (was it the auto-picker or the user's own tick?) and, for an auto pick,
+  `WGTSKMIN` = `kappa_min_frames(sigma_kappa)` — the frame count at which weighting starts counting again. The
+  run-Info endpoint parses them into an additive `weighting_skipped` field and History renders one plain-language
+  line, worded by cause: an **auto** pick gets "…picked automatically because sigma clipping can't remove a lone
+  satellite trail on a small stack; from 11 subs it switches to sigma clipping and your weighting counts again"
+  (a *wait*, not a mistake), while a **manually ticked** min/max gets "Use sigma clipping instead if you want your
+  best subs to count for more" (a setting to change). The two halves are mutually exclusive by construction —
+  a κ-σ stack keeps `WGTMODE` and carries no skip note. **Scope note on the filed "check first":** the gap is
+  wider than the entry assumed — it is any non-drizzle ≥3-frame min/max stack with weighting on, not only the
+  sub-11-frame walk-away case; the walk-away path is just the half with no pick-time warning to fall back on.
+  Additive header cards + an additive response field + one frontend line: no config/DB/API-shape/on-disk change,
+  no default flipped, and an older master with no `WGTSKIP` simply renders nothing as before. **Tests** (+10):
+  `tests/test_output_header_meta.py` (+4 — manual pick, auto pick with its crossover, no note when the weights
+  did apply, no note when weighting was never on), `tests/test_stack_pipeline.py` (+1 end-to-end walk-away run,
+  plus the existing min/max test extended to assert the reason is now stamped and the κ-σ control to assert it
+  is not), `tests/webapp/test_stack_render.py` (+1 endpoint parse, plus the unweighted control), and
+  `History.test.tsx` (+6 pure-function wordings + 1 render).
+  *(Original spec kept below for provenance.)*
   *(Honest accounting / trust — PRIORITY 2–3; size S; **traced, not yet reproduced end-to-end**.)*
   On the walk-away chains (watcher auto-stack, one-click Process target) `_build_and_run` sets
   `auto_reject=True` whenever the merged options carry no explicit rejection key (`webapp/pipeline.py`

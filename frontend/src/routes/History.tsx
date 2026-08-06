@@ -8,7 +8,7 @@ import { notifications } from "@mantine/notifications";
 import { IconAdjustments, IconCheck, IconClipboardText, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackFrameAccounting } from "../api/client";
+import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting } from "../api/client";
 import { formatIntegration } from "../format";
 import { postCaption, formatCaptionDate } from "../components/postCaption";
 import { HazyNightBadge } from "../components/HazyNightBadge";
@@ -250,6 +250,41 @@ export function weightingSummaryText(
   );
 }
 
+/** Why a quality-weighted run's weighting didn't count.
+ *
+ * The engine stamps this only when weighting was on *and* the min/max
+ * order-statistic path ran — it combines by rank, so per-frame weights have no
+ * effect. On the walk-away chains (watcher auto-stack, one-click Process
+ * target) the user never sees the Stack form's pick-time warning, so without
+ * this line "weighting did nothing" looks exactly like "weighting was off".
+ * The advice differs by how min/max got picked: an automatic pick fixes itself
+ * with more subs, a manual tick needs the setting changed.
+ */
+export function weightingSkippedText(
+  skipped: StackWeightingSkipped | null | undefined,
+  nFrames?: number | null,
+): string | null {
+  if (!skipped) return null;
+  const n =
+    typeof nFrames === "number" && Number.isFinite(nFrames) && nFrames > 0 ? nFrames : null;
+  const withCount = n ? ` with ${n.toLocaleString()} ${n === 1 ? "sub" : "subs"}` : "";
+  const lead =
+    `Quality weighting was on, but this stack${withCount} used min/max rejection, ` +
+    `which combines by rank instead of by weight — so the weighting didn't change the result.`;
+  const min = skipped.min_frames;
+  if (skipped.auto && typeof min === "number" && Number.isFinite(min) && min > 0) {
+    return (
+      `${lead} That method was picked automatically because sigma clipping can't ` +
+      `remove a lone satellite trail on a small stack; from ${min.toLocaleString()} subs ` +
+      `it switches to sigma clipping and your weighting counts again.`
+    );
+  }
+  if (skipped.auto) {
+    return `${lead} It was picked automatically for a stack this small; with more subs, weighting counts again.`;
+  }
+  return `${lead} Use sigma clipping instead if you want your best subs to count for more.`;
+}
+
 export interface FrameAccountingNote {
   // The honest one-liner: "1,850 of 2,000 subs combined · 150 couldn't be aligned".
   text: string;
@@ -435,6 +470,11 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
       {weightingSummaryText(data.weighting, data.n_frames) ? (
         <Text size="xs" c="dimmed">
           {weightingSummaryText(data.weighting, data.n_frames)}
+        </Text>
+      ) : null}
+      {weightingSkippedText(data.weighting_skipped, data.n_frames) ? (
+        <Text size="xs" c="dimmed">
+          {weightingSkippedText(data.weighting_skipped, data.n_frames)}
         </Text>
       ) : null}
       {photometricSummaryText(data.photometric) ? (
