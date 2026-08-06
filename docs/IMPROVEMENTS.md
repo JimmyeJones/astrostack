@@ -6189,6 +6189,36 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **MEASURED OBSERVATION (Builder 2026-08-06, measured while building the v0.240.1 nudge — file this before anyone
+  "improves" the shoulder blind) — "Hold back highlights" rescues an *ordinary* blown core and is essentially
+  powerless on an extreme one, because the Reinhard shoulder is asymptotic.** *(Image quality — PRIORITY 4; size M;
+  **measured, deliberately NOT fixed**.)* `_highlight_rolloff` maps `[knee, +inf)` onto `[knee, 1)` with
+  `t/(1+t)`, so nearly the whole output span is spent on the first few multiples of the 99.5th-percentile ceiling.
+  **Measured** on synthetic S30-shaped scenes (compact core on a faint disk on a 1000 ADU sky, `autostretch`): a
+  **60 000 ADU** core's internal gradient goes 8.1/255 → **13.4/255** at full protection with its blown fraction
+  0.099 % → 0 — the knob works. A **400 000 ADU** core goes 0.12/255 → **0.62/255**: still under one 8-bit level,
+  i.e. invisible, because after the shoulder the MTF's near-unity slope (`m/(1−m)` ≈ 0.11 at a typical STF midtone)
+  shrinks what little separation survives. On a *wide* extreme core, protection can even make the flat patch
+  slightly **larger** (measured 596 → 699 px at protect=1) as more of the bright range folds into the top band.
+  This is the same wall v0.240.0's `_MIN_IMPROVEMENT` guard bumped into from the other side ("a frame so contrasty
+  that the midtones transfer squashes the shoulder back together") — so nothing over-promises today: the suggester
+  measures rather than assumes and simply stays silent there. **The real fix direction:** a *data-referred*
+  shoulder (log-scaled to the frame's actual max rather than asymptotic) blended in as protection rises, so
+  `protect=0` stays byte-for-byte the historical Reinhard. **Why it is filed and not built:** it changes pixels for
+  anyone who has moved the slider or tapped "Core blown out", and how much extreme-HDR core a *real* Seestar OSC
+  stack actually carries — versus a core that clipped in the sensor, where no shoulder helps — is exactly the
+  real-data question this repo can't answer. Needs the owner's own M31/M42 stack to judge before shipping.
+- **NEW IDEA (Builder 2026-08-06, the root cause of the v0.240.1 invisible-button bug — worth one small pass) — the
+  editor's op-panel test fixtures declare params with the wrong `group`, so a control's real placement is never
+  exercised.** *(Infra / maintainability — PRIORITY 3; size S; frontend-only.)* v0.240.0 shipped a correct,
+  well-tested "from your image" button that no beginner could see, because its `EditOp` fixture in
+  `Editor.test.tsx` declares `highlights` as `group: "simple"` while the engine spec says `advanced` — and
+  `OpParamPanel` puts advanced params behind a collapsed accordion. Every hand-written `EditOp` fixture in that
+  file has the same freedom to drift from `editor_ops_schema`. **Slice:** a tiny generated fixture (or a single
+  test that fetches the real schema shape and asserts each hand-written fixture's `key`/`type`/`group` matches the
+  engine's) so a param's *placement* can't silently differ between the tests and the app. **Care:** don't turn the
+  fixtures into a full schema mirror — the value is entirely in the fields that change what a user can *reach*
+  (`group`, `depends_on`), so pin those and leave the rest free.
 - **NEW IDEA (Builder 2026-08-06, MEASURED while building the highlight suggestion v0.240.0) — "Hold back
   highlights" is close to a *no-op* on the very frames it is most needed for, because the shoulder runs
   **before** the midtones transfer squashes it back together.** *(Editor quality / image quality — PRIORITY 1/4;
@@ -6353,7 +6383,25 @@ to **Shipped**.)_
   honest no-suggestion answer on an ordinary run, the solve really calls the user's own op with only `highlights`
   varying and measures the linear image, an unknown uid falls back, and `already_display` is threaded), and
   `Editor.test.tsx` (+3 — the button appears naming what it measured and applies, hides on a null suggestion, and
-  appears in STF mode where Strength/Black don't). *(Original spec kept below for provenance.)*
+  appears in STF mode where Strength/Black don't).
+  **Follow-on SHIPPED v0.240.1** (Builder 2026-08-06, branch `claude/relaxed-turing-a8tmex`) — *the button was
+  measured, correct, and invisible.* `highlights` is declared `group="advanced"` on `tone.stretch`, and
+  `OpParamPanel` renders advanced params inside a **collapsed "Advanced" accordion** — so in the running app a
+  beginner who selects Stretch never sees the button at all. (v0.240.0's UI tests didn't catch it because their
+  `EditOp` fixture declares `highlights` as `group: "simple"`, unlike the real engine spec.) The panel now shows
+  the finding *above* the accordion, in the same shape as the shipped background-mode nudge: one plain-language
+  line ("The brightest core in your picture is washing out to flat white. The detail is still in your data —
+  holding the highlights back brings its shape and colour back, and leaves the sky exactly where it is") plus the
+  same one-click **"Hold back highlights (N)"**. Deliberately **no second threshold**: the server already declines
+  on a star-sized core, a barely-clipped one, one saturated at capture, and one the knob can't reopen, so a
+  strength arriving at all *is* the decision to speak — a UI floor could only disagree with it. The nudge goes
+  quiet once the slider is at or past the suggestion rather than repeating itself, and nothing changes until it is
+  pressed. Frontend-only and additive: no endpoint, engine, config, DB or API-shape change. **Tests (+8):**
+  `blownCore.test.ts` (+6 — the copy names the problem and promises only what the shoulder does, silence on a null
+  strength, a nonsensical strength never offers a no-op button, no nagging once applied, an unusable slider value
+  reads as "not held back yet") and `Editor.test.tsx` (+2 — with `highlights` grouped **advanced** as the real
+  spec has it, the slider's own button is *absent* while the nudge is visible and applies, and the nudge is silent
+  when there's no recoverable core). *(Original spec kept below for provenance.)*
   *(Editor quality + autonomy —
   PRIORITY 1/2; size S–M.)* v0.237.0 makes the stretch's highlight shoulder adjustable and lets the owner *ask* for
   more of it ("Core blown out"), but a beginner has to notice their core is washed out first — and the editor's
