@@ -6248,8 +6248,20 @@ to **Shipped**.)_
   clipping is a display-space property) but sanity-check against the linear data so a truly saturated core isn't
   promised a recovery that can't happen; and return "no suggestion" rather than 0 when there's no bright core at all,
   so the button self-hides instead of implying the picture has a problem.
-- **NEW IDEA (Builder 2026-08-06, spotted while adding the 10th and 11th Adaptive-Auto chips) — the "How did Auto
-  do?" chip row is becoming a wall.** *(Friendliness — PRIORITY 3; size S; frontend-only.)* `AUTO_FEEDBACK_CHIPS` is
+- ~~**NEW IDEA (Builder 2026-08-06, spotted while adding the 10th and 11th Adaptive-Auto chips) — the "How did Auto
+  do?" chip row is becoming a wall.**~~ — **SHIPPED v0.239.1** (Builder 2026-08-06, branch
+  `claude/gallant-galileo-kdy4gc`). Took the **five labelled clusters** shape rather than the −/+ collapse,
+  precisely because of the entry's own "care" note: clustering keeps *both* halves of every opposing pair visible
+  and one tap apart, so the walk-back is never further away than the tap that got the user there. Each chip now
+  carries a `group` (Brightness · Sharpness · Grain · Colour · Bright core) and a new pure
+  `autoFeedbackGroups()` clusters them in declaration order; the row renders as five small labelled questions
+  instead of eleven equal-weight buttons. **Pure presentation over the existing cue keys** — no new endpoint, no
+  change to what a tap sends, and `AUTO_FEEDBACK_CHIPS` stays the contract (it gained a field, lost nothing).
+  **Tests** (`AutoFeedback.test.tsx`, +5): the rendered row shows all five headings *and* still offers every one
+  of the eleven cues as its own button, plus pure-function tests that grouping keeps every chip exactly once in
+  order, collapses to ≤ 6 clusters, holds each opposing pair in one cluster, and groups a caller's own list
+  without mutating the shipped one. *(Original spec kept below for provenance.)*
+  *(Friendliness — PRIORITY 3; size S; frontend-only.)* `AUTO_FEEDBACK_CHIPS` is
   now eleven flat chips ("Too dark", "Too bright", "Too soft", "Over-sharpened", "Too noisy", "Over-smoothed",
   "Colours too weak", "Colours too strong", "Too green", "Core blown out", "Core looks flat"). Each one is good, but
   eleven equal-weight buttons is *more* decision for a beginner, not less — the opposite of what the feature is for,
