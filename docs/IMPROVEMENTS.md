@@ -49,6 +49,26 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **⚠ INFRA (Builder 2026-08-06, observed while merging v0.244.x; NOT a code bug — needs the owner) — GitHub
+  Actions has stopped running CI for this repo, so the independent safety net on `main` is currently blind.**
+  *(Infra / trust — no code fix available to an agent.)* **Evidence:** PR **#539** was opened and merged with
+  `get_check_runs` returning **`total_count: 0`** — no check was ever created for it — and no workflow run exists
+  for the resulting `main` push either. The last run that *did* exist, on `main` @ `261c351`, ended
+  **`conclusion: failure` on `run_attempt: 3` with both jobs `cancelled`**, each with `runner_id: 0` /
+  `runner_name: ""` and `started_at == created_at`, completing after ~15 minutes — i.e. **no runner ever picked
+  them up**; the same pattern hit PR #538's run. So the red on `main` is a *queue* failure, not a test failure:
+  the identical tree ran fully green locally (**Python 2507 passed / 2 skipped** at `261c351`, **2510 / 2** with
+  the v0.244.x work, frontend **1772 passed** across 163 files, `tsc --noEmit` clean, `vite build` fine).
+  **Why it matters:** AGENTS.md §8 makes CI the independent net behind a zero-touch, self-merging project, and
+  §12 tells each run to fix a red `main` first. With no runs being produced, "is `main` green?" can only be
+  answered by an agent's own local suite — and a future run could waste itself chasing a red that is really a
+  billing/quota/runner-availability problem. **Likely causes (owner-side, an agent cannot fix any of them):**
+  Actions minutes exhausted or a spending limit reached on the account; Actions disabled for the repo or the org;
+  or a hosted-runner outage. **Check:** repo *Settings → Actions → General*, and the account's *Billing →
+  Actions* usage. Once runs resume, re-run the workflow on `main` to get a real signal. Until then, treat a
+  cancelled-job "failure" on `main` as **unknown**, not red, and rely on the local suite (§5) — but do not relax
+  the "only merge fully-green work" rule; the local run is the gate, exactly as §8 already says.
+
 Each open entry below was traced through the code and, where marked *reproduced*,
 demonstrated by running it. Editor bugs first (PRIORITY 1), within each group
 ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
