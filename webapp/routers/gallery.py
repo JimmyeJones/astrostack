@@ -71,8 +71,37 @@ class GalleryItem(BaseModel):
     seam_verdict: str | None = None
 
 
+class VideoStillItem(BaseModel):
+    """One finished Moon/Sun still, as the Gallery needs to show it.
+
+    A video still is *not* a stack run — it has no target, no project DB, no
+    stacking options and none of the per-run actions (edit, reuse settings, set
+    as cover) apply — so it travels in its own list rather than being squeezed
+    into :class:`GalleryItem`. Read-only: everything here is derived from the
+    ``meta.json`` the stack already wrote.
+    """
+
+    capture_id: str
+    #: "Moon" / "Sun" / the folder's base name — what the Moon & Sun page shows.
+    label: str
+    #: "lunar" | "solar" | "other".
+    kind: str
+    created_utc: str
+    width: int
+    height: int
+    #: How many video frames were averaged into this picture.
+    n_stacked: int
+    #: The video file it came from, so a user with several clips can tell them apart.
+    source_name: str
+    preview_url: str
+
+
 class GalleryResponse(BaseModel):
     items: list[GalleryItem]
+    #: Finished Moon/Sun stills, newest first. Additive: an older frontend
+    #: ignores the field, and an install that has never stacked a video sends an
+    #: empty list.
+    videos: list[VideoStillItem] = []
 
 
 def _parse_options(options_json: str | None) -> dict[str, Any]:
@@ -147,7 +176,39 @@ def get_gallery(request: Request) -> GalleryResponse:
 
     # Newest first across all targets.
     items.sort(key=lambda it: it.timestamp_utc, reverse=True)
-    return GalleryResponse(items=items)
+    return GalleryResponse(items=items, videos=_video_stills(request))
+
+
+def _video_stills(request: Request) -> list[VideoStillItem]:
+    """Finished Moon/Sun stills, newest first.
+
+    Folded in here because the Gallery is where *every other* finished picture
+    lives: before this, a beginner who stacked their first Moon picture went
+    looking for it alongside their deep-sky stacks and found nothing. It stays a
+    strictly read-only extra source — a cheap directory read that never touches
+    the Library, and one that must never break the gallery if it fails.
+    """
+    from webapp import video
+
+    settings = deps.get_settings(request)
+    try:
+        metas = video.iter_results(settings)
+    except Exception:  # noqa: BLE001 — a video-store problem must not 500 the gallery
+        return []
+    return [
+        VideoStillItem(
+            capture_id=m.capture_id,
+            label=m.label,
+            kind=m.kind,
+            created_utc=m.created_utc,
+            width=m.width,
+            height=m.height,
+            n_stacked=m.n_stacked,
+            source_name=m.source_name,
+            preview_url=f"/api/videos/{m.capture_id}/preview.png",
+        )
+        for m in metas
+    ]
 
 
 class BestPicture(BaseModel):

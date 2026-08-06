@@ -1,0 +1,289 @@
+{
+  "background.final_gradient": {
+    "box_size": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "int"
+    },
+    "detect_sigma": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "float"
+    },
+    "dilate_px": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "int"
+    },
+    "match_channels": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "bool"
+    },
+    "mode": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "enum"
+    }
+  },
+  "background.level_coverage": {
+    "object_sigma": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "float"
+    }
+  },
+  "background.subtract": {
+    "box_size": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "int"
+    },
+    "mode": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "enum"
+    }
+  },
+  "detail.chroma_denoise": {
+    "protect_stars": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "bool"
+    },
+    "radius": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "float"
+    },
+    "strength": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    }
+  },
+  "detail.deconvolve": {
+    "iterations": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "int"
+    },
+    "psf_sigma": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    }
+  },
+  "detail.denoise": {
+    "method": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "enum"
+    },
+    "strength": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    }
+  },
+  "detail.hot_pixels": {
+    "sigma": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    }
+  },
+  "detail.sharpen": {
+    "amount": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "radius": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    }
+  },
+  "geometry.crop": {
+    "x0": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "x1": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "y0": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "y1": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    }
+  },
+  "geometry.resize": {
+    "scale": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    }
+  },
+  "geometry.rotate": {
+    "angle": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "expand": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "bool"
+    }
+  },
+  "stars.boost_nebula": {
+    "amount": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "size": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "int"
+    }
+  },
+  "stars.reduce": {
+    "amount": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "protect_nebula": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "bool"
+    },
+    "size": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "int"
+    }
+  },
+  "tone.color_calibrate": {
+    "mode": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "enum"
+    }
+  },
+  "tone.curves": {
+    "auto": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "bool"
+    },
+    "points": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "curve"
+    }
+  },
+  "tone.levels": {
+    "black": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "gamma": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "white": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    }
+  },
+  "tone.neutralize_background": {
+    "strength": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    }
+  },
+  "tone.saturation": {
+    "amount": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    }
+  },
+  "tone.scnr": {
+    "amount": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "mode": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "enum"
+    },
+    "protect_noise": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "bool"
+    }
+  },
+  "tone.stretch": {
+    "black": {
+      "depends_on": "mode=asinh",
+      "group": "simple",
+      "type": "float"
+    },
+    "highlights": {
+      "depends_on": null,
+      "group": "advanced",
+      "type": "float"
+    },
+    "mode": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "enum"
+    },
+    "stretch": {
+      "depends_on": "mode=asinh",
+      "group": "simple",
+      "type": "float"
+    },
+    "target_bg": {
+      "depends_on": "mode=stf",
+      "group": "simple",
+      "type": "float"
+    }
+  },
+  "tone.white_balance": {
+    "b": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "g": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    },
+    "r": {
+      "depends_on": null,
+      "group": "simple",
+      "type": "float"
+    }
+  }
+}
