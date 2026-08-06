@@ -67,8 +67,12 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 # Below this many *strided* sky pixels a per-level median is meaningless noise,
-# so we never level a level with fewer — even on a heavily-decimated proxy where
-# scaling ``min_pixels_per_level`` down would otherwise reach into single digits.
+# so we never *measure* a level with fewer — even on a heavily-decimated proxy
+# where scaling ``min_pixels_per_level`` down would otherwise reach into single
+# digits. It is deliberately a floor on **measuring**, not on *considering*: a
+# level that clears the export's own full-res-equivalent floor but not this one
+# is still leveled, from its neighbours' interpolated offset (see
+# ``include_min`` in :func:`_level_context`).
 _MIN_STRIDED_PIXELS = 12
 
 # A starved coverage level is only re-measured against its own statistics when
@@ -204,7 +208,10 @@ class _LevelContext:
     detect: np.ndarray         # luminance the object mask was measured on
     object_mask: np.ndarray    # stars/nebulosity — excluded from every sky sample
     max_level_sigma: float     # above this spread a level is structure, not sky
-    effective_min: int         # pixel floor, scaled for a strided proxy
+    # Floor on *measuring* a level's own sky median. The separate, lower floor on
+    # *considering* a level at all (the export-equivalent count) is applied when
+    # ``big_levels`` is built — see :func:`_level_context`.
+    effective_min: int
 
 
 def _level_context(
@@ -227,11 +234,20 @@ def _level_context(
 
     # Select the *same set* of coverage levels the full-res export would, by
     # gating on the full-resolution-equivalent pixel count: a strided proxy pixel
-    # stands in for ``step²`` full-res pixels, so scale the floor by 1/step²
-    # (never below a handful of pixels — a median over 3 pixels is noise).
+    # stands in for ``step²`` full-res pixels, so scale the floor by 1/step².
     step = max(1, int(round(float(proxy_scale))))
-    effective_min = max(
-        _MIN_STRIDED_PIXELS, int(round(min_pixels_per_level / (step * step))))
+    include_min = max(1, int(round(min_pixels_per_level / (step * step))))
+    # ...but never *measure* a level's own sky median from a handful of pixels:
+    # a median over 3 samples is noise, whatever it stands in for. On a heavily
+    # decimated proxy (step ≥ 5, i.e. a canvas over ~7500 px — a big mosaic) the
+    # two part company, and the gap used to be silent divergence: a level that
+    # cleared the export's floor but not this one dropped out of ``big_levels``
+    # entirely, so the preview neither measured **nor filled** it while the export
+    # leveled it — the panel kept its whole residual in the preview only. Keeping
+    # it *included* but unmeasurable routes it to the interpolated fill below,
+    # which is exactly what the export does for a level it can't measure either.
+    # At step ≤ 4 the two floors coincide, so the ordinary path is unchanged.
+    effective_min = max(_MIN_STRIDED_PIXELS, include_min)
 
     # Bin by the true per-pixel frame count when the caller provides it (quality
     # weighting fuzzes the weighted-sum ``coverage``); otherwise fall back to the
@@ -270,13 +286,15 @@ def _level_context(
     # entirely swallowed is still *considered* (and rescued below) instead of
     # dropping out of the list unnoticed.
     levels, region_counts = np.unique(cov_int[valid_pix], return_counts=True)
-    # The levels big enough to be worth correcting at all. A coverage value
-    # covering fewer than the floor's worth of pixels *in total* is a sliver, not
-    # a panel: it carries no reliable median, and it is left untouched — neither
-    # measured nor filled — exactly as it always has been.
+    # The levels big enough to be worth correcting at all — gated on the
+    # export-equivalent count, so the preview considers exactly the levels the
+    # full-res export does at any stride. A coverage value covering fewer than
+    # that in *total* is a sliver, not a panel: it carries no reliable median,
+    # and it is left untouched — neither measured nor filled — exactly as it
+    # always has been.
     big_levels = [
         int(lv) for lv, n in zip(levels, region_counts)
-        if lv > 0 and n >= effective_min
+        if lv > 0 and n >= include_min
     ]
 
     _, med, std = sigma_clipped_stats(luma, mask=~finite, sigma=3.0, maxiters=5)
@@ -537,6 +555,15 @@ def level_by_coverage(
         but leveled in the export** — a visible mosaic panel-step mismatch
         between the live preview and the exported image. Default ``1.0`` (the
         full-res export) leaves the behaviour unchanged.
+
+        Beyond ~×4 the scaled floor would drop below the handful of pixels a
+        median needs, so measuring stops there (``_MIN_STRIDED_PIXELS``) — but
+        *considering* the level does not: a level that clears the export's
+        full-res-equivalent floor without clearing the measurement floor is
+        given its neighbours' interpolated offset, exactly as the export does
+        for a level whose sky it cannot read. A level below the
+        export-equivalent floor is a genuine sliver and stays untouched at every
+        stride.
     """
     out = rgb.astype(np.float32, copy=True)
 
