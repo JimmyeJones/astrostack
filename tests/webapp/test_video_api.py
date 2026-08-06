@@ -332,6 +332,38 @@ def test_cropping_trims_the_sky_and_keeps_the_moon(client, data_root):
     assert tarr.shape[:2] == (result["height"], result["width"])
 
 
+def test_cropping_in_place_gives_what_a_re_stack_would_have(client, data_root):
+    """The reason "Crop it" no longer re-stacks: it can't tell you anything new.
+
+    Cropping the saved picture and re-stacking the capture with ``crop=True``
+    must land on the same picture — same size, same pixels — otherwise the fast
+    path would be quietly changing someone's result to save time.
+    """
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    _drop_capture(data_root)
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 30},
+    ).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    assert client.post("/api/videos/Lunar_video/crop").status_code == 200
+    in_place = np.asarray(Image.open(io.BytesIO(
+        client.get("/api/videos/Lunar_video/preview.png").content)).convert("RGB"))
+
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 30, "crop": True},
+    ).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    re_stacked = np.asarray(Image.open(io.BytesIO(
+        client.get("/api/videos/Lunar_video/preview.png").content)).convert("RGB"))
+
+    assert in_place.shape == re_stacked.shape
+    assert np.array_equal(in_place, re_stacked)
+
+
 def test_cropping_is_opt_in_so_an_omitted_field_changes_nothing(client, data_root):
     """Upgrade safety: a client that never heard of cropping gets the old picture."""
     _drop_capture(data_root)
@@ -342,8 +374,14 @@ def test_cropping_is_opt_in_so_an_omitted_field_changes_nothing(client, data_roo
     assert client.get("/api/videos").json()["captures"][0]["result"]["width"] == 64
 
 
-def test_a_result_stacked_before_cropping_existed_reads_as_uncropped(client, data_root):
-    """Upgrade safety: an old ``meta.json`` has none of the framing fields."""
+def test_a_result_stacked_before_cropping_existed_gets_measured(client, data_root):
+    """Upgrade safety: an old ``meta.json`` has none of the framing fields.
+
+    It still loads and still reads as *uncropped* — and because cropping now
+    works off the saved picture, its framing is measured on the spot, so a
+    picture the user already had gets the same offer a new one does instead of
+    being stuck at "nothing to trim" because nobody ever looked.
+    """
     import json
 
     from webapp.config import Settings
@@ -359,17 +397,20 @@ def test_a_result_stacked_before_cropping_existed_reads_as_uncropped(client, dat
     meta_path = result_dir(settings, "Lunar_video") / META_NAME
     raw = json.loads(meta_path.read_text(encoding="utf-8"))
     for key in (
-        "crop_applied", "crop_available", "crop_trim_fraction",
+        "crop_applied", "crop_available", "crop_trim_fraction", "crop_measured",
         "source_width", "source_height",
     ):
-        raw.pop(key)
+        raw.pop(key, None)
     meta_path.write_text(json.dumps(raw), encoding="utf-8")
 
     result = client.get("/api/videos").json()["captures"][0]["result"]
     assert result is not None
+    # Nothing claims it was cropped — it wasn't.
     assert result["crop_applied"] is False
-    assert result["crop_available"] is False
-    assert result["crop_trim_fraction"] == 0.0
+    # ...but the framing is now measured from the saved picture, so the offer
+    # is the same one this capture gets when stacked by a current version.
+    assert result["crop_available"] is True
+    assert result["crop_trim_fraction"] > 0.15
     # ...and the size still reports as the picture's own, not as 0.
     assert (result["source_width"], result["source_height"]) == (64, 48)
 

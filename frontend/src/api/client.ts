@@ -1354,6 +1354,9 @@ export interface VideoResult {
   crop_trim_fraction?: number;
   source_width?: number;
   source_height?: number;
+  // True when the still was cropped in place and its full frame is still saved
+  // beside it, so the crop can be undone in one click.
+  crop_restorable?: boolean;
 }
 
 export interface VideoCapture {
@@ -2111,4 +2114,11 @@ export const api = {
   ) => req<{ job_id: string }>(`/api/videos/${encodeURIComponent(id)}/stack`, {
     method: "POST", body: JSON.stringify(body),
   }),
+  // Trim the empty sky off a still that already exists. Not a job: it slices
+  // the saved picture, so it returns the updated result straight away instead
+  // of decoding the capture a second time.
+  cropVideoStill: (id: string) =>
+    req<VideoResult>(`/api/videos/${encodeURIComponent(id)}/crop`, { method: "POST" }),
+  restoreVideoStill: (id: string) =>
+    req<VideoResult>(`/api/videos/${encodeURIComponent(id)}/uncrop`, { method: "POST" }),
 };
