@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, frameAccountingNote, roughlyAlignedNote, calibrationSummaryText } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, roughlyAlignedNote, calibrationSummaryText } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import { SAMPLE_TOUR_COPY } from "../components/SampleTourNote";
@@ -157,6 +157,23 @@ describe("HistoryView", () => {
       expect(
         screen.getByText("Auto white-balanced from 240 stars ✓"),
       ).toBeInTheDocument());
+  });
+
+  it("explains why a walk-away run's quality weighting did not count", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 60, n_frames: 6, weighting: null,
+      weighting_skipped: { reason: "minmax", auto: true, min_frames: 11 },
+      cards: [{ key: "STACKER", value: "min-max-reject", comment: "stacking method" }],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    await waitFor(() =>
+      expect(screen.getByText(/Quality weighting was on, but this stack with 6 subs/))
+        .toBeInTheDocument());
+    expect(screen.getByText(/from 11 subs it switches to sigma clipping/)).toBeInTheDocument();
   });
 
   it("tells the user when a saved calibration pick was skipped by the run", async () => {
@@ -930,6 +947,43 @@ describe("weightingSummaryText", () => {
   it("formats large sub counts with thousands separators", () => {
     expect(weightingSummaryText({ mode: "quality", n_downweighted: 120 }, 2400)).toContain(
       "of your 2,400 subs, 120 were",
+    );
+  });
+});
+
+describe("weightingSkippedText", () => {
+  it("returns null when nothing was skipped", () => {
+    expect(weightingSkippedText(null)).toBeNull();
+    expect(weightingSkippedText(undefined)).toBeNull();
+  });
+  it("explains an auto-picked min/max and when weighting comes back", () => {
+    const s = weightingSkippedText({ reason: "minmax", auto: true, min_frames: 11 }, 6);
+    expect(s).toContain("Quality weighting was on");
+    expect(s).toContain("with 6 subs");
+    expect(s).toContain("combines by rank instead of by weight");
+    expect(s).toContain("from 11 subs");
+    // An auto pick is not the user's mistake — don't tell them to change a setting.
+    expect(s).not.toContain("Use sigma clipping instead");
+  });
+  it("tells a user who ticked min/max themselves how to get weighting back", () => {
+    const s = weightingSkippedText({ reason: "minmax", auto: false }, 40);
+    expect(s).toContain("with 40 subs");
+    expect(s).toContain("Use sigma clipping instead");
+    expect(s).not.toContain("picked automatically");
+  });
+  it("drops the sub count when it is unknown, and still explains", () => {
+    const s = weightingSkippedText({ reason: "minmax", auto: false }, null);
+    expect(s).toContain("this stack used min/max rejection");
+    expect(s).not.toContain("with ");
+  });
+  it("copes with an auto pick whose crossover count is missing (older master)", () => {
+    const s = weightingSkippedText({ reason: "minmax", auto: true }, 4);
+    expect(s).toContain("picked automatically");
+    expect(s).toContain("with more subs, weighting counts again");
+  });
+  it("formats large sub counts with thousands separators", () => {
+    expect(weightingSkippedText({ reason: "minmax", auto: false }, 1200)).toContain(
+      "with 1,200 subs",
     );
   });
 });

@@ -872,6 +872,9 @@ def test_weighting_provenance_omitted_when_min_max_reject_ignores_weights(tmp_pa
     assert hdr["STACKER"] == "min-max-reject"
     assert "WGTMODE" not in hdr, "min/max reject ignores weights — must not claim weighting"
     assert "WGTNDOWN" not in hdr
+    # …but say *why* it had no effect, so silence can't be read as "weighting off".
+    assert hdr["WGTSKIP"] == "minmax"
+    assert bool(hdr["WGTSKAUT"]) is False, "the user ticked min/max — not the auto-picker"
 
     # Control: quality weighting on the κ-σ path DOES influence the result (pass-2
     # weighted sum), so its provenance is still honestly recorded.
@@ -886,6 +889,36 @@ def test_weighting_provenance_omitted_when_min_max_reject_ignores_weights(tmp_pa
         hdr2 = hdul[0].header
     assert hdr2["WGTMODE"] == "quality"
     assert int(hdr2["WGTNDOWN"]) > 0
+    assert "WGTSKIP" not in hdr2, "the weights applied here — nothing was skipped"
+
+
+def test_walk_away_small_stack_records_why_quality_weighting_did_not_count(tmp_path):
+    """The walk-away chains (watcher auto-stack / one-click Process target) set
+    `auto_reject`, which resolves to min/max below `kappa_min_frames` — an order
+    statistic that ignores per-frame weights. The user never sees the Stack form's
+    pick-time warning on that path, so the run must record *why* their quality
+    weighting had no effect, and that it comes back on a bigger stack."""
+    from astropy.io import fits
+
+    from seestack.stack.stacker import kappa_min_frames
+
+    proj = _build_project(tmp_path / "walkaway", n=5)
+    try:
+        for i, f in enumerate(proj.iter_frames()):
+            proj.update_frame(f.id, fwhm_px=2.5 + 0.6 * i, star_count=40 - 3 * i)
+        res = run_stack(proj, StackOptions(
+            quality_weighted=True, auto_reject=True,
+            max_workers=2, output_name="walkaway"))
+    finally:
+        proj.close()
+    with fits.open(res.fits_path) as hdul:
+        hdr = hdul[0].header
+    # 5 frames is below the κ-σ crossover, so auto_reject picked min/max.
+    assert hdr["STACKER"] == "min-max-reject"
+    assert "WGTMODE" not in hdr
+    assert hdr["WGTSKIP"] == "minmax"
+    assert bool(hdr["WGTSKAUT"]) is True
+    assert int(hdr["WGTSKMIN"]) == kappa_min_frames(3.0)
 
 
 def test_stack_records_calibration_provenance(tmp_path):
