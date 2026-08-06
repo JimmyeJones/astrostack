@@ -82,6 +82,29 @@ class LuckyOptions:
 
 
 @dataclass
+class GradeResult:
+    """Pass 1 on its own: every frame's sharpness, and nothing else.
+
+    Grading is the cheap half of a lucky-imaging stack — it decodes once and
+    keeps a scalar per frame — so it can be run *before* committing to a stack,
+    to answer "how picky should I be with this capture?" while the answer can
+    still change what happens. :func:`stack_video` runs it internally too, so
+    there is exactly one grading pass in the codebase.
+    """
+
+    #: Every graded frame's sharpness, in capture order.
+    scores: tuple[float, ...]
+    #: Frames actually decoded and graded (after ``max_frames`` sampling).
+    n_graded: int
+    #: 1 = every frame graded; >1 = the capture was evenly sampled down.
+    stride: int
+    width: int
+    height: int
+    source: str = ""
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
 class LuckyResult:
     """The stacked still plus the numbers needed to explain it to the user."""
 
@@ -110,6 +133,11 @@ class LuckyResult:
     #: Which graded frames made the cut (indices into the *sampled* sequence,
     #: ascending). Exposed so the choice is inspectable rather than magic.
     kept_indices: tuple[int, ...] = ()
+    #: Every graded frame's sharpness, in capture order. The grading pass computes
+    #: these anyway and used to drop them on the floor; keeping them is what lets
+    #: :mod:`seestack.video.quality` show the user how steady their capture was and
+    #: whether a different keep-% would suit it better.
+    scores: tuple[float, ...] = ()
     source: str = ""
     warnings: list[str] = field(default_factory=list)
 
@@ -194,6 +222,65 @@ def _shift_frame(rgb: np.ndarray, dy: float, dx: float) -> np.ndarray:
     return out
 
 
+def grade_video(
+    path: str | Path,
+    options: LuckyOptions | None = None,
+    *,
+    info: VideoInfo | None = None,
+    progress: Callable[[str, int, int], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> GradeResult:
+    """Decode a capture once and score every frame's sharpness — pass 1 alone.
+
+    Same decode, same sampling and the same ``progress("grade", …)`` /
+    ``should_cancel`` contract as :func:`stack_video`, which calls this for its
+    first pass. Useful on its own to show the user what their capture looks like
+    before they choose how ruthless to be with it.
+
+    Raises ``ValueError`` if the file has fewer than :data:`MIN_FRAMES` usable
+    frames, and :class:`~seestack.video.ffmpeg.VideoToolsMissing` if ffmpeg
+    isn't installed.
+    """
+    opts = options or LuckyOptions()
+    src = Path(path)
+    vinfo = info or probe_video(src)
+    warnings: list[str] = []
+
+    stride = _sampling_stride(vinfo.n_frames, opts.max_frames)
+    if stride > 1:
+        warnings.append(
+            f"Long capture ({vinfo.n_frames} frames) — graded every {stride}th frame "
+            f"to keep this quick; seeing changes slowly, so the sharp moments are "
+            f"still found."
+        )
+
+    scores: list[float] = []
+    expected = max(1, vinfo.n_frames // stride) if vinfo.n_frames else 0
+    for i, frame in enumerate(
+        iter_frames(src, stride=stride, width=vinfo.width, height=vinfo.height)
+    ):
+        if should_cancel is not None and should_cancel():
+            raise VideoStackCancelled("cancelled while grading frames")
+        scores.append(frame_sharpness(frame_luma(frame)))
+        if progress is not None:
+            progress("grade", i + 1, expected)
+
+    if len(scores) < MIN_FRAMES:
+        raise ValueError(
+            f"{src.name} only has {len(scores)} readable frame(s) — a video stack "
+            f"needs at least {MIN_FRAMES}."
+        )
+    return GradeResult(
+        scores=tuple(float(s) for s in scores),
+        n_graded=len(scores),
+        stride=stride,
+        width=vinfo.width,
+        height=vinfo.height,
+        source=str(src),
+        warnings=warnings,
+    )
+
+
 def stack_video(
     path: str | Path,
     options: LuckyOptions | None = None,
@@ -215,34 +302,15 @@ def stack_video(
     opts = options or LuckyOptions()
     src = Path(path)
     vinfo = info or probe_video(src)
-    warnings: list[str] = []
-
-    stride = _sampling_stride(vinfo.n_frames, opts.max_frames)
-    if stride > 1:
-        warnings.append(
-            f"Long capture ({vinfo.n_frames} frames) — graded every {stride}th frame "
-            f"to keep this quick; seeing changes slowly, so the sharp moments are "
-            f"still found."
-        )
 
     # ---- pass 1: grade -----------------------------------------------------
-    scores: list[float] = []
-    expected = max(1, vinfo.n_frames // stride) if vinfo.n_frames else 0
-    for i, frame in enumerate(
-        iter_frames(src, stride=stride, width=vinfo.width, height=vinfo.height)
-    ):
-        if should_cancel is not None and should_cancel():
-            raise VideoStackCancelled("cancelled while grading frames")
-        scores.append(frame_sharpness(frame_luma(frame)))
-        if progress is not None:
-            progress("grade", i + 1, expected)
-
-    n_graded = len(scores)
-    if n_graded < MIN_FRAMES:
-        raise ValueError(
-            f"{src.name} only has {n_graded} readable frame(s) — a video stack "
-            f"needs at least {MIN_FRAMES}."
-        )
+    graded = grade_video(
+        src, opts, info=vinfo, progress=progress, should_cancel=should_cancel,
+    )
+    scores = list(graded.scores)
+    n_graded = graded.n_graded
+    stride = graded.stride
+    warnings: list[str] = list(graded.warnings)
 
     # ---- choose the keepers ------------------------------------------------
     n_keep = max(1, int(math.ceil(n_graded * opts.keep_percent / 100.0)))
@@ -310,6 +378,7 @@ def stack_video(
         sharpness_kept_median=float(np.median(kept_scores)) if kept_scores else 0.0,
         sharpness_all_median=float(np.median(scores)) if scores else 0.0,
         kept_indices=tuple(sorted(keep_idx)),
+        scores=tuple(float(s) for s in scores),
         source=str(src),
         warnings=warnings,
     )
