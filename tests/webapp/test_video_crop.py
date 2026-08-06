@@ -36,6 +36,12 @@ def _write_still(data_root: Path, capture_id: str = "Lunar_video", *,
     """Put a finished still on disk exactly as ``_video_stack_body`` would."""
     settings = Settings(data_root=str(data_root))
     display = _disk_still() if image is None else image
+    # The capture folder itself, so `/api/videos` lists it. Never decoded — the
+    # listing is a directory walk and cropping only ever touches the saved
+    # picture — so a placeholder file is enough and no ffmpeg is needed.
+    incoming = Path(data_root) / "incoming" / capture_id
+    incoming.mkdir(parents=True, exist_ok=True)
+    (incoming / "clip.mp4").write_bytes(b"not really a video")
     out_dir = video.result_dir(settings, capture_id)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -238,6 +244,77 @@ def test_the_meta_on_disk_is_what_the_api_reports(client, data_root, endpoint):
     assert (meta.width, meta.height) == (result["width"], result["height"])
     assert meta.crop_applied is result["crop_applied"]
     assert meta.crop_available is result["crop_available"]
+
+
+def test_a_still_from_before_framing_existed_gets_the_offer_too(client, data_root):
+    """The owner's existing Moon pictures must not miss out on the crop.
+
+    An older ``meta.json`` carries none of the ``crop_*`` fields, so it reads as
+    "nothing to trim" when the truth is nobody ever looked. Since cropping works
+    off the saved picture, the measurement can simply be made now.
+    """
+    settings = _write_still(data_root)
+    out_dir = video.result_dir(settings, "Lunar_video")
+    meta_path = out_dir / video.META_NAME
+    raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    for key in ("crop_applied", "crop_available", "crop_trim_fraction",
+                "crop_measured", "source_width", "source_height"):
+        raw.pop(key, None)
+    meta_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert result["crop_available"] is True
+    assert result["crop_trim_fraction"] > 0.15
+    # ...and it is offered for real: the crop then works.
+    assert client.post("/api/videos/Lunar_video/crop").status_code == 200
+
+
+def test_the_backfilled_measurement_is_recorded_once(client, data_root, monkeypatch):
+    """It costs one image read per pre-existing still, ever — not one per page
+    load, which on a library of stills would be a directory of PNG decodes on
+    every poll."""
+    settings = _write_still(data_root)
+    meta_path = video.result_dir(settings, "Lunar_video") / video.META_NAME
+    raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    for key in ("crop_applied", "crop_available", "crop_trim_fraction", "crop_measured"):
+        raw.pop(key, None)
+    meta_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    calls: list[int] = []
+    real = video.measure_framing
+    monkeypatch.setattr(
+        video, "measure_framing", lambda img, **kw: (calls.append(1), real(img, **kw))[1],
+    )
+    for _ in range(3):
+        assert client.get("/api/videos").json()["captures"][0]["result"][
+            "crop_available"] is True
+    assert len(calls) == 1
+    assert json.loads(meta_path.read_text(encoding="utf-8"))["crop_measured"] is True
+
+
+def test_a_frame_filling_still_is_measured_but_never_offered(client, data_root):
+    """The backfill records "looked, nothing to trim" — it must not nag."""
+    settings = _write_still(data_root, image=_disk_still(radius=40.0))
+    meta_path = video.result_dir(settings, "Lunar_video") / video.META_NAME
+    raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    for key in ("crop_available", "crop_trim_fraction", "crop_measured"):
+        raw.pop(key, None)
+    meta_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert result["crop_available"] is False
+    assert json.loads(meta_path.read_text(encoding="utf-8"))["crop_measured"] is True
+
+
+def test_an_already_cropped_still_is_never_re_measured(client, data_root):
+    """Backfilling a cropped still would offer to crop the crop."""
+    settings = _write_still(data_root)
+    assert client.post("/api/videos/Lunar_video/crop").status_code == 200
+    meta = video.read_meta(settings, "Lunar_video")
+    assert meta is not None
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert result["crop_applied"] is True
+    assert result["crop_available"] is False
 
 
 def test_writing_a_new_still_drops_a_stale_full_frame_backup(data_root):
