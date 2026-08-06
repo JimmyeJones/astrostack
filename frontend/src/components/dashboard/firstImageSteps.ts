@@ -91,6 +91,46 @@ export function firstImageComplete(steps: FirstImageStep[]): boolean {
   return steps.length > 0 && steps.every((s) => s.done);
 }
 
+/**
+ * True when the user has a finished picture *by any route* — including a
+ * stacked Moon or Sun video.
+ *
+ * Every signal the four steps read is deep-sky (frames ingested, frames solved,
+ * stack runs), and a video capture does none of those by design: it ingests no
+ * FITS, solves nothing, and creates no `stack_runs` row. So someone whose first
+ * picture is the Moon can never tick a single step, and the card would keep
+ * telling them to go and make their first picture while it hangs in the Gallery.
+ *
+ * The **steps themselves are deliberately left alone** — they describe the
+ * deep-sky journey and are still exactly the right advice for what to do next.
+ * Only the "you have a picture" *outcome* recognises a still, so the card
+ * congratulates and retires instead of nagging.
+ */
+export function firstImageDone(
+  steps: FirstImageStep[],
+  stats: DashboardStats | undefined,
+): boolean {
+  return firstImageComplete(steps) || (stats?.n_video_stills ?? 0) > 0;
+}
+
+/**
+ * The congratulation, worded for how they actually got there — pointing a
+ * Moon-video user at the editor they can't use would be worse than saying
+ * nothing.
+ */
+export function firstImageDoneMessage(
+  steps: FirstImageStep[],
+  stats: DashboardStats | undefined,
+): string {
+  if (firstImageComplete(steps)) {
+    return "That's the whole journey — you've made your first picture. Open it "
+      + "in the editor to finish it off, then share it.";
+  }
+  return "You've made your first picture — your Moon/Sun still is in the "
+    + "Gallery. Deep-sky targets take the same four steps below whenever "
+    + "you're ready for one.";
+}
+
 /** The step the user should do next (the first unticked one), or null when the
  *  journey is complete — so the card can lead with one thing rather than four. */
 export function firstImageNextStep(steps: FirstImageStep[]): FirstImageStep | null {

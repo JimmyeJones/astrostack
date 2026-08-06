@@ -532,6 +532,11 @@ export interface DashboardStats {
   n_stack_runs: number;
   n_targets_with_stacks: number;
   active_jobs: number;
+  // Finished Moon/Sun stills. Optional: an older backend never sends it, and
+  // every reader treats a missing value as 0. These are pictures the deep-sky
+  // counters above genuinely cannot see (a video ingests no FITS, solves
+  // nothing and creates no stack run).
+  n_video_stills?: number;
   recent_stacks: {
     safe: string;
     target_name: string;

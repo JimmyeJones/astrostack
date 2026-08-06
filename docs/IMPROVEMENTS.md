@@ -10860,9 +10860,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   stack's, progress/cancel, the too-few-frames refusal), `tests/webapp/test_video_api.py` (+4 — grades without
   stacking, leaves an existing still alone, 404, and the path-escape rejection), `MoonSun.test.tsx` (+2).
 
-- **NEW IDEA (Builder 2026-08-06, found while shipping the Gallery stills v0.243.0 — traced, not reproduced) —
+- ~~**NEW IDEA (Builder 2026-08-06, found while shipping the Gallery stills v0.243.0 — traced, not reproduced) —
   the "Your first image" checklist can't see a Moon/Sun still, so a beginner whose *first* picture is the Moon is
-  still told they haven't made one.** *(Friendliness — PRIORITY 3; size S; frontend-only.)*
+  still told they haven't made one.**~~ — **FIXED v0.244.1** (Builder 2026-08-06, branch
+  `claude/gallant-galileo-syc60a`), built to the filed slice and its "care" note exactly. `GET /api/stats` gained
+  an additive `n_video_stills` (from a new `webapp.video.count_results`, a plain directory listing that never
+  opens a `meta.json` — the home page polls this endpoint), and a new pure `firstImageDone(steps, stats)` treats a
+  finished still as a picture. **The four steps are untouched**: they still tick only off frames ingested / ASTAP
+  ready / frames accepted / stack runs, so a video can never claim a sub was ingested or solved (pinned by a test
+  that a still leaves the step list reading `[false, true, false, false]`, i.e. exactly the ASTAP-readiness tick
+  it had anyway). Only the *outcome* recognises it, so the card congratulates and retires instead of nagging next
+  to a picture. `firstImageDoneMessage` words the well-done for how they got there — the deep-sky text still
+  points at the editor; the video text points at the Gallery, because a Moon still can't be opened in the editor —
+  and the "N of 4 done" count and progress bar are hidden in that case rather than printing "0 of 4 done" under a
+  congratulation. Upgrade-safe: additive response field with a default, `?? 0` on the client, no default flipped.
+  **Tests (+8):** `tests/webapp/test_stats.py` (+1 — counts a finished still, ignores a half-written folder),
+  `firstImageSteps.test.ts` (+5), `FirstImageCard.test.tsx` (+2). Original spec:
   `frontend/src/components/dashboard/firstImageSteps.ts` ticks each of its four steps off `GET /api/system` and
   `GET /api/stats`, and every signal it reads is deep-sky: frames ingested, frames solved, and stacks run
   (`stats.n_frames` / `n_stacks`). A Moon or Sun capture ingests **no** FITS, solves nothing and creates no
