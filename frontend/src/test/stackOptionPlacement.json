@@ -1,0 +1,167 @@
+{
+  "auto_reject": {
+    "depends_on": null,
+    "group": "simple",
+    "type": "bool"
+  },
+  "background_box_size": {
+    "depends_on": "background_flatten",
+    "group": "advanced",
+    "type": "int"
+  },
+  "background_flatten": {
+    "depends_on": null,
+    "group": "simple",
+    "type": "bool"
+  },
+  "background_mode": {
+    "depends_on": "background_flatten",
+    "group": "advanced",
+    "type": "enum"
+  },
+  "color_calibration": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
+  "color_calibration_mode": {
+    "depends_on": "color_calibration",
+    "group": "advanced",
+    "type": "enum"
+  },
+  "drizzle": {
+    "depends_on": null,
+    "group": "simple",
+    "type": "bool"
+  },
+  "drizzle_kernel": {
+    "depends_on": "drizzle",
+    "group": "advanced",
+    "type": "enum"
+  },
+  "drizzle_pixfrac": {
+    "depends_on": "drizzle",
+    "group": "advanced",
+    "type": "float"
+  },
+  "drizzle_reject": {
+    "depends_on": "drizzle",
+    "group": "simple",
+    "type": "bool"
+  },
+  "drizzle_scale": {
+    "depends_on": "drizzle",
+    "group": "advanced",
+    "type": "float"
+  },
+  "final_gradient_box_size": {
+    "depends_on": "final_gradient_removal",
+    "group": "advanced",
+    "type": "int"
+  },
+  "final_gradient_mode": {
+    "depends_on": "final_gradient_removal",
+    "group": "advanced",
+    "type": "enum"
+  },
+  "final_gradient_removal": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
+  "hot_pixel_sigma": {
+    "depends_on": "suppress_hot_pixels",
+    "group": "advanced",
+    "type": "float"
+  },
+  "lucky_fraction": {
+    "depends_on": null,
+    "group": "simple",
+    "type": "float"
+  },
+  "max_workers": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "int"
+  },
+  "min_max_reject": {
+    "depends_on": null,
+    "group": "simple",
+    "type": "bool"
+  },
+  "min_max_reject_count": {
+    "depends_on": "min_max_reject",
+    "group": "advanced",
+    "type": "int"
+  },
+  "mono": {
+    "depends_on": null,
+    "group": "simple",
+    "type": "bool"
+  },
+  "mosaic_canvas": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "enum"
+  },
+  "output_name": {
+    "depends_on": null,
+    "group": "simple",
+    "type": "str"
+  },
+  "photometric_normalize": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
+  "quality_weighted": {
+    "depends_on": null,
+    "group": "simple",
+    "type": "bool"
+  },
+  "quick_look_interval": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "int"
+  },
+  "save_progress": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
+  "scale_dark_to_light": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
+  "sigma_clip": {
+    "depends_on": null,
+    "group": "simple",
+    "type": "bool"
+  },
+  "sigma_kappa": {
+    "depends_on": "sigma_clip",
+    "group": "simple",
+    "type": "float"
+  },
+  "subpixel_refine": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
+  "suppress_hot_pixels": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
+  "tiff_mode": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "enum"
+  },
+  "use_gpu": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  }
+}

@@ -118,13 +118,13 @@ describe("firstImageDone", () => {
 
   it("words the well-done for how they actually got there", () => {
     const video = stats({ n_video_stills: 1 });
-    const msg = firstImageDoneMessage(firstImageSteps(sys(), video), video);
+    const msg = firstImageDoneMessage(firstImageSteps(sys(), video));
     // Pointing a Moon-video user at the deep-sky editor would be wrong.
     expect(msg).toContain("Gallery");
     expect(msg).not.toContain("editor");
 
     const deep = stats({ n_frames: 40, n_frames_accepted: 32, n_stack_runs: 1 });
-    expect(firstImageDoneMessage(firstImageSteps(sys(), deep), deep))
+    expect(firstImageDoneMessage(firstImageSteps(sys(), deep)))
       .toContain("editor");
   });
 });

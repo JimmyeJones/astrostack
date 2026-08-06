@@ -94,7 +94,7 @@ export function FirstImageCard() {
       ) : null}
       {done ? (
         <Stack gap="xs">
-          <Text size="sm">{firstImageDoneMessage(steps, stats.data)}</Text>
+          <Text size="sm">{firstImageDoneMessage(steps)}</Text>
           <Group gap="sm">
             <Button size="xs" variant="light" component={Link} to="/gallery">
               See your pictures
