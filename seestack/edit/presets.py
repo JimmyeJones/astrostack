@@ -427,7 +427,12 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # so the boost lifts real colour, not the residual OSC green cast. Gentle
     # (0.7) and monotone — it can only *reduce* excess green, never invent colour.
     scnr_amount = 0.7
-    # Adaptive Auto: shift these five data-driven values toward the owner's stored
+    # "Hold back highlights" starts *off*: the stretch's existing shoulder already
+    # rescues an ordinary core, and deciding from the image whether a core is
+    # clipping needs real-data threshold tuning (filed in docs/IMPROVEMENTS.md).
+    # It moves only when the owner says the core looks blown out.
+    highlight_protect = 0.0
+    # Adaptive Auto: shift these data-driven values toward the owner's stored
     # taste, each re-clamped to a safe range. An empty/absent profile returns them
     # unchanged, so a never-configured library's Auto is byte-for-byte identical.
     if prefs is not None:
@@ -444,6 +449,7 @@ def auto_recipe(rgb: np.ndarray | None = None,
             sharpen_amount=sharpen_amount,
             denoise_strength=denoise_strength,
             scnr_amount=scnr_amount,
+            highlight_protect=highlight_protect,
             object_type=object_type,
         )
         target_bg = adj["target_bg"]
@@ -451,6 +457,7 @@ def auto_recipe(rgb: np.ndarray | None = None,
         sharpen_amount = adj["sharpen_amount"]
         denoise_strength = adj["denoise_strength"]
         scnr_amount = adj["scnr_amount"]
+        highlight_protect = adj["highlight_protect"]
 
     # Never let the automatic denoise reach the glass-smooth end of the wavelet
     # op (see _AUTO_DENOISE_MAX). Applied after the taste profile so a learned
@@ -472,7 +479,13 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # no-op op.
     if denoise_strength >= 0.05:
         ops.append(("detail.denoise", {"method": "wavelet", "strength": denoise_strength}))
-    ops.append(("tone.stretch", {"mode": "stf", "target_bg": target_bg}))
+    stretch_params: dict = {"mode": "stf", "target_bg": target_bg}
+    if highlight_protect >= 0.01:
+        # Only carried when a taste bias actually asked for it, so the default
+        # recipe's op list — which saved recipes and tests compare against — is
+        # unchanged rather than gaining a param pinned at its own default.
+        stretch_params["highlights"] = round(highlight_protect, 3)
+    ops.append(("tone.stretch", stretch_params))
     if scnr_amount >= 0.05:  # a bias can dial the green removal down to nothing
         ops.append(("tone.scnr", {"amount": round(scnr_amount, 3)}))
     ops.append(("tone.saturation", {"amount": round(saturation, 3)}))

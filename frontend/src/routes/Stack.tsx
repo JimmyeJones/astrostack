@@ -15,7 +15,9 @@ import { dependencyMet } from "../api/depends";
 import { backgroundModeLabel, backgroundModeNudge } from "../backgroundModeNudge";
 import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
-import { masterOptionSuffix, masterSizeWarning } from "../calibrationFit";
+import {
+  exposureMismatch, masterOptionSuffix, masterSizeWarning, tempMismatch,
+} from "../calibrationFit";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
 import { memoryFixAction } from "../stackMemoryFix";
@@ -359,8 +361,15 @@ export function StackView() {
   // flat's exposure. Advisory only — the pick is still honoured.
   const masterById = (id: unknown) =>
     (masters.data ?? []).find((m) => String(m.id) === String(id ?? ""));
-  const expMismatch = (a: number | null | undefined, b: number | null | undefined) =>
-    a != null && b != null && b > 0 && Math.abs(a - b) / b > 0.25;
+  // The mismatch tests are the *engine's* — served in `tolerances` (with a
+  // mirrored fallback for an older backend) so a pair the finished run will
+  // complain about is one the form already warned about, and vice versa. The
+  // form used to have its own looser rule against its own denominator, so e.g. a
+  // 30 s dark on 25 s subs passed here and was flagged after the stack.
+  const tolerances = sug?.tolerances ?? null;
+  const expMismatch = (master: number | null | undefined,
+                       frames: number | null | undefined) =>
+    exposureMismatch(master, frames, tolerances);
   const subExp = sug?.params.exposure_s ?? null;
   const darkM = masterById(values.dark_master_id);
   // A dark shot at a different exposure than the subs can be rescaled to match —
@@ -383,12 +392,10 @@ export function StackView() {
   // CalibrationMasters.calibration_warnings temperature advisory, which until now
   // only reached the stack log). Independent of the exposure warning above: a
   // dark can match on exposure but still be temperature-mismatched.
-  const TEMP_MISMATCH_TOL_C = 5;
   const subTemp = sug?.params.sensor_temp_c ?? null;
   const darkTempWarning =
-    darkM?.sensor_temp_c != null && subTemp != null
-    && Math.abs(darkM.sensor_temp_c - subTemp) >= TEMP_MISMATCH_TOL_C
-      ? `This dark was shot at ${darkM.sensor_temp_c}°C but your subs are at ${subTemp}°C — dark current changes with temperature, so some may remain even at a matched exposure. A temperature-matched dark calibrates best.`
+    tempMismatch(darkM?.sensor_temp_c, subTemp, tolerances)
+      ? `This dark was shot at ${darkM?.sensor_temp_c}°C but your subs are at ${subTemp}°C — dark current changes with temperature, so some may remain even at a matched exposure. A temperature-matched dark calibrates best.`
       : null;
   // Proactive nudge: the dark's exposure is mismatched and no bias is selected,
   // but the library *holds* a master bias — so scaling is one click away rather

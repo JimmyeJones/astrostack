@@ -532,6 +532,7 @@ def asinh_stretch(
     stretch: float = 0.5,
     black: float = 0.35,
     protect_highlights: bool = True,
+    highlight_protect: float = 0.0,
 ) -> np.ndarray:
     """Asinh (inverse-hyperbolic-sine) stretch — the astrophotographer's stretch.
 
@@ -553,7 +554,12 @@ def asinh_stretch(
 
     NaN pixels (uncovered mosaic canvas) are excluded from every statistic and
     rendered black, exactly as in :func:`autostretch`.
+
+    ``highlight_protect`` (0..1, default 0) walks the highlight shoulder's knee
+    down (:func:`highlight_knee_for`) so a bright core is compressed harder and
+    keeps its detail. 0 is byte-for-byte the historical behaviour.
     """
+    knee = highlight_knee_for(highlight_protect)
     img = rgb.astype(np.float32, copy=True)
     if img.ndim == 2:
         img = np.stack([img, img, img], axis=-1)
@@ -604,7 +610,7 @@ def asinh_stretch(
         # The rolloff leaves the sky/mid-tones untouched, so it only recovers
         # core detail; `protect_highlights=False` restores the old hard clip.
         xr = (chan[finite] - shadows) / rng
-        x = _highlight_rolloff(xr) if protect_highlights else np.clip(xr, 0.0, 1.0)
+        x = _highlight_rolloff(xr, knee) if protect_highlights else np.clip(xr, 0.0, 1.0)
         out[..., c][finite] = np.clip(np.arcsinh(x / a) / denom, 0.0, 1.0)
 
     return out
@@ -616,6 +622,7 @@ def autostretch(
     target_bg: float = 0.20,
     sigma_factor: float = -2.0,
     protect_highlights: bool = True,
+    highlight_protect: float = 0.0,
 ) -> np.ndarray:
     """
     PixInsight-style "Screen Transfer Function" (STF) autostretch.
@@ -637,7 +644,14 @@ def autostretch(
 
     where ``m`` is chosen per channel so that ``mtf(median, m) = target_bg``
     after shadow clipping at ``median + sigma_factor·σ``.
+
+    ``highlight_protect`` (0..1, default 0) walks the highlight shoulder's knee
+    down (:func:`highlight_knee_for`), compressing more of the bright range so a
+    high-dynamic-range core keeps its structure instead of washing out. It moves
+    only values *above* the knee, so the sky still lands on ``target_bg``
+    unchanged; 0 reproduces the historical output byte-for-byte.
     """
+    knee = highlight_knee_for(highlight_protect)
     img = rgb.astype(np.float32, copy=True)
     if img.ndim == 2:
         # A 2-D (mono) array is treated as a grey image — expand to 3 channels
@@ -691,7 +705,7 @@ def autostretch(
         # leaves the sky/mid-tones untouched (they're far below the knee), so it
         # only recovers core detail. `protect_highlights=False` restores the old
         # hard-clip behaviour for callers that want it.
-        x = _highlight_rolloff(xr) if protect_highlights else np.clip(xr, 0.0, 1.0)
+        x = _highlight_rolloff(xr, knee) if protect_highlights else np.clip(xr, 0.0, 1.0)
         norm_med = max((med - shadows) / rng, 1e-6)
         m = _midtones_for(norm_med, target_bg)
         out_chan = out[..., c]
@@ -726,6 +740,30 @@ def _mtf(x: np.ndarray, m: float) -> np.ndarray:
 #: it — a bright HDR core that sits above the robust 99.5th-percentile ceiling —
 #: are soft-compressed into ``[knee, 1)`` instead of hard-clipping to flat white.
 _HIGHLIGHT_KNEE = 0.7
+
+#: Where the knee lands at full "hold the highlights back" strength. Below this
+#: the shoulder would start eating ordinary bright nebulosity rather than just the
+#: core, so it is the floor of the range :func:`highlight_knee_for` sweeps.
+_HIGHLIGHT_KNEE_MIN = 0.25
+
+
+def highlight_knee_for(protect: float = 0.0) -> float:
+    """Rolloff knee for a 0..1 "hold the bright cores back" strength.
+
+    ``protect=0`` — every caller's default — returns :data:`_HIGHLIGHT_KNEE`
+    **exactly**, so an untouched stretch is byte-for-byte what it always was.
+    Raising it walks the knee down toward :data:`_HIGHLIGHT_KNEE_MIN`, which
+    starts the Reinhard shoulder earlier and so compresses more of the bright
+    range: a blown-out galaxy/nebula core keeps a resolvable gradient instead of
+    rendering as flat white. Non-finite / out-of-range input is treated as 0 (no
+    extra protection) rather than raising — the value can reach here from a
+    stored recipe or a taste profile.
+    """
+    p = float(protect)
+    if not math.isfinite(p) or p <= 0.0:
+        return _HIGHLIGHT_KNEE
+    p = min(p, 1.0)
+    return float(_HIGHLIGHT_KNEE + (_HIGHLIGHT_KNEE_MIN - _HIGHLIGHT_KNEE) * p)
 
 
 def _highlight_rolloff(x: np.ndarray, knee: float = _HIGHLIGHT_KNEE) -> np.ndarray:
