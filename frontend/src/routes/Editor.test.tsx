@@ -1786,6 +1786,55 @@ describe("EditorView", () => {
     expect(screen.queryByLabelText("Set Strength from your data")).toBeNull();
   });
 
+  // ...but the real `tone.stretch` spec declares `highlights` as an **advanced**
+  // param, so in the running app that button sits inside the op panel's collapsed
+  // Advanced accordion, where a beginner selecting Stretch never looks. Having
+  // measured the core is washing out, the panel says so where it can be seen.
+
+  const STRETCH_ADVANCED_HIGHLIGHTS: EditOp = {
+    ...STRETCH_WITH_HIGHLIGHTS,
+    params: STRETCH_WITH_HIGHLIGHTS.params.map((p) =>
+      p.key === "highlights" ? { ...p, group: "advanced" } : p),
+  };
+
+  function mockStretchOpWithAdvancedHighlights() {
+    mockStretchOpWith("asinh");
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH_ADVANCED_HIGHLIGHTS, LEVELS]);
+  }
+
+  it("surfaces the blown-core finding above the collapsed Advanced section",
+    async () => {
+      mockStretchOpWithAdvancedHighlights();
+      vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue(
+        { strength: 0.4, flat_fraction: 0.22, core_px: 241 });
+
+      renderEditor();
+      fireEvent.click(await screen.findByText("Stretch"));
+
+      // The slider (and so its "from your data" button) is behind the accordion...
+      expect(await screen.findByText("Advanced")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Set Hold back highlights from your data")).toBeNull();
+      // ...but the finding, and the fix, are visible without opening it.
+      expect(await screen.findByText(/washing out to flat white/i)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /Hold back highlights \(0.4\)/i }));
+      // Applied — and the nudge goes quiet rather than repeating itself.
+      await waitFor(() =>
+        expect(screen.queryByText(/washing out to flat white/i)).not.toBeInTheDocument());
+    });
+
+  it("says nothing above the panel when there is no recoverable blown core",
+    async () => {
+      mockStretchOpWithAdvancedHighlights();
+      vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue({ strength: null });
+
+      renderEditor();
+      fireEvent.click(await screen.findByText("Stretch"));
+
+      await screen.findByLabelText("Set Strength from your data");
+      expect(screen.queryByText(/washing out to flat white/i)).not.toBeInTheDocument();
+    });
+
   it("sets a gentle starting curve via the header 'Auto curve'", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
