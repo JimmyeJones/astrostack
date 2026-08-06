@@ -6901,7 +6901,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   floor risks a degenerate proxy mesh). (S, editor/parity-honesty — PRIORITY 1.) Found by an
   adversarial editor preview↔export parity audit (which otherwise traced clean).
   **Sibling sweep — negative result, recorded so nobody re-treads it (Builder 2026-08-06, done while
-  fixing the heavy-stride coverage-leveling floor, v0.236.1).** Every proxy-scaled pixel measure in
+  fixing the heavy-stride coverage-leveling floor, v0.237.2).** Every proxy-scaled pixel measure in
   `edit/ops/` was re-read looking for the *same class* of defect as the one just fixed — a floor that
   inverts at heavy stride and changes **whether an op acts on a region at all**, rather than merely by
   how much. All of them are strength/sharpness floors: `background.subtract`/`remove_final_gradient`'s
@@ -6958,7 +6958,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   **— BOTH NOW RESOLVED (Builder 2026-08-06, branch `claude/relaxed-turing-6zdskv`).** The **dilation
   scaling** turned out to have been done already: `edit/ops/background.py::_level_coverage` passes
   `dilate_object_mask_px=_scaled_box(ctx, 4, minimum=0)`, so the preview's object-mask halo is already a
-  full-res-equivalent measure. The **heavy-stride floor** is fixed in **v0.236.1** — see the Shipped entry
+  full-res-equivalent measure. The **heavy-stride floor** is fixed in **v0.237.2** — see the Shipped entry
   "Level a big mosaic's thin panel the same way in the preview and the export". Reproduced and measured on a
   ×6 proxy: the preview left a small overlap panel's **entire 162.7 ADU** offset in place while the export cut
   it to 30.0 (a **132.6 ADU** preview↔export divergence); the preview now lands on **30.7**. The floor is
@@ -15248,7 +15248,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
-- **v0.236.1** — Level a big mosaic's thin panel the same way in the preview and the export.
+- **v0.237.2** — Level a big mosaic's thin panel the same way in the preview and the export.
   `coverage_leveling` scaled its per-level pixel floor by the proxy stride, but a hard
   `_MIN_STRIDED_PIXELS = 12` safety floor stopped that scaling past ~×4 — so on a canvas over ~7500 px
   (step ≥ 5, an ordinary deep mosaic) the **preview demanded more full-res-equivalent pixels than the
