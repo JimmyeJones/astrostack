@@ -7909,9 +7909,53 @@ problems. Dogfood it every big-picture run and fix root causes.
   garbage/unknown-type coercion), `tests/webapp/test_editor.py` (+1: feedback scoped to a
   monkeypatched archetype — bucket not global, run Auto reflects it), `AutoFeedback.test.tsx`
   (+1 scoped + updated global assertion). **Remaining slices for a future run:** the two other
-  parts of (b) — **recency decay** and a **"highlights/core clipped" cue** (still needs a stretch
-  highlight-knee param) — and **(c)** an optional light statistical fit (numpy/scikit, no NN).
+  parts of (b) — ~~a **"highlights/core clipped" cue** (still needs a stretch highlight-knee
+  param)~~ **SHIPPED v0.237.0 (see below)** and **recency decay** — and **(c)** an optional light
+  statistical fit (numpy/scikit, no NN).
   Original slice-(a) write-up kept for provenance below.
+- ~~**⭐ OWNER-REQUESTED (remaining part of Adaptive Auto slice (b)) — a "the bright core is blown
+  out" cue, which needs a stretch highlight-knee param first.**~~ — **SHIPPED v0.237.0** (Builder
+  2026-08-06, branch `claude/relaxed-turing-jox1fn`). *(Editor quality — PRIORITY 1; the last
+  parameter Adaptive Auto had no way to move.)* The blocker named in the slice-(b) note was real:
+  the eight existing cues each map to a parameter Auto already *measures*, but "my galaxy's core
+  is a flat white blob" had nothing to move — the STF/asinh highlight shoulder
+  (`_highlight_rolloff`, v0.119.1) sat on a hard-coded knee of 0.7.
+  **The knee is now a knob.** `seestack/render/thumbnail.py` gains a pure
+  `highlight_knee_for(protect)` that sweeps the knee from **0.7 at `protect=0` — returned
+  *identically*, not merely close, so every existing render is byte-for-byte what it was** — down
+  to a floor of **0.25** at full strength, below which the shoulder would start compressing
+  ordinary nebulosity rather than just the core. Both `autostretch` and `asinh_stretch` take a new
+  `highlight_protect=0.0`, and `tone.stretch` exposes it as an **advanced** *"Hold back
+  highlights"* slider (0–1, default 0) that applies in **both** curve modes — the blow-out is a
+  property of the shared shoulder, not of the tone mapping above it. Because it only moves values
+  *above* the knee, the sky still lands on exactly the same grey: **the sky corner is bit-for-bit
+  identical** at full protection (pinned by a test), so "hold the core back" can never double as a
+  brightness change. Measured on the synthetic HDR core the v0.119.1 tests already use: at
+  `protect=1.0` the near-saturated 9×9 peak's internal gradient goes **σ 0.0032 → 0.0129 (4×)**
+  and the blown-to-white fraction **0.32 % → 0 %**.
+  **The cue then falls out.** `auto_prefs` gains `core_clipped` (+1) / `core_flat` (−1) on a new
+  `highlights` bias, wired through `apply_profile` → `auto_recipe` → the `tone.stretch` op, so it
+  works on the interactive *and* the unattended "Process target" path like every other cue, and is
+  scoped per object type. It is the **one-sided** knob in the set — protection starts *off*, so
+  there is nothing below neutral to ask for — which needed a per-parameter floor
+  (`_PARAM_MIN_STEP`) on the accumulator: without it the negative cue would pile up steps the range
+  clamp swallows, so one "looks flat" tap would fail to undo one "blown out" tap. The floor also
+  hardens the §9 loader (a garbled store can no longer inject a negative highlight bias).
+  **Deliberately NOT auto-detected:** deciding from the image whether a core is clipping is the
+  real-data-gated "highlight-clip cue" already filed under *Needs owner sign-off*-adjacent notes;
+  this ships neutral and moves only when the owner says so. Upgrade-safe: additive op param and
+  cue, no config/DB/API-shape change, no default flipped; an existing saved recipe carrying no
+  `highlights` key renders identically to one carrying an explicit `0.0` (pinned).
+  **Tests (+21):** `tests/test_stf_highlight_rolloff.py` (+7 — the knee is *exactly* the historical
+  constant at 0, monotone and floored, NaN/inf/negative degrade to off, both stretches byte-for-byte
+  at the default, the core gains >2× gradient at full strength, the sky stays bit-for-bit put, and
+  the knob is monotone in strength), `tests/test_edit_tone_ops.py` (+6 — the op is inert at its
+  default in both modes, holds the core back in both, tolerates a `null` param from an older
+  client, and preserves NaN gaps), `tests/test_auto_prefs.py` (+6 — the cue moves only its own
+  parameter, saturates in range, walks back one tap at a time and stops at off, a garbled negative
+  bias is dropped, per-type routing, the "why" note, and the recipe carries it), plus
+  `tests/webapp/test_editor.py` (+1 end-to-end through the feedback endpoint) and
+  `AutoFeedback.test.tsx` (+1 for the two new chips).
 - **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
   auto-processed image (no ML runtime, fully offline/private).** — **slice (a) SHIPPED
   v0.159.0** (Builder 2026-07-22, branch `claude/pensive-faraday-jwvd6c`). Implemented

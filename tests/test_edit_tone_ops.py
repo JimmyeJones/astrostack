@@ -349,3 +349,74 @@ def test_color_calibrate_preserves_nan_gaps():
     out = get_op("tone.color_calibrate").apply(rgb, {"mode": "gray_star"}, EditContext())
     assert np.all(np.isnan(out[:3, :, :]))
     assert np.all(np.isfinite(out[3:, :, :]))
+
+
+# ---- tone.stretch — "Hold back highlights" ---------------------------------
+
+def _hdr_core(h: int = 160, w: int = 160) -> np.ndarray:
+    """A bright compact core on a faint disk on sky — the shape that washes out."""
+    yy, xx = np.mgrid[0:h, 0:w]
+    r2 = (yy - h / 2) ** 2 + (xx - w / 2) ** 2
+    base = (1000.0 + 1500.0 * np.exp(-r2 / (2 * 35.0 ** 2))
+            + 60000.0 * np.exp(-r2 / (2 * 3.0 ** 2)))
+    rng = np.random.default_rng(3)
+    base = base + rng.normal(0.0, 20.0, size=(h, w))
+    return np.stack([base, base, base], axis=-1).astype(np.float32)
+
+
+@pytest.mark.parametrize("mode,extra", [
+    ("stf", {"target_bg": 0.2}),
+    ("asinh", {"stretch": 0.5, "black": 0.35}),
+])
+def test_stretch_highlights_default_is_the_untouched_render(mode, extra):
+    """The new param must be inert at its default in *both* curves — an existing
+    saved recipe (which carries no ``highlights`` key at all) and one that stores
+    the explicit 0.0 must render identically to each other."""
+    rgb = _hdr_core()
+    op = get_op("tone.stretch")
+    without = op.apply(rgb, {"mode": mode, **extra}, EditContext())
+    explicit = op.apply(rgb, {"mode": mode, **extra, "highlights": 0.0}, EditContext())
+    assert np.array_equal(without, explicit)
+
+
+@pytest.mark.parametrize("mode,extra", [
+    ("stf", {"target_bg": 0.2}),
+    ("asinh", {"stretch": 0.5, "black": 0.35}),
+])
+def test_stretch_highlights_holds_the_core_back(mode, extra):
+    """Turning it up keeps a resolvable gradient in the core instead of a flat
+    white blob, and leaves the sky exactly where it was."""
+    rgb = _hdr_core()
+    op = get_op("tone.stretch")
+    base = op.apply(rgb, {"mode": mode, **extra}, EditContext())[..., 0]
+    held = op.apply(rgb, {"mode": mode, **extra, "highlights": 1.0},
+                    EditContext())[..., 0]
+    # The near-saturated peak: the default render flattens it (std ~1e-3 over a
+    # 9x9 block that spans thousands of ADU), holding the highlights back gives
+    # it back several times that gradient.
+    core = (slice(76, 85), slice(76, 85))
+    assert base[core].max() > 0.99                  # blown in the default render
+    assert held[core].std() > 3.0 * base[core].std()
+    assert held.max() < base.max()
+    assert np.mean(held >= 0.99) < np.mean(base >= 0.99)
+    # Sky corner: below the knee in either setting, so bit-for-bit identical.
+    assert np.array_equal(held[:25, :25], base[:25, :25])
+
+
+def test_stretch_highlights_tolerates_a_null_param():
+    """A recipe written by an older client can carry ``highlights: null``; that
+    must read as "off", not raise."""
+    rgb = _hdr_core(h=40, w=40)
+    op = get_op("tone.stretch")
+    out = op.apply(rgb, {"mode": "stf", "target_bg": 0.2, "highlights": None},
+                   EditContext())
+    assert np.array_equal(
+        out, op.apply(rgb, {"mode": "stf", "target_bg": 0.2}, EditContext()))
+
+
+def test_stretch_highlights_preserves_nan_gaps():
+    rgb = _with_nan_border(_hdr_core(h=40, w=40))
+    out = get_op("tone.stretch").apply(
+        rgb, {"mode": "stf", "target_bg": 0.2, "highlights": 0.75}, EditContext())
+    assert np.all(np.isnan(out[:3, :, :]))
+    assert np.all(np.isfinite(out[3:, :, :]))
