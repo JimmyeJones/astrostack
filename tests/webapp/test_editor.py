@@ -1970,3 +1970,109 @@ def test_auto_endpoints_ignore_a_junk_auto_crop_body(client, solved_library):
     r = client.post(url, content=b"not json at all")
     assert r.status_code == 200
     assert "geometry.crop" in [o["id"] for o in r.json()["ops"]]
+
+
+def test_highlight_suggestion_reports_no_blown_core_on_an_ordinary_run(
+        client, solved_library):
+    # The endpoint answers for every run, not only blown ones: the fixture stack
+    # has no washed-out core, so the honest answer is "no suggestion" — which is
+    # what makes the button self-hide instead of implying a problem.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="hilite_plain")
+    q = _enc({"ops": [{"id": "tone.stretch", "uid": "s1",
+                       "params": {"mode": "stf", "highlights": 0.0}}]})
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/highlight-suggestion"
+        f"?recipe={q}&uid=s1")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["strength"] is None
+    assert body["flat_fraction"] is None and body["core_px"] is None
+
+
+def test_highlight_suggestion_solves_against_the_users_own_stretch(
+        client, solved_library, monkeypatch):
+    # The point of solving rather than mapping: the strength is searched by
+    # re-running *this* Stretch op (its own mode/params) at rising protection, so
+    # the value is measured against the op that will draw it. Pin that the op is
+    # called with the recipe's params and a varying `highlights`, and that the
+    # measurement it feeds is the linear image (auto_stretch suppressed).
+    import webapp.routers.editor as editor_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="hilite_solve")
+
+    from seestack.edit import registry as registry_mod
+
+    seen_params: list[dict] = []
+    real_spec = registry_mod.get_op("tone.stretch")
+    real_apply = real_spec.apply
+
+    def _spy_apply(rgb, params, ctx):
+        seen_params.append(dict(params))
+        return real_apply(rgb, params, ctx)
+
+    monkeypatch.setattr(real_spec, "apply", _spy_apply)
+
+    captured = {}
+    real_recipe = editor_mod.apply_recipe
+
+    def _spy_recipe(rgb, recipe, ctx, *args, **kwargs):
+        captured["auto_stretch"] = kwargs.get("auto_stretch")
+        return real_recipe(rgb, recipe, ctx, *args, **kwargs)
+
+    monkeypatch.setattr(editor_mod, "apply_recipe", _spy_recipe)
+
+    q = _enc({"ops": [{"id": "tone.stretch", "uid": "s1",
+                       "params": {"mode": "asinh", "stretch": 0.7, "black": 0.2}}]})
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/highlight-suggestion"
+        f"?recipe={q}&uid=s1")
+    assert r.status_code == 200
+    # Measured on the linear image the stretch receives, never a tone-mapped one.
+    assert captured["auto_stretch"] is False
+    # The user's own curve and sliders were used, with only `highlights` varying.
+    assert seen_params, "the stretch op should have been re-run to solve the knob"
+    assert all(p["mode"] == "asinh" and p["stretch"] == 0.7 and p["black"] == 0.2
+               for p in seen_params)
+    assert seen_params[0]["highlights"] == 0.0
+
+
+def test_highlight_suggestion_unknown_uid_falls_back(client, solved_library):
+    # A stale uid must not 404 — it drops the stretch op(s) and measures the
+    # linear proxy against the op's defaults, exactly like the sibling endpoints.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="hilite_fb")
+    q = _enc({"ops": [{"id": "tone.stretch", "uid": "s1", "params": {}}]})
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/highlight-suggestion"
+        f"?recipe={q}&uid=zzz")
+    assert r.status_code == 200
+    assert "strength" in r.json()
+
+
+def test_highlight_suggestion_threads_already_display(client, solved_library,
+                                                      monkeypatch):
+    # Same trap the stretch suggestion closed: the EditContext must carry the
+    # run's already_display flag so a re-opened export isn't measured through an
+    # extra fallback stretch.
+    import webapp.routers.editor as editor_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _register_display_space_run(solved_library, safe, "hilite_disp",
+                                      json.dumps({"display_space": True}))
+
+    captured = {}
+    real_apply = editor_mod.apply_recipe
+
+    def _spy(rgb, recipe, ctx, *args, **kwargs):
+        captured["already_display"] = ctx.already_display
+        return real_apply(rgb, recipe, ctx, *args, **kwargs)
+
+    monkeypatch.setattr(editor_mod, "apply_recipe", _spy)
+    q = _enc({"ops": [{"id": "tone.stretch", "uid": "s1", "params": {}}]})
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/highlight-suggestion"
+        f"?recipe={q}&uid=s1")
+    assert r.status_code == 200
+    assert captured["already_display"] is True

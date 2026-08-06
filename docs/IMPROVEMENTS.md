@@ -6189,9 +6189,58 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-08-06, found while shipping the WGTSKIP note v0.238.0) — the "these two settings cancel
+- **NEW IDEA (Builder 2026-08-06, MEASURED while building the highlight suggestion v0.240.0) — "Hold back
+  highlights" is close to a *no-op* on the very frames it is most needed for, because the shoulder runs
+  **before** the midtones transfer squashes it back together.** *(Editor quality / image quality — PRIORITY 1/4;
+  size M; **measured, not yet filed as a bug** because the current behaviour is a limitation of where the knee
+  sits, not a regression.)* `autostretch` applies `_highlight_rolloff(xr, knee)` and *then* `_mtf(x, m)`, with `m`
+  solved so the sky median lands on `target_bg`. On a high-contrast frame the sky sits at a tiny fraction of the
+  99.5th-percentile normalization ceiling, so `m` goes very small and the MTF becomes near-vertical at the top of
+  its range — which undoes the shoulder. **Measured** on a synthetic bright-core scene (sky at 0.036 % of the
+  ceiling → `m = 0.00144`): walking the knee its whole range, 0.70 → 0.25, moved the post-shoulder core from
+  0.850–0.903 to 0.625–0.692 — but *after* the MTF both render as **0.999–1.000**, i.e. the slider changes the
+  finished picture by less than a thousandth and the core stays flat white. On an ordinary compact-core frame
+  (`m` ≈ 0.3) the same slider works exactly as advertised, which is why v0.237.0's tests pass. **Consequence
+  today:** the v0.240.0 "from your image" button correctly self-hides there (it refuses to offer a strength that
+  can't help — pinned by
+  `test_highlight_suggestion.py::test_no_suggestion_when_the_knob_cannot_meaningfully_help`), so nobody is misled;
+  but the owner also has no fix for a genuinely blown core on such a frame. **Shape of a fix:** make the shoulder
+  act on the *rendered* tone rather than the pre-transfer one — e.g. apply the rolloff after `_mtf` (in display
+  space, where the knee means what the user thinks it means), or fold the protection into the `m` solve so the
+  transfer is shoulder-aware. **Care — this is the on-by-default render path** (`autostretch` is the fallback
+  stretch for *every* preview and thumbnail): the knee's default must stay byte-for-byte, so any change has to be
+  gated on `highlight_protect > 0` and re-measured against `tests/test_stf_highlight_rolloff.py`'s
+  sky-unchanged/monotone invariants. Worth doing with a before/after on the same scenes the suggestion tests use.
+- **NEW IDEA (Builder 2026-08-06, follow-on to v0.240.0) — the highlight suggestion is a ready-made way to collect
+  the real-data evidence the *automatic* highlight-clip cue is gated on.** *(Autonomy — PRIORITY 2; size S.)* The
+  filed "'How's my stack?' highlight-clip cue" is real-data-gated: a wrong threshold would silently change
+  everyone's picture. But `suggest_highlight_protect` now produces a *self-validating* number on the owner's real
+  runs — it doesn't just score a core, it verifies that the strength it returns actually reopens it. **Slice:**
+  have the auto-edit path record what the measurement says for each run it edits (strength, flat fraction, core
+  size, or "no suggestion") into the existing run/edit provenance, change **nothing** about the picture, and add a
+  one-line read-out to the Settings self-check family (like the Auto colour self-check). After a few weeks of real
+  stacks the owner — and the next agent — can see how often a genuinely blown core occurs and at what severity,
+  which is exactly the distribution the automatic cue needs before it can be defaulted on. Read-only and additive
+  by construction, so it can ship without the sign-off the automatic cue would need.
+- ~~**NEW IDEA (Builder 2026-08-06, found while shipping the WGTSKIP note v0.238.0) — the "these two settings cancel
   each other out" warning exists on the per-target Stack form but NOT on the global stack defaults in Settings,
-  which is where a walk-away user actually sets them.** *(Friendliness / honest accounting — PRIORITY 2–3; size S;
+  which is where a walk-away user actually sets them.**~~ — **SHIPPED v0.239.2** (Builder 2026-08-06, branch
+  `claude/gallant-galileo-r89tie`). Built exactly as the slice describes: the sentence (and the engine gate it
+  mirrors) now lives in one pure helper, `frontend/src/weightingHint.ts::minMaxIgnoresWeightingHint`, which both
+  screens call. It takes the frame count as `number | null` — the per-target Stack form passes `solvedAccepted`
+  and gets **byte-for-byte the sentence it rendered before** (the existing `Stack.test.tsx` assertions pass
+  unchanged), while Settings passes `null` and gets the conditional wording the entry's "care" note asked for
+  ("On any stack of 3 or more subs… won't affect those stacks"), so the defaults screen never asserts anything
+  about a specific run it can't see. The `n >= 3` half of `stacker.py`'s
+  `weights_applied = not (min_max_reject and not drizzle and n >= 3)` is now a named constant on the helper rather
+  than a bare literal in a JSX expression. The Settings Alert carries the same one-click **"Turn off quality
+  weighting"** fix as the Stack form, and it is advisory only — it never blocks the save. Frontend-only: no
+  config/DB/API-shape/on-disk change, no default flipped, nothing sent differently. **Tests (+9):**
+  `weightingHint.test.ts` (+5 — both halves on, either half off, the drizzle path, the 3-frame gate boundary, and
+  the unknown-count wording) and `Settings.test.tsx` (+4, all fail-before: the warning appears on the defaults
+  grid with its unknown-count wording, stays quiet with one half off, stays quiet on the drizzle path, and clears
+  in place when the fix button is pressed). *(Original spec kept below for provenance.)*
+  *(Friendliness / honest accounting — PRIORITY 2–3; size S;
   frontend-only; **traced**.)* `Stack.tsx` (~L497) computes `minMaxIgnoresWeightingHint` and says plainly that
   min/max rejection ignores quality weights, mirroring the engine's `weights_applied` gate exactly. But
   `Settings.tsx` renders `default_stack_options` through the generic descriptor-driven `StackOptionControl` grid,
@@ -6204,8 +6253,23 @@ to **Shipped**.)_
   under the defaults grid when both keys are on and drizzle is off. **Care:** the Settings grid has no frame count
   to gate on, so word it as a conditional ("on any stack of 3+ subs…") rather than asserting it about a specific
   run. Advisory only — never block the save.
-- **NEW OBSERVATION (Builder 2026-08-06, engine QA read of `seestack/stack/accumulator.py`; no bug found) — "coverage"
-  means two different things on the min/max path than everywhere else, and it may over-report frames per pixel.**
+- ~~**NEW OBSERVATION (Builder 2026-08-06, engine QA read of `seestack/stack/accumulator.py`; no bug found) — "coverage"
+  means two different things on the min/max path than everywhere else, and it may over-report frames per pixel.**~~ —
+  **RESOLVED as correct-as-is, v0.239.3** (Builder 2026-08-06, branch `claude/gallant-galileo-r89tie`). The entry
+  asked for the semantics to be *decided* first; decided: the number means **"how many subs covered this pixel"**,
+  so the min/max path is already right and nothing changes in the output. Three reasons, now written into
+  `MinMaxRejectAccumulator.coverage`'s docstring so no future run re-treads it: (1) it agrees with every other
+  path — `WeightedSumAccumulator.frame_coverage` is likewise "frames that covered this pixel" (it counts a frame
+  that contributed to *any* channel, precisely so per-channel κ-σ rejection can't understate it); (2) the
+  consumers read it that way — `stackhealth`'s ragged-border note compares edge coverage to centre coverage to
+  spot dithered/mosaic edges, which is a coverage question, not a rejection one; and (3) subtracting the trim
+  would make a user-facing "frames per pixel" **non-monotone in the frames shot**, because the drop schedule
+  degrades in bands — at `k=3` a 7-covered pixel averages 1 sample while a 6-covered one averages 4. How much the
+  rejection removed is already reported separately and honestly by `rejection_counts()` (the "rejection dropped
+  ~X% of samples" line). Docstring + test only: no behaviour, config, DB, API-shape or on-disk change.
+  **Test** (`tests/test_accumulator.py`, +1): pins that `coverage` reports 7 and 6 for pixels covered by 7 and 6
+  frames while `rejection_counts()` reports the band-dependent 2k-vs-2 trim — so a future run can't quietly flip
+  the semantics. *(Original observation kept below for provenance.)*
   *(Honest accounting — PRIORITY 3; size S; **traced, not reproduced**; file before fixing — this may well be
   correct as-is.)* `WeightedSumAccumulator` exposes both `coverage` (Σ per-frame weights) and `frame_coverage` (a
   true unweighted per-pixel frame count), and the stacker deliberately uses the latter for the `coverage_min` /
@@ -6262,8 +6326,35 @@ to **Shipped**.)_
   (`WeightingStats`, `eff.min_max_reject`, `n`). **Check first:** how narrow is this really — it needs
   quality weighting on *and* a sub-11-frame stack *and* the walk-away path, so measure whether the owner's
   install ever lands there before building. Fits the shipped "say it out loud" family (v0.236.0, v0.230.2).
-- **NEW IDEA (Builder 2026-08-06, filed while shipping the "Hold back highlights" knob v0.237.0) — give the new
-  highlight knob the "from your image" partner every other detail slider has.** *(Editor quality + autonomy —
+- ~~**NEW IDEA (Builder 2026-08-06, filed while shipping the "Hold back highlights" knob v0.237.0) — give the new
+  highlight knob the "from your image" partner every other detail slider has.**~~ — **SHIPPED v0.240.0** (Builder
+  2026-08-06, branch `claude/gallant-galileo-r89tie`). Built as the entry describes — a one-click **"From your
+  image (hold back N — X% of your core is flat white)"** button beside the slider, never an automatic default — with
+  one deliberate upgrade on the filed shape: **the number is solved, not mapped.** Instead of converting a severity
+  score into a strength through a guessed curve, `seestack/edit/highlights.py::suggest_highlight_protect` re-runs
+  **the user's own Stretch op** (its mode and sliders) at rising protection and returns the *smallest* slider step
+  that actually reopens the core — a bisection over the op's own 0.05 grid, sound because the flat share is monotone
+  in the strength. So the value is the least change that does the job, solved against the op that will draw it.
+  Both of the entry's "care" notes are honoured and tested: the measurement runs on the **stretched** proxy (the
+  clipping is a display-space property) but each flat pixel is checked against the **linear** image the stretch
+  received — a core with no gradient left in the data was saturated at capture, can't be recovered, and returns
+  **no suggestion** rather than a promise; and "no bright core" likewise returns `None`, so the button self-hides
+  instead of implying the picture has a problem. Two further self-hiding cases fell out of building it: a saturated
+  **star** field (the core must be object-sized — a scale-invariant 0.01 % of covered pixels), and a frame so
+  contrasty that the midtones transfer squashes the whole shoulder back together, where even full strength barely
+  moves the core (a button that does nothing is worse than no button). Unlike the asinh-only Strength/Black buttons
+  this one is offered on **both** curves, since the blow-out is a property of the shared highlight shoulder.
+  Upgrade-safe: one additive read-only GET endpoint, a new engine module, and one conditional button — no config,
+  DB, on-disk or API-shape change, no default flipped, and nothing moves until the user clicks.
+  **Tests (+19):** `tests/test_highlight_suggestion.py` (+11 — a stretch-blown core gets a strength; the suggested
+  step really does reopen the core *and* the step below it doesn't; a capture-saturated core, a coreless frame, a
+  star field, and an un-helpable frame each get nothing; the asinh curve works too; NaN/mosaic coverage and
+  degenerate proxies don't raise; the grid is the op's own slider steps), `tests/webapp/test_editor.py` (+4 — the
+  honest no-suggestion answer on an ordinary run, the solve really calls the user's own op with only `highlights`
+  varying and measures the linear image, an unknown uid falls back, and `already_display` is threaded), and
+  `Editor.test.tsx` (+3 — the button appears naming what it measured and applies, hides on a null suggestion, and
+  appears in STF mode where Strength/Black don't). *(Original spec kept below for provenance.)*
+  *(Editor quality + autonomy —
   PRIORITY 1/2; size S–M.)* v0.237.0 makes the stretch's highlight shoulder adjustable and lets the owner *ask* for
   more of it ("Core blown out"), but a beginner has to notice their core is washed out first — and the editor's
   sibling sliders don't make them: sharpen has "size it from your stars", denoise has "from your image". The same
