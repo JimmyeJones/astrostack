@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorView } from "./Editor";
 import * as client from "../api/client";
 import type { EditOp } from "../api/client";
+import { allPlacementMismatches, placementMismatches } from "../test/editorOpPlacement";
 
 const STRETCH: EditOp = {
   id: "tone.stretch", label: "Stretch", group: "tone", stage: "any",
@@ -92,6 +93,23 @@ const CROP: EditOp = {
       min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: null },
   ],
 };
+
+// Every hand-written fixture above, so the drift guard below can see them all.
+// Add new module-level fixtures here — that's what keeps the check honest.
+const ALL_FIXTURES: EditOp[] = [
+  STRETCH, CURVES, DECONVOLVE, SHARPEN, DENOISE, LEVELS, LEVEL_COVERAGE,
+  BG_SUBTRACT, CROP,
+];
+
+describe("editor fixtures vs the engine spec", () => {
+  // v0.240.0 shipped a button no beginner could see because the fixture here
+  // said `group: "simple"` where the engine says `advanced` — and advanced
+  // params render inside a *collapsed* accordion. A fixture is free to simplify
+  // labels and defaults, but never where a control lands or what gates it.
+  it("places every param where the app really does", () => {
+    expect(allPlacementMismatches(ALL_FIXTURES)).toEqual([]);
+  });
+});
 
 function renderEditor() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -1716,7 +1734,12 @@ describe("EditorView", () => {
         min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: "mode=asinh" },
       { key: "black", label: "Black point", type: "float", group: "simple", default: 0.35,
         min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: "mode=asinh" },
-      { key: "highlights", label: "Hold back highlights", type: "float", group: "simple",
+      // `advanced`, as the real `tone.stretch` spec declares it — so these tests
+      // meet the slider where a user actually does: inside the op panel's
+      // collapsed Advanced accordion. (Declaring it `simple` here is what let
+      // v0.240.0 ship a button no beginner could see; the fixture-drift guard at
+      // the top of this file now refuses that.)
+      { key: "highlights", label: "Hold back highlights", type: "float", group: "advanced",
         default: 0, min: 0, max: 1, step: 0.05, options: null,
         help: "Compress the very brightest tones.", depends_on: null },
     ],
@@ -1739,6 +1762,13 @@ describe("EditorView", () => {
     })));
   }
 
+  it("uses a Stretch fixture that matches the engine's real param placement", () => {
+    // The whole highlight family below depends on `highlights` being where the
+    // app puts it; this is the check that kept v0.240.0's invisible button from
+    // being repeatable.
+    expect(placementMismatches(STRETCH_WITH_HIGHLIGHTS)).toEqual([]);
+  });
+
   it("offers 'hold back highlights' from your image, naming what it measured", async () => {
     mockStretchOpWith("asinh");
     vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue(
@@ -1747,6 +1777,7 @@ describe("EditorView", () => {
     renderEditor();
 
     fireEvent.click(await screen.findByText("Stretch"));
+    fireEvent.click(await screen.findByText("Advanced"));
     const btn = await screen.findByLabelText("Set Hold back highlights from your data");
     expect(btn).toHaveTextContent("hold back 0.4");
     // The severity gives the number visible provenance, like FWHM does for sharpen.
@@ -1781,30 +1812,20 @@ describe("EditorView", () => {
     renderEditor();
 
     fireEvent.click(await screen.findByText("Stretch"));
+    fireEvent.click(await screen.findByText("Advanced"));
     const btn = await screen.findByLabelText("Set Hold back highlights from your data");
     expect(btn).toHaveTextContent("hold back 0.75");
     expect(screen.queryByLabelText("Set Strength from your data")).toBeNull();
   });
 
-  // ...but the real `tone.stretch` spec declares `highlights` as an **advanced**
-  // param, so in the running app that button sits inside the op panel's collapsed
-  // Advanced accordion, where a beginner selecting Stretch never looks. Having
-  // measured the core is washing out, the panel says so where it can be seen.
-
-  const STRETCH_ADVANCED_HIGHLIGHTS: EditOp = {
-    ...STRETCH_WITH_HIGHLIGHTS,
-    params: STRETCH_WITH_HIGHLIGHTS.params.map((p) =>
-      p.key === "highlights" ? { ...p, group: "advanced" } : p),
-  };
-
-  function mockStretchOpWithAdvancedHighlights() {
-    mockStretchOpWith("asinh");
-    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH_ADVANCED_HIGHLIGHTS, LEVELS]);
-  }
+  // ...and because that slider is **advanced**, in the running app it sits inside
+  // the op panel's collapsed Advanced accordion, where a beginner selecting
+  // Stretch never looks. Having measured the core is washing out, the panel says
+  // so where it can be seen — without anyone opening the accordion.
 
   it("surfaces the blown-core finding above the collapsed Advanced section",
     async () => {
-      mockStretchOpWithAdvancedHighlights();
+      mockStretchOpWith("asinh");
       vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue(
         { strength: 0.4, flat_fraction: 0.22, core_px: 241 });
 
@@ -1825,7 +1846,7 @@ describe("EditorView", () => {
 
   it("says nothing above the panel when there is no recoverable blown core",
     async () => {
-      mockStretchOpWithAdvancedHighlights();
+      mockStretchOpWith("asinh");
       vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue({ strength: null });
 
       renderEditor();
