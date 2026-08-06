@@ -15,7 +15,10 @@ mid-tones bit-for-bit unchanged.
 import numpy as np
 import pytest
 
-from seestack.render.thumbnail import _highlight_rolloff, asinh_stretch, autostretch
+from seestack.render.thumbnail import (
+    _HIGHLIGHT_KNEE, _highlight_rolloff, asinh_stretch, autostretch,
+    highlight_knee_for,
+)
 
 
 def _hdr_target(h=300, w=300):
@@ -107,3 +110,83 @@ def test_asinh_stretch_also_protects_the_core():
 
     # The sky corner (below the knee) is bit-for-bit unchanged.
     assert np.array_equal(new[:30, :30], old[:30, :30])
+
+
+# --- "Hold back highlights": an adjustable knee on the same shoulder ---------
+#
+# The fixed knee above rescues an ordinary core, but a very high-dynamic-range
+# target (a compact galaxy core on a faint disk) can still read as washed out.
+# ``highlight_protect`` walks the knee down so the shoulder starts earlier and
+# compresses more of the bright range. It is 0 (off) everywhere by default, so
+# every existing render is untouched; the Adaptive-Auto "Core blown out" cue is
+# what moves it.
+
+
+def test_knee_for_zero_is_exactly_the_historical_knee():
+    """The default must be byte-identical, not merely close — every stretch in
+    the app calls through this."""
+    assert highlight_knee_for(0.0) == _HIGHLIGHT_KNEE
+    assert highlight_knee_for() == _HIGHLIGHT_KNEE
+
+
+def test_knee_for_is_monotone_and_bounded():
+    """More protection = an earlier knee, floored so the shoulder never starts
+    eating ordinary nebulosity."""
+    knees = [highlight_knee_for(p) for p in (0.0, 0.25, 0.5, 0.75, 1.0)]
+    assert all(b < a for a, b in zip(knees, knees[1:]))
+    assert knees[-1] == pytest.approx(0.25)
+    # Out of range clamps rather than extrapolating past the floor.
+    assert highlight_knee_for(5.0) == knees[-1]
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0, -0.0])
+def test_knee_for_treats_unusable_input_as_off(bad):
+    """The value can arrive from a stored recipe or a taste profile, so a
+    non-finite / negative one degrades to "no extra protection" rather than
+    raising or producing a nonsense knee."""
+    assert highlight_knee_for(bad) == _HIGHLIGHT_KNEE
+
+
+def test_default_protect_is_byte_for_byte_the_old_render():
+    """Passing the default explicitly changes nothing, in both stretches."""
+    img = _hdr_target()
+    assert np.array_equal(autostretch(img), autostretch(img, highlight_protect=0.0))
+    assert np.array_equal(asinh_stretch(img), asinh_stretch(img, highlight_protect=0.0))
+
+
+def test_protect_recovers_more_core_detail_than_the_fixed_knee():
+    """The whole point: at full strength the core keeps a much stronger internal
+    gradient and nothing clips to white."""
+    img = _hdr_target()
+    base = autostretch(img)[..., 0]
+    held = autostretch(img, highlight_protect=1.0)[..., 0]
+    core = (slice(140, 161), slice(140, 161))
+    assert held[core].std() > 2.0 * base[core].std()
+    assert np.mean(held >= 0.99) < np.mean(base >= 0.99)
+    assert held.max() < base.max()
+
+
+def test_protect_leaves_the_sky_exactly_where_it_was():
+    """It may only move tones *above* the knee — the sky still lands on the same
+    grey, so "hold the core back" never doubles as a brightness change."""
+    img = _hdr_target()
+    base = autostretch(img)
+    held = autostretch(img, highlight_protect=1.0)
+    assert np.array_equal(held[:30, :30], base[:30, :30])
+    assert np.median(held[:30, :30]) == pytest.approx(np.median(base[:30, :30]))
+    # Same for the manual asinh curve.
+    assert np.array_equal(
+        asinh_stretch(img, highlight_protect=1.0)[:30, :30],
+        asinh_stretch(img)[:30, :30],
+    )
+
+
+def test_protect_is_monotone_in_strength():
+    """More protection never blows *more* of the core — the knob has one honest
+    direction."""
+    img = _hdr_target()
+    blown = [
+        float(np.mean(autostretch(img, highlight_protect=p)[..., 0] >= 0.99))
+        for p in (0.0, 0.5, 1.0)
+    ]
+    assert blown[0] >= blown[1] >= blown[2]

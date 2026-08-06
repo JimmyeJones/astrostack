@@ -67,6 +67,24 @@ describe("AutoFeedback", () => {
     await waitFor(() => expect(onRerun).toHaveBeenCalled());
   });
 
+  it("offers the bright-core pair and sends its cues", async () => {
+    // "Core blown out" is the one-sided highlight-protection cue (it starts off);
+    // "Core looks flat" walks it back. Both must reach the backend by their exact
+    // cue keys — an unknown cue is a 422 there, so a typo here is a dead chip.
+    vi.spyOn(client.api, "getAutoPreferences")
+      .mockResolvedValue({ biases: {}, note: null, neutral: true });
+    const send = vi.spyOn(client.api, "sendAutoFeedback")
+      .mockResolvedValue({ biases: { highlights: 1 }, note: "Auto is running with the bright cores held back for you, based on your recent feedback.", neutral: false });
+
+    wrap();
+    fireEvent.click(await screen.findByRole("button", { name: "Core blown out" }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith("core_clipped", undefined));
+    await screen.findByText(/bright cores held back/);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Core looks flat" }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith("core_flat", undefined));
+  });
+
   it("offers no Reset link when neutral", async () => {
     vi.spyOn(client.api, "getAutoPreferences")
       .mockResolvedValue({ biases: {}, note: null, neutral: true });

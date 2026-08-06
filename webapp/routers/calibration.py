@@ -82,6 +82,14 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     ``CalibrationMasters.validate`` refuses it and the whole stack fails — so the
     form needs the subs' size to say so at pick time rather than letting the job
     die with a cryptic error. Additive keys; an older client just ignores them.
+
+    ``tolerances`` carries the **engine's own** exposure/temperature mismatch
+    thresholds. The Stack form warns about the same two mismatches at *pick* time
+    that ``CalibrationMasters.calibration_warnings`` reports on the finished run,
+    and until now each side chose its own threshold — so on a borderline pair the
+    app could stay quiet before the night was spent and complain about it
+    afterwards. Serving the numbers makes the engine the single source of truth;
+    an older client that ignores the key just keeps its own built-in mirror.
     """
     settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
@@ -100,6 +108,15 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     rec["params"]["width_px"] = calibration.modal_dim([f.width_px for f in frames])
     rec["params"]["height_px"] = calibration.modal_dim([f.height_px for f in frames])
     rec["n_frames"] = len(frames)
+    # One source of truth for "is this master a poor match?" — see the docstring.
+    # ``exposure_frac`` is measured against the *master's* exposure
+    # (``|t_light / t_master − 1|``), exactly as ``calibration_warnings`` does.
+    from seestack.calibrate.apply import EXPOSURE_MISMATCH_TOL, TEMP_MISMATCH_TOL_C
+
+    rec["tolerances"] = {
+        "exposure_frac": float(EXPOSURE_MISMATCH_TOL),
+        "temp_c": float(TEMP_MISMATCH_TOL_C),
+    }
     return rec
 
 
