@@ -152,4 +152,43 @@ describe("MoonSunView", () => {
     await waitFor(() =>
       expect(screen.getByText("No Moon or Sun videos yet")).toBeInTheDocument());
   });
+  it("shows the capture's sharpness profile and applies its suggestion", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        result: result({
+          keep_percent: 15,
+          sharpness: {
+            curve: [1, 0.99, 0.98, 0.98],
+            cut_fraction: 0.15,
+            options: [
+              { percent: 15, n_frames: 15, sharpness_vs_typical: 1.02, noise_gain: 3.9 },
+              { percent: 30, n_frames: 30, sharpness_vs_typical: 1.01, noise_gain: 5.5 },
+              { percent: 50, n_frames: 50, sharpness_vs_typical: 1.0, noise_gain: 7.1 },
+            ],
+            suggested_percent: 50,
+            spread: "steady",
+            summary: "The air was steady …, so you can afford to keep more: …",
+          },
+        }),
+      })],
+    }));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByText("How steady was your capture?")).toBeInTheDocument());
+    expect(screen.getByText("Steady air")).toBeInTheDocument();
+    // Acting on the advice pre-selects the matching preset on the same card, so
+    // "Stack again" re-runs at the suggested setting.
+    fireEvent.click(screen.getByRole("button", { name: /Try 50% instead/ }));
+    await waitFor(() =>
+      expect(screen.getByDisplayValue(/Half of them \(50%\)/)).toBeInTheDocument());
+  });
+
+  it("leaves the panel out for a still stacked before scores were kept", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({ result: result() })],
+    }));
+    renderView();
+    await waitFor(() => expect(screen.getByText(/Stacked the sharpest/)).toBeInTheDocument());
+    expect(screen.queryByText("How steady was your capture?")).toBeNull();
+  });
 });

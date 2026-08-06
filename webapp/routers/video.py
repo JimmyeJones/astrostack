@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from seestack.video.discover import find_video_capture, find_video_captures
 from seestack.video.ffmpeg import ffmpeg_available
+from seestack.video.quality import sharpness_profile
 from webapp import deps, video
 
 router = APIRouter(tags=["video"])
@@ -40,6 +41,32 @@ class VideoFileOut(BaseModel):
     size_bytes: int
 
 
+class KeepOptionOut(BaseModel):
+    """What one keep-% setting would give you on this particular capture."""
+
+    percent: float
+    n_frames: int
+    sharpness_vs_typical: float
+    noise_gain: float
+
+
+class SharpnessProfileOut(BaseModel):
+    """"How steady was your capture?" — the grading pass's own numbers.
+
+    Derived on every request from the scores stored with the result, so it costs
+    no extra work at stack time and a future improvement to the advice applies to
+    stacks that already exist. Absent (``null``) for a result stacked by a version
+    that didn't keep the scores — the page then just doesn't show the panel.
+    """
+
+    curve: list[float]
+    cut_fraction: float
+    options: list[KeepOptionOut]
+    suggested_percent: float
+    spread: str
+    summary: str
+
+
 class VideoResultOut(BaseModel):
     created_utc: str
     source_name: str
@@ -54,6 +81,8 @@ class VideoResultOut(BaseModel):
     warnings: list[str] = []
     preview_url: str
     tiff_url: str
+    #: Additive: older clients ignore it, older results simply have none.
+    sharpness: SharpnessProfileOut | None = None
 
 
 class VideoCaptureOut(BaseModel):
@@ -94,6 +123,7 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
     meta = video.read_meta(settings, capture_id)
     if meta is None or not video.has_result(settings, capture_id):
         return None
+    profile = sharpness_profile(meta.scores, meta.keep_percent)
     return VideoResultOut(
         created_utc=meta.created_utc,
         source_name=meta.source_name,
@@ -108,6 +138,22 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
         warnings=list(meta.warnings),
         preview_url=f"/api/videos/{capture_id}/preview.png",
         tiff_url=f"/api/videos/{capture_id}/download.tiff",
+        sharpness=None if profile is None else SharpnessProfileOut(
+            curve=list(profile.curve),
+            cut_fraction=profile.cut_fraction,
+            options=[
+                KeepOptionOut(
+                    percent=o.percent,
+                    n_frames=o.n_frames,
+                    sharpness_vs_typical=o.sharpness_vs_typical,
+                    noise_gain=o.noise_gain,
+                )
+                for o in profile.options
+            ],
+            suggested_percent=profile.suggested_percent,
+            spread=profile.spread,
+            summary=profile.summary,
+        ),
     )
 
 

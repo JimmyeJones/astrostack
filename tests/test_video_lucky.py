@@ -126,6 +126,14 @@ def test_stack_keeps_the_sharpest_frames_and_drops_the_rest(tmp_path):
     # The three good-seeing frames are exactly the ones kept.
     assert result.kept_indices == (1, 4, 7)
     assert result.sharpness_kept_median > 2 * result.sharpness_all_median
+    # Every graded frame's score comes back, in capture order — that is what the
+    # "How steady was your capture?" panel is measured from, and it costs the
+    # grading pass nothing to keep.
+    assert len(result.scores) == 12
+    assert all(isinstance(s, float) for s in result.scores)
+    # In capture order, so the good-seeing moments sit at their own indices.
+    assert min(result.scores[i] for i in (1, 4, 7)) > max(
+        s for j, s in enumerate(result.scores) if j not in (1, 4, 7))
 
 
 def test_stack_averages_the_noise_down(tmp_path):
