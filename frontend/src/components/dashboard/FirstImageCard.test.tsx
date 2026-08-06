@@ -107,6 +107,29 @@ describe("FirstImageCard", () => {
     expect(screen.queryByTestId("first-image-card")).not.toBeInTheDocument();
   });
 
+  it("congratulates a beginner whose first picture came from a Moon video", async () => {
+    // The bug: the checklist's four signals are all deep-sky, so a Moon still
+    // left the card nagging "make your first picture" next to a picture.
+    localStorage.setItem("astrostack.dashboard.firstImageStarted", "1");
+    mount(sys(), stats({ n_video_stills: 1 }));
+
+    await screen.findByTestId("first-image-card");
+    expect(screen.getByText(/made your first picture/)).toBeInTheDocument();
+    expect(screen.getByText(/Gallery/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "See your pictures" }))
+      .toHaveAttribute("href", "/gallery");
+    // It must not tell them to make one, nor claim deep-sky progress it hasn't.
+    expect(screen.queryByText("Stack them into your first picture")).toBeNull();
+    expect(screen.queryByText("0 of 4 done")).toBeNull();
+  });
+
+  it("still nags before a video is stacked", async () => {
+    mount(sys(), stats({ n_video_stills: 0 }));
+
+    await screen.findByTestId("first-image-card");
+    expect(screen.getByText("Stack them into your first picture")).toBeInTheDocument();
+  });
+
   it("renders nothing while the Dashboard's data is still loading", () => {
     vi.spyOn(client.api, "getSystem").mockReturnValue(new Promise(() => {}));
     vi.spyOn(client.api, "getStats").mockReturnValue(new Promise(() => {}));

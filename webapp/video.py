@@ -198,6 +198,22 @@ def iter_results(settings: Settings) -> list[VideoStackMeta]:
     return results
 
 
+def count_results(settings: Settings) -> int:
+    """How many finished video stills exist — a directory listing, nothing more.
+
+    Deliberately cheaper than :func:`iter_results`: it never opens a
+    ``meta.json``, because the only caller (the Dashboard's stats roll-up, which
+    the home page polls) needs the *count* to answer "does this user have a
+    picture yet?" and nothing else. An install that has never stacked a video
+    has no ``video/`` directory and this is a single failed ``iterdir``.
+    """
+    try:
+        entries = list(video_root(settings).iterdir())
+    except OSError:
+        return 0
+    return sum(1 for e in entries if e.is_dir() and (e / PNG_NAME).is_file())
+
+
 def pick_source_file(capture: VideoCapture, requested_name: str | None) -> str:
     """Choose which file in the folder to stack.
 

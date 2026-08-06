@@ -5,7 +5,8 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import {
-  firstImageComplete, firstImageNextStep, firstImageSteps,
+  firstImageComplete, firstImageDone, firstImageDoneMessage, firstImageNextStep,
+  firstImageSteps,
 } from "./firstImageSteps";
 
 // Two localStorage flags, both defensively guarded so a disabled/broken store can
@@ -54,17 +55,21 @@ export function FirstImageCard() {
 
   const loaded = !!stats.data && !!system.data;
   const steps = firstImageSteps(system.data, stats.data);
+  // "Done" counts a stacked Moon/Sun still, which no step can ever tick — see
+  // `firstImageDone`. `complete` stays the strict four-step reading, because the
+  // progress bar is about *those* steps and must not claim them.
   const complete = firstImageComplete(steps);
+  const done = firstImageDone(steps, stats.data);
   const next = firstImageNextStep(steps);
 
   // Remember that this install was *seen* mid-journey, so the congratulation at
   // the end only ever reaches someone who actually walked it here.
   useEffect(() => {
-    if (loaded && !complete) writeFlag(STARTED_KEY);
-  }, [loaded, complete]);
+    if (loaded && !done) writeFlag(STARTED_KEY);
+  }, [loaded, done]);
 
   if (!loaded || dismissed) return null;
-  if (complete && !readFlag(STARTED_KEY)) return null;
+  if (done && !readFlag(STARTED_KEY)) return null;
 
   const doneCount = steps.filter((s) => s.done).length;
   return (
@@ -76,16 +81,20 @@ export function FirstImageCard() {
           </ThemeIcon>
           <Text fw={600}>Your first image</Text>
         </Group>
-        <Text size="xs" c="dimmed">{doneCount} of {steps.length} done</Text>
+        {complete || !done ? (
+          <Text size="xs" c="dimmed">{doneCount} of {steps.length} done</Text>
+        ) : null}
       </Group>
-      <Progress value={(doneCount / steps.length) * 100} size="sm" color="violet"
-        mb="sm" aria-label="First image progress" />
-      {complete ? (
+      {/* Hidden when the picture came from a video: the bar measures the
+          deep-sky steps, and "0 of 4" under a congratulation reads as a
+          contradiction rather than as progress. */}
+      {complete || !done ? (
+        <Progress value={(doneCount / steps.length) * 100} size="sm" color="violet"
+          mb="sm" aria-label="First image progress" />
+      ) : null}
+      {done ? (
         <Stack gap="xs">
-          <Text size="sm">
-            That's the whole journey — you've made your first picture. Open it in
-            the editor to finish it off, then share it.
-          </Text>
+          <Text size="sm">{firstImageDoneMessage(steps, stats.data)}</Text>
           <Group gap="sm">
             <Button size="xs" variant="light" component={Link} to="/gallery">
               See your pictures
