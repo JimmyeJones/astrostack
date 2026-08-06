@@ -6189,6 +6189,27 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-08-06, traced while auditing the stack dispatcher) — a walk-away stack of a *small*
+  night silently discards the quality weighting the user asked for, and nothing anywhere says so.**
+  *(Honest accounting / trust — PRIORITY 2–3; size S; **traced, not yet reproduced end-to-end**.)*
+  On the walk-away chains (watcher auto-stack, one-click Process target) `_build_and_run` sets
+  `auto_reject=True` whenever the merged options carry no explicit rejection key (`webapp/pipeline.py`
+  ~L2090). `_resolve_auto_reject` then picks **order-statistic min/max** below
+  `kappa_min_frames(3.0) == 11` frames — and the min/max accumulator is an order statistic, so it
+  **ignores per-frame quality weights entirely** (`MinMaxRejectAccumulator.add` takes `weight` and drops
+  it; the stacker knows, and sets `weights_applied=False`). So a beginner who turned **Quality weighting**
+  on in the global stack defaults and lets the app auto-stack a 6-sub night gets a plain unweighted mean,
+  with no signal at all: `_build_output_header_meta` correctly *omits* `WGTMODE` when
+  `weights_applied` is False, and `History.tsx::weightingSummaryText` renders nothing without it — so the
+  absence is indistinguishable from "weighting was off". The one place it *is* explained is the help text
+  on the `min_max_reject` checkbox ("ignores quality weights"), which this user never touched.
+  **The feature:** stamp the *reason* rather than nothing — e.g. a `WGTSKIP` header card plus one
+  plain-language History line ("Quality weighting was on, but with only 6 subs this stack used min/max
+  rejection, which combines by rank instead of weight. From 11 subs it switches to sigma clipping and
+  weighting applies again."). Additive, read-only, no default flipped; the numbers are already computed
+  (`WeightingStats`, `eff.min_max_reject`, `n`). **Check first:** how narrow is this really — it needs
+  quality weighting on *and* a sub-11-frame stack *and* the walk-away path, so measure whether the owner's
+  install ever lands there before building. Fits the shipped "say it out loud" family (v0.236.0, v0.230.2).
 - **NEW IDEA (Builder 2026-08-06, filed while shipping the "Hold back highlights" knob v0.237.0) — give the new
   highlight knob the "from your image" partner every other detail slider has.** *(Editor quality + autonomy —
   PRIORITY 1/2; size S–M.)* v0.237.0 makes the stretch's highlight shoulder adjustable and lets the owner *ask* for
@@ -6879,6 +6900,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   a sibling honest-advisory note (`bg_mesh_coarser_on_proxy`) rather than changing the floor (a smaller
   floor risks a degenerate proxy mesh). (S, editor/parity-honesty — PRIORITY 1.) Found by an
   adversarial editor preview↔export parity audit (which otherwise traced clean).
+  **Sibling sweep — negative result, recorded so nobody re-treads it (Builder 2026-08-06, done while
+  fixing the heavy-stride coverage-leveling floor, v0.237.2).** Every proxy-scaled pixel measure in
+  `edit/ops/` was re-read looking for the *same class* of defect as the one just fixed — a floor that
+  inverts at heavy stride and changes **whether an op acts on a region at all**, rather than merely by
+  how much. All of them are strength/sharpness floors: `background.subtract`/`remove_final_gradient`'s
+  `box_size` (this entry — a coarser mesh, still fitted), the `dilate_px`/`dilate_object_mask_px` floors
+  (`minimum=0` — a smaller halo, deliberately allowed to vanish), `detail.unsharp`'s `radius`,
+  `detail.chroma_denoise`'s radius, `detail.deconvolve`'s `_DECONV_PSF_FLOOR` and `stars.reduce`'s 1-px
+  footprint (the latter two already carry the `deconv_understates_on_proxy` /
+  `star_reduce_overstates_on_proxy` advisories), and `geometry`'s degenerate-crop test (already decided
+  in full-res px). None of them can drop a region out of the op's scope the way the coverage-leveling
+  floor did. **So this entry is the only remaining pixel-scale divergence, and it stays gated on real-data
+  confirmation as filed.**
 - ~~**Give the manual `asinh` stretch the same highlight rolloff STF just got.**~~
   — **SHIPPED v0.119.2** (Builder 2026-07-14, same branch). `asinh_stretch` shared
   the identical hard-clip, so it got the same `_highlight_rolloff` behind a
@@ -6921,6 +6955,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   "never median over a handful of pixels" guard, so any fix must keep a sane absolute minimum rather than let
   the proxy median run over <12 pixels). Neither cleared the churn bar alone; recorded so a future run in this
   op resolves the dilation scaling **and** the heavy-stride floor in one pass. (S, editor/parity))_
+  **— BOTH NOW RESOLVED (Builder 2026-08-06, branch `claude/relaxed-turing-6zdskv`).** The **dilation
+  scaling** turned out to have been done already: `edit/ops/background.py::_level_coverage` passes
+  `dilate_object_mask_px=_scaled_box(ctx, 4, minimum=0)`, so the preview's object-mask halo is already a
+  full-res-equivalent measure. The **heavy-stride floor** is fixed in **v0.237.2** — see the Shipped entry
+  "Level a big mosaic's thin panel the same way in the preview and the export". Reproduced and measured on a
+  ×6 proxy: the preview left a small overlap panel's **entire 162.7 ADU** offset in place while the export cut
+  it to 30.0 (a **132.6 ADU** preview↔export divergence); the preview now lands on **30.7**. The floor is
+  *not* loosened — `_MIN_STRIDED_PIXELS` still gates *measuring* a median — it is only no longer allowed to
+  drop the level out of consideration, so a level it can't measure takes the neighbour-interpolated offset the
+  export already gives its own unmeasurable levels.
 - ~~**Give the Auto recipe a gentle contrast curve (as the presets already do)**~~ — **shipped v0.73.0** (see Shipped). The one-click Auto recipe now appends a data-driven `tone.curves` (auto contrast) after the saturation boost, matching the built-in galaxy/nebula presets.
 - ~~**Reflect the auto-contrast curve's shape in the Curves widget (v0.73.0 follow-up).**~~
   — **shipped v0.74.4** (see Shipped). Both options landed: (a) when `auto` is on and the
@@ -14396,6 +14440,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY 3; Builder-filed 2026-07-16.)*
 
 ### Performance (only with a measurement)
+- **NEW IDEA (Builder 2026-08-06, MEASURED while auditing the stack path) — `detect_mixed_pointings` is a pure-Python
+  O(n²) pair loop with no cap, so the mixed-pointing preflight grows quadratically with a target's sub count.**
+  *(Performance — size S; **off-by-default setting, so this is a latency note, not a live problem**.)*
+  `seestack/stack/pointings.py::detect_mixed_pointings` single-linkage-clusters every accepted+solved sub against
+  every other one. The inner loop never short-circuits (a single tight target means *every* pair links), and
+  `webapp/pipeline.py::_detect_mixed_pointings` passes the full frame list with **no cap** — unlike the frontend
+  mirror (`frontend/src/components/target/mixedPointings.ts`), whose comment notes it is "bounded by the 2000-frame
+  list cap". **Measured** (one tight cluster, the ordinary single-target case): 0.17 s at 1 000 subs, 0.70 s at
+  2 000, 2.7 s at 4 000, **10.8 s at 8 000** — and 4× again per doubling, so the §1 owner's "thousands of subs"
+  target is a tens-of-seconds stall inside a stack job. **Only reachable with `mixed_pointing_guard` on** (it is
+  **off** by default), and it runs in a background job rather than an HTTP request, which is why this is filed as
+  perf rather than a bug. **Care:** any speed-up must be **exactly** verdict-preserving (a grid/KD-tree prefilter
+  is only exact if the neighbour radius is the chord `2·sin(d/2)`; naive cell-representative merging is *not*).
+  Cheapest honest option is simply to vectorise the pair test in NumPy in blocks (same O(n²), ~100× the constant)
+  or cap the input with a deterministic subsample — a cap changes the verdict, so it needs its own argument.
+  **Gate:** only worth doing if the owner turns the guard on.
 - **NEW IDEA (Builder 2026-08-04, spotted while shipping the pinned-cover wall v0.230.0) — `GET /api/gallery/best`
   opens *every* target's `project.sqlite` on every request, uncached, and the Dashboard hits it on every load.**
   *(Performance — PRIORITY 2/6; size S–M; **measure first, per this section's rule — do not optimise on suspicion**.)*
@@ -15064,6 +15124,10 @@ problems. Dogfood it every big-picture run and fix root causes.
     (never the image or the weight maps), so the severity is unchanged and this is not worth a run on its own —
     but if anyone is already in `drizzle_path.py`, make it `any`-channel in the same commit and the two paths agree
     again. Confidence: traced (both call sites read).
+    **⚠ STRIKE — already done (Builder 2026-08-06, re-read of `drizzle_path.py`).** `add_frame` now ORs each
+    channel's strict post-add `out_wht` increase into one `deposited` plane (`deposited |= ...` over `c in
+    range(3)`) before `self._count += deposited`, and the `frame_coverage` docstring says so. The two paths
+    already agree on the `any`-channel rule; nothing left to do here.
   - ~~**(3)** `stack/align.py:407,466,161` — `_apply_subpixel_shift_windowed` shifts a window padded only `pad=2`
     px while the sub-pixel correction is capped at ±5 px, so a frame legitimately needing a 3–5 px shift can
     lose a thin strip of real edge data (coverage reduction at frame edges, **not** wrong pixel values).~~
@@ -15184,6 +15248,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.237.2** — Level a big mosaic's thin panel the same way in the preview and the export.
+  `coverage_leveling` scaled its per-level pixel floor by the proxy stride, but a hard
+  `_MIN_STRIDED_PIXELS = 12` safety floor stopped that scaling past ~×4 — so on a canvas over ~7500 px
+  (step ≥ 5, an ordinary deep mosaic) the **preview demanded more full-res-equivalent pixels than the
+  export** and a thin overlap panel fell out of the level set entirely: neither measured **nor filled**,
+  keeping its whole residual in the live preview while the export removed most of it. Split the one floor
+  into two: `include_min` (the export-equivalent count — which levels are *considered*) and
+  `effective_min` (unchanged — which levels may have their own sky median *measured*). A level between
+  them now takes the neighbour-interpolated offset the export already gives its own unmeasurable levels.
+  Measured on a ×6 proxy: preview residual **162.7 → 30.7 ADU** against the export's 30.0 (a 132.6 ADU
+  divergence gone). Byte-for-byte unchanged at step ≤ 4 (the two floors coincide) and on every full-res
+  export; a level below the export-equivalent floor is still an untouched sliver. Tests:
+  `tests/test_coverage_leveling.py` (+2; the parity one fails before / passes after).
 - **v0.231.1** — "Point here right now" now respects the Moon: the whole-night plan's proximity penalty is
   extracted into one shared `nightplan.moon_penalty` and applied to the right-now sky term too, so a faint target
   sitting beside a full Moon can't out-rank one in clean sky — and the card says "the Moon is fairly close to it
