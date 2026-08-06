@@ -1,5 +1,5 @@
 import {
-  Badge, Card, Group, Image, Select, SimpleGrid, Stack, Text, TextInput,
+  Anchor, Badge, Card, Group, Image, Select, SimpleGrid, Stack, Text, TextInput,
   Title, Loader, Center, Chip,
 } from "@mantine/core";
 import { IconChevronRight, IconSearch, IconStars } from "@tabler/icons-react";
@@ -210,6 +210,15 @@ export function Library() {
               <Text c="dimmed" size="sm" ta="center">
                 Upload your Seestar FITS files below, or drop target folders into the watched
                 dataset over your NAS share.
+              </Text>
+              {/* Someone whose first night was a lunar video has *something* —
+                  it just isn't a target, because a video has no subs to ingest.
+                  Without this line the Library is the one screen that still
+                  reads as "you have nothing at all". Always shown: it costs a
+                  sentence and it is true either way. */}
+              <Text c="dimmed" size="sm" ta="center">
+                Shot a video of the Moon or the Sun instead? That lives on the{" "}
+                <Anchor component={Link} to="/moon-sun">Moon &amp; Sun</Anchor> page.
               </Text>
             </Stack>
           </Card>

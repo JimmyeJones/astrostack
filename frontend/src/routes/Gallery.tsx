@@ -25,6 +25,7 @@ import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
+import { videoPreviewSrc } from "../components/videoPreviewSrc";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 
 export type GallerySort = "newest" | "cleanest";
@@ -143,7 +144,7 @@ function VideoStillCard({ still, onView }: {
       <Card.Section>
         <Tooltip label="Click to view fullscreen" openDelay={400}>
           <Image
-            src={still.preview_url} h={200} fit="contain" bg="#000"
+            src={videoPreviewSrc(still)} h={200} fit="contain" bg="#000"
             alt={`${still.label} still`}
             style={{ cursor: "zoom-in" }}
             onClick={() => onView(still)}
@@ -570,7 +571,7 @@ export function GalleryView() {
           rather than being offered and broken — the 16-bit TIFF lives one click
           away on the Moon & Sun page. */}
       <ImageLightbox
-        src={viewingStill ? viewingStill.preview_url : null}
+        src={viewingStill ? videoPreviewSrc(viewingStill) : null}
         title={viewingStill
           ? `${viewingStill.label} · ${viewingStill.source_name}` : undefined}
         downloadHref={viewingStill?.preview_url}

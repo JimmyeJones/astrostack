@@ -251,6 +251,8 @@ describe("cropping the empty sky", () => {
     );
     expect(text).toContain("78%");
     expect(text).toContain("Moon");
+    // ...and no longer threatens a re-stack: trimming is a slice of the picture.
+    expect(text).not.toMatch(/stack again/i);
   });
 
   it("stays quiet when there is nothing worth trimming", () => {
@@ -275,21 +277,71 @@ describe("cropping the empty sky", () => {
     expect(cropNote({ crop_applied: false }, "solar")).toBeNull();
   });
 
-  it("offers the crop on a full-frame still and applies it in one click", async () => {
+  it("crops a finished still in place — no second stack of the capture", async () => {
     vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
       captures: [capture({
         result: result({ crop_available: true, crop_trim_fraction: 0.8 }),
       })],
     }));
-    const post = vi.spyOn(client.api, "stackVideoCapture")
+    const crop = vi.spyOn(client.api, "cropVideoStill").mockResolvedValue(
+      result({ width: 620, height: 620, crop_applied: true, crop_trim_fraction: 0.8 }),
+    );
+    const stack = vi.spyOn(client.api, "stackVideoCapture")
       .mockResolvedValue({ job_id: "j1" });
     renderView();
     await waitFor(() =>
       expect(screen.getByText(/80% of this picture is empty sky/)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: /Crop it and stack again/i }));
-    await waitFor(() => expect(post).toHaveBeenCalledWith("Lunar_video", {
-      keep_percent: Number(DEFAULT_KEEP), file_name: "clip.mp4", crop: true,
+    fireEvent.click(screen.getByRole("button", { name: /^Crop it$/i }));
+    await waitFor(() => expect(crop).toHaveBeenCalledWith("Lunar_video"));
+    // The whole point: the capture is never decoded again.
+    expect(stack).not.toHaveBeenCalled();
+  });
+
+  it("offers to crop even when ffmpeg is missing — it only touches the picture",
+    async () => {
+      vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+        available: false,
+        hint: "no ffmpeg here",
+        captures: [capture({
+          result: result({ crop_available: true, crop_trim_fraction: 0.8 }),
+        })],
+      }));
+      const crop = vi.spyOn(client.api, "cropVideoStill").mockResolvedValue(result());
+      renderView();
+      await waitFor(() => screen.getByRole("button", { name: /^Crop it$/i }));
+      fireEvent.click(screen.getByRole("button", { name: /^Crop it$/i }));
+      await waitFor(() => expect(crop).toHaveBeenCalledWith("Lunar_video"));
+    });
+
+  it("lets a crop be undone while the full frame is still saved", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        result: result({
+          width: 620, height: 620,
+          crop_applied: true, crop_available: false, crop_trim_fraction: 0.8,
+          crop_restorable: true, source_width: 1920, source_height: 1080,
+        }),
+      })],
     }));
+    const undo = vi.spyOn(client.api, "restoreVideoStill").mockResolvedValue(result());
+    renderView();
+    await waitFor(() => screen.getByRole("button", { name: /Undo crop/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Undo crop/i }));
+    await waitFor(() => expect(undo).toHaveBeenCalledWith("Lunar_video"));
+  });
+
+  it("doesn't offer an undo when the full frame isn't saved", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        result: result({
+          width: 620, height: 620, crop_applied: true, crop_trim_fraction: 0.8,
+          source_width: 1920, source_height: 1080,
+        }),
+      })],
+    }));
+    renderView();
+    await waitFor(() => screen.getByText(/Cropped to the Moon/));
+    expect(screen.queryByRole("button", { name: /Undo crop/i })).toBeNull();
   });
 
   it("sends the crop when the checkbox is ticked before stacking", async () => {
@@ -320,7 +372,7 @@ describe("cropping the empty sky", () => {
     await waitFor(() =>
       expect(screen.getByText(/Cropped to the Moon/)).toBeInTheDocument());
     expect(screen.queryByText(/empty sky around the Moon/)).toBeNull();
-    expect(screen.queryByRole("button", { name: /Crop it and stack again/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Crop it$/i })).toBeNull();
   });
 
   it("says nothing about framing for a still from an older backend", async () => {

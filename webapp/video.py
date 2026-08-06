@@ -12,6 +12,8 @@ self-contained store rather than an extension of the library:
         meta.json     ← how it was made, so the result can explain itself
         grade.json    ← a grade-only pass (every frame's sharpness), so the user
                         can see what their capture looks like before stacking it
+        stack-full.*  ← the uncropped originals, kept only while a still is
+                        cropped in place, so "Undo crop" is always possible
 
 Adding a directory alongside ``incoming/``/``library/``/``state/`` is additive:
 nothing existing moves, and an install that never stacks a video never grows one.
@@ -106,6 +108,11 @@ class VideoStackMeta:
     #: The stack's size *before* any crop. 0 means "same as width/height".
     source_width: int = 0
     source_height: int = 0
+    #: True once the framing has actually been measured for this still. False on
+    #: a ``meta.json`` written before framing existed — where ``crop_available``
+    #: is False because nobody ever looked, not because there is nothing to trim.
+    #: :func:`ensure_framing_measured` tells those two apart and fills it in.
+    crop_measured: bool = False
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -247,6 +254,249 @@ def _write_tiff16(path: Path, rgb) -> None:
 
     u16 = (np.clip(np.nan_to_num(rgb, nan=0.0), 0.0, 1.0) * 65535.0).astype(np.uint16)
     tifffile.imwrite(path, u16, photometric="rgb", compression="zlib")
+
+
+# --- Cropping a still that already exists -----------------------------------
+#
+# Trimming the empty sky is a decision about *framing*, and framing is decided
+# by looking at the picture — which means the offer only lands once the still
+# exists. Re-stacking to act on it would decode a multi-minute capture a second
+# time to change nothing but the crop box, and by then the source video may not
+# even be on the NAS any more. So the crop is done on the saved artifacts.
+#
+# It is exactly as honest as the re-stack: the box is measured on the same
+# display-rendered picture, and cropping is a per-pixel-independent slice, so
+# trimming the saved PNG gives byte-for-byte the pixels a re-stack with
+# ``crop=True`` would have written.
+
+
+class StillCropError(ValueError):
+    """A crop/restore that can't be done, with a line the user can act on."""
+
+
+#: The full frame, kept beside the cropped still so a crop is always undoable.
+#: Written only when a crop actually happens, so an install that never crops one
+#: never grows them.
+FULL_PNG_NAME = "stack-full.png"
+FULL_TIFF_NAME = "stack-full.tiff"
+
+
+def has_full_frame_backup(settings: Settings, capture_id: str) -> bool:
+    """True when a cropped still's original full frame is still on disk."""
+    return (result_dir(settings, capture_id) / FULL_PNG_NAME).is_file()
+
+
+def _clear_full_frame_backup(out_dir: Path) -> None:
+    """Drop the kept originals.
+
+    Called whenever a *new* still is written: the backup exists to undo an
+    in-place crop of the picture that was there, so once that picture has been
+    replaced it would restore someone else's render.
+    """
+    for stale in (out_dir / FULL_PNG_NAME, out_dir / FULL_TIFF_NAME):
+        stale.unlink(missing_ok=True)
+
+
+def _read_png(path: Path):
+    """A saved PNG as a 0–1 float image, or ``None`` if it can't be read."""
+    import numpy as np
+    from PIL import Image
+
+    try:
+        with Image.open(path) as img:
+            arr = np.asarray(img.convert("RGB"), dtype=np.float32)
+    except (OSError, ValueError):
+        return None
+    return arr / 255.0
+
+
+def _crop_saved_artifacts(out_dir: Path, box: tuple[int, int, int, int]) -> None:
+    """Slice the saved PNG (and TIFF, when present) to ``box``, in place.
+
+    Each file is cropped in its *own* domain rather than re-rendered from one
+    array, so neither is re-quantised: the cropped PNG holds exactly the 8-bit
+    values the full-frame PNG held, and likewise for the 16-bit TIFF.
+    """
+    import numpy as np
+    from PIL import Image
+
+    y0, x0, y1, x1 = box
+    png_path = out_dir / PNG_NAME
+    with Image.open(png_path) as img:
+        img.convert("RGB").crop((x0, y0, x1, y1)).save(png_path, format="PNG")
+
+    tiff_path = out_dir / TIFF_NAME
+    if tiff_path.is_file():
+        import tifffile
+
+        arr = np.asarray(tifffile.imread(tiff_path))
+        tifffile.imwrite(
+            tiff_path, arr[y0:y1, x0:x1], photometric="rgb", compression="zlib",
+        )
+
+
+def ensure_framing_measured(
+    settings: Settings, capture_id: str, meta: VideoStackMeta,
+) -> VideoStackMeta:
+    """Measure the framing of a still that was stacked before framing existed.
+
+    A picture made by an older version has no ``crop_*`` fields at all, so it
+    reads as "nothing to trim" when the truth is that nobody ever looked — and
+    since the offer is what makes the crop discoverable, those pictures would
+    never get one. Now that cropping works off the saved artifacts, the
+    measurement can be made from the picture itself, so the owner's existing
+    Moon stills are treated exactly like a new one.
+
+    Measured once and written back (the fields are additive; nothing else in the
+    file is touched), so this costs one image read per pre-existing still, ever.
+    Best-effort: an unreadable picture or a read-only volume leaves the metadata
+    as it was rather than failing the page that asked for it.
+    """
+    if meta.crop_measured or meta.crop_applied:
+        return meta
+    out_dir = result_dir(settings, capture_id)
+    display = _read_png(out_dir / PNG_NAME)
+    if display is None:
+        return meta
+    framing = measure_framing(display)
+    worthwhile = framing is not None and framing.worthwhile
+    updated = replace(
+        meta,
+        crop_measured=True,
+        crop_available=bool(worthwhile),
+        crop_trim_fraction=(
+            round(framing.trim_fraction, 4) if worthwhile and framing else 0.0
+        ),
+    )
+    try:
+        _write_meta(out_dir, updated)
+    except OSError:
+        log.debug("could not record the framing for %s", capture_id, exc_info=True)
+    return updated
+
+
+def crop_saved_still(settings: Settings, capture_id: str) -> VideoStackMeta:
+    """Trim a finished still to its disk, without decoding the video again.
+
+    Raises :class:`StillCropError` when there is nothing to do — no picture yet,
+    already cropped, or no disk with enough sky around it to be worth trimming —
+    so the caller always has a sentence to show rather than a silent no-op.
+    """
+    meta = read_meta(settings, capture_id)
+    out_dir = result_dir(settings, capture_id)
+    if meta is None or not (out_dir / PNG_NAME).is_file():
+        raise StillCropError("There's no finished picture for this capture yet.")
+    if meta.crop_applied:
+        raise StillCropError("This picture has already been cropped.")
+
+    # Measure on the 16-bit TIFF when it exists (it is the same display image the
+    # crop was measured on at stack time, at higher precision); fall back to the
+    # PNG for a result saved before TIFFs, so an old still can still be cropped.
+    display = None
+    if (out_dir / TIFF_NAME).is_file():
+        try:
+            import numpy as np
+            import tifffile
+
+            display = np.asarray(tifffile.imread(out_dir / TIFF_NAME),
+                                 dtype=np.float32) / 65535.0
+        except (OSError, ValueError):
+            display = None
+    if display is None:
+        display = _read_png(out_dir / PNG_NAME)
+    if display is None:
+        raise StillCropError(
+            "This picture couldn't be read back — stack the capture again."
+        )
+
+    framing = measure_framing(display)
+    if framing is None or not framing.worthwhile:
+        raise StillCropError(
+            "Nothing worth cropping — the subject already fills the frame, "
+            "so the picture was left as it is."
+        )
+
+    # Keep the full frame beside the cropped one so the crop is reversible. Only
+    # ever written once: cropping twice is refused above, so a backup that exists
+    # is always the true original.
+    import shutil
+
+    if not (out_dir / FULL_PNG_NAME).is_file():
+        shutil.copy2(out_dir / PNG_NAME, out_dir / FULL_PNG_NAME)
+        if (out_dir / TIFF_NAME).is_file():
+            shutil.copy2(out_dir / TIFF_NAME, out_dir / FULL_TIFF_NAME)
+
+    _crop_saved_artifacts(out_dir, framing.box)
+
+    height, width = framing.size
+    updated = replace(
+        meta,
+        width=int(width),
+        height=int(height),
+        # The pre-crop size is the stack's own — keep whatever an earlier crop
+        # recorded, and fall back to the size this picture had a moment ago.
+        source_width=meta.source_width or meta.width,
+        source_height=meta.source_height or meta.height,
+        crop_applied=True,
+        crop_available=False,
+        crop_measured=True,
+        crop_trim_fraction=round(framing.trim_fraction, 4),
+    )
+    _write_meta(out_dir, updated)
+    return updated
+
+
+def restore_full_still(settings: Settings, capture_id: str) -> VideoStackMeta:
+    """Put the full frame back, undoing :func:`crop_saved_still`.
+
+    The kept originals are moved back over the cropped files (not copied), so a
+    restored still leaves no duplicate behind and "can this be undone?" stays a
+    simple question of whether the backup is there.
+    """
+    meta = read_meta(settings, capture_id)
+    out_dir = result_dir(settings, capture_id)
+    if meta is None:
+        raise StillCropError("There's no finished picture for this capture yet.")
+    if not (out_dir / FULL_PNG_NAME).is_file():
+        raise StillCropError(
+            "The full-frame version of this picture isn't saved — stack the "
+            "capture again to get it back."
+        )
+
+    (out_dir / FULL_PNG_NAME).replace(out_dir / PNG_NAME)
+    if (out_dir / FULL_TIFF_NAME).is_file():
+        (out_dir / FULL_TIFF_NAME).replace(out_dir / TIFF_NAME)
+
+    display = _read_png(out_dir / PNG_NAME)
+    framing = measure_framing(display) if display is not None else None
+    worthwhile = framing is not None and framing.worthwhile
+    height, width = (
+        (display.shape[0], display.shape[1]) if display is not None
+        else (meta.source_height or meta.height, meta.source_width or meta.width)
+    )
+    updated = replace(
+        meta,
+        width=int(width),
+        height=int(height),
+        source_width=0,
+        source_height=0,
+        crop_applied=False,
+        # Re-measured rather than assumed, so the offer that comes back is the
+        # honest one for the picture now on disk.
+        crop_available=bool(worthwhile),
+        crop_measured=True,
+        crop_trim_fraction=(
+            round(framing.trim_fraction, 4) if worthwhile and framing else 0.0
+        ),
+    )
+    _write_meta(out_dir, updated)
+    return updated
+
+
+def _write_meta(out_dir: Path, meta: VideoStackMeta) -> None:
+    (out_dir / META_NAME).write_text(
+        json.dumps(asdict(meta), indent=2), encoding="utf-8",
+    )
 
 
 def submit_video_stack(
@@ -417,6 +667,7 @@ def _video_stack_body(
     out_dir.mkdir(parents=True, exist_ok=True)
     write_full_res_png(out_dir / PNG_NAME, display)
     _write_tiff16(out_dir / TIFF_NAME, display)
+    _clear_full_frame_backup(out_dir)
 
     meta = VideoStackMeta(
         capture_id=capture_id,
@@ -446,10 +697,11 @@ def _video_stack_body(
         ),
         source_width=result.width,
         source_height=result.height,
+        # The framing *was* looked at here, whatever it found — so this still
+        # never needs the one-off backfill in ``ensure_framing_measured``.
+        crop_measured=True,
     )
-    (out_dir / META_NAME).write_text(
-        json.dumps(asdict(meta), indent=2), encoding="utf-8",
-    )
+    _write_meta(out_dir, meta)
     return {
         "capture_id": capture_id,
         "n_graded": result.n_graded,

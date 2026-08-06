@@ -4,14 +4,15 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import {
-  IconAlertTriangle, IconChartBar, IconCrop, IconDownload, IconMoon, IconSun,
-  IconVideo, IconWand,
+  IconAlertTriangle, IconArrowBackUp, IconChartBar, IconCrop, IconDownload,
+  IconMoon, IconSun, IconVideo, IconWand,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type VideoCapture, type VideoResult } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { videoPreviewSrc } from "../components/videoPreviewSrc";
 import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
 
 // Local, like Storage.tsx's `gb` — a video is MB-to-GB sized, and there is no
@@ -72,7 +73,8 @@ export function cropSuggestion(
   if (pct < 1) return null;
   return (
     `About ${pct}% of this picture is empty sky around the ${subjectNoun(kind)}. `
-    + `Crop it and stack again for a picture that's mostly ${subjectNoun(kind)}.`
+    + `Trimming it takes a moment and doesn't re-stack anything — the picture `
+    + `itself stays exactly as it is, just without the empty sky.`
   );
 }
 
@@ -142,6 +144,35 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
+  // Cropping a still that already exists never re-decodes the capture — it
+  // slices the saved picture — so it is a plain request with an instant answer,
+  // not a job. Undo is offered whenever the full frame is still saved beside it.
+  const cropStill = useMutation({
+    mutationFn: () => api.cropVideoStill(capture.id),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["videos"] });
+      qc.invalidateQueries({ queryKey: ["gallery"] });
+      notifications.show({
+        message: (
+          `Trimmed ${Math.round((r.crop_trim_fraction ?? 0) * 100)}% of empty sky `
+          + `— your ${capture.label} picture is now ${r.width}×${r.height}.`
+        ),
+        color: "teal",
+      });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  const restoreStill = useMutation({
+    mutationFn: () => api.restoreVideoStill(capture.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["videos"] });
+      qc.invalidateQueries({ queryKey: ["gallery"] });
+      notifications.show({ message: "Put the full frame back.", color: "teal" });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
   const result = capture.result;
   const suggestCrop = cropSuggestion(result, capture.kind);
   const cropped = cropNote(result, capture.kind);
@@ -166,7 +197,7 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
       {result ? (
         <Card.Section mb="sm">
           <Image
-            src={`${result.preview_url}?t=${encodeURIComponent(result.created_utc)}`}
+            src={videoPreviewSrc(result)}
             alt={`Stacked ${capture.label}`}
             fit="contain"
             mah={280}
@@ -178,7 +209,24 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
       {result ? (
         <Stack gap={4} mb="sm">
           <Text size="sm">{resultSummary(result)}</Text>
-          {cropped ? <Text size="xs" c="dimmed">{cropped}</Text> : null}
+          {cropped ? (
+            <Group gap="xs" wrap="nowrap" align="center">
+              <Text size="xs" c="dimmed">{cropped}</Text>
+              {/* A framing decision should never be one-way: the full frame is
+                  kept beside the cropped one, so undoing it is a click. */}
+              {result.crop_restorable ? (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  leftSection={<IconArrowBackUp size={12} />}
+                  onClick={() => restoreStill.mutate()}
+                  loading={restoreStill.isPending}
+                >
+                  Undo crop
+                </Button>
+              ) : null}
+            </Group>
+          ) : null}
           {result.warnings.map((w) => (
             <Text key={w} size="xs" c="dimmed">{w}</Text>
           ))}
@@ -199,11 +247,10 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
                 variant="light"
                 mt={6}
                 leftSection={<IconCrop size={12} />}
-                onClick={() => { setCrop(true); stack.mutate({ crop: true }); }}
-                loading={stack.isPending}
-                disabled={disabled}
+                onClick={() => cropStill.mutate()}
+                loading={cropStill.isPending}
               >
-                Crop it and stack again
+                Crop it
               </Button>
             </Alert>
           ) : null}

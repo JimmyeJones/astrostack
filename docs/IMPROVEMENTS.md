@@ -10859,8 +10859,48 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-08-06, filed while shipping the "Crop to the Moon" v0.244.0) — cropping an existing
-  still shouldn't cost a whole re-stack.** *(Friendliness / autonomy — PRIORITY 3; size S.)* The shipped offer
+- ~~**NEW IDEA (Builder 2026-08-06, filed while shipping the "Crop to the Moon" v0.244.0) — cropping an existing
+  still shouldn't cost a whole re-stack.**~~ — **SHIPPED v0.245.0** (Builder 2026-08-06, branch
+  `claude/gallant-galileo-favvnu`). *(Friendliness / autonomy — PRIORITY 3.)* The offer under a full-frame Moon
+  still is now **"Crop it"**, and it acts on the *saved picture*: `POST /api/videos/{id}/crop` re-measures the
+  framing on `stack.tiff` (falling back to `stack.png` for a result saved before TIFFs) and slices both artifacts
+  in place, so trimming a Moon still is one instant request instead of minutes of decoding a capture that may not
+  even be on the NAS any more. **Cropping never re-renders:** each file is sliced in its *own* domain (PIL on the
+  PNG, `tifffile` on the TIFF), and quantisation is per-pixel-independent, so the kept pixels are byte-for-byte
+  the ones the full frame held — pinned by a test that finds the cropped PNG as an exact sub-rectangle of the
+  original. It is also **reversible**, which the entry's "care" note asked for: the full frame is kept beside the
+  cropped one as `stack-full.png`/`.tiff` and an **"Undo crop"** button (`…/uncrop`, offered only while the backup
+  is there — new additive `crop_restorable` field) moves it back, re-measuring the offer from the restored
+  picture rather than assuming it. A fresh stack clears any stale backup, so an undo can never hand back a
+  different render. **One real bug fixed along the way:** a cropped still is rewritten at the same URL with the
+  same `created_utc`, so the page's cache-buster (`?t=<created_utc>`) would have shown the *uncropped* picture
+  after the crop — `videoPreviewSrc` now keys on the size too, used by both the Moon & Sun page and the Gallery.
+  Cropping needs no ffmpeg (it never touches the video), so the button stays live on a container without it.
+  **Upgrade-safe:** additive endpoints and one additive response field; no default flipped (the pre-stack
+  "Crop to the Moon" checkbox is untouched), no config/DB/on-disk-layout change, and the backups appear only for
+  a still someone actually cropped. **Tests (+22):** `tests/webapp/test_video_crop.py` (+13, ffmpeg-free — builds
+  the artifacts directly: the crop trims and keeps the disk, the pixels are an exact sub-rectangle, the TIFF is
+  cropped too, undo restores byte-identically and leaves no duplicate, cropping twice / a frame-filling disk /
+  no picture / no saved full frame each fail with a line the user can act on, a TIFF-less result still crops, a
+  crafted id can't escape, meta-on-disk matches the wire, and a new still drops a stale backup),
+  `MoonSun.test.tsx` (+4 — crops in place without calling the stack endpoint, works with ffmpeg missing, undo
+  shown/hidden on `crop_restorable`) and `videoPreviewSrc.test.ts` (+4).
+  **▶ FOLLOW-ON SHIPPED v0.245.2 (same branch) — the offer now reaches the pictures the owner *already has*.**
+  The framing was only ever measured at stack time, so a still made before framing existed carries no `crop_*`
+  fields and reads as "nothing to trim" — when the truth is nobody ever looked. Since cropping works off the saved
+  picture, the measurement can simply be made now: `ensure_framing_measured` fills it in from `stack.png` the first
+  time a result is served, records it (new additive `crop_measured` flag) and never looks again. **Measured once per
+  pre-existing still, ever** — pinned by a test that polls three times and asserts exactly one measurement, because
+  a per-page-load PNG decode over a library of stills is a real cost. Best-effort: an unreadable picture or a
+  read-only volume leaves the metadata alone rather than failing the page. A cropped still is never re-measured
+  (that would offer to crop the crop). Also added the equivalence test the whole fast path rests on: cropping a
+  real stacked capture in place and re-stacking it with `crop=True` produce a **byte-identical** PNG
+  (`test_cropping_in_place_gives_what_a_re_stack_would_have`, run against a real ffmpeg-encoded capture).
+  **Tests (+6):** 4 in `test_video_crop.py` (old meta gets the offer and can then be cropped, measured exactly once
+  and recorded, a frame-filling still is measured but never offered, a cropped still is never re-measured), plus
+  the equivalence test and the updated upgrade-safety test in `test_video_api.py`.
+  *(Original spec kept below for provenance.)*
+  *(Friendliness / autonomy — PRIORITY 3; size S.)* The shipped offer
   under a full-frame Moon still is *"Crop it and stack again"*, and "stack again" means decoding a multi-minute
   capture twice over — minutes of work to change nothing but the framing. But the crop operates on the
   **display-rendered picture**, and that picture is already on disk as `stack.png` + `stack.tiff`: `measure_framing`
@@ -10872,8 +10912,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   say plainly that the full frame is regenerated by stacking again. Also check the source video may be gone from
   the NAS by then — which is precisely why reading the saved picture rather than the capture is the right move.
 
-- **NEW IDEA (Builder 2026-08-06, spotted while fixing the "Your first image" checklist v0.244.1) — the *Library*
-  empty state doesn't know Moon & Sun exists.** *(Friendliness — PRIORITY 3; size S; frontend-only.)* Someone
+- **NEW IDEA (Builder 2026-08-06, spotted while shipping the in-place crop v0.245.0) — offer the crop from the
+  *Gallery*, where the picture is, not only from the page that lists the source video.** *(Friendliness —
+  PRIORITY 3; size S.)* The "Crop it" offer lives on Moon & Sun, which lists **captures found in `incoming/`** — so
+  a user who has cleared the video off the NAS (exactly the case the in-place crop was built for: it never touches
+  the source) sees their still only in the Gallery, with a Moon adrift in black sky and no way to fix it. The crop
+  endpoint doesn't care; only the surface does. **Slice:** carry the four framing fields
+  (`crop_applied` / `crop_available` / `crop_trim_fraction` / `crop_restorable`) on `VideoStillItem` — all additive,
+  all already on the meta — and put the same one-click "Crop it" / "Undo crop" pair on the Gallery's video-still
+  card, invalidating `["gallery"]` and `["videos"]` as the Moon & Sun page already does. **Care:** the Gallery's
+  still card is deliberately read-only ("a video still is *not* a stack run"), so this is the first action on it —
+  keep it to the crop pair, and reuse `cropSuggestion`/`cropNote` from `MoonSun.tsx` rather than re-wording them, so
+  the two surfaces can't drift. Note `_video_stills` would want the same `ensure_framing_measured` backfill
+  `_result_out` got in v0.245.2, or an old still would show no offer there.
+
+- **NEW IDEA (Builder 2026-08-06, same run) — a beginner can crop the Moon, but there is no way to crop anything
+  else.** *(Friendliness — PRIORITY 3; size M; **think before building**.)* The framing crop is disk-shaped by
+  design (`measure_framing` finds "the one bright thing"), which is right for the Moon and Sun and useless for a
+  deep-sky stack — where the framing problem is different anyway (ragged dithered borders, already handled by
+  `auto_crop_border`). Filing it only so a future run doesn't read "crop" as a generic gap and build a manual
+  crop tool for the editor: that would be pro tooling by the §1 bar unless it answers a beginner question the app
+  doesn't already answer. Probably **not** worth building; recorded so it can be declined once rather than
+  re-litigated.
+
+- ~~**NEW IDEA (Builder 2026-08-06, spotted while fixing the "Your first image" checklist v0.244.1) — the *Library*
+  empty state doesn't know Moon & Sun exists.**~~ — **SHIPPED v0.245.1** (Builder 2026-08-06, branch
+  `claude/gallant-galileo-favvnu`). *(Friendliness — PRIORITY 3.)* The empty Library now ends with
+  *"Shot a video of the Moon or the Sun instead? That lives on the **Moon & Sun** page"*, linked. Shown always, as
+  the entry's first option: it costs one sentence and it is true either way, whereas gating it on
+  `n_video_stills > 0` would hide it from exactly the person who hasn't stacked their video yet. **Checked the
+  siblings the entry asked about and deliberately left them alone:** the Seestar page's empty state is about
+  *network discovery* ("make sure the scope is on and in Station mode"), and Tonight's is about a night with no
+  good targets — neither reads as "you have nothing", so a Moon & Sun pointer there would be clutter rather than a
+  signpost. Frontend-only; no API, schema or default change. **Tests (+2, `Library.test.tsx`):** the empty state
+  links to `/moon-sun`, and a library that has targets doesn't show it.
+  *(Original spec kept below for provenance.)*
+  *(Friendliness — PRIORITY 3; size S; frontend-only.)* Someone
   whose first night was a lunar video lands on the Library, sees "no targets yet — drop your Seestar folders in",
   and has no signpost to the page that *can* do something with what they shot. The Dashboard checklist now
   recognises their still (v0.244.1) and the Gallery lists it (v0.243.0), so the Library is the last screen that
