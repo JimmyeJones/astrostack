@@ -6220,8 +6220,23 @@ to **Shipped**.)_
   under the defaults grid when both keys are on and drizzle is off. **Care:** the Settings grid has no frame count
   to gate on, so word it as a conditional ("on any stack of 3+ subs…") rather than asserting it about a specific
   run. Advisory only — never block the save.
-- **NEW OBSERVATION (Builder 2026-08-06, engine QA read of `seestack/stack/accumulator.py`; no bug found) — "coverage"
-  means two different things on the min/max path than everywhere else, and it may over-report frames per pixel.**
+- ~~**NEW OBSERVATION (Builder 2026-08-06, engine QA read of `seestack/stack/accumulator.py`; no bug found) — "coverage"
+  means two different things on the min/max path than everywhere else, and it may over-report frames per pixel.**~~ —
+  **RESOLVED as correct-as-is, v0.239.3** (Builder 2026-08-06, branch `claude/gallant-galileo-r89tie`). The entry
+  asked for the semantics to be *decided* first; decided: the number means **"how many subs covered this pixel"**,
+  so the min/max path is already right and nothing changes in the output. Three reasons, now written into
+  `MinMaxRejectAccumulator.coverage`'s docstring so no future run re-treads it: (1) it agrees with every other
+  path — `WeightedSumAccumulator.frame_coverage` is likewise "frames that covered this pixel" (it counts a frame
+  that contributed to *any* channel, precisely so per-channel κ-σ rejection can't understate it); (2) the
+  consumers read it that way — `stackhealth`'s ragged-border note compares edge coverage to centre coverage to
+  spot dithered/mosaic edges, which is a coverage question, not a rejection one; and (3) subtracting the trim
+  would make a user-facing "frames per pixel" **non-monotone in the frames shot**, because the drop schedule
+  degrades in bands — at `k=3` a 7-covered pixel averages 1 sample while a 6-covered one averages 4. How much the
+  rejection removed is already reported separately and honestly by `rejection_counts()` (the "rejection dropped
+  ~X% of samples" line). Docstring + test only: no behaviour, config, DB, API-shape or on-disk change.
+  **Test** (`tests/test_accumulator.py`, +1): pins that `coverage` reports 7 and 6 for pixels covered by 7 and 6
+  frames while `rejection_counts()` reports the band-dependent 2k-vs-2 trim — so a future run can't quietly flip
+  the semantics. *(Original observation kept below for provenance.)*
   *(Honest accounting — PRIORITY 3; size S; **traced, not reproduced**; file before fixing — this may well be
   correct as-is.)* `WeightedSumAccumulator` exposes both `coverage` (Σ per-frame weights) and `frame_coverage` (a
   true unweighted per-pixel frame count), and the stacker deliberately uses the latter for the `coverage_min` /

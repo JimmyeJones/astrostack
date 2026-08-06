@@ -304,7 +304,25 @@ class MinMaxRejectAccumulator:
     @property
     def coverage(self) -> np.ndarray:
         """Per-pixel contributing-frame count (float, matching the other
-        accumulators' coverage semantics)."""
+        accumulators' coverage semantics).
+
+        This is a true *frame* count — weights are never applied on this path —
+        so the stacker deliberately leaves ``frame_cov=None`` here and the
+        ``coverage_min``/``coverage_max`` diagnostics read this map directly.
+
+        It counts **frames that covered the pixel**, not frames averaged into
+        it: :meth:`result` then discards the ``2k`` (or 2) per-pixel extremes,
+        so the effective sample count behind a pixel is ``count − 2k``. That is
+        deliberate, and matches what the number means everywhere else — the
+        weighted-sum path's ``frame_coverage`` is likewise "frames that covered
+        this pixel", and the diagnostic's consumers read it that way (the
+        ragged-border health note in ``stackhealth`` compares edge coverage to
+        centre coverage to spot dithered/mosaic edges — a *coverage* question,
+        not a rejection one). Subtracting the trim would also make the number
+        non-monotone in the frames shot, because the drop schedule degrades in
+        bands: at ``k=3`` a 7-covered pixel averages 1 sample while a 6-covered
+        one averages 4. How much rejection removed is reported separately and
+        honestly by :meth:`rejection_counts`."""
         return self._count.astype(self._sum.dtype)
 
     def rejection_counts(self) -> tuple[int, int]:

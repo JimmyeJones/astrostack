@@ -229,6 +229,24 @@ def test_min_max_reject_rejection_counts_empty_is_zero():
     assert acc.rejection_counts() == (0, 0)
 
 
+def test_min_max_reject_coverage_counts_covering_frames_not_averaged_ones():
+    # Pins the decided semantics of the coverage_min/max diagnostic on this path
+    # (see MinMaxRejectAccumulator.coverage): it reports how many frames
+    # *covered* each pixel, matching every other path, not how many survived the
+    # per-pixel extreme trim. The rejection is reported separately by
+    # rejection_counts(), and subtracting the trim here would be non-monotone in
+    # the frames shot (at k=3 a 7-covered pixel averages 1, a 6-covered one 4).
+    acc = MinMaxRejectAccumulator((1, 2), reject_count=3)
+    for i in range(7):
+        # col0 covered by all 7 frames; col1 by the first 6 only.
+        acc.add(np.array([[float(i), float(i) if i < 6 else np.nan]]))
+    np.testing.assert_array_equal(acc.coverage, np.array([[7.0, 6.0]]))
+    # ...and the trim really is the band-dependent one the docstring describes:
+    # col0 keeps 7−2k=1 sample, col1 degrades to the single min/max drop (6−2=4).
+    contributed, rejected = acc.rejection_counts()
+    assert (contributed, rejected) == (13, 6 + 2)
+
+
 def test_min_max_reject_small_coverage_falls_back_to_mean():
     acc = MinMaxRejectAccumulator((1, 3))
     # col0: one sample → mean=7; col1: two samples → mean; col2: none → NaN.
