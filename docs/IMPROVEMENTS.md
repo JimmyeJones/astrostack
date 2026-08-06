@@ -10835,8 +10835,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   stack's, progress/cancel, the too-few-frames refusal), `tests/webapp/test_video_api.py` (+4 — grades without
   stacking, leaves an existing still alone, 404, and the path-escape rejection), `MoonSun.test.tsx` (+2).
 
-- **NEW IDEA (Builder 2026-08-06, spotted while shipping the v0.241.0 sharpness panel — verified against the
-  routes) — a stacked Moon/Sun still is invisible everywhere except the Moon & Sun page.** *(Friendliness /
+- ~~**NEW IDEA (Builder 2026-08-06, spotted while shipping the v0.241.0 sharpness panel — verified against the
+  routes) — a stacked Moon/Sun still is invisible everywhere except the Moon & Sun page.**~~ — **SHIPPED
+  v0.243.0** (Builder 2026-08-06, branch `claude/gallant-galileo-ruf5nj`). Built exactly to the filed shape and
+  its "care" note: finished stills now appear in the **Gallery**, the place every *other* finished picture lives,
+  as a plain read-only card — no checkbox, no "Edit image", no "Reuse settings", just the picture, what it came
+  from, and one **"Open in Moon & Sun"** link back to the page that owns it. Engine/webapp: a new
+  `webapp.video.iter_results` reads `<data_root>/video/` directly (**not** the incoming folder, so a still keeps
+  showing up after the user clears the source video off the NAS) and counts a folder as finished only when it has
+  both `stack.png` **and** a readable `meta.json` — the same rule the Moon & Sun page already applies, so no
+  caller has to invent a label or a date. `GET /api/gallery` gained an **additive** `videos: []` alongside
+  `items`; the read is wrapped so a video-store problem degrades to "no stills" rather than 500-ing the gallery,
+  matching the per-project guard the same endpoint already uses. The addressable id is the **folder name**, not
+  whatever `meta.json` says, so a hand-edited file can't hand the UI a preview URL that 404s.
+  Frontend: `mergeGalleryEntries` interleaves stills with runs by date under **Newest**, and under **Cleanest**
+  leaves the noise ranking untouched and keeps the stills after it — a video still has no measured background σ,
+  so it is never given an invented position. The one search box covers both kinds (label / video file / capture
+  id), the header count includes them, and a still drops out of a *stack-specific* facet (Calibrated, combine
+  method) rather than pretending to have masters. The lightbox offers only what the video store actually holds
+  (the display PNG); the 16-bit TIFF stays one click away on Moon & Sun. Opening a still in the **editor** was
+  deliberately left out, as the entry asks. Upgrade-safe: one additive response field (an older frontend ignores
+  it; a newer frontend against an older backend reads `?? []`), no config/DB/on-disk change, no default flipped,
+  and an install that never stacked a video has no `video/` directory and sends an empty list.
+  **Tests (+13):** `tests/webapp/test_gallery.py` (+5 — a finished still is listed with a working preview URL and
+  is *not* smuggled in as a stack run, an install that never stacked a video sends none, newest-first ordering, a
+  half-written result and a graded-but-unstacked capture are both skipped, and the folder name wins over a
+  hand-edited `capture_id`) and `Gallery.test.tsx` (+8 — the four pure helpers, the read-only card and its link,
+  the shared search box, the stack-only facet hiding it, and an older backend sending no `videos` field at all).
+  *(Original spec kept below for provenance.)*
+  *(Friendliness /
   enjoy-share — PRIORITY 3; size M.)* `webapp/video.py` deliberately stores the still outside the library
   (`<data_root>/video/<id>/`) because none of the per-target machinery applies to it — which is the right call, but
   it means the Gallery, Best pictures, the Dashboard tiles and the editor have **no** knowledge of it (grepped:
