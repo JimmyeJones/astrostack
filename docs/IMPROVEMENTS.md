@@ -6189,8 +6189,60 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-08-06, traced while auditing the stack dispatcher) — a walk-away stack of a *small*
-  night silently discards the quality weighting the user asked for, and nothing anywhere says so.**
+- **NEW IDEA (Builder 2026-08-06, found while shipping the WGTSKIP note v0.238.0) — the "these two settings cancel
+  each other out" warning exists on the per-target Stack form but NOT on the global stack defaults in Settings,
+  which is where a walk-away user actually sets them.** *(Friendliness / honest accounting — PRIORITY 2–3; size S;
+  frontend-only; **traced**.)* `Stack.tsx` (~L497) computes `minMaxIgnoresWeightingHint` and says plainly that
+  min/max rejection ignores quality weights, mirroring the engine's `weights_applied` gate exactly. But
+  `Settings.tsx` renders `default_stack_options` through the generic descriptor-driven `StackOptionControl` grid,
+  which has no cross-field logic at all — so a user who ticks **Quality weighting** *and* **Min/max rejection** in
+  the *global defaults* (the natural place for someone who lets the watcher auto-stack) is never told, and every
+  unattended run silently combines by rank. v0.238.0 closes the after-the-fact half (the finished run now says
+  why), but the pick-time half is still missing on the screen where the pick is most often made. **Slice:** lift
+  the existing sentence out of `Stack.tsx` into one shared pure helper (it already has to stay in step with
+  `stacker.py`'s gate — two independently-worded copies is the exact drift that cost v0.237.1 a fix) and render it
+  under the defaults grid when both keys are on and drizzle is off. **Care:** the Settings grid has no frame count
+  to gate on, so word it as a conditional ("on any stack of 3+ subs…") rather than asserting it about a specific
+  run. Advisory only — never block the save.
+- **NEW OBSERVATION (Builder 2026-08-06, engine QA read of `seestack/stack/accumulator.py`; no bug found) — "coverage"
+  means two different things on the min/max path than everywhere else, and it may over-report frames per pixel.**
+  *(Honest accounting — PRIORITY 3; size S; **traced, not reproduced**; file before fixing — this may well be
+  correct as-is.)* `WeightedSumAccumulator` exposes both `coverage` (Σ per-frame weights) and `frame_coverage` (a
+  true unweighted per-pixel frame count), and the stacker deliberately uses the latter for the `coverage_min` /
+  `coverage_max` diagnostics so quality weighting can't understate "N frames per pixel".
+  `MinMaxRejectAccumulator` has **no** `frame_coverage`, so on that path `frame_cov` stays `None` and the code
+  falls back to `coverage[..., 0]` — which is the count of samples that *contributed*, including the `2k` that
+  `result()` then throws away as the per-pixel extremes. The effective sample count behind each pixel is
+  `count − 2k`. Whether that's wrong depends on what the number is meant to say ("how many subs covered this
+  pixel" — right as-is; "how many subs are averaged here" — over-reports by 2k, which matters most on exactly the
+  small stacks where min/max is auto-picked: 4 of 6 subs actually averaged, reported as 6). **Do this first:**
+  decide the semantics, then either leave it and document it in the accumulator docstring, or add a
+  `frame_coverage` that subtracts the trim. The rest of that file audited clean — the ±inf identities never form
+  an `inf − inf`, the k-set insertion reads each slot before overwriting it, the count<2k+1 and count<3 fallbacks
+  are right, and the memory guard's `2 + 2k` planes match what's allocated.
+- ~~**NEW IDEA (Builder 2026-08-06, traced while auditing the stack dispatcher) — a walk-away stack of a *small*
+  night silently discards the quality weighting the user asked for, and nothing anywhere says so.**~~ —
+  **SHIPPED v0.238.0** (Builder 2026-08-06, branch `claude/gallant-galileo-kdy4gc`). Confirmed end-to-end, not
+  just traced: a 5-frame `auto_reject` stack with `quality_weighted=True` really does resolve to min/max and
+  stamp nothing at all. The engine now records the *reason* alongside the (still correctly omitted) `WGTMODE`:
+  `WGTSKIP="minmax"`, `WGTSKAUT` (was it the auto-picker or the user's own tick?) and, for an auto pick,
+  `WGTSKMIN` = `kappa_min_frames(sigma_kappa)` — the frame count at which weighting starts counting again. The
+  run-Info endpoint parses them into an additive `weighting_skipped` field and History renders one plain-language
+  line, worded by cause: an **auto** pick gets "…picked automatically because sigma clipping can't remove a lone
+  satellite trail on a small stack; from 11 subs it switches to sigma clipping and your weighting counts again"
+  (a *wait*, not a mistake), while a **manually ticked** min/max gets "Use sigma clipping instead if you want your
+  best subs to count for more" (a setting to change). The two halves are mutually exclusive by construction —
+  a κ-σ stack keeps `WGTMODE` and carries no skip note. **Scope note on the filed "check first":** the gap is
+  wider than the entry assumed — it is any non-drizzle ≥3-frame min/max stack with weighting on, not only the
+  sub-11-frame walk-away case; the walk-away path is just the half with no pick-time warning to fall back on.
+  Additive header cards + an additive response field + one frontend line: no config/DB/API-shape/on-disk change,
+  no default flipped, and an older master with no `WGTSKIP` simply renders nothing as before. **Tests** (+10):
+  `tests/test_output_header_meta.py` (+4 — manual pick, auto pick with its crossover, no note when the weights
+  did apply, no note when weighting was never on), `tests/test_stack_pipeline.py` (+1 end-to-end walk-away run,
+  plus the existing min/max test extended to assert the reason is now stamped and the κ-σ control to assert it
+  is not), `tests/webapp/test_stack_render.py` (+1 endpoint parse, plus the unweighted control), and
+  `History.test.tsx` (+6 pure-function wordings + 1 render).
+  *(Original spec kept below for provenance.)*
   *(Honest accounting / trust — PRIORITY 2–3; size S; **traced, not yet reproduced end-to-end**.)*
   On the walk-away chains (watcher auto-stack, one-click Process target) `_build_and_run` sets
   `auto_reject=True` whenever the merged options carry no explicit rejection key (`webapp/pipeline.py`
@@ -6227,8 +6279,20 @@ to **Shipped**.)_
   clipping is a display-space property) but sanity-check against the linear data so a truly saturated core isn't
   promised a recovery that can't happen; and return "no suggestion" rather than 0 when there's no bright core at all,
   so the button self-hides instead of implying the picture has a problem.
-- **NEW IDEA (Builder 2026-08-06, spotted while adding the 10th and 11th Adaptive-Auto chips) — the "How did Auto
-  do?" chip row is becoming a wall.** *(Friendliness — PRIORITY 3; size S; frontend-only.)* `AUTO_FEEDBACK_CHIPS` is
+- ~~**NEW IDEA (Builder 2026-08-06, spotted while adding the 10th and 11th Adaptive-Auto chips) — the "How did Auto
+  do?" chip row is becoming a wall.**~~ — **SHIPPED v0.239.1** (Builder 2026-08-06, branch
+  `claude/gallant-galileo-kdy4gc`). Took the **five labelled clusters** shape rather than the −/+ collapse,
+  precisely because of the entry's own "care" note: clustering keeps *both* halves of every opposing pair visible
+  and one tap apart, so the walk-back is never further away than the tap that got the user there. Each chip now
+  carries a `group` (Brightness · Sharpness · Grain · Colour · Bright core) and a new pure
+  `autoFeedbackGroups()` clusters them in declaration order; the row renders as five small labelled questions
+  instead of eleven equal-weight buttons. **Pure presentation over the existing cue keys** — no new endpoint, no
+  change to what a tap sends, and `AUTO_FEEDBACK_CHIPS` stays the contract (it gained a field, lost nothing).
+  **Tests** (`AutoFeedback.test.tsx`, +5): the rendered row shows all five headings *and* still offers every one
+  of the eleven cues as its own button, plus pure-function tests that grouping keeps every chip exactly once in
+  order, collapses to ≤ 6 clusters, holds each opposing pair in one cluster, and groups a caller's own list
+  without mutating the shipped one. *(Original spec kept below for provenance.)*
+  *(Friendliness — PRIORITY 3; size S; frontend-only.)* `AUTO_FEEDBACK_CHIPS` is
   now eleven flat chips ("Too dark", "Too bright", "Too soft", "Over-sharpened", "Too noisy", "Over-smoothed",
   "Colours too weak", "Colours too strong", "Too green", "Core blown out", "Core looks flat"). Each one is good, but
   eleven equal-weight buttons is *more* decision for a beginner, not less — the opposite of what the feature is for,
@@ -10592,8 +10656,40 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-REQUESTED (2026-08-06) — optional "space ambient" background music in the web interface, off by
-  default, synthesised in the browser (no audio files).** *(Enjoyment polish; size M.)* The owner spends long
+- ~~**⭐ OWNER-REQUESTED (2026-08-06) — optional "space ambient" background music in the web interface, off by
+  default, synthesised in the browser (no audio files).**~~ — **SHIPPED v0.239.0** (Builder 2026-08-06, branch
+  `claude/gallant-galileo-kdy4gc`). Built exactly to the filed spec, procedurally — **no audio file ships or is
+  fetched**, so nothing leaves the NAS, the image gains no binary asset, and a multi-hour session never hears a
+  loop point. Three layers into a shared convolver whose impulse response is a generated decaying noise burst,
+  then a master gain and a `DynamicsCompressorNode` as a safety limiter: (1) a four-voice detuned pad (root ·
+  fifth · octave · twelfth) through a lowpass swept by a 0.035 Hz LFO, each voice swelling on its own
+  37/43/53/61 s clock so they never re-align into a pulse; (2) a brown-noise "solar wind" bed under a slow
+  bandpass sweep; (3) a sparse pentatonic bell every 8–25 s, never on a grid, with a quiet inharmonic partner for
+  the metallic edge. The bed drifts between three related roots (A1/B1/D2) every 2–5 minutes.
+  **Behaviour:** default **off** and per-device — the opt-in and the volume live in `localStorage`
+  (`astrostack.ambient.*`), never in `config.json`, so there is no server setting, no config migration and
+  nothing to break on upgrade. A speaker button in the `AppShell` header is the one click to start or silence it;
+  a Settings card carries the volume and the plain-language explanation. The `AudioContext` is created and
+  resumed **only inside the click handler** (autoplay policy), and the button shows "on" only if that actually
+  succeeded — a blocked browser gets a yellow notification and the toggle stays off rather than lying. A
+  remembered opt-in doesn't autoplay after a reload; it waits for the first click or keypress anywhere in the app.
+  Switching off fades over 2.5 s and then **suspends** the context (not just mutes it), so a tab left open for
+  hours costs nothing, and a restart during the fade wins rather than being suspended out from under.
+  **Split for testability as specified:** all the sound-design decisions are pure (`ambient/voicing.ts`), the
+  node graph is a thin layer over them (`ambient/player.ts`) with injectable context/random/timers.
+  **Tests (+56):** `voicing.test.ts` (21 — chord intervals, detune, distinct swell periods, the gain never
+  reaching zero, bell gaps spanning 8–25 s off-grid, bells always pentatonic and clear of the pad, drift always
+  moving to a different root, the IR decaying and staying in [-1,1], brown noise normalised and genuinely dark),
+  `prefs.test.ts` (8 — off on a fresh install, round-trips, garbage/hand-edited values, and a disabled or full
+  store degrading instead of throwing), `player.test.ts` (17, against a hand-rolled `AudioContext` stub — resume
+  only from a start, graph built once, fade targets, suspend-not-mute, a restart winning mid-fade, a blocked
+  resume reporting failure, bells re-arming, and a **fail-before/pass-after** guard that a root drift doesn't tear
+  down the un-restartable noise-bed source), and `AmbientToggle.test.tsx` (10 — the silent fresh install, the
+  gesture-scoped start, the persisted opt-in cleared before the fade finishes, the blocked-audio path, the
+  gesture-gated resume after a reload, no sound without an opt-in, and both components rendering nothing where
+  Web Audio is unavailable). Frontend-only: zero backend, zero engine, zero schema, no default flipped.
+  *(Original spec kept below for provenance.)*
+  *(Enjoyment polish; size M.)* The owner spends long
   stretches watching a stack run or browsing the gallery and wants the option of a quiet ambient soundbed while
   they do. **Be honest about where this ranks: it is *enjoyment* polish, not a workflow feature — it must never
   displace a bug or PRIORITY 1–4 work.** Pull it on a slow run, not ahead of the queue. It is, however, fully

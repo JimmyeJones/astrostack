@@ -732,6 +732,18 @@ export interface StackWeightingSummary {
   median?: number;
 }
 
+// Quality weighting was on, but the method that ran ignored it (min/max is an
+// order statistic, so it combines by rank rather than by weight). Present only
+// on such a run — its absence means either weighting was off or it applied.
+export interface StackWeightingSkipped {
+  reason: string;
+  // True when min/max was picked automatically from the frame count (so it
+  // switches back to weight-respecting sigma clipping at `min_frames` subs),
+  // false when the user ticked "Min/max rejection" themselves.
+  auto?: boolean;
+  min_frames?: number;
+}
+
 export interface StackPhotometricSummary {
   mode: string;
   n_adjusted?: number;
@@ -810,6 +822,7 @@ export interface StackRunInfo {
   integration_s: number | null;
   n_frames: number | null;
   weighting: StackWeightingSummary | null;
+  weighting_skipped?: StackWeightingSkipped | null;
   photometric?: StackPhotometricSummary | null;
   dark_scaling?: StackDarkScalingSummary | null;
   rejection?: StackRejectionSummary | null;

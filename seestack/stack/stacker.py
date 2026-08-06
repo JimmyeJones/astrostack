@@ -1040,6 +1040,22 @@ def _build_output_header_meta(
         meta["WGTMIN"] = (round(float(wstats.min_weight), 3), "min frame weight")
         meta["WGTMAX"] = (round(float(wstats.max_weight), 3), "max frame weight")
         meta["WGTMED"] = (round(float(wstats.median_weight), 3), "median frame weight")
+    # …and the mirror image: weighting was asked for and computed, but the path
+    # that ran ignores it. Stamping *nothing* (the WGTMODE gate above) is honest
+    # about the result but silent about the cause — and on the walk-away chains
+    # (watcher auto-stack / one-click Process target) the user never sees the
+    # Stack form's pick-time warning, so "quality weighting had no effect" is
+    # indistinguishable from "weighting was off". Record the reason instead.
+    # ``auto`` vs ``manual`` matters to the wording: an auto-picked min/max
+    # switches itself back to weight-respecting κ-σ once the stack is big enough
+    # (WGTSKMIN frames), which is a *wait for more subs* answer; an explicitly
+    # ticked min/max is a *change this setting* answer.
+    elif wstats is not None and wstats.n_weighted and not weights_applied:
+        meta["WGTSKIP"] = ("minmax", "weighting requested but not applied")
+        meta["WGTSKAUT"] = (bool(options.auto_reject), "min/max was auto-picked")
+        if options.auto_reject:
+            meta["WGTSKMIN"] = (int(kappa_min_frames(options.sigma_kappa)),
+                                "frames needed for weighting to apply")
     # Photometric-normalization provenance: records that frames were gain-matched
     # and over what scale range, so a normalised stack self-documents (mirrors the
     # WGT* keys). Omitted when nothing was actually scaled.
