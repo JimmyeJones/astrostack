@@ -6241,6 +6241,25 @@ to **Shipped**.)_
   stretch for *every* preview and thumbnail): the knee's default must stay byte-for-byte, so any change has to be
   gated on `highlight_protect > 0` and re-measured against `tests/test_stf_highlight_rolloff.py`'s
   sky-unchanged/monotone invariants. Worth doing with a before/after on the same scenes the suggestion tests use.
+  _(**Builder 2026-08-06, `claude/gallant-galileo-gv2vcx` — PROTOTYPED AND MEASURED, then deliberately NOT shipped.
+  Read this before spending a run on it.** Built the entry's own "fold the protection into the `m` solve" shape: pick
+  the shoulder's knee in **display** space (sweep 1.0 → 0.85 as `protect` goes 0 → 1) and map it back through
+  `_mtf`'s closed-form inverse, taking `min()` with today's linear knee. It is exactly gated as the entry asks —
+  `_mtf_inverse(1.0, m) == 1.0` for every `m`, so `protect=0` is byte-for-byte the historical render and an ordinary
+  frame (`m` ≈ 0.3, where the linear knee is already the lower of the two) is unchanged at every strength.
+  **The measurements are the reason it didn't ship.** On the pathological frame the entry describes (`m` clamped at
+  its 1e-3 floor) it halves the pure-white plateau — flat-at-1.0 core pixels **741 → 385** — but the core's rendered
+  span barely moves (18 → 19 distinct 8-bit levels, std 0.0174 → 0.0173), because the display knee only fixes *where*
+  the shoulder starts: above it the MTF is still near-vertical, so the shoulder's own top two-thirds still crowd into
+  the last 0.15 % of the display range. **And that regime looks unreachable from real data:** a Seestar stack is
+  derived from a 16-bit sensor, so max/sky ≲ 65 and the 99.5th-percentile ceiling can't sit ~2800× the sky the way
+  the synthetic scene needs. Swept realistic scenes (sky 1000 ADU, core peaks 20 k–1 M, three core widths, with a
+  disk): `protect=1` already leaves **zero** flat-white pixels today, and the change buys **~10 %** more core
+  contrast (e.g. std 0.01191 → 0.01324) — a marginal gain that would still change pixels for anyone who has moved
+  the slider or tapped "Core blown out". Per AGENTS.md §2 that is not worth shipping. **What would actually be
+  needed** is the *data-referred* (log-scaled) shoulder from the sibling entry above — a genuinely different curve,
+  not a repositioned knee — and that one is real-data-gated on the owner's own M31/M42 stack. So: don't re-derive
+  the display-knee prototype; if this is picked up again, start from the log shoulder and get owner data first.)_
 - **NEW IDEA (Builder 2026-08-06, follow-on to v0.240.0) — the highlight suggestion is a ready-made way to collect
   the real-data evidence the *automatic* highlight-clip cue is gated on.** *(Autonomy — PRIORITY 2; size S.)* The
   filed "'How's my stack?' highlight-clip cue" is real-data-gated: a wrong threshold would silently change
@@ -10795,6 +10814,42 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- ~~**NEW IDEA (Builder 2026-08-06, the obvious next slice after the v0.241.0 sharpness panel) — grade the capture
+  *before* stacking it, so the beginner picks the right setting the first time instead of learning it from a stack
+  they then redo.**~~ — **SHIPPED v0.242.0** (Builder 2026-08-06, branch `claude/gallant-galileo-gv2vcx`), in the
+  same run that shipped the panel. *(Autonomy — PRIORITY 2.)* A **"Check this capture first"** button on any
+  un-stacked Moon/Sun capture now runs pass 1 alone and renders the same `VideoSharpnessCard` — same component,
+  same numbers, no picture made — so "How picky should we be?" is an informed choice before the stack rather than a
+  lesson learned after it. Engine: pass 1 was extracted from `stack_video` into
+  `seestack.video.lucky.grade_video` → `GradeResult`, and `stack_video` now *calls* it, so there is exactly one
+  grading implementation and the two can't drift (pinned by a test asserting the standalone scores equal the
+  stack's). Webapp: `POST /api/videos/{id}/grade` → a `video_grade` job (progress + cancel, like the stack — a long
+  capture is still minutes of decoding, so it must never be a synchronous request) writing a **separate**
+  `grade.json` beside `meta.json`, so checking a capture can never disturb a finished still (pinned by a test that
+  grades an already-stacked capture and asserts the result payload is byte-identical and the PNG still serves).
+  `VideoCaptureOut.sharpness` carries it; `sharpness_profile(scores, None)` already handled "no stack yet"
+  (`cut_fraction = 0`, no "you kept…" clause), so the engine needed nothing new. The button self-hides once a grade
+  or a stack exists — there is no reason to offer it when the answer is already on screen. Additive and
+  upgrade-safe: new endpoint, new job kind, new optional field, new file that only appears when used; no default
+  flipped, no existing response shape changed. **Tests (+10):** `tests/test_video_lucky.py` (+3 — scores match the
+  stack's, progress/cancel, the too-few-frames refusal), `tests/webapp/test_video_api.py` (+4 — grades without
+  stacking, leaves an existing still alone, 404, and the path-escape rejection), `MoonSun.test.tsx` (+2).
+
+- **NEW IDEA (Builder 2026-08-06, spotted while shipping the v0.241.0 sharpness panel — verified against the
+  routes) — a stacked Moon/Sun still is invisible everywhere except the Moon & Sun page.** *(Friendliness /
+  enjoy-share — PRIORITY 3; size M.)* `webapp/video.py` deliberately stores the still outside the library
+  (`<data_root>/video/<id>/`) because none of the per-target machinery applies to it — which is the right call, but
+  it means the Gallery, Best pictures, the Dashboard tiles and the editor have **no** knowledge of it (grepped:
+  neither `routers/gallery.py` nor `routers/stats.py` nor any of those pages mentions video at all). A beginner who
+  stacks their first Moon picture then goes looking for it in the Gallery — the place every *other* finished picture
+  lives — finds nothing. **Shape:** have the gallery listing fold in finished video stills as a read-only extra
+  source (id, label, `preview_url`, created date), so they appear alongside stack runs without becoming
+  `stack_runs` rows or gaining a project DB. **Care:** keep it strictly additive and read-only — the gallery's
+  existing per-run actions (set as cover, open in editor, prune) mostly don't apply, so a video still should render
+  as a plain card that links back to the Moon & Sun page rather than growing a half-working action row. Opening one
+  in the editor is a *separate*, bigger question (the still is already display-rendered, so the deep-sky auto chain
+  must not touch it) and should not be bundled into this slice.
+
 - ~~**⭐ OWNER-REQUESTED (2026-08-06) — optional "space ambient" background music in the web interface, off by
   default, synthesised in the browser (no audio files).**~~ — **SHIPPED v0.239.0** (Builder 2026-08-06, branch
   `claude/gallant-galileo-kdy4gc`). Built exactly to the filed spec, procedurally — **no audio file ships or is
@@ -11106,9 +11161,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   dropped once everything is stacked, self-hide on empty and on error). (S, friendliness — PRIORITY 3.)
 
 - **Slices (b)/(c) of "Stack video" (follow-on to the shipped v0.224.0 slice (a)).** Deliberately left out of the
-  first slice, in rough value order: **(b1)** show the *sharpness distribution* of the capture so the user can see
+  first slice, in rough value order: ~~**(b1)** show the *sharpness distribution* of the capture so the user can see
   whether 15 % or 50 % is the right cut for *their* video (the engine already computes every frame's score — it just
-  isn't returned); **(b2)** an optional gentle final unsharp/wavelet on the result (the editor can already sharpen,
+  isn't returned)~~ — **(b1) SHIPPED v0.241.0** (Builder 2026-08-06, branch `claude/gallant-galileo-gv2vcx`).
+  A **"How steady was your capture?"** panel now sits under every finished Moon/Sun still, built from the grading
+  pass's own per-frame scores — which the stack computed and then dropped on the floor. New pure engine module
+  `seestack/video/quality.py::sharpness_profile(scores, keep_percent)` returns (i) a 32-point **curve** of every
+  frame's sharpness, sorted sharpest-first and normalised to the best frame, (ii) the measured trade-off at each of
+  the three settings the UI offers — *"15% · 30 frames · 2.4× sharper · 6× cleaner"* — and (iii) a **suggested
+  setting** picked by a stated rule (*the most frames you can keep while staying within 5 % of the strictest
+  setting's contrast*), plus a one-sentence plain-language summary and a `steady`/`mixed`/`variable` seeing verdict.
+  **The measure is contrast, not the raw score:** `frame_sharpness` is a mean-*squared* Laplacian, so the module
+  works in √score, and it aggregates the kept set with a **mean** rather than a median — the stack is an average of
+  frames, so a soft frame let in by a looser setting genuinely costs detail and the number has to show it (a median
+  hid two soft frames behind three sharp ones and recommended keeping more than the capture could support; caught by
+  the API test on the 3-sharp-in-10 synthetic capture, which now correctly lands on 30 %).
+  `LuckyResult.scores` and `VideoStackMeta.scores` carry the scores through (both additive with defaults, and
+  `read_meta` already drops unknown/missing fields, so a `meta.json` written by v0.224–v0.240 still loads and simply
+  has no panel — pinned by a test that deletes the key). The profile is derived **per request** from the stored
+  scores, so a future improvement to the advice applies to stills that already exist. Frontend:
+  `VideoSharpnessCard` draws the curve on a **fixed 0..1 axis** — deliberately not the shared `Sparkline`, which
+  autoscales to a series' own min/max and would render a steady capture's 1 % spread as a dramatic cliff, telling
+  the beginner the exact opposite of the truth — marks where their cut fell, and offers a one-click *"Try 50%
+  instead"* that pre-selects the matching preset so "Stack again" re-runs at the suggested setting. Additive and
+  upgrade-safe: new optional API field, new engine module, no default flipped, nothing changed about any picture.
+  **Tests (+29):** `tests/test_video_quality.py` (+14), `tests/webapp/test_video_api.py` (+2, incl. the
+  scores-less-meta upgrade case), `tests/test_video_lucky.py` (+1), `VideoSharpnessCard.test.tsx` (+11, incl. the
+  fixed-axis honesty guard), `MoonSun.test.tsx` (+2). Still open: **(b2)** an optional gentle final unsharp/wavelet
+  on the result (the editor can already sharpen,
   so this is convenience, not capability); **(b3)** raw-OSC video handling (if a Seestar ever writes a Bayer video,
   today's `rgb24` decode would need a debayer path — verify before building, the current captures are ordinary
   colour video); **(c)** disk crop/centre so the still isn't mostly black sky, and drizzle-upscale. Explicitly **not**

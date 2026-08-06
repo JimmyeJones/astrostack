@@ -4,13 +4,15 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import {
-  IconAlertTriangle, IconDownload, IconMoon, IconSun, IconVideo, IconWand,
+  IconAlertTriangle, IconChartBar, IconDownload, IconMoon, IconSun, IconVideo,
+  IconWand,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type VideoCapture } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
 
 // Local, like Storage.tsx's `gb` — a video is MB-to-GB sized, and there is no
 // shared byte formatter to reach for.
@@ -23,6 +25,10 @@ function fileSize(bytes: number): string {
 // Keep-% presets, phrased as what they *do* rather than as a number. Lucky
 // imaging's one real decision is how ruthless to be, and a beginner has no way
 // to guess "25%" — but they can absolutely answer "was the air steady?".
+// These three values must stay in step with `DEFAULT_CANDIDATES` in
+// `seestack/video/quality.py`: the "How steady was your capture?" panel measures
+// the trade-off at exactly these settings and its "try this instead" button
+// selects one of them here.
 export const KEEP_PRESETS = [
   { value: "15", label: "Only the very best (15%) — sharpest, a bit noisier" },
   { value: "30", label: "Best few (30%) — recommended" },
@@ -66,6 +72,22 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notifications.show({
         message: `Stacking your ${capture.label} video — this takes a minute or two.`,
+        color: "violet",
+      });
+      navigate("/jobs");
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  // Grading is the cheap half of the stack (one decode, a score per frame), so
+  // it can be run on its own to answer "how picky should I be?" *before* the
+  // stack is spent finding out. It never touches an existing still.
+  const grade = useMutation({
+    mutationFn: () => api.gradeVideoCapture(capture.id, { file_name: file ?? undefined }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notifications.show({
+        message: `Checking your ${capture.label} video — reading it through once.`,
         color: "violet",
       });
       navigate("/jobs");
@@ -131,6 +153,14 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
               16-bit TIFF
             </Button>
           </Group>
+          {/* The evidence behind "how picky should we be?", measured on this
+              capture. Self-hiding for a still stacked before the scores were
+              kept. Its suggestion drives the same Select below, so acting on it
+              is one click then "Stack again". */}
+          <VideoSharpnessCard
+            profile={result.sharpness}
+            onUseSuggestion={(pct) => setKeep(String(pct))}
+          />
         </Stack>
       ) : null}
 
@@ -149,6 +179,17 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
         />
       ) : null}
 
+      {/* Before any stack exists, the same panel from the grade-only pass — so
+          the setting below is an informed choice rather than a guess. Once a
+          still exists the result's own panel (above) is the better one to show,
+          since it can mark where the cut actually fell. */}
+      {!result ? (
+        <VideoSharpnessCard
+          profile={capture.sharpness}
+          onUseSuggestion={(pct) => setKeep(String(pct))}
+        />
+      ) : null}
+
       <Select
         label="How picky should we be?"
         description="Seeing makes some frames much sharper than others; we keep the best and throw the rest away."
@@ -158,6 +199,7 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
         onChange={(v) => setKeep(v ?? DEFAULT_KEEP)}
         allowDeselect={false}
         mb="sm"
+        mt="sm"
       />
 
       <Button
@@ -169,6 +211,23 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
       >
         {result ? "Stack again" : "Stack video"}
       </Button>
+
+      {/* Only worth offering while there is nothing to compare against — once a
+          still exists its own panel already answers the question. */}
+      {!result && !capture.sharpness ? (
+        <Button
+          fullWidth
+          mt="xs"
+          variant="subtle"
+          size="sm"
+          leftSection={<IconChartBar size={16} />}
+          onClick={() => grade.mutate()}
+          loading={grade.isPending}
+          disabled={disabled}
+        >
+          Check this capture first
+        </Button>
+      ) : null}
     </Card>
   );
 }

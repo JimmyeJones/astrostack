@@ -13,6 +13,7 @@ import pytest
 from seestack.video import (
     LuckyOptions,
     ffmpeg_available,
+    grade_video,
     iter_frames,
     normalize_for_display,
     probe_video,
@@ -126,6 +127,14 @@ def test_stack_keeps_the_sharpest_frames_and_drops_the_rest(tmp_path):
     # The three good-seeing frames are exactly the ones kept.
     assert result.kept_indices == (1, 4, 7)
     assert result.sharpness_kept_median > 2 * result.sharpness_all_median
+    # Every graded frame's score comes back, in capture order — that is what the
+    # "How steady was your capture?" panel is measured from, and it costs the
+    # grading pass nothing to keep.
+    assert len(result.scores) == 12
+    assert all(isinstance(s, float) for s in result.scores)
+    # In capture order, so the good-seeing moments sit at their own indices.
+    assert min(result.scores[i] for i in (1, 4, 7)) > max(
+        s for j, s in enumerate(result.scores) if j not in (1, 4, 7))
 
 
 def test_stack_averages_the_noise_down(tmp_path):
@@ -267,3 +276,40 @@ def test_display_render_maps_uncovered_pixels_to_black():
 def test_display_render_survives_an_all_uncovered_image():
     out = normalize_for_display(np.full((4, 4, 3), np.nan, dtype=np.float32))
     assert np.isfinite(out).all() and out.max() == 0.0
+
+
+def test_grade_only_scores_every_frame_without_stacking(tmp_path):
+    """Pass 1 on its own — the cheap half, run to answer "how picky should I
+    be?" before a stack is spent finding out."""
+    path = lunar_video(
+        tmp_path / "Lunar_video.mp4", n_frames=12, sharp_indices=(1, 4, 7), w=96, h=72,
+    )
+    graded = grade_video(path)
+    assert graded.n_graded == 12
+    assert graded.stride == 1
+    assert graded.width == 96 and graded.height == 72
+    assert len(graded.scores) == 12
+    assert min(graded.scores[i] for i in (1, 4, 7)) > max(
+        s for j, s in enumerate(graded.scores) if j not in (1, 4, 7))
+    # Identical to what the stack's own first pass produces — there is one
+    # grading implementation, not two that can drift apart.
+    stacked = stack_video(path, LuckyOptions(keep_percent=25, align=False))
+    assert graded.scores == stacked.scores
+
+
+def test_grade_only_honours_progress_and_cancel(tmp_path):
+    path = lunar_video(tmp_path / "Lunar_video.mp4", n_frames=8, w=48, h=36)
+    seen: list[tuple[str, int, int]] = []
+    graded = grade_video(path, progress=lambda *a: seen.append(a))
+    assert graded.n_graded == 8
+    assert {s for s, _, _ in seen} == {"grade"}
+    assert seen[-1][1] == 8
+
+    with pytest.raises(VideoStackCancelled):
+        grade_video(path, should_cancel=lambda: True)
+
+
+def test_grade_only_refuses_a_video_with_too_few_frames(tmp_path):
+    path = lunar_video(tmp_path / "Lunar_video.mp4", n_frames=2, w=48, h=36)
+    with pytest.raises(ValueError, match="at least 3"):
+        grade_video(path)

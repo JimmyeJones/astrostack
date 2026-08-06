@@ -10,6 +10,8 @@ self-contained store rather than an extension of the library:
         stack.png     ← the finished still, display-rendered (what the user sees)
         stack.tiff    ← 16-bit, for anyone who wants to edit it elsewhere
         meta.json     ← how it was made, so the result can explain itself
+        grade.json    ← a grade-only pass (every frame's sharpness), so the user
+                        can see what their capture looks like before stacking it
 
 Adding a directory alongside ``incoming/``/``library/``/``state/`` is additive:
 nothing existing moves, and an install that never stacks a video never grows one.
@@ -19,7 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,6 +32,7 @@ from seestack.video.ffmpeg import ffmpeg_available, probe_video
 from seestack.video.lucky import (
     LuckyOptions,
     VideoStackCancelled,
+    grade_video,
     normalize_for_display,
     stack_video,
 )
@@ -40,10 +43,16 @@ log = logging.getLogger(__name__)
 
 #: Job kind for the video stack, so the Jobs page can label it.
 JOB_KIND = "video_stack"
+#: ...and for the grade-only pass, which answers "how picky should I be?" before
+#: the user spends a full stack finding out.
+JOB_KIND_GRADE = "video_grade"
 
 PNG_NAME = "stack.png"
 TIFF_NAME = "stack.tiff"
 META_NAME = "meta.json"
+#: Written by the grade-only pass. Kept **beside** ``meta.json`` rather than in
+#: it so checking a capture can never disturb a still that is already stacked.
+GRADE_NAME = "grade.json"
 
 
 def video_root(settings: Settings) -> Path:
@@ -77,6 +86,12 @@ class VideoStackMeta:
     sharpness_kept_median: float
     sharpness_all_median: float
     warnings: list[str]
+    #: Every graded frame's sharpness score, in capture order. Optional and last
+    #: so a ``meta.json`` written by an older version still loads (it simply has
+    #: no profile, and the page hides the panel). Rounded on the way out — the
+    #: scores are only ever compared as ratios, so six significant figures is far
+    #: more than the advice needs and keeps a 1500-frame capture's file small.
+    scores: list[float] = field(default_factory=list)
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -95,6 +110,38 @@ def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
         return VideoStackMeta(**known)  # type: ignore[arg-type]
     except TypeError:
         log.debug("video meta for %s is missing fields; ignoring", capture_id)
+        return None
+
+
+@dataclass
+class VideoGradeMeta:
+    """A grade-only pass: what the capture's frames look like, no stack made."""
+
+    capture_id: str
+    source_name: str
+    created_utc: str
+    n_graded: int
+    stride: int
+    scores: list[float]
+    warnings: list[str] = field(default_factory=list)
+
+
+def read_grade(settings: Settings, capture_id: str) -> VideoGradeMeta | None:
+    """Load a capture's saved grade-only pass, or ``None`` if never checked.
+
+    Best-effort in the same way as :func:`read_meta`: a truncated or
+    hand-edited file reads as "never checked" rather than breaking the page.
+    """
+    path = result_dir(settings, capture_id) / GRADE_NAME
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    try:
+        known = {f: raw[f] for f in VideoGradeMeta.__dataclass_fields__ if f in raw}
+        return VideoGradeMeta(**known)  # type: ignore[arg-type]
+    except TypeError:
+        log.debug("video grade for %s is missing fields; ignoring", capture_id)
         return None
 
 
@@ -157,6 +204,80 @@ def submit_video_stack(
     return jm.submit(JOB_KIND, body, target=capture_id)
 
 
+def submit_video_grade(
+    settings: Settings,
+    jm: JobManager,
+    capture_id: str,
+    *,
+    file_name: str | None = None,
+) -> Job:
+    """Enqueue a grade-only pass — decode once, score every frame, stack nothing.
+
+    The cheap half of :func:`submit_video_stack`, run on its own so the user can
+    see how much their capture's sharpness actually varies *before* choosing how
+    ruthless to be with it. Writes only ``grade.json``; an existing stacked still
+    and its metadata are left exactly as they were.
+    """
+
+    def body(job: Job) -> dict[str, Any]:
+        return _video_grade_body(settings, job, capture_id, file_name=file_name)
+
+    return jm.submit(JOB_KIND_GRADE, body, target=capture_id)
+
+
+def _resolve_source(settings: Settings, capture_id: str, file_name: str | None):
+    """``(capture, source path)`` for a job, or a clear failure. Server-side only."""
+    if not ffmpeg_available():
+        raise RuntimeError(
+            "Video stacking needs ffmpeg, which isn't installed in this container. "
+            "Update to a current AstroStack image (it bundles ffmpeg) and try again."
+        )
+    capture = find_video_capture(settings.resolved_incoming_dir, capture_id)
+    if capture is None:
+        raise RuntimeError(f"No video capture called {capture_id!r} in the incoming folder.")
+    return capture, pick_source_file(capture, file_name)
+
+
+def _video_grade_body(
+    settings: Settings,
+    job: Job,
+    capture_id: str,
+    *,
+    file_name: str | None,
+) -> dict[str, Any]:
+    _capture, source = _resolve_source(settings, capture_id, file_name)
+    job.set_progress("probe", 0, 0, f"Reading {Path(source).name}")
+    info = probe_video(source)
+
+    def on_progress(stage: str, done: int, total: int) -> None:
+        job.set_progress("grade", done, total, "Grading every frame for sharpness")
+
+    try:
+        graded = grade_video(
+            source, LuckyOptions(), info=info,
+            progress=on_progress,
+            should_cancel=job.cancel_requested,
+        )
+    except VideoStackCancelled:
+        return {"cancelled": True, "capture_id": capture_id}
+
+    out_dir = result_dir(settings, capture_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    meta = VideoGradeMeta(
+        capture_id=capture_id,
+        source_name=Path(source).name,
+        created_utc=datetime.now(UTC).isoformat(timespec="seconds"),
+        n_graded=graded.n_graded,
+        stride=graded.stride,
+        scores=[round(float(v), 6) for v in graded.scores],
+        warnings=list(graded.warnings),
+    )
+    (out_dir / GRADE_NAME).write_text(
+        json.dumps(asdict(meta), indent=2), encoding="utf-8",
+    )
+    return {"capture_id": capture_id, "n_graded": graded.n_graded}
+
+
 def _video_stack_body(
     settings: Settings,
     job: Job,
@@ -166,16 +287,7 @@ def _video_stack_body(
     file_name: str | None,
     align: bool,
 ) -> dict[str, Any]:
-    if not ffmpeg_available():
-        raise RuntimeError(
-            "Video stacking needs ffmpeg, which isn't installed in this container. "
-            "Update to a current AstroStack image (it bundles ffmpeg) and try again."
-        )
-    capture = find_video_capture(settings.resolved_incoming_dir, capture_id)
-    if capture is None:
-        raise RuntimeError(f"No video capture called {capture_id!r} in the incoming folder.")
-
-    source = pick_source_file(capture, file_name)
+    capture, source = _resolve_source(settings, capture_id, file_name)
     job.set_progress("probe", 0, 0, f"Reading {Path(source).name}")
     info = probe_video(source)
 
@@ -226,6 +338,7 @@ def _video_stack_body(
         sharpness_kept_median=result.sharpness_kept_median,
         sharpness_all_median=result.sharpness_all_median,
         warnings=list(result.warnings),
+        scores=[round(float(v), 6) for v in result.scores],
     )
     (out_dir / META_NAME).write_text(
         json.dumps(asdict(meta), indent=2), encoding="utf-8",

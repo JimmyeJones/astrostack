@@ -6,6 +6,8 @@ a beginner had a Moon video on their NAS and no way to turn it into a picture.
 
 * ``GET  /api/videos`` — the captures sitting in ``incoming/``, plus whether
   each already has a finished still.
+* ``POST /api/videos/{id}/grade`` — grade only, so "how picky should I be with
+  this capture?" can be answered before a stack is spent finding out.
 * ``POST /api/videos/{id}/stack`` — grade → keep the sharpest → align → average.
 * ``GET  /api/videos/{id}/preview.png`` / ``…/download.tiff`` — the result.
 
@@ -23,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from seestack.video.discover import find_video_capture, find_video_captures
 from seestack.video.ffmpeg import ffmpeg_available
+from seestack.video.quality import sharpness_profile
 from webapp import deps, video
 
 router = APIRouter(tags=["video"])
@@ -40,6 +43,32 @@ class VideoFileOut(BaseModel):
     size_bytes: int
 
 
+class KeepOptionOut(BaseModel):
+    """What one keep-% setting would give you on this particular capture."""
+
+    percent: float
+    n_frames: int
+    sharpness_vs_typical: float
+    noise_gain: float
+
+
+class SharpnessProfileOut(BaseModel):
+    """"How steady was your capture?" — the grading pass's own numbers.
+
+    Derived on every request from the scores stored with the result, so it costs
+    no extra work at stack time and a future improvement to the advice applies to
+    stacks that already exist. Absent (``null``) for a result stacked by a version
+    that didn't keep the scores — the page then just doesn't show the panel.
+    """
+
+    curve: list[float]
+    cut_fraction: float
+    options: list[KeepOptionOut]
+    suggested_percent: float
+    spread: str
+    summary: str
+
+
 class VideoResultOut(BaseModel):
     created_utc: str
     source_name: str
@@ -54,6 +83,8 @@ class VideoResultOut(BaseModel):
     warnings: list[str] = []
     preview_url: str
     tiff_url: str
+    #: Additive: older clients ignore it, older results simply have none.
+    sharpness: SharpnessProfileOut | None = None
 
 
 class VideoCaptureOut(BaseModel):
@@ -64,6 +95,10 @@ class VideoCaptureOut(BaseModel):
     files: list[VideoFileOut]
     total_bytes: int
     result: VideoResultOut | None = None
+    #: The grade-only pass ("Check this capture"), when one has been run. Lets a
+    #: beginner see how much their frames vary *before* choosing how picky to be.
+    #: Additive: ``null`` until they press the button.
+    sharpness: SharpnessProfileOut | None = None
 
 
 class VideoListOut(BaseModel):
@@ -72,6 +107,11 @@ class VideoListOut(BaseModel):
     hint: str | None = None
     incoming_dir: str
     captures: list[VideoCaptureOut]
+
+
+class VideoGradeRequest(BaseModel):
+    #: Which file in the folder to grade (basename). Omit for the longest one.
+    file_name: str | None = None
 
 
 class VideoStackRequest(BaseModel):
@@ -88,6 +128,39 @@ def _size_of(path: str) -> int:
         return Path(path).stat().st_size
     except OSError:
         return 0
+
+
+def _profile_out(scores, keep_percent: float | None) -> SharpnessProfileOut | None:
+    """Adapt the engine's profile to the wire, or ``None`` when there's nothing
+    worth showing (no scores, or a capture whose frames all scored zero)."""
+    profile = sharpness_profile(scores, keep_percent)
+    if profile is None:
+        return None
+    return SharpnessProfileOut(
+        curve=list(profile.curve),
+        cut_fraction=profile.cut_fraction,
+        options=[
+            KeepOptionOut(
+                percent=o.percent,
+                n_frames=o.n_frames,
+                sharpness_vs_typical=o.sharpness_vs_typical,
+                noise_gain=o.noise_gain,
+            )
+            for o in profile.options
+        ],
+        suggested_percent=profile.suggested_percent,
+        spread=profile.spread,
+        summary=profile.summary,
+    )
+
+
+def _grade_out(settings, capture_id: str) -> SharpnessProfileOut | None:
+    """The grade-only pass's profile. ``keep_percent`` is ``None`` — nothing has
+    been stacked, so there is no cut to mark and no "you kept…" clause."""
+    grade = video.read_grade(settings, capture_id)
+    if grade is None:
+        return None
+    return _profile_out(grade.scores, None)
 
 
 def _result_out(settings, capture_id: str) -> VideoResultOut | None:
@@ -108,6 +181,7 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
         warnings=list(meta.warnings),
         preview_url=f"/api/videos/{capture_id}/preview.png",
         tiff_url=f"/api/videos/{capture_id}/download.tiff",
+        sharpness=_profile_out(meta.scores, meta.keep_percent),
     )
 
 
@@ -127,6 +201,7 @@ def list_videos(request: Request) -> VideoListOut:
             ],
             total_bytes=cap.total_bytes,
             result=_result_out(settings, cap.id),
+            sharpness=_grade_out(settings, cap.id),
         )
         for cap in find_video_captures(incoming)
     ]
@@ -136,6 +211,32 @@ def list_videos(request: Request) -> VideoListOut:
         incoming_dir=str(incoming),
         captures=captures,
     )
+
+
+@router.post("/api/videos/{capture_id}/grade")
+def grade_one_video(
+    capture_id: str, request: Request, body: VideoGradeRequest | None = None,
+) -> dict[str, str]:
+    """Grade a capture without stacking it — "how picky should I be with this?"
+
+    Same decode as pass 1 of the stack, so it is a *job* with progress and
+    cancel, not a synchronous request: a multi-minute capture takes real time to
+    read even when nothing is accumulated.
+    """
+    settings = deps.get_settings(request)
+    jm = deps.get_job_manager(request)
+    if not ffmpeg_available():
+        raise HTTPException(status_code=503, detail=FFMPEG_MISSING_HINT)
+    capture = find_video_capture(settings.resolved_incoming_dir, capture_id)
+    if capture is None:
+        raise HTTPException(status_code=404, detail="No such video capture")
+    req = body or VideoGradeRequest()
+    try:
+        video.pick_source_file(capture, req.file_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    job = video.submit_video_grade(settings, jm, capture.id, file_name=req.file_name)
+    return {"job_id": job.id}
 
 
 @router.post("/api/videos/{capture_id}/stack")

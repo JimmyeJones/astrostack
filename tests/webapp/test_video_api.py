@@ -168,3 +168,108 @@ def test_the_solar_folder_is_labelled_sun(client, data_root):
     (cap,) = client.get("/api/videos").json()["captures"]
     assert cap["label"] == "Sun"
     assert cap["kind"] == "solar"
+
+
+def test_the_result_carries_the_captures_sharpness_profile(client, data_root):
+    """"How steady was your capture?" — the grading pass's own scores, served so
+    the keep-% decision stops being a guess."""
+    _drop_capture(data_root)
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 30},
+    ).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    prof = result["sharpness"]
+    assert prof is not None
+    # The curve is the graded frames, sharpest first, normalised to the best.
+    assert prof["curve"][0] == pytest.approx(1.0)
+    assert prof["curve"] == sorted(prof["curve"], reverse=True)
+    # The synthetic capture has exactly 3 genuinely sharp frames in 10, so the
+    # sharpest slice really is sharper than a typical frame...
+    assert prof["spread"] == "variable"
+    # ...and 30% (3 of 10) is precisely the setting that takes every sharp frame
+    # and no soft one — keeping more would start averaging blur back in.
+    assert prof["suggested_percent"] == 30.0
+    assert [o["percent"] for o in prof["options"]] == [15.0, 30.0, 50.0]
+    assert prof["options"][0]["sharpness_vs_typical"] > prof["options"][-1]["sharpness_vs_typical"]
+    # The cut marker reflects what was actually stacked (3 of 10 frames).
+    assert prof["cut_fraction"] == pytest.approx(0.3)
+    assert prof["summary"]
+
+
+def test_a_result_stacked_before_scores_were_kept_still_loads(client, data_root):
+    """Upgrade safety: an existing ``meta.json`` has no ``scores`` — the result
+    must still list, just without the panel."""
+    import json
+
+    from webapp.config import Settings
+    from webapp.video import META_NAME, result_dir
+
+    _drop_capture(data_root)
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 30},
+    ).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    settings = Settings(data_root=str(data_root))
+    meta_path = result_dir(settings, "Lunar_video") / META_NAME
+    raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    raw.pop("scores")                      # exactly what an older version wrote
+    meta_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert result is not None
+    assert result["n_stacked"] == 3        # everything else still reported
+    assert result["sharpness"] is None
+
+
+def test_checking_a_capture_grades_it_without_stacking(client, data_root):
+    """"Check this capture first" — the profile arrives, no picture is made."""
+    _drop_capture(data_root)
+    r = client.post("/api/videos/Lunar_video/grade", json={})
+    assert r.status_code == 200
+    job = _wait_for_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job.get("error")
+    assert job["result"]["n_graded"] == 10
+
+    cap = client.get("/api/videos").json()["captures"][0]
+    assert cap["result"] is None                   # nothing was stacked
+    prof = cap["sharpness"]
+    assert prof is not None
+    assert prof["spread"] == "variable"
+    assert prof["suggested_percent"] == 30.0
+    # No stack yet, so there is no cut to mark and no "you kept…" clause.
+    assert prof["cut_fraction"] == 0.0
+    assert "you kept" not in prof["summary"]
+
+    # And no picture was written.
+    assert client.get("/api/videos/Lunar_video/preview.png").status_code == 404
+
+
+def test_checking_a_capture_leaves_an_existing_still_alone(client, data_root):
+    """Grading writes its own file — it must never disturb a finished stack."""
+    _drop_capture(data_root)
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 50},
+    ).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    before = client.get("/api/videos").json()["captures"][0]["result"]
+
+    job_id = client.post("/api/videos/Lunar_video/grade", json={}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    after = client.get("/api/videos").json()["captures"][0]["result"]
+    assert after == before
+    assert client.get("/api/videos/Lunar_video/preview.png").status_code == 200
+
+
+def test_grading_an_unknown_capture_is_a_404(client):
+    assert client.post("/api/videos/Nope_video/grade", json={}).status_code == 404
+
+
+def test_grading_a_file_that_is_not_in_the_folder_is_rejected(client, data_root):
+    _drop_capture(data_root)
+    r = client.post("/api/videos/Lunar_video/grade", json={"file_name": "../secret.mp4"})
+    assert r.status_code == 400
+    assert "not a video in this capture folder" in r.json()["detail"]
