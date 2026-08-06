@@ -16,6 +16,7 @@ import { dependencyMet } from "../api/depends";
 import { compassPoint } from "../tonight";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
 import { AmbientSettings } from "../components/AmbientSettings";
+import { minMaxIgnoresWeightingHint } from "../weightingHint";
 
 // Hover hints for every setting (shown via an info icon next to the label).
 const HINTS: Record<string, string> = {
@@ -528,6 +529,19 @@ export function SettingsView() {
   const advanced = fields.filter((f) => f.group === "advanced");
   const optVal = (k: string) => (k in stackOpts ? stackOpts[k] : fields.find((f) => f.key === k)?.default);
 
+  // The defaults grid is descriptor-driven and has no cross-field logic, so the
+  // one pairing that cancels itself out — min/max rejection with quality
+  // weighting — would go unmentioned on the very screen a walk-away user sets it
+  // from. Same shared wording as the per-target Stack form, worded conditionally
+  // here because these defaults apply to whatever a future run brings (no frame
+  // count to gate on). Advisory only; it never blocks the save.
+  const stackDefaultsWeightingHint = stackSchema.isLoading ? null : minMaxIgnoresWeightingHint({
+    minMaxReject: Boolean(optVal("min_max_reject")),
+    qualityWeighted: Boolean(optVal("quality_weighted")),
+    drizzle: Boolean(optVal("drizzle")),
+    frames: null,
+  });
+
   return (
     <Stack maw={680}>
       <Title order={2}>Settings</Title>
@@ -841,6 +855,15 @@ export function SettingsView() {
               </Accordion>
             </>
           )}
+          {stackDefaultsWeightingHint ? (
+            <Alert color="yellow" variant="light" py={6} px="sm">
+              <Text size="xs">{stackDefaultsWeightingHint}</Text>
+              <Button size="compact-xs" variant="light" mt={6}
+                onClick={() => setStackOpt("quality_weighted", false)}>
+                Turn off quality weighting
+              </Button>
+            </Alert>
+          ) : null}
           <Group justify="flex-end">
             <Button variant="default" leftSection={<IconDeviceFloppy size={16} />}
               onClick={() => save.mutate(form)} loading={save.isPending}>
