@@ -273,3 +273,129 @@ def test_grading_a_file_that_is_not_in_the_folder_is_rejected(client, data_root)
     r = client.post("/api/videos/Lunar_video/grade", json={"file_name": "../secret.mp4"})
     assert r.status_code == 400
     assert "not a video in this capture folder" in r.json()["detail"]
+
+
+def test_a_full_frame_still_offers_to_crop_the_empty_sky(client, data_root):
+    """The Seestar frames the Moon generously — the finished still should say so.
+
+    Nothing is cropped unless asked, but the result carries the measurement, so
+    a beginner who didn't know to ask can be offered it after seeing the picture.
+    """
+    _drop_capture(data_root)
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 30},
+    ).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert result["crop_applied"] is False
+    assert result["crop_available"] is True
+    assert result["crop_trim_fraction"] > 0.15
+    # Not cropped → the picture is the full frame, and says so.
+    assert (result["width"], result["height"]) == (64, 48)
+    assert (result["source_width"], result["source_height"]) == (64, 48)
+
+
+def test_cropping_trims_the_sky_and_keeps_the_moon(client, data_root):
+    """The whole feature: a smaller picture, still containing the disk."""
+    _drop_capture(data_root)
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 30, "crop": True},
+    ).json()["job_id"]
+    job = _wait_for_job(client, job_id)
+    assert job["state"] == "done", job.get("error")
+
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert result["crop_applied"] is True
+    # Nothing left to offer once it has been done.
+    assert result["crop_available"] is False
+    assert result["width"] < 64 and result["height"] < 48
+    assert (result["source_width"], result["source_height"]) == (64, 48)
+    assert result["crop_trim_fraction"] > 0.15
+
+    # The disk survives: the cropped picture is still mostly bright subject.
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    png = client.get(result["preview_url"])
+    assert png.status_code == 200
+    arr = np.asarray(Image.open(io.BytesIO(png.content)).convert("L"), dtype=np.float32)
+    assert arr.shape == (result["height"], result["width"])
+    assert float(np.mean(arr > 128)) > 0.4
+
+    # The saved TIFF is cropped too — the two artifacts never disagree.
+    tiff = client.get(result["tiff_url"])
+    assert tiff.status_code == 200
+    tarr = np.asarray(Image.open(io.BytesIO(tiff.content)))
+    assert tarr.shape[:2] == (result["height"], result["width"])
+
+
+def test_cropping_is_opt_in_so_an_omitted_field_changes_nothing(client, data_root):
+    """Upgrade safety: a client that never heard of cropping gets the old picture."""
+    _drop_capture(data_root)
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 30},
+    ).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    assert client.get("/api/videos").json()["captures"][0]["result"]["width"] == 64
+
+
+def test_a_result_stacked_before_cropping_existed_reads_as_uncropped(client, data_root):
+    """Upgrade safety: an old ``meta.json`` has none of the framing fields."""
+    import json
+
+    from webapp.config import Settings
+    from webapp.video import META_NAME, result_dir
+
+    _drop_capture(data_root)
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 30},
+    ).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    settings = Settings(data_root=str(data_root))
+    meta_path = result_dir(settings, "Lunar_video") / META_NAME
+    raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    for key in (
+        "crop_applied", "crop_available", "crop_trim_fraction",
+        "source_width", "source_height",
+    ):
+        raw.pop(key)
+    meta_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert result is not None
+    assert result["crop_applied"] is False
+    assert result["crop_available"] is False
+    assert result["crop_trim_fraction"] == 0.0
+    # ...and the size still reports as the picture's own, not as 0.
+    assert (result["source_width"], result["source_height"]) == (64, 48)
+
+
+def test_asking_to_crop_a_frame_filling_disk_says_why_it_didnt(client, data_root):
+    """A close-up has no sky to trim — the picture is left alone, and it says so
+    rather than silently doing nothing."""
+    from videosynth import lunar_frame, write_video
+
+    d = data_root / "incoming" / "Solar_video"
+    d.mkdir(parents=True, exist_ok=True)
+    write_video(d / "clip.mp4", [
+        lunar_frame(64, 48, cx=32, cy=24, radius=60,
+                    sharpness=1.0 if i in (1, 4, 7) else 0.15, seed=i)
+        for i in range(10)
+    ])
+
+    job_id = client.post(
+        "/api/videos/Solar_video/stack", json={"keep_percent": 30, "crop": True},
+    ).json()["job_id"]
+    job = _wait_for_job(client, job_id)
+    assert job["state"] == "done", job.get("error")
+
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert result["crop_applied"] is False
+    assert result["crop_available"] is False
+    assert (result["width"], result["height"]) == (64, 48)
+    assert any("Nothing worth cropping" in w for w in result["warnings"])
+    assert any("Sun" in w for w in result["warnings"])

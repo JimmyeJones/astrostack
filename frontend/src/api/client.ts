@@ -1339,6 +1339,16 @@ export interface VideoResult {
   preview_url: string;
   tiff_url: string;
   sharpness?: VideoSharpnessProfile | null;
+  // Framing. `crop_applied` — the still was trimmed to the disk, so width/height
+  // are the cropped size and `source_*` the stack's own. `crop_available` — it
+  // wasn't, and there is enough empty sky around the disk to be worth offering.
+  // All optional: an older backend sends none of them and nothing is claimed.
+  crop_applied?: boolean;
+  crop_available?: boolean;
+  // Fraction of the frame the crop trims, or would trim (0..1).
+  crop_trim_fraction?: number;
+  source_width?: number;
+  source_height?: number;
 }
 
 export interface VideoCapture {
@@ -2090,7 +2100,9 @@ export const api = {
   }),
   stackVideoCapture: (
     id: string,
-    body: { keep_percent: number; file_name?: string; align?: boolean },
+    body: {
+      keep_percent: number; file_name?: string; align?: boolean; crop?: boolean;
+    },
   ) => req<{ job_id: string }>(`/api/videos/${encodeURIComponent(id)}/stack`, {
     method: "POST", body: JSON.stringify(body),
   }),
