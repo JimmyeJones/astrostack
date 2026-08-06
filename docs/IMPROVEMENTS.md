@@ -6189,9 +6189,25 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
-- **NEW IDEA (Builder 2026-08-06, found while shipping the WGTSKIP note v0.238.0) — the "these two settings cancel
+- ~~**NEW IDEA (Builder 2026-08-06, found while shipping the WGTSKIP note v0.238.0) — the "these two settings cancel
   each other out" warning exists on the per-target Stack form but NOT on the global stack defaults in Settings,
-  which is where a walk-away user actually sets them.** *(Friendliness / honest accounting — PRIORITY 2–3; size S;
+  which is where a walk-away user actually sets them.**~~ — **SHIPPED v0.239.2** (Builder 2026-08-06, branch
+  `claude/gallant-galileo-r89tie`). Built exactly as the slice describes: the sentence (and the engine gate it
+  mirrors) now lives in one pure helper, `frontend/src/weightingHint.ts::minMaxIgnoresWeightingHint`, which both
+  screens call. It takes the frame count as `number | null` — the per-target Stack form passes `solvedAccepted`
+  and gets **byte-for-byte the sentence it rendered before** (the existing `Stack.test.tsx` assertions pass
+  unchanged), while Settings passes `null` and gets the conditional wording the entry's "care" note asked for
+  ("On any stack of 3 or more subs… won't affect those stacks"), so the defaults screen never asserts anything
+  about a specific run it can't see. The `n >= 3` half of `stacker.py`'s
+  `weights_applied = not (min_max_reject and not drizzle and n >= 3)` is now a named constant on the helper rather
+  than a bare literal in a JSX expression. The Settings Alert carries the same one-click **"Turn off quality
+  weighting"** fix as the Stack form, and it is advisory only — it never blocks the save. Frontend-only: no
+  config/DB/API-shape/on-disk change, no default flipped, nothing sent differently. **Tests (+9):**
+  `weightingHint.test.ts` (+5 — both halves on, either half off, the drizzle path, the 3-frame gate boundary, and
+  the unknown-count wording) and `Settings.test.tsx` (+4, all fail-before: the warning appears on the defaults
+  grid with its unknown-count wording, stays quiet with one half off, stays quiet on the drizzle path, and clears
+  in place when the fix button is pressed). *(Original spec kept below for provenance.)*
+  *(Friendliness / honest accounting — PRIORITY 2–3; size S;
   frontend-only; **traced**.)* `Stack.tsx` (~L497) computes `minMaxIgnoresWeightingHint` and says plainly that
   min/max rejection ignores quality weights, mirroring the engine's `weights_applied` gate exactly. But
   `Settings.tsx` renders `default_stack_options` through the generic descriptor-driven `StackOptionControl` grid,

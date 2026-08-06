@@ -21,6 +21,7 @@ import {
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
 import { memoryFixAction } from "../stackMemoryFix";
+import { minMaxIgnoresWeightingHint as minMaxIgnoresWeighting } from "../weightingHint";
 
 // Linear-interpolated percentile of an unsorted numeric sample (p in [0, 100]).
 function pctile(values: number[], p: number): number {
@@ -500,13 +501,15 @@ export function StackView() {
   // weights_applied=False into provenance on this exact path (min/max on, not
   // drizzle, ≥3 frames). A user who turns on both expects the best subs to count
   // for more and gets an unweighted combine instead, with no on-screen signal.
-  // Surface the tradeoff so they pick one rejection strategy knowingly. This
-  // mirrors the engine's `weights_applied` gate (stacker.py). Advisory only.
-  const minMaxIgnoresWeightingHint =
-    !frames.isLoading && !!values.min_max_reject && !!values.quality_weighted
-    && !values.drizzle && solvedAccepted >= 3
-      ? "Min/max rejection and quality weighting don't combine: min/max is an order statistic (it drops the highest and lowest values at each pixel), so it ignores per-frame weights — your quality weighting won't affect this stack. Use sigma clipping if you want quality weighting to count, or keep min/max and turn quality weighting off."
-      : null;
+  // Surface the tradeoff so they pick one rejection strategy knowingly. The
+  // wording (and the engine's `weights_applied` gate it mirrors) lives in
+  // `weightingHint.ts`, shared with the global defaults in Settings. Advisory only.
+  const minMaxIgnoresWeightingHint = frames.isLoading ? null : minMaxIgnoresWeighting({
+    minMaxReject: !!values.min_max_reject,
+    qualityWeighted: !!values.quality_weighted,
+    drizzle: !!values.drizzle,
+    frames: solvedAccepted,
+  });
 
   const streakNoRejectionWarning =
     streakedAccepted > 0 && !rejectionOn && !minMaxRejectHint
