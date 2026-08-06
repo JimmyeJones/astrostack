@@ -10889,9 +10889,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   *solve* or *frames* steps off a video — they genuinely haven't happened; only the "you have a picture" outcome
   should recognise it, so the card congratulates and retires instead of nagging. Same family as the filed "the
   checklist can't see …" entry above.
-- **NEW IDEA (Builder 2026-08-06, the obvious extension of the v0.243.1 editor fixture guard) — the *Stack form*
-  has exactly the same fixture-drift exposure, on a screen a beginner uses far more often.**
-  *(Infra / maintainability — PRIORITY 3; size S; test-only.)* v0.243.1 pins each hand-written `EditOp` fixture's
+- ~~**NEW IDEA (Builder 2026-08-06, the obvious extension of the v0.243.1 editor fixture guard) — the *Stack form*
+  has exactly the same fixture-drift exposure, on a screen a beginner uses far more often.**~~ — **SHIPPED
+  v0.244.2** (Builder 2026-08-06, branch `claude/gallant-galileo-syc60a`), built to the filed shape.
+  `frontend/src/test/stackOptionPlacement.json` is generated from `webapp.schemas.stack_option_fields`, and
+  `tests/webapp/test_stack_option_placement.py` fails — printing the one-line regeneration command — the moment a
+  descriptor's `type`/`group`/`depends_on` moves, so the snapshot can't go stale. A pure
+  `stackPlacementMismatches(fields)` reports drift as plain sentences (same shape and same
+  omitted-controlling-field allowance as the editor's `placementMismatches`, keyed by field rather than op.param).
+  **Wired at the point of use rather than as a separate list:** `Stack.test.tsx`'s 70 inline fixtures all go
+  through one `mockSchema(fields)` helper that refuses a misplaced control before handing it to the mock, so a
+  fixture written next month is covered without anyone remembering to add it to a roster; `Settings.test.tsx` has
+  a single module-level `STACK_FIELDS`, so it gets a one-line assertion instead.
+  **The "check first" in the filed entry paid off — it found live drift:** six fixtures across the two files
+  declared `drizzle`/`drizzle_reject` as `group: "advanced"` while the engine puts both on the **simple** pane.
+  Unlike the editor case the direction was the harmless one (the tests were stricter than the app, and all 102
+  still pass with the fixtures corrected), but it is the same class of lie about placement, and the guard now
+  makes the reverse impossible. Verified the guard bites by injecting the drift back: the affected test fails with
+  the mismatch printed. Test-only: no engine, webapp, frontend-runtime, config, DB, API-shape or on-disk change.
+  **Tests (+10):** `stackOptionPlacement.test.ts` (+8), `test_stack_option_placement.py` (+2), plus the
+  `Settings.test.tsx` assertion and the `mockSchema` guard now running inside all 70 Stack fixtures.
+  Original spec: *(Infra / maintainability — PRIORITY 3; size S; test-only.)* v0.243.1 pins each hand-written `EditOp` fixture's
   `type`/`group`/`depends_on` against a generated snapshot of `editor_ops_schema`, because a fixture that lies
   about `group` shipped a control no beginner could see. `Stack.tsx` and `Settings.tsx` render
   `StackOptions` through the *same* descriptor-driven `StackOptionControl`, with the same

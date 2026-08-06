@@ -9,6 +9,7 @@ import {
   SettingsView, WALK_AWAY_KEYS, walkAwayEnabled, withWalkAway,
 } from "./Settings";
 import * as client from "../api/client";
+import { stackPlacementMismatches } from "../test/stackOptionPlacement";
 
 function renderMaintenance() {
   const qc = new QueryClient();
@@ -322,10 +323,18 @@ const STACK_FIELDS = [
   { key: "quality_weighted", label: "Quality weighting", type: "bool", group: "simple",
     default: false, min: null, max: null, step: null, options: null, help: null,
     depends_on: null },
-  { key: "drizzle", label: "Drizzle", type: "bool", group: "advanced",
+  { key: "drizzle", label: "Drizzle", type: "bool", group: "simple",
     default: false, min: null, max: null, step: null, options: null, help: null,
     depends_on: null },
 ] as client.StackOptionField[];
+
+// The fixtures above must place their controls where the engine does: Settings
+// renders them through the same `StackOptionControl` as the Stack form, so a
+// fixture that gets `group`/`type`/`depends_on` wrong tests a screen the user
+// never sees (see `stackOptionPlacement.ts`).
+it("places its stack-option fixtures where the engine does", () => {
+  expect(stackPlacementMismatches(STACK_FIELDS)).toEqual([]);
+});
 
 function renderSettingsWith(stackDefaults: Record<string, unknown>) {
   vi.spyOn(client.api, "getSettings").mockResolvedValue({

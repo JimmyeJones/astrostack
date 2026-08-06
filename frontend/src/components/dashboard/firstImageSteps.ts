@@ -118,10 +118,7 @@ export function firstImageDone(
  * Moon-video user at the editor they can't use would be worse than saying
  * nothing.
  */
-export function firstImageDoneMessage(
-  steps: FirstImageStep[],
-  stats: DashboardStats | undefined,
-): string {
+export function firstImageDoneMessage(steps: FirstImageStep[]): string {
   if (firstImageComplete(steps)) {
     return "That's the whole journey — you've made your first picture. Open it "
       + "in the editor to finish it off, then share it.";

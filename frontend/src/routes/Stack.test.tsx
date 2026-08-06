@@ -5,6 +5,34 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StackView } from "./Stack";
 import * as client from "../api/client";
+import { stackPlacementMismatches } from "../test/stackOptionPlacement";
+
+/**
+ * Mock `GET /api/stack/options` — and refuse a fixture that puts a control
+ * somewhere the running app never does.
+ *
+ * `Stack.tsx` renders these descriptors through `StackOptionControl`, which
+ * decides from `group` whether a field sits on the page or inside the collapsed
+ * **Advanced options** accordion, from `type` which control appears, and from
+ * `depends_on` whether it is greyed out. A hand-written fixture is free to get
+ * any of those wrong, and the test would still pass while a real user found the
+ * control somewhere else — exactly how v0.240.0 shipped an editor button no
+ * beginner could see. Checking here, at the point every test hands its fixture
+ * over, means the guard can't be bypassed by a fixture written later.
+ *
+ * Only placement is pinned; labels, defaults, bounds and help stay free, so a
+ * fixture can still be a simplified stand-in (see `stackOptionPlacement.ts`).
+ */
+function mockSchema(fields: client.StackOptionField[]) {
+  const problems = stackPlacementMismatches(fields);
+  if (problems.length > 0) {
+    throw new Error(
+      `Stack option fixture doesn't match the engine's descriptors:\n  `
+      + problems.join("\n  "));
+  }
+  return vi.spyOn(client.api, "optionsSchema").mockResolvedValue(fields);
+}
+
 
 function renderStackAt(path: string) {
   // Retries off so a deliberately-rejected query fails fast (no exponential
@@ -31,7 +59,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("StackView", () => {
   it("renders simple fields from the schema and hides advanced behind a disclosure", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "drizzle_scale", label: "Drizzle scale", type: "float", group: "advanced",
@@ -48,7 +76,7 @@ describe("StackView", () => {
   });
 
   it("badges and applies the recommended calibration masters", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
@@ -79,7 +107,7 @@ describe("StackView", () => {
   });
 
   it("nudges when masters exist but nothing is selected, then hides once applied", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
@@ -112,7 +140,7 @@ describe("StackView", () => {
   });
 
   it("recommends and applies a matching flat-dark", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
@@ -150,7 +178,7 @@ describe("StackView", () => {
   });
 
   it("warns when a chosen dark's exposure is far from the subs", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
@@ -184,7 +212,7 @@ describe("StackView", () => {
     // differently-anchored rule stayed silent, so the app went quiet before the
     // night was spent and complained afterwards. Both now use the engine's test,
     // served in `tolerances`.
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 1 });
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
@@ -207,7 +235,7 @@ describe("StackView", () => {
   });
 
   it("warns when a chosen dark's temperature is far from the subs (even at a matched exposure)", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     // An exposure-matched (30 s) dark shot 15°C warmer than the subs — bias
     // scaling can't fix a temperature gap, so it warns regardless of exposure.
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 1 });
@@ -233,7 +261,7 @@ describe("StackView", () => {
   });
 
   it("offers a one-click dark exposure-scaling when a bias is also selected, then confirms", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     // A mismatched 120 s dark and a master bias both already selected.
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(
       { dark_master_id: 2, bias_master_id: 3 });
@@ -267,7 +295,7 @@ describe("StackView", () => {
   });
 
   it("proactively offers to select an available bias and scale the dark, then confirms", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     // A mismatched 120 s dark selected but NO bias selected yet — the library
     // holds one, so scaling should be one click (pick the bias + flip the flag).
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 2 });
@@ -301,7 +329,7 @@ describe("StackView", () => {
   });
 
   it("does not offer the bias-scaling nudge when the library has no bias", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 2 });
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
@@ -338,7 +366,7 @@ describe("StackView", () => {
   }
 
   it("cautions when sigma-clip is on but too few frames are accepted", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
@@ -354,7 +382,7 @@ describe("StackView", () => {
   });
 
   it("turns off sigma-clip in one click from the low-frame caution, then hides it", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
@@ -371,7 +399,7 @@ describe("StackView", () => {
   });
 
   it("does not caution when enough frames are accepted for sigma-clip", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
@@ -387,7 +415,7 @@ describe("StackView", () => {
   });
 
   it("warns when the accepted+solved subs look like two different targets", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     // Two well-separated pointings (RA 10 vs RA 83) in one folder.
     const frames = [
@@ -409,7 +437,7 @@ describe("StackView", () => {
   });
 
   it("does not warn about mixed targets for a single pointing", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     const frames = Array.from({ length: 20 }, (_, i) => ({
       ...mkFrame(i + 1), ra_center_deg: 10 + (i % 3) * 0.2, dec_center_deg: 20,
@@ -426,7 +454,7 @@ describe("StackView", () => {
   });
 
   it("hints to tighten kappa on a very large stack", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
@@ -443,7 +471,7 @@ describe("StackView", () => {
   });
 
   it("does not hint to tighten kappa on a small stack", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
@@ -459,7 +487,7 @@ describe("StackView", () => {
   });
 
   it("tightens kappa in one click from the large-stack hint, then hides it", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "sigma_kappa", label: "Sigma κ", type: "float", group: "simple",
@@ -480,7 +508,7 @@ describe("StackView", () => {
   });
 
   it("turns on sigma clipping in one click from the streak-no-rejection warning", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
@@ -502,12 +530,12 @@ describe("StackView", () => {
   });
 
   it("turns on drizzle outlier rejection in one click from the drizzle+sigma-clip hint", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "drizzle", label: "Drizzle", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
-      { key: "drizzle_reject", label: "Drizzle outlier rejection", type: "bool", group: "advanced",
+      { key: "drizzle_reject", label: "Drizzle outlier rejection", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: "drizzle" },
     ]);
     // drizzle + sigma_clip on, drizzle_reject off → the mismatch hint fires.
@@ -528,7 +556,7 @@ describe("StackView", () => {
   });
 
   it("warns when accepted streaked frames are stacked without rejection", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
@@ -548,7 +576,7 @@ describe("StackView", () => {
   });
 
   it("suggests min/max reject for a small streaked stack (κ-σ can't handle it)", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
@@ -569,7 +597,7 @@ describe("StackView", () => {
   });
 
   it("turns on min/max reject in one click from the nudge, then hides the nudge", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
@@ -591,7 +619,7 @@ describe("StackView", () => {
   });
 
   it("does not suggest min/max reject when it is already on", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
@@ -614,7 +642,7 @@ describe("StackView", () => {
   });
 
   it("does not suggest min/max reject on a large streaked stack", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
@@ -632,7 +660,7 @@ describe("StackView", () => {
   });
 
   it("warns that min/max rejection ignores quality weighting when both are on", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "quality_weighted", label: "Quality weighting", type: "bool", group: "simple",
@@ -654,7 +682,7 @@ describe("StackView", () => {
   });
 
   it("clears the min/max+weighting warning in one click by turning weighting off", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "quality_weighted", label: "Quality weighting", type: "bool", group: "simple",
@@ -675,7 +703,7 @@ describe("StackView", () => {
   });
 
   it("does not warn about min/max+weighting when only min/max reject is on", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "quality_weighted", label: "Quality weighting", type: "bool", group: "simple",
@@ -695,7 +723,7 @@ describe("StackView", () => {
   });
 
   it("warns when the min/max reject k is too high for the frame count", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
@@ -715,7 +743,7 @@ describe("StackView", () => {
   });
 
   it("lowers k in one click from the too-high nudge, then hides it", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
@@ -736,7 +764,7 @@ describe("StackView", () => {
   });
 
   it("does not warn when the min/max reject k fits the frame count", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
@@ -755,7 +783,7 @@ describe("StackView", () => {
   });
 
   it("suggests raising k to the streaked-frame count when min/max reject is on", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
@@ -778,7 +806,7 @@ describe("StackView", () => {
   });
 
   it("caps the suggested k at what the frame count can fully apply", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
@@ -798,7 +826,7 @@ describe("StackView", () => {
   });
 
   it("does not suggest raising k when only one frame is streaked", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
       { key: "min_max_reject_count", label: "Min/max reject count", type: "int", group: "advanced",
@@ -817,7 +845,7 @@ describe("StackView", () => {
   });
 
   it("drops the streak warning once rejection has enough frames", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
+    mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
@@ -844,7 +872,7 @@ describe("StackView", () => {
   ];
 
   it("hints that sigma-clip doesn't cover drizzle until drizzle rejection is on", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue(drizzleSchema);
+    mockSchema(drizzleSchema);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(
       { sigma_clip: true, drizzle: true, drizzle_reject: false });
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
@@ -857,7 +885,7 @@ describe("StackView", () => {
   });
 
   it("drops the drizzle hint once outlier rejection is enabled", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue(drizzleSchema);
+    mockSchema(drizzleSchema);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(
       { sigma_clip: true, drizzle: true, drizzle_reject: true });
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
@@ -871,7 +899,7 @@ describe("StackView", () => {
   });
 
   it("flags a hazy stack whose transparency sits below the target baseline", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     // Target's clear-sky baseline is ~10000; the accepted+solved run frames are
     // all hazy (~3000), well below 0.6× the 90th-percentile baseline.
@@ -889,7 +917,7 @@ describe("StackView", () => {
   });
 
   it("does not flag transparency when the run matches the target baseline", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     const frames = Array.from({ length: 8 }, (_, i) =>
       ({ ...mkFrame(i + 1), transparency_score: 9000 + i * 10 }));
@@ -903,7 +931,7 @@ describe("StackView", () => {
   });
 
   it("nudges quality weighting when frame quality varies a lot", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ quality_weighted: false });
     // A wide FWHM spread across accepted+solved frames (2.0 … 5.0px).
     const frames = Array.from({ length: 8 }, (_, i) =>
@@ -919,7 +947,7 @@ describe("StackView", () => {
   });
 
   it("turns on quality weighting in one click from the mixed-quality nudge, then hides it", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ quality_weighted: false });
     const frames = Array.from({ length: 8 }, (_, i) =>
       ({ ...mkFrame(i + 1), fwhm_px: 2.0 + i * 0.4 }));
@@ -935,7 +963,7 @@ describe("StackView", () => {
   });
 
   it("offers a one-click quality-weighting button on the hazy-transparency hint", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ quality_weighted: false });
     const clear = Array.from({ length: 5 }, (_, i) =>
       ({ ...mkFrame(100 + i), accept: false, transparency_score: 10000 }));
@@ -959,7 +987,7 @@ describe("StackView", () => {
   });
 
   it("does not nudge quality weighting when the set is uniform", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ quality_weighted: false });
     const frames = Array.from({ length: 8 }, (_, i) =>
       ({ ...mkFrame(i + 1), fwhm_px: 2.5 + i * 0.01, star_count: 300 + i }));
@@ -973,7 +1001,7 @@ describe("StackView", () => {
   });
 
   it("nudges photometric normalization when transparency varies a lot, then hides once on", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ photometric_normalize: false });
     // A wide transparency spread across the frames-to-be-stacked (2000 … 9000),
     // so p90/p10 ≫ 1.5 — haze / airmass varying across nights.
@@ -993,7 +1021,7 @@ describe("StackView", () => {
   });
 
   it("does not nudge photometric normalization when transparency is uniform", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ photometric_normalize: false });
     // Tight transparency (all ~5000) → p90/p10 ≈ 1, well under the 1.5 trigger.
     const frames = Array.from({ length: 8 }, (_, i) =>
@@ -1008,7 +1036,7 @@ describe("StackView", () => {
   });
 
   it("does not nudge photometric normalization when it is already on", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ photometric_normalize: true });
     const frames = Array.from({ length: 8 }, (_, i) =>
       ({ ...mkFrame(i + 1), transparency_score: 2000 + i * 1000 }));
@@ -1026,7 +1054,7 @@ describe("StackView", () => {
     // data-driven nudges don't flash against the empty initial state). The seed
     // effect must therefore settle even when the ?from= reuse fetch *errors* —
     // otherwise it would return forever and hang the page on the spinner.
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
     vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
@@ -1039,7 +1067,7 @@ describe("StackView", () => {
   });
 
   it("hints to review auto-grade when accepted frames look like outliers", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     const frames = Array.from({ length: 12 }, (_, i) => mkFrame(i + 1));
     vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
@@ -1068,7 +1096,7 @@ describe("StackView", () => {
   });
 
   it("does not hint auto-grade when nothing is flagged", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     const frames = Array.from({ length: 12 }, (_, i) => mkFrame(i + 1));
     vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
@@ -1086,7 +1114,7 @@ describe("StackView", () => {
   });
 
   it("drops the auto-grade outliers in one click and offers an undo", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     const frames = Array.from({ length: 12 }, (_, i) => mkFrame(i + 1));
     vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
@@ -1127,7 +1155,7 @@ describe("StackView", () => {
   });
 
   it("surfaces the auto-grade safety cap in the Stack-form hint", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     const frames = Array.from({ length: 20 }, (_, i) => mkFrame(i + 1));
     vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
@@ -1151,7 +1179,7 @@ describe("StackView", () => {
   });
 
   it("shows the pre-run output canvas + peak-memory estimate line", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
     vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
@@ -1170,7 +1198,7 @@ describe("StackView", () => {
   });
 
   it("warns in red when the estimate exceeds the memory budget", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
     vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
@@ -1188,7 +1216,7 @@ describe("StackView", () => {
   });
 
   it("offers a one-click smaller drizzle scale when one fits the budget", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({
       sigma_clip: true, drizzle: true, drizzle_scale: 2.0,
     });
@@ -1213,7 +1241,7 @@ describe("StackView", () => {
   });
 
   it("offers the reference canvas when a non-drizzle mosaic is over budget", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
     vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
@@ -1236,7 +1264,7 @@ describe("StackView", () => {
   });
 
   it("offers dropping extra outlier passes — the least-destructive lever — with its peak", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({
       min_max_reject: true, min_max_reject_count: 3,
     });
@@ -1275,8 +1303,8 @@ describe("StackView", () => {
   }
 
   it("nudges Drizzle on a large single-field set that fits the budget", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
-      { key: "drizzle", label: "Drizzle", type: "bool", group: "advanced",
+    mockSchema([
+      { key: "drizzle", label: "Drizzle", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
@@ -1293,7 +1321,7 @@ describe("StackView", () => {
   });
 
   it("does not nudge Drizzle on a small set", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
     vi.spyOn(client.api, "listFrames").mockResolvedValue(
       Array.from({ length: 50 }, (_, i) => mkFrame(i + 1)));
@@ -1309,7 +1337,7 @@ describe("StackView", () => {
   });
 
   it("does not nudge Drizzle when a drizzled run would exceed the memory budget", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
     vi.spyOn(client.api, "listFrames").mockResolvedValue(
       Array.from({ length: 250 }, (_, i) => mkFrame(i + 1)));
@@ -1329,7 +1357,7 @@ describe("StackView", () => {
   });
 
   it("does not nudge Drizzle on a mosaic canvas", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
     vi.spyOn(client.api, "listFrames").mockResolvedValue(
       Array.from({ length: 250 }, (_, i) => mkFrame(i + 1)));
@@ -1345,8 +1373,8 @@ describe("StackView", () => {
   });
 
   it("turns on Drizzle in one click from the nudge, then hides it", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
-      { key: "drizzle", label: "Drizzle", type: "bool", group: "advanced",
+    mockSchema([
+      { key: "drizzle", label: "Drizzle", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
@@ -1365,8 +1393,8 @@ describe("StackView", () => {
   });
 
   it("cautions when Drizzle is on but too few frames are accepted", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
-      { key: "drizzle", label: "Drizzle", type: "bool", group: "advanced",
+    mockSchema([
+      { key: "drizzle", label: "Drizzle", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: true });
@@ -1383,7 +1411,7 @@ describe("StackView", () => {
   });
 
   it("does not caution Drizzle on a large set", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: true });
     vi.spyOn(client.api, "listFrames").mockResolvedValue(
       Array.from({ length: 250 }, (_, i) => mkFrame(i + 1)));
@@ -1397,7 +1425,7 @@ describe("StackView", () => {
   });
 
   it("does not caution Drizzle when it is off", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: false });
     vi.spyOn(client.api, "listFrames").mockResolvedValue(
       Array.from({ length: 30 }, (_, i) => mkFrame(i + 1)));
@@ -1411,8 +1439,8 @@ describe("StackView", () => {
   });
 
   it("turns off Drizzle in one click from the too-few-frames caution, then hides it", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([
-      { key: "drizzle", label: "Drizzle", type: "bool", group: "advanced",
+    mockSchema([
+      { key: "drizzle", label: "Drizzle", type: "bool", group: "simple",
         default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ drizzle: true });
@@ -1430,7 +1458,7 @@ describe("StackView", () => {
   });
 
   it("titles the page with the target's friendly name, not the URL slug", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
     vi.spyOn(client.api, "getTarget").mockResolvedValue(
@@ -1444,7 +1472,7 @@ describe("StackView", () => {
   });
 
   it("flags a wrong-camera master at pick time instead of failing the stack", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 9 });
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
@@ -1471,7 +1499,7 @@ describe("StackView", () => {
   });
 
   it("stays quiet when the master matches the target's frames", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 9 });
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
@@ -1522,7 +1550,7 @@ describe("StackView", () => {
                       defaults: Record<string, unknown> = {
                         background_flatten: true, background_mode: "per_channel",
                       }) {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue(bgSchema);
+    mockSchema(bgSchema);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(defaults);
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
@@ -1565,7 +1593,7 @@ describe("StackView", () => {
   });
 
   it("falls back to the slug in the title when the target record can't be loaded", async () => {
-    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
     vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
     vi.spyOn(client.api, "getTarget").mockRejectedValue(new Error("404"));
