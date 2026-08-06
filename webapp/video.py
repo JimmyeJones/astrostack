@@ -108,6 +108,11 @@ class VideoStackMeta:
     #: The stack's size *before* any crop. 0 means "same as width/height".
     source_width: int = 0
     source_height: int = 0
+    #: True once the framing has actually been measured for this still. False on
+    #: a ``meta.json`` written before framing existed — where ``crop_available``
+    #: is False because nobody ever looked, not because there is nothing to trim.
+    #: :func:`ensure_framing_measured` tells those two apart and fills it in.
+    crop_measured: bool = False
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -330,6 +335,46 @@ def _crop_saved_artifacts(out_dir: Path, box: tuple[int, int, int, int]) -> None
         )
 
 
+def ensure_framing_measured(
+    settings: Settings, capture_id: str, meta: VideoStackMeta,
+) -> VideoStackMeta:
+    """Measure the framing of a still that was stacked before framing existed.
+
+    A picture made by an older version has no ``crop_*`` fields at all, so it
+    reads as "nothing to trim" when the truth is that nobody ever looked — and
+    since the offer is what makes the crop discoverable, those pictures would
+    never get one. Now that cropping works off the saved artifacts, the
+    measurement can be made from the picture itself, so the owner's existing
+    Moon stills are treated exactly like a new one.
+
+    Measured once and written back (the fields are additive; nothing else in the
+    file is touched), so this costs one image read per pre-existing still, ever.
+    Best-effort: an unreadable picture or a read-only volume leaves the metadata
+    as it was rather than failing the page that asked for it.
+    """
+    if meta.crop_measured or meta.crop_applied:
+        return meta
+    out_dir = result_dir(settings, capture_id)
+    display = _read_png(out_dir / PNG_NAME)
+    if display is None:
+        return meta
+    framing = measure_framing(display)
+    worthwhile = framing is not None and framing.worthwhile
+    updated = replace(
+        meta,
+        crop_measured=True,
+        crop_available=bool(worthwhile),
+        crop_trim_fraction=(
+            round(framing.trim_fraction, 4) if worthwhile and framing else 0.0
+        ),
+    )
+    try:
+        _write_meta(out_dir, updated)
+    except OSError:
+        log.debug("could not record the framing for %s", capture_id, exc_info=True)
+    return updated
+
+
 def crop_saved_still(settings: Settings, capture_id: str) -> VideoStackMeta:
     """Trim a finished still to its disk, without decoding the video again.
 
@@ -394,6 +439,7 @@ def crop_saved_still(settings: Settings, capture_id: str) -> VideoStackMeta:
         source_height=meta.source_height or meta.height,
         crop_applied=True,
         crop_available=False,
+        crop_measured=True,
         crop_trim_fraction=round(framing.trim_fraction, 4),
     )
     _write_meta(out_dir, updated)
@@ -438,6 +484,7 @@ def restore_full_still(settings: Settings, capture_id: str) -> VideoStackMeta:
         # Re-measured rather than assumed, so the offer that comes back is the
         # honest one for the picture now on disk.
         crop_available=bool(worthwhile),
+        crop_measured=True,
         crop_trim_fraction=(
             round(framing.trim_fraction, 4) if worthwhile and framing else 0.0
         ),
@@ -650,6 +697,9 @@ def _video_stack_body(
         ),
         source_width=result.width,
         source_height=result.height,
+        # The framing *was* looked at here, whatever it found — so this still
+        # never needs the one-off backfill in ``ensure_framing_measured``.
+        crop_measured=True,
     )
     _write_meta(out_dir, meta)
     return {

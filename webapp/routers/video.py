@@ -187,6 +187,10 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
     meta = video.read_meta(settings, capture_id)
     if meta is None or not video.has_result(settings, capture_id):
         return None
+    # A still stacked before framing existed has never been looked at, which is
+    # not the same as "nothing to trim" — measure it once, from the picture, so
+    # pictures the owner already has get the same offer a new one does.
+    meta = video.ensure_framing_measured(settings, capture_id, meta)
     return VideoResultOut(
         created_utc=meta.created_utc,
         source_name=meta.source_name,
