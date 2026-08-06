@@ -6189,6 +6189,37 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-08-06, found while shipping the WGTSKIP note v0.238.0) — the "these two settings cancel
+  each other out" warning exists on the per-target Stack form but NOT on the global stack defaults in Settings,
+  which is where a walk-away user actually sets them.** *(Friendliness / honest accounting — PRIORITY 2–3; size S;
+  frontend-only; **traced**.)* `Stack.tsx` (~L497) computes `minMaxIgnoresWeightingHint` and says plainly that
+  min/max rejection ignores quality weights, mirroring the engine's `weights_applied` gate exactly. But
+  `Settings.tsx` renders `default_stack_options` through the generic descriptor-driven `StackOptionControl` grid,
+  which has no cross-field logic at all — so a user who ticks **Quality weighting** *and* **Min/max rejection** in
+  the *global defaults* (the natural place for someone who lets the watcher auto-stack) is never told, and every
+  unattended run silently combines by rank. v0.238.0 closes the after-the-fact half (the finished run now says
+  why), but the pick-time half is still missing on the screen where the pick is most often made. **Slice:** lift
+  the existing sentence out of `Stack.tsx` into one shared pure helper (it already has to stay in step with
+  `stacker.py`'s gate — two independently-worded copies is the exact drift that cost v0.237.1 a fix) and render it
+  under the defaults grid when both keys are on and drizzle is off. **Care:** the Settings grid has no frame count
+  to gate on, so word it as a conditional ("on any stack of 3+ subs…") rather than asserting it about a specific
+  run. Advisory only — never block the save.
+- **NEW OBSERVATION (Builder 2026-08-06, engine QA read of `seestack/stack/accumulator.py`; no bug found) — "coverage"
+  means two different things on the min/max path than everywhere else, and it may over-report frames per pixel.**
+  *(Honest accounting — PRIORITY 3; size S; **traced, not reproduced**; file before fixing — this may well be
+  correct as-is.)* `WeightedSumAccumulator` exposes both `coverage` (Σ per-frame weights) and `frame_coverage` (a
+  true unweighted per-pixel frame count), and the stacker deliberately uses the latter for the `coverage_min` /
+  `coverage_max` diagnostics so quality weighting can't understate "N frames per pixel".
+  `MinMaxRejectAccumulator` has **no** `frame_coverage`, so on that path `frame_cov` stays `None` and the code
+  falls back to `coverage[..., 0]` — which is the count of samples that *contributed*, including the `2k` that
+  `result()` then throws away as the per-pixel extremes. The effective sample count behind each pixel is
+  `count − 2k`. Whether that's wrong depends on what the number is meant to say ("how many subs covered this
+  pixel" — right as-is; "how many subs are averaged here" — over-reports by 2k, which matters most on exactly the
+  small stacks where min/max is auto-picked: 4 of 6 subs actually averaged, reported as 6). **Do this first:**
+  decide the semantics, then either leave it and document it in the accumulator docstring, or add a
+  `frame_coverage` that subtracts the trim. The rest of that file audited clean — the ±inf identities never form
+  an `inf − inf`, the k-set insertion reads each slot before overwriting it, the count<2k+1 and count<3 fallbacks
+  are right, and the memory guard's `2 + 2k` planes match what's allocated.
 - ~~**NEW IDEA (Builder 2026-08-06, traced while auditing the stack dispatcher) — a walk-away stack of a *small*
   night silently discards the quality weighting the user asked for, and nothing anywhere says so.**~~ —
   **SHIPPED v0.238.0** (Builder 2026-08-06, branch `claude/gallant-galileo-kdy4gc`). Confirmed end-to-end, not
