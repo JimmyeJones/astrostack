@@ -5,9 +5,10 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GalleryView, sortGallery, filterGallery, filterByCalibration, filterByMethod, isCalibrated,
+  filterVideoStills, mergeGalleryEntries, videoStillCaption,
 } from "./Gallery";
 import * as client from "../api/client";
-import type { GalleryItem } from "../api/client";
+import type { GalleryItem, VideoStill } from "../api/client";
 
 function item(run_id: number, safe = "M_42"): GalleryItem {
   return {
@@ -402,5 +403,121 @@ describe("Gallery batch apply", () => {
     await waitFor(() =>
       expect(screen.getByText(/No images match/)).toBeInTheDocument());
     expect(screen.queryByTestId("first-image-card")).not.toBeInTheDocument();
+  });
+});
+
+// --- Moon/Sun stills in the gallery ---------------------------------------
+//
+// A finished video still is a picture the user made, so it belongs where every
+// other finished picture lives. It is *not* a stack run, though, so it gets a
+// plain read-only card that links back to the page that owns it.
+
+function still(capture_id: string, created_utc = "2026-05-02T00:00:00+00:00"): VideoStill {
+  return {
+    capture_id, label: "Moon", kind: "lunar", created_utc,
+    width: 640, height: 480, n_stacked: 29, source_name: "clip.mp4",
+    preview_url: `/api/videos/${capture_id}/preview.png`,
+  };
+}
+
+describe("Gallery Moon & Sun stills", () => {
+  it("filterVideoStills matches label, source file and capture id", () => {
+    const stills = [
+      { ...still("Lunar_video"), label: "Moon", source_name: "clip.mp4" },
+      { ...still("Solar_2026"), label: "Sun", source_name: "midday.mov" },
+    ];
+    expect(filterVideoStills(stills, "").length).toBe(2);
+    expect(filterVideoStills(stills, "  ").length).toBe(2);
+    expect(filterVideoStills(stills, "moon").map((v) => v.capture_id)).toEqual(["Lunar_video"]);
+    expect(filterVideoStills(stills, "midday").map((v) => v.capture_id)).toEqual(["Solar_2026"]);
+    expect(filterVideoStills(stills, "solar_").map((v) => v.capture_id)).toEqual(["Solar_2026"]);
+    expect(filterVideoStills(stills, "nope")).toEqual([]);
+  });
+
+  it("mergeGalleryEntries interleaves stills with runs by date when sorting newest", () => {
+    const runs = [
+      { ...item(2), timestamp_utc: "2026-05-03T00:00:00.123456+00:00" },
+      { ...item(1), timestamp_utc: "2026-05-01T00:00:00.000000+00:00" },
+    ];
+    const stills = [still("V", "2026-05-02T00:00:00+00:00")];
+    const merged = mergeGalleryEntries(runs, stills, "newest");
+    expect(merged.map((e) => (e.kind === "run" ? `run${e.run.run_id}` : e.video.capture_id)))
+      .toEqual(["run2", "V", "run1"]);
+  });
+
+  it("mergeGalleryEntries keeps the noise ranking intact and puts stills after it", () => {
+    // A video still has no measured background σ, so it can't be ranked among
+    // the cleanest stacks — it must not be given an invented position.
+    const runs = [item(1), item(2)];
+    const merged = mergeGalleryEntries(runs, [still("V")], "cleanest");
+    expect(merged.map((e) => (e.kind === "run" ? `run${e.run.run_id}` : e.video.capture_id)))
+      .toEqual(["run1", "run2", "V"]);
+  });
+
+  it("videoStillCaption says where it came from, when, how big and how many frames", () => {
+    expect(videoStillCaption(still("V", "2026-05-02T21:30:00+00:00")))
+      .toBe("clip.mp4 · 2026-05-02 21:30 · 640×480 · 29 frames stacked");
+    expect(videoStillCaption({ ...still("V"), n_stacked: 1 })).toContain("1 frame stacked");
+  });
+
+  it("shows a finished Moon still on a card that links back to Moon & Sun", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [], videos: [still("Lunar_video")],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    // Fail-before: the gallery only knew about stack runs, so this said
+    // "No stacked images yet".
+    expect(await screen.findByText("Moon")).toBeInTheDocument();
+    expect(screen.getByText(/clip\.mp4 · .* · 640×480 · 29 frames stacked/)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /Open in Moon & Sun/ });
+    expect(link).toHaveAttribute("href", "/moon-sun");
+    // Read-only: none of the per-run actions apply to a video still.
+    expect(screen.queryByLabelText("Select for batch edit")).not.toBeInTheDocument();
+    expect(screen.queryByText("Edit image")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reuse settings")).not.toBeInTheDocument();
+    // ...and it counts as one of the user's pictures.
+    expect(screen.getByText("1")).toBeInTheDocument();
+  });
+
+  it("finds a still through the one search box and hides it under a stack-only facet", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [
+        { ...item(1), notes: "best RGB v2", calstat: "dark+flat" },
+        { ...item(2), notes: "cloudy night" },
+      ],
+      videos: [still("Lunar_video")],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+    expect(await screen.findByText("Moon")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: "moon" } });
+    await waitFor(() => expect(screen.queryByText("best RGB v2")).not.toBeInTheDocument());
+    expect(screen.getByText("Moon")).toBeInTheDocument();
+
+    // "Calibrated" is a question about a stack's masters; a video still has
+    // none, so it drops out rather than pretending to be calibrated.
+    fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: "" } });
+    await waitFor(() => expect(screen.getByText("Moon")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Calibrated"));
+    await waitFor(() => expect(screen.queryByText("Moon")).not.toBeInTheDocument());
+  });
+
+  it("shows nothing extra when the backend sends no videos field (older server)", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), notes: "best RGB v2" }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+    await waitFor(() => expect(screen.getByText("best RGB v2")).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /Open in Moon & Sun/ })).not.toBeInTheDocument();
   });
 });

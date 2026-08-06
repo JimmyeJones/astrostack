@@ -163,3 +163,91 @@ def test_gallery_tolerates_bad_options_json(client, solved_library):
     assert r.status_code == 200
     mine = next(it for it in r.json()["items"] if it["run_id"] == run_id)
     assert mine["options"] == {}
+
+
+# --- Moon/Sun stills folded into the gallery -------------------------------
+#
+# A finished video still lives outside the library (``<data_root>/video/<id>/``)
+# because none of the per-target machinery applies to it — which used to mean a
+# beginner who stacked their first Moon picture went looking for it where every
+# *other* finished picture lives and found nothing. These pin that it shows up,
+# read-only, without becoming a stack run.
+
+
+def _drop_video_still(data_root, folder: str = "Lunar_video", **overrides) -> dict:
+    """Write a finished video result (PNG + meta.json) straight to disk.
+
+    Deliberately avoids the ffmpeg-dependent stack path: what the gallery reads
+    is the saved result, so the test writes exactly that.
+    """
+    d = data_root / "video" / folder
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "stack.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    meta = {
+        "capture_id": folder, "label": "Moon", "kind": "lunar",
+        "source_name": "clip.mp4", "created_utc": "2026-05-04T00:00:00+00:00",
+        "width": 640, "height": 480, "keep_percent": 30.0,
+        "n_graded": 100, "n_kept": 30, "n_stacked": 29, "n_align_failed": 1,
+        "stride": 1, "aligned": True,
+        "sharpness_best": 1.0, "sharpness_kept_median": 0.9,
+        "sharpness_all_median": 0.7, "warnings": [], "scores": [],
+    }
+    meta.update(overrides)
+    (d / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    return meta
+
+
+def test_gallery_lists_a_finished_moon_still(client, data_root):
+    _drop_video_still(data_root)
+
+    body = client.get("/api/gallery").json()
+    (still,) = body["videos"]
+    assert still["capture_id"] == "Lunar_video"
+    assert still["label"] == "Moon"
+    assert still["kind"] == "lunar"
+    assert still["source_name"] == "clip.mp4"
+    assert still["n_stacked"] == 29
+    assert (still["width"], still["height"]) == (640, 480)
+    # The preview URL is the one the Moon & Sun page already serves.
+    assert still["preview_url"] == "/api/videos/Lunar_video/preview.png"
+    assert client.get(still["preview_url"]).status_code == 200
+    # And it is *not* smuggled in as a stack run.
+    assert body["items"] == []
+
+
+def test_gallery_has_no_stills_on_an_install_that_never_stacked_a_video(client):
+    body = client.get("/api/gallery").json()
+    assert body["videos"] == []
+
+
+def test_gallery_stills_are_newest_first(client, data_root):
+    _drop_video_still(data_root, "A_video", created_utc="2026-05-01T00:00:00+00:00")
+    _drop_video_still(data_root, "B_video", created_utc="2026-06-01T00:00:00+00:00")
+
+    body = client.get("/api/gallery").json()
+    assert [v["capture_id"] for v in body["videos"]] == ["B_video", "A_video"]
+
+
+def test_gallery_skips_a_half_written_video_result(client, data_root):
+    """A folder with no readable meta.json has no label or date to show."""
+    _drop_video_still(data_root, "Good_video")
+    bad = data_root / "video" / "Broken_video"
+    bad.mkdir(parents=True, exist_ok=True)
+    (bad / "stack.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (bad / "meta.json").write_text("not json{", encoding="utf-8")
+    # ...and a graded-but-never-stacked capture has no picture to show at all.
+    graded = data_root / "video" / "Graded_video"
+    graded.mkdir(parents=True, exist_ok=True)
+    (graded / "grade.json").write_text("{}", encoding="utf-8")
+
+    body = client.get("/api/gallery").json()
+    assert [v["capture_id"] for v in body["videos"]] == ["Good_video"]
+
+
+def test_gallery_addresses_a_still_by_its_folder_not_its_metadata(client, data_root):
+    """A hand-edited ``capture_id`` must not hand the UI a URL that 404s."""
+    _drop_video_still(data_root, "Lunar_video", capture_id="something-else")
+
+    (still,) = client.get("/api/gallery").json()["videos"]
+    assert still["capture_id"] == "Lunar_video"
+    assert client.get(still["preview_url"]).status_code == 200

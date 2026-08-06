@@ -921,6 +921,22 @@ export interface GalleryItem {
   seam_verdict?: string | null;
 }
 
+// A finished Moon/Sun still, as the Gallery lists it alongside stack runs. It is
+// not a stack run — no target, no run id, no stacking options — so it carries
+// only what a plain read-only card needs, and links back to the Moon & Sun page
+// for anything else.
+export interface VideoStill {
+  capture_id: string;
+  label: string;
+  kind: "lunar" | "solar" | "other";
+  created_utc: string;
+  width: number;
+  height: number;
+  n_stacked: number;
+  source_name: string;
+  preview_url: string;
+}
+
 export interface BestPicture {
   safe: string;
   target_name: string;
@@ -1840,7 +1856,9 @@ export const api = {
     ),
 
   // gallery
-  getGallery: () => req<{ items: GalleryItem[] }>("/api/gallery"),
+  // `videos` is additive — an older backend doesn't send it, so read it as `?? []`.
+  getGallery: () =>
+    req<{ items: GalleryItem[]; videos?: VideoStill[] }>("/api/gallery"),
   // "My best pictures": the newest finished stack of every target, auto-ranked
   // best-first. Self-hides (empty items) until there are ≥2 finished pictures.
   getGalleryBest: (limit?: number) =>
