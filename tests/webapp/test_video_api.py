@@ -222,3 +222,54 @@ def test_a_result_stacked_before_scores_were_kept_still_loads(client, data_root)
     assert result is not None
     assert result["n_stacked"] == 3        # everything else still reported
     assert result["sharpness"] is None
+
+
+def test_checking_a_capture_grades_it_without_stacking(client, data_root):
+    """"Check this capture first" — the profile arrives, no picture is made."""
+    _drop_capture(data_root)
+    r = client.post("/api/videos/Lunar_video/grade", json={})
+    assert r.status_code == 200
+    job = _wait_for_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job.get("error")
+    assert job["result"]["n_graded"] == 10
+
+    cap = client.get("/api/videos").json()["captures"][0]
+    assert cap["result"] is None                   # nothing was stacked
+    prof = cap["sharpness"]
+    assert prof is not None
+    assert prof["spread"] == "variable"
+    assert prof["suggested_percent"] == 30.0
+    # No stack yet, so there is no cut to mark and no "you kept…" clause.
+    assert prof["cut_fraction"] == 0.0
+    assert "you kept" not in prof["summary"]
+
+    # And no picture was written.
+    assert client.get("/api/videos/Lunar_video/preview.png").status_code == 404
+
+
+def test_checking_a_capture_leaves_an_existing_still_alone(client, data_root):
+    """Grading writes its own file — it must never disturb a finished stack."""
+    _drop_capture(data_root)
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 50},
+    ).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    before = client.get("/api/videos").json()["captures"][0]["result"]
+
+    job_id = client.post("/api/videos/Lunar_video/grade", json={}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    after = client.get("/api/videos").json()["captures"][0]["result"]
+    assert after == before
+    assert client.get("/api/videos/Lunar_video/preview.png").status_code == 200
+
+
+def test_grading_an_unknown_capture_is_a_404(client):
+    assert client.post("/api/videos/Nope_video/grade", json={}).status_code == 404
+
+
+def test_grading_a_file_that_is_not_in_the_folder_is_rejected(client, data_root):
+    _drop_capture(data_root)
+    r = client.post("/api/videos/Lunar_video/grade", json={"file_name": "../secret.mp4"})
+    assert r.status_code == 400
+    assert "not a video in this capture folder" in r.json()["detail"]

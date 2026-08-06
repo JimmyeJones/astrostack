@@ -4,7 +4,8 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import {
-  IconAlertTriangle, IconDownload, IconMoon, IconSun, IconVideo, IconWand,
+  IconAlertTriangle, IconChartBar, IconDownload, IconMoon, IconSun, IconVideo,
+  IconWand,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -71,6 +72,22 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notifications.show({
         message: `Stacking your ${capture.label} video — this takes a minute or two.`,
+        color: "violet",
+      });
+      navigate("/jobs");
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  // Grading is the cheap half of the stack (one decode, a score per frame), so
+  // it can be run on its own to answer "how picky should I be?" *before* the
+  // stack is spent finding out. It never touches an existing still.
+  const grade = useMutation({
+    mutationFn: () => api.gradeVideoCapture(capture.id, { file_name: file ?? undefined }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notifications.show({
+        message: `Checking your ${capture.label} video — reading it through once.`,
         color: "violet",
       });
       navigate("/jobs");
@@ -162,6 +179,17 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
         />
       ) : null}
 
+      {/* Before any stack exists, the same panel from the grade-only pass — so
+          the setting below is an informed choice rather than a guess. Once a
+          still exists the result's own panel (above) is the better one to show,
+          since it can mark where the cut actually fell. */}
+      {!result ? (
+        <VideoSharpnessCard
+          profile={capture.sharpness}
+          onUseSuggestion={(pct) => setKeep(String(pct))}
+        />
+      ) : null}
+
       <Select
         label="How picky should we be?"
         description="Seeing makes some frames much sharper than others; we keep the best and throw the rest away."
@@ -171,6 +199,7 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
         onChange={(v) => setKeep(v ?? DEFAULT_KEEP)}
         allowDeselect={false}
         mb="sm"
+        mt="sm"
       />
 
       <Button
@@ -182,6 +211,23 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
       >
         {result ? "Stack again" : "Stack video"}
       </Button>
+
+      {/* Only worth offering while there is nothing to compare against — once a
+          still exists its own panel already answers the question. */}
+      {!result && !capture.sharpness ? (
+        <Button
+          fullWidth
+          mt="xs"
+          variant="subtle"
+          size="sm"
+          leftSection={<IconChartBar size={16} />}
+          onClick={() => grade.mutate()}
+          loading={grade.isPending}
+          disabled={disabled}
+        >
+          Check this capture first
+        </Button>
+      ) : null}
     </Card>
   );
 }

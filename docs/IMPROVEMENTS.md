@@ -10814,18 +10814,26 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-08-06, the obvious next slice after the v0.241.0 sharpness panel) — grade the capture
+- ~~**NEW IDEA (Builder 2026-08-06, the obvious next slice after the v0.241.0 sharpness panel) — grade the capture
   *before* stacking it, so the beginner picks the right setting the first time instead of learning it from a stack
-  they then redo.** *(Autonomy — PRIORITY 2; size S–M.)* The panel shipped in v0.241.0 answers "was 30 % right for
-  this video?" — but only *after* a full stack, so acting on its advice costs a second run. Grading is the cheap
-  half of the job (pass 1 decodes and scores; pass 2 decodes again, aligns and accumulates), so a **"Check this
-  capture"** button could run pass 1 alone and render the same `sharpness_profile` — same component, same numbers,
-  no stack — turning "How picky should we be?" into an informed choice rather than a guess. **Shape:** a new job
-  kind (or a `grade_only` flag on the existing one) that stops after the grading loop and writes just the scores to
-  the capture's result dir; `sharpness_profile(scores, None)` already handles "no stack yet" (it returns the options
-  and a suggestion with `cut_fraction = 0` and no "you kept…" clause), so the engine side is done. **Care:** on a
-  long capture the grade pass is still minutes of decoding — it must be a job with progress and cancel like the
-  stack, never a synchronous request, and the button should say roughly how long it will take.
+  they then redo.**~~ — **SHIPPED v0.242.0** (Builder 2026-08-06, branch `claude/gallant-galileo-gv2vcx`), in the
+  same run that shipped the panel. *(Autonomy — PRIORITY 2.)* A **"Check this capture first"** button on any
+  un-stacked Moon/Sun capture now runs pass 1 alone and renders the same `VideoSharpnessCard` — same component,
+  same numbers, no picture made — so "How picky should we be?" is an informed choice before the stack rather than a
+  lesson learned after it. Engine: pass 1 was extracted from `stack_video` into
+  `seestack.video.lucky.grade_video` → `GradeResult`, and `stack_video` now *calls* it, so there is exactly one
+  grading implementation and the two can't drift (pinned by a test asserting the standalone scores equal the
+  stack's). Webapp: `POST /api/videos/{id}/grade` → a `video_grade` job (progress + cancel, like the stack — a long
+  capture is still minutes of decoding, so it must never be a synchronous request) writing a **separate**
+  `grade.json` beside `meta.json`, so checking a capture can never disturb a finished still (pinned by a test that
+  grades an already-stacked capture and asserts the result payload is byte-identical and the PNG still serves).
+  `VideoCaptureOut.sharpness` carries it; `sharpness_profile(scores, None)` already handled "no stack yet"
+  (`cut_fraction = 0`, no "you kept…" clause), so the engine needed nothing new. The button self-hides once a grade
+  or a stack exists — there is no reason to offer it when the answer is already on screen. Additive and
+  upgrade-safe: new endpoint, new job kind, new optional field, new file that only appears when used; no default
+  flipped, no existing response shape changed. **Tests (+10):** `tests/test_video_lucky.py` (+3 — scores match the
+  stack's, progress/cancel, the too-few-frames refusal), `tests/webapp/test_video_api.py` (+4 — grades without
+  stacking, leaves an existing still alone, 404, and the path-escape rejection), `MoonSun.test.tsx` (+2).
 
 - **NEW IDEA (Builder 2026-08-06, spotted while shipping the v0.241.0 sharpness panel — verified against the
   routes) — a stacked Moon/Sun still is invisible everywhere except the Moon & Sun page.** *(Friendliness /
