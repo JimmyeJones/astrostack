@@ -1319,6 +1319,19 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 weighting[k] = float(header[hk])
 
+    # The other half of the weighting story: quality weighting was on, but the
+    # method that actually ran (order-statistic min/max) combines by rank and
+    # ignores per-frame weights, so WGTMODE above is deliberately absent. Without
+    # this the panel can only stay silent, which reads as "weighting was off" —
+    # the same picture for two very different situations.
+    weighting_skipped: dict[str, Any] | None = None
+    if "WGTSKIP" in header:
+        weighting_skipped = {"reason": str(header["WGTSKIP"])}
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            weighting_skipped["auto"] = bool(header["WGTSKAUT"])
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            weighting_skipped["min_frames"] = int(header["WGTSKMIN"])
+
     # Photometric-normalization summary (present only on normalized stacks), parsed
     # the same way so the panel can show a single "N frames gain-matched · scales
     # lo–hi" line and the user can trust the (off-by-default) normalization did
@@ -1417,6 +1430,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     calibration_warnings = _run_calibration_warnings(request, safe, run_id)
     return {"run_id": run_id, "integration_s": integration_s,
             "n_frames": n_frames, "weighting": weighting,
+            "weighting_skipped": weighting_skipped,
             "photometric": photometric, "dark_scaling": dark_scaling,
             "rejection": rejection, "frame_accounting": frame_accounting,
             "auto_edit": auto_edit, "sky_cast": sky_cast,

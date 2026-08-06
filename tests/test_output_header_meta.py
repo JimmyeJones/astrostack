@@ -173,7 +173,9 @@ def test_fits_is_display_space_tolerates_missing_file(tmp_path):
 # provenance: present only when scaling really happened, omitted otherwise.
 from types import SimpleNamespace  # noqa: E402
 
-from seestack.stack.stacker import StackOptions, _build_output_header_meta  # noqa: E402
+from seestack.stack.stacker import (  # noqa: E402
+    StackOptions, _build_output_header_meta, kappa_min_frames,
+)
 
 
 def _meta_for(*, scale, dark_exp, light_exp, has_bias=True, has_dark=True):
@@ -293,14 +295,14 @@ def test_stacker_label_min_max_takes_precedence_over_sigma_clip():
 from seestack.stack.weighting import WeightingStats  # noqa: E402
 
 
-def _wgt_meta_for(*, weights_applied: bool):
+def _wgt_meta_for(*, weights_applied: bool, opts: StackOptions | None = None):
     proj = SimpleNamespace(get_meta=lambda k: "M42" if k == "name" else None)
     frames = [SimpleNamespace(exposure_s=10.0) for _ in range(6)]
     wstats = WeightingStats(
         n_weighted=6, n_neutral=0, min_weight=0.4, max_weight=1.0,
         median_weight=0.8, n_downweighted=3)
     return _build_output_header_meta(
-        proj, frames, StackOptions(), 6, wstats=wstats,
+        proj, frames, opts if opts is not None else StackOptions(), 6, wstats=wstats,
         weights_applied=weights_applied)
 
 
@@ -318,3 +320,49 @@ def test_weighting_provenance_absent_when_min_max_reject_ignored_the_weights():
     assert "WGTMODE" not in meta
     assert "WGTNDOWN" not in meta
     assert "WGTMED" not in meta
+
+
+# --- …and say *why* it was skipped, rather than nothing ------------------------
+# Omitting WGTMODE is honest about the result but silent about the cause: on the
+# walk-away chains the user never sees the Stack form's pick-time warning, so
+# "weighting had no effect" is indistinguishable from "weighting was off".
+
+
+def test_weighting_skip_reason_stamped_when_min_max_ignored_the_weights():
+    meta = _wgt_meta_for(weights_applied=False,
+                         opts=StackOptions(quality_weighted=True, min_max_reject=True))
+    assert meta["WGTSKIP"][0] == "minmax"
+    # Manually ticked min/max: not the auto-picker, so no "wait for more subs".
+    assert meta["WGTSKAUT"][0] is False
+    assert "WGTSKMIN" not in meta
+
+
+def test_weighting_skip_reason_records_the_auto_pick_and_its_crossover():
+    # auto_reject picked min/max from the frame count, so the honest advice is
+    # "it switches back at N subs" — record N alongside the reason.
+    opts = StackOptions(quality_weighted=True, auto_reject=True,
+                        min_max_reject=True, sigma_kappa=3.0)
+    meta = _wgt_meta_for(weights_applied=False, opts=opts)
+    assert meta["WGTSKIP"][0] == "minmax"
+    assert meta["WGTSKAUT"][0] is True
+    assert meta["WGTSKMIN"][0] == kappa_min_frames(3.0)
+
+
+def test_weighting_skip_reason_absent_when_the_weights_did_apply():
+    # The two halves are mutually exclusive — a κ-σ stack reports WGTMODE and
+    # must never also carry a "weighting was skipped" note.
+    meta = _wgt_meta_for(weights_applied=True,
+                         opts=StackOptions(quality_weighted=True))
+    assert meta["WGTMODE"][0] == "quality"
+    assert "WGTSKIP" not in meta
+
+
+def test_weighting_skip_reason_absent_when_weighting_was_never_on():
+    # No wstats at all (quality_weighted off) → nothing to say either way.
+    proj = SimpleNamespace(get_meta=lambda k: "M42" if k == "name" else None)
+    frames = [SimpleNamespace(exposure_s=10.0) for _ in range(6)]
+    meta = _build_output_header_meta(
+        proj, frames, StackOptions(min_max_reject=True), 6, wstats=None,
+        weights_applied=False)
+    assert "WGTSKIP" not in meta
+    assert "WGTMODE" not in meta
