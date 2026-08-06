@@ -1336,6 +1336,11 @@ export interface CalibrationSuggestions {
   bias_master_id: number | null;
   scores: Record<string, number>;
   n_frames: number;
+  // The engine's own exposure/temperature mismatch thresholds, so the Stack
+  // form's pick-time warnings fire on exactly the pairs the finished run will
+  // complain about. Optional: an older backend omits it and the form falls back
+  // to its mirrored constants (see `calibrationFit.ts`).
+  tolerances?: { exposure_frac?: number | null; temp_c?: number | null } | null;
 }
 
 export interface UploadResult {

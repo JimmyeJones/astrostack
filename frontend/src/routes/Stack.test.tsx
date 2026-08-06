@@ -178,6 +178,34 @@ describe("StackView", () => {
       expect(screen.getByText(/shot at 120s but your subs are 30s/)).toBeInTheDocument());
   });
 
+  it("warns at pick time about the borderline dark the finished run complains about", async () => {
+    // A 30 s dark on 25 s subs. The engine's calibration_warnings reports it
+    // (|25/30 − 1| = 0.167 > its 0.15 tolerance) — but the form's own, looser,
+    // differently-anchored rule stayed silent, so the app went quiet before the
+    // night was spent and complained afterwards. Both now use the engine's test,
+    // served in `tolerances`.
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 1 });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 30s", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 25, gain: 80, sensor_temp_c: null },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
+      scores: { "1": 0.8 }, n_frames: 12,
+      tolerances: { exposure_frac: 0.15, temp_c: 5 },
+    });
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/shot at 30s but your subs are 25s/)).toBeInTheDocument());
+  });
+
   it("warns when a chosen dark's temperature is far from the subs (even at a matched exposure)", async () => {
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
     // An exposure-matched (30 s) dark shot 15°C warmer than the subs — bias

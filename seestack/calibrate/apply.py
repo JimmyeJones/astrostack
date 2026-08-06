@@ -22,14 +22,26 @@ log = logging.getLogger(__name__)
 _FLAT_FLOOR = 0.1
 
 # How far a master dark's exposure may differ from the lights before the advisory
-# mismatch warning fires (fractional). Seestar exposures are discrete (10/20/30 s),
-# so a real mismatch is ≥2× — well past this; the slack only absorbs header
-# rounding on a nominally-matched pair.
-_EXPOSURE_MISMATCH_TOL = 0.15
+# mismatch warning fires, as a fraction of the *dark's* exposure
+# (``|t_light / t_dark − 1|``). Seestar exposures are discrete (10/20/30 s), so a
+# real mismatch is ≥2× — well past this; the slack only absorbs header rounding on
+# a nominally-matched pair.
+#
+# Public because the Stack form warns about the same mismatch at *pick* time, and
+# the two must agree: a threshold written independently in the frontend let the app
+# stay quiet before the night was spent and then complain about it afterwards (or
+# the reverse) on a borderline pair. The webapp serves these two numbers to the
+# form (``…/calibration-suggestions`` → ``tolerances``) so there is one source of
+# truth; a test pins that the served values *are* these.
+EXPOSURE_MISMATCH_TOL = 0.15
 # How far a master dark's sensor temperature may differ from the lights (°C)
 # before the advisory warning fires. Dark current ~doubles per 6-7 °C, so a few
 # degrees is tolerable; this flags a clearly-mismatched dark library.
-_TEMP_MISMATCH_TOL_C = 5.0
+TEMP_MISMATCH_TOL_C = 5.0
+
+# Historical private aliases — kept so nothing that referenced them breaks.
+_EXPOSURE_MISMATCH_TOL = EXPOSURE_MISMATCH_TOL
+_TEMP_MISMATCH_TOL_C = TEMP_MISMATCH_TOL_C
 
 
 def _sanitize_pedestal(arr: np.ndarray) -> np.ndarray:
@@ -303,7 +315,7 @@ class CalibrationMasters:
         if (not scaling_active and de and de > 0
                 and light_exposure_s and light_exposure_s > 0):
             ratio = float(light_exposure_s) / float(de)
-            if abs(ratio - 1.0) > _EXPOSURE_MISMATCH_TOL:
+            if abs(ratio - 1.0) > EXPOSURE_MISMATCH_TOL:
                 direction = "over" if de > light_exposure_s else "under"
                 warnings.append(
                     f"Master dark is {de:g}s but your subs are {light_exposure_s:g}s — "
@@ -313,7 +325,7 @@ class CalibrationMasters:
                 )
         dt = self.dark_temp_c
         if (dt is not None and light_temp_c is not None
-                and abs(float(dt) - float(light_temp_c)) >= _TEMP_MISMATCH_TOL_C):
+                and abs(float(dt) - float(light_temp_c)) >= TEMP_MISMATCH_TOL_C):
             warnings.append(
                 f"Master dark was shot at {dt:g}°C but your subs are at "
                 f"{light_temp_c:g}°C — dark current changes with temperature, so "
