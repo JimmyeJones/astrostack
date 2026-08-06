@@ -6189,6 +6189,34 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-08-06, filed while shipping the "Hold back highlights" knob v0.237.0) — give the new
+  highlight knob the "from your image" partner every other detail slider has.** *(Editor quality + autonomy —
+  PRIORITY 1/2; size S–M.)* v0.237.0 makes the stretch's highlight shoulder adjustable and lets the owner *ask* for
+  more of it ("Core blown out"), but a beginner has to notice their core is washed out first — and the editor's
+  sibling sliders don't make them: sharpen has "size it from your stars", denoise has "from your image". The same
+  measurement is available here and is **purely offline**: render the proxy through the current recipe, find the
+  largest connected component at/near the display ceiling, and report what fraction of it is flat (zero local
+  gradient). A core that is genuinely saturated in the *data* can't be recovered and must be left alone; one that is
+  flat only *after* the stretch is exactly what the knob fixes, and the two are distinguishable by looking at the
+  same region in the linear input. **Shape:** a one-click "Hold it back from your image" button beside the slider
+  that sets a suggested strength, like `suggest_denoise_strength` — **not** an automatic default. That is the whole
+  point of proposing it now: the filed *automatic* highlight-clip cue is real-data-gated because a wrong threshold
+  would silently change everyone's picture, whereas a button changes nothing until pressed, shows its result in the
+  preview immediately, and is undone by moving the slider back. **Care:** measure on the *stretched* proxy (the
+  clipping is a display-space property) but sanity-check against the linear data so a truly saturated core isn't
+  promised a recovery that can't happen; and return "no suggestion" rather than 0 when there's no bright core at all,
+  so the button self-hides instead of implying the picture has a problem.
+- **NEW IDEA (Builder 2026-08-06, spotted while adding the 10th and 11th Adaptive-Auto chips) — the "How did Auto
+  do?" chip row is becoming a wall.** *(Friendliness — PRIORITY 3; size S; frontend-only.)* `AUTO_FEEDBACK_CHIPS` is
+  now eleven flat chips ("Too dark", "Too bright", "Too soft", "Over-sharpened", "Too noisy", "Over-smoothed",
+  "Colours too weak", "Colours too strong", "Too green", "Core blown out", "Core looks flat"). Each one is good, but
+  eleven equal-weight buttons is *more* decision for a beginner, not less — the opposite of what the feature is for,
+  and it will only grow as cues are added. **Slice:** group them by what they're about (brightness · sharpness ·
+  noise · colour · bright core) as five small labelled clusters, or collapse each opposing pair into one −/+ control
+  so the row is five items wide instead of eleven. Pure presentation over the existing cue keys — no new endpoint, no
+  change to what a tap sends, and the pure `AUTO_FEEDBACK_CHIPS` list stays the contract the tests assert on.
+  **Care:** don't hide the negative cue behind a second interaction — the walk-back tap is what makes the feature
+  reversible, and a beginner who over-taps needs it to be as easy to reach as the one that got them there.
 - **NOTE (Builder 2026-08-05, checked while shipping v0.236.0 — recorded so nobody re-treads it) — "warn about a
   mismatched dark at *pick* time" is ALREADY BUILT; the only thing left is a wording-drift risk.** The obvious
   follow-on to v0.236.0 looks like "say it before the night is spent, not after". It exists: `Stack.tsx` (~L357–405)
@@ -6201,8 +6229,27 @@ to **Shipped**.)_
   sentence in `Stack.tsx` and the after-the-fact sentence from `CalibrationMasters.calibration_warnings` are written
   independently, with independently-chosen thresholds (`expMismatch` in `calibrationFit.ts` vs
   `_EXPOSURE_MISMATCH_TOL` / `_TEMP_MISMATCH_TOL_C` in `calibrate/apply.py`) — so the app can warn before and go
-  quiet after, or vice versa, on a borderline pair. Worth one small pass to make the thresholds agree (and ideally
-  serve one wording), *only* if someone is already in those files. (S, friendliness — PRIORITY 3.)
+  quiet after, or vice versa, on a borderline pair. ~~Worth one small pass to make the thresholds agree (and ideally
+  serve one wording), *only* if someone is already in those files.~~ — **THRESHOLD HALF FIXED v0.237.1** (Builder
+  2026-08-06, branch `claude/relaxed-turing-jox1fn`). The drift was real and one-directional: the form's rule was
+  `|t_dark − t_subs| / t_subs > 0.25`, the engine's is `|t_subs / t_dark − 1| > 0.15` — both looser *and* anchored on
+  a different exposure — so the engine is consistently the stricter of the two. **Reproduced by construction: a 30 s
+  dark on 25 s subs** is 0.167 by the engine's measure (warned about on the finished run since v0.236.0) and 0.20 by
+  the form's old measure against a 0.25 bar — silent at pick time. Same for a 10 s dark on 12 s subs, and the whole
+  band between. Now there is one source of truth: `EXPOSURE_MISMATCH_TOL` / `TEMP_MISMATCH_TOL_C` are public in
+  `seestack/calibrate/apply.py` (the private names stay as aliases), `…/calibration-suggestions` serves them in an
+  additive `tolerances` block, and the form's cautions run through two pure helpers in `calibrationFit.ts`
+  (`exposureMismatch` / `tempMismatch`) that prefer the served numbers and fall back to mirrored constants for an
+  older backend. Both are one-sided like the size check — an unknown or non-positive exposure (a bias master records
+  0 s) never warns. The temperature thresholds already agreed at 5 °C; that literal is no longer duplicated in
+  `Stack.tsx`. Upgrade-safe: additive response key, no config/DB/on-disk change, no stacking behaviour touched —
+  only which advisory sentences appear, and strictly toward "warn about the pairs the run will complain about".
+  **Tests (+13):** `calibrationFit.test.ts` (+8 — the borderline pair, a matched pair inside the slack, the
+  master-anchored denominator, the one-sided guards, and the served-tolerance preference with its fallback for a
+  null/zero/negative/NaN/absent block), `Stack.test.tsx` (+1 — the 30 s-dark-on-25 s-subs pick now warns) and
+  `tests/webapp/test_calibration.py` (+1 pinning that the served values *are* the engine's constants, so a future
+  sensitivity change can't leave the form behind). **Still open (the smaller half):** the two *sentences* are still
+  written independently, so the wording can drift even though the trigger can't. (S, friendliness — PRIORITY 3.)
 - **NEW IDEA (Builder 2026-08-05, spotted while tracing the coverage accumulators) — the coverage map's `BUNIT`
   claims "frames" when it isn't one.** *(Trust / correctness of a diagnostic — PRIORITY 4; size S.)*
   `output._write_coverage_fits` writes `master_coverage.fits` with `BUNIT = "frames"`, but the array it gets is
