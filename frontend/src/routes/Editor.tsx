@@ -46,6 +46,7 @@ import { pngProgressLabel } from "../components/editor/pngProgress";
 import { isJobPollAbort, pollJobUntilDone } from "../components/editor/pollJob";
 import { opErrorsMessage } from "../components/editor/opErrors";
 import { clippingCaption } from "../components/editor/clipping";
+import { blownCoreButtonLabel, blownCoreCaption } from "../components/editor/blownCore";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
 import { levelsAtIdentity, resetLevelsPoints } from "../components/editor/levelsReset";
@@ -2039,6 +2040,31 @@ export function EditorView() {
                         onClick={() => setParams(
                           selectedOp.uid, { ...selectedOp.params, mode: advice.mode })}>
                         Use {backgroundModeOptionLabel(advice.mode, specs[selectedOp.id])} mode
+                      </Button>
+                    </Alert>
+                  );
+                })()}
+                {/* The highlight suggestion's button hangs off the "Hold back
+                    highlights" slider, which is an `advanced` param — so it sits
+                    inside the panel's collapsed Advanced accordion, where a
+                    beginner never looks. Having measured that their core is
+                    washing out and knowing the fix, say so where it can be seen,
+                    with the same one click. Same shape as the background-mode
+                    nudge above; nothing changes until it's pressed. */}
+                {(() => {
+                  if (selectedOp.id !== "tone.stretch") return null;
+                  const text = blownCoreCaption(
+                    highlight.data, selectedOp.params?.highlights);
+                  if (!text) return null;
+                  return (
+                    <Alert color="blue" variant="light" py={6} mb="xs"
+                      icon={<IconInfoCircle size={16} />}>
+                      <Text size="xs">{text}</Text>
+                      <Button size="compact-xs" variant="light" mt={6}
+                        onClick={() => setParams(selectedOp.uid, {
+                          ...selectedOp.params, highlights: highlight.data!.strength,
+                        })}>
+                        {blownCoreButtonLabel(highlight.data)}
                       </Button>
                     </Alert>
                   );
