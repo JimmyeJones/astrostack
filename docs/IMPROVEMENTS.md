@@ -10592,6 +10592,68 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-REQUESTED (2026-08-06) — optional "space ambient" background music in the web interface, off by
+  default, synthesised in the browser (no audio files).** *(Enjoyment polish; size M.)* The owner spends long
+  stretches watching a stack run or browsing the gallery and wants the option of a quiet ambient soundbed while
+  they do. **Be honest about where this ranks: it is *enjoyment* polish, not a workflow feature — it must never
+  displace a bug or PRIORITY 1–4 work.** Pull it on a slow run, not ahead of the queue. It is, however, fully
+  self-contained (one frontend module + one toggle; zero backend, zero engine, zero schema), so it carries
+  essentially no risk to the imaging path.
+
+  **Generate the audio procedurally with the Web Audio API — do NOT ship or fetch an audio file.** This is the
+  load-bearing decision, for four reasons: (a) **licensing** — an agent must not pull a music file off the
+  internet, and we have no cleared track to bundle; (b) it keeps the Docker image and repo free of multi-MB
+  binary assets; (c) **nothing is downloaded at runtime** (the owner's box is offline-first — the existing rule
+  that nothing leaves the NAS applies here too); (d) a synthesised bed **never loops audibly**, which a short
+  bundled sample always does on a multi-hour session. All of it is a few hundred lines of TypeScript with no new
+  npm dependency.
+
+  **Sound design (aim for "drifting through space", not a melody).** Three layers into a shared reverb:
+  1. **Drone pad** — 3–4 oscillators (sine/triangle) on a root + fifth + octave, each detuned a few cents so they
+     beat slowly against each other, through a lowpass (~400–800 Hz) whose cutoff is driven by a very slow LFO
+     (0.02–0.05 Hz). Give each voice an independent slow amplitude swell (30–60 s) so the pad breathes instead of
+     sitting static.
+  2. **Noise bed** — low-level pink/brown noise through a slowly-sweeping bandpass: the "solar wind" texture that
+     stops the pad sounding like a test tone. Keep it well under the pad.
+  3. **Sparse bells** — a single FM/sine ping every 8–25 s (randomised, never on a grid) on a **pentatonic** scale
+     above the drone root, with a long decay. This is what makes it read as *space* rather than *hum*; it is also
+     the layer most easily overdone, so keep it sparse and quiet.
+
+  Feed everything through a **ConvolverNode whose impulse response is generated at runtime** (an exponentially
+  decaying noise burst, ~3–6 s — again, no asset needed) for the long tail, then a master gain and a
+  `DynamicsCompressorNode` as a safety limiter so no combination of voices can spike. Stay on one root, or drift
+  between 2–3 related roots over *minutes*.
+
+  **Behaviour and the traps that matter:**
+  - **Default OFF, opt-in, and remembered per device.** Unrequested audio from a web app is hostile — a fresh
+    install must be silent. Persist in `localStorage` (key `astrostack.ambient.*`), **not** in `webapp/config.py`:
+    music preference is inherently per-device (on in the lounge, off on the phone at 2 a.m.), and it keeps this
+    feature entirely off the server, with no config migration and nothing to break on upgrade.
+  - **Browser autoplay policy**: an `AudioContext` starts suspended and may only be resumed from inside a real
+    user-gesture handler. Create/resume it **in the toggle's click handler** — never on mount, or it silently
+    fails to start and the toggle lies about its state. Reflect the *actual* context state in the UI.
+  - **Suspend, don't just mute, when off.** A running graph with a convolver burns real CPU in a tab that may sit
+    open for hours. `suspend()` the context when toggled off (after the fade) and on `visibilitychange` if the
+    owner wants it to pause on a hidden tab — decide one behaviour and say which in the UI copy.
+  - **Fade in/out over ~2–3 s** via a gain ramp on every start/stop and volume change. A raw start or stop clicks
+    audibly. Never set gain to exactly 0 on an exponential ramp.
+  - **Placement**: a small speaker icon + tooltip in the `AppShell` header in `frontend/src/App.tsx` (next to
+    `ActiveJobsBadge`), plus a volume slider in Settings. One click to silence — no menu-diving.
+  - **Follow the `jobNotify.ts` precedent exactly** — it is the established pattern for a client-only, opt-in,
+    `localStorage`-persisted toggle read fresh at use time, and `SampleTourNote`/`MergeSuggestionsCard` show the
+    `astrostack.*` key convention and the defensive `localStorage` read (wrap in try/catch; a disabled/full store
+    must not crash the shell).
+  - **Testability**: keep the **scheduling and voicing logic pure** (which note fires when, at what gain, the
+    ramp targets) in its own module, separate from the code that touches `AudioContext` nodes. Unit-test the pure
+    half in vitest with a fake clock; test the toggle/persistence with a stubbed `AudioContext` (jsdom has no Web
+    Audio, so a minimal hand-rolled stub is required — assert `resume`/`suspend` are called, not that sound came
+    out). Do not attempt to assert on rendered audio.
+
+  **Explicit non-goals (do not gold-plate):** no user-uploaded music files (a reasonable *later* follow-up, but it
+  drags in upload/storage/format handling — file it separately if the owner asks); no per-page or per-target
+  themes; no sound *effects* on job completion (that is a different feature and the owner has not asked for it);
+  no visualiser. One bed, one toggle, one volume.
+
 - **NEW IDEA (Builder 2026-08-04, follow-on to the v0.229.0 `.zip` upload) — unpack a big archive as a *job*
   rather than inside the request.** *(Autonomy/friendliness — PRIORITY 2–3; size M.)* The zip upload streams to
   disk and then unpacks **synchronously inside the POST**, so a multi-GB night is a long silent wait after the
