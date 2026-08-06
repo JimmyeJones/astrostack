@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { DashboardStats, SystemInfo } from "../../api/client";
 import {
-  firstImageComplete, firstImageNextStep, firstImageSteps,
+  firstImageComplete, firstImageDone, firstImageDoneMessage, firstImageNextStep,
+  firstImageSteps,
 } from "./firstImageSteps";
 
 function sys(over: Partial<SystemInfo["astap"]> = {}): SystemInfo {
@@ -79,5 +80,51 @@ describe("firstImageSteps", () => {
       expect(s.href.startsWith("/")).toBe(true);
       expect(s.action.length).toBeGreaterThan(3);
     }
+  });
+});
+
+describe("firstImageDone", () => {
+  it("counts a stacked Moon/Sun still as a finished picture", () => {
+    // The bug this exists for: a video ingests no FITS, solves nothing and
+    // creates no stack run, so every step is open — yet there is a picture.
+    const st = stats({ n_video_stills: 1 });
+    const steps = firstImageSteps(sys({ found: false }), st);
+    expect(steps.every((s) => !s.done)).toBe(true);
+    expect(firstImageComplete(steps)).toBe(false);
+    expect(firstImageDone(steps, st)).toBe(true);
+  });
+
+  it("never ticks a deep-sky step off a video", () => {
+    // Only the outcome recognises a still — the steps are still the right
+    // advice, and claiming frames were ingested or solved would be a lie.
+    const steps = firstImageSteps(sys(), stats({ n_video_stills: 3 }));
+    expect(steps.map((s) => s.done)).toEqual([false, true, false, false]);
+    expect(firstImageNextStep(steps)?.key).toBe("frames");
+  });
+
+  it("agrees with the four steps when there is no still", () => {
+    const none = stats();
+    expect(firstImageDone(firstImageSteps(sys(), none), none)).toBe(false);
+    const all = stats({ n_frames: 40, n_frames_accepted: 32, n_stack_runs: 1 });
+    expect(firstImageDone(firstImageSteps(sys(), all), all)).toBe(true);
+  });
+
+  it("reads an older backend's missing count as no stills", () => {
+    const st = stats();
+    delete (st as { n_video_stills?: number }).n_video_stills;
+    expect(firstImageDone(firstImageSteps(sys(), st), st)).toBe(false);
+    expect(firstImageDone(firstImageSteps(sys(), undefined), undefined)).toBe(false);
+  });
+
+  it("words the well-done for how they actually got there", () => {
+    const video = stats({ n_video_stills: 1 });
+    const msg = firstImageDoneMessage(firstImageSteps(sys(), video));
+    // Pointing a Moon-video user at the deep-sky editor would be wrong.
+    expect(msg).toContain("Gallery");
+    expect(msg).not.toContain("editor");
+
+    const deep = stats({ n_frames: 40, n_frames_accepted: 32, n_stack_runs: 1 });
+    expect(firstImageDoneMessage(firstImageSteps(sys(), deep)))
+      .toContain("editor");
   });
 });

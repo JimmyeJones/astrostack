@@ -1,16 +1,16 @@
 import {
-  Alert, Badge, Button, Card, Center, Group, Image, Loader, Paper, Select,
-  SimpleGrid, Stack, Text, Title,
+  Alert, Badge, Button, Card, Center, Checkbox, Group, Image, Loader, Paper,
+  Select, SimpleGrid, Stack, Text, Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import {
-  IconAlertTriangle, IconChartBar, IconDownload, IconMoon, IconSun, IconVideo,
-  IconWand,
+  IconAlertTriangle, IconChartBar, IconCrop, IconDownload, IconMoon, IconSun,
+  IconVideo, IconWand,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type VideoCapture } from "../api/client";
+import { api, type VideoCapture, type VideoResult } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
 
@@ -49,6 +49,48 @@ export function resultSummary(r: {
   );
 }
 
+/** What to call the bright thing in the middle, in plain language (pure). */
+export function subjectNoun(kind: VideoCapture["kind"]): string {
+  if (kind === "lunar") return "Moon";
+  if (kind === "solar") return "Sun";
+  return "subject";
+}
+
+/**
+ * "Most of this picture is empty sky" — or null when there's nothing to say.
+ *
+ * Only ever shown for a still that was *not* cropped and where the backend
+ * measured enough sky around the disk to be worth trimming, so it can't nag
+ * about a picture that is already mostly subject.
+ */
+export function cropSuggestion(
+  result: Pick<VideoResult, "crop_available" | "crop_trim_fraction"> | null,
+  kind: VideoCapture["kind"],
+): string | null {
+  if (!result?.crop_available) return null;
+  const pct = Math.round((result.crop_trim_fraction ?? 0) * 100);
+  if (pct < 1) return null;
+  return (
+    `About ${pct}% of this picture is empty sky around the ${subjectNoun(kind)}. `
+    + `Crop it and stack again for a picture that's mostly ${subjectNoun(kind)}.`
+  );
+}
+
+/** The matching line once a still *has* been cropped (pure). */
+export function cropNote(
+  result: Pick<
+    VideoResult, "crop_applied" | "crop_trim_fraction" | "source_width" | "source_height"
+  > | null,
+  kind: VideoCapture["kind"],
+): string | null {
+  if (!result?.crop_applied) return null;
+  const pct = Math.round((result.crop_trim_fraction ?? 0) * 100);
+  const from = result.source_width && result.source_height
+    ? ` (from ${result.source_width}×${result.source_height})`
+    : "";
+  return `Cropped to the ${subjectNoun(kind)} — trimmed ${pct}% of empty sky${from}.`;
+}
+
 function CaptureIcon({ kind }: { kind: VideoCapture["kind"] }) {
   if (kind === "lunar") return <IconMoon size={20} color="var(--mantine-color-yellow-4)" />;
   if (kind === "solar") return <IconSun size={20} color="var(--mantine-color-orange-4)" />;
@@ -59,14 +101,19 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [keep, setKeep] = useState<string>(DEFAULT_KEEP);
+  const [crop, setCrop] = useState(false);
   const [file, setFile] = useState<string | null>(
     capture.files.length === 1 ? capture.files[0].name : null,
   );
 
+  // The override lets the "crop it" suggestion act in one click: setting the
+  // checkbox and firing the mutation in the same handler would send the *old*
+  // value, since state updates don't apply until the next render.
   const stack = useMutation({
-    mutationFn: () => api.stackVideoCapture(capture.id, {
+    mutationFn: (over: { crop?: boolean } = {}) => api.stackVideoCapture(capture.id, {
       keep_percent: Number(keep),
       file_name: file ?? undefined,
+      crop: over.crop ?? crop,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -96,6 +143,8 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
   });
 
   const result = capture.result;
+  const suggestCrop = cropSuggestion(result, capture.kind);
+  const cropped = cropNote(result, capture.kind);
 
   return (
     <Card withBorder radius="md" padding="md">
@@ -129,9 +178,35 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
       {result ? (
         <Stack gap={4} mb="sm">
           <Text size="sm">{resultSummary(result)}</Text>
+          {cropped ? <Text size="xs" c="dimmed">{cropped}</Text> : null}
           {result.warnings.map((w) => (
             <Text key={w} size="xs" c="dimmed">{w}</Text>
           ))}
+          {/* Most people won't think to ask for a crop before they've seen how
+              much sky their Seestar left around the Moon — so the offer waits
+              until the picture itself can make the case. */}
+          {suggestCrop ? (
+            <Alert
+              color="violet"
+              variant="light"
+              icon={<IconCrop size={18} />}
+              p="xs"
+              mt={4}
+            >
+              <Text size="xs">{suggestCrop}</Text>
+              <Button
+                size="compact-xs"
+                variant="light"
+                mt={6}
+                leftSection={<IconCrop size={12} />}
+                onClick={() => { setCrop(true); stack.mutate({ crop: true }); }}
+                loading={stack.isPending}
+                disabled={disabled}
+              >
+                Crop it and stack again
+              </Button>
+            </Alert>
+          ) : null}
           <Group gap="xs" mt={4}>
             <Button
               size="xs"
@@ -202,10 +277,22 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
         mt="sm"
       />
 
+      <Checkbox
+        label={`Crop to the ${subjectNoun(capture.kind)}`}
+        description={
+          `Trims the empty sky around it, so your picture is mostly `
+          + `${subjectNoun(capture.kind)}. Left alone if there's nothing to trim.`
+        }
+        size="sm"
+        mb="sm"
+        checked={crop}
+        onChange={(e) => setCrop(e.currentTarget.checked)}
+      />
+
       <Button
         fullWidth
         leftSection={<IconWand size={16} />}
-        onClick={() => stack.mutate()}
+        onClick={() => stack.mutate({})}
         loading={stack.isPending}
         disabled={disabled}
       >

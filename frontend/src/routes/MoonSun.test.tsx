@@ -3,7 +3,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_KEEP, MoonSunView, resultSummary } from "./MoonSun";
+import {
+  DEFAULT_KEEP, MoonSunView, cropNote, cropSuggestion, resultSummary, subjectNoun,
+} from "./MoonSun";
 import * as client from "../api/client";
 import type { VideoCapture, VideoList, VideoResult } from "../api/client";
 
@@ -91,7 +93,7 @@ describe("MoonSunView", () => {
     await waitFor(() => screen.getByRole("button", { name: /Stack video/i }));
     fireEvent.click(screen.getByRole("button", { name: /Stack video/i }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("Lunar_video", {
-      keep_percent: Number(DEFAULT_KEEP), file_name: "clip.mp4",
+      keep_percent: Number(DEFAULT_KEEP), file_name: "clip.mp4", crop: false,
     }));
   });
 
@@ -233,5 +235,112 @@ describe("MoonSunView", () => {
     fireEvent.click(screen.getByRole("button", { name: /Try 15% instead/ }));
     await waitFor(() =>
       expect(screen.getByDisplayValue(/Only the very best \(15%\)/)).toBeInTheDocument());
+  });
+});
+
+describe("cropping the empty sky", () => {
+  it("names the subject the way the user would", () => {
+    expect(subjectNoun("lunar")).toBe("Moon");
+    expect(subjectNoun("solar")).toBe("Sun");
+    expect(subjectNoun("other")).toBe("subject");
+  });
+
+  it("quantifies the empty sky and says what to do about it", () => {
+    const text = cropSuggestion(
+      { crop_available: true, crop_trim_fraction: 0.78 }, "lunar",
+    );
+    expect(text).toContain("78%");
+    expect(text).toContain("Moon");
+  });
+
+  it("stays quiet when there is nothing worth trimming", () => {
+    expect(cropSuggestion({ crop_available: false, crop_trim_fraction: 0.9 }, "lunar"))
+      .toBeNull();
+    // An older backend sends neither field — never nag on a guess.
+    expect(cropSuggestion({}, "lunar")).toBeNull();
+    expect(cropSuggestion(null, "lunar")).toBeNull();
+    // ...nor round a sliver up into an offer.
+    expect(cropSuggestion({ crop_available: true, crop_trim_fraction: 0.001 }, "lunar"))
+      .toBeNull();
+  });
+
+  it("says what a cropped still gave up, and what it came from", () => {
+    const text = cropNote({
+      crop_applied: true, crop_trim_fraction: 0.62,
+      source_width: 1920, source_height: 1080,
+    }, "solar");
+    expect(text).toContain("Cropped to the Sun");
+    expect(text).toContain("62%");
+    expect(text).toContain("1920×1080");
+    expect(cropNote({ crop_applied: false }, "solar")).toBeNull();
+  });
+
+  it("offers the crop on a full-frame still and applies it in one click", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        result: result({ crop_available: true, crop_trim_fraction: 0.8 }),
+      })],
+    }));
+    const post = vi.spyOn(client.api, "stackVideoCapture")
+      .mockResolvedValue({ job_id: "j1" });
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByText(/80% of this picture is empty sky/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Crop it and stack again/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("Lunar_video", {
+      keep_percent: Number(DEFAULT_KEEP), file_name: "clip.mp4", crop: true,
+    }));
+  });
+
+  it("sends the crop when the checkbox is ticked before stacking", async () => {
+    vi.spyOn(client.api, "listVideoCaptures")
+      .mockResolvedValue(list({ captures: [capture()] }));
+    const post = vi.spyOn(client.api, "stackVideoCapture")
+      .mockResolvedValue({ job_id: "j1" });
+    renderView();
+    await waitFor(() => screen.getByRole("checkbox", { name: /Crop to the Moon/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Crop to the Moon/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Stack video/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("Lunar_video", {
+      keep_percent: Number(DEFAULT_KEEP), file_name: "clip.mp4", crop: true,
+    }));
+  });
+
+  it("reports a cropped still instead of offering to crop it again", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        result: result({
+          width: 620, height: 620,
+          crop_applied: true, crop_available: false, crop_trim_fraction: 0.8,
+          source_width: 1920, source_height: 1080,
+        }),
+      })],
+    }));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByText(/Cropped to the Moon/)).toBeInTheDocument());
+    expect(screen.queryByText(/empty sky around the Moon/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Crop it and stack again/i })).toBeNull();
+  });
+
+  it("says nothing about framing for a still from an older backend", async () => {
+    vi.spyOn(client.api, "listVideoCaptures")
+      .mockResolvedValue(list({ captures: [capture({ result: result() })] }));
+    renderView();
+    await waitFor(() => expect(screen.getByText(/Stacked the sharpest/)).toBeInTheDocument());
+    // The checkbox is still offered (it costs nothing); what must not appear is
+    // a claim about *this* picture's framing, which the backend never measured.
+    expect(screen.queryByText(/of this picture is empty sky/)).toBeNull();
+    expect(screen.queryByText(/Cropped to the/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Crop it and stack again/i })).toBeNull();
+  });
+
+  it("labels the checkbox for the Sun on a solar capture", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({ id: "Solar_video", label: "Sun", kind: "solar" })],
+    }));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox", { name: /Crop to the Sun/i })).toBeInTheDocument());
   });
 });
