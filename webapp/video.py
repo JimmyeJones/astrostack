@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -77,6 +77,12 @@ class VideoStackMeta:
     sharpness_kept_median: float
     sharpness_all_median: float
     warnings: list[str]
+    #: Every graded frame's sharpness score, in capture order. Optional and last
+    #: so a ``meta.json`` written by an older version still loads (it simply has
+    #: no profile, and the page hides the panel). Rounded on the way out — the
+    #: scores are only ever compared as ratios, so six significant figures is far
+    #: more than the advice needs and keeps a 1500-frame capture's file small.
+    scores: list[float] = field(default_factory=list)
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -226,6 +232,7 @@ def _video_stack_body(
         sharpness_kept_median=result.sharpness_kept_median,
         sharpness_all_median=result.sharpness_all_median,
         warnings=list(result.warnings),
+        scores=[round(float(v), 6) for v in result.scores],
     )
     (out_dir / META_NAME).write_text(
         json.dumps(asdict(meta), indent=2), encoding="utf-8",

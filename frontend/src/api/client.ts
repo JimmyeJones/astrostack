@@ -1284,6 +1284,30 @@ export interface VideoFile {
   size_bytes: number;
 }
 
+// What one "how picky should we be?" setting would give you on this capture,
+// measured from the grading pass's own per-frame scores.
+export interface VideoKeepOption {
+  percent: number;
+  n_frames: number;
+  // Median sharpness of the kept frames ÷ that of a typical frame in the capture.
+  sharpness_vs_typical: number;
+  // √N — roughly how much cleaner than a single frame the average is.
+  noise_gain: number;
+}
+
+// "How steady was your capture?" — optional, because a still stacked by an older
+// version didn't keep the scores. Absent → the panel simply doesn't render.
+export interface VideoSharpnessProfile {
+  // Frame scores sharpest-first, rescaled so the best frame is 1.0.
+  curve: number[];
+  // Where the setting used falls along that curve, 0..1.
+  cut_fraction: number;
+  options: VideoKeepOption[];
+  suggested_percent: number;
+  spread: "steady" | "mixed" | "variable";
+  summary: string;
+}
+
 export interface VideoResult {
   created_utc: string;
   source_name: string;
@@ -1298,6 +1322,7 @@ export interface VideoResult {
   warnings: string[];
   preview_url: string;
   tiff_url: string;
+  sharpness?: VideoSharpnessProfile | null;
 }
 
 export interface VideoCapture {

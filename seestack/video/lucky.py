@@ -110,6 +110,11 @@ class LuckyResult:
     #: Which graded frames made the cut (indices into the *sampled* sequence,
     #: ascending). Exposed so the choice is inspectable rather than magic.
     kept_indices: tuple[int, ...] = ()
+    #: Every graded frame's sharpness, in capture order. The grading pass computes
+    #: these anyway and used to drop them on the floor; keeping them is what lets
+    #: :mod:`seestack.video.quality` show the user how steady their capture was and
+    #: whether a different keep-% would suit it better.
+    scores: tuple[float, ...] = ()
     source: str = ""
     warnings: list[str] = field(default_factory=list)
 
@@ -310,6 +315,7 @@ def stack_video(
         sharpness_kept_median=float(np.median(kept_scores)) if kept_scores else 0.0,
         sharpness_all_median=float(np.median(scores)) if scores else 0.0,
         kept_indices=tuple(sorted(keep_idx)),
+        scores=tuple(float(s) for s in scores),
         source=str(src),
         warnings=warnings,
     )

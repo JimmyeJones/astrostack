@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type VideoCapture } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
 
 // Local, like Storage.tsx's `gb` — a video is MB-to-GB sized, and there is no
 // shared byte formatter to reach for.
@@ -23,6 +24,10 @@ function fileSize(bytes: number): string {
 // Keep-% presets, phrased as what they *do* rather than as a number. Lucky
 // imaging's one real decision is how ruthless to be, and a beginner has no way
 // to guess "25%" — but they can absolutely answer "was the air steady?".
+// These three values must stay in step with `DEFAULT_CANDIDATES` in
+// `seestack/video/quality.py`: the "How steady was your capture?" panel measures
+// the trade-off at exactly these settings and its "try this instead" button
+// selects one of them here.
 export const KEEP_PRESETS = [
   { value: "15", label: "Only the very best (15%) — sharpest, a bit noisier" },
   { value: "30", label: "Best few (30%) — recommended" },
@@ -131,6 +136,14 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
               16-bit TIFF
             </Button>
           </Group>
+          {/* The evidence behind "how picky should we be?", measured on this
+              capture. Self-hiding for a still stacked before the scores were
+              kept. Its suggestion drives the same Select below, so acting on it
+              is one click then "Stack again". */}
+          <VideoSharpnessCard
+            profile={result.sharpness}
+            onUseSuggestion={(pct) => setKeep(String(pct))}
+          />
         </Stack>
       ) : null}
 

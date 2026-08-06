@@ -168,3 +168,57 @@ def test_the_solar_folder_is_labelled_sun(client, data_root):
     (cap,) = client.get("/api/videos").json()["captures"]
     assert cap["label"] == "Sun"
     assert cap["kind"] == "solar"
+
+
+def test_the_result_carries_the_captures_sharpness_profile(client, data_root):
+    """"How steady was your capture?" — the grading pass's own scores, served so
+    the keep-% decision stops being a guess."""
+    _drop_capture(data_root)
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 30},
+    ).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    prof = result["sharpness"]
+    assert prof is not None
+    # The curve is the graded frames, sharpest first, normalised to the best.
+    assert prof["curve"][0] == pytest.approx(1.0)
+    assert prof["curve"] == sorted(prof["curve"], reverse=True)
+    # The synthetic capture has exactly 3 genuinely sharp frames in 10, so the
+    # sharpest slice really is sharper than a typical frame...
+    assert prof["spread"] == "variable"
+    # ...and 30% (3 of 10) is precisely the setting that takes every sharp frame
+    # and no soft one — keeping more would start averaging blur back in.
+    assert prof["suggested_percent"] == 30.0
+    assert [o["percent"] for o in prof["options"]] == [15.0, 30.0, 50.0]
+    assert prof["options"][0]["sharpness_vs_typical"] > prof["options"][-1]["sharpness_vs_typical"]
+    # The cut marker reflects what was actually stacked (3 of 10 frames).
+    assert prof["cut_fraction"] == pytest.approx(0.3)
+    assert prof["summary"]
+
+
+def test_a_result_stacked_before_scores_were_kept_still_loads(client, data_root):
+    """Upgrade safety: an existing ``meta.json`` has no ``scores`` — the result
+    must still list, just without the panel."""
+    import json
+
+    from webapp.config import Settings
+    from webapp.video import META_NAME, result_dir
+
+    _drop_capture(data_root)
+    job_id = client.post(
+        "/api/videos/Lunar_video/stack", json={"keep_percent": 30},
+    ).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    settings = Settings(data_root=str(data_root))
+    meta_path = result_dir(settings, "Lunar_video") / META_NAME
+    raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    raw.pop("scores")                      # exactly what an older version wrote
+    meta_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert result is not None
+    assert result["n_stacked"] == 3        # everything else still reported
+    assert result["sharpness"] is None
