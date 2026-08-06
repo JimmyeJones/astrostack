@@ -115,6 +115,28 @@ describe("Library", () => {
     expect(screen.getByRole("button", { name: /Choose FITS or \.zip/i })).toBeInTheDocument();
   });
 
+  it("signposts Moon & Sun, so a lunar video doesn't read as 'you have nothing'",
+    async () => {
+      // A video capture never becomes a target (there are no subs to ingest), so
+      // someone whose first night was the Moon lands on an empty Library with a
+      // picture waiting one page away and no way to know it.
+      vi.spyOn(client.api, "listTargets").mockResolvedValue([]);
+      renderLibrary();
+
+      await waitFor(() => expect(screen.getByText("No targets yet.")).toBeInTheDocument());
+      const link = screen.getByRole("link", { name: /Moon & Sun/i });
+      expect(link).toHaveAttribute("href", "/moon-sun");
+    });
+
+  it("doesn't clutter a library that has targets with the Moon & Sun signpost",
+    async () => {
+      vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Andromeda", ["galaxy"])]);
+      renderLibrary();
+
+      await waitFor(() => expect(screen.getByText("Andromeda")).toBeInTheDocument());
+      expect(screen.queryByRole("link", { name: /Moon & Sun/i })).not.toBeInTheDocument();
+    });
+
   it("shows the getting-started map on an empty library, and not once it has targets", async () => {
     // Library is as likely a first landing as the Dashboard (it's where the subs
     // go), so the "Your first image" checklist belongs on its empty state too.
