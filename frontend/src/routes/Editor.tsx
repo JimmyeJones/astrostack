@@ -389,6 +389,21 @@ export function EditorView() {
     staleTime: 30_000,
     placeholderData: keepPreviousData,  // see `levels` — no per-debounce flash
   });
+  // "Hold back highlights" from the image: the smallest slider step that reopens
+  // a blown-out bright core, solved by re-running *this* Stretch op at rising
+  // protection. Unlike the Strength/Black buttons it applies to **both** curves
+  // (the blow-out is a property of the shared highlight shoulder), so it keys on
+  // the selected stretch op whatever its mode. Returns null — and the button
+  // self-hides — when there's no recoverable blown core, so it never implies the
+  // picture has a problem.
+  const highlightSelUid = stretchSel?.uid;
+  const highlight = useQuery({
+    queryKey: ["highlight-suggestion", safe, rid, dKey, highlightSelUid],
+    queryFn: () => api.highlightSuggestion(safe, rid, dRecipe, highlightSelUid!),
+    enabled: !!opsSchema.data && !saved.isLoading && !!highlightSelUid,
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,  // see `levels` — no per-debounce flash
+  });
   // Data-driven starting tone curve for the selected Curves op, measured from the
   // display-space image *entering* that op (all prior ops applied). Enabled only
   // when a Curves op is selected; keyed on the debounced recipe + uid so it
@@ -2063,22 +2078,40 @@ export function EditorView() {
                               },
                             }
                             : selectedOp.id === "tone.stretch"
-                              && selectedOp.params?.mode !== "stf"
-                              && stretch.data?.stretch != null && stretch.data?.black != null
                               ? {
-                                // Each button sets only its own slider, so label it
-                                // with just that value. Strength names the goal it
-                                // solves for (the sky grey), like the gamma button.
-                                stretch: {
-                                  value: stretch.data.stretch,
-                                  label: stretch.data.target_bg != null
-                                    ? `From your image (strength ${stretch.data.stretch} — lands the sky at ~${Math.round(stretch.data.target_bg * 100)}% grey)`
-                                    : `From your image (strength ${stretch.data.stretch})`,
-                                },
-                                black: {
-                                  value: stretch.data.black,
-                                  label: `From your image (black ${stretch.data.black})`,
-                                },
+                                // Strength/Black are asinh-only (STF solves them
+                                // itself); each button sets just its own slider, so
+                                // label it with that value alone. Strength names the
+                                // goal it solves for (the sky grey), like gamma.
+                                ...(selectedOp.params?.mode !== "stf"
+                                  && stretch.data?.stretch != null
+                                  && stretch.data?.black != null
+                                  ? {
+                                    stretch: {
+                                      value: stretch.data.stretch,
+                                      label: stretch.data.target_bg != null
+                                        ? `From your image (strength ${stretch.data.stretch} — lands the sky at ~${Math.round(stretch.data.target_bg * 100)}% grey)`
+                                        : `From your image (strength ${stretch.data.stretch})`,
+                                    },
+                                    black: {
+                                      value: stretch.data.black,
+                                      label: `From your image (black ${stretch.data.black})`,
+                                    },
+                                  }
+                                  : {}),
+                                // "Hold back highlights" applies to *both* curves —
+                                // the blow-out is a property of the shared shoulder —
+                                // so it isn't gated on the mode. Only offered when a
+                                // blown core was actually found and can be reopened;
+                                // name the severity so the number has provenance.
+                                ...(highlight.data?.strength != null ? {
+                                  highlights: {
+                                    value: highlight.data.strength,
+                                    label: highlight.data.flat_fraction != null
+                                      ? `From your image (hold back ${highlight.data.strength} — ${Math.round(highlight.data.flat_fraction * 100)}% of your core is flat white)`
+                                      : `From your image (hold back ${highlight.data.strength})`,
+                                  },
+                                } : {}),
                               }
                             : selectedOp.id === "tone.levels"
                               && levels.data?.black != null && levels.data?.white != null

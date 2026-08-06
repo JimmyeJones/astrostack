@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   autoCastSummaryText, dropEmptyFields, Maintenance, reprocessNudgeText,
-  WALK_AWAY_KEYS, walkAwayEnabled, withWalkAway,
+  SettingsView, WALK_AWAY_KEYS, walkAwayEnabled, withWalkAway,
 } from "./Settings";
 import * as client from "../api/client";
 
@@ -307,5 +307,84 @@ describe("Maintenance — reprocess everything", () => {
     fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
 
     await waitFor(() => expect(screen.getByText("boom")).toBeInTheDocument());
+  });
+});
+
+// --- Automated stacking defaults: the pick-time weighting caution -----------
+// The defaults grid is descriptor-driven with no cross-field logic, so the one
+// self-cancelling pair (min/max rejection + quality weighting) had no warning on
+// the very screen a walk-away user sets it from.
+
+const STACK_FIELDS = [
+  { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+    default: false, min: null, max: null, step: null, options: null, help: null,
+    depends_on: null },
+  { key: "quality_weighted", label: "Quality weighting", type: "bool", group: "simple",
+    default: false, min: null, max: null, step: null, options: null, help: null,
+    depends_on: null },
+  { key: "drizzle", label: "Drizzle", type: "bool", group: "advanced",
+    default: false, min: null, max: null, step: null, options: null, help: null,
+    depends_on: null },
+] as client.StackOptionField[];
+
+function renderSettingsWith(stackDefaults: Record<string, unknown>) {
+  vi.spyOn(client.api, "getSettings").mockResolvedValue({
+    default_stack_options: stackDefaults,
+  } as never);
+  vi.spyOn(client.api, "getSystem").mockResolvedValue({
+    version: "0.0.0", data_root: "/data", cpu_count: 4, cpu_workers: 3,
+    gpu_available: false,
+    astap: { found: true, path: "/usr/bin/astap", star_db_found: true },
+    disk: {}, memory: {}, watcher_enabled: false,
+  } as never);
+  vi.spyOn(client.api, "optionsSchema").mockResolvedValue(STACK_FIELDS);
+  vi.spyOn(client.api, "authStatus").mockResolvedValue({ enabled: false } as never);
+  const qc = new QueryClient();
+  return render(
+    <MantineProvider>
+      <Notifications />
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <SettingsView />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </MantineProvider>,
+  );
+}
+
+describe("Automated stacking defaults — min/max vs quality weighting", () => {
+  it("warns when both defaults are on, worded for an unknown frame count", async () => {
+    renderSettingsWith({ min_max_reject: true, quality_weighted: true, drizzle: false });
+
+    await waitFor(() =>
+      expect(screen.getByText(/On any stack of 3 or more subs/)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Turn off quality weighting" }))
+      .toBeInTheDocument();
+  });
+
+  it("stays quiet when only one of the two is on", async () => {
+    renderSettingsWith({ min_max_reject: true, quality_weighted: false, drizzle: false });
+
+    await waitFor(() =>
+      expect(screen.getByText("Automated stacking defaults")).toBeInTheDocument());
+    expect(screen.queryByText(/don't combine/)).toBeNull();
+  });
+
+  it("stays quiet on the drizzle path, where the weights still apply", async () => {
+    renderSettingsWith({ min_max_reject: true, quality_weighted: true, drizzle: true });
+
+    await waitFor(() =>
+      expect(screen.getByText("Automated stacking defaults")).toBeInTheDocument());
+    expect(screen.queryByText(/don't combine/)).toBeNull();
+  });
+
+  it("clears the conflict in place when the fix button is pressed", async () => {
+    renderSettingsWith({ min_max_reject: true, quality_weighted: true, drizzle: false });
+
+    await waitFor(() =>
+      expect(screen.getByText(/On any stack of 3 or more subs/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Turn off quality weighting" }));
+
+    await waitFor(() => expect(screen.queryByText(/don't combine/)).toBeNull());
   });
 });

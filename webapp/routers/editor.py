@@ -973,6 +973,82 @@ async def stretch_suggestion(safe: str, run_id: int, request: Request,
     return await run_in_threadpool(work)
 
 
+class HighlightSuggestionOut(BaseModel):
+    """Data-driven "Hold back highlights" strength for the ``tone.stretch`` op.
+
+    ``strength`` is the smallest slider step that reopens the run's blown-out
+    bright core; ``flat_fraction`` is the share of that core which renders flat
+    white today while still carrying structure in the linear data, and
+    ``core_px`` the size of the core measured (on the proxy). All three are
+    ``None`` when there is no suggestion — no bright core, one too small to be
+    anything but a star, one barely clipped, one already saturated at capture
+    (nothing to bring back), or one the knob can't meaningfully reopen. The UI
+    hides the button in that case rather than implying the picture has a
+    problem."""
+
+    strength: float | None
+    flat_fraction: float | None = None
+    core_px: int | None = None
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/highlight-suggestion",
+            response_model=HighlightSuggestionOut)
+async def highlight_suggestion(safe: str, run_id: int, request: Request,
+                               recipe: str | None = None,
+                               uid: str | None = None) -> HighlightSuggestionOut:
+    """Suggest the Stretch op's "Hold back highlights" strength from the image.
+
+    The knob (v0.237.0) makes the stretch's highlight shoulder adjustable, but a
+    beginner has to notice their core is washed out before they touch it — and
+    unlike sharpen ("size it from your stars") or denoise ("from your image"),
+    it had no measured partner. This is that partner.
+
+    It measures the *linear* image entering the Stretch op (all prior ops
+    applied, the default-stretch fallback suppressed), then re-runs **this
+    user's own Stretch op** at increasing protection and returns the smallest
+    step that actually reopens the core — so the number is solved against the
+    op that will render it, not mapped through a guessed curve. A core already
+    saturated in the linear data is reported as no suggestion, because holding
+    the highlights back would only darken it.
+    """
+    from seestack.edit.highlights import suggest_highlight_protect
+    from seestack.edit.registry import get_op
+
+    project_dir, run = _run_info(request, safe, run_id)
+    rec = _decode_recipe_query(request, safe, run_id, recipe)
+    # The op we're suggesting *for* — its own params (asinh vs STF, strength,
+    # black point, sky level) shape the stretch we solve against. Fall back to
+    # the op's defaults when the uid isn't in the recipe.
+    spec = get_op("tone.stretch")
+    stretch_params = dict(spec.defaults()) if spec is not None else {}
+    for op in rec.ops:
+        if op.uid == uid and op.id == "tone.stretch":
+            stretch_params.update(op.params or {})
+            break
+    sub = _recipe_before_uid(rec, uid, drop_ids=("tone.stretch",))
+
+    def work() -> HighlightSuggestionOut:
+        if spec is None:
+            return HighlightSuggestionOut(strength=None)
+        rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+        ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                          coverage=_proxy_coverage(run.fits_path, scale),
+                          already_display=_run_display_space(run))
+        linear = apply_recipe(rgb, sub, ctx, for_preview=True, auto_stretch=False)
+
+        def restretch(protect: float) -> np.ndarray:
+            return spec.apply(linear, {**stretch_params, "highlights": protect}, ctx)
+
+        found = suggest_highlight_protect(linear, restretch)
+        if found is None:
+            return HighlightSuggestionOut(strength=None)
+        return HighlightSuggestionOut(
+            strength=found.strength, flat_fraction=found.flat_fraction,
+            core_px=found.core_px)
+
+    return await run_in_threadpool(work)
+
+
 class CurveSuggestionOut(BaseModel):
     """Data-driven starting tone curve for the ``tone.curves`` op — a gentle,
     strictly-monotone midtone-lift curve derived from the display-space histogram

@@ -1626,6 +1626,8 @@ describe("EditorView", () => {
     // Data-driven asinh values measured from the linear image entering the op.
     vi.spyOn(client.api, "stretchSuggestion").mockResolvedValue(
       { stretch: 0.8, black: 0.05, target_bg: 0.1 });
+    // No blown core on this run, so the highlight button stays hidden.
+    vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue({ strength: null });
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
     })));
@@ -1681,6 +1683,7 @@ describe("EditorView", () => {
       { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
     const sug = vi.spyOn(client.api, "stretchSuggestion").mockResolvedValue(
       { stretch: 0.8, black: 0.05, target_bg: 0.1 });
+    vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue({ strength: null });
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
     })));
@@ -1694,6 +1697,93 @@ describe("EditorView", () => {
     expect(screen.queryByRole("button", { name: /Auto stretch/ })).toBeNull();
     expect(screen.queryByLabelText("Set Strength from your data")).toBeNull();
     expect(sug).not.toHaveBeenCalled();
+  });
+
+  // --- "Hold back highlights" from your image -------------------------------
+  // The knob (v0.237.0) had no measured partner, so a beginner had to notice
+  // their core was washed out first. These pin that the button appears only when
+  // there is a recoverable blown core, names the severity it measured, and works
+  // on the STF curve too (the blow-out is a property of the shared shoulder).
+
+  const STRETCH_WITH_HIGHLIGHTS: EditOp = {
+    id: "tone.stretch", label: "Stretch", group: "tone", stage: "any",
+    proxy_safe: true, is_stretch: true, help: "tone map",
+    params: [
+      { key: "mode", label: "Curve", type: "enum", group: "simple", default: "asinh",
+        min: null, max: null, step: null, options: ["asinh", "stf"], help: null,
+        depends_on: null },
+      { key: "stretch", label: "Strength", type: "float", group: "simple", default: 0.5,
+        min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: "mode=asinh" },
+      { key: "black", label: "Black point", type: "float", group: "simple", default: 0.35,
+        min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: "mode=asinh" },
+      { key: "highlights", label: "Hold back highlights", type: "float", group: "simple",
+        default: 0, min: 0, max: 1, step: 0.05, options: null,
+        help: "Compress the very brightest tones.", depends_on: null },
+    ],
+  };
+
+  function mockStretchOpWith(mode: "asinh" | "stf") {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH_WITH_HIGHLIGHTS, LEVELS]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "s1", id: "tone.stretch", enabled: true,
+        params: { mode, stretch: 0.5, black: 0.35, highlights: 0 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.spyOn(client.api, "stretchSuggestion").mockResolvedValue(
+      { stretch: 0.8, black: 0.05, target_bg: 0.1 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+  }
+
+  it("offers 'hold back highlights' from your image, naming what it measured", async () => {
+    mockStretchOpWith("asinh");
+    vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue(
+      { strength: 0.4, flat_fraction: 0.22, core_px: 241 });
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Stretch"));
+    const btn = await screen.findByLabelText("Set Hold back highlights from your data");
+    expect(btn).toHaveTextContent("hold back 0.4");
+    // The severity gives the number visible provenance, like FWHM does for sharpen.
+    expect(btn).toHaveTextContent("22% of your core is flat white");
+
+    fireEvent.click(btn);
+    // Applied: the button now reads as already-set rather than inviting a no-op.
+    await waitFor(() => expect(
+      screen.getByLabelText("Set Hold back highlights from your data")).toBeDisabled());
+  });
+
+  it("hides the highlight button when there's no recoverable blown core", async () => {
+    // The honest empty state: most stacks have no washed-out core, and the button
+    // must not appear and imply the picture has a problem.
+    mockStretchOpWith("asinh");
+    vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue({ strength: null });
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Stretch"));
+    await screen.findByLabelText("Set Strength from your data");
+    expect(screen.queryByLabelText("Set Hold back highlights from your data")).toBeNull();
+  });
+
+  it("offers the highlight button in STF mode too, where strength/black are hidden", async () => {
+    // Unlike Strength/Black (asinh-only), the blow-out is a property of the shared
+    // highlight shoulder, so the auto curve gets the button as well.
+    mockStretchOpWith("stf");
+    vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue(
+      { strength: 0.75, flat_fraction: 0.51, core_px: 900 });
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Stretch"));
+    const btn = await screen.findByLabelText("Set Hold back highlights from your data");
+    expect(btn).toHaveTextContent("hold back 0.75");
+    expect(screen.queryByLabelText("Set Strength from your data")).toBeNull();
   });
 
   it("sets a gentle starting curve via the header 'Auto curve'", async () => {

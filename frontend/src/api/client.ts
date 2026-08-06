@@ -1228,6 +1228,20 @@ export interface StretchSuggestion {
   target_bg?: number | null;
 }
 
+export interface HighlightSuggestion {
+  /** The smallest "Hold back highlights" step that reopens the run's blown-out
+   * bright core, or null when there's no suggestion — no bright core, one too
+   * small to be anything but a star, one barely clipped, one already saturated
+   * at capture (nothing to bring back), or one the knob can't meaningfully
+   * reopen. The button hides on null rather than implying a problem. */
+  strength: number | null;
+  /** Share (0..1) of that core rendering flat white today while still carrying
+   * structure in the linear data — the severity the button can name. */
+  flat_fraction?: number | null;
+  /** Size of the measured core in proxy pixels. */
+  core_px?: number | null;
+}
+
 export interface CurveSuggestion {
   /** Ordered [x, y] control points for a gentle starting tone curve, or null when
    * there's no useful suggestion (too few finite pixels / degenerate range /
@@ -1884,6 +1898,11 @@ export const api = {
   stretchSuggestion: (safe: string, runId: number, recipe: Recipe, uid: string) =>
     req<StretchSuggestion>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/stretch-suggestion` +
+      `?recipe=${encodeRecipe(recipe)}&uid=${encodeURIComponent(uid)}`,
+    ),
+  highlightSuggestion: (safe: string, runId: number, recipe: Recipe, uid: string) =>
+    req<HighlightSuggestion>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/highlight-suggestion` +
       `?recipe=${encodeRecipe(recipe)}&uid=${encodeURIComponent(uid)}`,
     ),
   curveSuggestion: (safe: string, runId: number, recipe: Recipe, uid: string) =>
