@@ -6208,9 +6208,34 @@ to **Shipped**.)_
   anyone who has moved the slider or tapped "Core blown out", and how much extreme-HDR core a *real* Seestar OSC
   stack actually carries — versus a core that clipped in the sensor, where no shoulder helps — is exactly the
   real-data question this repo can't answer. Needs the owner's own M31/M42 stack to judge before shipping.
-- **NEW IDEA (Builder 2026-08-06, the root cause of the v0.240.1 invisible-button bug — worth one small pass) — the
+- ~~**NEW IDEA (Builder 2026-08-06, the root cause of the v0.240.1 invisible-button bug — worth one small pass) — the
   editor's op-panel test fixtures declare params with the wrong `group`, so a control's real placement is never
-  exercised.** *(Infra / maintainability — PRIORITY 3; size S; frontend-only.)* v0.240.0 shipped a correct,
+  exercised.**~~ — **SHIPPED v0.243.1** (Builder 2026-08-06, branch `claude/gallant-galileo-ruf5nj`). Built as the
+  entry's second option (assert the fixtures against the engine, don't generate them), and its "care" note set the
+  scope exactly: **only the fields that decide what a user can *reach*** are pinned — `type`, `group` and
+  `depends_on`. Labels, defaults, bounds and help stay free, so a fixture is still allowed to be a simplified
+  stand-in. `frontend/src/test/editorOpPlacement.json` is generated from `webapp.schemas.editor_ops_schema`, and
+  `tests/webapp/test_editor_op_placement.py` fails (printing the one-line regeneration command) the moment an
+  engine param moves group — a snapshot is only worth having if it can't go stale. A pure
+  `placementMismatches(op)` reports drift as plain sentences; `Editor.test.tsx` runs it over every module-level
+  fixture and over the Stretch-with-highlights fixture the bug actually lived in. **One nuance that mattered:** a
+  *partial* fixture that omits the param a `depends_on` is gated on cannot honestly express the gate, so
+  rendering the control unconditionally is accepted as simplification rather than reported as drift — otherwise
+  the guard would have forced every fixture to grow the controlling enum.
+  **It found live drift, and fixing it made the tests truer:** `STRETCH_WITH_HIGHLIGHTS` still declared
+  `highlights` as `simple`, so the three v0.240.0 tests were asserting on a button that in the running app sits
+  inside the collapsed **Advanced** accordion. The fixture now says `advanced` (as the engine does) and those
+  tests open the accordion first — they exercise the real placement instead of a friendlier one. The derived
+  `STRETCH_ADVANCED_HIGHLIGHTS` workaround that v0.240.1 had to add is gone; the nudge tests use the faithful
+  fixture directly. **Test-only: no engine, webapp, frontend-runtime, config, DB, API-shape or on-disk change.**
+  **Tests (+12):** `editorOpPlacement.test.ts` (+8 — the snapshot is real not a stub, a faithful fixture is
+  clean, the v0.240.1 group drift is caught, a wrong control type is caught, a wrong *and* a missing dependency
+  are caught when the fixture models the gating param, a partial fixture is allowed, unknown ops/params are
+  ignored while the same mistake on a real op is not, and several fixtures report together),
+  `tests/webapp/test_editor_op_placement.py` (+2 — snapshot equals the engine, and it covers every op and param
+  so it can't be silently emptied) and `Editor.test.tsx` (+2 guard tests).
+  *(Original spec kept below for provenance.)*
+  *(Infra / maintainability — PRIORITY 3; size S; frontend-only.)* v0.240.0 shipped a correct,
   well-tested "from your image" button that no beginner could see, because its `EditOp` fixture in
   `Editor.test.tsx` declares `highlights` as `group: "simple"` while the engine spec says `advanced` — and
   `OpParamPanel` puts advanced params behind a collapsed accordion. Every hand-written `EditOp` fixture in that
@@ -10835,8 +10860,66 @@ problems. Dogfood it every big-picture run and fix root causes.
   stack's, progress/cancel, the too-few-frames refusal), `tests/webapp/test_video_api.py` (+4 — grades without
   stacking, leaves an existing still alone, 404, and the path-escape rejection), `MoonSun.test.tsx` (+2).
 
-- **NEW IDEA (Builder 2026-08-06, spotted while shipping the v0.241.0 sharpness panel — verified against the
-  routes) — a stacked Moon/Sun still is invisible everywhere except the Moon & Sun page.** *(Friendliness /
+- **NEW IDEA (Builder 2026-08-06, found while shipping the Gallery stills v0.243.0 — traced, not reproduced) —
+  the "Your first image" checklist can't see a Moon/Sun still, so a beginner whose *first* picture is the Moon is
+  still told they haven't made one.** *(Friendliness — PRIORITY 3; size S; frontend-only.)*
+  `frontend/src/components/dashboard/firstImageSteps.ts` ticks each of its four steps off `GET /api/system` and
+  `GET /api/stats`, and every signal it reads is deep-sky: frames ingested, frames solved, and stacks run
+  (`stats.n_frames` / `n_stacks`). A Moon or Sun capture ingests **no** FITS, solves nothing and creates no
+  `stack_runs` row — by design — so someone who arrives with a lunar video, stacks it, and gets a genuinely good
+  picture still sees "Point AstroStack at your subs / make your first picture" on the Dashboard, the Library and
+  the (now non-empty) Gallery. That's the app disbelieving a picture it just made. **Slice:** the Gallery already
+  knows — `GET /api/gallery` now carries `videos` — so the cheapest honest fix is to let the *completion* signal
+  count a finished video still, while leaving the four **steps** exactly as they are (they describe the deep-sky
+  journey and are still the right advice for what to do next). Either add a video-still count to the stats
+  payload, or have `FirstImageCard` read the gallery query it can already share. **Care:** don't tick the
+  *solve* or *frames* steps off a video — they genuinely haven't happened; only the "you have a picture" outcome
+  should recognise it, so the card congratulates and retires instead of nagging. Same family as the filed "the
+  checklist can't see …" entry above.
+- **NEW IDEA (Builder 2026-08-06, the obvious extension of the v0.243.1 editor fixture guard) — the *Stack form*
+  has exactly the same fixture-drift exposure, on a screen a beginner uses far more often.**
+  *(Infra / maintainability — PRIORITY 3; size S; test-only.)* v0.243.1 pins each hand-written `EditOp` fixture's
+  `type`/`group`/`depends_on` against a generated snapshot of `editor_ops_schema`, because a fixture that lies
+  about `group` shipped a control no beginner could see. `Stack.tsx` and `Settings.tsx` render
+  `StackOptions` through the *same* descriptor-driven `StackOptionControl`, with the same
+  `group: "simple" | "advanced"` accordion split and the same `depends_on` greying — and `Stack.test.tsx` /
+  `Settings.test.tsx` build their `StackOptionField` fixtures by hand too. **Slice:** generate the sibling
+  snapshot from `webapp.schemas.stack_options_schema` into `frontend/src/test/`, reuse the existing pure
+  `placementMismatches` shape (it is already generic over `StackOptionField`; only the lookup keying differs),
+  and add the same two guards — a Python test that the snapshot can't go stale, and one frontend test over the
+  module-level fixtures. **Check first:** whether those fixtures currently *do* drift; the editor's did, and
+  fixing it made three tests exercise the real placement rather than a friendlier one, which was most of the
+  value.
+
+- ~~**NEW IDEA (Builder 2026-08-06, spotted while shipping the v0.241.0 sharpness panel — verified against the
+  routes) — a stacked Moon/Sun still is invisible everywhere except the Moon & Sun page.**~~ — **SHIPPED
+  v0.243.0** (Builder 2026-08-06, branch `claude/gallant-galileo-ruf5nj`). Built exactly to the filed shape and
+  its "care" note: finished stills now appear in the **Gallery**, the place every *other* finished picture lives,
+  as a plain read-only card — no checkbox, no "Edit image", no "Reuse settings", just the picture, what it came
+  from, and one **"Open in Moon & Sun"** link back to the page that owns it. Engine/webapp: a new
+  `webapp.video.iter_results` reads `<data_root>/video/` directly (**not** the incoming folder, so a still keeps
+  showing up after the user clears the source video off the NAS) and counts a folder as finished only when it has
+  both `stack.png` **and** a readable `meta.json` — the same rule the Moon & Sun page already applies, so no
+  caller has to invent a label or a date. `GET /api/gallery` gained an **additive** `videos: []` alongside
+  `items`; the read is wrapped so a video-store problem degrades to "no stills" rather than 500-ing the gallery,
+  matching the per-project guard the same endpoint already uses. The addressable id is the **folder name**, not
+  whatever `meta.json` says, so a hand-edited file can't hand the UI a preview URL that 404s.
+  Frontend: `mergeGalleryEntries` interleaves stills with runs by date under **Newest**, and under **Cleanest**
+  leaves the noise ranking untouched and keeps the stills after it — a video still has no measured background σ,
+  so it is never given an invented position. The one search box covers both kinds (label / video file / capture
+  id), the header count includes them, and a still drops out of a *stack-specific* facet (Calibrated, combine
+  method) rather than pretending to have masters. The lightbox offers only what the video store actually holds
+  (the display PNG); the 16-bit TIFF stays one click away on Moon & Sun. Opening a still in the **editor** was
+  deliberately left out, as the entry asks. Upgrade-safe: one additive response field (an older frontend ignores
+  it; a newer frontend against an older backend reads `?? []`), no config/DB/on-disk change, no default flipped,
+  and an install that never stacked a video has no `video/` directory and sends an empty list.
+  **Tests (+13):** `tests/webapp/test_gallery.py` (+5 — a finished still is listed with a working preview URL and
+  is *not* smuggled in as a stack run, an install that never stacked a video sends none, newest-first ordering, a
+  half-written result and a graded-but-unstacked capture are both skipped, and the folder name wins over a
+  hand-edited `capture_id`) and `Gallery.test.tsx` (+8 — the four pure helpers, the read-only card and its link,
+  the shared search box, the stack-only facet hiding it, and an older backend sending no `videos` field at all).
+  *(Original spec kept below for provenance.)*
+  *(Friendliness /
   enjoy-share — PRIORITY 3; size M.)* `webapp/video.py` deliberately stores the still outside the library
   (`<data_root>/video/<id>/`) because none of the per-target machinery applies to it — which is the right call, but
   it means the Gallery, Best pictures, the Dashboard tiles and the editor have **no** knowledge of it (grepped:

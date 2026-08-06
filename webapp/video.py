@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -147,6 +147,41 @@ def read_grade(settings: Settings, capture_id: str) -> VideoGradeMeta | None:
 
 def has_result(settings: Settings, capture_id: str) -> bool:
     return (result_dir(settings, capture_id) / PNG_NAME).is_file()
+
+
+def iter_results(settings: Settings) -> list[VideoStackMeta]:
+    """Every finished video still on disk, newest first.
+
+    Read straight from ``<data_root>/video/`` rather than from the incoming
+    folder, so a still keeps showing up after the user has cleared the source
+    video off the NAS — the picture is the thing they want to find again, not
+    the capture it came from.
+
+    A folder is a "finished still" only when it has both the rendered PNG and a
+    readable ``meta.json``; a half-written or hand-edited result is skipped
+    exactly as :func:`read_meta` skips it for the Moon & Sun page, so no caller
+    has to guess at a label or a date.
+    """
+    root = video_root(settings)
+    try:
+        entries = sorted(root.iterdir(), key=lambda p: p.name)
+    except OSError:
+        # No video/ directory yet (the common case on an install that has never
+        # stacked one), or an unreadable one — either way there is nothing to show.
+        return []
+    results: list[VideoStackMeta] = []
+    for entry in entries:
+        if not entry.is_dir() or not (entry / PNG_NAME).is_file():
+            continue
+        meta = read_meta(settings, entry.name)
+        if meta is not None:
+            # The folder name is the addressable id (it is what
+            # ``/api/videos/{id}/preview.png`` resolves), so it wins over
+            # whatever the file happens to say — a hand-edited ``capture_id``
+            # must not hand a caller a URL that 404s.
+            results.append(replace(meta, capture_id=entry.name))
+    results.sort(key=lambda m: m.created_utc, reverse=True)
+    return results
 
 
 def pick_source_file(capture: VideoCapture, requested_name: str | None) -> str:

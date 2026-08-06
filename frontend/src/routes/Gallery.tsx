@@ -3,11 +3,15 @@ import {
   Alert, Badge, Button, Card, Center, Checkbox, Group, Image, Loader, Menu, Paper,
   SegmentedControl, SimpleGrid, Spoiler, Stack, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
-import { IconCopy, IconGitCompare, IconPhoto, IconSearch, IconWand } from "@tabler/icons-react";
+import {
+  IconCopy, IconGitCompare, IconPhoto, IconSearch, IconVideo, IconWand,
+} from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { api, type GalleryItem, type StackOptionField } from "../api/client";
+import {
+  api, type GalleryItem, type StackOptionField, type VideoStill,
+} from "../api/client";
 import { sharePictureText } from "../share";
 import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
@@ -75,6 +79,100 @@ export function filterGallery(items: GalleryItem[], query: string): GalleryItem[
 export function filterByMethod(items: GalleryItem[], filter: MethodFilter): GalleryItem[] {
   if (filter === "all") return items;
   return items.filter((it) => combineMethodKey(it.options) === filter);
+}
+
+// One card in the grid. A finished Moon/Sun still is a picture the user made,
+// so it belongs here next to their stacks — but it is not a stack run (no
+// target, no run id, no stacking options, none of the per-run actions), so it
+// travels as its own variant rather than being faked into a GalleryItem.
+export type GalleryEntry =
+  | { kind: "run"; run: GalleryItem }
+  | { kind: "video"; video: VideoStill };
+
+// Sortable instant for either kind of entry. Both timestamps are UTC ISO 8601
+// but a stack run's carries microseconds and a video still's doesn't, so compare
+// the shared "YYYY-MM-DDTHH:MM:SS" prefix rather than the whole string.
+function entryInstant(e: GalleryEntry): string {
+  return (e.kind === "run" ? e.run.timestamp_utc : e.video.created_utc).slice(0, 19);
+}
+
+// Free-text filter over Moon/Sun stills — the plain-language label ("Moon"), the
+// video file the picture came from, and the capture folder id. Mirrors
+// filterGallery so the single search box covers both kinds of picture. Pure and
+// non-mutating. An empty/whitespace query matches all.
+export function filterVideoStills(videos: VideoStill[], query: string): VideoStill[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return videos;
+  return videos.filter((v) =>
+    [v.label, v.source_name, v.capture_id]
+      .some((s) => (s ?? "").toLowerCase().includes(q)));
+}
+
+// Interleave finished Moon/Sun stills with the (already sorted and filtered)
+// stack runs into the one grid.
+//
+// "newest" merges both by date, so the picture someone made five minutes ago is
+// first whichever kind it is. "cleanest" ranks by measured background noise —
+// something a video still has no equivalent of — so rather than invent a score
+// for it, the stills keep their own newest-first order after the ranked runs.
+// Pure and non-mutating.
+export function mergeGalleryEntries(
+  runs: GalleryItem[], videos: VideoStill[], sort: GallerySort,
+): GalleryEntry[] {
+  const runEntries: GalleryEntry[] = runs.map((run) => ({ kind: "run", run }));
+  const videoEntries: GalleryEntry[] = videos.map((video) => ({ kind: "video", video }));
+  if (sort !== "newest") return [...runEntries, ...videoEntries];
+  return [...runEntries, ...videoEntries].sort((a, b) =>
+    entryInstant(a) < entryInstant(b) ? 1 : entryInstant(a) > entryInstant(b) ? -1 : 0);
+}
+
+/** The dimmed detail line under a Moon/Sun still: where it came from, when, how
+ * big, and how many video frames were averaged into it. */
+export function videoStillCaption(v: VideoStill): string {
+  const when = v.created_utc.replace("T", " ").slice(0, 16);
+  const frames = `${v.n_stacked} frame${v.n_stacked === 1 ? "" : "s"}`;
+  return `${v.source_name} · ${when} · ${v.width}×${v.height} · ${frames} stacked`;
+}
+
+function VideoStillCard({ still, onView }: {
+  still: VideoStill;
+  onView: (still: VideoStill) => void;
+}) {
+  return (
+    <Card withBorder padding="md" radius="md">
+      <Card.Section>
+        <Tooltip label="Click to view fullscreen" openDelay={400}>
+          <Image
+            src={still.preview_url} h={200} fit="contain" bg="#000"
+            alt={`${still.label} still`}
+            style={{ cursor: "zoom-in" }}
+            onClick={() => onView(still)}
+          />
+        </Tooltip>
+      </Card.Section>
+
+      <Group justify="space-between" mt="sm" wrap="nowrap">
+        <Text fw={600} truncate>{still.label}</Text>
+        <Badge size="sm" variant="light" color="yellow" style={{ flexShrink: 0 }}>
+          Moon &amp; Sun
+        </Badge>
+      </Group>
+      <Text size="xs" c="dimmed">{videoStillCaption(still)}</Text>
+
+      <Group gap="xs" mt="xs" wrap="nowrap">
+        {/* Deliberately one link, not a per-run action row: none of the stack
+            actions (edit, reuse settings, set as cover) apply to a video still,
+            so the card points back at the page that does own it. */}
+        <Button
+          component={Link} to="/moon-sun"
+          leftSection={<IconVideo size={14} />} variant="light" color="gray" size="xs"
+          style={{ flex: 1 }}
+        >
+          Open in Moon &amp; Sun
+        </Button>
+      </Group>
+    </Card>
+  );
 }
 
 /** Format an option value for display (booleans → On/Off, round floats). */
@@ -213,6 +311,7 @@ export function GalleryView() {
   const schema = useQuery({ queryKey: ["stackSchema"], queryFn: api.optionsSchema });
   const presets = useQuery({ queryKey: ["presets"], queryFn: api.listPresets });
   const [viewing, setViewing] = useState<GalleryItem | null>(null);
+  const [viewingStill, setViewingStill] = useState<VideoStill | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<GallerySort>("newest");
   const [calFilter, setCalFilter] = useState<CalFilter>("all");
@@ -274,6 +373,15 @@ export function GalleryView() {
     filterByMethod(filterByCalibration(filterGallery(allItems, search), calFilter), methodFilter),
     sort,
   );
+  // Finished Moon/Sun stills, folded into the same grid. They're hidden while a
+  // *stack-specific* facet is active (calibration / combine method) — a video
+  // still has neither, so keeping it in a "Calibrated" cut would be a lie about
+  // what the filter selected.
+  const allStills = gallery.data?.videos ?? [];
+  const stills = calFilter === "all" && methodFilter === "all"
+    ? filterVideoStills(allStills, search)
+    : [];
+  const entries = mergeGalleryEntries(items, stills, sort);
   // Only offer the Cleanest sort once it's a meaningful comparison: more than one
   // image and at least one carries a measured σ (pre-v0.48 runs have none).
   const anyNoise = allItems.some((it) => hasNoise(it.noise_sigma));
@@ -296,12 +404,12 @@ export function GalleryView() {
       <Group gap="xs">
         <IconPhoto size={24} />
         <Title order={2}>Gallery</Title>
-        <Tooltip label="Every stacked image across all targets">
-          <Badge variant="light">{allItems.length}</Badge>
+        <Tooltip label="Every picture you've made — stacked images across all targets, plus your Moon & Sun stills">
+          <Badge variant="light">{allItems.length + allStills.length}</Badge>
         </Tooltip>
       </Group>
 
-      {allItems.length > 0 ? (
+      {allItems.length + allStills.length > 0 ? (
         <Group justify="space-between" wrap="wrap" gap="xs">
           <TextInput
             value={search}
@@ -392,7 +500,7 @@ export function GalleryView() {
         </Paper>
       ) : null}
 
-      {items.length === 0 ? (
+      {entries.length === 0 ? (
         <Stack gap="sm">
           <Text c="dimmed">
             {search.trim()
@@ -413,13 +521,20 @@ export function GalleryView() {
         </Stack>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>
-          {items.map((it) => (
-            <GalleryCard
-              key={`${it.safe}-${it.run_id}`} item={it} labels={labels}
-              onView={setViewing}
-              selected={!!selected[selKey(it)]}
-              onToggleSelect={() => toggleSelect(it)}
-            />
+          {entries.map((e) => (
+            e.kind === "run" ? (
+              <GalleryCard
+                key={`run-${e.run.safe}-${e.run.run_id}`} item={e.run} labels={labels}
+                onView={setViewing}
+                selected={!!selected[selKey(e.run)]}
+                onToggleSelect={() => toggleSelect(e.run)}
+              />
+            ) : (
+              <VideoStillCard
+                key={`video-${e.video.capture_id}`} still={e.video}
+                onView={setViewingStill}
+              />
+            )
           ))}
         </SimpleGrid>
       )}
@@ -447,6 +562,19 @@ export function GalleryView() {
             })()
           : {})}
         onClose={() => setViewing(null)}
+      />
+
+      {/* Moon/Sun stills get the same viewer, offering only what the video store
+          actually holds: the display-rendered PNG. There is no FITS, no JPEG and
+          no full-res render behind a video still, so those controls stay absent
+          rather than being offered and broken — the 16-bit TIFF lives one click
+          away on the Moon & Sun page. */}
+      <ImageLightbox
+        src={viewingStill ? viewingStill.preview_url : null}
+        title={viewingStill
+          ? `${viewingStill.label} · ${viewingStill.source_name}` : undefined}
+        downloadHref={viewingStill?.preview_url}
+        onClose={() => setViewingStill(null)}
       />
     </Stack>
   );
