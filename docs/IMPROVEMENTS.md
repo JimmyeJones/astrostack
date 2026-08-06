@@ -6189,6 +6189,27 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+- **NEW IDEA (Builder 2026-08-06, traced while auditing the stack dispatcher) — a walk-away stack of a *small*
+  night silently discards the quality weighting the user asked for, and nothing anywhere says so.**
+  *(Honest accounting / trust — PRIORITY 2–3; size S; **traced, not yet reproduced end-to-end**.)*
+  On the walk-away chains (watcher auto-stack, one-click Process target) `_build_and_run` sets
+  `auto_reject=True` whenever the merged options carry no explicit rejection key (`webapp/pipeline.py`
+  ~L2090). `_resolve_auto_reject` then picks **order-statistic min/max** below
+  `kappa_min_frames(3.0) == 11` frames — and the min/max accumulator is an order statistic, so it
+  **ignores per-frame quality weights entirely** (`MinMaxRejectAccumulator.add` takes `weight` and drops
+  it; the stacker knows, and sets `weights_applied=False`). So a beginner who turned **Quality weighting**
+  on in the global stack defaults and lets the app auto-stack a 6-sub night gets a plain unweighted mean,
+  with no signal at all: `_build_output_header_meta` correctly *omits* `WGTMODE` when
+  `weights_applied` is False, and `History.tsx::weightingSummaryText` renders nothing without it — so the
+  absence is indistinguishable from "weighting was off". The one place it *is* explained is the help text
+  on the `min_max_reject` checkbox ("ignores quality weights"), which this user never touched.
+  **The feature:** stamp the *reason* rather than nothing — e.g. a `WGTSKIP` header card plus one
+  plain-language History line ("Quality weighting was on, but with only 6 subs this stack used min/max
+  rejection, which combines by rank instead of weight. From 11 subs it switches to sigma clipping and
+  weighting applies again."). Additive, read-only, no default flipped; the numbers are already computed
+  (`WeightingStats`, `eff.min_max_reject`, `n`). **Check first:** how narrow is this really — it needs
+  quality weighting on *and* a sub-11-frame stack *and* the walk-away path, so measure whether the owner's
+  install ever lands there before building. Fits the shipped "say it out loud" family (v0.236.0, v0.230.2).
 - **NOTE (Builder 2026-08-05, checked while shipping v0.236.0 — recorded so nobody re-treads it) — "warn about a
   mismatched dark at *pick* time" is ALREADY BUILT; the only thing left is a wording-drift risk.** The obvious
   follow-on to v0.236.0 looks like "say it before the night is spent, not after". It exists: `Stack.tsx` (~L357–405)
@@ -6832,6 +6853,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   a sibling honest-advisory note (`bg_mesh_coarser_on_proxy`) rather than changing the floor (a smaller
   floor risks a degenerate proxy mesh). (S, editor/parity-honesty — PRIORITY 1.) Found by an
   adversarial editor preview↔export parity audit (which otherwise traced clean).
+  **Sibling sweep — negative result, recorded so nobody re-treads it (Builder 2026-08-06, done while
+  fixing the heavy-stride coverage-leveling floor, v0.236.1).** Every proxy-scaled pixel measure in
+  `edit/ops/` was re-read looking for the *same class* of defect as the one just fixed — a floor that
+  inverts at heavy stride and changes **whether an op acts on a region at all**, rather than merely by
+  how much. All of them are strength/sharpness floors: `background.subtract`/`remove_final_gradient`'s
+  `box_size` (this entry — a coarser mesh, still fitted), the `dilate_px`/`dilate_object_mask_px` floors
+  (`minimum=0` — a smaller halo, deliberately allowed to vanish), `detail.unsharp`'s `radius`,
+  `detail.chroma_denoise`'s radius, `detail.deconvolve`'s `_DECONV_PSF_FLOOR` and `stars.reduce`'s 1-px
+  footprint (the latter two already carry the `deconv_understates_on_proxy` /
+  `star_reduce_overstates_on_proxy` advisories), and `geometry`'s degenerate-crop test (already decided
+  in full-res px). None of them can drop a region out of the op's scope the way the coverage-leveling
+  floor did. **So this entry is the only remaining pixel-scale divergence, and it stays gated on real-data
+  confirmation as filed.**
 - ~~**Give the manual `asinh` stretch the same highlight rolloff STF just got.**~~
   — **SHIPPED v0.119.2** (Builder 2026-07-14, same branch). `asinh_stretch` shared
   the identical hard-clip, so it got the same `_highlight_rolloff` behind a
