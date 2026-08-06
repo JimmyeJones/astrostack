@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
-from webapp import deps
+from webapp import deps, video
 from webapp.site_location import resolve_site_lon
 
 router = APIRouter(tags=["stats"])
@@ -56,6 +56,13 @@ class StatsResponse(BaseModel):
     active_jobs: int
     recent_stacks: list[RecentStack]
     disk: dict
+    #: Finished Moon/Sun stills (``<data_root>/video/``). Additive with a
+    #: default, so an older frontend ignores it. These are pictures the library
+    #: roll-up above genuinely cannot see — a video capture ingests no FITS,
+    #: solves nothing and creates no stack run — so anything asking "does this
+    #: user have a picture yet?" has to count them separately, or tell someone
+    #: holding a finished Moon picture that they haven't made one.
+    n_video_stills: int = 0
 
 
 # The combined "Last night" card opens each project to read its frames, so it's
@@ -489,6 +496,7 @@ def get_stats(request: Request, recent_limit: int = 8) -> StatsResponse:
         active_jobs=active,
         recent_stacks=recent[:recent_limit],
         disk=disk,
+        n_video_stills=video.count_results(settings),
     )
 
 

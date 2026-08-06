@@ -29,6 +29,7 @@ from typing import Any
 from seestack.stack.output import write_full_res_png
 from seestack.video.discover import VideoCapture, find_video_capture
 from seestack.video.ffmpeg import ffmpeg_available, probe_video
+from seestack.video.framing import crop_to_disk, measure_framing
 from seestack.video.lucky import (
     LuckyOptions,
     VideoStackCancelled,
@@ -92,6 +93,19 @@ class VideoStackMeta:
     #: scores are only ever compared as ratios, so six significant figures is far
     #: more than the advice needs and keeps a 1500-frame capture's file small.
     scores: list[float] = field(default_factory=list)
+    #: True when the still was trimmed to the disk (``width``/``height`` are then
+    #: the *cropped* size). Optional with a default so an older ``meta.json``
+    #: reads as "not cropped", which is exactly what it was.
+    crop_applied: bool = False
+    #: True when this (uncropped) still has enough empty sky around the disk that
+    #: cropping is worth offering. Always False once a crop has been applied.
+    crop_available: bool = False
+    #: Fraction of the full frame the crop trims, or would trim — 0.0 when there
+    #: is nothing to trim or no disk was found.
+    crop_trim_fraction: float = 0.0
+    #: The stack's size *before* any crop. 0 means "same as width/height".
+    source_width: int = 0
+    source_height: int = 0
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -184,6 +198,22 @@ def iter_results(settings: Settings) -> list[VideoStackMeta]:
     return results
 
 
+def count_results(settings: Settings) -> int:
+    """How many finished video stills exist — a directory listing, nothing more.
+
+    Deliberately cheaper than :func:`iter_results`: it never opens a
+    ``meta.json``, because the only caller (the Dashboard's stats roll-up, which
+    the home page polls) needs the *count* to answer "does this user have a
+    picture yet?" and nothing else. An install that has never stacked a video
+    has no ``video/`` directory and this is a single failed ``iterdir``.
+    """
+    try:
+        entries = list(video_root(settings).iterdir())
+    except OSError:
+        return 0
+    return sum(1 for e in entries if e.is_dir() and (e / PNG_NAME).is_file())
+
+
 def pick_source_file(capture: VideoCapture, requested_name: str | None) -> str:
     """Choose which file in the folder to stack.
 
@@ -227,6 +257,7 @@ def submit_video_stack(
     keep_percent: float,
     file_name: str | None = None,
     align: bool = True,
+    crop: bool = False,
 ) -> Job:
     """Enqueue a lucky-imaging stack of one video capture."""
 
@@ -234,6 +265,7 @@ def submit_video_stack(
         return _video_stack_body(
             settings, job, capture_id,
             keep_percent=keep_percent, file_name=file_name, align=align,
+            crop=crop,
         )
 
     return jm.submit(JOB_KIND, body, target=capture_id)
@@ -313,6 +345,31 @@ def _video_grade_body(
     return {"capture_id": capture_id, "n_graded": graded.n_graded}
 
 
+def _apply_framing(display, crop: bool, label: str, warnings: list[str]):
+    """Measure where the disk is, and crop to it when the user asked for that.
+
+    Always measures (it is a threshold and two profiles on an image already in
+    memory — cheap next to decoding a video twice), because the measurement is
+    what lets the finished still say "there is a lot of empty sky here, want it
+    trimmed?" to someone who didn't know to ask beforehand.
+
+    Returns ``(image, framing)``. A capture with no disk to find, or one whose
+    disk already fills the frame, comes back with the picture untouched — and if
+    a crop *was* asked for, a plain-language line saying why it didn't happen,
+    so an unchanged picture is never a silent no-op.
+    """
+    framing = measure_framing(display)
+    if not crop:
+        return display, framing
+    if framing is None or not framing.worthwhile:
+        warnings.append(
+            f"Nothing worth cropping — the {label} already fills the frame, "
+            f"so the picture was left as it is."
+        )
+        return display, framing
+    return crop_to_disk(display, framing), framing
+
+
 def _video_stack_body(
     settings: Settings,
     job: Job,
@@ -321,6 +378,7 @@ def _video_stack_body(
     keep_percent: float,
     file_name: str | None,
     align: bool,
+    crop: bool = False,
 ) -> dict[str, Any]:
     capture, source = _resolve_source(settings, capture_id, file_name)
     job.set_progress("probe", 0, 0, f"Reading {Path(source).name}")
@@ -349,6 +407,12 @@ def _video_stack_body(
 
     job.set_progress("save", 0, 0, "Saving your picture")
     display = normalize_for_display(result.image)
+    # Framing is measured on the *display-rendered* picture and applied after it,
+    # so the tone mapping still sees the whole frame: cropping changes what is in
+    # the picture, never how bright it is.
+    warnings = list(result.warnings)
+    display, framing = _apply_framing(display, crop, capture.label, warnings)
+
     out_dir = result_dir(settings, capture_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     write_full_res_png(out_dir / PNG_NAME, display)
@@ -360,8 +424,8 @@ def _video_stack_body(
         kind=capture.kind,
         source_name=Path(source).name,
         created_utc=datetime.now(UTC).isoformat(timespec="seconds"),
-        width=result.width,
-        height=result.height,
+        width=int(display.shape[1]),
+        height=int(display.shape[0]),
         keep_percent=float(keep_percent),
         n_graded=result.n_graded,
         n_kept=result.n_kept,
@@ -372,8 +436,16 @@ def _video_stack_body(
         sharpness_best=result.sharpness_best,
         sharpness_kept_median=result.sharpness_kept_median,
         sharpness_all_median=result.sharpness_all_median,
-        warnings=list(result.warnings),
+        warnings=warnings,
         scores=[round(float(v), 6) for v in result.scores],
+        crop_applied=bool(crop and framing is not None and framing.worthwhile),
+        crop_available=bool(not crop and framing is not None and framing.worthwhile),
+        crop_trim_fraction=(
+            round(framing.trim_fraction, 4)
+            if framing is not None and framing.worthwhile else 0.0
+        ),
+        source_width=result.width,
+        source_height=result.height,
     )
     (out_dir / META_NAME).write_text(
         json.dumps(asdict(meta), indent=2), encoding="utf-8",
@@ -383,6 +455,6 @@ def _video_stack_body(
         "n_graded": result.n_graded,
         "n_kept": result.n_kept,
         "n_stacked": result.n_stacked,
-        "width": result.width,
-        "height": result.height,
+        "width": meta.width,
+        "height": meta.height,
     }

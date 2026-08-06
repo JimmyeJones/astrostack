@@ -147,3 +147,23 @@ def test_stats_caches_rollup_until_activity_changes(client, solved_library, monk
     body = client.get("/api/stats").json()
     assert calls["n"] == 2
     assert body["n_stack_runs"] == 1
+
+
+def test_stats_counts_finished_moon_sun_stills(client, data_root):
+    """A video still is a picture the deep-sky counters cannot see.
+
+    The Dashboard's "Your first image" checklist ticks itself off these numbers,
+    and a Moon capture ingests no FITS, solves nothing and creates no stack run —
+    so without its own count the app tells someone holding a finished Moon
+    picture that they haven't made one.
+    """
+    assert client.get("/api/stats").json()["n_video_stills"] == 0
+
+    video = data_root / "video"
+    (video / "Lunar_video").mkdir(parents=True)
+    (video / "Lunar_video" / "stack.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    # A folder that hasn't finished writing its picture isn't a picture yet.
+    (video / "Solar_video").mkdir(parents=True)
+    (video / "Solar_video" / "meta.json").write_text("{}", encoding="utf-8")
+
+    assert client.get("/api/stats").json()["n_video_stills"] == 1
