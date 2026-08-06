@@ -10613,8 +10613,40 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-REQUESTED (2026-08-06) — optional "space ambient" background music in the web interface, off by
-  default, synthesised in the browser (no audio files).** *(Enjoyment polish; size M.)* The owner spends long
+- ~~**⭐ OWNER-REQUESTED (2026-08-06) — optional "space ambient" background music in the web interface, off by
+  default, synthesised in the browser (no audio files).**~~ — **SHIPPED v0.239.0** (Builder 2026-08-06, branch
+  `claude/gallant-galileo-kdy4gc`). Built exactly to the filed spec, procedurally — **no audio file ships or is
+  fetched**, so nothing leaves the NAS, the image gains no binary asset, and a multi-hour session never hears a
+  loop point. Three layers into a shared convolver whose impulse response is a generated decaying noise burst,
+  then a master gain and a `DynamicsCompressorNode` as a safety limiter: (1) a four-voice detuned pad (root ·
+  fifth · octave · twelfth) through a lowpass swept by a 0.035 Hz LFO, each voice swelling on its own
+  37/43/53/61 s clock so they never re-align into a pulse; (2) a brown-noise "solar wind" bed under a slow
+  bandpass sweep; (3) a sparse pentatonic bell every 8–25 s, never on a grid, with a quiet inharmonic partner for
+  the metallic edge. The bed drifts between three related roots (A1/B1/D2) every 2–5 minutes.
+  **Behaviour:** default **off** and per-device — the opt-in and the volume live in `localStorage`
+  (`astrostack.ambient.*`), never in `config.json`, so there is no server setting, no config migration and
+  nothing to break on upgrade. A speaker button in the `AppShell` header is the one click to start or silence it;
+  a Settings card carries the volume and the plain-language explanation. The `AudioContext` is created and
+  resumed **only inside the click handler** (autoplay policy), and the button shows "on" only if that actually
+  succeeded — a blocked browser gets a yellow notification and the toggle stays off rather than lying. A
+  remembered opt-in doesn't autoplay after a reload; it waits for the first click or keypress anywhere in the app.
+  Switching off fades over 2.5 s and then **suspends** the context (not just mutes it), so a tab left open for
+  hours costs nothing, and a restart during the fade wins rather than being suspended out from under.
+  **Split for testability as specified:** all the sound-design decisions are pure (`ambient/voicing.ts`), the
+  node graph is a thin layer over them (`ambient/player.ts`) with injectable context/random/timers.
+  **Tests (+56):** `voicing.test.ts` (21 — chord intervals, detune, distinct swell periods, the gain never
+  reaching zero, bell gaps spanning 8–25 s off-grid, bells always pentatonic and clear of the pad, drift always
+  moving to a different root, the IR decaying and staying in [-1,1], brown noise normalised and genuinely dark),
+  `prefs.test.ts` (8 — off on a fresh install, round-trips, garbage/hand-edited values, and a disabled or full
+  store degrading instead of throwing), `player.test.ts` (17, against a hand-rolled `AudioContext` stub — resume
+  only from a start, graph built once, fade targets, suspend-not-mute, a restart winning mid-fade, a blocked
+  resume reporting failure, bells re-arming, and a **fail-before/pass-after** guard that a root drift doesn't tear
+  down the un-restartable noise-bed source), and `AmbientToggle.test.tsx` (10 — the silent fresh install, the
+  gesture-scoped start, the persisted opt-in cleared before the fade finishes, the blocked-audio path, the
+  gesture-gated resume after a reload, no sound without an opt-in, and both components rendering nothing where
+  Web Audio is unavailable). Frontend-only: zero backend, zero engine, zero schema, no default flipped.
+  *(Original spec kept below for provenance.)*
+  *(Enjoyment polish; size M.)* The owner spends long
   stretches watching a stack run or browsing the gallery and wants the option of a quiet ambient soundbed while
   they do. **Be honest about where this ranks: it is *enjoyment* polish, not a workflow feature — it must never
   displace a bug or PRIORITY 1–4 work.** Pull it on a slow run, not ahead of the queue. It is, however, fully

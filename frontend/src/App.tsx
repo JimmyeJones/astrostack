@@ -10,6 +10,7 @@ import { api } from "./api/client";
 import { isJobNotifyEnabled, justFinishedJobs, showJobNotification } from "./jobNotify";
 import { isNavActive } from "./navActive";
 import { jobKindLabel } from "./routes/Jobs";
+import { AmbientToggle } from "./components/AmbientToggle";
 
 // Shows the running backend build, so you can confirm a rebuild actually took
 // effect (the version bumps with each shipped change).
@@ -145,6 +146,7 @@ export function App() {
           </Group>
           <Group gap="xs" wrap="nowrap">
             <ActiveJobsBadge />
+            <AmbientToggle />
             <Button
               leftSection={<IconRadar2 size={16} />}
               onClick={() => scan.mutate()}

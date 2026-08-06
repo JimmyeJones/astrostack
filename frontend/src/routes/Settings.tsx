@@ -15,6 +15,7 @@ import { api, type AutoCastSummary, type ReprocessStatus } from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { compassPoint } from "../tonight";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
+import { AmbientSettings } from "../components/AmbientSettings";
 
 // Hover hints for every setting (shown via an info icon next to the label).
 const HINTS: Record<string, string> = {
@@ -752,6 +753,8 @@ export function SettingsView() {
           </Group>
         </Stack>
       </Paper>
+
+      <AmbientSettings />
 
       <Paper withBorder p="lg">
         <Stack>
