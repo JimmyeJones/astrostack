@@ -32,14 +32,17 @@ from seestack.video.ffmpeg import (
     probe_video,
 )
 from seestack.video.lucky import (
+    GradeResult,
     LuckyOptions,
     LuckyResult,
+    grade_video,
     normalize_for_display,
     stack_video,
 )
 
 __all__ = [
     "VIDEO_EXTENSIONS",
+    "GradeResult",
     "LuckyOptions",
     "LuckyResult",
     "VideoCapture",
@@ -47,6 +50,7 @@ __all__ = [
     "VideoToolsMissing",
     "ffmpeg_available",
     "find_video_captures",
+    "grade_video",
     "iter_frames",
     "normalize_for_display",
     "probe_video",

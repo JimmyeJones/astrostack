@@ -1333,6 +1333,9 @@ export interface VideoCapture {
   files: VideoFile[];
   total_bytes: number;
   result: VideoResult | null;
+  // The grade-only pass ("Check this capture"), when one has been run. Optional:
+  // an older backend never sends it and the panel simply doesn't appear.
+  sharpness?: VideoSharpnessProfile | null;
 }
 
 export interface VideoList {
@@ -2061,6 +2064,12 @@ export const api = {
 
   // Moon & Sun — lucky-imaging stacks of the Seestar's *_video captures
   listVideoCaptures: () => req<VideoList>("/api/videos"),
+  gradeVideoCapture: (
+    id: string,
+    body: { file_name?: string } = {},
+  ) => req<{ job_id: string }>(`/api/videos/${encodeURIComponent(id)}/grade`, {
+    method: "POST", body: JSON.stringify(body),
+  }),
   stackVideoCapture: (
     id: string,
     body: { keep_percent: number; file_name?: string; align?: boolean },

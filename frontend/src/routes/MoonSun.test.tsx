@@ -191,4 +191,47 @@ describe("MoonSunView", () => {
     await waitFor(() => expect(screen.getByText(/Stacked the sharpest/)).toBeInTheDocument());
     expect(screen.queryByText("How steady was your capture?")).toBeNull();
   });
+
+  it("offers a grade-only check before any stack exists, and shows its panel", async () => {
+    const grade = vi.spyOn(client.api, "gradeVideoCapture")
+      .mockResolvedValue({ job_id: "j1" });
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture()],
+    }));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Check this capture first/ }))
+        .toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Check this capture first/ }));
+    await waitFor(() => expect(grade).toHaveBeenCalledWith("Lunar_video", {
+      file_name: "clip.mp4",
+    }));
+  });
+
+  it("replaces the check button with its panel once the capture is graded", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        sharpness: {
+          curve: [1, 0.5, 0.3],
+          cut_fraction: 0,
+          options: [
+            { percent: 15, n_frames: 15, sharpness_vs_typical: 1.8, noise_gain: 3.9 },
+            { percent: 30, n_frames: 30, sharpness_vs_typical: 1.4, noise_gain: 5.5 },
+            { percent: 50, n_frames: 50, sharpness_vs_typical: 1.1, noise_gain: 7.1 },
+          ],
+          suggested_percent: 15,
+          spread: "variable",
+          summary: "The seeing jumped around a lot, so being pickier pays: …",
+        },
+      })],
+    }));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByText("How steady was your capture?")).toBeInTheDocument());
+    // Already answered — no reason to offer the check again.
+    expect(screen.queryByRole("button", { name: /Check this capture first/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Try 15% instead/ }));
+    await waitFor(() =>
+      expect(screen.getByDisplayValue(/Only the very best \(15%\)/)).toBeInTheDocument());
+  });
 });
