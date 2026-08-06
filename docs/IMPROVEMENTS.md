@@ -6210,6 +6210,34 @@ to **Shipped**.)_
   (`WeightingStats`, `eff.min_max_reject`, `n`). **Check first:** how narrow is this really — it needs
   quality weighting on *and* a sub-11-frame stack *and* the walk-away path, so measure whether the owner's
   install ever lands there before building. Fits the shipped "say it out loud" family (v0.236.0, v0.230.2).
+- **NEW IDEA (Builder 2026-08-06, filed while shipping the "Hold back highlights" knob v0.237.0) — give the new
+  highlight knob the "from your image" partner every other detail slider has.** *(Editor quality + autonomy —
+  PRIORITY 1/2; size S–M.)* v0.237.0 makes the stretch's highlight shoulder adjustable and lets the owner *ask* for
+  more of it ("Core blown out"), but a beginner has to notice their core is washed out first — and the editor's
+  sibling sliders don't make them: sharpen has "size it from your stars", denoise has "from your image". The same
+  measurement is available here and is **purely offline**: render the proxy through the current recipe, find the
+  largest connected component at/near the display ceiling, and report what fraction of it is flat (zero local
+  gradient). A core that is genuinely saturated in the *data* can't be recovered and must be left alone; one that is
+  flat only *after* the stretch is exactly what the knob fixes, and the two are distinguishable by looking at the
+  same region in the linear input. **Shape:** a one-click "Hold it back from your image" button beside the slider
+  that sets a suggested strength, like `suggest_denoise_strength` — **not** an automatic default. That is the whole
+  point of proposing it now: the filed *automatic* highlight-clip cue is real-data-gated because a wrong threshold
+  would silently change everyone's picture, whereas a button changes nothing until pressed, shows its result in the
+  preview immediately, and is undone by moving the slider back. **Care:** measure on the *stretched* proxy (the
+  clipping is a display-space property) but sanity-check against the linear data so a truly saturated core isn't
+  promised a recovery that can't happen; and return "no suggestion" rather than 0 when there's no bright core at all,
+  so the button self-hides instead of implying the picture has a problem.
+- **NEW IDEA (Builder 2026-08-06, spotted while adding the 10th and 11th Adaptive-Auto chips) — the "How did Auto
+  do?" chip row is becoming a wall.** *(Friendliness — PRIORITY 3; size S; frontend-only.)* `AUTO_FEEDBACK_CHIPS` is
+  now eleven flat chips ("Too dark", "Too bright", "Too soft", "Over-sharpened", "Too noisy", "Over-smoothed",
+  "Colours too weak", "Colours too strong", "Too green", "Core blown out", "Core looks flat"). Each one is good, but
+  eleven equal-weight buttons is *more* decision for a beginner, not less — the opposite of what the feature is for,
+  and it will only grow as cues are added. **Slice:** group them by what they're about (brightness · sharpness ·
+  noise · colour · bright core) as five small labelled clusters, or collapse each opposing pair into one −/+ control
+  so the row is five items wide instead of eleven. Pure presentation over the existing cue keys — no new endpoint, no
+  change to what a tap sends, and the pure `AUTO_FEEDBACK_CHIPS` list stays the contract the tests assert on.
+  **Care:** don't hide the negative cue behind a second interaction — the walk-back tap is what makes the feature
+  reversible, and a beginner who over-taps needs it to be as easy to reach as the one that got them there.
 - **NOTE (Builder 2026-08-05, checked while shipping v0.236.0 — recorded so nobody re-treads it) — "warn about a
   mismatched dark at *pick* time" is ALREADY BUILT; the only thing left is a wording-drift risk.** The obvious
   follow-on to v0.236.0 looks like "say it before the night is spent, not after". It exists: `Stack.tsx` (~L357–405)
@@ -6222,8 +6250,27 @@ to **Shipped**.)_
   sentence in `Stack.tsx` and the after-the-fact sentence from `CalibrationMasters.calibration_warnings` are written
   independently, with independently-chosen thresholds (`expMismatch` in `calibrationFit.ts` vs
   `_EXPOSURE_MISMATCH_TOL` / `_TEMP_MISMATCH_TOL_C` in `calibrate/apply.py`) — so the app can warn before and go
-  quiet after, or vice versa, on a borderline pair. Worth one small pass to make the thresholds agree (and ideally
-  serve one wording), *only* if someone is already in those files. (S, friendliness — PRIORITY 3.)
+  quiet after, or vice versa, on a borderline pair. ~~Worth one small pass to make the thresholds agree (and ideally
+  serve one wording), *only* if someone is already in those files.~~ — **THRESHOLD HALF FIXED v0.237.1** (Builder
+  2026-08-06, branch `claude/relaxed-turing-jox1fn`). The drift was real and one-directional: the form's rule was
+  `|t_dark − t_subs| / t_subs > 0.25`, the engine's is `|t_subs / t_dark − 1| > 0.15` — both looser *and* anchored on
+  a different exposure — so the engine is consistently the stricter of the two. **Reproduced by construction: a 30 s
+  dark on 25 s subs** is 0.167 by the engine's measure (warned about on the finished run since v0.236.0) and 0.20 by
+  the form's old measure against a 0.25 bar — silent at pick time. Same for a 10 s dark on 12 s subs, and the whole
+  band between. Now there is one source of truth: `EXPOSURE_MISMATCH_TOL` / `TEMP_MISMATCH_TOL_C` are public in
+  `seestack/calibrate/apply.py` (the private names stay as aliases), `…/calibration-suggestions` serves them in an
+  additive `tolerances` block, and the form's cautions run through two pure helpers in `calibrationFit.ts`
+  (`exposureMismatch` / `tempMismatch`) that prefer the served numbers and fall back to mirrored constants for an
+  older backend. Both are one-sided like the size check — an unknown or non-positive exposure (a bias master records
+  0 s) never warns. The temperature thresholds already agreed at 5 °C; that literal is no longer duplicated in
+  `Stack.tsx`. Upgrade-safe: additive response key, no config/DB/on-disk change, no stacking behaviour touched —
+  only which advisory sentences appear, and strictly toward "warn about the pairs the run will complain about".
+  **Tests (+13):** `calibrationFit.test.ts` (+8 — the borderline pair, a matched pair inside the slack, the
+  master-anchored denominator, the one-sided guards, and the served-tolerance preference with its fallback for a
+  null/zero/negative/NaN/absent block), `Stack.test.tsx` (+1 — the 30 s-dark-on-25 s-subs pick now warns) and
+  `tests/webapp/test_calibration.py` (+1 pinning that the served values *are* the engine's constants, so a future
+  sensitivity change can't leave the form behind). **Still open (the smaller half):** the two *sentences* are still
+  written independently, so the wording can drift even though the trigger can't. (S, friendliness — PRIORITY 3.)
 - **NEW IDEA (Builder 2026-08-05, spotted while tracing the coverage accumulators) — the coverage map's `BUNIT`
   claims "frames" when it isn't one.** *(Trust / correctness of a diagnostic — PRIORITY 4; size S.)*
   `output._write_coverage_fits` writes `master_coverage.fits` with `BUNIT = "frames"`, but the array it gets is
@@ -7953,9 +8000,53 @@ problems. Dogfood it every big-picture run and fix root causes.
   garbage/unknown-type coercion), `tests/webapp/test_editor.py` (+1: feedback scoped to a
   monkeypatched archetype — bucket not global, run Auto reflects it), `AutoFeedback.test.tsx`
   (+1 scoped + updated global assertion). **Remaining slices for a future run:** the two other
-  parts of (b) — **recency decay** and a **"highlights/core clipped" cue** (still needs a stretch
-  highlight-knee param) — and **(c)** an optional light statistical fit (numpy/scikit, no NN).
+  parts of (b) — ~~a **"highlights/core clipped" cue** (still needs a stretch highlight-knee
+  param)~~ **SHIPPED v0.237.0 (see below)** and **recency decay** — and **(c)** an optional light
+  statistical fit (numpy/scikit, no NN).
   Original slice-(a) write-up kept for provenance below.
+- ~~**⭐ OWNER-REQUESTED (remaining part of Adaptive Auto slice (b)) — a "the bright core is blown
+  out" cue, which needs a stretch highlight-knee param first.**~~ — **SHIPPED v0.237.0** (Builder
+  2026-08-06, branch `claude/relaxed-turing-jox1fn`). *(Editor quality — PRIORITY 1; the last
+  parameter Adaptive Auto had no way to move.)* The blocker named in the slice-(b) note was real:
+  the eight existing cues each map to a parameter Auto already *measures*, but "my galaxy's core
+  is a flat white blob" had nothing to move — the STF/asinh highlight shoulder
+  (`_highlight_rolloff`, v0.119.1) sat on a hard-coded knee of 0.7.
+  **The knee is now a knob.** `seestack/render/thumbnail.py` gains a pure
+  `highlight_knee_for(protect)` that sweeps the knee from **0.7 at `protect=0` — returned
+  *identically*, not merely close, so every existing render is byte-for-byte what it was** — down
+  to a floor of **0.25** at full strength, below which the shoulder would start compressing
+  ordinary nebulosity rather than just the core. Both `autostretch` and `asinh_stretch` take a new
+  `highlight_protect=0.0`, and `tone.stretch` exposes it as an **advanced** *"Hold back
+  highlights"* slider (0–1, default 0) that applies in **both** curve modes — the blow-out is a
+  property of the shared shoulder, not of the tone mapping above it. Because it only moves values
+  *above* the knee, the sky still lands on exactly the same grey: **the sky corner is bit-for-bit
+  identical** at full protection (pinned by a test), so "hold the core back" can never double as a
+  brightness change. Measured on the synthetic HDR core the v0.119.1 tests already use: at
+  `protect=1.0` the near-saturated 9×9 peak's internal gradient goes **σ 0.0032 → 0.0129 (4×)**
+  and the blown-to-white fraction **0.32 % → 0 %**.
+  **The cue then falls out.** `auto_prefs` gains `core_clipped` (+1) / `core_flat` (−1) on a new
+  `highlights` bias, wired through `apply_profile` → `auto_recipe` → the `tone.stretch` op, so it
+  works on the interactive *and* the unattended "Process target" path like every other cue, and is
+  scoped per object type. It is the **one-sided** knob in the set — protection starts *off*, so
+  there is nothing below neutral to ask for — which needed a per-parameter floor
+  (`_PARAM_MIN_STEP`) on the accumulator: without it the negative cue would pile up steps the range
+  clamp swallows, so one "looks flat" tap would fail to undo one "blown out" tap. The floor also
+  hardens the §9 loader (a garbled store can no longer inject a negative highlight bias).
+  **Deliberately NOT auto-detected:** deciding from the image whether a core is clipping is the
+  real-data-gated "highlight-clip cue" already filed under *Needs owner sign-off*-adjacent notes;
+  this ships neutral and moves only when the owner says so. Upgrade-safe: additive op param and
+  cue, no config/DB/API-shape change, no default flipped; an existing saved recipe carrying no
+  `highlights` key renders identically to one carrying an explicit `0.0` (pinned).
+  **Tests (+21):** `tests/test_stf_highlight_rolloff.py` (+7 — the knee is *exactly* the historical
+  constant at 0, monotone and floored, NaN/inf/negative degrade to off, both stretches byte-for-byte
+  at the default, the core gains >2× gradient at full strength, the sky stays bit-for-bit put, and
+  the knob is monotone in strength), `tests/test_edit_tone_ops.py` (+6 — the op is inert at its
+  default in both modes, holds the core back in both, tolerates a `null` param from an older
+  client, and preserves NaN gaps), `tests/test_auto_prefs.py` (+6 — the cue moves only its own
+  parameter, saturates in range, walks back one tap at a time and stops at off, a garbled negative
+  bias is dropped, per-type routing, the "why" note, and the recipe carries it), plus
+  `tests/webapp/test_editor.py` (+1 end-to-end through the feedback endpoint) and
+  `AutoFeedback.test.tsx` (+1 for the two new chips).
 - **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
   auto-processed image (no ML runtime, fully offline/private).** — **slice (a) SHIPPED
   v0.159.0** (Builder 2026-07-22, branch `claude/pensive-faraday-jwvd6c`). Implemented

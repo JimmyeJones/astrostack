@@ -1015,6 +1015,26 @@ def test_calibration_suggestions_reports_the_targets_frame_size(client, solved_l
     assert body["params"]["height_px"] == FRAME_H
 
 
+def test_calibration_suggestions_serves_the_engines_own_mismatch_tolerances(
+        client, solved_library):
+    """The Stack form warns about the same exposure/temperature mismatches the
+    finished run reports. Each side used to pick its own threshold, so on a
+    borderline pair (a 30 s dark on 25 s subs) the app stayed quiet before the
+    night was spent and complained afterwards. The endpoint now serves the
+    engine's constants — and this pins that they *are* the engine's, so changing
+    ``calibration_warnings``' sensitivity can't silently leave the form behind."""
+    from seestack.calibrate.apply import EXPOSURE_MISMATCH_TOL, TEMP_MISMATCH_TOL_C
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    tol = client.get(f"/api/targets/{safe}/calibration-suggestions").json()["tolerances"]
+
+    assert tol["exposure_frac"] == EXPOSURE_MISMATCH_TOL
+    assert tol["temp_c"] == TEMP_MISMATCH_TOL_C
+    # The pair the form used to let through is on the warning side of the served
+    # threshold, measured the way the engine measures it (against the master).
+    assert abs(25.0 / 30.0 - 1.0) > tol["exposure_frac"]
+
+
 def test_calibration_suggestions_frame_size_is_none_when_unrecorded(
         client, solved_library):
     """A target whose frames never recorded a size reports None rather than

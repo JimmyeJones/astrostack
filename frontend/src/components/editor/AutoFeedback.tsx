@@ -22,6 +22,10 @@ export const AUTO_FEEDBACK_CHIPS: { cue: string; label: string }[] = [
   { cue: "undersaturated", label: "Colours too weak" },
   { cue: "too_saturated", label: "Colours too strong" },
   { cue: "too_green", label: "Too green" },
+  // The bright-core pair. "Core blown out" asks Auto to hold the highlights back
+  // (it starts off); "Core looks flat" walks that back toward off again.
+  { cue: "core_clipped", label: "Core blown out" },
+  { cue: "core_flat", label: "Core looks flat" },
 ];
 
 export function AutoFeedback(

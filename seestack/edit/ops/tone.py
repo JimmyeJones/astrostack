@@ -19,11 +19,19 @@ def _stretch(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
     src = as_rgb(rgb)
     mode = str(params.get("mode", "asinh"))
+    # "Hold back highlights": 0 (the default) is byte-for-byte the historical
+    # stretch; higher starts the highlight shoulder earlier so a bright galaxy /
+    # nebula core keeps its gradient instead of blowing out to flat white. It
+    # applies to both curves — the blow-out is a property of the shared shoulder,
+    # not of the tone mapping above it.
+    highlights = float(params.get("highlights", 0.0) or 0.0)
     if mode == "stf":
-        out = autostretch(src, target_bg=float(params.get("target_bg", 0.20)))
+        out = autostretch(src, target_bg=float(params.get("target_bg", 0.20)),
+                          highlight_protect=highlights)
     else:
         out = asinh_stretch(src, stretch=float(params.get("stretch", 0.5)),
-                            black=float(params.get("black", 0.35)))
+                            black=float(params.get("black", 0.35)),
+                            highlight_protect=highlights)
     # asinh_stretch/autostretch fill uncovered (NaN) pixels with 0. Restore the
     # NaN so "no coverage" stays distinct from real black through the rest of the
     # pipeline: the histogram and Levels/gamma suggestions exclude it (no false
@@ -296,6 +304,11 @@ register(OpSpec(
         EditParam("target_bg", "STF sky level", "float", default=0.20, min=0.02, max=0.6,
                   step=0.01, depends_on="mode=stf",
                   help="Target background brightness for the auto-stretch (higher = brighter sky)."),
+        EditParam("highlights", "Hold back highlights", "float", default=0.0,
+                  min=0.0, max=1.0, step=0.05, group="advanced",
+                  help="Compress the very brightest tones so a bright galaxy or nebula "
+                       "core keeps its detail instead of washing out to flat white. "
+                       "Leaves the sky and midtones alone; 0 = as before."),
     ],
 ))
 
