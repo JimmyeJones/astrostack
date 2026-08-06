@@ -132,6 +132,85 @@ def test_proxy_scale_matches_full_res_level_selection():
     assert abs(float(np.median(fixed[panel_proxy]))) < 0.005
 
 
+def _heavy_stride_scene(h=600, w=900, patch=18, seed=3):
+    """Two big panels plus one small overlap patch, sized for a ×6 proxy.
+
+    ``patch``² full-res pixels clears the export's 200-pixel floor but strides
+    down to fewer than the 12 the proxy needs to *measure* a median — the exact
+    band where the preview used to diverge from the export.
+    """
+    rng = np.random.default_rng(seed)
+    cov = np.ones((h, w), dtype=np.int32)
+    cov[:, w // 2:] = 2
+    x0 = w // 2 - patch // 2
+    cov[10:10 + patch, x0:x0 + patch] = 3
+    rgb = np.zeros((h, w, 3), dtype=np.float32)
+    for lvl, sky in ((1, 100.0), (2, 130.0), (3, 160.0)):
+        region = cov == lvl
+        for c in range(3):
+            rgb[..., c][region] = sky + c * 2.0
+    rgb += rng.normal(0.0, 1.0, rgb.shape).astype(np.float32)
+    return rgb, cov
+
+
+def test_a_heavily_strided_proxy_still_levels_a_panel_the_export_levels():
+    """Preview↔export parity at heavy decimation (step ≥ 5, i.e. a mosaic canvas
+    over ~7500 px — exactly the deep mosaics this op exists for).
+
+    The floor that keeps a per-level median off a handful of pixels
+    (``_MIN_STRIDED_PIXELS``) stops scaling past ~×4, so beyond that the proxy
+    demanded *more* full-res-equivalent pixels than the export. A level in that
+    band used to drop out of the level set entirely — neither measured **nor
+    filled** — so the preview left the whole panel step in place while the export
+    removed most of it. It is now still *considered*, and takes the same
+    neighbour-interpolated offset the export gives a level it can't measure
+    either.
+    """
+    rgb, cov = _heavy_stride_scene()
+    assert int((cov == 3).sum()) == 324           # clears the export's 200 floor
+
+    export = level_by_coverage(rgb.copy(), cov.astype(np.float32))
+    export_residual = float(np.median(export[..., 1][cov == 3]))
+
+    step = 6
+    proxy = np.ascontiguousarray(rgb[::step, ::step])
+    cov_proxy = np.ascontiguousarray(cov[::step, ::step])
+    # 9 strided pixels: above the export-equivalent floor (200/36 ≈ 6), below the
+    # 12 a median needs — the band the fix is about.
+    assert int((cov_proxy == 3).sum()) == 9
+
+    preview = level_by_coverage(
+        proxy.copy(), cov_proxy.astype(np.float32), proxy_scale=float(step),
+        dilate_object_mask_px=max(0, round(4 / step)))
+    preview_residual = float(np.median(preview[..., 1][cov_proxy == 3]))
+
+    # Before the fix the preview left the panel's full ~162 ADU offset while the
+    # export cut it to ~30; they now agree to well inside the 1 ADU noise.
+    assert abs(preview_residual - export_residual) < 3.0
+    # And both are far below the untouched offset, so this isn't passing by both
+    # sides doing nothing.
+    assert preview_residual < 60.0
+
+
+def test_a_sliver_below_the_export_floor_stays_untouched_at_heavy_stride():
+    """The lower, export-equivalent floor is still a floor: a level too small to
+    clear it is a sliver, not a panel, and is left byte-for-byte alone at any
+    stride. (Without this the fix would read as "the pixel floor was removed".)"""
+    rgb, cov = _heavy_stride_scene(patch=6)       # 36 full-res px, under 200
+    step = 6
+    proxy = np.ascontiguousarray(rgb[::step, ::step])
+    cov_proxy = np.ascontiguousarray(cov[::step, ::step])
+    sliver = cov_proxy == 3
+    assert sliver.any()
+    # 36/36 = 1 strided pixel, under the export-equivalent floor of ~6.
+    assert int(sliver.sum()) < 6
+
+    out = level_by_coverage(
+        proxy.copy(), cov_proxy.astype(np.float32), proxy_scale=float(step),
+        dilate_object_mask_px=max(0, round(4 / step)))
+    np.testing.assert_array_equal(out[sliver], proxy[sliver])
+
+
 def test_smoothing_does_not_extrapolate_a_seam_onto_a_gapped_overlap_level():
     """A sparsely-sampled deep-overlap coverage level must not have a wrong
     offset *extrapolated* onto it from the dense single-panel levels.
