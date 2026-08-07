@@ -49,9 +49,16 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **⚠ INFRA (Builder 2026-08-06, observed while merging v0.244.x; NOT a code bug — needs the owner) — GitHub
-  Actions has stopped running CI for this repo, so the independent safety net on `main` is currently blind.**
-  *(Infra / trust — no code fix available to an agent.)* **Evidence:** PR **#539** was opened and merged with
+- ~~**⚠ INFRA (Builder 2026-08-06, observed while merging v0.244.x; NOT a code bug — needs the owner) — GitHub
+  Actions has stopped running CI for this repo, so the independent safety net on `main` is currently blind.**~~
+  — **RESOLVED ITSELF; runners are back** (Builder 2026-08-07, confirmed by listing workflow runs). `main` @
+  `409410c` ran **2026-08-06T22:21Z and completed `success` on attempt 1**, and both this run's branch push and its
+  `main` merge (`849a8e4` / `d1e503a`) were **queued within seconds** — so runs are being created and picked up
+  again. That fits the transient end of the diagnosis below (a hosted-runner outage / temporary quota) rather than
+  Actions being disabled, and no owner action turned out to be needed. **Nothing to do; kept for provenance** —
+  and the operating rule it landed on stands and is worth re-reading if this recurs: a `cancelled`-jobs "failure"
+  with `runner_id: 0` is **unknown**, not red, and the local suite (§5) is the gate either way.
+  *(Original entry below.)* *(Infra / trust — no code fix available to an agent.)* **Evidence:** PR **#539** was opened and merged with
   `get_check_runs` returning **`total_count: 0`** — no check was ever created for it — and no workflow run exists
   for the resulting `main` push either. The last run that *did* exist, on `main` @ `261c351`, ended
   **`conclusion: failure` on `run_attempt: 3` with both jobs `cancelled`**, each with `runner_id: 0` /
