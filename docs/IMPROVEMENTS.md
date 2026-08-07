@@ -15665,6 +15665,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY 3; Builder-filed 2026-07-16.)*
 
 ### Performance (only with a measurement)
+- **NEW IDEA (Builder 2026-08-07, spotted while adversarially reading `accumulator.py`; TRACED, NOT MEASURED) —
+  `MinMaxRejectAccumulator._add_into` writes its whole k-plane extremes buffer back over itself once per frame,
+  for nothing.** *(Performance / clarity — PRIORITY 4; size XS; **not a correctness bug** — the result is
+  identical either way.)* `mins = self._mins[:, ys, xs]` is *basic* indexing (two slices), so it returns a
+  **view**, and the `mins[j] = slot` loop already mutates `self._mins` in place. The trailing
+  `self._mins[:, ys, xs] = mins` (and its `_maxs` twin) is therefore a self-assignment that copies `2k`
+  canvas-sized float32 planes per frame per side — at the default `k=1` on a 1920×1080 RGB canvas that is ~50 MB
+  of pointless memcpy **per frame**, and it scales with `reject_count`. **Shape:** drop the two write-backs, or
+  (clearer, and immune to someone later changing the slicing to fancy indexing, which *would* copy) index the
+  planes as `self._mins[j, ys, xs]` inside the loop so the in-place intent is on the face of it. **Care:** pin it
+  with a before/after byte-for-byte equality test on a small stack including the windowed (`add_window`) path and
+  a `reject_count > 1` case, because the whole point is that nothing about the output may change. Worth doing
+  next time someone is in this file; measure the actual saving on a realistic canvas before claiming one.
 - **NEW IDEA (Builder 2026-08-06, MEASURED while auditing the stack path) — `detect_mixed_pointings` is a pure-Python
   O(n²) pair loop with no cap, so the mixed-pointing preflight grows quadratically with a target's sub count.**
   *(Performance — size S; **off-by-default setting, so this is a latency note, not a live problem**.)*
