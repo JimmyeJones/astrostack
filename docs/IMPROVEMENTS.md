@@ -9374,8 +9374,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   tests for every crop×sharpen×undo path. The 8-bit PNG re-render is also a real (if small) quality loss the
   stack-time path doesn't have — measure it on the 16-bit TIFF path and say so.
 
-- **NEW IDEA (Builder 2026-08-07, spotted while shipping the stale-grade guard v0.246.2) — the quick-look *image*
-  survives the check that owns it being ruled stale.** *(Trust — PRIORITY 3; size XS.)* v0.246.2 makes
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while shipping the stale-grade guard v0.246.2) — the quick-look *image*
+  survives the check that owns it being ruled stale.**~~ — **SHIPPED v0.247.2** (Builder 2026-08-07, branch
+  `claude/elegant-bohr-izzmou`), built to the filed shape and its "care" note exactly. *(Trust — PRIORITY 3.)*
+  `GET /api/videos/{id}/quicklook.png` now looks up the capture's **current** files and asks
+  `video.grade_matches_source` before serving; a positive mismatch 404s with the *same* "hasn't been checked yet"
+  line a never-checked capture gets — deliberately, because a check that no longer describes the clip on disk *is*
+  an unchecked capture, and the "Check this capture first" button is one click from making it true again (pinned:
+  re-grading brings the frame straight back, so this is never a dead end). The orphaned-still case is handled as
+  the panels handle it: no files is nothing to disagree with, so clearing the clip off the NAS leaves the frame
+  serving. Everything else — an older `grade.json` with no stamp, an unreadable stat, a capture graded but never
+  re-recorded — still serves, since `grade_matches_source` only ever returns `False` on a *positive* mismatch.
+  Additive and upgrade-safe: no schema, response shape, config or default change; the only behaviour that changes
+  is a stale URL now 404ing instead of lying. **Tests** (`tests/webapp/test_video_api.py`, +2; the first fails
+  before / passes after): the frame stops serving once the clip is replaced in place and returns after a re-check,
+  and it keeps serving when the clip is deleted from `incoming/` altogether.
+  *(Original spec kept below for provenance.)*
+  *(Trust — PRIORITY 3; size XS.)* v0.246.2 makes
   `_grade_panels` drop a capture's curve and quick look once the clip on disk no longer matches the stamp in
   `grade.json`. But `GET /api/videos/{id}/quicklook.png` answers from the file alone, so a client that already
   holds the URL (a stale tab, a bookmark, a browser cache) still gets last night's frame served happily. Low
