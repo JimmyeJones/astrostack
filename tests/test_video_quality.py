@@ -16,6 +16,7 @@ from seestack.video.quality import (
     CURVE_POINTS,
     DEFAULT_CANDIDATES,
     frames_kept,
+    quicklook_note,
     sharpness_profile,
 )
 
@@ -133,3 +134,32 @@ def test_a_mixed_capture_reads_as_mixed():
     assert p is not None
     assert p.spread == "mixed"
     assert "varied a fair bit" in p.summary
+
+
+# --------------------------------------------------------------------------
+# quick look — the sentence beside the sharpest single frame
+# --------------------------------------------------------------------------
+
+
+def test_quicklook_note_names_the_frame_and_what_stacking_would_add():
+    """The one thing a beginner must not conclude is "that's my picture"."""
+    p = sharpness_profile(_steady(), keep_percent=None)
+    note = quicklook_note(p, frame_number=42, n_graded=200)
+    assert "frame 42 of the 200 we checked" in note
+    # Says plainly that it is one noisy frame, and quantifies the alternative
+    # from this capture's own numbers (the suggested setting, its frame count
+    # and its √N gain) rather than with a stock phrase.
+    assert "It's one frame, so it's noisy" in note
+    suggested = next(o for o in p.options if o.percent == p.suggested_percent)
+    assert f"{suggested.percent:.0f}%" in note
+    assert f"({suggested.n_frames} frames)" in note
+    assert f"{suggested.noise_gain:.0f}× cleaner" in note
+
+
+def test_quicklook_note_still_warns_when_there_is_no_profile_to_quote():
+    """A capture whose frames all scored zero has no advice — but the caveat
+    about a single frame is the part that must never be dropped."""
+    note = quicklook_note(None, frame_number=1, n_graded=3)
+    assert "frame 1 of the 3 we checked" in note
+    assert "It's one frame, so it's noisy" in note
+    assert "%" not in note

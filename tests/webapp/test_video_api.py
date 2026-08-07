@@ -264,6 +264,101 @@ def test_checking_a_capture_leaves_an_existing_still_alone(client, data_root):
     assert client.get("/api/videos/Lunar_video/preview.png").status_code == 200
 
 
+def test_checking_a_capture_also_shows_its_sharpest_frame(client, data_root):
+    """"Quick look" — is this capture worth stacking at all?
+
+    The sharpest frame comes off the grading pass's own decode, so a beginner
+    can see what the capture actually holds without spending a full stack (two
+    decode passes and a multi-minute wait) finding out.
+    """
+    _drop_capture(data_root)
+    job_id = client.post("/api/videos/Lunar_video/grade", json={}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    cap = client.get("/api/videos").json()["captures"][0]
+    ql = cap["quicklook"]
+    assert ql is not None
+    assert ql["n_graded"] == 10
+    # The synthetic capture's good-seeing frames are 1, 4 and 7 (1-based: 2, 5, 8).
+    assert ql["frame_number"] in (2, 5, 8)
+    assert "It's one frame, so it's noisy" in ql["note"]
+    assert f"frame {ql['frame_number']} of the 10 we checked" in ql["note"]
+
+    # It is a real, servable picture — and at the capture's native size.
+    r = client.get(ql["url"])
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    from io import BytesIO
+
+    from PIL import Image
+
+    with Image.open(BytesIO(r.content)) as img:
+        assert img.size == (64, 48)
+
+    # Still nothing stacked — checking a capture never makes a picture of it.
+    assert cap["result"] is None
+    assert client.get("/api/videos/Lunar_video/preview.png").status_code == 404
+
+
+def test_a_capture_that_was_never_checked_offers_no_quick_look(client, data_root):
+    _drop_capture(data_root)
+    cap = client.get("/api/videos").json()["captures"][0]
+    assert cap["quicklook"] is None
+    r = client.get("/api/videos/Lunar_video/quicklook.png")
+    assert r.status_code == 404
+    assert "hasn't been checked yet" in r.json()["detail"]
+
+
+def test_an_older_grade_without_a_quick_look_still_shows_its_curve(client, data_root):
+    """Upgrade safety: a ``grade.json`` written before the quick look existed
+    has the scores but no ``best_index`` and no picture on disk."""
+    import json
+
+    from webapp import video as videomod
+
+    _drop_capture(data_root)
+    job_id = client.post("/api/videos/Lunar_video/grade", json={}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    out_dir = data_root / "video" / "Lunar_video"
+    (out_dir / videomod.QUICKLOOK_NAME).unlink()
+    raw = json.loads((out_dir / videomod.GRADE_NAME).read_text())
+    del raw["best_index"]
+    (out_dir / videomod.GRADE_NAME).write_text(json.dumps(raw))
+
+    cap = client.get("/api/videos").json()["captures"][0]
+    assert cap["quicklook"] is None
+    assert cap["sharpness"] is not None
+    assert cap["sharpness"]["suggested_percent"] == 30.0
+
+
+def test_re_checking_a_capture_replaces_the_quick_look(client, data_root):
+    """The picture on disk always belongs to the scores beside it.
+
+    Re-recording the same target overwrites the clip in place, so a stale frame
+    left behind would be shown next to a completely different capture's numbers.
+    """
+    _drop_capture(data_root)
+    job_id = client.post("/api/videos/Lunar_video/grade", json={}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    first = client.get("/api/videos/Lunar_video/quicklook.png").content
+    first_number = client.get("/api/videos").json()["captures"][0]["quicklook"][
+        "frame_number"
+    ]
+
+    # Same folder, same file name, a different capture: 12 frames whose one
+    # good-seeing moment is the last.
+    _drop_capture(data_root, n_frames=12, sharp_indices=(11,), w=48, h=36)
+    job_id = client.post("/api/videos/Lunar_video/grade", json={}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    ql = client.get("/api/videos").json()["captures"][0]["quicklook"]
+    assert ql["n_graded"] == 12
+    assert ql["frame_number"] == 12
+    assert ql["frame_number"] != first_number
+    assert client.get("/api/videos/Lunar_video/quicklook.png").content != first
+
+
 def test_grading_an_unknown_capture_is_a_404(client):
     assert client.post("/api/videos/Nope_video/grade", json={}).status_code == 404
 
