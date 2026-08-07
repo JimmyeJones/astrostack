@@ -649,6 +649,19 @@ export function GalleryView() {
         downloadHref={viewingStill?.preview_url}
         rawHref={viewingStill?.tiff_url ?? undefined}
         rawLabel="16-bit TIFF"
+        {...(viewingStill
+          ? (() => {
+              // The still's PNG *is* its picture, so the share sheet gets that —
+              // named `.png`, since a PNG arriving called `.jpg` confuses the
+              // app it lands in.
+              const { title, text, filename } = sharePictureText(
+                viewingStill.label,
+                new Date(viewingStill.created_utc).toLocaleDateString(),
+                "png",
+              );
+              return { shareFilename: filename, shareTitle: title, shareText: text };
+            })()
+          : {})}
         onClose={() => setViewingStill(null)}
       />
     </Stack>

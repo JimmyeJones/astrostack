@@ -217,6 +217,44 @@ def _summary(spread: str, current: KeepOption | None, suggested: KeepOption) -> 
     )
 
 
+def quicklook_note(
+    profile: SharpnessProfile | None, *, frame_number: int, n_graded: int,
+) -> str:
+    """One line explaining what the sharpest single frame is — and what it isn't.
+
+    The quick look exists to answer "is this capture worth stacking at all?"
+    (did a cloud roll in, did the disk drift out of frame, was it ever in
+    focus?) in a couple of seconds. Its one risk is being mistaken for the
+    product, so every phrasing here says plainly that it is *one* frame and
+    that the stack is the picture.
+
+    ``profile`` is this capture's grading profile when one exists, so the
+    sentence can name the setting the numbers actually argue for and how much
+    cleaner it would be; ``None`` (a capture whose frames all scored zero) falls
+    back to the same point made without figures.
+    """
+    head = (
+        f"This is the sharpest single frame of your capture "
+        f"(frame {int(frame_number)} of the {int(n_graded)} we checked)"
+    )
+    suggested = None
+    if profile is not None:
+        suggested = next(
+            (o for o in profile.options if o.percent == profile.suggested_percent),
+            None,
+        )
+    if suggested is None:
+        return (
+            f"{head}. It's one frame, so it's noisy — stacking the sharpest "
+            f"frames keeps this detail and averages the noise away."
+        )
+    return (
+        f"{head}. It's one frame, so it's noisy — stacking the sharpest "
+        f"{suggested.percent:.0f}% ({suggested.n_frames} frames) keeps detail "
+        f"like this and comes out about {suggested.noise_gain:.0f}× cleaner."
+    )
+
+
 def sharpness_profile(
     scores,
     keep_percent: float | None = None,

@@ -12,6 +12,9 @@ self-contained store rather than an extension of the library:
         meta.json     ← how it was made, so the result can explain itself
         grade.json    ← a grade-only pass (every frame's sharpness), so the user
                         can see what their capture looks like before stacking it
+        quicklook.png ← the sharpest single frame from that pass — a two-second
+                        look at what the capture actually holds, before spending
+                        a full stack finding out
         stack-full.*  ← the uncropped originals, kept only while a still is
                         cropped in place, so "Undo crop" is always possible
 
@@ -56,6 +59,10 @@ META_NAME = "meta.json"
 #: Written by the grade-only pass. Kept **beside** ``meta.json`` rather than in
 #: it so checking a capture can never disturb a still that is already stacked.
 GRADE_NAME = "grade.json"
+#: The sharpest single frame of that pass, display-rendered. Same reasoning as
+#: ``grade.json``: it is written by the *check*, never by the stack, so looking
+#: at a capture leaves any finished still exactly as it was.
+QUICKLOOK_NAME = "quicklook.png"
 
 
 def video_root(settings: Settings) -> Path:
@@ -145,6 +152,10 @@ class VideoGradeMeta:
     stride: int
     scores: list[float]
     warnings: list[str] = field(default_factory=list)
+    #: Where the sharpest frame sat in ``scores`` (``-1`` when unknown). Optional
+    #: and defaulted so a ``grade.json`` written before the quick look existed
+    #: still loads — it simply has no frame to point at.
+    best_index: int = -1
 
 
 def read_grade(settings: Settings, capture_id: str) -> VideoGradeMeta | None:
@@ -168,6 +179,16 @@ def read_grade(settings: Settings, capture_id: str) -> VideoGradeMeta | None:
 
 def has_result(settings: Settings, capture_id: str) -> bool:
     return (result_dir(settings, capture_id) / PNG_NAME).is_file()
+
+
+def has_quicklook(settings: Settings, capture_id: str) -> bool:
+    """True when the grade pass's sharpest-frame picture is on disk.
+
+    Asked before the frame is offered, so a grade recorded by an older version
+    (which kept the scores but no picture) shows its curve without a broken
+    image beside it.
+    """
+    return (result_dir(settings, capture_id) / QUICKLOOK_NAME).is_file()
 
 
 def has_tiff(settings: Settings, capture_id: str) -> bool:
@@ -584,12 +605,17 @@ def _video_grade_body(
             source, LuckyOptions(), info=info,
             progress=on_progress,
             should_cancel=job.cancel_requested,
+            # The sharpest frame comes back with the scores, off the same decode
+            # — so "what does this capture actually look like?" costs one held
+            # frame rather than a third pass over the file.
+            keep_best_frame=True,
         )
     except VideoStackCancelled:
         return {"cancelled": True, "capture_id": capture_id}
 
     out_dir = result_dir(settings, capture_id)
     out_dir.mkdir(parents=True, exist_ok=True)
+    _write_quicklook(out_dir, graded.best_frame)
     meta = VideoGradeMeta(
         capture_id=capture_id,
         source_name=Path(source).name,
@@ -598,11 +624,39 @@ def _video_grade_body(
         stride=graded.stride,
         scores=[round(float(v), 6) for v in graded.scores],
         warnings=list(graded.warnings),
+        best_index=int(graded.best_index),
     )
     (out_dir / GRADE_NAME).write_text(
         json.dumps(asdict(meta), indent=2), encoding="utf-8",
     )
     return {"capture_id": capture_id, "n_graded": graded.n_graded}
+
+
+def _write_quicklook(out_dir: Path, frame) -> None:
+    """Save the grade pass's sharpest frame as the quick look, best-effort.
+
+    Rendered with the *same* :func:`normalize_for_display` the finished still
+    uses, so the quick look is a fair preview of what the stack will look like —
+    one frame's worth of noise apart — rather than a differently-toned picture
+    the user then has to reconcile with the result.
+
+    A failure here leaves the grade itself intact: the scores and the advice are
+    the substance of a check, and losing the picture must not lose them. Any
+    stale quick look from an earlier check is cleared first, so what is on disk
+    always belongs to the scores beside it.
+    """
+    path = out_dir / QUICKLOOK_NAME
+    path.unlink(missing_ok=True)
+    if frame is None:
+        return
+    import numpy as np
+
+    try:
+        rgb = np.asarray(frame, dtype=np.float32) / 255.0
+        write_full_res_png(path, normalize_for_display(rgb))
+    except (OSError, ValueError):
+        log.debug("could not write the quick look for %s", out_dir.name, exc_info=True)
+        path.unlink(missing_ok=True)
 
 
 def _apply_framing(display, crop: bool, label: str, warnings: list[str]):

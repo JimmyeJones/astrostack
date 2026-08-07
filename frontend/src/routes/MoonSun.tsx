@@ -13,7 +13,10 @@ import { useNavigate } from "react-router-dom";
 import { api, type VideoCapture } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
+import { SharePictureButton } from "../components/SharePictureButton";
+import { sharePictureText } from "../share";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
+import { VideoQuickLookCard } from "../components/VideoQuickLookCard";
 import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
 // The framing copy is shared with the Gallery's video-still card, which offers
 // the identical crop — re-exported here so this page stays the obvious place to
@@ -256,6 +259,22 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
                 + `${subjectNoun(capture.kind)} picture and save it.`
               }
             />
+            {/* …and on a phone, where that QR is redundant with the OS's own
+                sheet, this is the control that actually helps. It renders
+                nothing on a browser that can't share files, so a desktop still
+                sees exactly the row it saw before. */}
+            <SharePictureButton
+              {...(() => {
+                const { title, text, filename } = sharePictureText(
+                  capture.label,
+                  new Date(result.created_utc).toLocaleDateString(),
+                  "png",
+                );
+                return { filename, title, text };
+              })()}
+              url={result.preview_url}
+              label="Share"
+            />
           </Group>
           {/* The evidence behind "how picky should we be?", measured on this
               capture. Self-hiding for a still stacked before the scores were
@@ -295,10 +314,19 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
           still exists the result's own panel (above) is the better one to show,
           since it can mark where the cut actually fell. */}
       {!result && !sourceGone ? (
-        <VideoSharpnessCard
-          profile={capture.sharpness}
-          onUseSuggestion={(pct) => setKeep(String(pct))}
-        />
+        <>
+          <VideoSharpnessCard
+            profile={capture.sharpness}
+            onUseSuggestion={(pct) => setKeep(String(pct))}
+          />
+          {/* The curve says how much the frames vary; the frame itself says
+              whether there is anything worth stacking in the first place. Both
+              come out of the one check, so both are shown before the stack. */}
+          <VideoQuickLookCard
+            quicklook={capture.quicklook}
+            subject={subjectNoun(capture.kind)}
+          />
+        </>
       ) : null}
 
       {sourceGone ? null : (

@@ -102,6 +102,14 @@ class GradeResult:
     height: int
     source: str = ""
     warnings: list[str] = field(default_factory=list)
+    #: Position of the sharpest frame in :attr:`scores` (``-1`` when there are
+    #: no scores). Always filled in — it costs an ``argmax`` over the scalars.
+    best_index: int = -1
+    #: The sharpest frame itself, as decoded ((H, W, 3) uint8), when the caller
+    #: asked for it with ``keep_best_frame=True``. ``None`` otherwise — grading
+    #: is the memory-cheap pass and holding a frame is opt-in, so
+    #: :func:`stack_video`'s own grading pass never carries one.
+    best_frame: np.ndarray | None = None
 
 
 @dataclass
@@ -229,6 +237,7 @@ def grade_video(
     info: VideoInfo | None = None,
     progress: Callable[[str, int, int], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    keep_best_frame: bool = False,
 ) -> GradeResult:
     """Decode a capture once and score every frame's sharpness — pass 1 alone.
 
@@ -236,6 +245,14 @@ def grade_video(
     ``should_cancel`` contract as :func:`stack_video`, which calls this for its
     first pass. Useful on its own to show the user what their capture looks like
     before they choose how ruthless to be with it.
+
+    ``keep_best_frame`` additionally hands back the sharpest frame itself
+    (:attr:`GradeResult.best_frame`), so "what does this capture actually look
+    like?" can be answered without decoding the file a second time. It holds
+    **exactly one extra frame** — the best one seen so far, replaced as a
+    sharper one arrives — so the pass stays flat in memory whatever the video's
+    length. Off by default: :func:`stack_video` grades to choose keepers, not to
+    look at one, and must not pay for a frame it never uses.
 
     Raises ``ValueError`` if the file has fewer than :data:`MIN_FRAMES` usable
     frames, and :class:`~seestack.video.ffmpeg.VideoToolsMissing` if ffmpeg
@@ -255,13 +272,25 @@ def grade_video(
         )
 
     scores: list[float] = []
+    best_index = -1
+    best_score = -math.inf
+    best_frame: np.ndarray | None = None
     expected = max(1, vinfo.n_frames // stride) if vinfo.n_frames else 0
     for i, frame in enumerate(
         iter_frames(src, stride=stride, width=vinfo.width, height=vinfo.height)
     ):
         if should_cancel is not None and should_cancel():
             raise VideoStackCancelled("cancelled while grading frames")
-        scores.append(frame_sharpness(frame_luma(frame)))
+        score = frame_sharpness(frame_luma(frame))
+        scores.append(score)
+        if score > best_score:
+            best_score = score
+            best_index = i
+            if keep_best_frame:
+                # ``iter_frames`` yields a fresh copy per iteration, so holding
+                # this one keeps nothing else alive — the previous best is
+                # dropped here and collected.
+                best_frame = frame
         if progress is not None:
             progress("grade", i + 1, expected)
 
@@ -278,6 +307,8 @@ def grade_video(
         height=vinfo.height,
         source=str(src),
         warnings=warnings,
+        best_index=best_index,
+        best_frame=best_frame,
     )
 
 

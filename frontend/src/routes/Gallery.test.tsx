@@ -619,6 +619,36 @@ describe("Gallery Moon & Sun stills", () => {
       .toHaveAttribute("href", "/api/videos/Lunar_video/preview.png");
   });
 
+  it("offers the OS share sheet for a still, named for the file it sends", async () => {
+    // Fail-before: the lightbox gated its Share control on a JPEG, which no
+    // still has — so on a phone (where the QR is redundant with the OS's own
+    // sheet) a Moon picture had no way out of the app at all.
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    const shared: ShareData[] = [];
+    nav.share = async (d: ShareData) => { shared.push(d); };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Blob(["x"], { type: "image/png" })),
+    );
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [], videos: [still("Lunar_video")],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+
+    fireEvent.click(await screen.findByLabelText("Share picture"));
+    await waitFor(() => expect(shared).toHaveLength(1));
+    // A PNG called `.jpg` would confuse whatever app it lands in.
+    expect((shared[0].files as File[])[0].name).toBe("moon.png");
+    expect(shared[0].title).toContain("Moon");
+    delete nav.canShare;
+    delete nav.share;
+  });
+
   it("offers no TIFF for a still that has none on disk", async () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({
       items: [], videos: [{ ...still("Lunar_video"), tiff_url: null }],

@@ -254,6 +254,78 @@ describe("MoonSunView", () => {
     await waitFor(() =>
       expect(screen.getByDisplayValue(/Only the very best \(15%\)/)).toBeInTheDocument());
   });
+
+  it("shows the sharpest single frame of a checked capture, with its caveat", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        quicklook: {
+          url: "/api/videos/Lunar_video/quicklook.png",
+          frame_number: 412,
+          n_graded: 900,
+          note: "This is the sharpest single frame of your capture (frame 412 of "
+            + "the 900 we checked). It's one frame, so it's noisy — stacking the "
+            + "sharpest 30% (270 frames) keeps detail like this and comes out "
+            + "about 16× cleaner.",
+        },
+      })],
+    }));
+    renderView();
+    await waitFor(() => expect(screen.getByText("Quick look")).toBeInTheDocument());
+    const img = screen.getByAltText("The sharpest single frame of your Moon capture");
+    expect(img).toHaveAttribute("src", "/api/videos/Lunar_video/quicklook.png");
+    // The caveat is the whole reason a noisy single frame is safe to show.
+    expect(screen.getByText(/It's one frame, so it's noisy/)).toBeInTheDocument();
+  });
+
+  it("offers the OS share sheet beside the picture downloads", async () => {
+    // Fail-before: the row had PNG / TIFF / "To phone" and no Share. On a
+    // phone the QR is redundant with the OS's own sheet, so this is the
+    // control that actually gets a Moon picture to a friend.
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    const shared: ShareData[] = [];
+    nav.share = async (d: ShareData) => { shared.push(d); };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Blob(["x"], { type: "image/png" })),
+    );
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({ result: result() })],
+    }));
+    renderView();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Share/ }));
+    await waitFor(() => expect(shared).toHaveLength(1));
+    expect((shared[0].files as File[])[0].name).toBe("moon.png");
+    delete nav.canShare;
+    delete nav.share;
+  });
+
+  it("shows no quick look for a capture that was never checked", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture()],
+    }));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Stack video/ })).toBeInTheDocument());
+    expect(screen.queryByText("Quick look")).toBeNull();
+  });
+
+  it("drops the quick look once the finished picture is there to show", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        result: result(),
+        quicklook: {
+          url: "/api/videos/Lunar_video/quicklook.png",
+          frame_number: 4, n_graded: 10, note: "…",
+        },
+      })],
+    }));
+    renderView();
+    await waitFor(() => expect(screen.getByText(/Stacked the sharpest/)).toBeInTheDocument());
+    // The stack is the picture — a single noisy frame beside it would only
+    // muddle which one is the result.
+    expect(screen.queryByText("Quick look")).toBeNull();
+  });
 });
 
 describe("cropping the empty sky", () => {

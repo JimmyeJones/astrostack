@@ -149,6 +149,19 @@ describe("sharePictureText", () => {
   it("never produces a bare '.jpg' filename from punctuation-only names", () => {
     expect(sharePictureText("***", null).filename).toBe("astrophoto.jpg");
   });
+
+  it("names the file for what is actually being shared", () => {
+    // A Moon/Sun still has only a PNG — sharing it called `.jpg` would confuse
+    // whatever app it lands in. The caption is unaffected by the extension.
+    const { title, filename } = sharePictureText("Moon", "1/15/2026", "png");
+    expect(filename).toBe("moon.png");
+    expect(title).toBe("Moon · 1/15/2026");
+  });
+
+  it("falls back to .jpg for an unusable extension", () => {
+    expect(sharePictureText("Moon", null, "").filename).toBe("moon.jpg");
+    expect(sharePictureText("Moon", null, "!!").filename).toBe("moon.jpg");
+  });
 });
 
 describe("shareClipText", () => {

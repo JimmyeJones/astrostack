@@ -313,3 +313,35 @@ def test_grade_only_refuses_a_video_with_too_few_frames(tmp_path):
     path = lunar_video(tmp_path / "Lunar_video.mp4", n_frames=2, w=48, h=36)
     with pytest.raises(ValueError, match="at least 3"):
         grade_video(path)
+
+
+def test_grade_hands_back_the_sharpest_frame_when_asked(tmp_path):
+    """The "quick look": the best frame itself, off the same single decode."""
+    path = lunar_video(
+        tmp_path / "Lunar_video.mp4", n_frames=12, sharp_indices=(5,), w=96, h=72,
+    )
+    graded = grade_video(path, keep_best_frame=True)
+    assert graded.best_index == 5
+    assert graded.best_index == int(np.argmax(graded.scores))
+    assert graded.best_frame is not None
+    assert graded.best_frame.shape == (72, 96, 3)
+    assert graded.best_frame.dtype == np.uint8
+    # It is genuinely that frame, not a re-decode that could drift: grading it
+    # again reproduces the frame's own score.
+    assert frame_sharpness(frame_luma(graded.best_frame)) == pytest.approx(
+        graded.scores[5], rel=1e-9,
+    )
+
+
+def test_grade_locates_the_sharpest_frame_without_holding_one(tmp_path):
+    """``keep_best_frame`` is opt-in — the index is free, the frame is not.
+
+    The stack's own grading pass must not pay a frame of memory for a picture
+    it never looks at, so the default carries the index alone.
+    """
+    path = lunar_video(
+        tmp_path / "Lunar_video.mp4", n_frames=10, sharp_indices=(3,), w=64, h=48,
+    )
+    graded = grade_video(path)
+    assert graded.best_index == 3
+    assert graded.best_frame is None
