@@ -7597,6 +7597,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+
+- **NEW IDEA (Builder 2026-08-07, spotted while building the Quick look v0.246.0) — a `grade.json` can silently
+  describe a capture that is no longer on disk, because it is keyed only by folder id.** *(Trust / friendliness —
+  PRIORITY 3; size S.)* The Seestar writes each night's Moon clip into the *same* `<Target>_video/` folder, so
+  re-recording overwrites `clip.mp4` in place while the capture id stays `Lunar_video`. A grade recorded against
+  the old clip therefore stays authoritative on the Moon & Sun page — its curve, its "keep 50%" advice, and now
+  its quick-look frame — and nothing on screen says the scores belong to a *different* recording. The quick look
+  makes this newly visible: the picture is unmistakably last night's. (v0.246.0 already replaces the frame and
+  the scores together whenever a check *is* re-run, so what is on disk is always self-consistent — this is only
+  about a check that was never re-run.) **Shape:** stamp the source file's `st_size` + `st_mtime` into
+  `VideoGradeMeta` (additive, defaulted, so an older `grade.json` reads as "unknown" and behaves exactly as it
+  does today), and have `_grade_panels` treat a mismatch as *not checked* — the panel and the quick look drop
+  out, the "Check this capture first" button comes back, and the beginner re-checks in one click rather than
+  reading advice about a clip they replaced. **Care:** unknown must mean "trust it" (never hide an existing
+  panel on upgrade), and a filesystem that reports no usable mtime must fall back to trusting it too. Testable
+  with the synthetic fixture — the v0.246.0 re-check test already writes a second capture over the first.
+
+- **NEW IDEA (Builder 2026-08-07, measured-by-inspection while building the Quick look v0.246.0) — checking a
+  Moon capture and then stacking it decodes the same video *three* times, when the second decode is pure
+  duplication.** *(Autonomy / performance — PRIORITY 2; size M; **measure the wall-clock saving first**.)* The
+  recommended beginner path is now "Check this capture" → read the advice → "Stack video". That is one decode
+  for the check's grading pass, then `stack_video`'s *own* grading pass (identical stride, identical scores —
+  `test_grade_only_scores_every_frame_without_stacking` pins that they agree exactly), then the stack pass. On a
+  multi-minute capture the redundant middle pass is a third of the wait, and it is the one the app already has
+  the answer to on disk. **Shape:** let `stack_video` accept a pre-computed `GradeResult` and have the stack job
+  pass the saved `grade.json` when it is valid for this file — which needs exactly the size/mtime stamp the
+  entry above adds, plus a match on stride and frame count, so a stale or differently-sampled grade can never
+  select the wrong frames. **Care:** the keeper set is chosen by *index into the sampled sequence*, so the
+  reused scores are only sound if the stride and the decoded frame count match what pass 2 will see — verify
+  both before trusting them, and fall back to grading normally otherwise (never guess). Memory is unaffected
+  (scores are scalars). Worth a before/after on a real-length capture before shipping: if the saving is small
+  relative to the stack pass, say so with the number and strike it.
+
 - ~~**NEW IDEA (Builder 2026-08-04, traced while auditing the stack dispatcher) — a user who saved stack defaults
   *before* `auto_reject` existed silently gets **no effective outlier rejection** on every small stack, and nothing
   anywhere says so.**~~ — **SHIPPED v0.230.1** (Builder 2026-08-04, same run/branch
