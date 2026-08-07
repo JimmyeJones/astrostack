@@ -1014,14 +1014,18 @@ def _build_output_header_meta(
     # The scale is applied per-frame, so this stamps the run-level option + the
     # (median) exposures, not a per-pixel value. Omitted (like PHOTNORM) whenever
     # nothing was actually scaled — matched exposures leave the dark unscaled.
+    # The "did it actually scale?" test is asked of the bundle itself
+    # (``dark_scaling_provenance``) rather than re-derived here: this stamp used
+    # to check only that *a* bias was loaded, but a bias whose shape doesn't
+    # match the dark can't hold the pedestal fixed, so the engine subtracts the
+    # dark unscaled — and the run then claimed "Dark scaled to sub exposure ·
+    # 30s → 10s" about a dark it hadn't touched.
     if calibration is not None and getattr(calibration, "scale_dark_to_light", False):
-        dark_exp = getattr(calibration, "dark_exposure_s", None)
-        has_bias = getattr(calibration, "bias", None) is not None
-        has_dark = getattr(calibration, "dark", None) is not None
         light_exp = exposures[len(exposures) // 2] if exposures else None
-        if (has_bias and has_dark and dark_exp and light_exp
-                and dark_exp > 0 and light_exp > 0
-                and abs(float(light_exp) / float(dark_exp) - 1.0) > 1e-3):
+        provenance = getattr(calibration, "dark_scaling_provenance", None)
+        scaled = provenance(light_exp) if callable(provenance) else None
+        if scaled is not None:
+            dark_exp, light_exp = scaled
             meta["DARKSCAL"] = ("exposure", "dark exposure-scaling mode")
             meta["DARKDEXP"] = (round(float(dark_exp), 3), "master dark exposure (s)")
             meta["DARKLEXP"] = (round(float(light_exp), 3),

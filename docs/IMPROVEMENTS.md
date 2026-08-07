@@ -75,6 +75,20 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**⭐ CALIBRATION-PROVENANCE BUG (Builder 2026-08-07, found by an engine QA pass of the dark exposure-scaling
+  path; REPRODUCED) — a run tells the owner its dark was scaled to their sub exposure when the engine subtracted it
+  unscaled.**~~ — **FIXED v0.245.4** (Builder 2026-08-07, branch `claude/gallant-galileo-hyz6ug`).
+  *(Trust / correctness of a saved artifact — the stamp is written into the output FITS.)* Exposure-scaling
+  (`dark = bias + (dark − bias)·t_sub/t_dark`) needs the master bias to be the **dark's** shape to hold the readout
+  pedestal fixed; `_dark_scaling_applies` knows that and falls back to the plain dark when it isn't. But
+  `_build_output_header_meta` stamped `DARKSCAL`/`DARKDEXP`/`DARKLEXP` on the looser "a bias is loaded" test — so a
+  wrong-sized bias produced a run that reported *"Dark scaled to sub exposure · 30s → 10s"* in Info/History while
+  every frame had the full unscaled 30 s pedestal taken off it. **Reproduced** as the regression test
+  (`test_dark_scaling_provenance_absent_when_the_bias_is_the_wrong_shape`), which fails before and passes after.
+  The stamp now asks `CalibrationMasters.dark_scaling_provenance()`, which returns non-`None` under exactly the
+  condition `_effective_dark` scales under. Full write-up (plus the two Stack-form claims fixed with it) under the
+  calibration-mismatch item in Ideas → Friendliness.
+
 - ~~**⭐ CALIBRATION-ENGINE BUG (Builder 2026-08-05, found by an engine QA pass of `seestack/calibrate/masters.py`;
   REPRODUCED) — one stray frame sorted first hijacks a whole master build, and the "master built" message says
   nothing about it.**~~ — **FIXED v0.234.2** (Builder 2026-08-05, branch `claude/relaxed-turing-k8ghhx`).
@@ -9313,8 +9327,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   size is reported, is `None` when unrecorded, and `modal_dim` ignores strays/unknowns). Upgrade-safe: two additive
   response fields + display-only frontend; no config/DB-schema/on-disk/default change and no API-shape break (an
   older client ignores the new keys; a newer client against an older backend simply can't disprove anything and flags
-  nothing). **Still open:** the narrower *bias-shape-vs-dark* inert case (a bias whose shape doesn't match the
-  **dark** it's paired with, rather than the frames) — same idea, different comparison.
+  nothing). ~~**Still open:** the narrower *bias-shape-vs-dark* inert case (a bias whose shape doesn't match the
+  **dark** it's paired with, rather than the frames) — same idea, different comparison.~~
+  **▶ SLICE (d) — the bias-shape-vs-dark case SHIPPED v0.245.4** (Builder 2026-08-07, branch
+  `claude/gallant-galileo-hyz6ug`), and chasing it turned up **a real engine bug** in the same predicate.
+  `_dark_scaling_applies` correctly requires the bias to be the **dark's** shape (it holds the readout pedestal fixed
+  while the dark current is rescaled), and falls back to subtracting the dark **unscaled** when it isn't — but two
+  places tested only "a bias is loaded":
+  **(1) the FITS provenance (the bug).** `_build_output_header_meta` (`seestack/stack/stacker.py`) stamped
+  `DARKSCAL`/`DARKDEXP`/`DARKLEXP` on that looser test, so a run whose bias couldn't scale anything still told the
+  owner *"Dark scaled to sub exposure · 30s → 10s"* in the run Info / History — about a dark the engine had
+  subtracted untouched, at full 30 s pedestal, on every frame. The stamp now asks the bundle itself via a new
+  `CalibrationMasters.dark_scaling_provenance(light_exposure_s)`, which returns non-`None` under exactly the
+  condition `_effective_dark` scales under, so the claim and the pixels can't drift again. *(Regression test fails
+  before / passes after.)*
+  **(2) the Stack form.** It said *"Dark exposure-scaling is on — this 120s dark will be scaled to match your 30s
+  subs"*, a promise the stack doesn't keep, and suppressed both the real exposure warning and the "your dark already
+  contains the bias" note. `darkScalingActive` now also requires `darkScalingBlockedNote(dark, bias)` to be null, and
+  a new yellow note names both sizes and says the dark goes in unscaled. The engine's own advisory got the same
+  treatment: its exposure warning used to end *"or turn on dark exposure-scaling (needs a master bias)"* — advice
+  the user has already taken — and now explains the shape clash instead.
+  **Also fixed alongside:** the bias slot's red *"Stacking with it will fail"* size warning was simply untrue once a
+  dark was chosen — `validate` only refuses a wrong-sized bias when it is the calibration (no dark), so the stack
+  runs and quietly ignores it. `biasSizeWarning(bias, frames, dark)` now stays silent there and lets the scaling note
+  say what the size actually decides. **Not affected:** the unattended auto-binder, which gates dark *and* bias
+  against the subs' dimensions, so anything it binds already matches. Upgrade-safe: no config/DB/on-disk/API-shape
+  change, no default flipped, and the stamp is only ever *withheld* where it was previously wrong. Tests:
+  `tests/test_output_header_meta.py` (+1 fail-before, and its fixture now builds a **real** `CalibrationMasters`
+  instead of a hand-rolled stand-in — the mock is how the stamp drifted from the pixel path in the first place),
+  `tests/test_calibrate.py` (+2 — the warning names both sizes and stops asking for something already done;
+  `dark_scaling_provenance` agrees with `_effective_dark` on all four outcomes), `calibrationFit.test.ts` (+6),
+  `Stack.test.tsx` (+1 fail-before).
   **▶ THE AFTER-THE-FACT HALF SHIPPED TOO, v0.215.1** (Builder 2026-07-30, same branch; tested). Pick-time is only
   half the story: the walk-away user never opens the Stack form, so they meet the problem as an uncalibrated result
   in History next to a library that visibly *holds* a dark. `calibration.diagnose_uncalibrated` — the

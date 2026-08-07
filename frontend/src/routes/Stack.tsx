@@ -16,7 +16,8 @@ import { backgroundModeLabel, backgroundModeNudge } from "../backgroundModeNudge
 import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import {
-  exposureMismatch, masterOptionSuffix, masterSizeWarning, tempMismatch,
+  biasSizeWarning, darkScalingBlockedNote, exposureMismatch, masterOptionSuffix,
+  masterSizeWarning, tempMismatch,
 } from "../calibrationFit";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
@@ -378,8 +379,15 @@ export function StackView() {
   // bias selected to hold the readout pedestal fixed. When that's opted in the
   // mismatch is handled, so show a reassurance instead of the warning.
   const darkExpMismatch = expMismatch(darkM?.exposure_s, subExp);
+  const biasM = masterById(values.bias_master_id);
+  // …and only when that bias can actually hold the pedestal: the engine's
+  // formula needs it to be the dark's size, and silently subtracts the dark
+  // unscaled when it isn't. Claiming a scale that won't happen is worse than the
+  // original mismatch warning, which at least tells the truth.
+  const darkScalingBlocked = darkScalingBlockedNote(darkM, biasM);
   const darkScalingActive =
-    darkExpMismatch && !!values.scale_dark_to_light && !!values.bias_master_id;
+    darkExpMismatch && !!values.scale_dark_to_light && !!values.bias_master_id
+    && !darkScalingBlocked;
   const darkWarning = darkExpMismatch && !darkScalingActive
     ? `This dark was shot at ${darkM?.exposure_s}s but your subs are ${subExp}s — a mismatched dark leaves residual thermal signal or over-subtracts. ${values.bias_master_id ? "Scale it to your sub exposure, or use" : "Add a master bias to scale it to your subs, or use"} a ${subExp}s dark.`
     : null;
@@ -423,11 +431,14 @@ export function StackView() {
   // blockers — the engine refuses the master and the whole stack fails — so they
   // read red; and the walk-away auto-stack silently skips them, which is exactly
   // the "I added darks and nothing happened" confusion worth heading off.
-  const biasM = masterById(values.bias_master_id);
   const darkSizeWarning = masterSizeWarning("dark", darkM, frameDims);
   const flatSizeWarning = masterSizeWarning("flat", flatM, frameDims);
   const flatDarkSizeWarning = masterSizeWarning("flat-dark", flatDarkM, frameDims);
-  const biasSizeWarning = masterSizeWarning("bias", biasM, frameDims);
+  // The bias is the one slot where a size clash isn't fatal: with a dark chosen
+  // it is never subtracted from the lights, so the shared "stacking will fail"
+  // line would be untrue — the scaling note above covers what its size *does*
+  // decide there.
+  const biasSizeWarn = biasSizeWarning(biasM, frameDims, darkM);
   const running = job && (job.state === "running" || job.state === "queued");
   const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
 
@@ -879,6 +890,14 @@ export function StackView() {
                     <Text size="xs">{darkScaledNote}</Text>
                   </Alert>
                 ) : null}
+                {/* Only worth saying when scaling was actually asked for — a
+                    bias that can't scale the dark is otherwise just an inert
+                    pick, which the "already contains the bias" note covers. */}
+                {values.scale_dark_to_light && darkScalingBlocked ? (
+                  <Alert color="yellow" variant="light" py={6} px="sm">
+                    <Text size="xs">{darkScalingBlocked}</Text>
+                  </Alert>
+                ) : null}
                 {darkTempWarning ? (
                   <Alert color="yellow" variant="light" py={6} px="sm">
                     <Text size="xs">{darkTempWarning}</Text>
@@ -912,9 +931,9 @@ export function StackView() {
                     onChange={(v) => set("bias_master_id", v)}
                   />
                 ) : null}
-                {biasSizeWarning ? (
+                {biasSizeWarn ? (
                   <Alert color="red" variant="light" py={6} px="sm">
-                    <Text size="xs">{biasSizeWarning}</Text>
+                    <Text size="xs">{biasSizeWarn}</Text>
                   </Alert>
                 ) : null}
                 {biasIgnoredForLights ? (
