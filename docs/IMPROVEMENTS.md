@@ -9290,6 +9290,45 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEW IDEA (Builder 2026-08-07, spotted while shipping the sharpening slice v0.247.0) — trying a different
+  sharpening strength costs a whole second decode of the capture, when the crop next to it costs none.**
+  *(Friendliness / autonomy — PRIORITY 2–3; size M.)* Sharpening is a decision you can only really make by
+  *looking at the picture* — exactly like the crop — but it was shipped as a stack-time option, so changing your
+  mind means "Stack again" and another multi-minute grade+stack pass on a long capture. The crop already solved
+  this class of problem: `crop_saved_still` slices the saved artifacts and keeps `stack-full.*` beside them so it
+  is reversible, and the page offers it *after* the picture exists, which is what makes it discoverable at all.
+  **Shape:** the same treatment — on the first sharpen, copy `stack.png`/`stack.tiff` to a `stack-soft.*` pair;
+  every later sharpen renders from *that* (never from the already-sharpened file, so changing the strength can
+  never compound), and "remove sharpening" moves them back. Then the Moon & Sun card can offer *"Bring out more
+  surface detail"* on a finished still, instantly, with an undo. **Care — the crop interaction is the whole
+  problem, so decide it before writing code:** `stack-full.*` already means "the uncropped original" and would
+  now also need to be unsharpened, or the two backups need an explicit ordering (sharpen always applied to the
+  cropped picture, cleared on uncrop). Getting this wrong loses someone's picture, so a state table first, then
+  tests for every crop×sharpen×undo path. The 8-bit PNG re-render is also a real (if small) quality loss the
+  stack-time path doesn't have — measure it on the 16-bit TIFF path and say so.
+
+- **NEW IDEA (Builder 2026-08-07, spotted while shipping the stale-grade guard v0.246.2) — the quick-look *image*
+  survives the check that owns it being ruled stale.** *(Trust — PRIORITY 3; size XS.)* v0.246.2 makes
+  `_grade_panels` drop a capture's curve and quick look once the clip on disk no longer matches the stamp in
+  `grade.json`. But `GET /api/videos/{id}/quicklook.png` answers from the file alone, so a client that already
+  holds the URL (a stale tab, a bookmark, a browser cache) still gets last night's frame served happily. Low
+  impact — nothing on the page links to it once the panel is gone, which is why it wasn't folded into that fix —
+  but it is the same dishonesty the guard exists to remove. **Shape:** have the endpoint ask
+  `video.grade_matches_source` before serving, and 404 with the same "hasn't been checked yet" line a
+  never-checked capture gets. **Care:** it needs the capture's current files, so it must handle the
+  orphaned-still case the same way the panels do — no files means nothing to disagree with, so serve it.
+
+- **NEW IDEA (Builder 2026-08-07, same run) — the Gallery's video-still card doesn't say a picture was
+  sharpened, though the Moon & Sun card does.** *(Consistency — PRIORITY 3; size XS.)* v0.247.0 records
+  `sharpen_amount` and the Moon & Sun result card renders *"Sharpening: Medium — surface detail lifted after
+  stacking"*. The Gallery lists the same stills (v0.243.0) and shares the framing copy through
+  `components/videoFraming.ts`, but carries no sharpening line — so the same picture explains itself on one
+  screen and not the other. **Shape:** move `sharpenNote` next to `cropNote` in `videoFraming.ts` (where the
+  shared-copy precedent already is) and render it on both cards. Only worth doing if the Gallery card already
+  receives the field — check before building; if it doesn't, this is a bigger change than it looks and probably
+  isn't worth it.
+
 - ~~**NEW IDEA (Builder 2026-08-04, spotted while making the night-labelling family agree) — the two recap cards
   still *say* "Last night" / "Last session" even when the night they're describing was weeks ago.**~~ —
   **SHIPPED v0.229.5** (Builder 2026-08-04, branch `claude/relaxed-turing-15aq36`). Both recap sentences now
