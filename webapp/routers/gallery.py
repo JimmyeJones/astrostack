@@ -77,8 +77,10 @@ class VideoStillItem(BaseModel):
     A video still is *not* a stack run — it has no target, no project DB, no
     stacking options and none of the per-run actions (edit, reuse settings, set
     as cover) apply — so it travels in its own list rather than being squeezed
-    into :class:`GalleryItem`. Read-only: everything here is derived from the
-    ``meta.json`` the stack already wrote.
+    into :class:`GalleryItem`. Everything here is derived from the ``meta.json``
+    the stack already wrote; the only action it carries is the framing crop,
+    because the Gallery is where a user whose source video is long gone actually
+    finds the picture.
     """
 
     capture_id: str
@@ -94,6 +96,20 @@ class VideoStillItem(BaseModel):
     #: The video file it came from, so a user with several clips can tell them apart.
     source_name: str
     preview_url: str
+    #: Framing, mirroring the same four fields on the Moon & Sun page's result so
+    #: the two surfaces can offer the identical one-click crop. ``crop_applied``
+    #: — this still was trimmed to the disk, so ``width``/``height`` are the
+    #: cropped size and ``source_*`` the stack's own. ``crop_available`` — it
+    #: wasn't, and there is enough empty sky around the subject to be worth
+    #: trimming. ``crop_restorable`` — the full frame is still saved beside it,
+    #: so the crop can be undone in a click. All additive with defaults that read
+    #: as "not cropped, nothing to offer", which is what an older still was.
+    crop_applied: bool = False
+    crop_available: bool = False
+    crop_trim_fraction: float = 0.0
+    source_width: int = 0
+    source_height: int = 0
+    crop_restorable: bool = False
 
 
 class GalleryResponse(BaseModel):
@@ -184,9 +200,14 @@ def _video_stills(request: Request) -> list[VideoStillItem]:
 
     Folded in here because the Gallery is where *every other* finished picture
     lives: before this, a beginner who stacked their first Moon picture went
-    looking for it alongside their deep-sky stacks and found nothing. It stays a
-    strictly read-only extra source — a cheap directory read that never touches
-    the Library, and one that must never break the gallery if it fails.
+    looking for it alongside their deep-sky stacks and found nothing. It is an
+    extra source that never touches the Library, and one that must never break
+    the gallery if it fails.
+
+    The framing is backfilled per still exactly as the Moon & Sun page does it
+    (:func:`webapp.video.ensure_framing_measured` — measured once, then written
+    back), so a picture made before framing existed gets the crop offer here too
+    instead of reading as "nothing to trim" because nobody ever looked.
     """
     from webapp import video
 
@@ -195,20 +216,33 @@ def _video_stills(request: Request) -> list[VideoStillItem]:
         metas = video.iter_results(settings)
     except Exception:  # noqa: BLE001 — a video-store problem must not 500 the gallery
         return []
-    return [
-        VideoStillItem(
-            capture_id=m.capture_id,
-            label=m.label,
-            kind=m.kind,
-            created_utc=m.created_utc,
-            width=m.width,
-            height=m.height,
-            n_stacked=m.n_stacked,
-            source_name=m.source_name,
-            preview_url=f"/api/videos/{m.capture_id}/preview.png",
-        )
-        for m in metas
-    ]
+    items: list[VideoStillItem] = []
+    for m in metas:
+        try:
+            meta = video.ensure_framing_measured(settings, m.capture_id, m)
+            restorable = meta.crop_applied and video.has_full_frame_backup(
+                settings, m.capture_id,
+            )
+        except Exception:  # noqa: BLE001 — one unreadable still must not hide the rest
+            meta, restorable = m, False
+        items.append(VideoStillItem(
+            capture_id=meta.capture_id,
+            label=meta.label,
+            kind=meta.kind,
+            created_utc=meta.created_utc,
+            width=meta.width,
+            height=meta.height,
+            n_stacked=meta.n_stacked,
+            source_name=meta.source_name,
+            preview_url=f"/api/videos/{meta.capture_id}/preview.png",
+            crop_applied=meta.crop_applied,
+            crop_available=meta.crop_available,
+            crop_trim_fraction=meta.crop_trim_fraction,
+            source_width=meta.source_width,
+            source_height=meta.source_height,
+            crop_restorable=restorable,
+        ))
+    return items
 
 
 class BestPicture(BaseModel):

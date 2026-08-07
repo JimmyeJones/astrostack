@@ -520,4 +520,74 @@ describe("Gallery Moon & Sun stills", () => {
     await waitFor(() => expect(screen.getByText("best RGB v2")).toBeInTheDocument());
     expect(screen.queryByRole("link", { name: /Open in Moon & Sun/ })).not.toBeInTheDocument();
   });
+
+  // The crop offer on the Gallery card. Moon & Sun lists the *captures* still in
+  // `incoming/`, so someone who has cleared the video off the NAS only ever sees
+  // their picture here — with, before this, no way to trim the empty sky.
+  it("offers the crop on an uncropped still and fires it in one click", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [],
+      videos: [{ ...still("Lunar_video"), crop_available: true, crop_trim_fraction: 0.78 }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    const crop = vi.spyOn(client.api, "cropVideoStill").mockResolvedValue({
+      crop_applied: true, crop_trim_fraction: 0.78, width: 300, height: 300,
+    } as never);
+
+    renderGallery();
+
+    // Fail-before: the Gallery card had no crop offer at all.
+    expect(await screen.findByText(/About 78% of this picture is empty sky/))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Crop it/ }));
+    await waitFor(() => expect(crop).toHaveBeenCalledWith("Lunar_video"));
+  });
+
+  it("says a still is cropped and offers to undo it", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [],
+      videos: [{
+        ...still("Lunar_video"), width: 300, height: 300,
+        crop_applied: true, crop_available: false, crop_trim_fraction: 0.62,
+        crop_restorable: true, source_width: 640, source_height: 480,
+      }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    const undo = vi.spyOn(client.api, "restoreVideoStill").mockResolvedValue({} as never);
+
+    renderGallery();
+
+    expect(await screen.findByText(/Cropped to the Moon — trimmed 62% of empty sky \(from 640×480\)\./))
+      .toBeInTheDocument();
+    // The offer is gone once it has been taken.
+    expect(screen.queryByRole("button", { name: /Crop it/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Undo crop/ }));
+    await waitFor(() => expect(undo).toHaveBeenCalledWith("Lunar_video"));
+  });
+
+  it("offers no crop on a still with nothing worth trimming, and no undo without a backup",
+    async () => {
+      vi.spyOn(client.api, "getGallery").mockResolvedValue({
+        items: [],
+        videos: [
+          { ...still("Full_video"), crop_available: false },
+          {
+            ...still("Old_crop"), crop_applied: true, crop_trim_fraction: 0.5,
+            crop_restorable: false,
+          },
+        ],
+      });
+      vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+      vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+      renderGallery();
+      await waitFor(() => expect(screen.getAllByText("Moon").length).toBe(2));
+      expect(screen.queryByRole("button", { name: /Crop it/ })).not.toBeInTheDocument();
+      // The full frame is gone (a re-stack cleared it), so undo is not offered —
+      // but the card still says what happened.
+      expect(screen.queryByRole("button", { name: /Undo crop/ })).not.toBeInTheDocument();
+      expect(screen.getByText(/Cropped to the Moon/)).toBeInTheDocument();
+    });
 });
