@@ -9848,6 +9848,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   flat imposed, and both are in the Auto recipe *and* in every built-in preset. So per-CFA flat normalisation
   ("equalize CFA") would buy the target user nothing, and adding it as a `StackOption` would be new surface with
   no measured payoff — **declined, not deferred**.
+  **Checked too, so nobody re-treads it:** the *unedited* surfaces are covered by the same mechanism.
+  `output._write_preview_png` / `_write_export_tiff` both go through `_autostretch_for_export` → `render.thumbnail
+  .autostretch`, which is the per-channel STF ("each channel is stretched independently so that **its own** robust
+  sky median lands at `target_bg`"), so the Gallery/History thumbnail a user sees before ever opening the editor
+  carries no flat cast either. The one artifact that *does* keep it is the linear master FITS — correctly, since
+  that is the un-normalised measurement.
   **What did ship: a fast guard.** `tests/test_flat_colour_cast.py` (+4, ~2 s, no stacking) pins the property the
   conclusion rests on — a per-channel gain on the linear stack is invisible in the finished picture at both cast
   strengths, the cast genuinely *is* in the linear data, and Auto still carries both normalising steps. Without
@@ -10997,6 +11003,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   encodes the *JPEG*, proven by matching the rendered QR path against the one that URL produces alone and against
   the PNG's, which differs; a viewer with no picture offers none) and `MoonSun.test.tsx` (+1 — the finished still
   opens a QR captioned for the Moon).
+  - **Follow-on worth a run (Builder 2026-08-07, the same reasoning one step further; S):** the OS **share sheet**
+    (`SharePictureButton`) is surface-agnostic in exactly the way the QR is — it fetches a URL and hands the file
+    to `navigator.share` — but the lightbox gates it on `jpegHref && shareFilename`, so a Moon/Sun still gets no
+    "Share" icon either. On a phone (where the QR is redundant with the OS sheet) that is the *only* control that
+    would help. **Care, and why it wasn't folded into v0.245.8:** the gate isn't arbitrary — the sheet uploads the
+    whole file, and a still's display PNG is several times the size of the JPEG the stack surfaces hand it, so
+    this needs a look at what a full-frame Moon PNG actually weighs before it's offered as the share path. Still
+    **not** the share *card* (see above): a filename and a caption, nothing stack-run-shaped.
+
+- **NEW IDEA (Builder 2026-08-07, spotted while adding the phone QR) — a Moon/Sun still has no JPEG at all, so
+  every "send this somewhere" path on it moves the full display PNG.** *(Friendliness / performance — PRIORITY 3;
+  size S; **measure the file size first**.)* The stack path writes a share JPEG beside every deep-sky run
+  (`write_share_jpeg`) precisely because the PNG is the wrong thing to pull over a LAN or hand to a phone; the
+  video path writes only `stack.png` + `stack.tiff`. Nothing is broken today — the QR and the download both work —
+  but the beginner's most-used file is also the heaviest one. **Shape:** write a `stack.jpg` beside the pair at
+  stack time (and backfill it, as `ensure_framing_measured` backfills framing, the first time a result is served),
+  carry it as an additive nullable `jpeg_url`, and let the lightbox's existing PNG-or-JPEG menu and the phone QR
+  prefer it exactly as they already do for a stack run. **Care:** measure a real full-frame Moon PNG first — if it
+  is already small (a Moon still is mostly black sky, which PNG compresses well) this is churn, and the honest
+  outcome is to strike it with the number. Cropping already shrinks it further.
 
 - ~~**NEW IDEA (Builder 2026-08-07, the last gap left after the Gallery crop v0.245.3 and the orphaned-still fix
   v0.245.5) — a Moon/Sun still is the only finished picture in the Gallery you can't download at full quality from
