@@ -115,6 +115,11 @@ class VideoStillItem(BaseModel):
     source_width: int = 0
     source_height: int = 0
     crop_restorable: bool = False
+    #: How hard the finished picture was sharpened after stacking (0 = not at
+    #: all), so the Gallery can explain the picture in the same words the Moon &
+    #: Sun page does. Additive with a ``0.0`` default, which is exactly what
+    #: every still made before sharpening existed was.
+    sharpen_amount: float = 0.0
 
 
 class GalleryResponse(BaseModel):
@@ -250,6 +255,7 @@ def _video_stills(request: Request) -> list[VideoStillItem]:
             source_width=meta.source_width,
             source_height=meta.source_height,
             crop_restorable=restorable,
+            sharpen_amount=meta.sharpen_amount,
         ))
     return items
 

@@ -392,6 +392,50 @@ def test_a_check_of_a_replaced_clip_stops_being_offered_as_this_captures(
     assert cap["quicklook"]["n_graded"] == 14
 
 
+def test_the_quick_look_image_itself_stops_serving_once_its_check_is_stale(
+    client, data_root,
+):
+    """The panels drop out, but the picture lives at a plain URL of its own.
+
+    A tab left open, a bookmark or a browser cache still holds
+    ``/quicklook.png`` — and until this guard it was handed last night's frame
+    quite happily, next to nothing that said so. Fails before / passes after.
+    """
+    _drop_capture(data_root)
+    job_id = client.post("/api/videos/Lunar_video/grade", json={}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    assert client.get("/api/videos/Lunar_video/quicklook.png").status_code == 200
+
+    # A different recording, same folder, same file name — and no re-check.
+    _drop_capture(data_root, n_frames=14, sharp_indices=(13,), w=48, h=36)
+
+    r = client.get("/api/videos/Lunar_video/quicklook.png")
+    assert r.status_code == 404
+    assert "hasn't been checked" in r.json()["detail"]
+
+    # ...and re-checking brings it back, so this is never a dead end.
+    job_id = client.post("/api/videos/Lunar_video/grade", json={}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    assert client.get("/api/videos/Lunar_video/quicklook.png").status_code == 200
+
+
+def test_the_quick_look_still_serves_when_the_clip_is_gone_from_incoming(
+    client, data_root,
+):
+    """Same rule the panels use: no files is nothing to disagree with.
+
+    Clearing the video off the NAS must not take the frame away — there is no
+    newer recording it could be misrepresenting.
+    """
+    clip = _drop_capture(data_root)
+    job_id = client.post("/api/videos/Lunar_video/grade", json={}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    Path(clip).unlink()
+
+    assert client.get("/api/videos/Lunar_video/quicklook.png").status_code == 200
+
+
 def test_a_check_of_the_clip_still_on_disk_keeps_its_panels(client, data_root):
     """The guard must only fire on a real mismatch — merely listing again is not one."""
     _drop_capture(data_root)

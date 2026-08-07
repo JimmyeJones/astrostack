@@ -27,7 +27,7 @@ import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
-import { cropNote, cropSuggestion } from "../components/videoFraming";
+import { cropNote, cropSuggestion, sharpenNote } from "../components/videoFraming";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 
 export type GallerySort = "newest" | "cleanest";
@@ -178,6 +178,7 @@ function VideoStillCard({ still, onView }: {
   // drift into telling the user two different things about one picture.
   const suggestCrop = cropSuggestion(still, still.kind);
   const cropped = cropNote(still, still.kind);
+  const sharpened = sharpenNote(still.sharpen_amount);
 
   return (
     <Card withBorder padding="md" radius="md">
@@ -217,6 +218,8 @@ function VideoStillCard({ still, onView }: {
           ) : null}
         </Group>
       ) : null}
+
+      {sharpened ? <Text size="xs" c="dimmed" mt={4}>{sharpened}</Text> : null}
 
       {suggestCrop ? (
         <Alert color="violet" variant="light" icon={<IconCrop size={16} />} p="xs" mt="xs">
