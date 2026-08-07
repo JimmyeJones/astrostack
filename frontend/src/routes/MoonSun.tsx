@@ -137,6 +137,12 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
   });
 
   const result = capture.result;
+  // The source clip is gone from `incoming/` — cleared off the NAS, which is
+  // exactly what the in-place crop was built to survive. The picture is still
+  // here (the backend lists the finished still anyway, so this page stays the
+  // one that owns it), but nothing that needs to decode the video can run, so
+  // the stacking half of the card is hidden rather than offered and failed.
+  const sourceGone = capture.files.length === 0;
   const suggestCrop = cropSuggestion(result, capture.kind);
   const cropped = cropNote(result, capture.kind);
 
@@ -148,9 +154,11 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
           <div style={{ minWidth: 0 }}>
             <Text fw={600} truncate>{capture.label}</Text>
             <Text size="xs" c="dimmed" truncate>
-              {capture.folder_name} · {capture.files.length}{" "}
-              {capture.files.length === 1 ? "video" : "videos"} ·{" "}
-              {fileSize(capture.total_bytes)}
+              {sourceGone
+                ? `${capture.folder_name} · video no longer in your incoming folder`
+                : `${capture.folder_name} · ${capture.files.length} `
+                  + `${capture.files.length === 1 ? "video" : "videos"} · `
+                  + fileSize(capture.total_bytes)}
             </Text>
           </div>
         </Group>
@@ -249,7 +257,14 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
         </Stack>
       ) : null}
 
-      {capture.files.length > 1 ? (
+      {sourceGone ? (
+        <Text size="xs" c="dimmed">
+          The video this came from isn't in your incoming folder any more, so it
+          can't be stacked again — your picture is safe here either way.
+        </Text>
+      ) : null}
+
+      {!sourceGone && capture.files.length > 1 ? (
         <Select
           label="Which recording?"
           size="sm"
@@ -268,63 +283,67 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
           the setting below is an informed choice rather than a guess. Once a
           still exists the result's own panel (above) is the better one to show,
           since it can mark where the cut actually fell. */}
-      {!result ? (
+      {!result && !sourceGone ? (
         <VideoSharpnessCard
           profile={capture.sharpness}
           onUseSuggestion={(pct) => setKeep(String(pct))}
         />
       ) : null}
 
-      <Select
-        label="How picky should we be?"
-        description="Seeing makes some frames much sharper than others; we keep the best and throw the rest away."
-        size="sm"
-        data={KEEP_PRESETS}
-        value={keep}
-        onChange={(v) => setKeep(v ?? DEFAULT_KEEP)}
-        allowDeselect={false}
-        mb="sm"
-        mt="sm"
-      />
+      {sourceGone ? null : (
+        <>
+          <Select
+            label="How picky should we be?"
+            description="Seeing makes some frames much sharper than others; we keep the best and throw the rest away."
+            size="sm"
+            data={KEEP_PRESETS}
+            value={keep}
+            onChange={(v) => setKeep(v ?? DEFAULT_KEEP)}
+            allowDeselect={false}
+            mb="sm"
+            mt="sm"
+          />
 
-      <Checkbox
-        label={`Crop to the ${subjectNoun(capture.kind)}`}
-        description={
-          `Trims the empty sky around it, so your picture is mostly `
-          + `${subjectNoun(capture.kind)}. Left alone if there's nothing to trim.`
-        }
-        size="sm"
-        mb="sm"
-        checked={crop}
-        onChange={(e) => setCrop(e.currentTarget.checked)}
-      />
+          <Checkbox
+            label={`Crop to the ${subjectNoun(capture.kind)}`}
+            description={
+              `Trims the empty sky around it, so your picture is mostly `
+              + `${subjectNoun(capture.kind)}. Left alone if there's nothing to trim.`
+            }
+            size="sm"
+            mb="sm"
+            checked={crop}
+            onChange={(e) => setCrop(e.currentTarget.checked)}
+          />
 
-      <Button
-        fullWidth
-        leftSection={<IconWand size={16} />}
-        onClick={() => stack.mutate({})}
-        loading={stack.isPending}
-        disabled={disabled}
-      >
-        {result ? "Stack again" : "Stack video"}
-      </Button>
+          <Button
+            fullWidth
+            leftSection={<IconWand size={16} />}
+            onClick={() => stack.mutate({})}
+            loading={stack.isPending}
+            disabled={disabled}
+          >
+            {result ? "Stack again" : "Stack video"}
+          </Button>
 
-      {/* Only worth offering while there is nothing to compare against — once a
-          still exists its own panel already answers the question. */}
-      {!result && !capture.sharpness ? (
-        <Button
-          fullWidth
-          mt="xs"
-          variant="subtle"
-          size="sm"
-          leftSection={<IconChartBar size={16} />}
-          onClick={() => grade.mutate()}
-          loading={grade.isPending}
-          disabled={disabled}
-        >
-          Check this capture first
-        </Button>
-      ) : null}
+          {/* Only worth offering while there is nothing to compare against — once a
+              still exists its own panel already answers the question. */}
+          {!result && !capture.sharpness ? (
+            <Button
+              fullWidth
+              mt="xs"
+              variant="subtle"
+              size="sm"
+              leftSection={<IconChartBar size={16} />}
+              onClick={() => grade.mutate()}
+              loading={grade.isPending}
+              disabled={disabled}
+            >
+              Check this capture first
+            </Button>
+          ) : null}
+        </>
+      )}
     </Card>
   );
 }
