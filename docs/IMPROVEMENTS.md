@@ -7598,8 +7598,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
 
-- **NEW IDEA (Builder 2026-08-07, spotted while building the Quick look v0.246.0) — a `grade.json` can silently
-  describe a capture that is no longer on disk, because it is keyed only by folder id.** *(Trust / friendliness —
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while building the Quick look v0.246.0) — a `grade.json` can silently
+  describe a capture that is no longer on disk, because it is keyed only by folder id.**~~ — **SHIPPED v0.246.2**
+  (Builder 2026-08-07, branch `claude/elegant-bohr-9kc2et`), built to the filed shape exactly.
+  `VideoGradeMeta` gained `source_size` + `source_mtime` (both additive, both defaulted to `0` — which reads as
+  *unknown*), stamped by `_video_grade_body` from the file it just finished reading. A new pure
+  `webapp.video.grade_matches_source(meta, files)` answers "does this check still describe the clip on disk?", and
+  `_grade_panels` treats a mismatch as *not checked*: the curve, the keep-% advice and the quick look all drop out
+  and the **"Check this capture first"** button comes back on its own (the frontend already gates on
+  `!capture.sharpness`), so the beginner is one click from a truthful answer instead of reading last night's
+  advice about tonight's recording. **The asymmetry the entry's "care" note asked for is the design:** the guard
+  only ever fires on a *positive* mismatch — the graded file is in the folder, both stamps read, and they
+  disagree. An un-stamped `grade.json` (every check the owner has already run), a file that isn't in the folder
+  any more, or a filesystem with no usable `stat` all count as a match, because hiding a good panel on upgrade is
+  a much worse error than showing a stale one; mtimes match within 1 s so coarse network-filesystem timestamps
+  can't invalidate a good check either. An orphaned still — video cleared off the NAS — therefore keeps its
+  panels, which is right: the check describes the clip that picture was made from. Upgrade-safe: two new
+  defaulted fields, no response shape changed, no default flipped, nothing on disk moved. **Tests (+4,
+  `tests/webapp/test_video_api.py`):** re-recording over the clip drops the stale panels and one re-check restores
+  them (fails before, passes after); listing repeatedly does *not* invalidate a good check; a `grade.json` with
+  the stamp stripped is still trusted even after the clip is replaced; and a still whose video was deleted keeps
+  its panels. *(Original spec kept below.)*
+  *(Trust / friendliness —
   PRIORITY 3; size S.)* The Seestar writes each night's Moon clip into the *same* `<Target>_video/` folder, so
   re-recording overwrites `clip.mp4` in place while the capture id stays `Lunar_video`. A grade recorded against
   the old clip therefore stays authoritative on the Moon & Sun page — its curve, its "keep 50%" advice, and now

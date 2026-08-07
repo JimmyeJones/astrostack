@@ -203,7 +203,7 @@ def _adapt_profile(profile) -> SharpnessProfileOut | None:
 
 
 def _grade_panels(
-    settings, capture_id: str,
+    settings, capture_id: str, files: list[str] | None = None,
 ) -> tuple[SharpnessProfileOut | None, QuickLookOut | None]:
     """Both halves of a grade-only pass — its profile and its sharpest frame.
 
@@ -215,9 +215,18 @@ def _grade_panels(
     there is no cut to mark and no "you kept…" clause. The quick look is offered
     only when the picture is actually on disk, so a grade recorded before it
     existed still shows its curve rather than a broken image.
+
+    ``files`` is the capture's current video files, used to check the saved
+    grade still describes one of them: the Seestar re-records into the same
+    folder, and a check of *last night's* clip must not stay on screen advising
+    on tonight's. A grade that no longer matches reads as "never checked" — the
+    panels drop out and the "Check this capture first" button comes back — which
+    is one click to a truthful answer rather than a stale one dressed as fresh.
     """
     grade = video.read_grade(settings, capture_id)
     if grade is None:
+        return None, None
+    if not video.grade_matches_source(grade, list(files or [])):
         return None, None
     profile = sharpness_profile(grade.scores, None)
     quicklook = None
@@ -293,6 +302,9 @@ def _orphaned_stills(settings, listed: set[str]) -> list[VideoCaptureOut]:
     for m in metas:
         if m.capture_id in listed:
             continue
+        # No files to compare a saved check against — the video is gone — so the
+        # grade is trusted as-is rather than hidden. It describes the clip this
+        # picture was made from, which is exactly the one the user is looking at.
         profile, quicklook = _grade_panels(settings, m.capture_id)
         out.append(VideoCaptureOut(
             id=m.capture_id,
@@ -312,7 +324,7 @@ def _orphaned_stills(settings, listed: set[str]) -> list[VideoCaptureOut]:
 
 def _capture_out(settings, cap) -> VideoCaptureOut:
     """One discovered capture's list entry, result and grade panels included."""
-    profile, quicklook = _grade_panels(settings, cap.id)
+    profile, quicklook = _grade_panels(settings, cap.id, cap.files)
     return VideoCaptureOut(
         id=cap.id,
         label=cap.label,
