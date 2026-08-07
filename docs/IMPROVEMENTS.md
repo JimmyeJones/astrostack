@@ -75,6 +75,25 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**MOON & SUN BUG (Builder 2026-08-07, found by dogfooding the Gallery crop shipped the same run; REPRODUCED) —
+  clear the video off your NAS and your Moon picture disappears from the page that owns it, taking its 16-bit TIFF,
+  its crop and its sharpness panel with it.**~~ — **FIXED v0.245.5** (Builder 2026-08-07, branch
+  `claude/gallant-galileo-hyz6ug`). *(Friendliness — PRIORITY 3.)* `/api/videos` listed **only**
+  `find_video_captures(incoming)`, which deliberately skips a folder with no readable video — right for "what can I
+  stack?", wrong for "where is my picture?". Deleting the clip is precisely the case the in-place crop was built to
+  survive (it never touches the source), and v0.245.3 put an *"Open in Moon & Sun"* button on the Gallery card, so
+  that button led to a page the picture wasn't on. The listing now appends finished stills whose capture is gone,
+  after the ones the user can act on, with an empty `files` list — which is exactly how the card tells the two apart:
+  it keeps the picture, the downloads, the crop/undo pair and the sharpness panel, and replaces the stacking half
+  with *"The video this came from isn't in your incoming folder any more, so it can't be stacked again — your
+  picture is safe here either way."* rather than offering a "Stack again" that could only fail. Best-effort: a
+  video-store problem leaves the live captures alone. Upgrade-safe: no new fields, no shape change, no default
+  flipped — an install that has never lost a clip sees the identical list. **Tests:**
+  `tests/webapp/test_video_crop.py` (+4 — a still outlives its deleted video and keeps its result, the crop still
+  works on it, a capture that *is* on disk is listed once and keeps its files, and an empty install lists nothing),
+  `MoonSun.test.tsx` (+2, one fail-before — the orphaned card keeps the picture/crop/downloads and hides the
+  stacking controls; a capture with its video still offers them).
+
 - ~~**⭐ CALIBRATION-PROVENANCE BUG (Builder 2026-08-07, found by an engine QA pass of the dark exposure-scaling
   path; REPRODUCED) — a run tells the owner its dark was scaled to their sub exposure when the engine subtracted it
   unscaled.**~~ — **FIXED v0.245.4** (Builder 2026-08-07, branch `claude/gallant-galileo-hyz6ug`).
@@ -3333,6 +3352,16 @@ sweep are now both well-hardened.)_
     `pad=SUBPIXEL_SHIFT_CAP_PX=5` window). Defensive-only: rewrite as `not (abs(dy) <= CAP and abs(dx) <= CAP)` so a NaN
     is treated as "too large" and skipped, belt-and-suspenders, if the file is touched. (Cosmetic — unreachable;
     confidence: traced.) _(Found by the 2026-07-24 align audit.)_
+  - `seestack/stack/align.py::extract_reference_patch` fills NaNs with `np.nanmedian(luma)`, which on an **all-NaN**
+    patch emits a RuntimeWarning and returns NaN — so the shared reference patch would be entirely NaN and every
+    frame's sub-pixel refine would silently correlate against nothing (each `phase_cross_correlation` returning a
+    meaningless shift, or the call failing and the frame stacking unrefined). **Unreachable in practice** — the
+    patch is the *centre* of the reference frame's own aligned array, which is finite by construction; a fully
+    uncovered centre would mean the reference didn't land on its own canvas. Defensive-only: fall back to `0.0`
+    when the median isn't finite, if the file is touched. (Cosmetic — unreachable; confidence: traced.)
+    _(Found by the 2026-08-07 align/accumulator audit, which otherwise traced clean: the windowed and full-canvas
+    accumulator adds, the min/max k-set insertion and its ±inf identities, the mosaic canvas RA-unwrap and outlier
+    passes, the photometric scale/weight composition, and the reproject inset/pad arithmetic all held.)_
   - `webapp/routers/storage.py:193` `prune_stack_runs` closes `proj` then `lib` in a **single** `finally` (not
     nested like `gallery.py`/`storage.py::get_storage`), so if `proj.close()` itself raised, `lib.close()` would
     be skipped and the Library handle would leak. Trigger is essentially unreachable (`sqlite3.Connection.close()`
@@ -9792,6 +9821,24 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **NEW IDEA (Builder 2026-08-07, spotted while auditing `seestack/calibrate/apply.py`) — a master flat built on a
+  Bayer sensor imposes its *own* illumination colour on every calibrated light, because it is normalised by one
+  global mean.** *(Image quality — PRIORITY 4; size M; **measure first, and it may well turn out to be a non-issue
+  — do not blind-flip it**.)* `CalibrationMasters.load` divides the flat by `np.nanmean(flat)` over the whole raw
+  mosaic, i.e. across R, G and B sites together, then the lights are divided by that one surface in the raw domain.
+  If the flat panel/sky was warmer than neutral, its R sites read high, so every light's R sites are divided down —
+  the flat's colour temperature is subtracted from the user's image. Siril's *"equalize CFA"* exists for exactly
+  this and normalises each Bayer channel by its own mean, which removes the vignetting/dust shape while leaving the
+  colour balance alone. **Why it may not matter here:** the effect is a single multiplicative constant per channel,
+  and the downstream gray-star colour calibration solves for exactly that — the 2026-07-26 quality audit measured it
+  recovering true channel scales well — so the residual could be nil. **Method before building:** take a synthetic
+  OSC scene with known true colour, apply a flat with a deliberate per-channel gain (say R +8 %, B −5 %), run the
+  real chain `run_stack → get_proxy → auto_recipe → apply_recipe`, and measure the finished picture's star colour
+  against the no-flat control. If the cast survives, add per-CFA-channel flat normalisation as an **off-by-default**
+  `StackOption` (it moves pixels for anyone who already uses flats, and a Seestar owner usually has none — so it
+  must be opt-in with a plain-language line), and pin the byte-for-byte invariance of the default path. If the cast
+  doesn't survive, strike this entry with the measurement so nobody re-treads it.
+
 - ~~**NEW IDEA (Builder 2026-08-05, spotted while wiring the seam note's new "Open the editor" link) — the editor's
   background tools can't actually see the panel joins we just sent the beginner there to fix.**~~ — **ALREADY
   SHIPPED; struck as stale** (Builder 2026-08-05, verified in-repo, no code change needed). Option **(a)**, the
@@ -10901,6 +10948,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW IDEA (Builder 2026-08-07, the last gap left after the Gallery crop v0.245.3 and the orphaned-still fix
+  v0.245.5) — a Moon/Sun still is the only finished picture in the Gallery you can't download at full quality from
+  the Gallery.** *(Friendliness — PRIORITY 3; size S.)* A stack run's lightbox offers preview PNG, share JPEG,
+  full-res PNG and the raw FITS; a video still's offers the preview PNG alone, even though `download.tiff` (16-bit)
+  has existed since the feature shipped and the endpoint doesn't care which page asks. A beginner who wants to send
+  their sharpest Moon somewhere, or open it in another app, has to notice that a *different* page holds the good
+  copy. **Slice:** carry `tiff_url` on `VideoStillItem` (additive, already on the meta side as
+  `/api/videos/{id}/download.tiff`) and pass it to `ImageLightbox` in the slot the stack lightbox uses for its raw
+  download, wording it "16-bit TIFF" exactly as Moon & Sun does. **Care:** don't invent a *share* path for a still —
+  the share card machinery is stack-run-shaped (target name, integration, run id) and giving a video still a
+  half-filled version of it would be worse than not offering it.
 
 - ~~**NEW IDEA (Builder 2026-08-06, filed while shipping the "Crop to the Moon" v0.244.0) — cropping an existing
   still shouldn't cost a whole re-stack.**~~ — **SHIPPED v0.245.0** (Builder 2026-08-06, branch

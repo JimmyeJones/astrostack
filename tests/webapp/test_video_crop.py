@@ -417,3 +417,59 @@ def test_a_still_whose_framing_cannot_be_read_does_not_break_the_gallery(
     assert still["label"] == "Moon"
     assert still["crop_available"] is False
     assert still["crop_restorable"] is False
+
+
+# --- a still that outlived its video --------------------------------------
+#
+# `find_video_captures` skips a folder with no readable video — right for "what
+# can I stack?", wrong for "where is my picture?". Clearing the clip off the NAS
+# is the case the in-place crop exists for, and the Gallery card points here, so
+# a still whose source is gone must still have a home on this page.
+
+
+def _forget_the_video(data_root: Path, capture_id: str = "Lunar_video") -> None:
+    """What a user does when the NAS fills up: delete the source clip."""
+    import shutil
+
+    shutil.rmtree(Path(data_root) / "incoming" / capture_id)
+
+
+def test_a_still_is_still_listed_after_its_video_is_deleted(client, data_root):
+    _write_still(data_root)
+    _forget_the_video(data_root)
+
+    (cap,) = client.get("/api/videos").json()["captures"]
+    assert cap["id"] == "Lunar_video"
+    assert cap["label"] == "Moon"
+    # No source to stack again — which is how the page knows to hide the
+    # stacking controls rather than offer a button that can only fail.
+    assert cap["files"] == []
+    assert cap["total_bytes"] == 0
+    # …but the picture, and everything that acts on it, is intact.
+    assert cap["result"]["width"] == 64
+    assert cap["result"]["crop_available"] is True
+    assert client.get("/api/videos/Lunar_video/preview.png").status_code == 200
+
+
+def test_the_crop_still_works_on_a_still_whose_video_is_gone(client, data_root):
+    """The whole point of cropping the saved artifacts: it never needs the source."""
+    _write_still(data_root)
+    _forget_the_video(data_root)
+
+    r = client.post("/api/videos/Lunar_video/crop")
+    assert r.status_code == 200, r.text
+    assert r.json()["crop_applied"] is True
+    (cap,) = client.get("/api/videos").json()["captures"]
+    assert cap["result"]["crop_restorable"] is True
+
+
+def test_a_capture_with_its_video_is_listed_once_and_keeps_its_files(client, data_root):
+    """The extra source must not double-list a capture that is still on disk."""
+    _write_still(data_root)
+
+    (cap,) = client.get("/api/videos").json()["captures"]
+    assert [f["name"] for f in cap["files"]] == ["clip.mp4"]
+
+
+def test_an_install_with_no_videos_and_no_stills_lists_nothing(client):
+    assert client.get("/api/videos").json()["captures"] == []

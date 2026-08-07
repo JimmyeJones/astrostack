@@ -217,6 +217,45 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
     )
 
 
+def _orphaned_stills(settings, listed: set[str]) -> list[VideoCaptureOut]:
+    """Finished stills whose source video is no longer in ``incoming/``.
+
+    ``find_video_captures`` deliberately skips a folder with no readable video —
+    right for "what can I stack?", wrong for "where is my picture?". Clearing the
+    clip off the NAS is the case the in-place crop was built for (it never needs
+    the source), and the Gallery card points here, so a still that outlived its
+    video must still have a home on this page: without it that button leads to a
+    page the picture isn't on, and its 16-bit TIFF, its crop and its sharpness
+    panel all become unreachable.
+
+    Listed last, after the captures the user can actually act on, and with an
+    empty ``files`` list — which is exactly how the page tells the two apart and
+    hides the stacking controls. Best-effort: a video-store problem leaves the
+    live captures alone rather than failing the page.
+    """
+    try:
+        metas = video.iter_results(settings)
+    except Exception:  # noqa: BLE001 — never fail the page over the extra source
+        return []
+    out: list[VideoCaptureOut] = []
+    for m in metas:
+        if m.capture_id in listed:
+            continue
+        out.append(VideoCaptureOut(
+            id=m.capture_id,
+            label=m.label,
+            kind=m.kind,
+            # The result folder's own name — the same id every ``/api/videos/{id}``
+            # route resolves, so the card's actions keep working.
+            folder_name=m.capture_id,
+            files=[],
+            total_bytes=0,
+            result=_result_out(settings, m.capture_id),
+            sharpness=_grade_out(settings, m.capture_id),
+        ))
+    return out
+
+
 @router.get("/api/videos", response_model=VideoListOut)
 def list_videos(request: Request) -> VideoListOut:
     settings = deps.get_settings(request)
@@ -237,6 +276,7 @@ def list_videos(request: Request) -> VideoListOut:
         )
         for cap in find_video_captures(incoming)
     ]
+    captures.extend(_orphaned_stills(settings, {c.id for c in captures}))
     return VideoListOut(
         available=available,
         hint=None if available else FFMPEG_MISSING_HINT,
