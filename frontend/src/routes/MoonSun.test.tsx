@@ -277,6 +277,29 @@ describe("MoonSunView", () => {
     expect(screen.getByText(/It's one frame, so it's noisy/)).toBeInTheDocument();
   });
 
+  it("offers the OS share sheet beside the picture downloads", async () => {
+    // Fail-before: the row had PNG / TIFF / "To phone" and no Share. On a
+    // phone the QR is redundant with the OS's own sheet, so this is the
+    // control that actually gets a Moon picture to a friend.
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    const shared: ShareData[] = [];
+    nav.share = async (d: ShareData) => { shared.push(d); };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Blob(["x"], { type: "image/png" })),
+    );
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({ result: result() })],
+    }));
+    renderView();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Share/ }));
+    await waitFor(() => expect(shared).toHaveLength(1));
+    expect((shared[0].files as File[])[0].name).toBe("moon.png");
+    delete nav.canShare;
+    delete nav.share;
+  });
+
   it("shows no quick look for a capture that was never checked", async () => {
     vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
       captures: [capture()],

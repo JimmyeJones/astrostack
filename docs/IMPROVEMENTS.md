@@ -11095,18 +11095,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   encodes the *JPEG*, proven by matching the rendered QR path against the one that URL produces alone and against
   the PNG's, which differs; a viewer with no picture offers none) and `MoonSun.test.tsx` (+1 — the finished still
   opens a QR captioned for the Moon).
-  - **Follow-on worth a run (Builder 2026-08-07, the same reasoning one step further; S):** the OS **share sheet**
-    (`SharePictureButton`) is surface-agnostic in exactly the way the QR is — it fetches a URL and hands the file
-    to `navigator.share` — but the lightbox gates it on `jpegHref && shareFilename`, so a Moon/Sun still gets no
-    "Share" icon either. On a phone (where the QR is redundant with the OS sheet) that is the *only* control that
-    would help. **Care, and why it wasn't folded into v0.245.8:** the gate isn't arbitrary — the sheet uploads the
-    whole file, and a still's display PNG is several times the size of the JPEG the stack surfaces hand it, so
-    this needs a look at what a full-frame Moon PNG actually weighs before it's offered as the share path. Still
-    **not** the share *card* (see above): a filename and a caption, nothing stack-run-shaped.
+  - ~~**Follow-on worth a run (Builder 2026-08-07, the same reasoning one step further; S):** the OS **share sheet**
+    (`SharePictureButton`) is surface-agnostic in exactly the way the QR is … but the lightbox gates it on
+    `jpegHref && shareFilename`, so a Moon/Sun still gets no "Share" icon either.~~ — **SHIPPED v0.246.0**
+    (Builder 2026-08-07, branch `claude/elegant-bohr-dobfg3`). **The care note's measurement was made first, and
+    it cleared the gate:** a full-frame stacked Moon still, rendered through the app's own
+    `normalize_for_display` + `write_full_res_png` at 1920×1080 (the Seestar's video size, so this is the
+    realistic ceiling) with the residual noise a 30-frame lucky stack leaves, weighs **0.99 MB** as PNG against
+    **0.09 MB** as the share JPEG. ~1 MB is an entirely ordinary thing to hand a share sheet over a LAN, so the
+    control is now gated on the *picture* (`jpegHref ?? downloadHref`) exactly as the QR already was — the small
+    JPEG still wins wherever one exists, and a PNG-only surface shares its PNG rather than losing the control.
+    Wired on both surfaces that hold a still: the Gallery's fullscreen viewer and the Moon & Sun card's own
+    download row. One detail beyond the spec: `sharePictureText` gained an optional `ext` (default `"jpg"`, so
+    every existing caller is byte-identical), because a PNG arriving named `.jpg` confuses the app it lands in —
+    the still shares as `moon.png`. Still **not** the share *card*, as the entry asks: a filename and a caption,
+    nothing stack-run-shaped. Frontend-only; no API, schema, config, endpoint or default change, and the control
+    renders nothing on a browser without file-share support, so a desktop sees the row it always saw.
+    **Tests:** `share.test.ts` (+2 — the extension names the file and a blank/punctuation one falls back to
+    `.jpg`), `ImageLightbox.test.tsx` (+2, both fail-before — a PNG-only surface shares its PNG under the right
+    filename; a surface with both still fetches the JPEG), `Gallery.test.tsx` (+1, fail-before) and
+    `MoonSun.test.tsx` (+1, fail-before).
 
-- **NEW IDEA (Builder 2026-08-07, spotted while adding the phone QR) — a Moon/Sun still has no JPEG at all, so
-  every "send this somewhere" path on it moves the full display PNG.** *(Friendliness / performance — PRIORITY 3;
-  size S; **measure the file size first**.)* The stack path writes a share JPEG beside every deep-sky run
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while adding the phone QR) — a Moon/Sun still has no JPEG at all, so
+  every "send this somewhere" path on it moves the full display PNG.**~~ — **CLOSED, NOT BUILT: measured, and the
+  number says it would be churn** (Builder 2026-08-07, branch `claude/elegant-bohr-dobfg3`). The entry's own care
+  note asked for the measurement first, so here it is: a full-frame stacked Moon still at **1920×1080** — the
+  Seestar's video size, i.e. the realistic ceiling — rendered through the shipping
+  `normalize_for_display` → `write_full_res_png` path, carrying the residual noise a 30-frame lucky stack leaves,
+  is **0.99 MB** as PNG against **0.09 MB** as the share JPEG (≈11×). The ratio is real, but the *absolute* size
+  is the number that decides it: **~1 MB is unremarkable** to pull over a LAN or hand to a phone, and the
+  suspicion behind this entry — that the PNG was too heavy to be the share path — is exactly what the
+  measurement disproves. Building it would cost a new on-disk artifact, a nullable field, a backfill path for
+  every existing still and a fourth download control, to save under a megabyte on a click a user makes once per
+  picture. **So the honest outcome is to strike it with the number**, per AGENTS.md §2 — and the thing it was
+  really wanted for (the share sheet, gated on the PNG's weight) shipped **without** it in v0.246.0, above.
+  Re-open only if Seestar captures ever get much larger than 1080p. *(Original spec kept below.)*
+  *(Friendliness / performance — PRIORITY 3; size S; **measure the file size first**.)* The stack path writes a share JPEG beside every deep-sky run
   (`write_share_jpeg`) precisely because the PNG is the wrong thing to pull over a LAN or hand to a phone; the
   video path writes only `stack.png` + `stack.tiff`. Nothing is broken today — the QR and the download both work —
   but the beginner's most-used file is also the heaviest one. **Shape:** write a `stack.jpg` beside the pair at
