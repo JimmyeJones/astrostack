@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from seestack.video.detail import SHARPEN_MAX
 from seestack.video.discover import find_video_capture, find_video_captures
 from seestack.video.ffmpeg import ffmpeg_available
 from seestack.video.quality import quicklook_note, sharpness_profile
@@ -121,6 +122,10 @@ class VideoResultOut(BaseModel):
     #: True when this still was cropped in place and its full frame is still
     #: saved beside it, so the crop can be undone in one click.
     crop_restorable: bool = False
+    #: How hard this picture was sharpened after stacking (0 = not at all).
+    #: Additive with a neutral default, so a still made before sharpening
+    #: existed reads exactly as what it is: unsharpened.
+    sharpen_amount: float = 0.0
 
 
 class VideoCaptureOut(BaseModel):
@@ -165,6 +170,11 @@ class VideoStackRequest(BaseModel):
     #: Off by default: an omitted field must keep giving the full frame a
     #: previous version produced.
     crop: bool = False
+    #: How hard to sharpen the finished picture. Zero — no sharpening at all —
+    #: is the default for the same reason: an omitted field must reproduce the
+    #: picture the previous version made. Bounded to what the engine offers, so
+    #: a stray value fails here with a clear 422 rather than mid-job.
+    sharpen: float = Field(default=0.0, ge=0.0, le=SHARPEN_MAX)
 
 
 def _size_of(path: str) -> int:
@@ -203,7 +213,7 @@ def _adapt_profile(profile) -> SharpnessProfileOut | None:
 
 
 def _grade_panels(
-    settings, capture_id: str,
+    settings, capture_id: str, files: list[str] | None = None,
 ) -> tuple[SharpnessProfileOut | None, QuickLookOut | None]:
     """Both halves of a grade-only pass — its profile and its sharpest frame.
 
@@ -215,9 +225,18 @@ def _grade_panels(
     there is no cut to mark and no "you kept…" clause. The quick look is offered
     only when the picture is actually on disk, so a grade recorded before it
     existed still shows its curve rather than a broken image.
+
+    ``files`` is the capture's current video files, used to check the saved
+    grade still describes one of them: the Seestar re-records into the same
+    folder, and a check of *last night's* clip must not stay on screen advising
+    on tonight's. A grade that no longer matches reads as "never checked" — the
+    panels drop out and the "Check this capture first" button comes back — which
+    is one click to a truthful answer rather than a stale one dressed as fresh.
     """
     grade = video.read_grade(settings, capture_id)
     if grade is None:
+        return None, None
+    if not video.grade_matches_source(grade, list(files or [])):
         return None, None
     profile = sharpness_profile(grade.scores, None)
     quicklook = None
@@ -266,6 +285,7 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
         crop_restorable=(
             meta.crop_applied and video.has_full_frame_backup(settings, capture_id)
         ),
+        sharpen_amount=meta.sharpen_amount,
     )
 
 
@@ -293,6 +313,9 @@ def _orphaned_stills(settings, listed: set[str]) -> list[VideoCaptureOut]:
     for m in metas:
         if m.capture_id in listed:
             continue
+        # No files to compare a saved check against — the video is gone — so the
+        # grade is trusted as-is rather than hidden. It describes the clip this
+        # picture was made from, which is exactly the one the user is looking at.
         profile, quicklook = _grade_panels(settings, m.capture_id)
         out.append(VideoCaptureOut(
             id=m.capture_id,
@@ -312,7 +335,7 @@ def _orphaned_stills(settings, listed: set[str]) -> list[VideoCaptureOut]:
 
 def _capture_out(settings, cap) -> VideoCaptureOut:
     """One discovered capture's list entry, result and grade panels included."""
-    profile, quicklook = _grade_panels(settings, cap.id)
+    profile, quicklook = _grade_panels(settings, cap.id, cap.files)
     return VideoCaptureOut(
         id=cap.id,
         label=cap.label,
@@ -391,6 +414,7 @@ def stack_one_video(
         file_name=req.file_name,
         align=req.align,
         crop=req.crop,
+        sharpen=req.sharpen,
     )
     return {"job_id": job.id}
 
