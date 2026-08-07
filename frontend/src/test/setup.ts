@@ -42,3 +42,10 @@ class ResizeObserver {
   disconnect() {}
 }
 window.ResizeObserver = ResizeObserver as unknown as typeof window.ResizeObserver;
+
+// ...and `Element.scrollIntoView`, which jsdom also doesn't implement. Mantine's
+// Combobox (behind every `Select`) calls it on a timer after the dropdown opens,
+// so without this a test that picks an option throws *after* the test has
+// finished — an unhandled error vitest reports separately from the assertions,
+// and which can turn a green run red.
+Element.prototype.scrollIntoView = function scrollIntoView() {};

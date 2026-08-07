@@ -465,6 +465,100 @@ def test_grading_a_file_that_is_not_in_the_folder_is_rejected(client, data_root)
     assert "not a video in this capture folder" in r.json()["detail"]
 
 
+def _detail_energy(png_bytes: bytes) -> float:
+    """How much fine structure a saved picture carries (mean squared Laplacian)."""
+    from io import BytesIO
+
+    import numpy as np
+    from PIL import Image
+    from scipy.ndimage import laplace
+
+    with Image.open(BytesIO(png_bytes)) as img:
+        arr = np.asarray(img.convert("L"), dtype=np.float32)
+    return float(np.mean(laplace(arr) ** 2))
+
+
+def _stack(client, *, capture_id: str = "Lunar_video", **body) -> dict:
+    body.setdefault("keep_percent", 50)
+    job_id = client.post(f"/api/videos/{capture_id}/stack", json=body).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    return client.get("/api/videos").json()["captures"][0]
+
+
+def test_sharpening_brings_out_the_surface_detail_a_stack_softens(client, data_root):
+    """A lucky stack is an average, and averaging softens.
+
+    The editor can't open a Moon still, so without this the picture the beginner
+    downloads is the soft one.
+    """
+    _drop_capture(data_root, n_frames=12, sharp_indices=(1, 4, 7, 10))
+    plain = _stack(client)
+    assert plain["result"]["sharpen_amount"] == 0.0
+    soft_png = client.get("/api/videos/Lunar_video/preview.png").content
+
+    sharpened = _stack(client, sharpen=1.2)
+    assert sharpened["result"]["sharpen_amount"] == pytest.approx(1.2)
+    sharp_png = client.get("/api/videos/Lunar_video/preview.png").content
+
+    assert _detail_energy(sharp_png) > _detail_energy(soft_png)
+    # It is still an ordinary picture at the same size, not a clipped mess.
+    assert sharpened["result"]["width"] == plain["result"]["width"]
+    assert sharpened["result"]["height"] == plain["result"]["height"]
+    assert client.get("/api/videos/Lunar_video/download.tiff").status_code == 200
+
+
+def test_sharpening_is_opt_in_so_an_omitted_field_changes_nothing(client, data_root):
+    """Upgrade safety: the picture an existing install gets must not move."""
+    _drop_capture(data_root)
+    _stack(client)
+    omitted = client.get("/api/videos/Lunar_video/preview.png").content
+
+    cap = _stack(client, sharpen=0)
+    explicit_zero = client.get("/api/videos/Lunar_video/preview.png").content
+
+    assert explicit_zero == omitted
+    assert cap["result"]["sharpen_amount"] == 0.0
+
+
+def test_a_silly_sharpen_amount_is_rejected_before_the_job_starts(client, data_root):
+    _drop_capture(data_root)
+    for amount in (-0.5, 9.0):
+        r = client.post(
+            "/api/videos/Lunar_video/stack",
+            json={"keep_percent": 50, "sharpen": amount},
+        )
+        assert r.status_code == 422, amount
+
+
+def test_a_still_stacked_before_sharpening_existed_reads_as_unsharpened(
+    client, data_root,
+):
+    import json
+
+    from webapp import video as videomod
+
+    _drop_capture(data_root)
+    _stack(client)
+    meta_path = data_root / "video" / "Lunar_video" / videomod.META_NAME
+    raw = json.loads(meta_path.read_text())
+    del raw["sharpen_amount"]
+    meta_path.write_text(json.dumps(raw))
+
+    cap = client.get("/api/videos").json()["captures"][0]
+    assert cap["result"]["sharpen_amount"] == 0.0
+
+
+def test_a_sharpened_still_can_still_be_cropped_to_the_disk(client, data_root):
+    """Sharpening happens on the whole frame, before any crop — the two compose."""
+    _drop_capture(data_root, n_frames=12, w=160, h=120)
+    cap = _stack(client, sharpen=0.6, crop=True)
+    result = cap["result"]
+    assert result["sharpen_amount"] == pytest.approx(0.6)
+    assert result["crop_applied"] is True
+    assert result["width"] < result["source_width"]
+    assert client.get("/api/videos/Lunar_video/preview.png").status_code == 200
+
+
 def test_a_full_frame_still_offers_to_crop_the_empty_sky(client, data_root):
     """The Seestar frames the Moon generously — the finished still should say so.
 

@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from seestack.stack.output import write_full_res_png
+from seestack.video.detail import sharpen_still
 from seestack.video.discover import VideoCapture, find_video_capture
 from seestack.video.ffmpeg import ffmpeg_available, probe_video
 from seestack.video.framing import crop_to_disk, measure_framing
@@ -120,6 +121,11 @@ class VideoStackMeta:
     #: is False because nobody ever looked, not because there is nothing to trim.
     #: :func:`ensure_framing_measured` tells those two apart and fills it in.
     crop_measured: bool = False
+    #: How hard this still was sharpened after stacking (0 = not at all, which is
+    #: the default and what every ``meta.json`` written before sharpening existed
+    #: reads as). Recorded so the picture can say so rather than leaving the owner
+    #: wondering why one Moon looks crisper than the last.
+    sharpen_amount: float = 0.0
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -596,6 +602,7 @@ def submit_video_stack(
     file_name: str | None = None,
     align: bool = True,
     crop: bool = False,
+    sharpen: float = 0.0,
 ) -> Job:
     """Enqueue a lucky-imaging stack of one video capture."""
 
@@ -603,7 +610,7 @@ def submit_video_stack(
         return _video_stack_body(
             settings, job, capture_id,
             keep_percent=keep_percent, file_name=file_name, align=align,
-            crop=crop,
+            crop=crop, sharpen=sharpen,
         )
 
     return jm.submit(JOB_KIND, body, target=capture_id)
@@ -755,6 +762,7 @@ def _video_stack_body(
     file_name: str | None,
     align: bool,
     crop: bool = False,
+    sharpen: float = 0.0,
 ) -> dict[str, Any]:
     capture, source = _resolve_source(settings, capture_id, file_name)
     job.set_progress("probe", 0, 0, f"Reading {Path(source).name}")
@@ -783,9 +791,17 @@ def _video_stack_body(
 
     job.set_progress("save", 0, 0, "Saving your picture")
     display = normalize_for_display(result.image)
+    # Stacking is an average, and averaging is a low-pass filter — so the last
+    # step of every planetary workflow is a sharpen. Done on the *whole* frame,
+    # before any crop, so every pixel is sharpened against its real neighbours
+    # rather than against a reflected crop edge. A zero amount returns the array
+    # untouched, so the default path is byte-for-byte the render it always was.
+    display = sharpen_still(display, sharpen)
     # Framing is measured on the *display-rendered* picture and applied after it,
     # so the tone mapping still sees the whole frame: cropping changes what is in
-    # the picture, never how bright it is.
+    # the picture, never how bright it is. Measuring the sharpened picture is
+    # deliberate — it is the one saved to disk, so a crop offered now and a crop
+    # taken later from the saved artifacts see the same thing.
     warnings = list(result.warnings)
     display, framing = _apply_framing(display, crop, capture.label, warnings)
 
@@ -826,6 +842,7 @@ def _video_stack_body(
         # The framing *was* looked at here, whatever it found — so this still
         # never needs the one-off backfill in ``ensure_framing_measured``.
         crop_measured=True,
+        sharpen_amount=float(sharpen),
     )
     _write_meta(out_dir, meta)
     return {
