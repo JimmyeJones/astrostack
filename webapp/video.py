@@ -170,6 +170,16 @@ def has_result(settings: Settings, capture_id: str) -> bool:
     return (result_dir(settings, capture_id) / PNG_NAME).is_file()
 
 
+def has_tiff(settings: Settings, capture_id: str) -> bool:
+    """True when the 16-bit TIFF of this still is on disk.
+
+    Every still stacked since the feature shipped has one, but a half-written
+    result can have the PNG without it — so a surface that *offers* the TIFF
+    download asks first rather than handing the user a link that 404s.
+    """
+    return (result_dir(settings, capture_id) / TIFF_NAME).is_file()
+
+
 def iter_results(settings: Settings) -> list[VideoStackMeta]:
     """Every finished video still on disk, newest first.
 

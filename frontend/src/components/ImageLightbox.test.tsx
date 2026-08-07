@@ -127,6 +127,15 @@ describe("ImageLightbox", () => {
     expect(screen.getByLabelText("Download raw data")).toHaveAttribute("href", "/api/run/1/fits");
   });
 
+  it("names the secondary download whatever the surface calls it", () => {
+    // A Moon/Sun still's heavier file is a 16-bit TIFF, not a FITS — calling it
+    // "raw data (FITS)" there would be plainly wrong.
+    renderLightbox({ rawHref: "/api/videos/v/download.tiff", rawLabel: "16-bit TIFF" });
+    expect(screen.getByLabelText("Download 16-bit TIFF"))
+      .toHaveAttribute("href", "/api/videos/v/download.tiff");
+    expect(screen.queryByLabelText("Download raw data")).not.toBeInTheDocument();
+  });
+
   it("renders a toolbarExtra control in the toolbar when given", () => {
     renderLightbox({ toolbarExtra: <button type="button">Wallpaper</button> });
     expect(screen.getByRole("button", { name: "Wallpaper" })).toBeInTheDocument();

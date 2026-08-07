@@ -638,15 +638,17 @@ export function GalleryView() {
       />
 
       {/* Moon/Sun stills get the same viewer, offering only what the video store
-          actually holds: the display-rendered PNG. There is no FITS, no JPEG and
-          no full-res render behind a video still, so those controls stay absent
-          rather than being offered and broken — the 16-bit TIFF lives one click
-          away on the Moon & Sun page. */}
+          actually holds: the display-rendered PNG plus the 16-bit TIFF beside it,
+          worded exactly as Moon & Sun words it. There is no FITS, no JPEG and no
+          full-res render behind a video still, so those controls stay absent
+          rather than being offered and broken. */}
       <ImageLightbox
         src={viewingStill ? videoPreviewSrc(viewingStill) : null}
         title={viewingStill
           ? `${viewingStill.label} · ${viewingStill.source_name}` : undefined}
         downloadHref={viewingStill?.preview_url}
+        rawHref={viewingStill?.tiff_url ?? undefined}
+        rawLabel="16-bit TIFF"
         onClose={() => setViewingStill(null)}
       />
     </Stack>
