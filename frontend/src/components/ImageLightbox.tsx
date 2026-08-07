@@ -289,7 +289,12 @@ export function ImageLightbox({
               url={jpegHref} filename={shareFilename} title={shareTitle} text={shareText} iconOnly
             />
           ) : null}
-          {jpegHref ? <ScanToPhoneButton url={jpegHref} iconOnly /> : null}
+          {/* "Get it on your phone" needs nothing but a URL, so it follows the
+              picture rather than the JPEG: the small share-friendly JPEG is
+              preferred when the surface has one, and a surface that only holds a
+              PNG (a Moon/Sun still) gets the QR too rather than nothing. */}
+          {jpegHref ?? downloadHref
+            ? <ScanToPhoneButton url={(jpegHref ?? downloadHref)!} iconOnly /> : null}
           {rawHref ? (
             <Tooltip label={`Download ${rawLabel ?? "raw data (FITS)"}`}>
               <ActionIcon size="lg" variant="subtle" color="gray"
