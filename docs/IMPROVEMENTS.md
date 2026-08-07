@@ -49,10 +49,38 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🔒⭐⭐ OWNER REQUIREMENT (2026-08-07) — add an automated SAFETY NET that fails CI if any code path can delete,
-  move, rename or overwrite a file under `incoming/`.** *(Data-integrity / regression prevention — NOT a current
-  defect; the audit below found the app clean today. Size S–M. This outranks feature work: the downside is
-  unrecoverable.)* **Why this is the highest-stakes rule in the repo:** the owner's **raw subs live in `incoming/`
+- ~~**🔒⭐⭐ OWNER REQUIREMENT (2026-08-07) — add an automated SAFETY NET that fails CI if any code path can delete,
+  move, rename or overwrite a file under `incoming/`.**~~ — **SHIPPED v0.247.1** (Builder 2026-08-07, branch
+  `claude/elegant-bohr-izzmou`). *(Data-integrity / regression prevention.)* `tests/webapp/test_incoming_readonly_guard.py`
+  builds all three suggested layers, and **each was proved by mutation** rather than assumed:
+  1. **Behavioural** — a decoy incoming tree (the fixture's two Seestar target folders plus an `M 51_sub/` capture
+     folder, a bare on-device `M 51/` output folder, a stray `.txt`, a loose top-level sub and, when ffmpeg is
+     present, a lunar clip), snapshotted as **size + sha256 + mtime_ns per file plus the directory listing**, then
+     driven through scan → ingest → QC → `process` (stack), sample-data load *and* remove, every `/cache/clear`
+     stage, `stack-runs/prune`, target merge, `DELETE /api/targets/{safe}?remove_files=true`, `reprocess-all` and
+     the whole Moon & Sun grade → stack → crop → uncrop path — then asserted byte-for-byte unchanged, and re-scanned
+     to prove the library is still rebuildable from it. **Stage-1 caching is switched ON in that test**
+     (`copy_to_cache` defaults to `False`, so the branch that actually *copies each source frame* — the one a
+     "move it instead, we already have a copy" optimisation would live in — was otherwise never exercised).
+  2. **A call-level spy** (`_IncomingSentinel`) wrapping `os.remove/unlink/rmdir/truncate`, `os.rename/replace`,
+     `Path.unlink/rmdir/rename/replace`, `shutil.move/rmtree/copy/copy2/copyfile` for the duration of every test
+     above, failing on any call whose **fully-resolved** path (symlinks and `..` collapsed, so a symlinked NAS
+     mount is not a way around it) lands inside incoming. It also flags a *destination* inside incoming that
+     already exists, so a silent `os.replace`/`copy2` clobber counts as a violation too. The one documented
+     exception is a `*.part` sidecar — the temp each upload creates, owns and removes within its own request.
+  3. **Source backstops** — `ingest.py` must still contain `shutil.copy2(` and must contain no move/rename/unlink
+     call at all; `scanner.py` likewise.
+  Plus a **meta-test that the sentinel itself fires** (deleting a decoy is caught; deleting app-owned storage and a
+  `.part` sidecar is not), so a spy that quietly stopped wrapping anything can't leave the whole file green while
+  enforcing nothing. **Mutation-verified:** turning ingest's `copy2` into `shutil.move` fails layers 1 *and* 3
+  (9 files "VANISHED"), and a simulated `unlink(missing_ok=True)` of a *non-existent* path under incoming — invisible
+  to any snapshot — is caught by layer 2. Also shipped as the entry asked: the Storage page now says in plain words
+  that nothing on it touches your incoming folder, that AstroStack only ever reads and copies your originals, and
+  that tidying that folder is yours to do (`Storage.test.tsx`, +1). Test-only + one copy paragraph: no engine,
+  API, schema, config, on-disk or default change.
+
+  *(Original spec kept below for provenance.)*
+  **Why this is the highest-stakes rule in the repo:** the owner's **raw subs live in `incoming/`
   and nowhere else — no backup, no second copy.** A single stray `unlink`/`move` there destroys data that cannot
   be regenerated. `AGENTS.md` §10 now carries the hard guardrail, but **a prose rule is not enforcement** — the
   next agent to build a "tidy up your incoming folder" or "free space by removing ingested originals" feature is

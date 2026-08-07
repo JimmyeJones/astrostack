@@ -193,6 +193,12 @@ export function StorageView() {
         regenerated automatically — safe to clear to reclaim space. Pruning stacks permanently
         deletes old stacked outputs.
       </Text>
+      <Text size="sm" c="dimmed">
+        Nothing here touches your incoming folder. AstroStack only ever <b>reads</b> your original
+        subs and copies them — it never moves, deletes or changes a file you dropped in, so
+        clearing everything on this page still leaves you able to rebuild your whole library from
+        them. Tidying up that folder is yours to do, and worth having a backup of.
+      </Text>
 
       {data.targets.length === 0 ? (
         <Card withBorder padding="xl">
