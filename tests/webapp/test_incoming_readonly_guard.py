@@ -50,7 +50,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # tests/ for synth
 from synth import write_seestar_fits  # noqa: E402
 
-
 # --------------------------------------------------------------------------- #
 # Layer 1 — the behavioural snapshot
 # --------------------------------------------------------------------------- #
