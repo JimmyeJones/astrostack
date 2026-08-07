@@ -29,24 +29,7 @@ real bugs and sharp, well-shaped ideas is your deliverable. Each run:
    auto-calibrate produce a clean, trustworthy image with minimal fuss?) and on
    autonomy/friendliness friction. Note everything confusing, broken, ugly, slow,
    or untrustworthy — for a beginner *and* for someone with thousands of subs.
-3. **Run a focused QA audit of ONE subsystem.**
-
-   > **OWNER DIRECTIVE (2026-08-07, expires after use) — audit the newest surface
-   > area first.** Several subsystems shipped in the last couple weeks with good
-   > unit tests but **no dedicated adversarial QA pass**: the Moon/Sun video
-   > lucky-imaging pipeline (`seestack/video/*`, `webapp/video.py`, the
-   > `/moon-sun` route — decode edge cases, alignment failures, memory bounds on
-   > long videos, the crop/gallery/download follow-ons) and the mosaic
-   > panel-alignment/seam path (`seestack/stack/mosaic.py`,
-   > `seestack/stack/photometric.py`, the panel-lined-up reporting in v0.233.0+
-   > and the leveling fixes in v0.232.x) — this area has broken before (the
-   > owner-reported multicolour-grid regression) so it deserves a fresh look now
-   > that more has changed. **For your next 1–2 runs, make one of these your
-   > focused-subsystem audit (step 3) instead of the rotation below.** Once
-   > you've completed a real adversarial pass on *both* (not just skimmed them),
-   > **delete this directive block** and resume the normal rotation.
-
-   The editor is now well-hardened
+3. **Run a focused QA audit of ONE subsystem.** The editor is now well-hardened
    (its bug backlog is drained and re-audits come back clean), so **lead your
    rotation with the stacking engine** — `seestack/stack/*` (`align`, `stacker`,
    `accumulator`, `mosaic`, `drizzle_path`, rejection) and `seestack/calibrate/*`.

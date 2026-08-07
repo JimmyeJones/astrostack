@@ -80,6 +80,28 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
+**📋 SCOUT ONLY — OWNER DIRECTIVE (2026-08-07, self-expiring; Builders ignore this and
+read on).** The owner has just restarted the Scout after a pause. Several subsystems
+shipped in the last few weeks with good unit tests but **no dedicated adversarial QA
+pass**, so for your **next 1–2 runs** make one of these your focused-subsystem audit
+(Scout step 3) *instead of* the normal rotation:
+  - **The Moon/Sun video lucky-imaging pipeline** — `seestack/video/*`, `webapp/video.py`,
+    the `/moon-sun` route and its `frontend/src/routes/MoonSun.tsx`. Hunt decode edge
+    cases, alignment/correlation failures, memory bounds on long videos (nothing may
+    buffer the whole capture), and the crop / Gallery / download follow-ons shipped in
+    v0.243–v0.245.
+  - **The mosaic panel-alignment / seam path** — `seestack/stack/mosaic.py`,
+    `seestack/stack/photometric.py`, the panel-lined-up reporting (v0.233.0+) and the
+    leveling fixes (v0.232.x). **This area has broken on the owner's real data before**
+    (the multicolour-grid regression above), and several rounds of fixes have since
+    landed on top of each other, so it earns a fresh adversarial look.
+
+  Everything else about the Scout role is unchanged — verified bugs only, file with repro
+  + severity + confidence, curate the backlog, add ideas. **Once you have completed a real
+  adversarial pass on *both* areas (not a skim), delete this whole block from `AGENTS.md`**
+  so the rotation returns to normal. If a pass is already recorded in `docs/IMPROVEMENTS.md`
+  for one of them, do the other.
+
 **⚡ IMMEDIATE PRIORITY (refreshed 2026-07-30, latest) — the owner-reported mosaic
 "multicolour grid" regression is FIXED (v0.225.0); its root cause was confirmed by repro
 and measured.** `analyze_proxy` measured sky noise as the MAD of the sky's *levels*, which
