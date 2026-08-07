@@ -9400,8 +9400,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   never-checked capture gets. **Care:** it needs the capture's current files, so it must handle the
   orphaned-still case the same way the panels do — no files means nothing to disagree with, so serve it.
 
-- **NEW IDEA (Builder 2026-08-07, same run) — the Gallery's video-still card doesn't say a picture was
-  sharpened, though the Moon & Sun card does.** *(Consistency — PRIORITY 3; size XS.)* v0.247.0 records
+- ~~**NEW IDEA (Builder 2026-08-07, same run) — the Gallery's video-still card doesn't say a picture was
+  sharpened, though the Moon & Sun card does.**~~ — **SHIPPED v0.247.3** (Builder 2026-08-07, branch
+  `claude/elegant-bohr-izzmou`). *(Consistency — PRIORITY 3.)* The entry's "check before building" answered:
+  the Gallery card did **not** receive the field, so this was three additive pieces rather than one — but each is
+  small and the shared-copy precedent made the shape obvious. `VideoStillItem` gained `sharpen_amount: float = 0.0`
+  (additive, defaulted, and `0.0` is exactly what every still made before sharpening existed *was*, pinned by a
+  test that an older `meta.json` with no such key still lists); `sharpenNote` moved to `videoFraming.ts` next to
+  `cropNote` — with `SHARPEN_PRESETS`/`DEFAULT_SHARPEN`, which it reads — and MoonSun re-exports all three, so its
+  existing importers and tests are untouched; the Gallery card renders it under the caption exactly as the Moon &
+  Sun card does. One wording, two screens, no drift. Upgrade-safe: additive response field with a default, optional
+  on the client, no default flipped, no shape changed. **Tests (+4):** `tests/webapp/test_gallery.py` (+2 — the
+  amount is reported, and an older still reads as unsharpened), `Gallery.test.tsx` (+2 — the card says it in the
+  identical `sharpenNote` words, and says nothing when the picture wasn't sharpened).
+  *(Original spec kept below for provenance.)*
+  *(Consistency — PRIORITY 3; size XS.)* v0.247.0 records
   `sharpen_amount` and the Moon & Sun result card renders *"Sharpening: Medium — surface detail lifted after
   stacking"*. The Gallery lists the same stills (v0.243.0) and shares the framing copy through
   `components/videoFraming.ts`, but carries no sharpening line — so the same picture explains itself on one

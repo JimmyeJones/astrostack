@@ -953,6 +953,10 @@ export interface VideoStill {
   source_width?: number;
   source_height?: number;
   crop_restorable?: boolean;
+  // How hard this picture was sharpened (0 = not at all), so the card can say so
+  // in the same words the Moon & Sun page does. Optional: an older backend omits
+  // it and a still made before sharpening existed reads as unsharpened.
+  sharpen_amount?: number;
 }
 
 export interface BestPicture {
