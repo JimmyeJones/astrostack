@@ -96,6 +96,11 @@ class VideoStillItem(BaseModel):
     #: The video file it came from, so a user with several clips can tell them apart.
     source_name: str
     preview_url: str
+    #: The 16-bit TIFF of the same picture, when one is on disk — the full-quality
+    #: copy to open in another app or send on. Additive and nullable: a still whose
+    #: TIFF is missing (a half-written result) sends ``None`` and the surface simply
+    #: doesn't offer it, and an older frontend ignores the field.
+    tiff_url: str | None = None
     #: Framing, mirroring the same four fields on the Moon & Sun page's result so
     #: the two surfaces can offer the identical one-click crop. ``crop_applied``
     #: — this still was trimmed to the disk, so ``width``/``height`` are the
@@ -223,8 +228,9 @@ def _video_stills(request: Request) -> list[VideoStillItem]:
             restorable = meta.crop_applied and video.has_full_frame_backup(
                 settings, m.capture_id,
             )
+            has_tiff = video.has_tiff(settings, m.capture_id)
         except Exception:  # noqa: BLE001 — one unreadable still must not hide the rest
-            meta, restorable = m, False
+            meta, restorable, has_tiff = m, False, False
         items.append(VideoStillItem(
             capture_id=meta.capture_id,
             label=meta.label,
@@ -235,6 +241,9 @@ def _video_stills(request: Request) -> list[VideoStillItem]:
             n_stacked=meta.n_stacked,
             source_name=meta.source_name,
             preview_url=f"/api/videos/{meta.capture_id}/preview.png",
+            tiff_url=(
+                f"/api/videos/{meta.capture_id}/download.tiff" if has_tiff else None
+            ),
             crop_applied=meta.crop_applied,
             crop_available=meta.crop_available,
             crop_trim_fraction=meta.crop_trim_fraction,

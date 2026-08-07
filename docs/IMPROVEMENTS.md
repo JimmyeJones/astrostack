@@ -10956,9 +10956,26 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-08-07, the last gap left after the Gallery crop v0.245.3 and the orphaned-still fix
+- ~~**NEW IDEA (Builder 2026-08-07, the last gap left after the Gallery crop v0.245.3 and the orphaned-still fix
   v0.245.5) — a Moon/Sun still is the only finished picture in the Gallery you can't download at full quality from
-  the Gallery.** *(Friendliness — PRIORITY 3; size S.)* A stack run's lightbox offers preview PNG, share JPEG,
+  the Gallery.**~~ — **SHIPPED v0.245.6** (Builder 2026-08-07, branch `claude/gallant-galileo-bfm5qe`).
+  *(Friendliness — PRIORITY 3.)* `VideoStillItem` now carries `tiff_url`, and the Gallery's still lightbox passes it
+  in the slot the stack lightbox uses for its FITS. Two details beyond the spec: **(1)** the field is **nullable and
+  disk-checked** (new `video.has_tiff`) rather than formatted unconditionally — `meta.json` is written *after* the
+  TIFF so every real still has one, but a deleted or half-written file would otherwise put a 404 behind a download
+  button, and not offering it is strictly better than offering it broken. **(2)** `ImageLightbox` gained an optional
+  `rawLabel`, so the control reads *"Download 16-bit TIFF"* here and keeps its exact *"Download raw data (FITS)"*
+  wording everywhere else (the default is unchanged, so the four stack surfaces are byte-identical) — calling a TIFF
+  "raw data (FITS)" would have been plainly wrong. The entry's **care** note is honoured: no share/JPEG/full-res
+  control was invented for a still, so the picture download stays a plain PNG link rather than becoming a menu of
+  things that don't exist. Upgrade-safe: one additive nullable response field, one optional frontend prop, no
+  default flipped, no endpoint added (`/api/videos/{id}/download.tiff` has served this file since the feature
+  shipped). **Tests:** `tests/webapp/test_gallery.py` (+2 — the still carries the URL and it downloads as
+  `image/tiff`; a still with no TIFF on disk sends `null`), `Gallery.test.tsx` (+2, one fail-before — the fullscreen
+  view offers the TIFF and keeps the picture download a plain PNG; a `null` offers nothing) and
+  `ImageLightbox.test.tsx` (+1 — `rawLabel` names both the tooltip and the accessible label).
+  *(Original spec kept below.)*
+  *(Friendliness — PRIORITY 3; size S.)* A stack run's lightbox offers preview PNG, share JPEG,
   full-res PNG and the raw FITS; a video still's offers the preview PNG alone, even though `download.tiff` (16-bit)
   has existed since the feature shipped and the endpoint doesn't care which page asks. A beginner who wants to send
   their sharpest Moon somewhere, or open it in another app, has to notice that a *different* page holds the good
