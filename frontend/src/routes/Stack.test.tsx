@@ -294,6 +294,49 @@ describe("StackView", () => {
     expect(screen.queryByText(/shot at 120s but your subs are 30s/)).not.toBeInTheDocument();
   });
 
+  it("refuses to promise a scale a wrong-sized bias can't deliver", async () => {
+    mockSchema([]);
+    // Scaling already on, a mismatched 120 s dark, and a bias from another
+    // camera/binning. The engine needs the bias to be the dark's size to hold
+    // the readout pedestal fixed, so it silently subtracts the dark *unscaled*.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(
+      { dark_master_id: 2, bias_master_id: 3, scale_dark_to_light: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 2, name: "Dark 120s", kind: "dark", filename: "d2.fits", n_frames: 20,
+        method: "median", exposure_s: 120, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+      { id: 3, name: "Bias (S30)", kind: "bias", filename: "b.fits", n_frames: 20,
+        method: "median", exposure_s: 0, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 240, height_px: 160,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null,
+                width_px: 480, height_px: 320 },
+      dark_master_id: null, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
+      scores: {}, n_frames: 12,
+    });
+
+    renderStack();
+
+    // Fail-before: the form said "Dark exposure-scaling is on — this 120s dark
+    // will be scaled to match your 30s subs", which the stack does not do.
+    await waitFor(() =>
+      expect(screen.getByText(/scaling holds the bias pedestal fixed/)).toBeInTheDocument());
+    expect(screen.getByText(/240×160 and the dark is 480×320/)).toBeInTheDocument();
+    expect(screen.queryByText(/Dark exposure-scaling is on — this/)).not.toBeInTheDocument();
+    // …so the plain exposure-mismatch warning is back, telling the truth.
+    expect(screen.getByText(/shot at 120s but your subs are 30s/)).toBeInTheDocument();
+    // …and the bias really is inert, which the existing note now says.
+    expect(screen.getByText(/won't be subtracted from the lights again/))
+      .toBeInTheDocument();
+    // But NOT the generic "stacking will fail": with a dark chosen the engine
+    // never validates the bias, so the stack runs — it just ignores it.
+    expect(screen.queryByText(/Stacking with it\s+will fail/)).not.toBeInTheDocument();
+  });
+
   it("proactively offers to select an available bias and scale the dark, then confirms", async () => {
     mockSchema([]);
     // A mismatched 120 s dark selected but NO bias selected yet — the library

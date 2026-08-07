@@ -666,6 +666,56 @@ def test_calibration_exposure_warning_fires_when_bias_shape_mismatch_disables_sc
     assert "over-subtracted" in warns[0]
 
 
+def test_the_exposure_warning_says_the_bias_shape_is_why_scaling_did_nothing(tmp_path):
+    """Telling someone who has already turned scaling on to "turn on dark
+    exposure-scaling" is advice they can't act on — and leaves them with no idea
+    why the option they enabled changed nothing."""
+    dark = np.full((4, 4), 300.0, dtype=np.float32)
+    bias = np.full((2, 2), 100.0, dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=30.0))
+    save_master(tmp_path / "b.fits", bias,
+                MasterMeta("bias", 5, 2, 2, "mean", exposure_s=0.0))
+    cal = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d.fits"),
+        bias_path=str(tmp_path / "b.fits"),
+        scale_dark_to_light=True)
+
+    (warn,) = cal.calibration_warnings(light_exposure_s=10.0)
+    # Names both sizes (width×height, as ``validate`` phrases them) …
+    assert "2×2" in warn and "4×4" in warn
+    # …says the dark went in unscaled, and does not ask for something already done.
+    assert "unscaled" in warn
+    assert "turn on dark" not in warn
+
+
+def test_dark_scaling_provenance_matches_what_effective_dark_actually_did(tmp_path):
+    """The provenance predicate is the run's only claim that the dark was
+    matched to the subs, so it must agree with the pixels."""
+    dark = np.full((4, 4), 300.0, dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=30.0))
+    save_master(tmp_path / "good.fits", np.full((4, 4), 100.0, dtype=np.float32),
+                MasterMeta("bias", 5, 4, 4, "mean", exposure_s=0.0))
+    save_master(tmp_path / "bad.fits", np.full((2, 2), 100.0, dtype=np.float32),
+                MasterMeta("bias", 5, 2, 2, "mean", exposure_s=0.0))
+
+    good = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d.fits"), bias_path=str(tmp_path / "good.fits"),
+        scale_dark_to_light=True)
+    assert good.dark_scaling_provenance(10.0) == (30.0, 10.0)
+    assert float(good._effective_dark(10.0)[0, 0]) == pytest.approx(166.667, abs=1e-2)
+    # Matched exposures leave the dark alone, so there is nothing to claim.
+    assert good.dark_scaling_provenance(30.0) is None
+    assert good.dark_scaling_provenance(None) is None
+
+    bad = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d.fits"), bias_path=str(tmp_path / "bad.fits"),
+        scale_dark_to_light=True)
+    assert float(bad._effective_dark(10.0)[0, 0]) == 300.0   # unscaled
+    assert bad.dark_scaling_provenance(10.0) is None         # …so: no claim
+
+
 def test_calibration_warns_on_a_mismatched_dark_temperature(tmp_path):
     dark = np.zeros((4, 4), dtype=np.float32)
     save_master(tmp_path / "d.fits", dark,
