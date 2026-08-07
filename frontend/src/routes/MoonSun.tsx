@@ -13,6 +13,8 @@ import { useNavigate } from "react-router-dom";
 import { api, type VideoCapture } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
+import { SharePictureButton } from "../components/SharePictureButton";
+import { sharePictureText } from "../share";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
 import { VideoQuickLookCard } from "../components/VideoQuickLookCard";
 import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
@@ -256,6 +258,22 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
                 "Point your phone camera at this code to open your "
                 + `${subjectNoun(capture.kind)} picture and save it.`
               }
+            />
+            {/* …and on a phone, where that QR is redundant with the OS's own
+                sheet, this is the control that actually helps. It renders
+                nothing on a browser that can't share files, so a desktop still
+                sees exactly the row it saw before. */}
+            <SharePictureButton
+              {...(() => {
+                const { title, text, filename } = sharePictureText(
+                  capture.label,
+                  new Date(result.created_utc).toLocaleDateString(),
+                  "png",
+                );
+                return { filename, title, text };
+              })()}
+              url={result.preview_url}
+              label="Share"
             />
           </Group>
           {/* The evidence behind "how picky should we be?", measured on this

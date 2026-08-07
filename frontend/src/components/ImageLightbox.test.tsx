@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ImageLightbox, computePinch } from "./ImageLightbox";
 import { ScanToPhoneButton } from "./ScanToPhoneButton";
 
@@ -25,6 +25,8 @@ function wheel(el: HTMLElement, deltaY: number) {
     el.dispatchEvent(new WheelEvent("wheel", { deltaY, bubbles: true, cancelable: true }));
   });
 }
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("ImageLightbox", () => {
   it("renders the image and starts at 100%", () => {
@@ -108,6 +110,46 @@ describe("ImageLightbox", () => {
     nav.share = async () => {};
     renderLightbox({ jpegHref: "/api/run/1/jpeg", shareFilename: "m42.jpg", shareTitle: "M42" });
     expect(screen.getByLabelText("Share picture")).toBeInTheDocument();
+    delete nav.canShare;
+    delete nav.share;
+  });
+
+  it("shares the PNG when the surface has no JPEG", async () => {
+    // Fail-before: the sheet was gated on `jpegHref`, so a Moon/Sun still — which
+    // has only a display PNG — got no Share control, and on a phone (where the
+    // QR is redundant with the OS's own sheet) that was the only control that
+    // would have helped. The sheet hands the OS whatever the URL serves.
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    const shared: ShareData[] = [];
+    nav.share = async (d: ShareData) => { shared.push(d); };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Blob(["x"], { type: "image/png" })),
+    );
+    renderLightbox({
+      downloadHref: "/api/videos/Lunar_video/preview.png", shareFilename: "moon.png",
+    });
+    fireEvent.click(screen.getByLabelText("Share picture"));
+    await waitFor(() => expect(shared).toHaveLength(1));
+    expect(fetchSpy).toHaveBeenCalledWith("/api/videos/Lunar_video/preview.png");
+    expect((shared[0].files as File[])[0].name).toBe("moon.png");
+    delete nav.canShare;
+    delete nav.share;
+  });
+
+  it("still prefers the JPEG for the share sheet when there is one", async () => {
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    nav.share = async () => {};
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Blob(["x"], { type: "image/jpeg" })),
+    );
+    renderLightbox({
+      downloadHref: "/api/run/1/preview", jpegHref: "/api/run/1/jpeg",
+      shareFilename: "m42.jpg",
+    });
+    fireEvent.click(screen.getByLabelText("Share picture"));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/api/run/1/jpeg"));
     delete nav.canShare;
     delete nav.share;
   });

@@ -81,9 +81,11 @@ export function ImageLightbox({
    * file isn't a FITS doesn't have to call it one. Omitted, it keeps the stack
    * surfaces' existing FITS wording verbatim. */
   rawLabel?: string;
-  /** Filename + caption for the OS share sheet. When `shareFilename` and
-   * `jpegHref` are both present (and the browser supports file sharing) a
-   * "Share" icon appears in the toolbar; otherwise it's silently omitted. */
+  /** Filename + caption for the OS share sheet. When `shareFilename` and a
+   * picture (`jpegHref`, else `downloadHref`) are both present — and the
+   * browser supports file sharing — a "Share" icon appears in the toolbar;
+   * otherwise it's silently omitted. Give the filename the extension of the
+   * file that will actually be shared. */
   shareFilename?: string;
   shareTitle?: string;
   shareText?: string;
@@ -284,9 +286,19 @@ export function ImageLightbox({
             <Tooltip label="Download picture (PNG)"><ActionIcon size="lg" variant="subtle" color="gray"
               component="a" href={downloadHref} aria-label="Download picture"><IconPhotoDown size={20} /></ActionIcon></Tooltip>
           ) : null}
-          {jpegHref && shareFilename ? (
+          {/* Same reasoning as the QR below, and the same fallback: the sheet
+              hands the OS whatever file the URL serves, so the small JPEG is
+              preferred where one exists and a PNG-only surface shares its PNG
+              rather than losing the control. On a phone — where the QR is
+              redundant with the OS sheet — this is the *only* control that
+              helps, so a Moon/Sun still going without it left phones with
+              nothing. (A full-frame Moon PNG measures ~1 MB at 1080p, the
+              Seestar's video size, so it is a perfectly ordinary thing to hand
+              a share sheet.) */}
+          {(jpegHref ?? downloadHref) && shareFilename ? (
             <SharePictureButton
-              url={jpegHref} filename={shareFilename} title={shareTitle} text={shareText} iconOnly
+              url={(jpegHref ?? downloadHref)!}
+              filename={shareFilename} title={shareTitle} text={shareText} iconOnly
             />
           ) : null}
           {/* "Get it on your phone" needs nothing but a URL, so it follows the
