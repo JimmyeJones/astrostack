@@ -483,16 +483,35 @@ def video_preview(capture_id: str, request: Request) -> FileResponse:
     )
 
 
+#: Said by both the never-checked and the no-longer-current case, deliberately:
+#: a check that no longer describes the clip on disk *is* a capture that hasn't
+#: been checked, and one click on "Check this capture first" makes it true again.
+_NOT_CHECKED = "This capture hasn't been checked yet, so there's no frame to look at"
+
+
 @router.get("/api/videos/{capture_id}/quicklook.png")
 def video_quicklook(capture_id: str, request: Request) -> FileResponse:
-    """The sharpest single frame the last check of this capture found."""
-    return FileResponse(
-        _result_file(
-            request, capture_id, video.QUICKLOOK_NAME,
-            "This capture hasn't been checked yet, so there's no frame to look at",
-        ),
-        media_type="image/png",
-    )
+    """The sharpest single frame the last check of this capture found.
+
+    Refuses to serve a frame from a check that no longer describes the clip on
+    disk. :func:`_grade_panels` already drops the curve and the quick look from
+    the page in that case, but the picture itself lives at a plain URL — so a
+    stale tab, a bookmark or a browser cache would still be handed last night's
+    frame, which is the very dishonesty that guard exists to remove.
+
+    The capture's *current* files decide it, exactly as the panels do — and, as
+    there, "no files" is not a mismatch: an orphaned still whose clip has been
+    cleared off the NAS has nothing to disagree with, so its frame still serves.
+    """
+    settings = deps.get_settings(request)
+    safe_id = _safe_capture_id(capture_id)
+    path = _result_file(request, capture_id, video.QUICKLOOK_NAME, _NOT_CHECKED)
+    grade = video.read_grade(settings, safe_id)
+    if grade is not None:
+        cap = find_video_capture(settings.resolved_incoming_dir, safe_id)
+        if not video.grade_matches_source(grade, list(cap.files) if cap else []):
+            raise HTTPException(status_code=404, detail=_NOT_CHECKED)
+    return FileResponse(path, media_type="image/png")
 
 
 @router.get("/api/videos/{capture_id}/download.tiff")

@@ -273,3 +273,21 @@ def test_gallery_offers_no_tiff_when_the_still_has_none(client, data_root):
 
     (still,) = client.get("/api/gallery").json()["videos"]
     assert still["tiff_url"] is None
+
+
+def test_gallery_reports_how_hard_a_still_was_sharpened(client, data_root):
+    """The Moon & Sun card says "Sharpening: Medium"; the Gallery shows the same
+    picture, so it needs the same field to say the same thing about it."""
+    _drop_video_still(data_root, sharpen_amount=1.2)
+
+    (still,) = client.get("/api/gallery").json()["videos"]
+    assert still["sharpen_amount"] == 1.2
+
+
+def test_a_still_made_before_sharpening_existed_reads_as_unsharpened(client, data_root):
+    """Upgrade safety: an older ``meta.json`` has no such key, and must read as
+    "not sharpened" rather than breaking the listing."""
+    _drop_video_still(data_root)
+
+    (still,) = client.get("/api/gallery").json()["videos"]
+    assert still["sharpen_amount"] == 0.0

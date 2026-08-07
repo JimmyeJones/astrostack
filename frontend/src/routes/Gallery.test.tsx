@@ -7,6 +7,7 @@ import {
   GalleryView, sortGallery, filterGallery, filterByCalibration, filterByMethod, isCalibrated,
   filterVideoStills, mergeGalleryEntries, videoStillCaption,
 } from "./Gallery";
+import { sharpenNote } from "../components/videoFraming";
 import * as client from "../api/client";
 import type { GalleryItem, VideoStill } from "../api/client";
 
@@ -565,6 +566,33 @@ describe("Gallery Moon & Sun stills", () => {
     expect(screen.queryByRole("button", { name: /Crop it/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Undo crop/ }));
     await waitFor(() => expect(undo).toHaveBeenCalledWith("Lunar_video"));
+  });
+
+  it("says a still was sharpened, in the same words the Moon & Sun page uses", async () => {
+    // Same picture, two screens: it should explain itself identically on both.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [],
+      videos: [{ ...still("Lunar_video"), sharpen_amount: 1.2 }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    expect(await screen.findByText(sharpenNote(1.2)!)).toBeInTheDocument();
+  });
+
+  it("says nothing about sharpening on a still that wasn't sharpened", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [], videos: [still("Lunar_video")],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await screen.findByText("Moon");
+    expect(screen.queryByText(/Sharpening:/)).not.toBeInTheDocument();
   });
 
   it("offers no crop on a still with nothing worth trimming, and no undo without a backup",

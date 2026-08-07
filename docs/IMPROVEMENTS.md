@@ -49,10 +49,38 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🔒⭐⭐ OWNER REQUIREMENT (2026-08-07) — add an automated SAFETY NET that fails CI if any code path can delete,
-  move, rename or overwrite a file under `incoming/`.** *(Data-integrity / regression prevention — NOT a current
-  defect; the audit below found the app clean today. Size S–M. This outranks feature work: the downside is
-  unrecoverable.)* **Why this is the highest-stakes rule in the repo:** the owner's **raw subs live in `incoming/`
+- ~~**🔒⭐⭐ OWNER REQUIREMENT (2026-08-07) — add an automated SAFETY NET that fails CI if any code path can delete,
+  move, rename or overwrite a file under `incoming/`.**~~ — **SHIPPED v0.247.1** (Builder 2026-08-07, branch
+  `claude/elegant-bohr-izzmou`). *(Data-integrity / regression prevention.)* `tests/webapp/test_incoming_readonly_guard.py`
+  builds all three suggested layers, and **each was proved by mutation** rather than assumed:
+  1. **Behavioural** — a decoy incoming tree (the fixture's two Seestar target folders plus an `M 51_sub/` capture
+     folder, a bare on-device `M 51/` output folder, a stray `.txt`, a loose top-level sub and, when ffmpeg is
+     present, a lunar clip), snapshotted as **size + sha256 + mtime_ns per file plus the directory listing**, then
+     driven through scan → ingest → QC → `process` (stack), sample-data load *and* remove, every `/cache/clear`
+     stage, `stack-runs/prune`, target merge, `DELETE /api/targets/{safe}?remove_files=true`, `reprocess-all` and
+     the whole Moon & Sun grade → stack → crop → uncrop path — then asserted byte-for-byte unchanged, and re-scanned
+     to prove the library is still rebuildable from it. **Stage-1 caching is switched ON in that test**
+     (`copy_to_cache` defaults to `False`, so the branch that actually *copies each source frame* — the one a
+     "move it instead, we already have a copy" optimisation would live in — was otherwise never exercised).
+  2. **A call-level spy** (`_IncomingSentinel`) wrapping `os.remove/unlink/rmdir/truncate`, `os.rename/replace`,
+     `Path.unlink/rmdir/rename/replace`, `shutil.move/rmtree/copy/copy2/copyfile` for the duration of every test
+     above, failing on any call whose **fully-resolved** path (symlinks and `..` collapsed, so a symlinked NAS
+     mount is not a way around it) lands inside incoming. It also flags a *destination* inside incoming that
+     already exists, so a silent `os.replace`/`copy2` clobber counts as a violation too. The one documented
+     exception is a `*.part` sidecar — the temp each upload creates, owns and removes within its own request.
+  3. **Source backstops** — `ingest.py` must still contain `shutil.copy2(` and must contain no move/rename/unlink
+     call at all; `scanner.py` likewise.
+  Plus a **meta-test that the sentinel itself fires** (deleting a decoy is caught; deleting app-owned storage and a
+  `.part` sidecar is not), so a spy that quietly stopped wrapping anything can't leave the whole file green while
+  enforcing nothing. **Mutation-verified:** turning ingest's `copy2` into `shutil.move` fails layers 1 *and* 3
+  (9 files "VANISHED"), and a simulated `unlink(missing_ok=True)` of a *non-existent* path under incoming — invisible
+  to any snapshot — is caught by layer 2. Also shipped as the entry asked: the Storage page now says in plain words
+  that nothing on it touches your incoming folder, that AstroStack only ever reads and copies your originals, and
+  that tidying that folder is yours to do (`Storage.test.tsx`, +1). Test-only + one copy paragraph: no engine,
+  API, schema, config, on-disk or default change.
+
+  *(Original spec kept below for provenance.)*
+  **Why this is the highest-stakes rule in the repo:** the owner's **raw subs live in `incoming/`
   and nowhere else — no backup, no second copy.** A single stray `unlink`/`move` there destroys data that cannot
   be regenerated. `AGENTS.md` §10 now carries the hard guardrail, but **a prose rule is not enforcement** — the
   next agent to build a "tidy up your incoming folder" or "free space by removing ingested originals" feature is
@@ -9346,8 +9374,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   tests for every crop×sharpen×undo path. The 8-bit PNG re-render is also a real (if small) quality loss the
   stack-time path doesn't have — measure it on the 16-bit TIFF path and say so.
 
-- **NEW IDEA (Builder 2026-08-07, spotted while shipping the stale-grade guard v0.246.2) — the quick-look *image*
-  survives the check that owns it being ruled stale.** *(Trust — PRIORITY 3; size XS.)* v0.246.2 makes
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while shipping the stale-grade guard v0.246.2) — the quick-look *image*
+  survives the check that owns it being ruled stale.**~~ — **SHIPPED v0.247.2** (Builder 2026-08-07, branch
+  `claude/elegant-bohr-izzmou`), built to the filed shape and its "care" note exactly. *(Trust — PRIORITY 3.)*
+  `GET /api/videos/{id}/quicklook.png` now looks up the capture's **current** files and asks
+  `video.grade_matches_source` before serving; a positive mismatch 404s with the *same* "hasn't been checked yet"
+  line a never-checked capture gets — deliberately, because a check that no longer describes the clip on disk *is*
+  an unchecked capture, and the "Check this capture first" button is one click from making it true again (pinned:
+  re-grading brings the frame straight back, so this is never a dead end). The orphaned-still case is handled as
+  the panels handle it: no files is nothing to disagree with, so clearing the clip off the NAS leaves the frame
+  serving. Everything else — an older `grade.json` with no stamp, an unreadable stat, a capture graded but never
+  re-recorded — still serves, since `grade_matches_source` only ever returns `False` on a *positive* mismatch.
+  Additive and upgrade-safe: no schema, response shape, config or default change; the only behaviour that changes
+  is a stale URL now 404ing instead of lying. **Tests** (`tests/webapp/test_video_api.py`, +2; the first fails
+  before / passes after): the frame stops serving once the clip is replaced in place and returns after a re-check,
+  and it keeps serving when the clip is deleted from `incoming/` altogether.
+  *(Original spec kept below for provenance.)*
+  *(Trust — PRIORITY 3; size XS.)* v0.246.2 makes
   `_grade_panels` drop a capture's curve and quick look once the clip on disk no longer matches the stamp in
   `grade.json`. But `GET /api/videos/{id}/quicklook.png` answers from the file alone, so a client that already
   holds the URL (a stale tab, a bookmark, a browser cache) still gets last night's frame served happily. Low
@@ -9357,8 +9400,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   never-checked capture gets. **Care:** it needs the capture's current files, so it must handle the
   orphaned-still case the same way the panels do — no files means nothing to disagree with, so serve it.
 
-- **NEW IDEA (Builder 2026-08-07, same run) — the Gallery's video-still card doesn't say a picture was
-  sharpened, though the Moon & Sun card does.** *(Consistency — PRIORITY 3; size XS.)* v0.247.0 records
+- ~~**NEW IDEA (Builder 2026-08-07, same run) — the Gallery's video-still card doesn't say a picture was
+  sharpened, though the Moon & Sun card does.**~~ — **SHIPPED v0.247.3** (Builder 2026-08-07, branch
+  `claude/elegant-bohr-izzmou`). *(Consistency — PRIORITY 3.)* The entry's "check before building" answered:
+  the Gallery card did **not** receive the field, so this was three additive pieces rather than one — but each is
+  small and the shared-copy precedent made the shape obvious. `VideoStillItem` gained `sharpen_amount: float = 0.0`
+  (additive, defaulted, and `0.0` is exactly what every still made before sharpening existed *was*, pinned by a
+  test that an older `meta.json` with no such key still lists); `sharpenNote` moved to `videoFraming.ts` next to
+  `cropNote` — with `SHARPEN_PRESETS`/`DEFAULT_SHARPEN`, which it reads — and MoonSun re-exports all three, so its
+  existing importers and tests are untouched; the Gallery card renders it under the caption exactly as the Moon &
+  Sun card does. One wording, two screens, no drift. Upgrade-safe: additive response field with a default, optional
+  on the client, no default flipped, no shape changed. **Tests (+4):** `tests/webapp/test_gallery.py` (+2 — the
+  amount is reported, and an older still reads as unsharpened), `Gallery.test.tsx` (+2 — the card says it in the
+  identical `sharpenNote` words, and says nothing when the picture wasn't sharpened).
+  *(Original spec kept below for provenance.)*
+  *(Consistency — PRIORITY 3; size XS.)* v0.247.0 records
   `sharpen_amount` and the Moon & Sun result card renders *"Sharpening: Medium — surface detail lifted after
   stacking"*. The Gallery lists the same stills (v0.243.0) and shares the framing copy through
   `components/videoFraming.ts`, but carries no sharpening line — so the same picture explains itself on one
@@ -15609,6 +15665,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY 3; Builder-filed 2026-07-16.)*
 
 ### Performance (only with a measurement)
+- **NEW IDEA (Builder 2026-08-07, spotted while adversarially reading `accumulator.py`; TRACED, NOT MEASURED) —
+  `MinMaxRejectAccumulator._add_into` writes its whole k-plane extremes buffer back over itself once per frame,
+  for nothing.** *(Performance / clarity — PRIORITY 4; size XS; **not a correctness bug** — the result is
+  identical either way.)* `mins = self._mins[:, ys, xs]` is *basic* indexing (two slices), so it returns a
+  **view**, and the `mins[j] = slot` loop already mutates `self._mins` in place. The trailing
+  `self._mins[:, ys, xs] = mins` (and its `_maxs` twin) is therefore a self-assignment that copies `2k`
+  canvas-sized float32 planes per frame per side — at the default `k=1` on a 1920×1080 RGB canvas that is ~50 MB
+  of pointless memcpy **per frame**, and it scales with `reject_count`. **Shape:** drop the two write-backs, or
+  (clearer, and immune to someone later changing the slicing to fancy indexing, which *would* copy) index the
+  planes as `self._mins[j, ys, xs]` inside the loop so the in-place intent is on the face of it. **Care:** pin it
+  with a before/after byte-for-byte equality test on a small stack including the windowed (`add_window`) path and
+  a `reject_count > 1` case, because the whole point is that nothing about the output may change. Worth doing
+  next time someone is in this file; measure the actual saving on a realistic canvas before claiming one.
 - **NEW IDEA (Builder 2026-08-06, MEASURED while auditing the stack path) — `detect_mixed_pointings` is a pure-Python
   O(n²) pair loop with no cap, so the mixed-pointing preflight grows quadratically with a target's sub count.**
   *(Performance — size S; **off-by-default setting, so this is a latency note, not a live problem**.)*
