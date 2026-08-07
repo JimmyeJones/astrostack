@@ -9828,9 +9828,32 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Builder 2026-08-07, spotted while auditing `seestack/calibrate/apply.py`) — a master flat built on a
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while auditing `seestack/calibrate/apply.py`) — a master flat built on a
   Bayer sensor imposes its *own* illumination colour on every calibrated light, because it is normalised by one
-  global mean.** *(Image quality — PRIORITY 4; size M; **measure first, and it may well turn out to be a non-issue
+  global mean.**~~ — **MEASURED NON-ISSUE; nothing to build** (Builder 2026-08-07, branch
+  `claude/gallant-galileo-bfm5qe`, v0.245.7). The entry's own method was run verbatim — synthetic Seestar subs
+  through the real chain `run_stack → auto_recipe → apply_recipe`, with a master flat carrying a deliberate
+  per-CFA gain over a vignette — and it splits cleanly in two:
+  **(1) the cast is real and exact in the linear stack.** A flat with R ×1.08 / B ×0.95 moved the stacked FITS's
+  star colour from R/G **0.9354 → 0.8645** and B/G **0.9365 → 0.9868** — precisely the injected 1/1.08 and 1/0.95.
+  So the premise is right about the mechanism: nothing before the editor undoes it.
+  **(2) it does not survive to the picture.** The finished Auto image's **sky** colour (the honest probe —
+  gray-star calibration neutralises *star* colour by construction, so measuring stars would only restate its own
+  definition) came out R/G **1.0351 vs 1.0352** and B/G **1.0380 vs 1.0379** against the neutral-flat control.
+  Pushed to an absurd R ×1.5 / B ×0.7 the finished sky still landed within **0.2 %**, and within **0.5 %** on a
+  star-poor 5-star field where gray-star has little to lock onto.
+  **Why it's so robust: two independent steps remove it, not one.** Isolating the ops on a synthetic linear stack
+  at the ×1.5/×0.7 cast — linear alone **−33.3 % / +42.8 %**; `tone.color_calibrate` alone **0.0 % / 0.0 %**;
+  `tone.stretch` (per-channel STF) alone **+0.1 % / −0.1 %**. Both solve for exactly the per-channel constant the
+  flat imposed, and both are in the Auto recipe *and* in every built-in preset. So per-CFA flat normalisation
+  ("equalize CFA") would buy the target user nothing, and adding it as a `StackOption` would be new surface with
+  no measured payoff — **declined, not deferred**.
+  **What did ship: a fast guard.** `tests/test_flat_colour_cast.py` (+4, ~2 s, no stacking) pins the property the
+  conclusion rests on — a per-channel gain on the linear stack is invisible in the finished picture at both cast
+  strengths, the cast genuinely *is* in the linear data, and Auto still carries both normalising steps. Without
+  it, a future change that drops per-channel normalisation would surface as *"my picture went red after I made
+  flats"*, a long way from the code that caused it. *(Original spec kept below.)*
+  *(Image quality — PRIORITY 4; size M; **measure first, and it may well turn out to be a non-issue
   — do not blind-flip it**.)* `CalibrationMasters.load` divides the flat by `np.nanmean(flat)` over the whole raw
   mosaic, i.e. across R, G and B sites together, then the lights are divided by that one surface in the raw domain.
   If the flat panel/sky was warmer than neutral, its R sites read high, so every light's R sites are divided down —
