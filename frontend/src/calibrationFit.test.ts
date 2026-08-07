@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  exposureMismatch, masterFitsFrames, masterOptionSuffix, masterSizeWarning,
-  tempMismatch,
+  biasCanScaleDark, biasSizeWarning, darkScalingBlockedNote, exposureMismatch,
+  masterFitsFrames, masterOptionSuffix, masterSizeWarning, tempMismatch,
 } from "./calibrationFit";
 
 const SUBS = { width_px: 1080, height_px: 1920 };
@@ -129,5 +129,63 @@ describe("tempMismatch", () => {
     expect(tempMismatch(20, 12, { temp_c: 10 })).toBe(false);
     expect(tempMismatch(20, 18, { temp_c: 1 })).toBe(true);
     expect(tempMismatch(20, 18, { temp_c: null })).toBe(false);
+  });
+});
+
+
+// --- the bias slot: the one master whose size clash isn't fatal ------------
+//
+// A bias is subtracted from the lights only when no dark is chosen (a dark
+// already carries the pedestal), and the engine's `validate` only refuses a
+// wrong-sized bias on that path. With a dark chosen its size decides one thing
+// instead: whether it can hold the pedestal fixed while the dark is rescaled.
+
+describe("biasSizeWarning", () => {
+  it("warns like any other master when the bias IS the calibration", () => {
+    const warn = biasSizeWarning({ width_px: 540, height_px: 960 }, SUBS, null);
+    expect(warn).toContain("540×960");
+    expect(warn).toContain("will fail");
+  });
+
+  it("stays silent once a dark is chosen, because the claim would be false", () => {
+    // The engine never validates — never even applies — a bias here, so the
+    // stack does not fail. Saying it will is worse than saying nothing.
+    expect(biasSizeWarning(
+      { width_px: 540, height_px: 960 }, SUBS, { width_px: 1080, height_px: 1920 },
+    )).toBeNull();
+  });
+
+  it("says nothing about a bias that fits, either way", () => {
+    const fits = { width_px: 1080, height_px: 1920 };
+    expect(biasSizeWarning(fits, SUBS, null)).toBeNull();
+    expect(biasSizeWarning(fits, SUBS, fits)).toBeNull();
+    expect(biasSizeWarning(null, SUBS, null)).toBeNull();
+  });
+});
+
+describe("biasCanScaleDark / darkScalingBlockedNote", () => {
+  const DARK = { width_px: 1080, height_px: 1920 };
+
+  it("accepts a bias built the same way as the dark", () => {
+    expect(biasCanScaleDark({ width_px: 1080, height_px: 1920 }, DARK)).toBe(true);
+    expect(darkScalingBlockedNote(DARK, { width_px: 1080, height_px: 1920 })).toBeNull();
+  });
+
+  it("explains why scaling will do nothing with a wrong-sized bias", () => {
+    const bias = { width_px: 540, height_px: 960 };
+    expect(biasCanScaleDark(bias, DARK)).toBe(false);
+    const note = darkScalingBlockedNote(DARK, bias);
+    // Both sizes, so the user can see which one to rebuild...
+    expect(note).toContain("540×960");
+    expect(note).toContain("1080×1920");
+    // ...and what actually happens to their subs.
+    expect(note).toContain("unscaled");
+  });
+
+  it("never flags what it cannot disprove", () => {
+    expect(biasCanScaleDark({ width_px: null, height_px: null }, DARK)).toBe(true);
+    expect(darkScalingBlockedNote(DARK, { width_px: null, height_px: null })).toBeNull();
+    expect(darkScalingBlockedNote(DARK, null)).toBeNull();
+    expect(darkScalingBlockedNote(null, { width_px: 540, height_px: 960 })).toBeNull();
   });
 });

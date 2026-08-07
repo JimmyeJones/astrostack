@@ -10,10 +10,16 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type VideoCapture, type VideoResult } from "../api/client";
+import { api, type VideoCapture } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
 import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
+// The framing copy is shared with the Gallery's video-still card, which offers
+// the identical crop — re-exported here so this page stays the obvious place to
+// look for it (and its existing callers/tests keep importing it from one place).
+import { cropNote, cropSuggestion, subjectNoun } from "../components/videoFraming";
+
+export { cropNote, cropSuggestion, subjectNoun };
 
 // Local, like Storage.tsx's `gb` — a video is MB-to-GB sized, and there is no
 // shared byte formatter to reach for.
@@ -48,49 +54,6 @@ export function resultSummary(r: {
     + `— about ${cleaner.toFixed(1)}× cleaner than a single frame `
     + `(${r.width}×${r.height}).`
   );
-}
-
-/** What to call the bright thing in the middle, in plain language (pure). */
-export function subjectNoun(kind: VideoCapture["kind"]): string {
-  if (kind === "lunar") return "Moon";
-  if (kind === "solar") return "Sun";
-  return "subject";
-}
-
-/**
- * "Most of this picture is empty sky" — or null when there's nothing to say.
- *
- * Only ever shown for a still that was *not* cropped and where the backend
- * measured enough sky around the disk to be worth trimming, so it can't nag
- * about a picture that is already mostly subject.
- */
-export function cropSuggestion(
-  result: Pick<VideoResult, "crop_available" | "crop_trim_fraction"> | null,
-  kind: VideoCapture["kind"],
-): string | null {
-  if (!result?.crop_available) return null;
-  const pct = Math.round((result.crop_trim_fraction ?? 0) * 100);
-  if (pct < 1) return null;
-  return (
-    `About ${pct}% of this picture is empty sky around the ${subjectNoun(kind)}. `
-    + `Trimming it takes a moment and doesn't re-stack anything — the picture `
-    + `itself stays exactly as it is, just without the empty sky.`
-  );
-}
-
-/** The matching line once a still *has* been cropped (pure). */
-export function cropNote(
-  result: Pick<
-    VideoResult, "crop_applied" | "crop_trim_fraction" | "source_width" | "source_height"
-  > | null,
-  kind: VideoCapture["kind"],
-): string | null {
-  if (!result?.crop_applied) return null;
-  const pct = Math.round((result.crop_trim_fraction ?? 0) * 100);
-  const from = result.source_width && result.source_height
-    ? ` (from ${result.source_width}×${result.source_height})`
-    : "";
-  return `Cropped to the ${subjectNoun(kind)} — trimmed ${pct}% of empty sky${from}.`;
 }
 
 function CaptureIcon({ kind }: { kind: VideoCapture["kind"] }) {
@@ -174,6 +137,12 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
   });
 
   const result = capture.result;
+  // The source clip is gone from `incoming/` — cleared off the NAS, which is
+  // exactly what the in-place crop was built to survive. The picture is still
+  // here (the backend lists the finished still anyway, so this page stays the
+  // one that owns it), but nothing that needs to decode the video can run, so
+  // the stacking half of the card is hidden rather than offered and failed.
+  const sourceGone = capture.files.length === 0;
   const suggestCrop = cropSuggestion(result, capture.kind);
   const cropped = cropNote(result, capture.kind);
 
@@ -185,9 +154,11 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
           <div style={{ minWidth: 0 }}>
             <Text fw={600} truncate>{capture.label}</Text>
             <Text size="xs" c="dimmed" truncate>
-              {capture.folder_name} · {capture.files.length}{" "}
-              {capture.files.length === 1 ? "video" : "videos"} ·{" "}
-              {fileSize(capture.total_bytes)}
+              {sourceGone
+                ? `${capture.folder_name} · video no longer in your incoming folder`
+                : `${capture.folder_name} · ${capture.files.length} `
+                  + `${capture.files.length === 1 ? "video" : "videos"} · `
+                  + fileSize(capture.total_bytes)}
             </Text>
           </div>
         </Group>
@@ -286,7 +257,14 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
         </Stack>
       ) : null}
 
-      {capture.files.length > 1 ? (
+      {sourceGone ? (
+        <Text size="xs" c="dimmed">
+          The video this came from isn't in your incoming folder any more, so it
+          can't be stacked again — your picture is safe here either way.
+        </Text>
+      ) : null}
+
+      {!sourceGone && capture.files.length > 1 ? (
         <Select
           label="Which recording?"
           size="sm"
@@ -305,63 +283,67 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
           the setting below is an informed choice rather than a guess. Once a
           still exists the result's own panel (above) is the better one to show,
           since it can mark where the cut actually fell. */}
-      {!result ? (
+      {!result && !sourceGone ? (
         <VideoSharpnessCard
           profile={capture.sharpness}
           onUseSuggestion={(pct) => setKeep(String(pct))}
         />
       ) : null}
 
-      <Select
-        label="How picky should we be?"
-        description="Seeing makes some frames much sharper than others; we keep the best and throw the rest away."
-        size="sm"
-        data={KEEP_PRESETS}
-        value={keep}
-        onChange={(v) => setKeep(v ?? DEFAULT_KEEP)}
-        allowDeselect={false}
-        mb="sm"
-        mt="sm"
-      />
+      {sourceGone ? null : (
+        <>
+          <Select
+            label="How picky should we be?"
+            description="Seeing makes some frames much sharper than others; we keep the best and throw the rest away."
+            size="sm"
+            data={KEEP_PRESETS}
+            value={keep}
+            onChange={(v) => setKeep(v ?? DEFAULT_KEEP)}
+            allowDeselect={false}
+            mb="sm"
+            mt="sm"
+          />
 
-      <Checkbox
-        label={`Crop to the ${subjectNoun(capture.kind)}`}
-        description={
-          `Trims the empty sky around it, so your picture is mostly `
-          + `${subjectNoun(capture.kind)}. Left alone if there's nothing to trim.`
-        }
-        size="sm"
-        mb="sm"
-        checked={crop}
-        onChange={(e) => setCrop(e.currentTarget.checked)}
-      />
+          <Checkbox
+            label={`Crop to the ${subjectNoun(capture.kind)}`}
+            description={
+              `Trims the empty sky around it, so your picture is mostly `
+              + `${subjectNoun(capture.kind)}. Left alone if there's nothing to trim.`
+            }
+            size="sm"
+            mb="sm"
+            checked={crop}
+            onChange={(e) => setCrop(e.currentTarget.checked)}
+          />
 
-      <Button
-        fullWidth
-        leftSection={<IconWand size={16} />}
-        onClick={() => stack.mutate({})}
-        loading={stack.isPending}
-        disabled={disabled}
-      >
-        {result ? "Stack again" : "Stack video"}
-      </Button>
+          <Button
+            fullWidth
+            leftSection={<IconWand size={16} />}
+            onClick={() => stack.mutate({})}
+            loading={stack.isPending}
+            disabled={disabled}
+          >
+            {result ? "Stack again" : "Stack video"}
+          </Button>
 
-      {/* Only worth offering while there is nothing to compare against — once a
-          still exists its own panel already answers the question. */}
-      {!result && !capture.sharpness ? (
-        <Button
-          fullWidth
-          mt="xs"
-          variant="subtle"
-          size="sm"
-          leftSection={<IconChartBar size={16} />}
-          onClick={() => grade.mutate()}
-          loading={grade.isPending}
-          disabled={disabled}
-        >
-          Check this capture first
-        </Button>
-      ) : null}
+          {/* Only worth offering while there is nothing to compare against — once a
+              still exists its own panel already answers the question. */}
+          {!result && !capture.sharpness ? (
+            <Button
+              fullWidth
+              mt="xs"
+              variant="subtle"
+              size="sm"
+              leftSection={<IconChartBar size={16} />}
+              onClick={() => grade.mutate()}
+              loading={grade.isPending}
+              disabled={disabled}
+            >
+              Check this capture first
+            </Button>
+          ) : null}
+        </>
+      )}
     </Card>
   );
 }

@@ -178,15 +178,25 @@ from seestack.stack.stacker import (  # noqa: E402
 )
 
 
-def _meta_for(*, scale, dark_exp, light_exp, has_bias=True, has_dark=True):
+def _meta_for(*, scale, dark_exp, light_exp, has_bias=True, has_dark=True,
+              bias_shape=(4, 4)):
+    """Header meta for a run whose calibration bundle is the **real** class.
+
+    Built as a genuine ``CalibrationMasters`` rather than a stand-in so the stamp
+    is decided by the same predicate the pixel path uses — a hand-rolled mock is
+    exactly how the stamp drifted apart from ``_effective_dark`` in the first
+    place (it claimed a scaled dark whenever *a* bias was loaded, including one
+    whose shape can't hold the pedestal).
+    """
+    from seestack.calibrate.apply import CalibrationMasters
+
     proj = SimpleNamespace(get_meta=lambda k: "M42" if k == "name" else None)
     frames = [SimpleNamespace(exposure_s=light_exp) for _ in range(5)]
-    cal = SimpleNamespace(
-        scale_dark_to_light=scale,
-        dark_exposure_s=dark_exp,
-        bias=np.zeros((4, 4), dtype=np.float32) if has_bias else None,
+    cal = CalibrationMasters(
         dark=np.zeros((4, 4), dtype=np.float32) if has_dark else None,
-        describe=lambda: "dark+bias",
+        bias=np.zeros(bias_shape, dtype=np.float32) if has_bias else None,
+        dark_exposure_s=dark_exp,
+        scale_dark_to_light=scale,
     )
     return _build_output_header_meta(proj, frames, StackOptions(), 5, calibration=cal)
 
@@ -216,6 +226,15 @@ def test_dark_scaling_provenance_absent_without_bias_or_exposure():
     assert "DARKSCAL" not in _meta_for(scale=True, dark_exp=30.0, light_exp=10.0,
                                        has_bias=False)
     assert "DARKSCAL" not in _meta_for(scale=True, dark_exp=None, light_exp=10.0)
+
+
+def test_dark_scaling_provenance_absent_when_the_bias_is_the_wrong_shape():
+    """A bias from another camera/binning can't hold the pedestal, so
+    ``_effective_dark`` subtracts the dark **unscaled** — the run must not claim
+    "Dark scaled to sub exposure · 30s → 10s" about a dark it never touched."""
+    assert "DARKSCAL" not in _meta_for(
+        scale=True, dark_exp=30.0, light_exp=10.0, bias_shape=(8, 8),
+    )
 
 
 # --- Rejection provenance (companion to the "surface rejection clipping" feature) --

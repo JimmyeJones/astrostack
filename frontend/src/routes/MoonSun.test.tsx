@@ -396,3 +396,49 @@ describe("cropping the empty sky", () => {
       expect(screen.getByRole("checkbox", { name: /Crop to the Sun/i })).toBeInTheDocument());
   });
 });
+
+// --- a still whose source video is gone ------------------------------------
+//
+// The backend keeps listing a finished still after its clip leaves `incoming/`
+// (the case the in-place crop exists for), sending it with an empty `files`
+// list. The card must then read as "here is your picture" rather than offering
+// a stack that can only fail.
+
+describe("MoonSunView with a still whose video is gone", () => {
+  const orphan = () => capture({
+    files: [], total_bytes: 0, result: result({ crop_available: true, crop_trim_fraction: 0.8 }),
+  });
+
+  it("keeps the picture and its crop, and hides the stacking controls", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(
+      list({ captures: [orphan()] }));
+
+    renderView();
+
+    // The picture and everything that acts on it survive...
+    expect(await screen.findByText("Moon")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Crop it/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "PNG" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /16-bit TIFF/ })).toBeInTheDocument();
+    // ...and it says plainly why there's nothing to stack.
+    expect(screen.getByText(/isn't in your incoming folder any more/)).toBeInTheDocument();
+    expect(screen.getByText(/video no longer in your incoming folder/)).toBeInTheDocument();
+    // Fail-before: "Stack again" was offered on a capture with no video to read.
+    expect(screen.queryByRole("button", { name: /Stack again/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("How picky should we be?")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Check this capture/ }))
+      .not.toBeInTheDocument();
+  });
+
+  it("still offers to stack a capture whose video is present", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(
+      list({ captures: [capture({ result: result() })] }));
+
+    renderView();
+
+    expect(await screen.findByRole("button", { name: /Stack again/ })).toBeInTheDocument();
+    expect(screen.getByText("How picky should we be?")).toBeInTheDocument();
+    expect(screen.queryByText(/isn't in your incoming folder any more/))
+      .not.toBeInTheDocument();
+  });
+});
