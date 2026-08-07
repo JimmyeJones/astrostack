@@ -551,6 +551,30 @@ add a test that an *old* config/DB upgrades cleanly.
 
 ## 10. Hard guardrails (never cross these)
 
+- **🔒 THE INCOMING FOLDER IS STRICTLY READ-ONLY. THE APP MUST NEVER DELETE, MOVE,
+  RENAME, TRUNCATE, OR OVERWRITE ANYTHING INSIDE IT.** *(Owner requirement,
+  2026-08-07 — the single most important rule in this file.)* The owner's **raw
+  subs exist in `incoming/` and NOWHERE ELSE — there is no backup and no second
+  copy.** If the app deletes a file there, the owner's data is gone forever and
+  no amount of re-stacking brings it back. Therefore:
+  - The **only** permitted operations on any path under
+    `Settings.resolved_incoming_dir` are **read** and **create-new** (the upload
+    endpoints may *add* files; the scanner/ingest may only *read*).
+  - **Ingest copies, it never moves** (`shutil.copy2` in `seestack/io/ingest.py`)
+    — that is deliberate and load-bearing. **Never** "optimise" it into a
+    `shutil.move`, `os.rename`, `Path.rename`, or a hardlink-plus-unlink, and
+    never add a "free up space by removing ingested originals" feature, however
+    well-intentioned or opt-in.
+  - **No cleanup, prune, tidy, dedupe, archive, quarantine, "move processed
+    files", or "delete after successful stack" behaviour may ever target
+    `incoming/`** — not by default, not behind a confirmation, not behind a
+    setting. Cache/thumb/output cleanup stays inside the library's own
+    `targets/` tree and the app's result stores, which is where every existing
+    `unlink`/`rmtree` is correctly scoped today (audited 2026-08-07: ingest
+    copies, and no destructive call resolves into `incoming/`).
+  - If a future feature seems to *need* to remove something from `incoming/`,
+    that is **"needs owner sign-off"** — file it, do not build it.
+
 - **Never break an in-place upgrade** (§9) — no config wipes, destructive
   migrations, moved data, or breaking default flips.
 - Never merge anything that isn't fully green (§5), and never force-push or rewrite

@@ -49,6 +49,44 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🔒⭐⭐ OWNER REQUIREMENT (2026-08-07) — add an automated SAFETY NET that fails CI if any code path can delete,
+  move, rename or overwrite a file under `incoming/`.** *(Data-integrity / regression prevention — NOT a current
+  defect; the audit below found the app clean today. Size S–M. This outranks feature work: the downside is
+  unrecoverable.)* **Why this is the highest-stakes rule in the repo:** the owner's **raw subs live in `incoming/`
+  and nowhere else — no backup, no second copy.** A single stray `unlink`/`move` there destroys data that cannot
+  be regenerated. `AGENTS.md` §10 now carries the hard guardrail, but **a prose rule is not enforcement** — the
+  next agent to build a "tidy up your incoming folder" or "free space by removing ingested originals" feature is
+  exactly the failure mode this must catch.
+
+  **Audit already done (2026-08-07 — the app is currently SAFE; do not "fix" a bug that isn't there):** every
+  destructive call was enumerated and traced. `seestack/io/ingest.py:145` uses **`shutil.copy2`** — ingest
+  *copies*, never moves. There is **no** `shutil.move` / `os.rename` / `Path.rename` on a source file anywhere.
+  Every `unlink`/`rmtree` in `seestack/` + `webapp/` resolves into app-owned storage, never `incoming/`:
+  `Library.delete_target` → `library_root/targets/<safe>` (`seestack/io/library.py:537`, and only with an explicit
+  `remove_files=True`); `storage.py` → that target's `CacheManager` stages + `thumbs_dir`;
+  `delete_run_artifacts` → a stack run's own `fits_path`/`tiff_path`/`preview_path`; `webapp/video.py` → the
+  result store at `<data_root>/video/<id>/`; plus proxy/thumbnail caches and upload temp files.
+
+  **What to build (the point of this item):** a test that is **hard to defeat by accident**, not a one-off
+  assertion. Suggested belt-and-braces, do at least the first two:
+  1. **A runtime guard test.** Point `Settings.resolved_incoming_dir` at a temp dir seeded with decoy raws +
+     checksums, then drive the real code paths that could plausibly touch it — full scan/ingest of a Seestar-style
+     tree, auto-stack, reprocess-all, `DELETE /api/targets/{safe}?remove_files=true`, every
+     `/api/storage/...` clear stage, target merge, the video pipeline over an `incoming/*_video/` capture, and
+     the sample-data delete — then assert **every decoy file still exists with an unchanged checksum and mtime**,
+     and that the directory listing is unchanged. This catches real behaviour, not spelling.
+  2. **A static guard test.** Monkeypatch/spy `os.remove`, `os.unlink`, `os.rename`, `Path.unlink`,
+     `Path.rename`, `shutil.move`, `shutil.rmtree` for the duration of the above, and **fail if any of them is
+     called with a path that resolves inside the incoming dir** (resolve symlinks and `..` first — see the
+     existing path-containment helper in `webapp/routers/upload.py`, which already reasons about symlinked NAS
+     mounts). A spy is stronger than grepping source text.
+  3. Optional but cheap: assert the ingest module contains no move-style call, so the "optimise copy2 into move"
+     regression is caught at the source.
+
+  Wire it into the normal suite so **CI blocks the merge**. Keep the failure message explicit about *why*
+  (owner's only copy). Also worth adding: an `incoming/`-adjacent note in the Storage page copy so a human never
+  assumes the app manages that folder for them.
+
 - ~~**⚠ INFRA (Builder 2026-08-06, observed while merging v0.244.x; NOT a code bug — needs the owner) — GitHub
   Actions has stopped running CI for this repo, so the independent safety net on `main` is currently blind.**~~
   — **RESOLVED ITSELF; runners are back** (Builder 2026-08-07, confirmed by listing workflow runs). `main` @
