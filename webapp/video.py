@@ -156,6 +156,17 @@ class VideoGradeMeta:
     #: and defaulted so a ``grade.json`` written before the quick look existed
     #: still loads — it simply has no frame to point at.
     best_index: int = -1
+    #: Size and modification time of the file that was graded, so a check can
+    #: tell whether it still describes the clip on disk. The Seestar writes each
+    #: night's capture into the *same* ``<Target>_video/`` folder, so re-recording
+    #: replaces ``clip.mp4`` in place while the capture id stays put — without
+    #: this stamp last night's scores, advice and quick look would stay on screen
+    #: as if they described tonight's clip. Both optional and defaulted to 0,
+    #: which reads as "unknown" and is deliberately trusted (see
+    #: :func:`grade_matches_source`): an upgrade must never hide a panel that has
+    #: been there all along.
+    source_size: int = 0
+    source_mtime: float = 0.0
 
 
 def read_grade(settings: Settings, capture_id: str) -> VideoGradeMeta | None:
@@ -175,6 +186,52 @@ def read_grade(settings: Settings, capture_id: str) -> VideoGradeMeta | None:
     except TypeError:
         log.debug("video grade for %s is missing fields; ignoring", capture_id)
         return None
+
+
+#: How far apart two modification times may be and still count as the same file.
+#: A second of slack costs nothing (a re-recording changes the mtime by minutes at
+#: least) and absorbs the coarser timestamp granularity some network filesystems
+#: report, which would otherwise invalidate a perfectly good check.
+_MTIME_TOLERANCE_S = 1.0
+
+
+def source_stamp(path: str | Path) -> tuple[int, float]:
+    """``(size, mtime)`` of a video file, or ``(0, 0.0)`` when it can't be read.
+
+    ``(0, 0.0)`` is the same "unknown" the older ``grade.json`` files carry, so a
+    filesystem that reports no usable stat degrades to today's behaviour —
+    trusting the check — rather than to hiding one.
+    """
+    try:
+        st = Path(path).stat()
+    except OSError:
+        return 0, 0.0
+    return int(st.st_size), round(float(st.st_mtime), 3)
+
+
+def grade_matches_source(meta: VideoGradeMeta, files: list[str]) -> bool:
+    """Does a saved check still describe the clip that is on disk?
+
+    Only ever returns ``False`` on a *positive* mismatch — the graded file is
+    among ``files``, both stamps are readable, and they disagree. Everything
+    else ("unknown" stamp from an older version, the named file not in this
+    folder, an unreadable stat) counts as a match, because the cost of the two
+    mistakes is not symmetric: showing a stale curve is a small dishonesty,
+    while hiding a good one on upgrade would take a panel away from every
+    capture the owner has already checked.
+    """
+    if not meta.source_size and not meta.source_mtime:
+        return True
+    match = next((f for f in files if Path(f).name == meta.source_name), None)
+    if match is None:
+        return True
+    size, mtime = source_stamp(match)
+    if not size and not mtime:
+        return True
+    return (
+        size == meta.source_size
+        and abs(mtime - meta.source_mtime) <= _MTIME_TOLERANCE_S
+    )
 
 
 def has_result(settings: Settings, capture_id: str) -> bool:
@@ -616,6 +673,9 @@ def _video_grade_body(
     out_dir = result_dir(settings, capture_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     _write_quicklook(out_dir, graded.best_frame)
+    # Stamped from the file we just finished reading, so re-recording over it
+    # later is detectable — see ``grade_matches_source``.
+    source_size, source_mtime = source_stamp(source)
     meta = VideoGradeMeta(
         capture_id=capture_id,
         source_name=Path(source).name,
@@ -625,6 +685,8 @@ def _video_grade_body(
         scores=[round(float(v), 6) for v in graded.scores],
         warnings=list(graded.warnings),
         best_index=int(graded.best_index),
+        source_size=source_size,
+        source_mtime=source_mtime,
     )
     (out_dir / GRADE_NAME).write_text(
         json.dumps(asdict(meta), indent=2), encoding="utf-8",
