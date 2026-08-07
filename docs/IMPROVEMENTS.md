@@ -7597,6 +7597,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+
+- **NEW IDEA (Builder 2026-08-07, spotted while building the Quick look v0.246.0) — a `grade.json` can silently
+  describe a capture that is no longer on disk, because it is keyed only by folder id.** *(Trust / friendliness —
+  PRIORITY 3; size S.)* The Seestar writes each night's Moon clip into the *same* `<Target>_video/` folder, so
+  re-recording overwrites `clip.mp4` in place while the capture id stays `Lunar_video`. A grade recorded against
+  the old clip therefore stays authoritative on the Moon & Sun page — its curve, its "keep 50%" advice, and now
+  its quick-look frame — and nothing on screen says the scores belong to a *different* recording. The quick look
+  makes this newly visible: the picture is unmistakably last night's. (v0.246.0 already replaces the frame and
+  the scores together whenever a check *is* re-run, so what is on disk is always self-consistent — this is only
+  about a check that was never re-run.) **Shape:** stamp the source file's `st_size` + `st_mtime` into
+  `VideoGradeMeta` (additive, defaulted, so an older `grade.json` reads as "unknown" and behaves exactly as it
+  does today), and have `_grade_panels` treat a mismatch as *not checked* — the panel and the quick look drop
+  out, the "Check this capture first" button comes back, and the beginner re-checks in one click rather than
+  reading advice about a clip they replaced. **Care:** unknown must mean "trust it" (never hide an existing
+  panel on upgrade), and a filesystem that reports no usable mtime must fall back to trusting it too. Testable
+  with the synthetic fixture — the v0.246.0 re-check test already writes a second capture over the first.
+
+- **NEW IDEA (Builder 2026-08-07, measured-by-inspection while building the Quick look v0.246.0) — checking a
+  Moon capture and then stacking it decodes the same video *three* times, when the second decode is pure
+  duplication.** *(Autonomy / performance — PRIORITY 2; size M; **measure the wall-clock saving first**.)* The
+  recommended beginner path is now "Check this capture" → read the advice → "Stack video". That is one decode
+  for the check's grading pass, then `stack_video`'s *own* grading pass (identical stride, identical scores —
+  `test_grade_only_scores_every_frame_without_stacking` pins that they agree exactly), then the stack pass. On a
+  multi-minute capture the redundant middle pass is a third of the wait, and it is the one the app already has
+  the answer to on disk. **Shape:** let `stack_video` accept a pre-computed `GradeResult` and have the stack job
+  pass the saved `grade.json` when it is valid for this file — which needs exactly the size/mtime stamp the
+  entry above adds, plus a match on stride and frame count, so a stale or differently-sampled grade can never
+  select the wrong frames. **Care:** the keeper set is chosen by *index into the sampled sequence*, so the
+  reused scores are only sound if the stride and the decoded frame count match what pass 2 will see — verify
+  both before trusting them, and fall back to grading normally otherwise (never guess). Memory is unaffected
+  (scores are scalars). Worth a before/after on a real-length capture before shipping: if the saving is small
+  relative to the stack pass, say so with the number and strike it.
+
 - ~~**NEW IDEA (Builder 2026-08-04, traced while auditing the stack dispatcher) — a user who saved stack defaults
   *before* `auto_reject` existed silently gets **no effective outlier rejection** on every small stack, and nothing
   anywhere says so.**~~ — **SHIPPED v0.230.1** (Builder 2026-08-04, same run/branch
@@ -11028,8 +11061,39 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-07) — "Quick look": show the single sharpest frame of a Moon/Sun capture
-  *before* committing to a full stack.** *(Autonomy / friendliness — PRIORITY 2–3; size M.)* Today the only way to
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-07) — "Quick look": show the single sharpest frame of a Moon/Sun capture
+  *before* committing to a full stack.**~~ — **SHIPPED v0.246.0** (Builder 2026-08-07, branch
+  `claude/elegant-bohr-dobfg3`). *(Autonomy / friendliness — PRIORITY 2–3.)* "Check this capture" now comes back
+  with the capture's sharpest frame as well as its curve, so *"is this worth stacking at all?"* — did a cloud roll
+  in, did the Moon drift out of frame, was it ever in focus — is a look rather than a two-decode, multi-minute wait.
+  **Cheaper than the filed spec, and one fewer moving part:** rather than seeking back for the best frame with a
+  third `ffmpeg` pass (`select='eq(n\,IDX)'`), `grade_video` takes an opt-in `keep_best_frame` and simply *keeps*
+  the best frame it has already decoded, replacing it as a sharper one arrives — **exactly one extra frame held**,
+  flat in video length, so the standing video memory discipline is untouched. It is opt-in precisely because
+  `stack_video` grades to choose keepers, not to look at one, and must not pay a frame for a picture it never uses
+  (pinned by a test: the default carries the index and no frame). The index itself is free (an `argmax` over
+  scalars) and is always filled in.
+  The frame is rendered with the **same** `normalize_for_display` the finished still uses, so the quick look is a
+  fair preview of the stack rather than a differently-toned picture to reconcile — one frame's worth of noise
+  apart. Written by the *check*, beside `grade.json`, so looking at a capture still never disturbs a finished
+  still; a stale one from an earlier check is cleared first, so the picture on disk always belongs to the scores
+  next to it. The **care note is honoured literally**: `quicklook_note` (pure, in `seestack/video/quality.py`)
+  builds the caption from the capture's own numbers — *"…It's one frame, so it's noisy — stacking the sharpest 30%
+  (270 frames) keeps detail like this and comes out about 16× cleaner"* — and a capture with no measurable profile
+  still gets the single-frame caveat, never a bare picture. The card is shown only before a stack exists; once
+  there is a finished still, that is the picture.
+  Upgrade-safe: one new endpoint (`GET /api/videos/{id}/quicklook.png`), one additive nullable response field, one
+  additive defaulted `grade.json` field — a grade written by an older version has the scores but no `best_index`
+  and no picture, and reads as "curve, no quick look" (pinned by a test). No default flipped, no existing shape
+  changed. **Tests:** `tests/test_video_lucky.py` (+2 — the kept frame is genuinely the sharpest one, re-grading it
+  reproduces its own score; the default holds no frame), `tests/test_video_quality.py` (+2 — the note names the
+  frame and quantifies the alternative from this capture's numbers; no-profile still warns), and
+  `tests/webapp/test_video_api.py` (+4 — the check produces a servable native-size PNG and still stacks nothing,
+  an unchecked capture offers none and 404s with a sentence, an older grade keeps its curve, a re-check replaces
+  the frame), `MoonSun.test.tsx` (+3 — the frame and its caveat render, an unchecked capture shows none, a
+  finished still hides it).
+  *(Original spec kept below.)*
+  *(Autonomy / friendliness — PRIORITY 2–3; size M.)* Today the only way to
   see what a `Lunar_video/` capture actually holds is to run a full lucky stack — two whole decode passes and a
   multi-minute wait — and only then does the beginner learn whether the capture was worth keeping at all (a cloud
   rolled in, the Moon drifted out of frame, the whole clip was soft). The grading pass already scores every frame
@@ -11064,18 +11128,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   encodes the *JPEG*, proven by matching the rendered QR path against the one that URL produces alone and against
   the PNG's, which differs; a viewer with no picture offers none) and `MoonSun.test.tsx` (+1 — the finished still
   opens a QR captioned for the Moon).
-  - **Follow-on worth a run (Builder 2026-08-07, the same reasoning one step further; S):** the OS **share sheet**
-    (`SharePictureButton`) is surface-agnostic in exactly the way the QR is — it fetches a URL and hands the file
-    to `navigator.share` — but the lightbox gates it on `jpegHref && shareFilename`, so a Moon/Sun still gets no
-    "Share" icon either. On a phone (where the QR is redundant with the OS sheet) that is the *only* control that
-    would help. **Care, and why it wasn't folded into v0.245.8:** the gate isn't arbitrary — the sheet uploads the
-    whole file, and a still's display PNG is several times the size of the JPEG the stack surfaces hand it, so
-    this needs a look at what a full-frame Moon PNG actually weighs before it's offered as the share path. Still
-    **not** the share *card* (see above): a filename and a caption, nothing stack-run-shaped.
+  - ~~**Follow-on worth a run (Builder 2026-08-07, the same reasoning one step further; S):** the OS **share sheet**
+    (`SharePictureButton`) is surface-agnostic in exactly the way the QR is … but the lightbox gates it on
+    `jpegHref && shareFilename`, so a Moon/Sun still gets no "Share" icon either.~~ — **SHIPPED v0.246.0**
+    (Builder 2026-08-07, branch `claude/elegant-bohr-dobfg3`). **The care note's measurement was made first, and
+    it cleared the gate:** a full-frame stacked Moon still, rendered through the app's own
+    `normalize_for_display` + `write_full_res_png` at 1920×1080 (the Seestar's video size, so this is the
+    realistic ceiling) with the residual noise a 30-frame lucky stack leaves, weighs **0.99 MB** as PNG against
+    **0.09 MB** as the share JPEG. ~1 MB is an entirely ordinary thing to hand a share sheet over a LAN, so the
+    control is now gated on the *picture* (`jpegHref ?? downloadHref`) exactly as the QR already was — the small
+    JPEG still wins wherever one exists, and a PNG-only surface shares its PNG rather than losing the control.
+    Wired on both surfaces that hold a still: the Gallery's fullscreen viewer and the Moon & Sun card's own
+    download row. One detail beyond the spec: `sharePictureText` gained an optional `ext` (default `"jpg"`, so
+    every existing caller is byte-identical), because a PNG arriving named `.jpg` confuses the app it lands in —
+    the still shares as `moon.png`. Still **not** the share *card*, as the entry asks: a filename and a caption,
+    nothing stack-run-shaped. Frontend-only; no API, schema, config, endpoint or default change, and the control
+    renders nothing on a browser without file-share support, so a desktop sees the row it always saw.
+    **Tests:** `share.test.ts` (+2 — the extension names the file and a blank/punctuation one falls back to
+    `.jpg`), `ImageLightbox.test.tsx` (+2, both fail-before — a PNG-only surface shares its PNG under the right
+    filename; a surface with both still fetches the JPEG), `Gallery.test.tsx` (+1, fail-before) and
+    `MoonSun.test.tsx` (+1, fail-before).
 
-- **NEW IDEA (Builder 2026-08-07, spotted while adding the phone QR) — a Moon/Sun still has no JPEG at all, so
-  every "send this somewhere" path on it moves the full display PNG.** *(Friendliness / performance — PRIORITY 3;
-  size S; **measure the file size first**.)* The stack path writes a share JPEG beside every deep-sky run
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while adding the phone QR) — a Moon/Sun still has no JPEG at all, so
+  every "send this somewhere" path on it moves the full display PNG.**~~ — **CLOSED, NOT BUILT: measured, and the
+  number says it would be churn** (Builder 2026-08-07, branch `claude/elegant-bohr-dobfg3`). The entry's own care
+  note asked for the measurement first, so here it is: a full-frame stacked Moon still at **1920×1080** — the
+  Seestar's video size, i.e. the realistic ceiling — rendered through the shipping
+  `normalize_for_display` → `write_full_res_png` path, carrying the residual noise a 30-frame lucky stack leaves,
+  is **0.99 MB** as PNG against **0.09 MB** as the share JPEG (≈11×). The ratio is real, but the *absolute* size
+  is the number that decides it: **~1 MB is unremarkable** to pull over a LAN or hand to a phone, and the
+  suspicion behind this entry — that the PNG was too heavy to be the share path — is exactly what the
+  measurement disproves. Building it would cost a new on-disk artifact, a nullable field, a backfill path for
+  every existing still and a fourth download control, to save under a megabyte on a click a user makes once per
+  picture. **So the honest outcome is to strike it with the number**, per AGENTS.md §2 — and the thing it was
+  really wanted for (the share sheet, gated on the PNG's weight) shipped **without** it in v0.246.0, above.
+  Re-open only if Seestar captures ever get much larger than 1080p. *(Original spec kept below.)*
+  *(Friendliness / performance — PRIORITY 3; size S; **measure the file size first**.)* The stack path writes a share JPEG beside every deep-sky run
   (`write_share_jpeg`) precisely because the PNG is the wrong thing to pull over a LAN or hand to a phone; the
   video path writes only `stack.png` + `stack.tiff`. Nothing is broken today — the QR and the download both work —
   but the beginner's most-used file is also the heaviest one. **Shape:** write a `stack.jpg` beside the pair at

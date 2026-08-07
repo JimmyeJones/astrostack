@@ -96,16 +96,23 @@ function slugify(name: string): string {
  * Build a friendly caption + filename for a shared picture from the target
  * name and (optionally) the capture/stack date, so the post arrives labelled.
  * A blank name falls back to a sensible generic so we never share `.jpg`.
+ *
+ * `ext` is the shared file's extension. It defaults to `jpg` — every stack run
+ * shares its share-JPEG — but a Moon/Sun still has only a PNG, and a PNG
+ * arriving named `.jpg` is the kind of small wrongness that confuses the app it
+ * lands in. The blob's own mime type is what the OS actually goes on; this is
+ * just the filename.
  */
 export function sharePictureText(
   name: string | null | undefined,
   dateLabel?: string | null,
+  ext: string = "jpg",
 ): { title: string; text: string; filename: string } {
   const clean = (name ?? "").trim() || "My astrophoto";
   const date = (dateLabel ?? "").trim();
   const title = date ? `${clean} · ${date}` : clean;
   const text = date ? `${clean} — captured ${date}` : clean;
-  const filename = `${slugify(clean) || "astrophoto"}.jpg`;
+  const filename = `${slugify(clean) || "astrophoto"}.${slugify(ext) || "jpg"}`;
   return { title, text, filename };
 }
 
