@@ -111,6 +111,24 @@ describe("MoonSunView", () => {
     expect(screen.getByRole("button", { name: /Stack again/i })).toBeInTheDocument();
   });
 
+  it("offers the finished picture to the user's phone", async () => {
+    // Fail-before: showing someone is the first thing a beginner does with a
+    // Moon picture, and this page — the one that owns it — had no way to get it
+    // off the laptop but a file download.
+    vi.spyOn(client.api, "listVideoCaptures")
+      .mockResolvedValue(list({ captures: [capture({ result: result() })] }));
+    renderView();
+    await waitFor(() => expect(screen.getByText("Stacked")).toBeInTheDocument());
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Scan to get this picture on your phone" }),
+    );
+    await waitFor(() => expect(screen.getByRole("img", { name: /QR code/i }))
+      .toBeInTheDocument());
+    // Named in the user's words for *this* capture, not "the picture".
+    expect(screen.getByText(/open your Moon picture and save it/)).toBeInTheDocument();
+  });
+
   it("surfaces the engine's honest notes about a run", async () => {
     vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
       captures: [capture({

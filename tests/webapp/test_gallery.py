@@ -251,3 +251,25 @@ def test_gallery_addresses_a_still_by_its_folder_not_its_metadata(client, data_r
     (still,) = client.get("/api/gallery").json()["videos"]
     assert still["capture_id"] == "Lunar_video"
     assert client.get(still["preview_url"]).status_code == 200
+
+
+def test_gallery_offers_the_16_bit_tiff_of_a_still(client, data_root):
+    """The Gallery is where a beginner finds a finished Moon picture, so the
+    full-quality copy has to be reachable from here — not only from the page
+    that lists the source video (which a cleared-off NAS no longer has)."""
+    _drop_video_still(data_root)
+    (data_root / "video" / "Lunar_video" / "stack.tiff").write_bytes(b"II*\x00")
+
+    (still,) = client.get("/api/gallery").json()["videos"]
+    assert still["tiff_url"] == "/api/videos/Lunar_video/download.tiff"
+    r = client.get(still["tiff_url"])
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/tiff"
+
+
+def test_gallery_offers_no_tiff_when_the_still_has_none(client, data_root):
+    """Offering a download that 404s is worse than not offering it."""
+    _drop_video_still(data_root)
+
+    (still,) = client.get("/api/gallery").json()["videos"]
+    assert still["tiff_url"] is None

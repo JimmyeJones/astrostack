@@ -940,6 +940,10 @@ export interface VideoStill {
   n_stacked: number;
   source_name: string;
   preview_url: string;
+  // The 16-bit TIFF of the same picture, when the backend found one on disk —
+  // the full-quality copy to open elsewhere. Optional/nullable: an older backend
+  // omits it and the viewer simply doesn't offer the download.
+  tiff_url?: string | null;
   // Framing — the same four fields `VideoResult` carries, so both surfaces read
   // one decision. Optional: an older backend omits them and the card simply
   // offers nothing.

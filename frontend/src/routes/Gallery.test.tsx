@@ -590,4 +590,47 @@ describe("Gallery Moon & Sun stills", () => {
       expect(screen.queryByRole("button", { name: /Undo crop/ })).not.toBeInTheDocument();
       expect(screen.getByText(/Cropped to the Moon/)).toBeInTheDocument();
     });
+
+  // The full-quality copy. A Moon still was the only finished picture in the
+  // Gallery whose fullscreen view offered nothing but the small preview PNG,
+  // so sending the sharpest copy somewhere meant knowing a *different* page
+  // held it — and for a user whose clip is off the NAS, that page is empty.
+  it("offers the 16-bit TIFF of a still from the fullscreen view", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [],
+      videos: [{
+        ...still("Lunar_video"),
+        tiff_url: "/api/videos/Lunar_video/download.tiff",
+      }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+
+    // Fail-before: the still's viewer passed no `rawHref` at all.
+    expect(await screen.findByLabelText("Download 16-bit TIFF")).toHaveAttribute(
+      "href", "/api/videos/Lunar_video/download.tiff");
+    // The picture download stays the plain PNG — there is no JPEG or full-res
+    // render behind a still, so it must not become a menu offering neither.
+    expect(screen.getByLabelText("Download picture"))
+      .toHaveAttribute("href", "/api/videos/Lunar_video/preview.png");
+  });
+
+  it("offers no TIFF for a still that has none on disk", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [], videos: [{ ...still("Lunar_video"), tiff_url: null }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+
+    expect(await screen.findByLabelText("Download picture")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Download 16-bit TIFF")).not.toBeInTheDocument();
+  });
 });
