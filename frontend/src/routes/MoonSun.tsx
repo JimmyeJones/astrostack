@@ -48,6 +48,35 @@ export const KEEP_PRESETS = [
 
 export const DEFAULT_KEEP = "30";
 
+// How hard to sharpen the finished picture. A lucky stack is an average, and
+// averaging softens — every planetary tool finishes with a sharpening step for
+// exactly that reason. The amounts must stay in step with `SHARPEN_PRESETS` in
+// `seestack/video/detail.py`, which is what actually renders them.
+export const SHARPEN_PRESETS = [
+  { value: "0", name: "Off", label: "Off — the plain stacked picture" },
+  { value: "0.6", name: "Gentle", label: "Gentle — recommended" },
+  { value: "1.2", name: "Medium", label: "Medium — more surface detail" },
+  { value: "2", name: "Strong", label: "Strong — as far as it goes" },
+];
+
+export const DEFAULT_SHARPEN = "0";
+
+/** How a finished picture says it was sharpened, or null when it wasn't.
+ *
+ * Named by the nearest preset rather than printed as a number: "1.2" means
+ * nothing to the person looking at the picture, and a still made by a hand-written
+ * API call can still be described in the same words as one made from the menu.
+ */
+export function sharpenNote(amount: number | undefined | null): string | null {
+  if (!amount || !Number.isFinite(amount) || amount <= 0) return null;
+  const preset = SHARPEN_PRESETS
+    .filter((p) => Number(p.value) > 0)
+    .reduce((best, p) => (
+      Math.abs(Number(p.value) - amount) < Math.abs(Number(best.value) - amount) ? p : best
+    ));
+  return `Sharpening: ${preset.name} — surface detail lifted after stacking.`;
+}
+
 /** One-line summary of a finished still, in plain language (pure, tested). */
 export function resultSummary(r: {
   n_stacked: number; n_graded: number; width: number; height: number;
@@ -71,6 +100,7 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
   const navigate = useNavigate();
   const [keep, setKeep] = useState<string>(DEFAULT_KEEP);
   const [crop, setCrop] = useState(false);
+  const [sharpen, setSharpen] = useState<string>(DEFAULT_SHARPEN);
   const [file, setFile] = useState<string | null>(
     capture.files.length === 1 ? capture.files[0].name : null,
   );
@@ -83,6 +113,7 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
       keep_percent: Number(keep),
       file_name: file ?? undefined,
       crop: over.crop ?? crop,
+      sharpen: Number(sharpen),
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -201,6 +232,11 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
                 </Button>
               ) : null}
             </Group>
+          ) : null}
+          {/* Provenance: a sharpened picture should say so, so nobody wonders
+              later why it looks crisper than the last one. */}
+          {sharpenNote(result.sharpen_amount) ? (
+            <Text size="xs" c="dimmed">{sharpenNote(result.sharpen_amount)}</Text>
           ) : null}
           {result.warnings.map((w) => (
             <Text key={w} size="xs" c="dimmed">{w}</Text>
@@ -341,6 +377,22 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
             allowDeselect={false}
             mb="sm"
             mt="sm"
+          />
+
+          {/* A stack is an average, and averaging softens — so the last step of
+              every planetary workflow is a sharpen. The editor can't open a
+              Moon still, so without this the picture the user downloads is the
+              soft one. Off by default: the picture an existing install has been
+              getting must not change under it. */}
+          <Select
+            label="Sharpen the detail"
+            description="Stacking makes a clean picture but a slightly soft one. This brings the surface detail back."
+            size="sm"
+            data={SHARPEN_PRESETS}
+            value={sharpen}
+            onChange={(v) => setSharpen(v ?? DEFAULT_SHARPEN)}
+            allowDeselect={false}
+            mb="sm"
           />
 
           <Checkbox

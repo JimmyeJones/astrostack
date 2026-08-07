@@ -15,8 +15,8 @@ video in RAM:
 1. **Grade.** Decode once, scoring each frame's sharpness and keeping only the
    scalar score. Memory: one frame.
 2. **Stack.** Decode again, and for the frames that made the cut, align to the
-   first kept frame and add into a NaN-aware accumulator. Memory: a handful of
-   full-frame canvases regardless of video length.
+   *sharpest* kept frame and add into a NaN-aware accumulator. Memory: a handful
+   of full-frame canvases regardless of video length.
 
 Decoding twice is cheaper than the alternatives (holding the best *N* frames
 needs *N* frames of RAM; a single pass can't know what "best" means yet) and
@@ -107,8 +107,9 @@ class GradeResult:
     best_index: int = -1
     #: The sharpest frame itself, as decoded ((H, W, 3) uint8), when the caller
     #: asked for it with ``keep_best_frame=True``. ``None`` otherwise — grading
-    #: is the memory-cheap pass and holding a frame is opt-in, so
-    #: :func:`stack_video`'s own grading pass never carries one.
+    #: is the memory-cheap pass and holding a frame is opt-in. Both callers want
+    #: it: the "check this capture" pass renders it as the quick look, and
+    #: :func:`stack_video` uses its luma as the alignment reference.
     best_frame: np.ndarray | None = None
 
 
@@ -251,8 +252,8 @@ def grade_video(
     like?" can be answered without decoding the file a second time. It holds
     **exactly one extra frame** — the best one seen so far, replaced as a
     sharper one arrives — so the pass stays flat in memory whatever the video's
-    length. Off by default: :func:`stack_video` grades to choose keepers, not to
-    look at one, and must not pay for a frame it never uses.
+    length. Off by default, so a caller that only wants the scores never pays
+    for a frame it will not use.
 
     Raises ``ValueError`` if the file has fewer than :data:`MIN_FRAMES` usable
     frames, and :class:`~seestack.video.ffmpeg.VideoToolsMissing` if ffmpeg
@@ -322,6 +323,9 @@ def stack_video(
 ) -> LuckyResult:
     """Grade → keep the sharpest → align → average one video capture.
 
+    Everything kept is aligned onto the **sharpest** frame in the capture, which
+    is therefore the one that fixes the result's framing.
+
     ``progress(stage, done, total)`` is called as the two passes advance
     (``stage`` is ``"grade"`` or ``"stack"``); ``should_cancel`` is polled
     between frames so a cancelled job stops the decoder promptly.
@@ -337,6 +341,10 @@ def stack_video(
     # ---- pass 1: grade -----------------------------------------------------
     graded = grade_video(
         src, opts, info=vinfo, progress=progress, should_cancel=should_cancel,
+        # The sharpest frame is the alignment reference (see below), so pass 1
+        # hands it back rather than pass 2 hunting for it. Costs exactly one held
+        # frame — the pass stays flat in memory — and only when aligning at all.
+        keep_best_frame=opts.align,
     )
     scores = list(graded.scores)
     n_graded = graded.n_graded
@@ -345,13 +353,31 @@ def stack_video(
 
     # ---- choose the keepers ------------------------------------------------
     n_keep = max(1, int(math.ceil(n_graded * opts.keep_percent / 100.0)))
-    order = np.argsort(np.asarray(scores, dtype=np.float64))[::-1]
+    # Descending by score, ties broken toward the *earlier* frame — a stable sort
+    # of the negated scores. The tie rule is what makes "the sharpest frame is
+    # always among the keepers, and it is the one ``grade_video`` held on to"
+    # true by construction rather than by luck.
+    order = np.argsort(-np.asarray(scores, dtype=np.float64), kind="stable")
     keep_idx = set(int(i) for i in order[:n_keep])
     kept_scores = [scores[i] for i in sorted(keep_idx)]
 
     # ---- pass 2: align + average ------------------------------------------
+    #
+    # Align to the *sharpest* kept frame, not the earliest one. Phase correlation
+    # locks harder against a crisp reference — a sharp frame gives a tighter
+    # correlation peak — so anchoring on whichever keeper happened to come first
+    # in decode order makes every other frame's measured shift noisier, and can
+    # push a good frame past ``_MAX_SHIFT_FRACTION`` and out of the stack
+    # entirely. Aligning to the best frame is also what AutoStakkert/RegiStax do,
+    # and it costs nothing: pass 1 already knows which frame that is.
     acc = WeightedSumAccumulator((vinfo.height, vinfo.width, 3), dtype=np.float32)
-    ref_luma: np.ndarray | None = None
+    ref_index = graded.best_index if opts.align else -1
+    ref_luma: np.ndarray | None = (
+        frame_luma(graded.best_frame) if graded.best_frame is not None else None
+    )
+    # Nothing else needs the reference *frame* once its luma is measured, and it
+    # is the one full frame pass 1 was holding.
+    graded.best_frame = None
     n_stacked = 0
     n_align_failed = 0
     max_shift = max(2.0, _MAX_SHIFT_FRACTION * min(vinfo.height, vinfo.width))
@@ -366,8 +392,13 @@ def stack_video(
         # Decoder output is 0–255; work in 0–1 so the result matches the rest of
         # the engine's display-space convention.
         rgb = frame.astype(np.float32) / 255.0
-        if not opts.align or ref_luma is None:
-            if opts.align:
+        if not opts.align or ref_luma is None or i == ref_index:
+            # The reference itself goes in unshifted — it is what everything else
+            # is being brought onto, so it defines the result's framing. (When
+            # pass 1 couldn't hand back a frame we fall back to the old
+            # anchor-on-the-first-keeper behaviour, which is still correct.)
+            if opts.align and ref_luma is None:
+                ref_index = i
                 ref_luma = frame_luma(frame)
             acc.add(rgb)
             n_stacked += 1

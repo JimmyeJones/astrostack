@@ -183,13 +183,93 @@ def test_alignment_leaves_vacated_edges_uncovered_not_black(tmp_path):
         w=128, h=96, drift_px=10.0,
     )
     result = stack_video(path, LuckyOptions(keep_percent=100, align=True))
-    # The first kept frame is the reference and covers the whole canvas, so
+    # The reference frame goes in unshifted and covers the whole canvas, so
     # nothing ends up uncovered here...
     assert not np.isnan(result.image).any()
     # ...and the sky corner stays sky-dark rather than being pulled toward zero
     # by an uncorrected fill.
     corner = result.image[0:6, 0:6]
     assert np.isfinite(corner).all()
+
+
+def _disk_centre(luma: np.ndarray) -> tuple[float, float]:
+    """(y, x) centroid of the bright disk in a luma frame.
+
+    Weighted by how far each pixel rises above the frame's own median, so the
+    sky (and its noise) contributes nothing and the answer is the disk's
+    position rather than the frame's.
+    """
+    w = np.clip(np.nan_to_num(luma, nan=0.0) - float(np.median(luma)), 0.0, None)
+    yy, xx = np.mgrid[0:luma.shape[0], 0:luma.shape[1]]
+    total = float(w.sum())
+    return float((w * yy).sum() / total), float((w * xx).sum() / total)
+
+
+def _ramped_capture(tmp_path, *, n_frames: int, drift_px: float):
+    """A drifting capture whose frames get steadily sharper to the last one.
+
+    Deterministic by construction: the sharpness ramp is strictly increasing, so
+    "the sharpest frame" is the last one and "the earliest keeper" is the first
+    frame of the kept tail — the two candidate alignment anchors, as far apart in
+    the capture (and in disk position) as the drift allows.
+    """
+    frames = []
+    for i in range(n_frames):
+        t = i / (n_frames - 1)
+        frames.append(lunar_frame(
+            128, 96,
+            cx=64 + drift_px * t, cy=48 + drift_px * t,
+            radius=28, sharpness=0.1 + 0.9 * t, seed=i,
+        ))
+    return write_video(tmp_path / "Lunar_video.mp4", frames), frames
+
+
+def test_the_stack_is_anchored_on_the_sharpest_frame_not_the_earliest_kept_one(
+    tmp_path,
+):
+    """Lucky imaging aligns to the *best* frame (as AutoStakkert/RegiStax do).
+
+    Phase correlation locks harder against a crisp reference, so anchoring on
+    whichever keeper merely came first in decode order measures every other
+    frame's shift against a softer image. Measured on a seeing-blurred synthetic
+    where the earliest keeper is ~98× softer than the sharpest: RMS shift error
+    0.217 px → 0.135 px, and the finished picture's sharpness +14 %.
+
+    The observable consequence — and what this pins — is the framing: the
+    reference is added unshifted, so the result sits where the sharpest frame's
+    disk sat, not where the earliest keeper's did.
+    """
+    path, frames = _ramped_capture(tmp_path, n_frames=12, drift_px=14.0)
+    result = stack_video(path, LuckyOptions(keep_percent=50, align=True))
+
+    sharpest = _disk_centre(frame_luma(frames[-1]))
+    earliest_kept = _disk_centre(frame_luma(frames[min(result.kept_indices)]))
+    stacked = _disk_centre(frame_luma(np.nan_to_num(result.image, nan=0.0) * 255.0))
+
+    # The two candidate anchors really are far apart, so this can distinguish them.
+    assert abs(sharpest[1] - earliest_kept[1]) > 4.0
+    assert stacked[0] == pytest.approx(sharpest[0], abs=1.0)
+    assert stacked[1] == pytest.approx(sharpest[1], abs=1.0)
+    assert abs(stacked[1] - earliest_kept[1]) > 3.0
+    # Anchoring elsewhere must not cost frames: everything kept still stacks.
+    assert result.n_stacked == result.n_kept
+    assert result.n_align_failed == 0
+
+
+def test_the_sharpest_frame_is_always_one_of_the_keepers(tmp_path):
+    """The reference must be a frame that is actually in the picture.
+
+    Keepers are chosen by a stable descending sort, so a tie breaks toward the
+    earlier frame — the same rule ``grade_video`` uses to pick the frame it hands
+    back. That is what makes "the alignment reference is a kept frame" true by
+    construction rather than by luck.
+    """
+    path, _ = _ramped_capture(tmp_path, n_frames=11, drift_px=6.0)
+    for keep in (10, 30, 50, 100):
+        result = stack_video(path, LuckyOptions(keep_percent=keep, align=True))
+        best = int(np.argmax(result.scores))
+        assert best in result.kept_indices, f"keep_percent={keep}"
+        assert len(result.kept_indices) == result.n_kept
 
 
 def test_stack_refuses_a_video_with_too_few_frames(tmp_path):

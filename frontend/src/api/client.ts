@@ -1379,6 +1379,9 @@ export interface VideoResult {
   crop_trim_fraction?: number;
   source_width?: number;
   source_height?: number;
+  // How hard this picture was sharpened (0 = not at all). Optional: a still
+  // stacked before sharpening existed sends nothing and reads as unsharpened.
+  sharpen_amount?: number;
   // True when the still was cropped in place and its full frame is still saved
   // beside it, so the crop can be undone in one click.
   crop_restorable?: boolean;
@@ -2139,6 +2142,10 @@ export const api = {
     id: string,
     body: {
       keep_percent: number; file_name?: string; align?: boolean; crop?: boolean;
+      // How hard to sharpen the finished picture (0 = not at all, the default).
+      // Omitted by an older client, which then gets exactly the picture it
+      // always got.
+      sharpen?: number;
     },
   ) => req<{ job_id: string }>(`/api/videos/${encodeURIComponent(id)}/stack`, {
     method: "POST", body: JSON.stringify(body),

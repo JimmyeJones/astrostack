@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from seestack.stack.output import write_full_res_png
+from seestack.video.detail import sharpen_still
 from seestack.video.discover import VideoCapture, find_video_capture
 from seestack.video.ffmpeg import ffmpeg_available, probe_video
 from seestack.video.framing import crop_to_disk, measure_framing
@@ -120,6 +121,11 @@ class VideoStackMeta:
     #: is False because nobody ever looked, not because there is nothing to trim.
     #: :func:`ensure_framing_measured` tells those two apart and fills it in.
     crop_measured: bool = False
+    #: How hard this still was sharpened after stacking (0 = not at all, which is
+    #: the default and what every ``meta.json`` written before sharpening existed
+    #: reads as). Recorded so the picture can say so rather than leaving the owner
+    #: wondering why one Moon looks crisper than the last.
+    sharpen_amount: float = 0.0
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -156,6 +162,17 @@ class VideoGradeMeta:
     #: and defaulted so a ``grade.json`` written before the quick look existed
     #: still loads — it simply has no frame to point at.
     best_index: int = -1
+    #: Size and modification time of the file that was graded, so a check can
+    #: tell whether it still describes the clip on disk. The Seestar writes each
+    #: night's capture into the *same* ``<Target>_video/`` folder, so re-recording
+    #: replaces ``clip.mp4`` in place while the capture id stays put — without
+    #: this stamp last night's scores, advice and quick look would stay on screen
+    #: as if they described tonight's clip. Both optional and defaulted to 0,
+    #: which reads as "unknown" and is deliberately trusted (see
+    #: :func:`grade_matches_source`): an upgrade must never hide a panel that has
+    #: been there all along.
+    source_size: int = 0
+    source_mtime: float = 0.0
 
 
 def read_grade(settings: Settings, capture_id: str) -> VideoGradeMeta | None:
@@ -175,6 +192,52 @@ def read_grade(settings: Settings, capture_id: str) -> VideoGradeMeta | None:
     except TypeError:
         log.debug("video grade for %s is missing fields; ignoring", capture_id)
         return None
+
+
+#: How far apart two modification times may be and still count as the same file.
+#: A second of slack costs nothing (a re-recording changes the mtime by minutes at
+#: least) and absorbs the coarser timestamp granularity some network filesystems
+#: report, which would otherwise invalidate a perfectly good check.
+_MTIME_TOLERANCE_S = 1.0
+
+
+def source_stamp(path: str | Path) -> tuple[int, float]:
+    """``(size, mtime)`` of a video file, or ``(0, 0.0)`` when it can't be read.
+
+    ``(0, 0.0)`` is the same "unknown" the older ``grade.json`` files carry, so a
+    filesystem that reports no usable stat degrades to today's behaviour —
+    trusting the check — rather than to hiding one.
+    """
+    try:
+        st = Path(path).stat()
+    except OSError:
+        return 0, 0.0
+    return int(st.st_size), round(float(st.st_mtime), 3)
+
+
+def grade_matches_source(meta: VideoGradeMeta, files: list[str]) -> bool:
+    """Does a saved check still describe the clip that is on disk?
+
+    Only ever returns ``False`` on a *positive* mismatch — the graded file is
+    among ``files``, both stamps are readable, and they disagree. Everything
+    else ("unknown" stamp from an older version, the named file not in this
+    folder, an unreadable stat) counts as a match, because the cost of the two
+    mistakes is not symmetric: showing a stale curve is a small dishonesty,
+    while hiding a good one on upgrade would take a panel away from every
+    capture the owner has already checked.
+    """
+    if not meta.source_size and not meta.source_mtime:
+        return True
+    match = next((f for f in files if Path(f).name == meta.source_name), None)
+    if match is None:
+        return True
+    size, mtime = source_stamp(match)
+    if not size and not mtime:
+        return True
+    return (
+        size == meta.source_size
+        and abs(mtime - meta.source_mtime) <= _MTIME_TOLERANCE_S
+    )
 
 
 def has_result(settings: Settings, capture_id: str) -> bool:
@@ -539,6 +602,7 @@ def submit_video_stack(
     file_name: str | None = None,
     align: bool = True,
     crop: bool = False,
+    sharpen: float = 0.0,
 ) -> Job:
     """Enqueue a lucky-imaging stack of one video capture."""
 
@@ -546,7 +610,7 @@ def submit_video_stack(
         return _video_stack_body(
             settings, job, capture_id,
             keep_percent=keep_percent, file_name=file_name, align=align,
-            crop=crop,
+            crop=crop, sharpen=sharpen,
         )
 
     return jm.submit(JOB_KIND, body, target=capture_id)
@@ -616,6 +680,9 @@ def _video_grade_body(
     out_dir = result_dir(settings, capture_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     _write_quicklook(out_dir, graded.best_frame)
+    # Stamped from the file we just finished reading, so re-recording over it
+    # later is detectable — see ``grade_matches_source``.
+    source_size, source_mtime = source_stamp(source)
     meta = VideoGradeMeta(
         capture_id=capture_id,
         source_name=Path(source).name,
@@ -625,6 +692,8 @@ def _video_grade_body(
         scores=[round(float(v), 6) for v in graded.scores],
         warnings=list(graded.warnings),
         best_index=int(graded.best_index),
+        source_size=source_size,
+        source_mtime=source_mtime,
     )
     (out_dir / GRADE_NAME).write_text(
         json.dumps(asdict(meta), indent=2), encoding="utf-8",
@@ -693,6 +762,7 @@ def _video_stack_body(
     file_name: str | None,
     align: bool,
     crop: bool = False,
+    sharpen: float = 0.0,
 ) -> dict[str, Any]:
     capture, source = _resolve_source(settings, capture_id, file_name)
     job.set_progress("probe", 0, 0, f"Reading {Path(source).name}")
@@ -721,9 +791,17 @@ def _video_stack_body(
 
     job.set_progress("save", 0, 0, "Saving your picture")
     display = normalize_for_display(result.image)
+    # Stacking is an average, and averaging is a low-pass filter — so the last
+    # step of every planetary workflow is a sharpen. Done on the *whole* frame,
+    # before any crop, so every pixel is sharpened against its real neighbours
+    # rather than against a reflected crop edge. A zero amount returns the array
+    # untouched, so the default path is byte-for-byte the render it always was.
+    display = sharpen_still(display, sharpen)
     # Framing is measured on the *display-rendered* picture and applied after it,
     # so the tone mapping still sees the whole frame: cropping changes what is in
-    # the picture, never how bright it is.
+    # the picture, never how bright it is. Measuring the sharpened picture is
+    # deliberate — it is the one saved to disk, so a crop offered now and a crop
+    # taken later from the saved artifacts see the same thing.
     warnings = list(result.warnings)
     display, framing = _apply_framing(display, crop, capture.label, warnings)
 
@@ -764,6 +842,7 @@ def _video_stack_body(
         # The framing *was* looked at here, whatever it found — so this still
         # never needs the one-off backfill in ``ensure_framing_measured``.
         crop_measured=True,
+        sharpen_amount=float(sharpen),
     )
     _write_meta(out_dir, meta)
     return {
