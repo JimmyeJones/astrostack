@@ -9907,8 +9907,35 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Scout 2026-08-07, spotted while adversarially tracing `seestack/video/lucky.py`) — the Moon/Sun
-  lucky stack aligns every kept frame to the *earliest* kept frame, not the *sharpest* one.** *(Image quality /
+- ~~**NEW IDEA (Scout 2026-08-07, spotted while adversarially tracing `seestack/video/lucky.py`) — the Moon/Sun
+  lucky stack aligns every kept frame to the *earliest* kept frame, not the *sharpest* one.**~~ — **SHIPPED
+  v0.246.3** (Builder 2026-08-07, branch `claude/elegant-bohr-9kc2et`), **measured before and after** as the entry
+  required rather than blind-flipped.
+  **The measurement.** A first attempt on the obvious synthetic — `videosynth`'s `sharpness` knob, which scales
+  *detail amplitude* — found essentially nothing (RMS shift error 0.1159 → 0.1175 px, finished-picture sharpness
+  +0.38 %), because a low-amplitude frame still has a crisp disk *limb*, and the limb is what a whole-frame phase
+  correlation locks onto. Re-run with **real seeing blur** (a Gaussian applied per frame, good frames sharpening
+  σ 2.2 → 0.2 px across the capture, bad ones smeared at σ 4.0), so the earliest keeper is genuinely soft — 98×
+  lower score than the sharpest — the effect is large and in the direction the entry predicted: measured against
+  the synthetic's known per-frame offsets, **RMS shift error 0.2172 → 0.1345 px (−38 %), worst-case 0.2718 →
+  0.2205 px**, and the finished picture's sharpness **0.1016 → 0.1158 (+14.0 %)**. So the refinement is real, but
+  only when the earliest keeper is *blurred*, not merely low-contrast — worth recording, because the first
+  synthetic would have talked a future run out of it.
+  **How it's done — no extra decode and no extra memory.** Pass 1 already knows which frame is sharpest and can
+  hand the frame itself back (`keep_best_frame`, one held frame, added for the quick look in v0.246.0), so
+  `stack_video` now asks for it and uses its luma as the reference. Keeper selection moved to a **stable**
+  descending sort (`argsort(-scores, kind="stable")`), which breaks ties toward the earlier frame — the same rule
+  `grade_video` uses to pick the frame it holds — so "the alignment reference is always one of the keepers" is
+  true by construction rather than by luck. The reference is added unshifted (it defines the framing), and if pass
+  1 hands back no frame the old anchor-on-the-first-keeper path still runs unchanged. `align=False` asks for no
+  frame at all and is byte-for-byte as before.
+  **Care, as the entry asked:** the framing anchor does move from the earliest keeper's disk position to the
+  sharpest keeper's — cosmetic, and now pinned by a test that measures the stacked disk's centroid against both
+  candidates on a drifting capture (fails before, passes after). **Tests (+2, `tests/test_video_lucky.py`):** the
+  anchor test above, and one pinning that the sharpest frame is among the keepers at every keep-% (the tie-break
+  invariant the reference depends on). The vacated-edges test's comment was corrected to name the reference rather
+  than "the first kept frame". *(Original spec kept below.)*
+  *(Image quality /
   robustness on the always-run video align path — PRIORITY 4; size S.)* In `stack_video`, `ref_luma` is set from
   the first kept frame encountered in **decode order** (`if ... or ref_luma is None: ref_luma = frame_luma(frame)`),
   which is just the earliest sharp frame, not the best one. The classic lucky-imaging recipe (AutoStakkert /
