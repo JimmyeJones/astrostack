@@ -18,12 +18,16 @@ import { sharePictureText } from "../share";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
 import { VideoQuickLookCard } from "../components/VideoQuickLookCard";
 import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
-// The framing copy is shared with the Gallery's video-still card, which offers
-// the identical crop — re-exported here so this page stays the obvious place to
-// look for it (and its existing callers/tests keep importing it from one place).
-import { cropNote, cropSuggestion, subjectNoun } from "../components/videoFraming";
+// The framing and sharpening copy is shared with the Gallery's video-still card,
+// which shows the same finished pictures (and offers the identical crop) — one
+// wording so the two surfaces can't describe one picture differently.
+// Re-exported here so this page stays the obvious place to look for it (and its
+// existing callers/tests keep importing it from one place).
+import {
+  DEFAULT_SHARPEN, SHARPEN_PRESETS, cropNote, cropSuggestion, sharpenNote, subjectNoun,
+} from "../components/videoFraming";
 
-export { cropNote, cropSuggestion, subjectNoun };
+export { DEFAULT_SHARPEN, SHARPEN_PRESETS, cropNote, cropSuggestion, sharpenNote, subjectNoun };
 
 // Local, like Storage.tsx's `gb` — a video is MB-to-GB sized, and there is no
 // shared byte formatter to reach for.
@@ -47,35 +51,6 @@ export const KEEP_PRESETS = [
 ];
 
 export const DEFAULT_KEEP = "30";
-
-// How hard to sharpen the finished picture. A lucky stack is an average, and
-// averaging softens — every planetary tool finishes with a sharpening step for
-// exactly that reason. The amounts must stay in step with `SHARPEN_PRESETS` in
-// `seestack/video/detail.py`, which is what actually renders them.
-export const SHARPEN_PRESETS = [
-  { value: "0", name: "Off", label: "Off — the plain stacked picture" },
-  { value: "0.6", name: "Gentle", label: "Gentle — recommended" },
-  { value: "1.2", name: "Medium", label: "Medium — more surface detail" },
-  { value: "2", name: "Strong", label: "Strong — as far as it goes" },
-];
-
-export const DEFAULT_SHARPEN = "0";
-
-/** How a finished picture says it was sharpened, or null when it wasn't.
- *
- * Named by the nearest preset rather than printed as a number: "1.2" means
- * nothing to the person looking at the picture, and a still made by a hand-written
- * API call can still be described in the same words as one made from the menu.
- */
-export function sharpenNote(amount: number | undefined | null): string | null {
-  if (!amount || !Number.isFinite(amount) || amount <= 0) return null;
-  const preset = SHARPEN_PRESETS
-    .filter((p) => Number(p.value) > 0)
-    .reduce((best, p) => (
-      Math.abs(Number(p.value) - amount) < Math.abs(Number(best.value) - amount) ? p : best
-    ));
-  return `Sharpening: ${preset.name} — surface detail lifted after stacking.`;
-}
 
 /** One-line summary of a finished still, in plain language (pure, tested). */
 export function resultSummary(r: {
