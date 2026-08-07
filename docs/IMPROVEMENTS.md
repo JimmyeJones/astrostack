@@ -11258,6 +11258,53 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-REQUESTED (2026-08-07, follow-on to v0.239.0) — restyle the ambient bed toward *psychill / psybient*
+  (the owner named **A.e.r.o.** and **AstroPilot** as the reference feel). The current bed is "decent but not
+  really it".** *(Enjoyment polish; size M. Same standing as the original: **must not displace a bug or
+  PRIORITY 1–4 work** — pull it on a slow run. Frontend-only, cannot touch the imaging path.)*
+
+  **⚠️ Write ORIGINAL material in the genre idiom. Do NOT attempt to reproduce, transcribe or approximate any
+  specific track, melody, hook or recognisable motif by these (or any) artists** — take only the general stylistic
+  vocabulary below, exactly as "write something bluesy" is a style and not a copy. Everything stays procedurally
+  generated at runtime; the no-audio-files rule from v0.239.0 is unchanged and non-negotiable.
+
+  **Why the current bed doesn't land (measured against `frontend/src/ambient/voicing.ts` as shipped).** It is a
+  *beatless major-key drone*: four sine/triangle voices (root/fifth/octave/twelfth), brown-noise bed, sparse
+  **major pentatonic** bells, one convolver reverb. The target genre is built on almost the opposite foundations —
+  it has a pulse, a deep bottom end, tempo-synced echo, and a darker mode. Concretely, these are missing:
+  1. **A slow pulse.** This is the single biggest gap — psychill/psydub has a heartbeat, roughly **72–84 BPM**.
+     Not a drum kit and not a foreground beat: a soft sub "thump" on the downbeat plus a gentle tempo-locked
+     amplitude movement is enough to imply tempo. Everything else below should be *derived from this grid*.
+  2. **Dedicated warm sub-bass.** A low sine an octave under the pad root, pulsing on the grid. Consider a light
+     **sidechain-style duck** of the pad/noise against each sub pulse (a scheduled gain dip, not a compressor) —
+     that "breathing" is a defining psydub texture and is cheap to schedule.
+  3. **Tempo-synced ping-pong delay** — the genre's signature. A **dotted-eighth** stereo delay (feedback ~0.45–0.6)
+     on a short **pluck** voice. The plucks themselves should be sparse; the delay does most of the musical work,
+     dissolving each note into a receding trail. Currently there is *no* `DelayNode` at all.
+  4. **A darker mode.** Swap the major pentatonic for **minor pentatonic / Dorian** (Dorian's natural 6th keeps it
+     spacious rather than mournful). Add an occasional 9th/11th for colour. This alone changes the character more
+     than any other single edit.
+  5. **A warmer, wider pad.** Replace the pure sines with **pairs of detuned sawtooths** per voice through the
+     existing lowpass (supersaw-lite), plus a slow **chorus** (two short modulated delay lines) and real stereo
+     (`StereoPannerNode`s, per-channel LFO rates slightly offset). The bed is currently near-mono; the genre is
+     very wide.
+  6. **Macro structure.** A multi-minute arc that opens and closes the filter and eases layers in/out, so a long
+     session goes somewhere instead of sitting still. Keep it slow enough to be felt, not noticed.
+
+  **Constraints that do not change:** default **off**; `localStorage` per-device; `AudioContext` created/resumed
+  only from the user gesture; **suspend** (not mute) when off; fade every start/stop/volume change; no new npm
+  dependency; no audio file shipped or fetched. **Keep it background** — it plays while someone watches a stack
+  run, so the pulse must sit low in the mix and nothing may jump out. **Watch CPU**: this adds delay lines,
+  chorus and more oscillators to a tab that may be open for hours — keep the node count bounded and constant
+  (schedule notes on a lookahead timer, reuse voices, don't allocate a node per pluck without disposing it).
+  **Keep the existing architecture**: all new decisions (tempo grid, which degree, when the next pluck fires,
+  delay times, the arc) go in the pure, unit-tested `voicing.ts`; `player.ts` stays the thin node layer. Extend
+  `voicing.test.ts` alongside.
+
+  **If the pulse turns out to be distracting during real use**, the cheap fallback is a second "mood" (beatless =
+  today's bed, pulsed = the new one) behind the existing volume control in Settings — but ship the restyle first
+  and only add the choice if it's actually wanted; don't build two beds speculatively.
+
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-07) — "Quick look": show the single sharpest frame of a Moon/Sun capture
   *before* committing to a full stack.**~~ — **SHIPPED v0.246.0** (Builder 2026-08-07, branch
   `claude/elegant-bohr-dobfg3`). *(Autonomy / friendliness — PRIORITY 2–3.)* "Check this capture" now comes back
