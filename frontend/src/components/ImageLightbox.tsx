@@ -51,8 +51,8 @@ export function computePinch(
  *    effect keyed on `src` couldn't reliably find the node.
  */
 export function ImageLightbox({
-  src, title, downloadHref, jpegHref, fullResHref, rawHref, shareFilename, shareTitle, shareText,
-  toolbarExtra, onClose,
+  src, title, downloadHref, jpegHref, fullResHref, rawHref, rawLabel,
+  shareFilename, shareTitle, shareText, toolbarExtra, onClose,
 }: {
   src: string | null;
   title?: string;
@@ -76,6 +76,11 @@ export function ImageLightbox({
   /** Optional secondary download for the raw scientific data (FITS), offered
    * next to the picture download so power users keep access to it. */
   rawHref?: string;
+  /** What that secondary download *is*, in the user's words (e.g. "16-bit TIFF")
+   * — it names the tooltip and the accessible label, so a surface whose heavier
+   * file isn't a FITS doesn't have to call it one. Omitted, it keeps the stack
+   * surfaces' existing FITS wording verbatim. */
+  rawLabel?: string;
   /** Filename + caption for the OS share sheet. When `shareFilename` and
    * `jpegHref` are both present (and the browser supports file sharing) a
    * "Share" icon appears in the toolbar; otherwise it's silently omitted. */
@@ -284,10 +289,17 @@ export function ImageLightbox({
               url={jpegHref} filename={shareFilename} title={shareTitle} text={shareText} iconOnly
             />
           ) : null}
-          {jpegHref ? <ScanToPhoneButton url={jpegHref} iconOnly /> : null}
+          {/* "Get it on your phone" needs nothing but a URL, so it follows the
+              picture rather than the JPEG: the small share-friendly JPEG is
+              preferred when the surface has one, and a surface that only holds a
+              PNG (a Moon/Sun still) gets the QR too rather than nothing. */}
+          {jpegHref ?? downloadHref
+            ? <ScanToPhoneButton url={(jpegHref ?? downloadHref)!} iconOnly /> : null}
           {rawHref ? (
-            <Tooltip label="Download raw data (FITS)"><ActionIcon size="lg" variant="subtle" color="gray"
-              component="a" href={rawHref} aria-label="Download raw data"><IconDatabase size={20} /></ActionIcon></Tooltip>
+            <Tooltip label={`Download ${rawLabel ?? "raw data (FITS)"}`}>
+              <ActionIcon size="lg" variant="subtle" color="gray"
+                component="a" href={rawHref} aria-label={`Download ${rawLabel ?? "raw data"}`}
+              ><IconDatabase size={20} /></ActionIcon></Tooltip>
           ) : null}
           {toolbarExtra}
           <ActionIcon size="lg" variant="subtle" color="gray" onClick={onClose} aria-label="Close">✕</ActionIcon>

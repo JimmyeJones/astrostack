@@ -9828,9 +9828,38 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Builder 2026-08-07, spotted while auditing `seestack/calibrate/apply.py`) — a master flat built on a
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while auditing `seestack/calibrate/apply.py`) — a master flat built on a
   Bayer sensor imposes its *own* illumination colour on every calibrated light, because it is normalised by one
-  global mean.** *(Image quality — PRIORITY 4; size M; **measure first, and it may well turn out to be a non-issue
+  global mean.**~~ — **MEASURED NON-ISSUE; nothing to build** (Builder 2026-08-07, branch
+  `claude/gallant-galileo-bfm5qe`, v0.245.7). The entry's own method was run verbatim — synthetic Seestar subs
+  through the real chain `run_stack → auto_recipe → apply_recipe`, with a master flat carrying a deliberate
+  per-CFA gain over a vignette — and it splits cleanly in two:
+  **(1) the cast is real and exact in the linear stack.** A flat with R ×1.08 / B ×0.95 moved the stacked FITS's
+  star colour from R/G **0.9354 → 0.8645** and B/G **0.9365 → 0.9868** — precisely the injected 1/1.08 and 1/0.95.
+  So the premise is right about the mechanism: nothing before the editor undoes it.
+  **(2) it does not survive to the picture.** The finished Auto image's **sky** colour (the honest probe —
+  gray-star calibration neutralises *star* colour by construction, so measuring stars would only restate its own
+  definition) came out R/G **1.0351 vs 1.0352** and B/G **1.0380 vs 1.0379** against the neutral-flat control.
+  Pushed to an absurd R ×1.5 / B ×0.7 the finished sky still landed within **0.2 %**, and within **0.5 %** on a
+  star-poor 5-star field where gray-star has little to lock onto.
+  **Why it's so robust: two independent steps remove it, not one.** Isolating the ops on a synthetic linear stack
+  at the ×1.5/×0.7 cast — linear alone **−33.3 % / +42.8 %**; `tone.color_calibrate` alone **0.0 % / 0.0 %**;
+  `tone.stretch` (per-channel STF) alone **+0.1 % / −0.1 %**. Both solve for exactly the per-channel constant the
+  flat imposed, and both are in the Auto recipe *and* in every built-in preset. So per-CFA flat normalisation
+  ("equalize CFA") would buy the target user nothing, and adding it as a `StackOption` would be new surface with
+  no measured payoff — **declined, not deferred**.
+  **Checked too, so nobody re-treads it:** the *unedited* surfaces are covered by the same mechanism.
+  `output._write_preview_png` / `_write_export_tiff` both go through `_autostretch_for_export` → `render.thumbnail
+  .autostretch`, which is the per-channel STF ("each channel is stretched independently so that **its own** robust
+  sky median lands at `target_bg`"), so the Gallery/History thumbnail a user sees before ever opening the editor
+  carries no flat cast either. The one artifact that *does* keep it is the linear master FITS — correctly, since
+  that is the un-normalised measurement.
+  **What did ship: a fast guard.** `tests/test_flat_colour_cast.py` (+4, ~2 s, no stacking) pins the property the
+  conclusion rests on — a per-channel gain on the linear stack is invisible in the finished picture at both cast
+  strengths, the cast genuinely *is* in the linear data, and Auto still carries both normalising steps. Without
+  it, a future change that drops per-channel normalisation would surface as *"my picture went red after I made
+  flats"*, a long way from the code that caused it. *(Original spec kept below.)*
+  *(Image quality — PRIORITY 4; size M; **measure first, and it may well turn out to be a non-issue
   — do not blind-flip it**.)* `CalibrationMasters.load` divides the flat by `np.nanmean(flat)` over the whole raw
   mosaic, i.e. across R, G and B sites together, then the lights are divided by that one surface in the raw domain.
   If the flat panel/sky was warmer than neutral, its R sites read high, so every light's R sites are divided down —
@@ -10956,9 +10985,65 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-08-07, the last gap left after the Gallery crop v0.245.3 and the orphaned-still fix
+- ~~**NEW BEGINNER FEATURE (Builder 2026-08-07, found by dogfooding the Moon & Sun result card the same run) — the
+  first thing anyone does with a Moon picture is show someone, and the only way off the laptop was a file
+  download.**~~ — **SHIPPED v0.245.8** (Builder 2026-08-07, branch `claude/gallant-galileo-bfm5qe`).
+  *(Friendliness — PRIORITY 3.)* The **"To phone"** QR — already the answer to the app's most common post-success
+  question on the Target and History pages — needs nothing but the picture's URL, yet a Moon/Sun still couldn't
+  reach it: `ImageLightbox` gated the control on `jpegHref`, and there is no JPEG behind a video still. The gate is
+  now the *picture* (`jpegHref ?? downloadHref`), so the small share-friendly JPEG is still preferred wherever one
+  exists and a PNG-only surface gets the QR instead of nothing; a viewer with no picture at all still offers
+  nothing. The Moon & Sun page gained the same control beside its PNG / 16-bit TIFF pair, with the caption named
+  for the capture (*"…open your Moon picture and save it"* / *"…your Sun picture…"*) via the existing
+  `subjectNoun`. Deliberately **not** the share *card*: that machinery is stack-run-shaped (target name,
+  integration, run id) and a half-filled version of it would be worse than none — the QR is surface-agnostic by
+  construction, which is exactly why it travels and the card doesn't. Frontend-only; no API, schema, config,
+  default or endpoint change, and the QR is still generated entirely client-side (nothing leaves the LAN).
+  **Tests:** `ImageLightbox.test.tsx` (+3, one fail-before — a PNG-only surface offers the QR; a surface with both
+  encodes the *JPEG*, proven by matching the rendered QR path against the one that URL produces alone and against
+  the PNG's, which differs; a viewer with no picture offers none) and `MoonSun.test.tsx` (+1 — the finished still
+  opens a QR captioned for the Moon).
+  - **Follow-on worth a run (Builder 2026-08-07, the same reasoning one step further; S):** the OS **share sheet**
+    (`SharePictureButton`) is surface-agnostic in exactly the way the QR is — it fetches a URL and hands the file
+    to `navigator.share` — but the lightbox gates it on `jpegHref && shareFilename`, so a Moon/Sun still gets no
+    "Share" icon either. On a phone (where the QR is redundant with the OS sheet) that is the *only* control that
+    would help. **Care, and why it wasn't folded into v0.245.8:** the gate isn't arbitrary — the sheet uploads the
+    whole file, and a still's display PNG is several times the size of the JPEG the stack surfaces hand it, so
+    this needs a look at what a full-frame Moon PNG actually weighs before it's offered as the share path. Still
+    **not** the share *card* (see above): a filename and a caption, nothing stack-run-shaped.
+
+- **NEW IDEA (Builder 2026-08-07, spotted while adding the phone QR) — a Moon/Sun still has no JPEG at all, so
+  every "send this somewhere" path on it moves the full display PNG.** *(Friendliness / performance — PRIORITY 3;
+  size S; **measure the file size first**.)* The stack path writes a share JPEG beside every deep-sky run
+  (`write_share_jpeg`) precisely because the PNG is the wrong thing to pull over a LAN or hand to a phone; the
+  video path writes only `stack.png` + `stack.tiff`. Nothing is broken today — the QR and the download both work —
+  but the beginner's most-used file is also the heaviest one. **Shape:** write a `stack.jpg` beside the pair at
+  stack time (and backfill it, as `ensure_framing_measured` backfills framing, the first time a result is served),
+  carry it as an additive nullable `jpeg_url`, and let the lightbox's existing PNG-or-JPEG menu and the phone QR
+  prefer it exactly as they already do for a stack run. **Care:** measure a real full-frame Moon PNG first — if it
+  is already small (a Moon still is mostly black sky, which PNG compresses well) this is churn, and the honest
+  outcome is to strike it with the number. Cropping already shrinks it further.
+
+- ~~**NEW IDEA (Builder 2026-08-07, the last gap left after the Gallery crop v0.245.3 and the orphaned-still fix
   v0.245.5) — a Moon/Sun still is the only finished picture in the Gallery you can't download at full quality from
-  the Gallery.** *(Friendliness — PRIORITY 3; size S.)* A stack run's lightbox offers preview PNG, share JPEG,
+  the Gallery.**~~ — **SHIPPED v0.245.6** (Builder 2026-08-07, branch `claude/gallant-galileo-bfm5qe`).
+  *(Friendliness — PRIORITY 3.)* `VideoStillItem` now carries `tiff_url`, and the Gallery's still lightbox passes it
+  in the slot the stack lightbox uses for its FITS. Two details beyond the spec: **(1)** the field is **nullable and
+  disk-checked** (new `video.has_tiff`) rather than formatted unconditionally — `meta.json` is written *after* the
+  TIFF so every real still has one, but a deleted or half-written file would otherwise put a 404 behind a download
+  button, and not offering it is strictly better than offering it broken. **(2)** `ImageLightbox` gained an optional
+  `rawLabel`, so the control reads *"Download 16-bit TIFF"* here and keeps its exact *"Download raw data (FITS)"*
+  wording everywhere else (the default is unchanged, so the four stack surfaces are byte-identical) — calling a TIFF
+  "raw data (FITS)" would have been plainly wrong. The entry's **care** note is honoured: no share/JPEG/full-res
+  control was invented for a still, so the picture download stays a plain PNG link rather than becoming a menu of
+  things that don't exist. Upgrade-safe: one additive nullable response field, one optional frontend prop, no
+  default flipped, no endpoint added (`/api/videos/{id}/download.tiff` has served this file since the feature
+  shipped). **Tests:** `tests/webapp/test_gallery.py` (+2 — the still carries the URL and it downloads as
+  `image/tiff`; a still with no TIFF on disk sends `null`), `Gallery.test.tsx` (+2, one fail-before — the fullscreen
+  view offers the TIFF and keeps the picture download a plain PNG; a `null` offers nothing) and
+  `ImageLightbox.test.tsx` (+1 — `rawLabel` names both the tooltip and the accessible label).
+  *(Original spec kept below.)*
+  *(Friendliness — PRIORITY 3; size S.)* A stack run's lightbox offers preview PNG, share JPEG,
   full-res PNG and the raw FITS; a video still's offers the preview PNG alone, even though `download.tiff` (16-bit)
   has existed since the feature shipped and the endpoint doesn't care which page asks. A beginner who wants to send
   their sharpest Moon somewhere, or open it in another app, has to notice that a *different* page holds the good

@@ -2,6 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ImageLightbox, computePinch } from "./ImageLightbox";
+import { ScanToPhoneButton } from "./ScanToPhoneButton";
 
 function renderLightbox(props: Partial<React.ComponentProps<typeof ImageLightbox>> = {}) {
   return render(
@@ -125,6 +126,57 @@ describe("ImageLightbox", () => {
     renderLightbox({ downloadHref: "/api/run/1/preview", rawHref: "/api/run/1/fits" });
     expect(screen.getByLabelText("Download picture")).toHaveAttribute("href", "/api/run/1/preview");
     expect(screen.getByLabelText("Download raw data")).toHaveAttribute("href", "/api/run/1/fits");
+  });
+
+  it("offers the phone QR from the PNG when the surface has no JPEG", () => {
+    // Fail-before: the QR was gated on `jpegHref`, so a Moon/Sun still — which
+    // has only a display PNG — got no way onto the phone at all, even though
+    // the QR encodes nothing but a URL.
+    renderLightbox({ downloadHref: "/api/videos/v/preview.png" });
+    expect(
+      screen.getByRole("button", { name: "Scan to get this picture on your phone" }),
+    ).toBeInTheDocument();
+  });
+
+  it("prefers the JPEG for the phone QR when there is one", async () => {
+    // The small share-friendly file is the better thing to pull over the LAN.
+    // The QR renders as a path, not text, so compare it against the code the
+    // JPEG URL produces on its own — and against the PNG's, which must differ.
+    const openQrPath = async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Scan to get this picture on your phone" }),
+      );
+      const svg = await screen.findByRole("img", { name: /QR code/i });
+      return svg.querySelector("path")?.getAttribute("d");
+    };
+    const forUrl = async (url: string) => {
+      const { unmount } = render(
+        <MantineProvider><ScanToPhoneButton url={url} /></MantineProvider>);
+      const d = await openQrPath();
+      unmount();
+      return d;
+    };
+    const jpegCode = await forUrl("/api/run/1/jpeg");
+    expect(jpegCode).not.toEqual(await forUrl("/api/run/1/preview"));
+
+    renderLightbox({ downloadHref: "/api/run/1/preview", jpegHref: "/api/run/1/jpeg" });
+    expect(await openQrPath()).toEqual(jpegCode);
+  });
+
+  it("offers no phone QR when there is no picture to point at", () => {
+    renderLightbox({});
+    expect(
+      screen.queryByRole("button", { name: "Scan to get this picture on your phone" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("names the secondary download whatever the surface calls it", () => {
+    // A Moon/Sun still's heavier file is a 16-bit TIFF, not a FITS — calling it
+    // "raw data (FITS)" there would be plainly wrong.
+    renderLightbox({ rawHref: "/api/videos/v/download.tiff", rawLabel: "16-bit TIFF" });
+    expect(screen.getByLabelText("Download 16-bit TIFF"))
+      .toHaveAttribute("href", "/api/videos/v/download.tiff");
+    expect(screen.queryByLabelText("Download raw data")).not.toBeInTheDocument();
   });
 
   it("renders a toolbarExtra control in the toolbar when given", () => {

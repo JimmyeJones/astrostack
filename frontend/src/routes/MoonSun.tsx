@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type VideoCapture } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
 import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
 // The framing copy is shared with the Gallery's video-still card, which offers
@@ -245,6 +246,16 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
             >
               16-bit TIFF
             </Button>
+            {/* The first thing a beginner wants to do with a Moon picture is
+                show someone — and the QR needs nothing but the picture's URL,
+                so the same control the stack pages carry works verbatim here. */}
+            <ScanToPhoneButton
+              url={result.preview_url}
+              caption={
+                "Point your phone camera at this code to open your "
+                + `${subjectNoun(capture.kind)} picture and save it.`
+              }
+            />
           </Group>
           {/* The evidence behind "how picky should we be?", measured on this
               capture. Self-hiding for a still stacked before the scores were
