@@ -68,6 +68,60 @@ export function masterOptionSuffix(
   return masterFitsFrames(master, frames) ? "" : " — wrong size for this target";
 }
 
+/** The bias slot's own size warning — which is *not* the generic one.
+ *
+ * A master bias is subtracted from the lights only when **no** master dark is
+ * chosen (a dark already carries the bias pedestal), and the engine's
+ * `CalibrationMasters.validate` mirrors that: it only refuses a wrong-sized bias
+ * on that path. So "stacking with it will fail" — true of every other slot — is
+ * simply false once a dark is picked: there the bias is never applied to the
+ * lights at all, and what its size does decide is whether it can scale the dark
+ * (see `darkScalingBlockedNote`). Saying the wrong one of those two things is
+ * worse than saying nothing, so with a dark present this stays silent and lets
+ * the scaling note speak. */
+export function biasSizeWarning(
+  bias: MasterDims | null | undefined,
+  frames: FrameDims | null | undefined,
+  dark: MasterDims | null | undefined,
+): string | null {
+  if (dark) return null;
+  return masterSizeWarning("bias", bias, frames);
+}
+
+/** Can this bias actually hold the readout pedestal fixed while the dark is
+ * rescaled? Mirrors the engine's `_dark_scaling_applies` shape test.
+ *
+ * One-sided like the rest of this module: a master that never recorded a size
+ * can't be *disproved*, so it is assumed to fit. */
+export function biasCanScaleDark(
+  bias: MasterDims | null | undefined,
+  dark: MasterDims | null | undefined,
+): boolean {
+  return masterFitsFrames(bias, dark as FrameDims | null | undefined);
+}
+
+/** Why turning dark exposure-scaling on changed nothing, or null when it works
+ * (or there is no scaling to do).
+ *
+ * The engine scales `dark = bias + (dark − bias)·(t_sub / t_dark)`, which needs
+ * the bias and the dark to be the same size; when they aren't it quietly
+ * subtracts the dark **unscaled**. Without this the form went the other way and
+ * said "Dark exposure-scaling is on — this 30s dark will be scaled to match your
+ * 10s subs", which is a promise the stack doesn't keep. */
+export function darkScalingBlockedNote(
+  dark: MasterDims | null | undefined,
+  bias: MasterDims | null | undefined,
+): string | null {
+  if (!dark || !bias || biasCanScaleDark(bias, dark)) return null;
+  return (
+    `Dark exposure-scaling is on, but this bias is ${bias.width_px}×` +
+    `${bias.height_px} and the dark is ${dark.width_px}×${dark.height_px} — ` +
+    `scaling holds the bias pedestal fixed while the dark current is rescaled, ` +
+    `so both must be the same size. The dark will be subtracted unscaled. Use a ` +
+    `bias built from the same camera and binning as the dark.`
+  );
+}
+
 
 /* --- "is this master a poor match?" — one predicate, shared with the engine ---
  *

@@ -4,7 +4,8 @@ import {
   SegmentedControl, SimpleGrid, Spoiler, Stack, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconCopy, IconGitCompare, IconPhoto, IconSearch, IconVideo, IconWand,
+  IconArrowBackUp, IconCopy, IconCrop, IconGitCompare, IconPhoto, IconSearch,
+  IconVideo, IconWand,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,6 +27,7 @@ import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
+import { cropNote, cropSuggestion } from "../components/videoFraming";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 
 export type GallerySort = "newest" | "cleanest";
@@ -139,6 +141,44 @@ function VideoStillCard({ still, onView }: {
   still: VideoStill;
   onView: (still: VideoStill) => void;
 }) {
+  const qc = useQueryClient();
+
+  // The same in-place crop the Moon & Sun page offers, on the surface where the
+  // picture actually lives. It matters here most: Moon & Sun lists the captures
+  // still sitting in `incoming/`, so someone who has cleared the video off the
+  // NAS only ever sees their Moon here — adrift in black sky, with nowhere to
+  // fix it. Neither call re-decodes anything; both slice the saved artifacts.
+  const cropStill = useMutation({
+    mutationFn: () => api.cropVideoStill(still.capture_id),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["gallery"] });
+      qc.invalidateQueries({ queryKey: ["videos"] });
+      notifications.show({
+        message: (
+          `Trimmed ${Math.round((r.crop_trim_fraction ?? 0) * 100)}% of empty sky `
+          + `— your ${still.label} picture is now ${r.width}×${r.height}.`
+        ),
+        color: "teal",
+      });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  const restoreStill = useMutation({
+    mutationFn: () => api.restoreVideoStill(still.capture_id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["gallery"] });
+      qc.invalidateQueries({ queryKey: ["videos"] });
+      notifications.show({ message: "Put the full frame back.", color: "teal" });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  // Reused from Moon & Sun rather than re-worded, so the two surfaces can never
+  // drift into telling the user two different things about one picture.
+  const suggestCrop = cropSuggestion(still, still.kind);
+  const cropped = cropNote(still, still.kind);
+
   return (
     <Card withBorder padding="md" radius="md">
       <Card.Section>
@@ -159,6 +199,38 @@ function VideoStillCard({ still, onView }: {
         </Badge>
       </Group>
       <Text size="xs" c="dimmed">{videoStillCaption(still)}</Text>
+
+      {cropped ? (
+        <Group gap="xs" wrap="nowrap" align="center" mt={4}>
+          <Text size="xs" c="dimmed">{cropped}</Text>
+          {/* A framing decision should never be one-way — the full frame is kept
+              beside the cropped one, so undoing it is a click. */}
+          {still.crop_restorable ? (
+            <Button
+              size="compact-xs" variant="subtle"
+              leftSection={<IconArrowBackUp size={12} />}
+              onClick={() => restoreStill.mutate()}
+              loading={restoreStill.isPending}
+            >
+              Undo crop
+            </Button>
+          ) : null}
+        </Group>
+      ) : null}
+
+      {suggestCrop ? (
+        <Alert color="violet" variant="light" icon={<IconCrop size={16} />} p="xs" mt="xs">
+          <Text size="xs">{suggestCrop}</Text>
+          <Button
+            size="compact-xs" variant="light" mt={6}
+            leftSection={<IconCrop size={12} />}
+            onClick={() => cropStill.mutate()}
+            loading={cropStill.isPending}
+          >
+            Crop it
+          </Button>
+        </Alert>
+      ) : null}
 
       <Group gap="xs" mt="xs" wrap="nowrap">
         {/* Deliberately one link, not a per-run action row: none of the stack

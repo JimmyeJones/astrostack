@@ -75,6 +75,39 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- ~~**MOON & SUN BUG (Builder 2026-08-07, found by dogfooding the Gallery crop shipped the same run; REPRODUCED) —
+  clear the video off your NAS and your Moon picture disappears from the page that owns it, taking its 16-bit TIFF,
+  its crop and its sharpness panel with it.**~~ — **FIXED v0.245.5** (Builder 2026-08-07, branch
+  `claude/gallant-galileo-hyz6ug`). *(Friendliness — PRIORITY 3.)* `/api/videos` listed **only**
+  `find_video_captures(incoming)`, which deliberately skips a folder with no readable video — right for "what can I
+  stack?", wrong for "where is my picture?". Deleting the clip is precisely the case the in-place crop was built to
+  survive (it never touches the source), and v0.245.3 put an *"Open in Moon & Sun"* button on the Gallery card, so
+  that button led to a page the picture wasn't on. The listing now appends finished stills whose capture is gone,
+  after the ones the user can act on, with an empty `files` list — which is exactly how the card tells the two apart:
+  it keeps the picture, the downloads, the crop/undo pair and the sharpness panel, and replaces the stacking half
+  with *"The video this came from isn't in your incoming folder any more, so it can't be stacked again — your
+  picture is safe here either way."* rather than offering a "Stack again" that could only fail. Best-effort: a
+  video-store problem leaves the live captures alone. Upgrade-safe: no new fields, no shape change, no default
+  flipped — an install that has never lost a clip sees the identical list. **Tests:**
+  `tests/webapp/test_video_crop.py` (+4 — a still outlives its deleted video and keeps its result, the crop still
+  works on it, a capture that *is* on disk is listed once and keeps its files, and an empty install lists nothing),
+  `MoonSun.test.tsx` (+2, one fail-before — the orphaned card keeps the picture/crop/downloads and hides the
+  stacking controls; a capture with its video still offers them).
+
+- ~~**⭐ CALIBRATION-PROVENANCE BUG (Builder 2026-08-07, found by an engine QA pass of the dark exposure-scaling
+  path; REPRODUCED) — a run tells the owner its dark was scaled to their sub exposure when the engine subtracted it
+  unscaled.**~~ — **FIXED v0.245.4** (Builder 2026-08-07, branch `claude/gallant-galileo-hyz6ug`).
+  *(Trust / correctness of a saved artifact — the stamp is written into the output FITS.)* Exposure-scaling
+  (`dark = bias + (dark − bias)·t_sub/t_dark`) needs the master bias to be the **dark's** shape to hold the readout
+  pedestal fixed; `_dark_scaling_applies` knows that and falls back to the plain dark when it isn't. But
+  `_build_output_header_meta` stamped `DARKSCAL`/`DARKDEXP`/`DARKLEXP` on the looser "a bias is loaded" test — so a
+  wrong-sized bias produced a run that reported *"Dark scaled to sub exposure · 30s → 10s"* in Info/History while
+  every frame had the full unscaled 30 s pedestal taken off it. **Reproduced** as the regression test
+  (`test_dark_scaling_provenance_absent_when_the_bias_is_the_wrong_shape`), which fails before and passes after.
+  The stamp now asks `CalibrationMasters.dark_scaling_provenance()`, which returns non-`None` under exactly the
+  condition `_effective_dark` scales under. Full write-up (plus the two Stack-form claims fixed with it) under the
+  calibration-mismatch item in Ideas → Friendliness.
+
 - ~~**⭐ CALIBRATION-ENGINE BUG (Builder 2026-08-05, found by an engine QA pass of `seestack/calibrate/masters.py`;
   REPRODUCED) — one stray frame sorted first hijacks a whole master build, and the "master built" message says
   nothing about it.**~~ — **FIXED v0.234.2** (Builder 2026-08-05, branch `claude/relaxed-turing-k8ghhx`).
@@ -3319,6 +3352,16 @@ sweep are now both well-hardened.)_
     `pad=SUBPIXEL_SHIFT_CAP_PX=5` window). Defensive-only: rewrite as `not (abs(dy) <= CAP and abs(dx) <= CAP)` so a NaN
     is treated as "too large" and skipped, belt-and-suspenders, if the file is touched. (Cosmetic — unreachable;
     confidence: traced.) _(Found by the 2026-07-24 align audit.)_
+  - `seestack/stack/align.py::extract_reference_patch` fills NaNs with `np.nanmedian(luma)`, which on an **all-NaN**
+    patch emits a RuntimeWarning and returns NaN — so the shared reference patch would be entirely NaN and every
+    frame's sub-pixel refine would silently correlate against nothing (each `phase_cross_correlation` returning a
+    meaningless shift, or the call failing and the frame stacking unrefined). **Unreachable in practice** — the
+    patch is the *centre* of the reference frame's own aligned array, which is finite by construction; a fully
+    uncovered centre would mean the reference didn't land on its own canvas. Defensive-only: fall back to `0.0`
+    when the median isn't finite, if the file is touched. (Cosmetic — unreachable; confidence: traced.)
+    _(Found by the 2026-08-07 align/accumulator audit, which otherwise traced clean: the windowed and full-canvas
+    accumulator adds, the min/max k-set insertion and its ±inf identities, the mosaic canvas RA-unwrap and outlier
+    passes, the photometric scale/weight composition, and the reproject inset/pad arithmetic all held.)_
   - `webapp/routers/storage.py:193` `prune_stack_runs` closes `proj` then `lib` in a **single** `finally` (not
     nested like `gallery.py`/`storage.py::get_storage`), so if `proj.close()` itself raised, `lib.close()` would
     be skipped and the Library handle would leak. Trigger is essentially unreachable (`sqlite3.Connection.close()`
@@ -9313,8 +9356,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   size is reported, is `None` when unrecorded, and `modal_dim` ignores strays/unknowns). Upgrade-safe: two additive
   response fields + display-only frontend; no config/DB-schema/on-disk/default change and no API-shape break (an
   older client ignores the new keys; a newer client against an older backend simply can't disprove anything and flags
-  nothing). **Still open:** the narrower *bias-shape-vs-dark* inert case (a bias whose shape doesn't match the
-  **dark** it's paired with, rather than the frames) — same idea, different comparison.
+  nothing). ~~**Still open:** the narrower *bias-shape-vs-dark* inert case (a bias whose shape doesn't match the
+  **dark** it's paired with, rather than the frames) — same idea, different comparison.~~
+  **▶ SLICE (d) — the bias-shape-vs-dark case SHIPPED v0.245.4** (Builder 2026-08-07, branch
+  `claude/gallant-galileo-hyz6ug`), and chasing it turned up **a real engine bug** in the same predicate.
+  `_dark_scaling_applies` correctly requires the bias to be the **dark's** shape (it holds the readout pedestal fixed
+  while the dark current is rescaled), and falls back to subtracting the dark **unscaled** when it isn't — but two
+  places tested only "a bias is loaded":
+  **(1) the FITS provenance (the bug).** `_build_output_header_meta` (`seestack/stack/stacker.py`) stamped
+  `DARKSCAL`/`DARKDEXP`/`DARKLEXP` on that looser test, so a run whose bias couldn't scale anything still told the
+  owner *"Dark scaled to sub exposure · 30s → 10s"* in the run Info / History — about a dark the engine had
+  subtracted untouched, at full 30 s pedestal, on every frame. The stamp now asks the bundle itself via a new
+  `CalibrationMasters.dark_scaling_provenance(light_exposure_s)`, which returns non-`None` under exactly the
+  condition `_effective_dark` scales under, so the claim and the pixels can't drift again. *(Regression test fails
+  before / passes after.)*
+  **(2) the Stack form.** It said *"Dark exposure-scaling is on — this 120s dark will be scaled to match your 30s
+  subs"*, a promise the stack doesn't keep, and suppressed both the real exposure warning and the "your dark already
+  contains the bias" note. `darkScalingActive` now also requires `darkScalingBlockedNote(dark, bias)` to be null, and
+  a new yellow note names both sizes and says the dark goes in unscaled. The engine's own advisory got the same
+  treatment: its exposure warning used to end *"or turn on dark exposure-scaling (needs a master bias)"* — advice
+  the user has already taken — and now explains the shape clash instead.
+  **Also fixed alongside:** the bias slot's red *"Stacking with it will fail"* size warning was simply untrue once a
+  dark was chosen — `validate` only refuses a wrong-sized bias when it is the calibration (no dark), so the stack
+  runs and quietly ignores it. `biasSizeWarning(bias, frames, dark)` now stays silent there and lets the scaling note
+  say what the size actually decides. **Not affected:** the unattended auto-binder, which gates dark *and* bias
+  against the subs' dimensions, so anything it binds already matches. Upgrade-safe: no config/DB/on-disk/API-shape
+  change, no default flipped, and the stamp is only ever *withheld* where it was previously wrong. Tests:
+  `tests/test_output_header_meta.py` (+1 fail-before, and its fixture now builds a **real** `CalibrationMasters`
+  instead of a hand-rolled stand-in — the mock is how the stamp drifted from the pixel path in the first place),
+  `tests/test_calibrate.py` (+2 — the warning names both sizes and stops asking for something already done;
+  `dark_scaling_provenance` agrees with `_effective_dark` on all four outcomes), `calibrationFit.test.ts` (+6),
+  `Stack.test.tsx` (+1 fail-before).
   **▶ THE AFTER-THE-FACT HALF SHIPPED TOO, v0.215.1** (Builder 2026-07-30, same branch; tested). Pick-time is only
   half the story: the walk-away user never opens the Stack form, so they meet the problem as an uncalibrated result
   in History next to a library that visibly *holds* a dark. `calibration.diagnose_uncalibrated` — the
@@ -9748,6 +9820,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **NEW IDEA (Builder 2026-08-07, spotted while auditing `seestack/calibrate/apply.py`) — a master flat built on a
+  Bayer sensor imposes its *own* illumination colour on every calibrated light, because it is normalised by one
+  global mean.** *(Image quality — PRIORITY 4; size M; **measure first, and it may well turn out to be a non-issue
+  — do not blind-flip it**.)* `CalibrationMasters.load` divides the flat by `np.nanmean(flat)` over the whole raw
+  mosaic, i.e. across R, G and B sites together, then the lights are divided by that one surface in the raw domain.
+  If the flat panel/sky was warmer than neutral, its R sites read high, so every light's R sites are divided down —
+  the flat's colour temperature is subtracted from the user's image. Siril's *"equalize CFA"* exists for exactly
+  this and normalises each Bayer channel by its own mean, which removes the vignetting/dust shape while leaving the
+  colour balance alone. **Why it may not matter here:** the effect is a single multiplicative constant per channel,
+  and the downstream gray-star colour calibration solves for exactly that — the 2026-07-26 quality audit measured it
+  recovering true channel scales well — so the residual could be nil. **Method before building:** take a synthetic
+  OSC scene with known true colour, apply a flat with a deliberate per-channel gain (say R +8 %, B −5 %), run the
+  real chain `run_stack → get_proxy → auto_recipe → apply_recipe`, and measure the finished picture's star colour
+  against the no-flat control. If the cast survives, add per-CFA-channel flat normalisation as an **off-by-default**
+  `StackOption` (it moves pixels for anyone who already uses flats, and a Seestar owner usually has none — so it
+  must be opt-in with a plain-language line), and pin the byte-for-byte invariance of the default path. If the cast
+  doesn't survive, strike this entry with the measurement so nobody re-treads it.
 
 - ~~**NEW IDEA (Builder 2026-08-05, spotted while wiring the seam note's new "Open the editor" link) — the editor's
   background tools can't actually see the panel joins we just sent the beginner there to fix.**~~ — **ALREADY
@@ -10859,6 +10949,18 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW IDEA (Builder 2026-08-07, the last gap left after the Gallery crop v0.245.3 and the orphaned-still fix
+  v0.245.5) — a Moon/Sun still is the only finished picture in the Gallery you can't download at full quality from
+  the Gallery.** *(Friendliness — PRIORITY 3; size S.)* A stack run's lightbox offers preview PNG, share JPEG,
+  full-res PNG and the raw FITS; a video still's offers the preview PNG alone, even though `download.tiff` (16-bit)
+  has existed since the feature shipped and the endpoint doesn't care which page asks. A beginner who wants to send
+  their sharpest Moon somewhere, or open it in another app, has to notice that a *different* page holds the good
+  copy. **Slice:** carry `tiff_url` on `VideoStillItem` (additive, already on the meta side as
+  `/api/videos/{id}/download.tiff`) and pass it to `ImageLightbox` in the slot the stack lightbox uses for its raw
+  download, wording it "16-bit TIFF" exactly as Moon & Sun does. **Care:** don't invent a *share* path for a still —
+  the share card machinery is stack-run-shaped (target name, integration, run id) and giving a video still a
+  half-filled version of it would be worse than not offering it.
+
 - ~~**NEW IDEA (Builder 2026-08-06, filed while shipping the "Crop to the Moon" v0.244.0) — cropping an existing
   still shouldn't cost a whole re-stack.**~~ — **SHIPPED v0.245.0** (Builder 2026-08-06, branch
   `claude/gallant-galileo-favvnu`). *(Friendliness / autonomy — PRIORITY 3.)* The offer under a full-frame Moon
@@ -10912,9 +11014,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   say plainly that the full frame is regenerated by stacking again. Also check the source video may be gone from
   the NAS by then — which is precisely why reading the saved picture rather than the capture is the right move.
 
-- **NEW IDEA (Builder 2026-08-06, spotted while shipping the in-place crop v0.245.0) — offer the crop from the
-  *Gallery*, where the picture is, not only from the page that lists the source video.** *(Friendliness —
-  PRIORITY 3; size S.)* The "Crop it" offer lives on Moon & Sun, which lists **captures found in `incoming/`** — so
+- ~~**NEW IDEA (Builder 2026-08-06, spotted while shipping the in-place crop v0.245.0) — offer the crop from the
+  *Gallery*, where the picture is, not only from the page that lists the source video.**~~ — **SHIPPED v0.245.3**
+  (Builder 2026-08-07, branch `claude/gallant-galileo-hyz6ug`). *(Friendliness — PRIORITY 3.)* `VideoStillItem` now
+  carries the six framing fields (the four the entry named plus `source_width`/`source_height`, which `cropNote`
+  needs to say "from 640×480"), all additive with defaults that read as "not cropped, nothing to offer" — so an
+  older frontend and an install that has never cropped are unchanged. `_video_stills` runs the same
+  `ensure_framing_measured` backfill `_result_out` got in v0.245.2, so the owner's *existing* Moon stills get the
+  offer here too rather than reading as "nothing to trim" because nobody ever looked; the whole per-still block is
+  wrapped so one unreadable picture falls back to its `meta.json` instead of taking the Gallery down. On the
+  frontend the card gained exactly the crop pair and nothing else — "Crop it" under the same suggestion line,
+  "Undo crop" beside the same cropped note, both invalidating `["gallery"]` and `["videos"]`. The copy was
+  **moved**, not copied: `cropSuggestion`/`cropNote`/`subjectNoun` now live in
+  `frontend/src/components/videoFraming.ts` and are re-exported from `MoonSun.tsx`, so the two surfaces cannot
+  drift into describing one picture differently. Tests: `tests/webapp/test_video_crop.py` (+4 — the Gallery offers
+  the crop and it works, a cropped still reports its undo and the undo restores it, the pre-framing backfill fires
+  on this surface too, and a still whose framing can't be read still lists) and `Gallery.test.tsx` (+3 — the offer
+  fires the crop in one click, the cropped note offers the undo and hides the offer, and neither is shown when
+  there is nothing to trim or no full-frame backup). *(Original spec kept below.)*
+  The "Crop it" offer lives on Moon & Sun, which lists **captures found in `incoming/`** — so
   a user who has cleared the video off the NAS (exactly the case the in-place crop was built for: it never touches
   the source) sees their still only in the Gallery, with a Moon adrift in black sky and no way to fix it. The crop
   endpoint doesn't care; only the surface does. **Slice:** carry the four framing fields

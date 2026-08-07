@@ -312,17 +312,40 @@ class CalibrationMasters:
         # same predicate the scaling path uses — else the warning is silenced
         # exactly when the unscaled fallback makes it necessary.
         scaling_active = self._dark_scaling_applies
+        # Scaling was *asked for* but a wrong-shaped bias silenced it. Worth
+        # saying separately: the generic advice below ends with "turn on dark
+        # exposure-scaling", which is nonsense to someone who already did, and
+        # leaves them with no idea why nothing happened.
+        blocked_by_bias_shape = (
+            self.scale_dark_to_light and self.dark is not None
+            and self.bias is not None and self.bias.shape != self.dark.shape
+        )
         if (not scaling_active and de and de > 0
                 and light_exposure_s and light_exposure_s > 0):
             ratio = float(light_exposure_s) / float(de)
             if abs(ratio - 1.0) > EXPOSURE_MISMATCH_TOL:
                 direction = "over" if de > light_exposure_s else "under"
-                warnings.append(
-                    f"Master dark is {de:g}s but your subs are {light_exposure_s:g}s — "
-                    f"its pedestal will be {direction}-subtracted on every frame. "
-                    f"Use a dark matched to your exposure, or turn on dark "
-                    f"exposure-scaling (needs a master bias)."
-                )
+                if blocked_by_bias_shape:
+                    bh, bw = self.bias.shape[0], self.bias.shape[1]
+                    dh, dw = self.dark.shape[0], self.dark.shape[1]
+                    warnings.append(
+                        f"Master dark is {de:g}s but your subs are "
+                        f"{light_exposure_s:g}s — its pedestal will be "
+                        f"{direction}-subtracted on every frame. Dark "
+                        f"exposure-scaling is on, but your master bias is "
+                        f"{bw}×{bh} and the dark is {dw}×{dh}, so it can't hold "
+                        f"the readout pedestal fixed while the dark is rescaled "
+                        f"— the dark was subtracted unscaled. Use a bias built "
+                        f"from the same camera and binning as the dark, or a "
+                        f"{light_exposure_s:g}s dark."
+                    )
+                else:
+                    warnings.append(
+                        f"Master dark is {de:g}s but your subs are {light_exposure_s:g}s — "
+                        f"its pedestal will be {direction}-subtracted on every frame. "
+                        f"Use a dark matched to your exposure, or turn on dark "
+                        f"exposure-scaling (needs a master bias)."
+                    )
         dt = self.dark_temp_c
         if (dt is not None and light_temp_c is not None
                 and abs(float(dt) - float(light_temp_c)) >= TEMP_MISMATCH_TOL_C):
@@ -332,6 +355,33 @@ class CalibrationMasters:
                 f"some may remain. A temperature-matched dark calibrates best."
             )
         return warnings
+
+    def dark_scaling_provenance(
+        self, light_exposure_s: float | None,
+    ) -> tuple[float, float] | None:
+        """``(dark_exposure_s, light_exposure_s)`` when the dark really is scaled.
+
+        The single answer to "did exposure-scaling actually happen?", so a run's
+        provenance can't claim something :meth:`_effective_dark` didn't do. It
+        returns non-``None`` under **exactly** the condition that method scales:
+        the option is on, a shape-matching master bias holds the readout pedestal
+        fixed, and both exposures are known, positive and materially different.
+
+        A *wrong-shaped* bias is the case this exists for. It doesn't enable
+        scaling (see :attr:`_dark_scaling_applies`) — the dark is subtracted
+        unscaled — but "a bias is loaded" reads as enough from the outside, and a
+        stamp written on that looser test tells the user the dark was matched to
+        their subs when it wasn't.
+        """
+        if not self._dark_scaling_applies:
+            return None
+        de, le = self.dark_exposure_s, light_exposure_s
+        if not de or not le or de <= 0 or le <= 0:
+            return None
+        if abs(float(le) / float(de) - 1.0) <= 1e-3:
+            # Matched exposures leave the dark unscaled — nothing to advertise.
+            return None
+        return float(de), float(le)
 
     def _effective_dark(self, light_exposure_s: float | None) -> np.ndarray | None:
         """The dark to subtract, exposure-scaled to the light when opted in.
