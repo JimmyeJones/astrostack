@@ -928,8 +928,8 @@ export interface GalleryItem {
 
 // A finished Moon/Sun still, as the Gallery lists it alongside stack runs. It is
 // not a stack run — no target, no run id, no stacking options — so it carries
-// only what a plain read-only card needs, and links back to the Moon & Sun page
-// for anything else.
+// only what a plain card needs, plus the framing fields behind the one-click
+// crop, and links back to the Moon & Sun page for anything else.
 export interface VideoStill {
   capture_id: string;
   label: string;
@@ -940,6 +940,15 @@ export interface VideoStill {
   n_stacked: number;
   source_name: string;
   preview_url: string;
+  // Framing — the same four fields `VideoResult` carries, so both surfaces read
+  // one decision. Optional: an older backend omits them and the card simply
+  // offers nothing.
+  crop_applied?: boolean;
+  crop_available?: boolean;
+  crop_trim_fraction?: number;
+  source_width?: number;
+  source_height?: number;
+  crop_restorable?: boolean;
 }
 
 export interface BestPicture {

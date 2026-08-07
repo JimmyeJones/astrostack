@@ -330,3 +330,90 @@ def test_writing_a_new_still_drops_a_stale_full_frame_backup(data_root):
     video._clear_full_frame_backup(out_dir)
     assert video.has_full_frame_backup(settings, "Lunar_video") is False
     assert not (out_dir / video.FULL_TIFF_NAME).exists()
+
+
+# --- the Gallery offers the same crop -------------------------------------
+#
+# Moon & Sun lists the *captures* still sitting in ``incoming/``, so a user who
+# has cleared the source video off the NAS — exactly the case the in-place crop
+# was built for, since it never touches the source — only ever sees their
+# picture in the Gallery. Before this, that user had a Moon adrift in black sky
+# and nowhere to fix it.
+
+
+def _gallery_still(client, capture_id: str = "Lunar_video") -> dict:
+    stills = client.get("/api/gallery").json()["videos"]
+    return next(s for s in stills if s["capture_id"] == capture_id)
+
+
+def test_the_gallery_offers_the_crop_on_an_uncropped_still(client, data_root):
+    _write_still(data_root)
+
+    still = _gallery_still(client)
+    assert still["crop_available"] is True
+    assert still["crop_trim_fraction"] > 0.15
+    assert still["crop_applied"] is False
+    assert still["crop_restorable"] is False
+    # ...and the offer is real: the crop the card fires actually works.
+    assert client.post("/api/videos/Lunar_video/crop").status_code == 200
+
+
+def test_a_gallery_still_cropped_in_place_reports_its_undo(client, data_root):
+    _write_still(data_root)
+    assert client.post("/api/videos/Lunar_video/crop").status_code == 200
+
+    still = _gallery_still(client)
+    assert still["crop_applied"] is True
+    assert still["crop_available"] is False
+    assert still["crop_restorable"] is True
+    assert still["width"] < 64 and still["height"] < 48
+    assert (still["source_width"], still["source_height"]) == (64, 48)
+
+    # And undoing it from the same card puts the full frame back.
+    assert client.post("/api/videos/Lunar_video/uncrop").status_code == 200
+    back = _gallery_still(client)
+    assert back["crop_applied"] is False
+    assert back["crop_restorable"] is False
+    assert (back["width"], back["height"]) == (64, 48)
+
+
+def test_the_gallery_backfills_the_framing_of_a_pre_framing_still(client, data_root):
+    """Same backfill the Moon & Sun page does — without it, the owner's existing
+    stills would read as "nothing to trim" on the Gallery because nobody looked."""
+    settings = _write_still(data_root)
+    meta_path = video.result_dir(settings, "Lunar_video") / video.META_NAME
+    raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    for key in ("crop_applied", "crop_available", "crop_trim_fraction",
+                "crop_measured", "source_width", "source_height"):
+        raw.pop(key, None)
+    meta_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    still = _gallery_still(client)
+    assert still["crop_available"] is True
+    assert still["crop_trim_fraction"] > 0.15
+    assert json.loads(meta_path.read_text(encoding="utf-8"))["crop_measured"] is True
+
+
+def test_a_still_whose_framing_cannot_be_read_does_not_break_the_gallery(
+    client, data_root, monkeypatch,
+):
+    """The stills are an extra source on a page that must always render — a
+    picture the backfill chokes on falls back to what its ``meta.json`` says
+    rather than taking the whole Gallery down with it."""
+    settings = _write_still(data_root)
+    meta_path = video.result_dir(settings, "Lunar_video") / video.META_NAME
+    raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    for key in ("crop_available", "crop_trim_fraction", "crop_measured"):
+        raw.pop(key, None)
+    meta_path.write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setattr(
+        video, "ensure_framing_measured",
+        lambda *a, **kw: (_ for _ in ()).throw(OSError("boom")),
+    )
+
+    body = client.get("/api/gallery").json()
+    still = next(s for s in body["videos"] if s["capture_id"] == "Lunar_video")
+    # Still listed, just with nothing to offer.
+    assert still["label"] == "Moon"
+    assert still["crop_available"] is False
+    assert still["crop_restorable"] is False

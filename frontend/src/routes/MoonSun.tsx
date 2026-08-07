@@ -10,10 +10,16 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type VideoCapture, type VideoResult } from "../api/client";
+import { api, type VideoCapture } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
 import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
+// The framing copy is shared with the Gallery's video-still card, which offers
+// the identical crop — re-exported here so this page stays the obvious place to
+// look for it (and its existing callers/tests keep importing it from one place).
+import { cropNote, cropSuggestion, subjectNoun } from "../components/videoFraming";
+
+export { cropNote, cropSuggestion, subjectNoun };
 
 // Local, like Storage.tsx's `gb` — a video is MB-to-GB sized, and there is no
 // shared byte formatter to reach for.
@@ -48,49 +54,6 @@ export function resultSummary(r: {
     + `— about ${cleaner.toFixed(1)}× cleaner than a single frame `
     + `(${r.width}×${r.height}).`
   );
-}
-
-/** What to call the bright thing in the middle, in plain language (pure). */
-export function subjectNoun(kind: VideoCapture["kind"]): string {
-  if (kind === "lunar") return "Moon";
-  if (kind === "solar") return "Sun";
-  return "subject";
-}
-
-/**
- * "Most of this picture is empty sky" — or null when there's nothing to say.
- *
- * Only ever shown for a still that was *not* cropped and where the backend
- * measured enough sky around the disk to be worth trimming, so it can't nag
- * about a picture that is already mostly subject.
- */
-export function cropSuggestion(
-  result: Pick<VideoResult, "crop_available" | "crop_trim_fraction"> | null,
-  kind: VideoCapture["kind"],
-): string | null {
-  if (!result?.crop_available) return null;
-  const pct = Math.round((result.crop_trim_fraction ?? 0) * 100);
-  if (pct < 1) return null;
-  return (
-    `About ${pct}% of this picture is empty sky around the ${subjectNoun(kind)}. `
-    + `Trimming it takes a moment and doesn't re-stack anything — the picture `
-    + `itself stays exactly as it is, just without the empty sky.`
-  );
-}
-
-/** The matching line once a still *has* been cropped (pure). */
-export function cropNote(
-  result: Pick<
-    VideoResult, "crop_applied" | "crop_trim_fraction" | "source_width" | "source_height"
-  > | null,
-  kind: VideoCapture["kind"],
-): string | null {
-  if (!result?.crop_applied) return null;
-  const pct = Math.round((result.crop_trim_fraction ?? 0) * 100);
-  const from = result.source_width && result.source_height
-    ? ` (from ${result.source_width}×${result.source_height})`
-    : "";
-  return `Cropped to the ${subjectNoun(kind)} — trimmed ${pct}% of empty sky${from}.`;
 }
 
 function CaptureIcon({ kind }: { kind: VideoCapture["kind"] }) {
