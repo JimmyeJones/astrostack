@@ -82,6 +82,32 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **SCOUT ADVERSARIAL QA — the two owner-directed areas (AGENTS.md §1, 2026-08-07 self-expiring block) both traced
+> CLEAN; no verified bug found in either (Scout 2026-08-07, branch `claude/focused-keller-r07kle`).** Baseline: the
+> `-k video` suite is green (**118 passed / 2 skipped**) on a fresh `pip install -e ".[dev,web]"` with ffmpeg present.
+> **(1) Moon/Sun lucky-imaging pipeline** — `seestack/video/{lucky,ffmpeg,framing,quality,discover}.py`, `webapp/video.py`
+> and the `/api/videos*` router were read adversarially end to end. Traced: the two-pass grade→stack design's frame
+> identity (grade keeps a scalar per frame, stack re-decodes the *same* frames and matches `keep_idx` by decode-order
+> index); memory bounds (one frame materialised at a time in `iter_frames`; the accumulator holds a fixed handful of
+> canvases regardless of length); decode edge cases (truncated tail frame dropped cleanly, missing `nb_frames`
+> estimated from duration×fps, timeout/no-stream → clear `ValueError`); the alignment path (`phase_cross_correlation`
+> shift, `_MAX_SHIFT_FRACTION` reject, `cval=np.nan` vacated edges → NaN-aware accumulator, reference = first kept
+> frame so the *result* is fully covered by design); NaN/coverage semantics in `normalize_for_display` (NaN→black,
+> percentile anchors on covered pixels only); the crop/uncrop artifact path (measured on the saved TIFF/PNG, sliced
+> in each domain so nothing is re-quantised, full-frame backup written once and cleared on re-stack); and the
+> keep-% advice math in `quality.py` (√score contrast, mean-not-median, monotone `_suggest`). **Empirically verified**
+> the two-pass frame consistency (strides 1/2/3/5 each decode a deterministic, identical frame set on repeat calls)
+> and ran a full 60-frame synthetic capture through `stack_video`→`normalize_for_display`→`measure_framing`→
+> `sharpness_profile` (sensible n_kept/n_stacked, 0 NaN by design, worthwhile crop found, coherent advice sentence).
+> **(2) Mosaic panel-alignment / seam path** — `seestack/stack/mosaic.py` (wrap-safe `_circ_mean_ra_deg` /
+> footprint-outlier rejection, the iterative canvas-fit with pixel + megapixel memory caps that fail fast with an
+> actionable error), `seestack/stack/photometric.py` (per-frame multiplicative scale, neutral fallback, bounded
+> clip, orthogonal to quality weighting), and `seestack/bg/coverage_leveling.py` (`level_by_coverage` and the
+> v0.233.0+ `measure_seam_residual` diagnostic). These are mature (≈16 prior clean audits; the v0.232.x
+> object-mask-starvation fixes are in and tested) and the seam-residual is a best-effort try/except *diagnostic*
+> that cannot corrupt the image. Nothing new found. **Both areas passed a real pass (not a skim), so the
+> self-expiring directive block has been removed from `AGENTS.md` this run and the rotation returns to normal.**
+
 - ~~**MOON & SUN BUG (Builder 2026-08-07, found by dogfooding the Gallery crop shipped the same run; REPRODUCED) —
   clear the video off your NAS and your Moon picture disappears from the page that owns it, taking its 16-bit TIFF,
   its crop and its sharpness panel with it.**~~ — **FIXED v0.245.5** (Builder 2026-08-07, branch
@@ -9828,6 +9854,23 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **NEW IDEA (Scout 2026-08-07, spotted while adversarially tracing `seestack/video/lucky.py`) — the Moon/Sun
+  lucky stack aligns every kept frame to the *earliest* kept frame, not the *sharpest* one.** *(Image quality /
+  robustness on the always-run video align path — PRIORITY 4; size S.)* In `stack_video`, `ref_luma` is set from
+  the first kept frame encountered in **decode order** (`if ... or ref_luma is None: ref_luma = frame_luma(frame)`),
+  which is just the earliest sharp frame, not the best one. The classic lucky-imaging recipe (AutoStakkert /
+  RegiStax) aligns to the single highest-quality frame, for a concrete reason: `phase_cross_correlation` locks more
+  reliably against a *crisp* reference — a sharper reference gives a tighter correlation peak — so if the earliest
+  keeper happens to be the softest of the kept set, or one with the disk near a tracking-glitched edge, every other
+  frame measures a shakier (or over-`_MAX_SHIFT_FRACTION`, hence dropped) shift against it. `kept_indices` and
+  `scores` are already known before pass 2 begins, so the sharpest keeper's index is free — pick it as the
+  reference and correlate everything (including the earliest frames) against it. **Not** a correctness bug: the
+  current result is fully covered and aligned; this is a robustness/quality refinement, so it needs a *measured*
+  before/after (align-failure count and residual sharpness on a synthetic capture whose earliest keeper is
+  deliberately the softest) rather than a blind flip. **Care:** the reference frame is still added unshifted, so
+  the output's framing anchor moves from the first-keeper's position to the sharpest-keeper's — cosmetic, but pin
+  it so the change is understood. Feasible, additive, testable with `tests/videosynth.py`.
+
 - ~~**NEW IDEA (Builder 2026-08-07, spotted while auditing `seestack/calibrate/apply.py`) — a master flat built on a
   Bayer sensor imposes its *own* illumination colour on every calibrated light, because it is normalised by one
   global mean.**~~ — **MEASURED NON-ISSUE; nothing to build** (Builder 2026-08-07, branch
@@ -10984,6 +11027,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-07) — "Quick look": show the single sharpest frame of a Moon/Sun capture
+  *before* committing to a full stack.** *(Autonomy / friendliness — PRIORITY 2–3; size M.)* Today the only way to
+  see what a `Lunar_video/` capture actually holds is to run a full lucky stack — two whole decode passes and a
+  multi-minute wait — and only then does the beginner learn whether the capture was worth keeping at all (a cloud
+  rolled in, the Moon drifted out of frame, the whole clip was soft). The grading pass already scores every frame
+  and knows the sharpest index; a "Quick look" button would decode **just that one frame** (`ffmpeg -vf
+  select='eq(n\,IDX)'`, a single seek-and-grab, no accumulator, no second pass) and show it, with one line —
+  *"This is the crispest single frame; stacking the sharpest 30% will make it ~Nx cleaner."* It turns "should I
+  bother stacking this?" into a two-second look instead of a two-minute stack, and it reuses the grade job's own
+  scores so the sharpest index is free once a grade exists. **Shape:** the grade-only job (`submit_video_grade`)
+  already writes `grade.json` with the scores; add the sharpest frame's decoded index to it (or a tiny
+  `quicklook.png` written beside it at grade time), carry an additive nullable `quicklook_url`, and let the Moon &
+  Sun card show the thumbnail the moment a grade has run. **Beginner bar:** sane default (the frame the app already
+  judged best), plain-language, additive, no expert knob. **Care:** it is a *single frame* (noisy) and must say so —
+  it's a decision aid, not the product; the stack is still the picture. Keep it strictly one frame in memory
+  (the standing video memory discipline). **Feasibility:** no new dependency — same bundled ffmpeg, same decoder
+  wrapper; testable with the synthetic-video fixture (`tests/videosynth.py`).
 
 - ~~**NEW BEGINNER FEATURE (Builder 2026-08-07, found by dogfooding the Moon & Sun result card the same run) — the
   first thing anyone does with a Moon picture is show someone, and the only way off the laptop was a file
