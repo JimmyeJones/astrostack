@@ -8,6 +8,8 @@ a beginner had a Moon video on their NAS and no way to turn it into a picture.
   each already has a finished still.
 * ``POST /api/videos/{id}/grade`` — grade only, so "how picky should I be with
   this capture?" can be answered before a stack is spent finding out.
+* ``GET  /api/videos/{id}/quicklook.png`` — the sharpest single frame that pass
+  found, so "is this capture worth stacking at all?" is a two-second look.
 * ``POST /api/videos/{id}/stack`` — grade → keep the sharpest → align → average.
 * ``POST /api/videos/{id}/crop`` / ``…/uncrop`` — trim the empty sky off a
   finished still (or put the full frame back) by slicing the saved picture, so
@@ -28,7 +30,7 @@ from pydantic import BaseModel, Field
 
 from seestack.video.discover import find_video_capture, find_video_captures
 from seestack.video.ffmpeg import ffmpeg_available
-from seestack.video.quality import sharpness_profile
+from seestack.video.quality import quicklook_note, sharpness_profile
 from webapp import deps, video
 
 router = APIRouter(tags=["video"])
@@ -70,6 +72,24 @@ class SharpnessProfileOut(BaseModel):
     suggested_percent: float
     spread: str
     summary: str
+
+
+class QuickLookOut(BaseModel):
+    """The sharpest single frame of a graded capture, and how to read it.
+
+    A full lucky stack decodes a multi-minute video twice before the user learns
+    whether the capture was worth keeping. The grading pass already finds the
+    best frame, so handing that one frame back turns "should I bother stacking
+    this?" into a look instead of a wait. It is emphatically not the product —
+    ``note`` says so in as many words.
+    """
+
+    url: str
+    #: Where the frame sat among the graded ones (1-based), and how many those
+    #: were — so the picture is locatable rather than anonymous.
+    frame_number: int
+    n_graded: int
+    note: str
 
 
 class VideoResultOut(BaseModel):
@@ -115,6 +135,10 @@ class VideoCaptureOut(BaseModel):
     #: beginner see how much their frames vary *before* choosing how picky to be.
     #: Additive: ``null`` until they press the button.
     sharpness: SharpnessProfileOut | None = None
+    #: The sharpest frame that pass found. Additive and independent of
+    #: ``sharpness``: a grade run by an older version has scores but no picture,
+    #: and reads as ``null`` here.
+    quicklook: QuickLookOut | None = None
 
 
 class VideoListOut(BaseModel):
@@ -153,7 +177,11 @@ def _size_of(path: str) -> int:
 def _profile_out(scores, keep_percent: float | None) -> SharpnessProfileOut | None:
     """Adapt the engine's profile to the wire, or ``None`` when there's nothing
     worth showing (no scores, or a capture whose frames all scored zero)."""
-    profile = sharpness_profile(scores, keep_percent)
+    return _adapt_profile(sharpness_profile(scores, keep_percent))
+
+
+def _adapt_profile(profile) -> SharpnessProfileOut | None:
+    """Wire shape for an already-measured profile (``None`` passes through)."""
     if profile is None:
         return None
     return SharpnessProfileOut(
@@ -174,13 +202,37 @@ def _profile_out(scores, keep_percent: float | None) -> SharpnessProfileOut | No
     )
 
 
-def _grade_out(settings, capture_id: str) -> SharpnessProfileOut | None:
-    """The grade-only pass's profile. ``keep_percent`` is ``None`` — nothing has
-    been stacked, so there is no cut to mark and no "you kept…" clause."""
+def _grade_panels(
+    settings, capture_id: str,
+) -> tuple[SharpnessProfileOut | None, QuickLookOut | None]:
+    """Both halves of a grade-only pass — its profile and its sharpest frame.
+
+    Read together from one ``grade.json`` because a capture's list entry wants
+    both and the file carries a score per graded frame; asking twice would read
+    a 1500-entry list twice on a page that polls.
+
+    The profile's ``keep_percent`` is ``None`` — nothing has been stacked, so
+    there is no cut to mark and no "you kept…" clause. The quick look is offered
+    only when the picture is actually on disk, so a grade recorded before it
+    existed still shows its curve rather than a broken image.
+    """
     grade = video.read_grade(settings, capture_id)
     if grade is None:
-        return None
-    return _profile_out(grade.scores, None)
+        return None, None
+    profile = sharpness_profile(grade.scores, None)
+    quicklook = None
+    if grade.best_index >= 0 and video.has_quicklook(settings, capture_id):
+        quicklook = QuickLookOut(
+            url=f"/api/videos/{capture_id}/quicklook.png",
+            frame_number=grade.best_index + 1,
+            n_graded=grade.n_graded,
+            note=quicklook_note(
+                profile,
+                frame_number=grade.best_index + 1,
+                n_graded=grade.n_graded,
+            ),
+        )
+    return _adapt_profile(profile), quicklook
 
 
 def _result_out(settings, capture_id: str) -> VideoResultOut | None:
@@ -241,6 +293,7 @@ def _orphaned_stills(settings, listed: set[str]) -> list[VideoCaptureOut]:
     for m in metas:
         if m.capture_id in listed:
             continue
+        profile, quicklook = _grade_panels(settings, m.capture_id)
         out.append(VideoCaptureOut(
             id=m.capture_id,
             label=m.label,
@@ -251,9 +304,28 @@ def _orphaned_stills(settings, listed: set[str]) -> list[VideoCaptureOut]:
             files=[],
             total_bytes=0,
             result=_result_out(settings, m.capture_id),
-            sharpness=_grade_out(settings, m.capture_id),
+            sharpness=profile,
+            quicklook=quicklook,
         ))
     return out
+
+
+def _capture_out(settings, cap) -> VideoCaptureOut:
+    """One discovered capture's list entry, result and grade panels included."""
+    profile, quicklook = _grade_panels(settings, cap.id)
+    return VideoCaptureOut(
+        id=cap.id,
+        label=cap.label,
+        kind=cap.kind,
+        folder_name=cap.folder_name,
+        files=[
+            VideoFileOut(name=Path(f).name, size_bytes=_size_of(f)) for f in cap.files
+        ],
+        total_bytes=cap.total_bytes,
+        result=_result_out(settings, cap.id),
+        sharpness=profile,
+        quicklook=quicklook,
+    )
 
 
 @router.get("/api/videos", response_model=VideoListOut)
@@ -261,21 +333,7 @@ def list_videos(request: Request) -> VideoListOut:
     settings = deps.get_settings(request)
     incoming = settings.resolved_incoming_dir
     available = ffmpeg_available()
-    captures = [
-        VideoCaptureOut(
-            id=cap.id,
-            label=cap.label,
-            kind=cap.kind,
-            folder_name=cap.folder_name,
-            files=[
-                VideoFileOut(name=Path(f).name, size_bytes=_size_of(f)) for f in cap.files
-            ],
-            total_bytes=cap.total_bytes,
-            result=_result_out(settings, cap.id),
-            sharpness=_grade_out(settings, cap.id),
-        )
-        for cap in find_video_captures(incoming)
-    ]
+    captures = [_capture_out(settings, cap) for cap in find_video_captures(incoming)]
     captures.extend(_orphaned_stills(settings, {c.id for c in captures}))
     return VideoListOut(
         available=available,
@@ -381,11 +439,16 @@ def restore_one_still(capture_id: str, request: Request) -> VideoResultOut:
     return result
 
 
-def _result_file(request: Request, capture_id: str, name: str) -> Path:
+def _result_file(
+    request: Request,
+    capture_id: str,
+    name: str,
+    missing: str = "No stacked picture for this capture yet",
+) -> Path:
     settings = deps.get_settings(request)
     path = video.result_dir(settings, _safe_capture_id(capture_id)) / name
     if not path.is_file():
-        raise HTTPException(status_code=404, detail="No stacked picture for this capture yet")
+        raise HTTPException(status_code=404, detail=missing)
     return path
 
 
@@ -393,6 +456,18 @@ def _result_file(request: Request, capture_id: str, name: str) -> Path:
 def video_preview(capture_id: str, request: Request) -> FileResponse:
     return FileResponse(
         _result_file(request, capture_id, video.PNG_NAME), media_type="image/png",
+    )
+
+
+@router.get("/api/videos/{capture_id}/quicklook.png")
+def video_quicklook(capture_id: str, request: Request) -> FileResponse:
+    """The sharpest single frame the last check of this capture found."""
+    return FileResponse(
+        _result_file(
+            request, capture_id, video.QUICKLOOK_NAME,
+            "This capture hasn't been checked yet, so there's no frame to look at",
+        ),
+        media_type="image/png",
     )
 
 

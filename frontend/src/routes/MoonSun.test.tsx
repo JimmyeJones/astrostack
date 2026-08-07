@@ -254,6 +254,55 @@ describe("MoonSunView", () => {
     await waitFor(() =>
       expect(screen.getByDisplayValue(/Only the very best \(15%\)/)).toBeInTheDocument());
   });
+
+  it("shows the sharpest single frame of a checked capture, with its caveat", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        quicklook: {
+          url: "/api/videos/Lunar_video/quicklook.png",
+          frame_number: 412,
+          n_graded: 900,
+          note: "This is the sharpest single frame of your capture (frame 412 of "
+            + "the 900 we checked). It's one frame, so it's noisy — stacking the "
+            + "sharpest 30% (270 frames) keeps detail like this and comes out "
+            + "about 16× cleaner.",
+        },
+      })],
+    }));
+    renderView();
+    await waitFor(() => expect(screen.getByText("Quick look")).toBeInTheDocument());
+    const img = screen.getByAltText("The sharpest single frame of your Moon capture");
+    expect(img).toHaveAttribute("src", "/api/videos/Lunar_video/quicklook.png");
+    // The caveat is the whole reason a noisy single frame is safe to show.
+    expect(screen.getByText(/It's one frame, so it's noisy/)).toBeInTheDocument();
+  });
+
+  it("shows no quick look for a capture that was never checked", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture()],
+    }));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Stack video/ })).toBeInTheDocument());
+    expect(screen.queryByText("Quick look")).toBeNull();
+  });
+
+  it("drops the quick look once the finished picture is there to show", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        result: result(),
+        quicklook: {
+          url: "/api/videos/Lunar_video/quicklook.png",
+          frame_number: 4, n_graded: 10, note: "…",
+        },
+      })],
+    }));
+    renderView();
+    await waitFor(() => expect(screen.getByText(/Stacked the sharpest/)).toBeInTheDocument());
+    // The stack is the picture — a single noisy frame beside it would only
+    // muddle which one is the result.
+    expect(screen.queryByText("Quick look")).toBeNull();
+  });
 });
 
 describe("cropping the empty sky", () => {

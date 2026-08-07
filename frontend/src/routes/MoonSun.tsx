@@ -14,6 +14,7 @@ import { api, type VideoCapture } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
+import { VideoQuickLookCard } from "../components/VideoQuickLookCard";
 import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
 // The framing copy is shared with the Gallery's video-still card, which offers
 // the identical crop — re-exported here so this page stays the obvious place to
@@ -295,10 +296,19 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
           still exists the result's own panel (above) is the better one to show,
           since it can mark where the cut actually fell. */}
       {!result && !sourceGone ? (
-        <VideoSharpnessCard
-          profile={capture.sharpness}
-          onUseSuggestion={(pct) => setKeep(String(pct))}
-        />
+        <>
+          <VideoSharpnessCard
+            profile={capture.sharpness}
+            onUseSuggestion={(pct) => setKeep(String(pct))}
+          />
+          {/* The curve says how much the frames vary; the frame itself says
+              whether there is anything worth stacking in the first place. Both
+              come out of the one check, so both are shown before the stack. */}
+          <VideoQuickLookCard
+            quicklook={capture.quicklook}
+            subject={subjectNoun(capture.kind)}
+          />
+        </>
       ) : null}
 
       {sourceGone ? null : (

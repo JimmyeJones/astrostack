@@ -11028,8 +11028,39 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-07) — "Quick look": show the single sharpest frame of a Moon/Sun capture
-  *before* committing to a full stack.** *(Autonomy / friendliness — PRIORITY 2–3; size M.)* Today the only way to
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-07) — "Quick look": show the single sharpest frame of a Moon/Sun capture
+  *before* committing to a full stack.**~~ — **SHIPPED v0.246.0** (Builder 2026-08-07, branch
+  `claude/elegant-bohr-dobfg3`). *(Autonomy / friendliness — PRIORITY 2–3.)* "Check this capture" now comes back
+  with the capture's sharpest frame as well as its curve, so *"is this worth stacking at all?"* — did a cloud roll
+  in, did the Moon drift out of frame, was it ever in focus — is a look rather than a two-decode, multi-minute wait.
+  **Cheaper than the filed spec, and one fewer moving part:** rather than seeking back for the best frame with a
+  third `ffmpeg` pass (`select='eq(n\,IDX)'`), `grade_video` takes an opt-in `keep_best_frame` and simply *keeps*
+  the best frame it has already decoded, replacing it as a sharper one arrives — **exactly one extra frame held**,
+  flat in video length, so the standing video memory discipline is untouched. It is opt-in precisely because
+  `stack_video` grades to choose keepers, not to look at one, and must not pay a frame for a picture it never uses
+  (pinned by a test: the default carries the index and no frame). The index itself is free (an `argmax` over
+  scalars) and is always filled in.
+  The frame is rendered with the **same** `normalize_for_display` the finished still uses, so the quick look is a
+  fair preview of the stack rather than a differently-toned picture to reconcile — one frame's worth of noise
+  apart. Written by the *check*, beside `grade.json`, so looking at a capture still never disturbs a finished
+  still; a stale one from an earlier check is cleared first, so the picture on disk always belongs to the scores
+  next to it. The **care note is honoured literally**: `quicklook_note` (pure, in `seestack/video/quality.py`)
+  builds the caption from the capture's own numbers — *"…It's one frame, so it's noisy — stacking the sharpest 30%
+  (270 frames) keeps detail like this and comes out about 16× cleaner"* — and a capture with no measurable profile
+  still gets the single-frame caveat, never a bare picture. The card is shown only before a stack exists; once
+  there is a finished still, that is the picture.
+  Upgrade-safe: one new endpoint (`GET /api/videos/{id}/quicklook.png`), one additive nullable response field, one
+  additive defaulted `grade.json` field — a grade written by an older version has the scores but no `best_index`
+  and no picture, and reads as "curve, no quick look" (pinned by a test). No default flipped, no existing shape
+  changed. **Tests:** `tests/test_video_lucky.py` (+2 — the kept frame is genuinely the sharpest one, re-grading it
+  reproduces its own score; the default holds no frame), `tests/test_video_quality.py` (+2 — the note names the
+  frame and quantifies the alternative from this capture's numbers; no-profile still warns), and
+  `tests/webapp/test_video_api.py` (+4 — the check produces a servable native-size PNG and still stacks nothing,
+  an unchecked capture offers none and 404s with a sentence, an older grade keeps its curve, a re-check replaces
+  the frame), `MoonSun.test.tsx` (+3 — the frame and its caveat render, an unchecked capture shows none, a
+  finished still hides it).
+  *(Original spec kept below.)*
+  *(Autonomy / friendliness — PRIORITY 2–3; size M.)* Today the only way to
   see what a `Lunar_video/` capture actually holds is to run a full lucky stack — two whole decode passes and a
   multi-minute wait — and only then does the beginner learn whether the capture was worth keeping at all (a cloud
   rolled in, the Moon drifted out of frame, the whole clip was soft). The grading pass already scores every frame

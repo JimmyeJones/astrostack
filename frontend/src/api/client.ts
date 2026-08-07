@@ -1342,6 +1342,18 @@ export interface VideoSharpnessProfile {
   summary: string;
 }
 
+// The sharpest single frame a "Check this capture" pass found. It answers "is
+// this capture worth stacking at all?" — a cloud, a drift out of frame, a soft
+// focus — in a couple of seconds rather than a couple of minutes. `note` is the
+// backend's own sentence, and it says plainly that this is one noisy frame and
+// the stack is the picture.
+export interface VideoQuickLook {
+  url: string;
+  frame_number: number;
+  n_graded: number;
+  note: string;
+}
+
 export interface VideoResult {
   created_utc: string;
   source_name: string;
@@ -1383,6 +1395,10 @@ export interface VideoCapture {
   // The grade-only pass ("Check this capture"), when one has been run. Optional:
   // an older backend never sends it and the panel simply doesn't appear.
   sharpness?: VideoSharpnessProfile | null;
+  // The sharpest frame that same pass found. Optional and independent of
+  // `sharpness`: a grade recorded before the quick look existed has the scores
+  // but no picture, and nothing renders.
+  quicklook?: VideoQuickLook | null;
 }
 
 export interface VideoList {
