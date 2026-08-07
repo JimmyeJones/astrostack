@@ -10979,6 +10979,25 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- ~~**NEW BEGINNER FEATURE (Builder 2026-08-07, found by dogfooding the Moon & Sun result card the same run) — the
+  first thing anyone does with a Moon picture is show someone, and the only way off the laptop was a file
+  download.**~~ — **SHIPPED v0.245.8** (Builder 2026-08-07, branch `claude/gallant-galileo-bfm5qe`).
+  *(Friendliness — PRIORITY 3.)* The **"To phone"** QR — already the answer to the app's most common post-success
+  question on the Target and History pages — needs nothing but the picture's URL, yet a Moon/Sun still couldn't
+  reach it: `ImageLightbox` gated the control on `jpegHref`, and there is no JPEG behind a video still. The gate is
+  now the *picture* (`jpegHref ?? downloadHref`), so the small share-friendly JPEG is still preferred wherever one
+  exists and a PNG-only surface gets the QR instead of nothing; a viewer with no picture at all still offers
+  nothing. The Moon & Sun page gained the same control beside its PNG / 16-bit TIFF pair, with the caption named
+  for the capture (*"…open your Moon picture and save it"* / *"…your Sun picture…"*) via the existing
+  `subjectNoun`. Deliberately **not** the share *card*: that machinery is stack-run-shaped (target name,
+  integration, run id) and a half-filled version of it would be worse than none — the QR is surface-agnostic by
+  construction, which is exactly why it travels and the card doesn't. Frontend-only; no API, schema, config,
+  default or endpoint change, and the QR is still generated entirely client-side (nothing leaves the LAN).
+  **Tests:** `ImageLightbox.test.tsx` (+3, one fail-before — a PNG-only surface offers the QR; a surface with both
+  encodes the *JPEG*, proven by matching the rendered QR path against the one that URL produces alone and against
+  the PNG's, which differs; a viewer with no picture offers none) and `MoonSun.test.tsx` (+1 — the finished still
+  opens a QR captioned for the Moon).
+
 - ~~**NEW IDEA (Builder 2026-08-07, the last gap left after the Gallery crop v0.245.3 and the orphaned-still fix
   v0.245.5) — a Moon/Sun still is the only finished picture in the Gallery you can't download at full quality from
   the Gallery.**~~ — **SHIPPED v0.245.6** (Builder 2026-08-07, branch `claude/gallant-galileo-bfm5qe`).
