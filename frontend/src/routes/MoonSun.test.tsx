@@ -4,7 +4,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  DEFAULT_KEEP, MoonSunView, cropNote, cropSuggestion, resultSummary, subjectNoun,
+  DEFAULT_KEEP, DEFAULT_SHARPEN, MoonSunView, cropNote, cropSuggestion,
+  resultSummary, sharpenNote, subjectNoun,
 } from "./MoonSun";
 import * as client from "../api/client";
 import type { VideoCapture, VideoList, VideoResult } from "../api/client";
@@ -94,6 +95,7 @@ describe("MoonSunView", () => {
     fireEvent.click(screen.getByRole("button", { name: /Stack video/i }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("Lunar_video", {
       keep_percent: Number(DEFAULT_KEEP), file_name: "clip.mp4", crop: false,
+      sharpen: Number(DEFAULT_SHARPEN),
     }));
   });
 
@@ -445,6 +447,7 @@ describe("cropping the empty sky", () => {
     fireEvent.click(screen.getByRole("button", { name: /Stack video/i }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("Lunar_video", {
       keep_percent: Number(DEFAULT_KEEP), file_name: "clip.mp4", crop: true,
+      sharpen: Number(DEFAULT_SHARPEN),
     }));
   });
 
@@ -530,5 +533,74 @@ describe("MoonSunView with a still whose video is gone", () => {
     expect(screen.getByText("How picky should we be?")).toBeInTheDocument();
     expect(screen.queryByText(/isn't in your incoming folder any more/))
       .not.toBeInTheDocument();
+  });
+});
+
+describe("sharpening a Moon or Sun picture", () => {
+  it("says nothing about sharpening for a picture that wasn't sharpened", () => {
+    expect(sharpenNote(0)).toBeNull();
+    expect(sharpenNote(undefined)).toBeNull();
+    expect(sharpenNote(null)).toBeNull();
+    expect(sharpenNote(Number.NaN)).toBeNull();
+  });
+
+  it("names the strength in words rather than printing a number", () => {
+    expect(sharpenNote(0.6)).toContain("Gentle");
+    expect(sharpenNote(1.2)).toContain("Medium");
+    expect(sharpenNote(2)).toContain("Strong");
+    // A value that didn't come from the menu still reads as the nearest one.
+    expect(sharpenNote(0.55)).toContain("Gentle");
+    expect(sharpenNote(0.6)).not.toMatch(/0\.6/);
+  });
+
+  it("offers sharpening, off by default, so an existing install is unchanged",
+    async () => {
+      vi.spyOn(client.api, "listVideoCaptures")
+        .mockResolvedValue(list({ captures: [capture()] }));
+      const post = vi.spyOn(client.api, "stackVideoCapture")
+        .mockResolvedValue({ job_id: "j1" });
+      renderView();
+      await waitFor(() => screen.getByText("Sharpen the detail"));
+      fireEvent.click(screen.getByRole("button", { name: /Stack video/i }));
+      await waitFor(() => expect(post).toHaveBeenCalledWith(
+        "Lunar_video",
+        expect.objectContaining({ sharpen: 0 }),
+      ));
+    });
+
+  it("sends the strength the user picked", async () => {
+    vi.spyOn(client.api, "listVideoCaptures")
+      .mockResolvedValue(list({ captures: [capture()] }));
+    const post = vi.spyOn(client.api, "stackVideoCapture")
+      .mockResolvedValue({ job_id: "j1" });
+    renderView();
+    await waitFor(() => screen.getByText("Sharpen the detail"));
+    // The Select's own input, addressed by the value it is showing — the label
+    // text also appears on the wrapper, so it can't be used to pick one element.
+    fireEvent.click(screen.getByDisplayValue(/Off — the plain stacked picture/));
+    fireEvent.click(await screen.findByText(/Gentle — recommended/));
+    fireEvent.click(screen.getByRole("button", { name: /Stack video/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith(
+      "Lunar_video",
+      expect.objectContaining({ sharpen: 0.6 }),
+    ));
+  });
+
+  it("says on the finished picture that it was sharpened", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({ result: result({ sharpen_amount: 1.2 }) })],
+    }));
+    renderView();
+    await waitFor(() => expect(screen.getByText(/Sharpening: Medium/))
+      .toBeInTheDocument());
+  });
+
+  it("says nothing on a still stacked before sharpening existed", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({ result: result() })],
+    }));
+    renderView();
+    await waitFor(() => screen.getByText(/Stacked the sharpest/));
+    expect(screen.queryByText(/Sharpening:/)).not.toBeInTheDocument();
   });
 });

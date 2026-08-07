@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from seestack.video.detail import SHARPEN_MAX
 from seestack.video.discover import find_video_capture, find_video_captures
 from seestack.video.ffmpeg import ffmpeg_available
 from seestack.video.quality import quicklook_note, sharpness_profile
@@ -121,6 +122,10 @@ class VideoResultOut(BaseModel):
     #: True when this still was cropped in place and its full frame is still
     #: saved beside it, so the crop can be undone in one click.
     crop_restorable: bool = False
+    #: How hard this picture was sharpened after stacking (0 = not at all).
+    #: Additive with a neutral default, so a still made before sharpening
+    #: existed reads exactly as what it is: unsharpened.
+    sharpen_amount: float = 0.0
 
 
 class VideoCaptureOut(BaseModel):
@@ -165,6 +170,11 @@ class VideoStackRequest(BaseModel):
     #: Off by default: an omitted field must keep giving the full frame a
     #: previous version produced.
     crop: bool = False
+    #: How hard to sharpen the finished picture. Zero — no sharpening at all —
+    #: is the default for the same reason: an omitted field must reproduce the
+    #: picture the previous version made. Bounded to what the engine offers, so
+    #: a stray value fails here with a clear 422 rather than mid-job.
+    sharpen: float = Field(default=0.0, ge=0.0, le=SHARPEN_MAX)
 
 
 def _size_of(path: str) -> int:
@@ -275,6 +285,7 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
         crop_restorable=(
             meta.crop_applied and video.has_full_frame_backup(settings, capture_id)
         ),
+        sharpen_amount=meta.sharpen_amount,
     )
 
 
@@ -403,6 +414,7 @@ def stack_one_video(
         file_name=req.file_name,
         align=req.align,
         crop=req.crop,
+        sharpen=req.sharpen,
     )
     return {"job_id": job.id}
 

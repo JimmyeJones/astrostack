@@ -18,6 +18,7 @@ gradient removal would wreck a bright disk). See :func:`~seestack.video.lucky.
 normalize_for_display` for the gentle disk-appropriate render used instead.
 """
 
+from seestack.video.detail import SHARPEN_PRESETS, sharpen_still
 from seestack.video.discover import (
     VIDEO_EXTENSIONS,
     VideoCapture,
@@ -41,6 +42,7 @@ from seestack.video.lucky import (
 )
 
 __all__ = [
+    "SHARPEN_PRESETS",
     "VIDEO_EXTENSIONS",
     "GradeResult",
     "LuckyOptions",
@@ -54,6 +56,7 @@ __all__ = [
     "iter_frames",
     "normalize_for_display",
     "probe_video",
+    "sharpen_still",
     "stack_video",
     "video_capture_id",
 ]

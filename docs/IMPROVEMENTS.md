@@ -7634,9 +7634,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   panel on upgrade), and a filesystem that reports no usable mtime must fall back to trusting it too. Testable
   with the synthetic fixture — the v0.246.0 re-check test already writes a second capture over the first.
 
-- **NEW IDEA (Builder 2026-08-07, measured-by-inspection while building the Quick look v0.246.0) — checking a
+- ~~**NEW IDEA (Builder 2026-08-07, measured-by-inspection while building the Quick look v0.246.0) — checking a
   Moon capture and then stacking it decodes the same video *three* times, when the second decode is pure
-  duplication.** *(Autonomy / performance — PRIORITY 2; size M; **measure the wall-clock saving first**.)* The
+  duplication.**~~ — **MEASURED AND DECLINED; do not re-pick this** (Builder 2026-08-07, branch
+  `claude/elegant-bohr-9kc2et`). The entry asked for a before/after on a real-length capture before shipping, and
+  said to strike it with the number if the saving turned out small. It is small.
+  **The number.** A 600-frame 640×480 synthetic capture (93 MB, the whole file decoded twice) at the default
+  `keep_percent=30`: **grading pass 4.89 s, full stack 23.93 s, so the stack's own second pass is 19.04 s.**
+  Check-then-stack costs **28.82 s** today; reusing the saved grade would cost **23.93 s** — a **17 %** saving,
+  not the "third of the wait" the entry estimated. The estimate was off because it counted decodes and pass 2 is
+  not a decode: aligning ~30 % of the frames with `phase_cross_correlation` at `upsample_factor=10` is ~14 s of
+  that 19 s, so the redundant grading pass is a sixth of the wait, not a third.
+  **And the price went up.** As of v0.246.3 the stack aligns onto the *sharpest frame*, whose pixels come out of
+  its own grading pass (`keep_best_frame`). A saved `grade.json` holds scores and an index, not a frame — the only
+  picture beside it is the display-rendered `quicklook.png` — so reusing the file would mean either giving up the
+  sharpest-frame reference (measured at +14 % finished sharpness, so a straight trade of picture quality for
+  wall-clock) or correlating against a differently-tone-mapped PNG. Neither is worth 17 % on a path that produces
+  the user's picture, and the validation it needs (size/mtime + stride + frame count, all of which must hold or
+  the wrong frames get selected silently) is real risk for that. **Declined, not deferred.** *(Original spec kept
+  below.)*
+  *(Autonomy / performance — PRIORITY 2; size M; **measure the wall-clock saving first**.)* The
   recommended beginner path is now "Check this capture" → read the advice → "Stack video". That is one decode
   for the check's grading pass, then `stack_video`'s *own* grading pass (identical stride, identical scores —
   `test_grade_only_scores_every_frame_without_stacking` pins that they agree exactly), then the stack pass. On a
@@ -11824,9 +11841,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   upgrade-safe: new optional API field, new engine module, no default flipped, nothing changed about any picture.
   **Tests (+29):** `tests/test_video_quality.py` (+14), `tests/webapp/test_video_api.py` (+2, incl. the
   scores-less-meta upgrade case), `tests/test_video_lucky.py` (+1), `VideoSharpnessCard.test.tsx` (+11, incl. the
-  fixed-axis honesty guard), `MoonSun.test.tsx` (+2). Still open: **(b2)** an optional gentle final unsharp/wavelet
-  on the result (the editor can already sharpen,
-  so this is convenience, not capability); **(b3)** raw-OSC video handling (if a Seestar ever writes a Bayer video,
+  fixed-axis honesty guard), `MoonSun.test.tsx` (+2). ~~Still open: **(b2)** an optional gentle final
+  unsharp/wavelet on the result (the editor can already sharpen, so this is convenience, not capability)~~ —
+  **(b2) SHIPPED v0.247.0** (Builder 2026-08-07, branch `claude/elegant-bohr-9kc2et`), and it turned out to be
+  **capability, not convenience**: the parenthetical was wrong. A Moon/Sun still is not a stack run, so it cannot
+  be opened in the editor at all (the v0.244.1 "Your first image" work established exactly that, which is why its
+  well-done line points a video user at the Gallery rather than the editor) — so before this, the picture a
+  beginner downloaded was simply the soft one, with no path to a sharp one anywhere in the app.
+  New pure engine module `seestack/video/detail.py`: `sharpen_still(rgb, amount)` is an unsharp mask in *display*
+  space (the picture `normalize_for_display` already rendered), with one knob — **how much** — and a fixed
+  `SHARPEN_SIGMA_PX = 1.1` radius. The radius is deliberately not exposed: lunar/solar detail lives at a pixel or
+  two and doesn't vary the way a deep-sky star profile does, so it would be a knob with one right answer, and a
+  tight radius is also what keeps the limb free of the dark halo that makes an over-cooked planetary image obvious.
+  Named strengths (`SHARPEN_PRESETS`: Off / Gentle 0.6 / Medium 1.2 / Strong 2.0, ceiling `SHARPEN_MAX = 2.0`) live
+  in the engine so the numbers and the words can't drift from the menu. NaN-aware as everywhere else: holes are
+  filled before the blur so a gap can't eat a ring of real picture around it, and come back as holes.
+  **Off by default at every layer** — the API field defaults to 0, `sharpen_still` returns its input array
+  *untouched* at 0, and the UI's default option is "Off" — so an omitted field reproduces the previous version's
+  picture byte-for-byte (pinned by a test that compares the saved PNG bytes). Sharpening runs on the whole frame
+  *before* any crop, so every pixel is sharpened against its real neighbours rather than a reflected crop edge, and
+  the framing is measured on the sharpened picture, which is the one on disk — so a crop offered at stack time and
+  a crop taken later from the saved artifacts see the same thing. `sharpen_amount` is recorded in `meta.json` and
+  served on `VideoResultOut` (additive, defaulted), and the card says *"Sharpening: Medium — surface detail lifted
+  after stacking"* so nobody wonders later why one Moon looks crisper than the last.
+  **Tests (+20):** `tests/test_video_detail.py` (new, +8 — off is byte-for-byte identity, detail rises with the
+  amount, output stays a writable 0–1 picture, a grey picture stays grey, the ceiling caps rather than honours,
+  holes stay holes and don't bleed, presets ordered Off→Strong, and the words for an off-menu amount),
+  `tests/webapp/test_video_api.py` (+5 — a sharpened still measurably carries more fine detail than the plain one
+  at the same size, an omitted field is byte-identical to an explicit zero, a silly amount is a 422, an older
+  `meta.json` reads as unsharpened, and sharpen composes with crop), `MoonSun.test.tsx` (+5). One test-harness
+  fix came with it: `frontend/src/test/setup.ts` now stubs `Element.scrollIntoView`, which jsdom doesn't implement
+  and Mantine's Combobox calls on a timer — without it *any* test that picks a `Select` option throws an unhandled
+  error after the test finishes. **Still open:** **(b3)** raw-OSC video handling (if a Seestar ever writes a Bayer video,
   today's `rgb24` decode would need a debayer path — verify before building, the current captures are ordinary
   colour video); ~~**(c)** disk crop/centre so the still isn't mostly black sky~~ — **CROP HALF SHIPPED v0.244.0**
   (Builder 2026-08-06, branch `claude/gallant-galileo-syc60a`), leaving only **drizzle-upscale** open under (c).
