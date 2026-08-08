@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  autoCastSummaryText, dropEmptyFields, Maintenance, reprocessNudgeText,
+  autoCastSummaryText, dropEmptyFields, HINTS, Maintenance, reprocessNudgeText,
   SettingsView, WALK_AWAY_KEYS, walkAwayEnabled, withWalkAway,
 } from "./Settings";
 import * as client from "../api/client";
@@ -129,6 +129,23 @@ describe("autoCastSummaryText", () => {
       by_cast: { green: 1 }, median_deviation: 0.02,
     });
     expect(msg).toContain("neutral on 0 of 1 auto-edited result;");
+  });
+});
+
+describe("Auto-stack hint", () => {
+  // The hands-off stack makes two choices the user never sees a form for
+  // (`auto_reject` and `quality_weighted`, both injected in
+  // `webapp/pipeline.py::_stack_target` on the `auto` path). If the copy doesn't
+  // say so, the app is silently changing how the picture is combined — so the
+  // wording is pinned here rather than left to drift.
+  it("says what a hands-off stack decides on your behalf", () => {
+    expect(HINTS.auto_stack).toMatch(/removes outliers/i);
+    expect(HINTS.auto_stack).toMatch(/sharper/i);
+  });
+
+  it("says those choices only apply when you haven't made one yourself", () => {
+    expect(HINTS.auto_stack).toMatch(/only apply when you haven't picked/i);
+    expect(HINTS.auto_stack).toMatch(/Stack form is never touched/i);
   });
 });
 
