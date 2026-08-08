@@ -14,6 +14,9 @@ a beginner had a Moon video on their NAS and no way to turn it into a picture.
 * ``POST /api/videos/{id}/crop`` / ``…/uncrop`` — trim the empty sky off a
   finished still (or put the full frame back) by slicing the saved picture, so
   changing the framing never costs a second decode of the capture.
+* ``POST /api/videos/{id}/sharpen`` — bring out more surface detail on a finished
+  still (or take it back off) by re-rendering from the kept original, for the
+  same reason: it is a decision you make by looking at the picture.
 * ``GET  /api/videos/{id}/preview.png`` / ``…/download.tiff`` — the result.
 
 Captures are addressed by a sanitised id and re-discovered server-side on every
@@ -126,6 +129,11 @@ class VideoResultOut(BaseModel):
     #: Additive with a neutral default, so a still made before sharpening
     #: existed reads exactly as what it is: unsharpened.
     sharpen_amount: float = 0.0
+    #: True when that strength can still be changed from the saved picture, with
+    #: no second decode of the capture. False only for a still whose stack
+    #: sharpened it before the soft render was kept beside it — the strength is
+    #: still reported, it just can't be moved without re-stacking.
+    sharpen_editable: bool = False
 
 
 class VideoCaptureOut(BaseModel):
@@ -282,10 +290,9 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
         crop_trim_fraction=meta.crop_trim_fraction,
         source_width=meta.source_width or meta.width,
         source_height=meta.source_height or meta.height,
-        crop_restorable=(
-            meta.crop_applied and video.has_full_frame_backup(settings, capture_id)
-        ),
+        crop_restorable=video.crop_is_restorable(settings, capture_id, meta),
         sharpen_amount=meta.sharpen_amount,
+        sharpen_editable=video.can_resharpen(meta),
     )
 
 
@@ -459,6 +466,37 @@ def restore_one_still(capture_id: str, request: Request) -> VideoResultOut:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     result = _result_out(settings, safe_id)
     if result is None:  # pragma: no cover - the restore just wrote it
+        raise HTTPException(status_code=404, detail="No stacked picture for this capture")
+    return result
+
+
+class VideoSharpenRequest(BaseModel):
+    """How hard to sharpen a picture that already exists. 0 removes it."""
+
+    amount: float = Field(default=0.0, ge=0.0, le=SHARPEN_MAX)
+
+
+@router.post("/api/videos/{capture_id}/sharpen", response_model=VideoResultOut)
+def sharpen_one_still(
+    capture_id: str, req: VideoSharpenRequest, request: Request,
+) -> VideoResultOut:
+    """Change how sharp a finished still is — no re-stack, no ffmpeg.
+
+    Exactly the same reasoning as the crop next to it: how much sharpening a
+    picture wants is something you can only judge by *looking at it*, so acting
+    on that judgement must not cost another multi-minute decode of a capture that
+    may not even be on the NAS any more. Every strength is rendered from the
+    kept original rather than from the picture on disk, so trying several never
+    compounds, and ``amount: 0`` puts the soft picture back.
+    """
+    settings = deps.get_settings(request)
+    safe_id = _safe_capture_id(capture_id)
+    try:
+        video.sharpen_saved_still(settings, safe_id, req.amount)
+    except video.StillCropError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = _result_out(settings, safe_id)
+    if result is None:  # pragma: no cover - the sharpen just wrote it
         raise HTTPException(status_code=404, detail="No stacked picture for this capture")
     return result
 

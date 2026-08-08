@@ -95,3 +95,51 @@ export function sharpenNote(amount: number | undefined | null): string | null {
     ));
   return `Sharpening: ${preset.name} — surface detail lifted after stacking.`;
 }
+
+/** Fields the sharpening control reads off a finished picture. */
+export interface SharpenFields {
+  sharpen_amount?: number;
+  sharpen_editable?: boolean;
+}
+
+/**
+ * The offer to try a different sharpening on a picture that already exists — or
+ * null when there is nothing to offer.
+ *
+ * Like the crop, this is a decision you can only really make by *looking at the
+ * picture*, so the offer waits until there is one. It is null when the backend
+ * can't do it without re-stacking (a still sharpened before the soft render was
+ * kept beside it), because an offer that would fail is worse than none.
+ */
+export function sharpenOffer(
+  result: SharpenFields | null | undefined,
+  kind: SubjectKind,
+): string | null {
+  if (!result?.sharpen_editable) return null;
+  const noun = subjectNoun(kind);
+  if ((result.sharpen_amount ?? 0) > 0) {
+    return (
+      `Try a different amount — each one is rendered from the unsharpened `
+      + `picture, so nothing builds up and "Off" gets you back exactly where `
+      + `you started.`
+    );
+  }
+  return (
+    `Stacking averages your frames together, which makes the picture cleaner `
+    + `but slightly softer. Bringing the detail back takes a moment and doesn't `
+    + `re-stack anything — and you can change your mind as often as you like, `
+    + `so it's worth seeing what your ${noun} looks like sharpened.`
+  );
+}
+
+/** Which preset a picture's current strength corresponds to, for a menu (pure).
+ *
+ * Snapped to the nearest offered value so a still made by a hand-written API
+ * call still selects something, rather than leaving the control blank. */
+export function sharpenValueOf(result: SharpenFields | null | undefined): string {
+  const amount = result?.sharpen_amount ?? 0;
+  if (!Number.isFinite(amount) || amount <= 0) return DEFAULT_SHARPEN;
+  return SHARPEN_PRESETS.reduce((best, p) => (
+    Math.abs(Number(p.value) - amount) < Math.abs(Number(best.value) - amount) ? p : best
+  )).value;
+}
