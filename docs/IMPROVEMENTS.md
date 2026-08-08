@@ -11258,11 +11258,64 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-REQUESTED (2026-08-07, follow-on to v0.239.0) — restyle the ambient bed toward *psychill / psybient*
+- ~~**⭐ OWNER-REQUESTED (2026-08-07, follow-on to v0.239.0) — restyle the ambient bed toward *psychill / psybient*
   (the owner named **A.e.r.o.** and **AstroPilot** as the reference feel). The current bed is "decent but not
-  really it".** *(Enjoyment polish; size M. Same standing as the original: **must not displace a bug or
-  PRIORITY 1–4 work** — pull it on a slow run. Frontend-only, cannot touch the imaging path.)*
+  really it".**~~ — **SHIPPED v0.248.0** (Builder 2026-08-08, branch `claude/elegant-bohr-f7slyy`). *(Enjoyment
+  polish.)* All six named gaps are built, all as **original material in the genre idiom** — a tempo range, a scale
+  and a delay division are stylistic conventions, and nothing here reproduces or approximates any recording.
+  Still procedurally generated at runtime: **no audio file ships or is fetched**, no new npm dependency, and the
+  bed is still **off by default**, per-device `localStorage`, created/resumed only from the user gesture, and
+  suspended (not muted) when off.
+  1. **The pulse (76 BPM).** `TEMPO_BPM` / `beatSeconds` / `barSeconds` are now the grid everything else derives
+     from, scheduled by a **two-bar lookahead** (`scheduleGrid`) rather than a `setTimeout` per note, so a busy
+     main thread — a stack-run poll, a re-render — can't make the heartbeat late.
+  2. **Warm sub-bass + the duck.** `subVoices` puts the fundamental an octave under the pad root and pairs it with
+     a quieter partner *at* the root, because at these roots the octave-under is 27–37 Hz and a laptop reproduces
+     none of it. Two soft thumps a bar (downbeat, and a 0.6× one at the half), and each one dips the pad and
+     noise through a persistent `duck` gain — a *scheduled* dip (`duckEnvelope`), not a compressor, so its depth
+     is exactly what the pure layer says it is and it is provably back to 1 before the next pulse (there is a test
+     for that). The sub bypasses both the duck (it must not duck itself) and the reverb (a 4.5 s tail on 30 Hz is
+     mud).
+  3. **Dotted-eighth ping-pong.** The first `DelayNode`s in the file: two lines at `delaySeconds()` = 0.75 beat,
+     each panned hard the other way, only the second feeding back (0.52), fed by a sparse **pluck** voice — 0–2 a
+     bar, never on the downbeat (that belongs to the sub), so the trail does the musical work and the notes
+     themselves stay quiet.
+  4. **A darker mode.** Minor pentatonic for the bells, **Dorian** (natural 6th — spacious, not mournful) for the
+     plucks, an occasional 9th/11th for colour, and a quiet minor-7th voice in the pad so the chord itself states
+     the mode.
+  5. **A wider, warmer pad.** Every voice is now a **pair of detuned sawtooths** through the lowpass instead of
+     one sine, each on its own `StereoPannerNode` with an offset pan-drift LFO, plus a two-tap **chorus** (13/19 ms,
+     modulated at 0.11/0.17 Hz, panned apart). The bed was near-mono; it isn't now.
+  6. **A 7-minute arc.** `macroLevels(t)` is a raised cosine — no corner to hear — easing the filter centre
+     (340→880 Hz), the noise bed, the sub level and how often plucks fire. It is measured from each *start*, so a
+     bed resumed after a long pause opens from the top rather than mid-swell.
+  **Two things worth knowing beyond the spec.** (a) **Root drift now crossfades.** It always tore the pad down and
+  rebuilt it on the spot; with sines that was a small click, with a sawtooth stack it would have been a real one —
+  each pad now lives behind its own group gain, the two overlap for `ROOT_CROSSFADE_S`, and the old voices are
+  stopped only once inaudible. (b) **The node discipline the entry asked for is enforced by a test, and writing
+  it found a gap**: `disposeWith` now hangs an `onended` disconnect on *every* transient oscillator (the sub's
+  fundamental and the bell's shimmer partner previously had none, so their per-voice gains stayed reachable from
+  the bus), and a test walks several bars and fails if any voice given a stop time lacks a disposer. The
+  persistent graph is built once and constant; only the per-bar voices come and go.
+  The Settings and toggle copy now say *"slow-pulsing chill soundbed … a soft heartbeat under a wide, dark pad,
+  with echoes that drift off into the dark"* rather than describing the old beatless drone. **Frontend-only: no
+  engine, webapp, API, schema, config, DB, on-disk or default change** — the imaging path is untouched.
+  **Tests (+36, `frontend/src/ambient/`):** `voicing.test.ts` 22 → 53 (the tempo sits in the 72–84 window and the
+  delay is a division the pulse never lands on; the pad is a detuned saw pair, panned, with per-voice drift rates
+  and a pan that can't leave the field; the sub's two frequencies; `barPlan` always lays the heartbeat, never
+  doubles a slot, caps at two plucks, leaves the downbeat alone, returns them in time order and survives a
+  nonsense chance; the pentatonic is genuinely minor and Dorian keeps its natural 6th; colour tones are the
+  exception; the duck scales, recovers in time and is a dip not a gate; the arc opens, wraps, has no audible
+  corner and never closes the bed to nothing) and `player.test.ts` 17 → 28 (the pulse lands on the grid two bars
+  ahead; it keeps topping up as the clock advances; a bed resumed hours later schedules a lookahead, not a
+  catch-up burst; one duck dip per pulse; every per-bar voice carries a disposer; the ping-pong and chorus delay
+  lines and their panning; the arc eases the filter and restarts from the top; the drift crossfades). The fake
+  `AudioContext` grew `createDelay`/`createStereoPanner` and now records start/stop times and `onended`, which is
+  what lets a test read the tempo grid back out at all.
+  *(If the pulse turns out to be distracting in real use, the entry's fallback — a beatless "mood" alongside this
+  one — is still the cheap answer; per the spec it was deliberately not built speculatively.)*
 
+  *(Original spec kept below for provenance.)*
   **⚠️ Write ORIGINAL material in the genre idiom. Do NOT attempt to reproduce, transcribe or approximate any
   specific track, melody, hook or recognisable motif by these (or any) artists** — take only the general stylistic
   vocabulary below, exactly as "write something bluesy" is a style and not a copy. Everything stays procedurally

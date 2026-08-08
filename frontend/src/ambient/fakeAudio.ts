@@ -32,16 +32,30 @@ class FakeNode {
   connected: unknown[] = [];
   started = 0;
   stopped = 0;
+  disconnects = 0;
+  /** Every `start(when)` / `stop(when)` the player asked for. The start times
+   * are how a test reads the tempo grid back out; a voice given a *future*
+   * stop time is a transient one, which is how a test tells the persistent
+   * graph from the per-bar voices. */
+  startTimes: Array<number | undefined> = [];
+  stopTimes: Array<number | undefined> = [];
+  /** Recorded, not fired: the fake has no clock to end a note on, but a
+   * transient voice that never sets this would leak its nodes in a real one. */
+  onended: (() => void) | null = null;
   connect(dest: unknown): unknown {
     this.connected.push(dest);
     return dest;
   }
-  disconnect(): void {}
-  start(_when?: number): void {
-    this.started++;
+  disconnect(): void {
+    this.disconnects++;
   }
-  stop(_when?: number): void {
+  start(when?: number): void {
+    this.started++;
+    this.startTimes.push(when);
+  }
+  stop(when?: number): void {
     this.stopped++;
+    this.stopTimes.push(when);
   }
 }
 
@@ -70,10 +84,18 @@ class FakeConvolver extends FakeNode {
   buffer: unknown = null;
 }
 
-class FakeCompressor extends FakeNode {
+export class FakeCompressor extends FakeNode {
   threshold = new FakeParam();
   ratio = new FakeParam();
   knee = new FakeParam();
+}
+
+export class FakeDelay extends FakeNode {
+  delayTime = new FakeParam();
+}
+
+export class FakeStereoPanner extends FakeNode {
+  pan = new FakeParam();
 }
 
 class FakeBuffer {
@@ -99,6 +121,9 @@ export class FakeAudioContext {
   oscillators: FakeOscillator[] = [];
   gains: FakeGain[] = [];
   bufferSources: FakeBufferSource[] = [];
+  delays: FakeDelay[] = [];
+  panners: FakeStereoPanner[] = [];
+  filters: FakeFilter[] = [];
   /** Set to make `resume()` reject, standing in for a browser that blocks it. */
   resumeRejects = false;
 
@@ -122,7 +147,19 @@ export class FakeAudioContext {
     return o;
   }
   createBiquadFilter(): FakeFilter {
-    return new FakeFilter();
+    const f = new FakeFilter();
+    this.filters.push(f);
+    return f;
+  }
+  createDelay(_maxSeconds?: number): FakeDelay {
+    const d = new FakeDelay();
+    this.delays.push(d);
+    return d;
+  }
+  createStereoPanner(): FakeStereoPanner {
+    const p = new FakeStereoPanner();
+    this.panners.push(p);
+    return p;
   }
   createBufferSource(): FakeBufferSource {
     const s = new FakeBufferSource();

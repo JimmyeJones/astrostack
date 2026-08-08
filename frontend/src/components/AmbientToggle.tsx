@@ -80,7 +80,7 @@ export function AmbientToggle() {
       label={
         playing
           ? "Ambient sound is playing — click to silence it"
-          : "Play a quiet space-ambient soundbed while you work (off by default)"
+          : "Play a quiet, slow-pulsing chill soundbed while you work (off by default)"
       }
       withArrow
     >
