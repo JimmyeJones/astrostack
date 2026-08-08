@@ -6351,6 +6351,58 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- ~~**NEW IDEA (Builder 2026-08-08, spotted while closing the Gallery's sharpen gap in v0.250.0) — the Gallery's
+  still card silently drops a finished picture's *warnings*, so the one surface a cleared-NAS user has is the one
+  that doesn't tell them anything went wrong.**~~ — **SHIPPED v0.250.2** (Builder 2026-08-08, same run and branch
+  that filed it — it was XS and the context was already open, so filing it and leaving it would have been the more
+  expensive choice). *(Friendliness / trust — PRIORITY 3.)* `VideoStillItem` gained an additive
+  `warnings: list[str] = []`, filled from `meta.warnings` exactly as `video.py` does, and the Gallery card renders
+  the lines dimmed under the caption the way the Moon & Sun card does — **verbatim**, not re-worded, because they
+  are engine strings and one picture must read the same on both surfaces. With this the three-item parity list is
+  closed: crop (v0.244.0), sharpen (v0.250.0), warnings (v0.250.2). **One premise in the filed spec turned out to
+  be wrong, and is worth knowing:** there is no "older `meta.json`" case for this field the way there is for the
+  framing and sharpening ones — `warnings` is a **required** field on `VideoStackMeta`, written by every version
+  that ever made a still, so a `meta.json` lacking it isn't an old still but a broken one, which `read_meta`
+  already drops (covered by the existing half-written-result test). The test that tried to simulate the old case
+  by deleting the key proved exactly that, and was rewritten to say so. Additive and upgrade-safe: one optional
+  response field with an empty default, no endpoint, schema, config, on-disk or default change. **Tests (+4):**
+  `tests/webapp/test_gallery.py` (+2 — warnings carried verbatim, and an empty list rather than a missing key when
+  there is nothing to say), `Gallery.test.tsx` (+2 — both lines render, and a payload with no `warnings` key at
+  all still renders the card).
+  *(Original spec kept below for provenance.)*
+  *(Friendliness / trust — PRIORITY 3; size XS; the last of the
+  three-item parity list, and the only one left.)* `VideoResultOut` carries `warnings: list[str]`
+  (`webapp/routers/video.py:110`, filled from `meta.warnings`) and the Moon & Sun card renders every line of it —
+  *"12 frames couldn't be aligned"*, *"the last frame was truncated"*, and so on. `VideoStillItem`
+  (`webapp/routers/gallery.py`) has **no such field at all**, so the Gallery shows the picture with no hint that
+  part of the capture was dropped. That is the same shape of gap the crop (v0.244.0) and the sharpen (v0.250.0)
+  had — and the worst of the three to leave open, because the other two withheld an *action* while this withholds
+  the *reason the picture looks how it does*. **Slice:** add `warnings: list[str] = []` to `VideoStillItem`
+  (additive, empty default — an older still and an older frontend both read as "nothing to say"), fill it from
+  `meta.warnings` exactly as `video.py` does, and render the lines dimmed under the caption the way the Moon & Sun
+  card already does. **Care:** don't re-word them — they are engine strings shared by both surfaces, and the whole
+  point of `components/videoFraming.ts` is that one picture is described in one voice. Verify a still with no
+  warnings gains no empty block.
+
+- **ENGINE QA NOTE (Builder 2026-08-08, read adversarially while looking for a stacking-engine bug to fix; nothing
+  found — recorded so the rotation doesn't re-tread it).** Four areas of the Current-focus §1 list traced **clean**
+  on a close read: (1) `seestack/stack/accumulator.py` — the weighted-sum path's `_count` any-channel coverage, the
+  min/max `k`-set insertion (the ±inf identities can never form an `inf − inf` because the `full` band requires
+  `count ≥ 2k+1`, which fills every slot; the `single`/`lt3` degradation bands are disjoint and complete), and both
+  Welford paths (`add_window`'s in-place view writes compute `new_mean` before overwriting `sub_mean`, so the
+  M2 update reads the old mean, which is correct); (2) `seestack/stack/weighting.py` — every factor guards its own
+  divisor, the geometric mean keeps the result inside `[min_weight, 1]`, and the empty-`weighted_list`
+  `WeightingStats` positional construction is right; (3) `seestack/calibrate/apply.py` — the no-data pedestal
+  masks, the wrong-shaped-bias gating (one predicate shared by the scaling path, the advisory warning *and* the
+  provenance stamp) and the "returns a new array" contract on the empty-bundle path all hold; (4) the
+  weight-vs-frame-count question in `seestack/bg/coverage_leveling.py`, which was the one thing that looked like a
+  live bug from the outside — it is **not**: the leveler rounds the Σ-weight map to the nearest integer before
+  `np.unique`, and says so, so quality weighting does not shatter it into a bin per pixel. The only real finding
+  was the sidecar's mislabelled `BUNIT`, shipped this run as v0.250.1. **What is still worth a future adversarial
+  pass:** `stacker.py` (2 400 lines — the κ-σ two-pass gating and the memory-budget drizzle-scale logic in
+  particular) and `drizzle_path.py`, neither of which this run had the budget to read end to end.
+
 - **MEASURED OBSERVATION (Builder 2026-08-06, measured while building the v0.240.1 nudge — file this before anyone
   "improves" the shoulder blind) — "Hold back highlights" rescues an *ordinary* blown core and is essentially
   powerless on an extreme one, because the Reinhard shoulder is asymptotic.** *(Image quality — PRIORITY 4; size M;
@@ -6680,8 +6732,27 @@ to **Shipped**.)_
   `tests/webapp/test_calibration.py` (+1 pinning that the served values *are* the engine's constants, so a future
   sensitivity change can't leave the form behind). **Still open (the smaller half):** the two *sentences* are still
   written independently, so the wording can drift even though the trigger can't. (S, friendliness — PRIORITY 3.)
-- **NEW IDEA (Builder 2026-08-05, spotted while tracing the coverage accumulators) — the coverage map's `BUNIT`
-  claims "frames" when it isn't one.** *(Trust / correctness of a diagnostic — PRIORITY 4; size S.)*
+- ~~**NEW IDEA (Builder 2026-08-05, spotted while tracing the coverage accumulators) — the coverage map's `BUNIT`
+  claims "frames" when it isn't one.**~~ — **SLICE (a) SHIPPED v0.250.1** (Builder 2026-08-08, branch
+  `claude/elegant-bohr-pievix`). *(Trust / correctness of a diagnostic — PRIORITY 4.)* `master_coverage.fits` now
+  carries `BUNIT = "weight"` with the comment *"sum of frame weights (=frames unweighted)"*, so the sidecar states
+  what its numbers are instead of making a claim only an unweighted all-or-nothing stack satisfies — and keeps the
+  equivalence the old label got right. The entry's **"do not just swap the array"** caution was obeyed to the
+  letter: **only the label changed**, the pixels are byte-for-byte what they always were, because
+  `level_by_coverage` bins on them (rounding the Σ-weight map to the nearest integer, which is already correct and
+  documented as such) and the editor loads them as `EditContext.coverage` — swapping the contents would change
+  every existing run's picture. Slice **(b)** (a second HDU carrying the true frame count) was deliberately **not**
+  built: nothing would read it, and the honest count is already reported to the user through the stacker's separate
+  `frame_coverage` behind `coverage_min`/`coverage_max`, so a new HDU would be speculative surface on the hot path.
+  The docstring now spells out the weight-vs-count distinction and *why* the array can't be changed, so the next
+  reader doesn't re-derive it. Upgrade-safe: a header comment on a diagnostic sidecar — no config, DB-schema, API,
+  on-disk-layout or default change, and a run written by an older version still loads unchanged (nothing in the
+  app reads `BUNIT` off this file). **Test (+1, `tests/test_output_header_meta.py`):** a deliberately non-integer
+  coverage map — exactly what a quality-weighted or drizzled stack produces, and what "frames" could never
+  describe — round-trips with the new label, a comment that survives the 80-column card intact rather than being
+  truncated mid-word (the first attempt was), and untouched pixel values.
+  *(Original spec kept below for provenance.)*
+  *(Trust / correctness of a diagnostic — PRIORITY 4; size S.)*
   `output._write_coverage_fits` writes `master_coverage.fits` with `BUNIT = "frames"`, but the array it gets is
   the accumulator's `coverage` — Σ of per-frame *weights*. With quality weighting on that isn't a frame count, and
   on the drizzle path it's Σ of weighted footprint overlap (fractional at any `pixfrac < 1` / `scale ≠ 1`, i.e. the
@@ -11623,8 +11694,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   the two surfaces can't drift. Note `_video_stills` would want the same `ensure_framing_measured` backfill
   `_result_out` got in v0.245.2, or an old still would show no offer there.
 
-- **NEW IDEA (Builder 2026-08-08, filed while shipping the in-place sharpen v0.249.0) — the Gallery's video-still
-  card now lags the Moon & Sun page by *two* in-place edits, not one.** *(Friendliness — PRIORITY 3; size S;
+- ~~**NEW IDEA (Builder 2026-08-08, filed while shipping the in-place sharpen v0.249.0) — the Gallery's video-still
+  card now lags the Moon & Sun page by *two* in-place edits, not one.**~~ — **SHIPPED v0.250.0** (Builder
+  2026-08-08, branch `claude/elegant-bohr-pievix`). *(Friendliness — PRIORITY 3.)* The Gallery's still card now
+  carries **both** in-place edits, so the two surfaces describe and offer exactly the same things about one
+  picture. The crop half had already shipped, so this run closed the remaining gap: `VideoStillItem` gained an
+  additive `sharpen_editable`, filled from the **same** `webapp.video.can_resharpen(meta)` call the Moon & Sun
+  result uses — so neither surface can offer an edit the other knows would fail — and the card grew the
+  `sharpenOffer` alert + `SHARPEN_PRESETS` menu, reusing `components/videoFraming.ts` verbatim rather than
+  re-wording anything. The mutation invalidates `["gallery"]` **and** `["videos"]`, so the Moon & Sun page reflects
+  a change made here and vice versa. **No backfill was needed** (unlike the crop's `ensure_framing_measured`):
+  `can_resharpen` is a pure read of `sharpen_baked`, which every still made before sharpening existed leaves at
+  `0.0` — i.e. an old still reads as *editable*, which is exactly what it is, since the picture on disk is its own
+  unsharpened original. Additive and upgrade-safe: one new optional response field with a `False` default (an older
+  frontend ignores it, an older backend omitting it simply offers no control), no endpoint, schema, config,
+  on-disk or default change — the `POST /api/videos/{id}/sharpen` it calls already existed. **Tests (+6):**
+  `tests/webapp/test_gallery.py` (+3 — an editable still, a stack-baked one whose control is withheld *and* whose
+  endpoint 400s for the same reason, and the pre-sharpening `meta.json` reading as editable),
+  `Gallery.test.tsx` (+3 — the offer fires `sharpenVideoStill("Lunar_video", 1.2)` in one click, an
+  already-sharpened still gets the "try a different amount" wording with the menu on its current strength, and a
+  stack-baked still keeps its provenance line but loses the control). Two of the three frontend tests were
+  confirmed to fail before the change.
+  *(Original spec kept below for provenance.)*
+  *(Friendliness — PRIORITY 3; size S;
   frontend-only.)* The filed "carry the four framing fields onto `VideoStillItem` and put the Crop/Undo pair on the
   Gallery card" entry above has a twin now: `sharpen_editable` + `sharpen_amount` are the same shape of additive
   field, and `sharpenOffer`/`sharpenValueOf` in `components/videoFraming.ts` are already shared, pure and tested —
