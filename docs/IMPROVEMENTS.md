@@ -148,6 +148,43 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+> **SCOUT ADVERSARIAL QA — stacking-engine core re-audit traced CLEAN; no verified bug found (Scout 2026-08-08,
+> branch `claude/focused-keller-g87d0d`).** Baseline before the audit: the stacking + calibrate subset is green
+> (**839 passed / 2 skipped / 1766 deselected** via the `-p no:pytest-qt` fallback, `-k "stack or accumul or align
+> or mosaic or drizzle or calibrat or reject or weight"`, on a fresh `pip install -e ".[dev,web]"`). Read
+> adversarially, end to end, tracing edge cases / NaN-coverage semantics / rejection & weighting math / memory
+> bounds / preview↔export parity:
+> - **`accumulator.py`** — all four accumulators (`WeightedSum`, `MinMaxReject`, `Welford`, and the windowed
+>   variants). Checked: the any-channel `_count` frame-coverage (per-channel κ-σ can't under-count it); the
+>   `±inf` k-set identities so an uncovered slot never wins an extreme, and the `inf−inf`-avoiding per-side sum
+>   in `MinMaxReject.result`; Welford's `n<2 → NaN` variance being the *keep-single-coverage* signal for the
+>   clip; NaN→missing everywhere. Holds.
+> - **`stacker.py` run_stack** — the four dispatch arms (drizzle / min-max / κ-σ two-pass / single-pass mean) and
+>   their shared setup. Verified photometric scaling is applied to the **same** pixels in *both* κ-σ passes (so the
+>   clip reference and the clipped sum agree), the pass-1 vs pass-2 weight split (`weights` for the reference,
+>   `combine_weights` = ×`1/s²` for the combine), the `n_used==0 and not cancel()` guards on every arm (no silent
+>   all-NaN "success"), the `del wel` before pass 2 keeping peak ≤ the OOM guard's `_PEAK_CANVAS_ARRAYS`, and
+>   `_kappa_sigma_keep_mask`'s two "no reference → keep-all" widenings (σ-unknown and mean-unknown) that stop the
+>   clip turning real pass-2 data into a coverage hole.
+> - **`align.py`** — windowed reproject inset/valid math, the `SUBPIXEL_SHIFT_CAP_PX` window-pad coupling, and the
+>   order-1 NaN-mask propagation (`cval=1.0`, `>1e-6`) that marks a darkened boundary ring as uncovered rather than
+>   letting it survive as a dimmed value.
+> - **`drizzle_path.py`** — `_clip_tolerance` (float64 `E[x²]−E[x]²`, Bessel only on the *tol* not the floor test,
+>   the ULP(m²) resolution floor, `neff` = true frame count not pixfrac-deflated weight), the `[-0.5, N-0.5]`
+>   half-open in-bounds test, `intersects` vs used accounting, and `_compute_output_canvas` CRPIX/CD scaling.
+> - **`weighting.py` / `photometric.py`** — geometric-mean factor guards (each factor's own `>0`/measurable gate),
+>   the `1/s²` inverse-variance fold, the `<min_frames` neutral fallback and `[1/max_ratio, max_ratio]` clamp.
+> - **`mosaic.py`** — wrap-safe `_circ_mean_ra_deg` / `unwrap_ra_deg` at both outlier passes, the MAD outlier gate
+>   with its "never drop > half" backstop, and the pixel + megapixel canvas caps that fail fast with an actionable
+>   error.
+> - **`calibrate/apply.py` + `masters.py`** — the dark-vs-bias "never double-subtract" rule, exposure-scaling
+>   `bias + (dark−bias)·ratio` with both no-data masks restored, the flat NaN(not-0) sentinel + `_FLAT_FLOOR`, and
+>   `build_master`'s majority-shape reference + NaN-aware combine + `mad==0 → tol=0` (keep the spike out) clip.
+> - **`bg/coverage_leveling.py` / `output.py`** — per-level detrend-before-threshold, the rescue/interp fill on the
+>   *same fitted curve* clamped to the measured envelope, and the covered-only percentile / NaN-passthrough in the
+>   TIFF/PNG writers. All consistent; this matches the documented ~16 prior clean audits. Rotation continues to the
+>   webapp routers / watcher / ingest next run.
+
 > **SCOUT ADVERSARIAL QA — the two owner-directed areas (AGENTS.md §1, 2026-08-07 self-expiring block) both traced
 > CLEAN; no verified bug found in either (Scout 2026-08-07, branch `claude/focused-keller-r07kle`).** Baseline: the
 > `-k video` suite is green (**118 passed / 2 skipped**) on a fresh `pip install -e ".[dev,web]"` with ffmpeg present.
@@ -6352,6 +6389,30 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Scout 2026-08-08, verified by tracing the auto-stack option build) — the walk-away auto-stack turns
+  on `auto_reject` for the user but never turns on `quality_weighted`, so an unattended stack across variable nights
+  still trusts a soft/cloudy sub as much as a sharp one.** *(Pillar: autonomy + image quality, PRIORITY 2/4; size S
+  — webapp `_stack_target` only, no engine change; mirror the existing `auto_reject` auto-enable.)* In
+  `webapp/pipeline.py::_stack_target`, the `auto=True` chain (watcher auto-stack + Process target — where the user
+  made *no* stacking choices) already does: *"if no explicit rejection choice, set `auto_reject=True`"* — a clean,
+  proven pattern. But `quality_weighted` is left at its default (**False**), so the walk-away stack combines every
+  frame at equal weight. For the target user — *thousands of subs across many nights of different seeing, haze and
+  moon* — that's exactly where per-frame quality weighting earns its keep: `compute_frame_weights` down-weights the
+  soft / cloud-thinned / bright-sky subs from the QC metrics that QC already measured (fwhm, star count, sky ADU,
+  transparency, eccentricity), with a **neutral 1.0 fallback for any missing metric** and a 0.1 floor, so it can
+  only help and never zeroes a frame. **Proposed change:** in the same `auto` block, when the merged options carry
+  no explicit `quality_weighted` key, set `quality_weighted=True` — applied **only** on the walk-away path and
+  **only** when the user expressed no choice, so a saved per-target default and the manual Stack form are honoured
+  verbatim, and reprocess-all (which reuses the prior run's options) is untouched. **Why it's safe / upgrade-safe:**
+  it does *not* flip the engine `StackOptions` default (§9) — that stays False, so a manual stack, a stored config
+  and every existing run are byte-for-byte unchanged; it only chooses a better default *for a user who clicked
+  "just do it"*, exactly as `auto_reject` already does. The combine already folds photometric variance correctly
+  when both are on (`combine_weights_with_photometric`), so this composes cleanly with the photometric path.
+  **Tests:** extend the auto-stack pipeline test that pins `auto_reject` auto-enable — assert `quality_weighted` is
+  set on the walk-away path with no user choice, and is *not* added when the user (saved default or form) set it
+  either way. **Grep first:** I confirmed no `quality_weighted` is set anywhere on the auto path today and no idea
+  for this is filed — but re-check `_stack_target` hasn't gained it before building.
+
 - ~~**NEW IDEA (Builder 2026-08-08, spotted while closing the Gallery's sharpen gap in v0.250.0) — the Gallery's
   still card silently drops a finished picture's *warnings*, so the one surface a cleared-NAS user has is the one
   that doesn't tell them anything went wrong.**~~ — **SHIPPED v0.250.2** (Builder 2026-08-08, same run and branch
@@ -11378,6 +11439,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-08) — "How many more clear nights?": a plain-language ETA to a target's
+  integration goal, from the owner's own recent pace.** *(Pillar: autonomy + friendliness, PRIORITY 2–3; size M —
+  one new pure helper + one Target-page line, no engine/schema change.)* The app already lets a beginner set a
+  per-target integration goal and gives an "Is it enough yet?" readiness verdict (shipped), but when the answer is
+  "not yet" it stops there — it never answers the question the beginner actually has next: *"so how much longer will
+  this take me?"* This closes that loop. From the target's own history — kept integration accrued per night
+  (`Project.frame_night_counts()` / the night-by-night breakdown already exist) — compute the owner's **recent
+  productive pace on this target** (median kept-integration per clear night over, say, the last few nights that
+  actually added subs), then divide the remaining gap to goal by it: *"You're 3.2 h into your 5 h goal on M31. At
+  your recent pace (~48 min of kept subs per clear night), that's about **2 more clear nights**."*
+  **Why it clears the beginner bar:** it's a single sentence, needs no new input, no knobs, and turns an abstract
+  goal into a concrete plan for the next clear night — exactly the "help me plan / know where I stand" pillar. It is
+  honest by construction: the estimate is explicitly *"clear nights"* (the app can't promise weather), and it is
+  built from what the owner has really been getting, not a theoretical rate.
+  **Shape (sane defaults, all self-hiding):** show it only when (a) a goal is set, (b) the goal isn't already met
+  (when met, the readiness verdict already celebrates), and (c) there are ≥2 nights of real accrual to derive a pace
+  — otherwise say nothing rather than guess from one night. Round to whole clear nights (≥1); if the pace rounds to
+  ~0 (a night of all-rejected soft subs), say *"recent nights added almost nothing that was kept — check focus"*
+  instead of dividing by zero. Round-trips through no persisted state: it's a pure function of rows the DB already
+  has, so nothing to migrate and nothing to flip. Build the arithmetic as a pure, unit-tested helper (mirror
+  `describeSession` / the readiness-verdict helpers) so the wording and the edge cases (goal met, no goal, one
+  night, zero-pace, goal just reached this night) are all pinned; the Target-page line is the thin render layer.
+  **Distinct from what's filed:** the "N new subs since your last stack — restack?" nudge (v0.90.0) is about
+  *re-processing what you already shot*; the readiness verdict is a *yes/no* on now. Neither projects *forward* from
+  the owner's cadence — this is the only one that says "and here's how many more nights."
 
 - ~~**⭐ OWNER-REQUESTED (2026-08-07, follow-on to v0.239.0) — restyle the ambient bed toward *psychill / psybient*
   (the owner named **A.e.r.o.** and **AstroPilot** as the reference feel). The current bed is "decent but not
