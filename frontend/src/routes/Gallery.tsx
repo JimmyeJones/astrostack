@@ -244,6 +244,13 @@ function VideoStillCard({ still, onView }: {
 
       {sharpened ? <Text size="xs" c="dimmed" mt={4}>{sharpened}</Text> : null}
 
+      {/* Verbatim engine strings, as the Moon & Sun card renders them — this is
+          the only surface a user whose clip is gone still has, so it must not be
+          the one that stays quiet about frames the stack had to drop. */}
+      {(still.warnings ?? []).map((w) => (
+        <Text key={w} size="xs" c="dimmed" mt={4}>{w}</Text>
+      ))}
+
       {suggestCrop ? (
         <Alert color="violet" variant="light" icon={<IconCrop size={16} />} p="xs" mt="xs">
           <Text size="xs">{suggestCrop}</Text>

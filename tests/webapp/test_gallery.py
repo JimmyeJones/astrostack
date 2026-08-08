@@ -296,6 +296,32 @@ def test_a_still_made_before_sharpening_existed_reads_as_unsharpened(client, dat
     assert still["sharpen_editable"] is True
 
 
+def test_gallery_carries_a_stills_warnings(client, data_root):
+    """The Gallery is the only surface left for a user who has cleared the clip
+    off their NAS, so it must not be the one that stays quiet about frames the
+    stack had to drop. Same engine strings, verbatim — not re-worded."""
+    _drop_video_still(data_root, warnings=["12 frames couldn't be aligned."])
+
+    (still,) = client.get("/api/gallery").json()["videos"]
+    assert still["warnings"] == ["12 frames couldn't be aligned."]
+
+
+def test_a_still_with_nothing_to_report_carries_no_warnings(client, data_root):
+    """An empty list, not a missing key, so the card has nothing to render rather
+    than something to guard against.
+
+    (``warnings`` is a *required* field on ``VideoStackMeta`` — it has been
+    written by every version that ever made a still — so there is no "older
+    ``meta.json``" case to cover here, unlike the framing and sharpening fields.
+    A meta.json missing it isn't an old still, it's a broken one, and
+    ``read_meta`` already drops those: see the half-written-result test above.)
+    """
+    _drop_video_still(data_root)
+
+    (still,) = client.get("/api/gallery").json()["videos"]
+    assert still["warnings"] == []
+
+
 def test_gallery_offers_the_in_place_sharpen_on_a_still(client, data_root):
     """Someone who has cleared the clip off their NAS finds the picture only
     here, and is exactly the person who can't re-stack to change how sharp it
