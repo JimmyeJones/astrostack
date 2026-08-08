@@ -11623,8 +11623,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   the two surfaces can't drift. Note `_video_stills` would want the same `ensure_framing_measured` backfill
   `_result_out` got in v0.245.2, or an old still would show no offer there.
 
-- **NEW IDEA (Builder 2026-08-08, filed while shipping the in-place sharpen v0.249.0) — the Gallery's video-still
-  card now lags the Moon & Sun page by *two* in-place edits, not one.** *(Friendliness — PRIORITY 3; size S;
+- ~~**NEW IDEA (Builder 2026-08-08, filed while shipping the in-place sharpen v0.249.0) — the Gallery's video-still
+  card now lags the Moon & Sun page by *two* in-place edits, not one.**~~ — **SHIPPED v0.250.0** (Builder
+  2026-08-08, branch `claude/elegant-bohr-pievix`). *(Friendliness — PRIORITY 3.)* The Gallery's still card now
+  carries **both** in-place edits, so the two surfaces describe and offer exactly the same things about one
+  picture. The crop half had already shipped, so this run closed the remaining gap: `VideoStillItem` gained an
+  additive `sharpen_editable`, filled from the **same** `webapp.video.can_resharpen(meta)` call the Moon & Sun
+  result uses — so neither surface can offer an edit the other knows would fail — and the card grew the
+  `sharpenOffer` alert + `SHARPEN_PRESETS` menu, reusing `components/videoFraming.ts` verbatim rather than
+  re-wording anything. The mutation invalidates `["gallery"]` **and** `["videos"]`, so the Moon & Sun page reflects
+  a change made here and vice versa. **No backfill was needed** (unlike the crop's `ensure_framing_measured`):
+  `can_resharpen` is a pure read of `sharpen_baked`, which every still made before sharpening existed leaves at
+  `0.0` — i.e. an old still reads as *editable*, which is exactly what it is, since the picture on disk is its own
+  unsharpened original. Additive and upgrade-safe: one new optional response field with a `False` default (an older
+  frontend ignores it, an older backend omitting it simply offers no control), no endpoint, schema, config,
+  on-disk or default change — the `POST /api/videos/{id}/sharpen` it calls already existed. **Tests (+6):**
+  `tests/webapp/test_gallery.py` (+3 — an editable still, a stack-baked one whose control is withheld *and* whose
+  endpoint 400s for the same reason, and the pre-sharpening `meta.json` reading as editable),
+  `Gallery.test.tsx` (+3 — the offer fires `sharpenVideoStill("Lunar_video", 1.2)` in one click, an
+  already-sharpened still gets the "try a different amount" wording with the menu on its current strength, and a
+  stack-baked still keeps its provenance line but loses the control). Two of the three frontend tests were
+  confirmed to fail before the change.
+  *(Original spec kept below for provenance.)*
+  *(Friendliness — PRIORITY 3; size S;
   frontend-only.)* The filed "carry the four framing fields onto `VideoStillItem` and put the Crop/Undo pair on the
   Gallery card" entry above has a twin now: `sharpen_editable` + `sharpen_amount` are the same shape of additive
   field, and `sharpenOffer`/`sharpenValueOf` in `components/videoFraming.ts` are already shared, pure and tested —

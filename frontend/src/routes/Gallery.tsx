@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import {
   Alert, Badge, Button, Card, Center, Checkbox, Group, Image, Loader, Menu, Paper,
-  SegmentedControl, SimpleGrid, Spoiler, Stack, Text, TextInput, Title, Tooltip,
+  SegmentedControl, Select, SimpleGrid, Spoiler, Stack, Text, TextInput, Title,
+  Tooltip,
 } from "@mantine/core";
 import {
   IconArrowBackUp, IconCopy, IconCrop, IconGitCompare, IconPhoto, IconSearch,
-  IconVideo, IconWand,
+  IconSparkles, IconVideo, IconWand,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,7 +28,10 @@ import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
-import { cropNote, cropSuggestion, sharpenNote } from "../components/videoFraming";
+import {
+  DEFAULT_SHARPEN, SHARPEN_PRESETS, cropNote, cropSuggestion, sharpenNote,
+  sharpenOffer, sharpenValueOf,
+} from "../components/videoFraming";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 
 export type GallerySort = "newest" | "cleanest";
@@ -174,11 +178,30 @@ function VideoStillCard({ still, onView }: {
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
+  // …and the other in-place edit, for the same reason and on the same terms:
+  // every strength is rendered from the copy kept beside the picture, so trying
+  // them costs nothing and "Off" gets the user back exactly where they started.
+  const sharpenStill = useMutation({
+    mutationFn: (amount: number) => api.sharpenVideoStill(still.capture_id, amount),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["gallery"] });
+      qc.invalidateQueries({ queryKey: ["videos"] });
+      notifications.show({
+        message: (r.sharpen_amount ?? 0) > 0
+          ? `Sharpened your ${still.label} picture — change it again any time.`
+          : `Put the unsharpened ${still.label} picture back.`,
+        color: "teal",
+      });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
   // Reused from Moon & Sun rather than re-worded, so the two surfaces can never
   // drift into telling the user two different things about one picture.
   const suggestCrop = cropSuggestion(still, still.kind);
   const cropped = cropNote(still, still.kind);
   const sharpened = sharpenNote(still.sharpen_amount);
+  const offerSharpen = sharpenOffer(still, still.kind);
 
   return (
     <Card withBorder padding="md" radius="md">
@@ -232,6 +255,26 @@ function VideoStillCard({ still, onView }: {
           >
             Crop it
           </Button>
+        </Alert>
+      ) : null}
+
+      {/* The person whose clip is long gone off the NAS is precisely the person
+          who can't re-stack to change how sharp their picture is — so this is
+          the surface where the in-place sharpen matters most. */}
+      {offerSharpen ? (
+        <Alert color="violet" variant="light" icon={<IconSparkles size={16} />} p="xs" mt="xs">
+          <Text size="xs">{offerSharpen}</Text>
+          <Select
+            mt={6}
+            size="xs"
+            label="Bring out surface detail"
+            description="Applied to the saved picture — no re-stack."
+            data={SHARPEN_PRESETS}
+            value={sharpenValueOf(still)}
+            onChange={(v) => sharpenStill.mutate(Number(v ?? DEFAULT_SHARPEN))}
+            disabled={sharpenStill.isPending}
+            allowDeselect={false}
+          />
         </Alert>
       ) : null}
 
