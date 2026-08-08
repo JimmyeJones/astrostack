@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from seestack.io.library import Library
 from seestack.io.project import StackRunRow
 from webapp import pipeline
@@ -216,6 +218,131 @@ def test_walk_away_stack_turns_on_auto_reject(solved_library, monkeypatch):
     finally:
         lib.close()
     assert captured["opts"].auto_reject is True
+
+
+def test_walk_away_stack_turns_on_quality_weighting(solved_library, monkeypatch):
+    # Same walk-away path, same "user made no choice" guard: weight each sub by the
+    # QC metrics already measured, so an unattended stack across variable nights
+    # doesn't trust a soft / cloud-thinned sub as much as a sharp one.
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            auto=True)
+    finally:
+        lib.close()
+    assert captured["opts"].quality_weighted is True
+
+
+def test_manual_stack_leaves_quality_weighting_off(solved_library, monkeypatch):
+    # The manual Stack form is honoured verbatim — the engine default (off) stands,
+    # so an existing manual stack is byte-for-byte unchanged.
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            options={})
+    finally:
+        lib.close()
+    assert captured["opts"].quality_weighted is False
+
+
+@pytest.mark.parametrize("saved", [True, False])
+def test_walk_away_respects_an_explicit_saved_quality_weighting_choice(
+    solved_library, monkeypatch, saved,
+):
+    # A per-target "Save as defaults" that names quality weighting either way wins:
+    # the walk-away path must not override an explicit choice — including an
+    # explicit *off*, which is the one a blind ``= True`` would trample.
+    import json
+
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(
+                pipeline.STACK_DEFAULTS_META_KEY,
+                json.dumps({"quality_weighted": saved}),
+            )
+        finally:
+            proj.close()
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            auto=True)
+    finally:
+        lib.close()
+    assert captured["opts"].quality_weighted is saved
+
+
+def test_walk_away_skips_quality_weighting_when_saved_defaults_pick_min_max(
+    solved_library, monkeypatch,
+):
+    # A saved default of explicit min/max rejection combines by *rank* and ignores
+    # per-frame weights, so injecting quality weighting there would change nothing
+    # in the picture while making the run stamp WGTSKIP with auto=False — which
+    # History renders as "use sigma clipping instead", advice to undo a setting the
+    # user never chose. Leave it off and say nothing.
+    import json
+
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(
+                pipeline.STACK_DEFAULTS_META_KEY,
+                json.dumps({"min_max_reject": True, "sigma_clip": False}),
+            )
+        finally:
+            proj.close()
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            auto=True)
+    finally:
+        lib.close()
+    assert captured["opts"].min_max_reject is True
+    assert captured["opts"].quality_weighted is False
+
+
+def test_walk_away_still_weights_a_drizzle_stack_that_names_min_max(
+    solved_library, monkeypatch,
+):
+    # Drizzle is the exemption: it honours per-frame weights and runs its own
+    # two-pass rejection, so a stray min_max_reject in the saved defaults is inert
+    # there and must not suppress the weighting.
+    import json
+
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(
+                pipeline.STACK_DEFAULTS_META_KEY,
+                json.dumps({"min_max_reject": True, "drizzle": True}),
+            )
+        finally:
+            proj.close()
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            auto=True)
+    finally:
+        lib.close()
+    assert captured["opts"].drizzle is True
+    assert captured["opts"].quality_weighted is True
 
 
 def test_manual_stack_leaves_auto_reject_off(solved_library, monkeypatch):

@@ -18,6 +18,7 @@ import { integrationReadiness, readinessColor, noiseReductionHint } from "../rea
 import { QueryError } from "../components/QueryError";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { NightsCard } from "../components/NightsCard";
+import { estimateClearNights } from "../components/clearNights";
 import { FocusTrendCard } from "../components/FocusTrendCard";
 import { TransparencyTrendCard } from "../components/TransparencyTrendCard";
 import { NextSessionCard } from "../components/NextSessionCard";
@@ -344,6 +345,13 @@ export function TargetView() {
     queryKey: ["integration-goal", safe],
     queryFn: () => api.getIntegrationGoal(safe),
   });
+  // Night-by-night accrual, newest first — the same query the Nights card runs
+  // (identical key, so TanStack serves one request to both). Feeds the "how many
+  // more clear nights?" estimate under the readiness verdict.
+  const nights = useQuery({
+    queryKey: ["nights", safe],
+    queryFn: () => api.targetNights(safe),
+  });
   const setGoal = useMutation({
     mutationFn: (goalS: number | null) => api.setIntegrationGoal(safe, goalS),
     onSuccess: (r) => {
@@ -628,6 +636,22 @@ export function TargetView() {
           )
         : null,
     [target.data, identity.data, goal.data],
+  );
+
+  // "…and how much longer will that take me?" — the question the readiness
+  // verdict leaves hanging whenever the answer is "not yet". Projects the
+  // remaining gap forward at the owner's *own* recent pace on this target, in
+  // clear nights (the app can't promise weather). Self-hides once the goal is
+  // met or when there's too little history to derive an honest pace.
+  const clearNights = useMemo(
+    () =>
+      readiness
+        ? estimateClearNights(
+            (readiness.goalHours - readiness.hours) * 3600,
+            nights.data,
+          )
+        : null,
+    [readiness, nights.data],
   );
 
   // Frames QC couldn't read at all (corrupt/truncated FITS): make them visible —
@@ -1256,6 +1280,13 @@ export function TargetView() {
               <Progress value={readiness.fraction * 100}
                 color={readinessColor(readiness.level)} size="sm" radius="xl" />
               <Text size="sm" c="dimmed">{readiness.verdict}</Text>
+              {/* "How many more clear nights?" — the goal gap projected forward at
+                  this target's own recent pace, so "not yet" comes with a plan
+                  rather than an open question. Self-hides when the goal is met or
+                  there's too little history to judge a pace. */}
+              {clearNights ? (
+                <Text size="xs" c="dimmed">{clearNights.text}</Text>
+              ) : null}
               {/* The honest √N diminishing-returns figure: how much more a single
                   extra hour would cut background noise, so "keep shooting?" gets a
                   physics-based answer, not just a goal-fraction. */}

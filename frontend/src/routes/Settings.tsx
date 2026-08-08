@@ -19,7 +19,10 @@ import { AmbientSettings } from "../components/AmbientSettings";
 import { minMaxIgnoresWeightingHint } from "../weightingHint";
 
 // Hover hints for every setting (shown via an info icon next to the label).
-const HINTS: Record<string, string> = {
+// Exported so the copy that explains a *silent* decision — one the app makes on
+// the user's behalf when they aren't there to make it — can be pinned by a test
+// rather than quietly drifting away from what the pipeline actually does.
+export const HINTS: Record<string, string> = {
   data_root: "Root folder on the mounted dataset. Holds incoming/, library/ and state/.",
   incoming_dir: "Folder watched for new Seestar data. Blank = <data root>/incoming.",
   library_root: "Where organised per-target projects and stacks are stored. Blank = <data root>/library.",
@@ -31,7 +34,7 @@ const HINTS: Record<string, string> = {
   auto_ingest: "On new files: register them into the library, grouped per target.",
   auto_qc: "On new files: compute quality metrics (FWHM, star count, eccentricity, sky level).",
   auto_solve: "On new files: plate-solve with ASTAP so frames can be aligned and placed on the sky.",
-  auto_stack: "On new files: also stack each touched target automatically (uses the defaults below, or a target's saved defaults).",
+  auto_stack: "On new files: also stack each touched target automatically (uses the defaults below, or a target's saved defaults). Because you're not there to choose, a hands-off stack makes two decisions for you: it removes outliers (satellite and plane trails) automatically, and it leans on your sharper, clearer subs rather than treating a soft or hazy one as equal. Both only apply when you haven't picked for yourself — anything you set below, or saved as a target's defaults, is used exactly as you left it, and the Stack form is never touched.",
   auto_edit_on_autostack: "After an automatic stack, also auto-edit the master into a finished picture (the same one-click Auto processing), so an unattended run comes back to a great image, not a flat linear master. Reversible in the editor (Reset). Needs Auto-stack on.",
   auto_stack_min_frames: "How many of a target's subs must be located (plate-solved) before a hands-off auto-stack will make a picture. A faint field where ASTAP can only locate one or two subs would otherwise auto-stack a single frame — pure colour noise. Below this floor the target waits (\"held for more located subs\") and stacks itself the moment enough subs solve. 3 is a good default; set to 1 to stack from the very first located sub. The Stack form and Process-target button are unaffected.",
   auto_crop_border: "When the one-click Auto edit finishes a mosaic or dithered stack, trim the ragged, uneven edge away so the picture is cleanly framed. Turn this off to keep the whole frame exactly as it was stacked — nothing else about Auto changes, and the editor's \"Trim border\" button still crops by hand whenever you want it. Applies to Auto-process in the editor and to the hands-off chains (Process target, auto-edit, Reprocess everything).",

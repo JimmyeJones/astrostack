@@ -38,6 +38,15 @@ function mkTarget(overrides: Partial<Target> = {}): Target {
   };
 }
 
+function mkNight(keptExposureS: number): client.NightSummary {
+  return {
+    start_utc: "2026-01-01T21:00:00Z", end_utc: "2026-01-02T02:00:00Z",
+    n_frames: 60, n_kept: 60, n_set_aside: 0,
+    exposure_s: keptExposureS, kept_exposure_s: keptExposureS,
+    median_fwhm_px: 3.2, verdict: "sharp", is_best: false, reject_buckets: {},
+  };
+}
+
 function renderTarget(qc = new QueryClient()) {
   return render(
     <MantineProvider>
@@ -387,6 +396,76 @@ describe("TargetView readiness card", () => {
     await waitFor(() =>
       expect(screen.getByText(/your goal ~10 h/)).toBeInTheDocument());
     expect(screen.getByText(/5\.0 h of ~10 h/)).toBeInTheDocument();
+  });
+
+  it("projects the remaining gap forward in clear nights at the target's own pace", async () => {
+    // 3 h of a 6 h galaxy goal, and the last two nights each kept 1 h → 3 more
+    // clear nights. The answer a beginner actually wants after "not yet".
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 3 * 3600 }),
+    );
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+    });
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([
+      mkNight(3600), mkNight(3600),
+    ]);
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          /At your recent pace \(~1\.0 h of kept subs per clear night\), that's about 3 more clear nights\./,
+        ),
+      ).toBeInTheDocument());
+  });
+
+  it("says nothing about clear nights once the goal is met", async () => {
+    // 8 h on a 6 h galaxy goal — the verdict celebrates; there's no gap to project.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 8 * 3600 }),
+    );
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+    });
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([
+      mkNight(3600), mkNight(3600),
+    ]);
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("Is it enough yet?")).toBeInTheDocument());
+    expect(screen.queryByText(/more clear night/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing about clear nights from a single night of history", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 3 * 3600 }),
+    );
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+    });
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([mkNight(3600)]);
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("Is it enough yet?")).toBeInTheDocument());
+    expect(screen.queryByText(/recent pace/)).not.toBeInTheDocument();
   });
 
   it("stays hidden until any light has been collected", async () => {
