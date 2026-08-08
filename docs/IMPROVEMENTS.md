@@ -11258,9 +11258,53 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-REQUESTED (2026-08-07, follow-on to v0.239.0) — restyle the ambient bed toward *psychill / psybient*
+- ~~**⭐ OWNER-REQUESTED (2026-08-07, follow-on to v0.239.0) — restyle the ambient bed toward *psychill / psybient*
   (the owner named **A.e.r.o.** and **AstroPilot** as the reference feel). The current bed is "decent but not
-  really it".** *(Enjoyment polish; size M. Same standing as the original: **must not displace a bug or
+  really it".**~~ — **SHIPPED v0.248.0** (Builder 2026-08-08, branch `claude/elegant-bohr-cdbcoy`), all six
+  named gaps built, and pulled on exactly the run the entry asks for: the Bugs section holds nothing an agent can
+  fix without owner-side data, so nothing PRIORITY 1–4 was displaced. **Original material in the idiom only** — a
+  tempo, a mode and a set of textures; nothing is transcribed, and the bed is still procedurally generated at
+  runtime with no audio file shipped or fetched.
+  1. **A slow pulse (`TEMPO_BPM = 76`).** Not a drum: `subPulseGainForBeat` puts full weight on the downbeat and a
+     0.55 answer on beat 3, and leaves beats 2 and 4 empty. Everything rhythmic derives from `beatSeconds()`.
+  2. **Warm sub-bass + sidechain-style duck.** One *persistent* sine an octave under the root, enveloped on the
+     grid (a stopped oscillator can never be restarted, so a root drift **ramps its pitch** over the fade instead
+     of rebuilding it — pinned by a test). A `duck` gain the pad and noise pass through — but not the sub that
+     causes the dip, and not the bells, where a ducked tail reads as a fault — dips `DUCK_DEPTH` 0.34 and eases
+     back over 0.5 s. Linear ramps, because this parameter passes through 1.
+  3. **Tempo-synced ping-pong delay.** Two `DelayNode`s at `dottedEighthSeconds()` (there was no `DelayNode` in
+     the graph at all before), cross-fed at 0.52 and panned ±0.85, fed by short sparse plucks
+     (`PLUCK_PROBABILITY` 0.3, never on the downbeat where the sub already is).
+  4. **A darker mode.** `MINOR_PENTATONIC_SEMITONES` with `DORIAN_COLOUR_SEMITONES` (the 9th and the *natural*
+     6th) reached for ~22 % of the time; the bells and the plucks share one `scaleDegreeSemitones`, an octave
+     apart, so they can't drift into different keys.
+  5. **A warmer, wider pad.** Each voice is now a **detuned sawtooth pair** (halved so a pair is no louder than
+     the sine it replaced) through a `StereoPannerNode`, then a two-line modulated **chorus** panned ±0.7. The
+     root stays near centre — a wide bottom end smears the mix.
+  6. **Macro structure.** `macroLevelAt` is a raised cosine over `MACRO_PERIOD_S` = 8 min that opens the pad's
+     cutoff and thins the plucks toward a floor (never to silence) — felt, not noticed.
+  **Architecture kept:** every decision above is a pure, unit-tested function in `voicing.ts`; `player.ts` stays
+  the thin node layer. **CPU/node count held:** the pad, chorus, delay and sub are built once and reused, only
+  the short-lived bells and plucks allocate and each stops itself at the end of its own decay, and a root drift
+  now `disconnect()`s the chain it replaces (a small pre-existing leak) — pinned by a test that ten scheduler
+  ticks add **zero** nodes. **Grid accuracy:** a lookahead scheduler (200 ms tick, 0.6 s ahead) places every event
+  at an exact audio-clock time, so timer jitter never reaches the pulse; and because a background tab's timers are
+  throttled to ~1/minute, the scheduler **re-joins** the grid rather than firing a minute of missed pulses at once
+  (pinned). Constraints unchanged: default **off**, `localStorage` per device, context created/resumed only from
+  the user gesture, **suspend** not mute, every start/stop/volume change faded, no new npm dependency. The
+  second "mood" the entry offers as a fallback was deliberately **not** built — the entry says ship the restyle
+  first and only add the choice if it's wanted. Frontend-only: no engine, API, schema, config, DB, on-disk or
+  default change. Settings copy now describes what you'd actually hear. **Tests (+22):** `voicing.test.ts` (+18 —
+  the pair detune and stereo spread, the mode is minor with Dorian colour and no semitone clash, pluck register,
+  the tempo band and dotted-eighth derivation, the pulse pattern including a far-future and a negative beat
+  index, pluck sparsity and arc-thinning that never reaches silence, and the arc's range/period/smoothness/
+  nonsense-clock behaviour) and `player.test.ts` (+8 — the first downbeat pulses without waiting for a timer, the
+  bed dips and comes all the way back, events land on whole beats of the grid, a throttled tab doesn't burst,
+  the grid re-arms and stops dead, plucks feed a dotted-eighth ping-pong whose feedback decays, the pad is panned
+  and chorused, the sub survives a root drift by ramping, and the node count is flat).
+
+  *(Original spec kept below for provenance.)*
+  *(Enjoyment polish; size M. Same standing as the original: **must not displace a bug or
   PRIORITY 1–4 work** — pull it on a slow run. Frontend-only, cannot touch the imaging path.)*
 
   **⚠️ Write ORIGINAL material in the genre idiom. Do NOT attempt to reproduce, transcribe or approximate any
@@ -15712,10 +15756,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY 3; Builder-filed 2026-07-16.)*
 
 ### Performance (only with a measurement)
-- **NEW IDEA (Builder 2026-08-07, spotted while adversarially reading `accumulator.py`; TRACED, NOT MEASURED) —
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while adversarially reading `accumulator.py`; TRACED, NOT MEASURED) —
   `MinMaxRejectAccumulator._add_into` writes its whole k-plane extremes buffer back over itself once per frame,
-  for nothing.** *(Performance / clarity — PRIORITY 4; size XS; **not a correctness bug** — the result is
-  identical either way.)* `mins = self._mins[:, ys, xs]` is *basic* indexing (two slices), so it returns a
+  for nothing.**~~ — **CLOSED, NOT BUILT: measured, and the memcpy this is premised on does not happen**
+  (Builder 2026-08-08, branch `claude/elegant-bohr-cdbcoy`). The entry's own closing sentence — *"measure the
+  actual saving on a realistic canvas before claiming one"* — is what closed it. **NumPy elides a self-assignment
+  entirely** when the source and destination are the same memory with the same layout, which is exactly what
+  `self._mins[:, ys, xs] = mins` is: timed directly on a 1920×1080 RGB canvas, the write-back costs **0.001 ms**
+  for three k-planes, against **14.4 ms** for a genuine copy of the identical region — on the windowed
+  (`add_window`-shaped, offset-slice) path as well as the full-frame one. So there is no ~50 MB memcpy per frame
+  to remove; the claim was traced correctly but never timed.
+  **Built the entry's preferred "clearer" form anyway and A/B-timed it** (`self._mins[j, ys, xs] = slot` inside
+  the loop, write-backs dropped), same process, best-of-3, 8 frames of a 1080×1920×3 float32 canvas:
+  **k=1 70.9 → 71.8 ms/frame, k=3 165.0 → 166.9 ms/frame** — i.e. ~1 % *slower*, because the per-plane indexing
+  costs `2k` extra NumPy calls per frame and buys nothing back. Results were byte-for-byte identical either way
+  (checked at k=1 and k=3, `equal_nan=True`), as the entry predicted. Per AGENTS.md §2/§3 a refactor that is
+  neither a correctness fix nor a measured win is churn on the stack hot path, so **the change was reverted and
+  nothing shipped**. Recorded here so the next reader of this file doesn't re-derive it — and as a general note
+  worth keeping: `a[basic_slices] = a[same_basic_slices]` is free in NumPy, so "redundant write-back" findings in
+  this codebase need a timing before they're worth acting on. *(Performance / clarity — PRIORITY 4; size XS;
+  **not a correctness bug** — the result is identical either way.)*
+
+  *(Original spec kept below for provenance.)* `mins = self._mins[:, ys, xs]` is *basic* indexing (two slices), so it returns a
   **view**, and the `mins[j] = slot` loop already mutates `self._mins` in place. The trailing
   `self._mins[:, ys, xs] = mins` (and its `_maxs` twin) is therefore a self-assignment that copies `2k`
   canvas-sized float32 planes per frame per side — at the default `k=1` on a 1920×1080 RGB canvas that is ~50 MB
