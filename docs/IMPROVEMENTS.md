@@ -6409,6 +6409,21 @@ to **Shipped**.)_
   engine default off; and a per-target "Save as defaults" naming it wins — parametrised over **both** `True` and
   `False`, since an explicit *off* is the one a blind `= True` would trample. Additive: no engine, schema, API,
   config, DB, on-disk or default change.
+  **One guard the spec didn't anticipate, added in v0.252.1 before merge (caught by tracing the injection through
+  the History surface rather than only through the stacker).** If the user's *saved* defaults already name
+  `min_max_reject` on the standard path, injecting weighting would change nothing in the picture — that combine
+  works by rank — but would make the run stamp `WGTSKIP` with `auto=False`, which `weightingSkippedText`
+  (`History.tsx:263`) renders as *"Quality weighting was on, but … use sigma clipping instead if you want your
+  best subs to count for more."* — i.e. advice to undo a setting the user never chose, on a picture that is
+  byte-for-byte what it would have been anyway. So the injection now skips that case. The `auto_reject` branch
+  resolving *itself* to min/max on a small stack is deliberately **not** skipped: it stamps `auto=True`, whose
+  wording ("from N subs it switches to sigma clipping and your weighting counts again") is exactly right.
+  Drizzle is exempt from the guard — it honours per-frame weights and runs its own rejection, so a stray
+  `min_max_reject` alongside it is inert. Both branches are pinned by tests.
+  **Also shipped in v0.252.1 (friendliness, PRIORITY 3):** the Settings → Auto-stack hint now *says* what a
+  hands-off stack decides for you. Both `auto_reject` (shipped long ago) and now `quality_weighted` were silent
+  choices the app made on the user's behalf with nothing on the settings screen mentioning either. `HINTS` is
+  exported so the copy is pinned by tests rather than left to drift from what `_stack_target` actually does.
   *(Original spec kept below for provenance.)*
   *(Pillar: autonomy + image quality, PRIORITY 2/4; size S
   — webapp `_stack_target` only, no engine change; mirror the existing `auto_reject` auto-enable.)* In
