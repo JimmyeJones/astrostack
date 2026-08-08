@@ -6680,8 +6680,27 @@ to **Shipped**.)_
   `tests/webapp/test_calibration.py` (+1 pinning that the served values *are* the engine's constants, so a future
   sensitivity change can't leave the form behind). **Still open (the smaller half):** the two *sentences* are still
   written independently, so the wording can drift even though the trigger can't. (S, friendliness — PRIORITY 3.)
-- **NEW IDEA (Builder 2026-08-05, spotted while tracing the coverage accumulators) — the coverage map's `BUNIT`
-  claims "frames" when it isn't one.** *(Trust / correctness of a diagnostic — PRIORITY 4; size S.)*
+- ~~**NEW IDEA (Builder 2026-08-05, spotted while tracing the coverage accumulators) — the coverage map's `BUNIT`
+  claims "frames" when it isn't one.**~~ — **SLICE (a) SHIPPED v0.250.1** (Builder 2026-08-08, branch
+  `claude/elegant-bohr-pievix`). *(Trust / correctness of a diagnostic — PRIORITY 4.)* `master_coverage.fits` now
+  carries `BUNIT = "weight"` with the comment *"sum of frame weights (=frames unweighted)"*, so the sidecar states
+  what its numbers are instead of making a claim only an unweighted all-or-nothing stack satisfies — and keeps the
+  equivalence the old label got right. The entry's **"do not just swap the array"** caution was obeyed to the
+  letter: **only the label changed**, the pixels are byte-for-byte what they always were, because
+  `level_by_coverage` bins on them (rounding the Σ-weight map to the nearest integer, which is already correct and
+  documented as such) and the editor loads them as `EditContext.coverage` — swapping the contents would change
+  every existing run's picture. Slice **(b)** (a second HDU carrying the true frame count) was deliberately **not**
+  built: nothing would read it, and the honest count is already reported to the user through the stacker's separate
+  `frame_coverage` behind `coverage_min`/`coverage_max`, so a new HDU would be speculative surface on the hot path.
+  The docstring now spells out the weight-vs-count distinction and *why* the array can't be changed, so the next
+  reader doesn't re-derive it. Upgrade-safe: a header comment on a diagnostic sidecar — no config, DB-schema, API,
+  on-disk-layout or default change, and a run written by an older version still loads unchanged (nothing in the
+  app reads `BUNIT` off this file). **Test (+1, `tests/test_output_header_meta.py`):** a deliberately non-integer
+  coverage map — exactly what a quality-weighted or drizzled stack produces, and what "frames" could never
+  describe — round-trips with the new label, a comment that survives the 80-column card intact rather than being
+  truncated mid-word (the first attempt was), and untouched pixel values.
+  *(Original spec kept below for provenance.)*
+  *(Trust / correctness of a diagnostic — PRIORITY 4; size S.)*
   `output._write_coverage_fits` writes `master_coverage.fits` with `BUNIT = "frames"`, but the array it gets is
   the accumulator's `coverage` — Σ of per-frame *weights*. With quality weighting on that isn't a frame count, and
   on the drizzle path it's Σ of weighted footprint overlap (fractional at any `pixfrac < 1` / `scale ≠ 1`, i.e. the

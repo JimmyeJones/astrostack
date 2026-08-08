@@ -235,13 +235,31 @@ def _merge_header_meta(header, meta: dict[str, Any]) -> None:  # noqa: ANN001
 
 
 def _write_coverage_fits(path: Path, coverage: np.ndarray) -> None:
-    """Write the per-pixel coverage map (averaged across channels)."""
+    """Write the per-pixel coverage map (averaged across channels).
+
+    The map is the accumulator's ``coverage`` — the **Σ of per-frame weights**,
+    not a frame count. Those are the same number only for an unweighted stack
+    whose frames are all-or-nothing per pixel; with quality weighting on (or on
+    the drizzle path, where a frame contributes fractional footprint overlap at
+    any ``pixfrac < 1`` / ``scale ≠ 1``) a pixel's value is a weight sum that
+    happens to sit near the frame count. The header used to call it "frames"
+    outright, which is a claim the numbers don't support — so it now says what
+    they are, with the equivalence spelled out in the comment for anyone who
+    opens the file. **Only the label changed**: the array is byte-for-byte what
+    it always was, because the sky-leveling pass and the editor's
+    ``EditContext.coverage`` both read these pixels and binning them differently
+    would change every existing run's picture. The honest unweighted count is
+    the stacker's separate ``frame_coverage``, which is what the
+    ``coverage_min``/``coverage_max`` diagnostics already report.
+    """
     from astropy.io import fits
 
     cov_2d = coverage.mean(axis=-1).astype(np.float32) if coverage.ndim == 3 else coverage
     hdu = fits.PrimaryHDU(data=cov_2d)
     hdu.header["CREATOR"] = "Seestack"
-    hdu.header["BUNIT"] = "frames"
+    # The comment has to fit the 80-column card beside the value, or astropy
+    # truncates it mid-word — so it is kept short deliberately.
+    hdu.header["BUNIT"] = ("weight", "sum of frame weights (=frames unweighted)")
     hdu.writeto(path, overwrite=True)
 
 
