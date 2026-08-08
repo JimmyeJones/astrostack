@@ -6389,9 +6389,75 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Scout 2026-08-08, verified by tracing the auto-stack option build) — the walk-away auto-stack turns
+- **NEW IDEA (Builder 2026-08-08, the sibling question raised by shipping the walk-away quality weighting v0.251.0)
+  — should the walk-away path also turn on `photometric_normalize`? NOT blind-shippable; needs a Scout vet on real
+  data first.** *(Pillar: autonomy + image quality, PRIORITY 2/4; size S to build, M to justify.)* Weighting and
+  photometric normalization answer the same complaint — *thousands of subs across nights of different transparency*
+  — and the engine says they "compose cleanly" (`combine_weights_with_photometric`). Having just auto-enabled the
+  first on the `auto=True` path, the obvious next question is whether the second belongs there too. **Do not treat
+  this as a done deal, because the two are not equally safe.** Quality weighting only changes how much each frame
+  *counts*, is floored at 0.1, falls back to a neutral 1.0 for any metric it couldn't measure, and is provably inert
+  on the min/max path — worst case it does nothing. Photometric normalization *multiplies frame values* before they
+  combine, so a mis-estimated scale changes pixels, and the "neutral fallback" only covers a frame with no
+  `transparency_score` at all, not one with a bad score. It is also correctly off by default for that reason.
+  **What a vet needs to establish, on the owner's real multi-night data:** (a) that the per-frame scales land in a
+  sane band on an ordinary clear-night set (i.e. it's ~inert when transparency really is uniform, so we're not
+  paying pixel risk for nothing); (b) that a genuinely hazy night is scaled *up* by a plausible factor rather than
+  amplified into noise; and (c) that the rejection spread narrows rather than widens. **Related and already filed:**
+  the "nudge the user on the Stack form when the transparency spread is wide and `photometric_normalize` is off"
+  idea (search `suggest_photometric_normalize`) — that nudge is the *lower-risk half* of this and could ship first,
+  since it asks the user rather than deciding for them. **If it does get built, mirror v0.251.0 exactly:** inject
+  only on `auto=True`, only when the merged options carry no explicit key, and leave the engine default False.
+
+- **NOTE (Builder 2026-08-08, learned the hard way while shipping v0.251.0 → v0.252.1 — read this before injecting
+  ANY option on the walk-away path).** Injecting an option for the user is not just a stacking decision, it is a
+  *messaging* decision, and the second one is easy to miss. `quality_weighted` looked purely additive right up until
+  the History surface was traced: on a stack whose saved defaults already name `min_max_reject`, the injected
+  weighting is ignored by that rank-based combine, the run stamps `WGTSKIP` with `auto=False`, and
+  `weightingSkippedText` (`History.tsx:263`) tells the user to *"use sigma clipping instead if you want your best
+  subs to count for more"* — advice to undo a setting they never chose, about a picture that is byte-for-byte what
+  it would have been anyway. The stacker was right; the *sentence* was wrong. **Rule for next time:** before
+  auto-enabling an option, grep for every provenance key it can cause the run to stamp (`WGT*`, `PHOT*`, `REJ*`,
+  `STACKER`…) and read the copy each one renders, with `auto` both true and false. The engine's own honesty
+  machinery — which stamps *why* something didn't apply — is what turns a silent no-op into a confusing message.
+
+- ~~**NEW IDEA (Scout 2026-08-08, verified by tracing the auto-stack option build) — the walk-away auto-stack turns
   on `auto_reject` for the user but never turns on `quality_weighted`, so an unattended stack across variable nights
-  still trusts a soft/cloudy sub as much as a sharp one.** *(Pillar: autonomy + image quality, PRIORITY 2/4; size S
+  still trusts a soft/cloudy sub as much as a sharp one.**~~ — **SHIPPED v0.251.0** (Builder 2026-08-08, branch
+  `claude/elegant-bohr-tp5639`), built exactly as specced: in `webapp/pipeline.py::_stack_target`, the `auto=True`
+  block now also sets `quality_weighted=True` when the merged options carry **no** `quality_weighted` key, guarded
+  the same way the neighbouring `auto_reject` auto-enable is. Verified before building: `_stack_target` had not
+  gained it, and the engine `StackOptions.quality_weighted` default stays **False**, so a manual stack, a stored
+  config and every existing run record are byte-for-byte unchanged — only the "just do it" path picks a better
+  default. **Two composition facts worth keeping** (both already handled by the engine, checked rather than
+  assumed): (1) on the same walk-away path `auto_reject` resolves to order-statistic **min/max** below
+  `kappa_min_frames` frames, and that path combines by *rank* and ignores per-frame weights — so on a small
+  walk-away stack the weighting is inert, and the run correctly stamps `WGTSKIP=minmax` / `WGTSKAUT=True` /
+  `WGTSKMIN` rather than claiming a demotion it didn't make (`stacker.py:1057`, which was written for precisely
+  this chain); it starts biting the moment the stack is big enough for κ-σ, which is where the target user's
+  many-night sets live. (2) The mosaic coverage leveler rounds its Σ-weight map to the nearest integer before
+  `np.unique`, so non-integer weights don't shatter it into a bin per pixel. **Tests (+4, all in
+  `tests/webapp/test_auto_stack_pipeline.py`):** the walk-away path sets it; the manual Stack form leaves the
+  engine default off; and a per-target "Save as defaults" naming it wins — parametrised over **both** `True` and
+  `False`, since an explicit *off* is the one a blind `= True` would trample. Additive: no engine, schema, API,
+  config, DB, on-disk or default change.
+  **One guard the spec didn't anticipate, added in v0.252.1 before merge (caught by tracing the injection through
+  the History surface rather than only through the stacker).** If the user's *saved* defaults already name
+  `min_max_reject` on the standard path, injecting weighting would change nothing in the picture — that combine
+  works by rank — but would make the run stamp `WGTSKIP` with `auto=False`, which `weightingSkippedText`
+  (`History.tsx:263`) renders as *"Quality weighting was on, but … use sigma clipping instead if you want your
+  best subs to count for more."* — i.e. advice to undo a setting the user never chose, on a picture that is
+  byte-for-byte what it would have been anyway. So the injection now skips that case. The `auto_reject` branch
+  resolving *itself* to min/max on a small stack is deliberately **not** skipped: it stamps `auto=True`, whose
+  wording ("from N subs it switches to sigma clipping and your weighting counts again") is exactly right.
+  Drizzle is exempt from the guard — it honours per-frame weights and runs its own rejection, so a stray
+  `min_max_reject` alongside it is inert. Both branches are pinned by tests.
+  **Also shipped in v0.252.1 (friendliness, PRIORITY 3):** the Settings → Auto-stack hint now *says* what a
+  hands-off stack decides for you. Both `auto_reject` (shipped long ago) and now `quality_weighted` were silent
+  choices the app made on the user's behalf with nothing on the settings screen mentioning either. `HINTS` is
+  exported so the copy is pinned by tests rather than left to drift from what `_stack_target` actually does.
+  *(Original spec kept below for provenance.)*
+  *(Pillar: autonomy + image quality, PRIORITY 2/4; size S
   — webapp `_stack_target` only, no engine change; mirror the existing `auto_reject` auto-enable.)* In
   `webapp/pipeline.py::_stack_target`, the `auto=True` chain (watcher auto-stack + Process target — where the user
   made *no* stacking choices) already does: *"if no explicit rejection choice, set `auto_reject=True`"* — a clean,
@@ -11440,8 +11506,61 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-08) — "How many more clear nights?": a plain-language ETA to a target's
-  integration goal, from the owner's own recent pace.** *(Pillar: autonomy + friendliness, PRIORITY 2–3; size M —
+- **NEW BEGINNER FEATURE (Builder 2026-08-08, the natural follow-on to "How many more clear nights?" v0.252.0) —
+  "Finish this one first": tell the beginner which of their in-flight targets is *closest to done*, so a clear
+  night goes to the target one more session would finish rather than the one that needs six more.** *(Pillar:
+  autonomy + friendliness, PRIORITY 2–3; size M — mostly a data-plumbing question, see the caveat.)* v0.252.0 put
+  a real number on "how much longer will this take me?" — but **per target, on the Target page**, which is the one
+  place you only look once you've already decided what you're shooting. The decision it should inform happens
+  earlier and one level up: on Tonight ("add more to what you're shooting") or on the Library, where the beginner
+  is choosing *between* targets. A beginner with four half-finished targets has no way to see that M31 needs one
+  more night and NGC 7000 needs six; ranking them turns a shrug into a plan, and it makes finishing things —
+  rather than starting a fifth — the path of least resistance. The maths is **already shipped and unit-tested**:
+  `estimateClearNights(gapSeconds, nights)` in `frontend/src/components/clearNights.ts`, with `gapSeconds` from the
+  same `integrationReadiness` the row hints already call.
+  **The real work is the data, and it is why this is filed rather than built.** The helper needs each target's
+  **night-by-night** breakdown, and today that is one `/api/targets/{safe}/nights` request per target — fine for
+  one Target page, a fan-out of N requests on a library view, each of which re-walks that project's frames through
+  `nights_breakdown`. Three shapes, cheapest first: (a) add an additive `recent_night_exposures: list[float]`
+  (or a pre-reduced `recent_pace_s`) to the **existing** targets-list response, computed server-side — one query,
+  no new endpoint, no client fan-out, and the pure helper takes a pace instead of a night list; (b) a batched
+  `/api/targets/nights-pace` returning `{safe: pace_s}` for every target; (c) client fan-out with TanStack, which
+  is the quickest to write and the one to avoid on a library with hundreds of targets. **(a) is almost certainly
+  right** — it keeps the estimate honest (same rows, same bucketing) and costs one field.
+  **Beginner bar / care:** phrase it as *encouragement*, never a scold — "1 more clear night finishes M31" reads
+  well; "NGC 7000: 6 nights behind" does not, so cap what's shown (say, only surface targets within ~3 nights and
+  stay silent about the rest). Reuse the existing self-hiding rules verbatim: no goal, no history, one night, or a
+  met goal all mean *say nothing about that target*, and a list where nothing qualifies renders nothing at all.
+  Don't duplicate `readinessRowHint` ("Nearly there" / "Plenty — try something new") — this replaces that row's
+  vague adverb with a number, so decide which one wins per row rather than printing both.
+
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-08) — "How many more clear nights?": a plain-language ETA to a target's
+  integration goal, from the owner's own recent pace.**~~ — **SHIPPED v0.252.0** (Builder 2026-08-08, branch
+  `claude/elegant-bohr-tp5639`), built to the filed shape. `frontend/src/components/clearNights.ts` is the pure
+  helper (`estimateClearNights(gapSeconds, nights)`); the Target page's "Is it enough yet?" card renders its one
+  sentence between the verdict and the √N line, which is where the unanswered question actually sits. It reads the
+  target's existing night-by-night breakdown (`/api/targets/{safe}/nights`, **newest first**) under the *same*
+  query key the Nights card uses, so TanStack serves one request to both — **no new endpoint, no new response
+  field, no engine/schema/DB/config change**, and nothing persisted.
+  **The pace:** the median kept integration over the most recent `PACE_LOOKBACK_NIGHTS` = 5 nights that really
+  accrued something (≥2 min kept — below that a "night" is a test frame or two, and counting it would drag the
+  median down and inflate the ETA). Median, not mean, so one short night doesn't skew it; a 5-night window so a
+  change of habit shows up quickly instead of being averaged against old marathons. The gap is then divided by it
+  and rounded **up** — you can't shoot 1.2 nights.
+  **Every self-hiding rule the entry asked for, each pinned by a test:** silent when the goal is met (the verdict
+  already celebrates), when there's no night history, from a single night (one session is not a pace), and when
+  only one of several recent nights accrued anything (that's data, not a pace — projecting the whole remaining
+  goal off it would be a confident guess from nothing). The one non-numeric answer is the all-duds case the entry
+  called out — recent nights recorded subs but kept next to none — where it says so and suggests checking focus
+  and framing rather than dividing by ~zero. Wording is *"clear nights"* throughout: the app cannot promise
+  weather, and any other phrasing would be the dishonest way to say this. A far goal at a slow pace prints the
+  real (large) number rather than a silently capped one, so nobody plans around a flattering figure.
+  **Tests (+16):** `clearNights.test.ts` (+13 — the division and its median/lookback behaviour, singular vs plural,
+  round-up, goal met, no history, one night, one-productive-night, the all-duds advisory, never dividing by zero,
+  NaN/∞ gaps refused, and the honest big number) and `Target.test.tsx` (+3 — the line renders end-to-end with the
+  real card, and stays absent when the goal is met or there's a single night of history).
+  *(Original spec kept below for provenance.)*
+  *(Pillar: autonomy + friendliness, PRIORITY 2–3; size M —
   one new pure helper + one Target-page line, no engine/schema change.)* The app already lets a beginner set a
   per-target integration goal and gives an "Is it enough yet?" readiness verdict (shipped), but when the answer is
   "not yet" it stops there — it never answers the question the beginner actually has next: *"so how much longer will
