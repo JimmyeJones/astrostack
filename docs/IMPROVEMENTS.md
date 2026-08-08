@@ -6389,9 +6389,28 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Scout 2026-08-08, verified by tracing the auto-stack option build) — the walk-away auto-stack turns
+- ~~**NEW IDEA (Scout 2026-08-08, verified by tracing the auto-stack option build) — the walk-away auto-stack turns
   on `auto_reject` for the user but never turns on `quality_weighted`, so an unattended stack across variable nights
-  still trusts a soft/cloudy sub as much as a sharp one.** *(Pillar: autonomy + image quality, PRIORITY 2/4; size S
+  still trusts a soft/cloudy sub as much as a sharp one.**~~ — **SHIPPED v0.251.0** (Builder 2026-08-08, branch
+  `claude/elegant-bohr-tp5639`), built exactly as specced: in `webapp/pipeline.py::_stack_target`, the `auto=True`
+  block now also sets `quality_weighted=True` when the merged options carry **no** `quality_weighted` key, guarded
+  the same way the neighbouring `auto_reject` auto-enable is. Verified before building: `_stack_target` had not
+  gained it, and the engine `StackOptions.quality_weighted` default stays **False**, so a manual stack, a stored
+  config and every existing run record are byte-for-byte unchanged — only the "just do it" path picks a better
+  default. **Two composition facts worth keeping** (both already handled by the engine, checked rather than
+  assumed): (1) on the same walk-away path `auto_reject` resolves to order-statistic **min/max** below
+  `kappa_min_frames` frames, and that path combines by *rank* and ignores per-frame weights — so on a small
+  walk-away stack the weighting is inert, and the run correctly stamps `WGTSKIP=minmax` / `WGTSKAUT=True` /
+  `WGTSKMIN` rather than claiming a demotion it didn't make (`stacker.py:1057`, which was written for precisely
+  this chain); it starts biting the moment the stack is big enough for κ-σ, which is where the target user's
+  many-night sets live. (2) The mosaic coverage leveler rounds its Σ-weight map to the nearest integer before
+  `np.unique`, so non-integer weights don't shatter it into a bin per pixel. **Tests (+4, all in
+  `tests/webapp/test_auto_stack_pipeline.py`):** the walk-away path sets it; the manual Stack form leaves the
+  engine default off; and a per-target "Save as defaults" naming it wins — parametrised over **both** `True` and
+  `False`, since an explicit *off* is the one a blind `= True` would trample. Additive: no engine, schema, API,
+  config, DB, on-disk or default change.
+  *(Original spec kept below for provenance.)*
+  *(Pillar: autonomy + image quality, PRIORITY 2/4; size S
   — webapp `_stack_target` only, no engine change; mirror the existing `auto_reject` auto-enable.)* In
   `webapp/pipeline.py::_stack_target`, the `auto=True` chain (watcher auto-stack + Process target — where the user
   made *no* stacking choices) already does: *"if no explicit rejection choice, set `auto_reject=True`"* — a clean,

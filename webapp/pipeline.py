@@ -2053,6 +2053,17 @@ def _stack_target(
     merged options), so a saved per-target default or the manual Stack form is always
     honoured verbatim; reprocess-all likewise reuses the prior run's options
     untouched. Off (the default) leaves the built options byte-for-byte unchanged.
+
+    ``auto`` also turns on ``StackOptions.quality_weighted`` when the merged options
+    carry no explicit preference, for the same reason and with the same guard: a
+    walk-away stack spanning many nights of different seeing, haze and moon would
+    otherwise trust a soft or cloud-thinned sub exactly as much as a sharp one.
+    ``compute_frame_weights`` derives the weights from QC metrics that are already
+    measured, gives a neutral 1.0 to any metric it couldn't measure and floors every
+    weight at 0.1, so it can only demote a genuinely worse sub and never drops one.
+    The engine default stays **False** — a manual stack, a stored config and every
+    existing run record are untouched; this only picks a better default for a user
+    who clicked "just do it".
     """
     from seestack.stack.stacker import run_stack
 
@@ -2094,6 +2105,14 @@ def _stack_target(
             # below the ~11-frame κ-σ threshold. Only when nothing explicit was set,
             # so a saved per-target default / the manual form is never overridden.
             opts_dict["auto_reject"] = True
+        if auto and "quality_weighted" not in opts_dict:
+            # Same walk-away reasoning: with no user choice, weight each sub by the
+            # QC metrics we already measured so a soft / hazy night doesn't pull the
+            # stack down as hard as a sharp one. Missing metrics fall back to a
+            # neutral 1.0 and the weight floor is 0.1, so nothing is ever dropped.
+            # Only when nothing explicit was set — a saved per-target default and
+            # the manual Stack form (either way) are honoured verbatim.
+            opts_dict["quality_weighted"] = True
         calibration_skipped: list[str] = []
         if saved_master_ids:
             # The user's own "Save as defaults" calibration picks win over the
