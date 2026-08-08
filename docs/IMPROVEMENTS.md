@@ -6389,6 +6389,38 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-08, the sibling question raised by shipping the walk-away quality weighting v0.251.0)
+  — should the walk-away path also turn on `photometric_normalize`? NOT blind-shippable; needs a Scout vet on real
+  data first.** *(Pillar: autonomy + image quality, PRIORITY 2/4; size S to build, M to justify.)* Weighting and
+  photometric normalization answer the same complaint — *thousands of subs across nights of different transparency*
+  — and the engine says they "compose cleanly" (`combine_weights_with_photometric`). Having just auto-enabled the
+  first on the `auto=True` path, the obvious next question is whether the second belongs there too. **Do not treat
+  this as a done deal, because the two are not equally safe.** Quality weighting only changes how much each frame
+  *counts*, is floored at 0.1, falls back to a neutral 1.0 for any metric it couldn't measure, and is provably inert
+  on the min/max path — worst case it does nothing. Photometric normalization *multiplies frame values* before they
+  combine, so a mis-estimated scale changes pixels, and the "neutral fallback" only covers a frame with no
+  `transparency_score` at all, not one with a bad score. It is also correctly off by default for that reason.
+  **What a vet needs to establish, on the owner's real multi-night data:** (a) that the per-frame scales land in a
+  sane band on an ordinary clear-night set (i.e. it's ~inert when transparency really is uniform, so we're not
+  paying pixel risk for nothing); (b) that a genuinely hazy night is scaled *up* by a plausible factor rather than
+  amplified into noise; and (c) that the rejection spread narrows rather than widens. **Related and already filed:**
+  the "nudge the user on the Stack form when the transparency spread is wide and `photometric_normalize` is off"
+  idea (search `suggest_photometric_normalize`) — that nudge is the *lower-risk half* of this and could ship first,
+  since it asks the user rather than deciding for them. **If it does get built, mirror v0.251.0 exactly:** inject
+  only on `auto=True`, only when the merged options carry no explicit key, and leave the engine default False.
+
+- **NOTE (Builder 2026-08-08, learned the hard way while shipping v0.251.0 → v0.252.1 — read this before injecting
+  ANY option on the walk-away path).** Injecting an option for the user is not just a stacking decision, it is a
+  *messaging* decision, and the second one is easy to miss. `quality_weighted` looked purely additive right up until
+  the History surface was traced: on a stack whose saved defaults already name `min_max_reject`, the injected
+  weighting is ignored by that rank-based combine, the run stamps `WGTSKIP` with `auto=False`, and
+  `weightingSkippedText` (`History.tsx:263`) tells the user to *"use sigma clipping instead if you want your best
+  subs to count for more"* — advice to undo a setting they never chose, about a picture that is byte-for-byte what
+  it would have been anyway. The stacker was right; the *sentence* was wrong. **Rule for next time:** before
+  auto-enabling an option, grep for every provenance key it can cause the run to stamp (`WGT*`, `PHOT*`, `REJ*`,
+  `STACKER`…) and read the copy each one renders, with `auto` both true and false. The engine's own honesty
+  machinery — which stamps *why* something didn't apply — is what turns a silent no-op into a confusing message.
+
 - ~~**NEW IDEA (Scout 2026-08-08, verified by tracing the auto-stack option build) — the walk-away auto-stack turns
   on `auto_reject` for the user but never turns on `quality_weighted`, so an unattended stack across variable nights
   still trusts a soft/cloudy sub as much as a sharp one.**~~ — **SHIPPED v0.251.0** (Builder 2026-08-08, branch
@@ -11473,6 +11505,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Builder 2026-08-08, the natural follow-on to "How many more clear nights?" v0.252.0) —
+  "Finish this one first": tell the beginner which of their in-flight targets is *closest to done*, so a clear
+  night goes to the target one more session would finish rather than the one that needs six more.** *(Pillar:
+  autonomy + friendliness, PRIORITY 2–3; size M — mostly a data-plumbing question, see the caveat.)* v0.252.0 put
+  a real number on "how much longer will this take me?" — but **per target, on the Target page**, which is the one
+  place you only look once you've already decided what you're shooting. The decision it should inform happens
+  earlier and one level up: on Tonight ("add more to what you're shooting") or on the Library, where the beginner
+  is choosing *between* targets. A beginner with four half-finished targets has no way to see that M31 needs one
+  more night and NGC 7000 needs six; ranking them turns a shrug into a plan, and it makes finishing things —
+  rather than starting a fifth — the path of least resistance. The maths is **already shipped and unit-tested**:
+  `estimateClearNights(gapSeconds, nights)` in `frontend/src/components/clearNights.ts`, with `gapSeconds` from the
+  same `integrationReadiness` the row hints already call.
+  **The real work is the data, and it is why this is filed rather than built.** The helper needs each target's
+  **night-by-night** breakdown, and today that is one `/api/targets/{safe}/nights` request per target — fine for
+  one Target page, a fan-out of N requests on a library view, each of which re-walks that project's frames through
+  `nights_breakdown`. Three shapes, cheapest first: (a) add an additive `recent_night_exposures: list[float]`
+  (or a pre-reduced `recent_pace_s`) to the **existing** targets-list response, computed server-side — one query,
+  no new endpoint, no client fan-out, and the pure helper takes a pace instead of a night list; (b) a batched
+  `/api/targets/nights-pace` returning `{safe: pace_s}` for every target; (c) client fan-out with TanStack, which
+  is the quickest to write and the one to avoid on a library with hundreds of targets. **(a) is almost certainly
+  right** — it keeps the estimate honest (same rows, same bucketing) and costs one field.
+  **Beginner bar / care:** phrase it as *encouragement*, never a scold — "1 more clear night finishes M31" reads
+  well; "NGC 7000: 6 nights behind" does not, so cap what's shown (say, only surface targets within ~3 nights and
+  stay silent about the rest). Reuse the existing self-hiding rules verbatim: no goal, no history, one night, or a
+  met goal all mean *say nothing about that target*, and a list where nothing qualifies renders nothing at all.
+  Don't duplicate `readinessRowHint` ("Nearly there" / "Plenty — try something new") — this replaces that row's
+  vague adverb with a number, so decide which one wins per row rather than printing both.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-08) — "How many more clear nights?": a plain-language ETA to a target's
   integration goal, from the owner's own recent pace.**~~ — **SHIPPED v0.252.0** (Builder 2026-08-08, branch
