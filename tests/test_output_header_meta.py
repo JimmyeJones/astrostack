@@ -385,3 +385,35 @@ def test_weighting_skip_reason_absent_when_weighting_was_never_on():
         weights_applied=False)
     assert "WGTSKIP" not in meta
     assert "WGTMODE" not in meta
+
+
+def test_coverage_sidecar_says_what_its_numbers_actually_are(tmp_path):
+    """The coverage map is Σ of per-frame *weights*, not a frame count.
+
+    It read ``BUNIT = 'frames'``, which is only true for an unweighted stack of
+    all-or-nothing frames — with quality weighting on, or on the drizzle path
+    (fractional footprint overlap), the pixels are a weight sum. A header that
+    names them wrongly is a trap for anyone who opens the sidecar to check
+    "how many subs made this pixel?"; the honest count is the stacker's separate
+    ``frame_coverage``, behind ``coverage_min``/``coverage_max``.
+    """
+    rgb = np.zeros((8, 8, 3), dtype=np.float32)
+    # A deliberately non-integer map — exactly what a quality-weighted or
+    # drizzled stack produces, and what "frames" could never describe.
+    coverage = np.full((8, 8), 3.25, dtype=np.float32)
+
+    paths = write_stack_outputs(tmp_path, rgb, coverage, wcs_text=None,
+                                out_basename="master")
+
+    with fits.open(paths["coverage"]) as hdul:
+        hdr, data = hdul[0].header, np.asarray(hdul[0].data, dtype=np.float64)
+    assert str(hdr["BUNIT"]) == "weight"
+    # The comment carries the "= frames when unweighted" equivalence, so the
+    # rename doesn't lose what the old label got right — and it has to survive
+    # the 80-column card intact rather than being truncated mid-word.
+    comment = hdr.comments["BUNIT"]
+    assert "frames" in comment
+    assert comment == "sum of frame weights (=frames unweighted)"
+    # Label-only: the pixels are untouched, because the sky-leveling pass and the
+    # editor's EditContext.coverage both read them.
+    assert np.allclose(data, 3.25)

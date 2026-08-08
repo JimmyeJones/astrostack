@@ -691,4 +691,88 @@ describe("Gallery Moon & Sun stills", () => {
     expect(await screen.findByLabelText("Download picture")).toBeInTheDocument();
     expect(screen.queryByLabelText("Download 16-bit TIFF")).not.toBeInTheDocument();
   });
+
+  // The second in-place edit, on the same reasoning as the crop above: the
+  // person whose clip is gone off the NAS can't re-stack, so a Gallery that
+  // only *reports* the sharpening leaves them stuck with whatever it is.
+  it("offers the sharpening on a still and changes it in one click", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [], videos: [{ ...still("Lunar_video"), sharpen_editable: true }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    const sharpen = vi.spyOn(client.api, "sharpenVideoStill")
+      .mockResolvedValue({ sharpen_amount: 1.2 } as never);
+
+    renderGallery();
+
+    // Fail-before: the Gallery card explained the sharpening but never offered it.
+    expect(await screen.findByText(/slightly softer/)).toBeInTheDocument();
+    const input = screen.getByDisplayValue(/Off — the plain stacked picture/);
+    fireEvent.click(input);
+    fireEvent.click(await screen.findByText(/Medium — more surface detail/));
+    await waitFor(() => expect(sharpen).toHaveBeenCalledWith("Lunar_video", 1.2));
+  });
+
+  it("words the offer as 'try a different amount' once a still is sharpened", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [],
+      videos: [{ ...still("Lunar_video"), sharpen_amount: 1.2, sharpen_editable: true }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    expect(await screen.findByText(/Try a different amount/)).toBeInTheDocument();
+    // …and the menu opens on the strength the picture actually has.
+    expect(screen.getByDisplayValue(/Medium — more surface detail/)).toBeInTheDocument();
+  });
+
+  it("shows a still's warnings, so the Gallery isn't the quiet surface", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [],
+      videos: [{
+        ...still("Lunar_video"),
+        warnings: ["12 frames couldn't be aligned.", "The last frame was truncated."],
+      }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    // Verbatim engine strings — the same ones the Moon & Sun card renders.
+    expect(await screen.findByText("12 frames couldn't be aligned.")).toBeInTheDocument();
+    expect(screen.getByText("The last frame was truncated.")).toBeInTheDocument();
+  });
+
+  it("says nothing extra for a still with no warnings, or an older backend", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      // No `warnings` key at all — what a backend from before the field sends.
+      items: [], videos: [still("Lunar_video")],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    // Renders the card without throwing on the missing list.
+    expect(await screen.findByText("Moon")).toBeInTheDocument();
+  });
+
+  it("hides the control on a still that would have to be stacked again", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [],
+      videos: [{ ...still("Lunar_video"), sharpen_amount: 1.2, sharpen_editable: false }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    // The picture still says how sharp it is — it just can't be changed here.
+    expect(await screen.findByText(sharpenNote(1.2)!)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Bring out surface detail/i)).toBeNull();
+  });
 });

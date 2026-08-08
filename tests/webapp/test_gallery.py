@@ -291,3 +291,57 @@ def test_a_still_made_before_sharpening_existed_reads_as_unsharpened(client, dat
 
     (still,) = client.get("/api/gallery").json()["videos"]
     assert still["sharpen_amount"] == 0.0
+    # ...and it can still be sharpened in place: nothing was baked into it, so
+    # the unsharpened original *is* the picture on disk.
+    assert still["sharpen_editable"] is True
+
+
+def test_gallery_carries_a_stills_warnings(client, data_root):
+    """The Gallery is the only surface left for a user who has cleared the clip
+    off their NAS, so it must not be the one that stays quiet about frames the
+    stack had to drop. Same engine strings, verbatim — not re-worded."""
+    _drop_video_still(data_root, warnings=["12 frames couldn't be aligned."])
+
+    (still,) = client.get("/api/gallery").json()["videos"]
+    assert still["warnings"] == ["12 frames couldn't be aligned."]
+
+
+def test_a_still_with_nothing_to_report_carries_no_warnings(client, data_root):
+    """An empty list, not a missing key, so the card has nothing to render rather
+    than something to guard against.
+
+    (``warnings`` is a *required* field on ``VideoStackMeta`` — it has been
+    written by every version that ever made a still — so there is no "older
+    ``meta.json``" case to cover here, unlike the framing and sharpening fields.
+    A meta.json missing it isn't an old still, it's a broken one, and
+    ``read_meta`` already drops those: see the half-written-result test above.)
+    """
+    _drop_video_still(data_root)
+
+    (still,) = client.get("/api/gallery").json()["videos"]
+    assert still["warnings"] == []
+
+
+def test_gallery_offers_the_in_place_sharpen_on_a_still(client, data_root):
+    """Someone who has cleared the clip off their NAS finds the picture only
+    here, and is exactly the person who can't re-stack to change how sharp it
+    is — so the Gallery has to carry the same offer the Moon & Sun page does."""
+    _drop_video_still(data_root, sharpen_amount=0.6)
+
+    (still,) = client.get("/api/gallery").json()["videos"]
+    assert still["sharpen_editable"] is True
+
+
+def test_gallery_offers_no_sharpen_when_the_stack_baked_one_in(client, data_root):
+    """A picture whose *stack* sharpened it has no soft version kept beside it,
+    so the strength can't be changed without stacking again. Offering a control
+    that would only ever error is worse than offering none — and the Gallery
+    must reach the same verdict the Moon & Sun page does."""
+    _drop_video_still(data_root, sharpen_amount=1.2, sharpen_baked=1.2)
+
+    (still,) = client.get("/api/gallery").json()["videos"]
+    assert still["sharpen_amount"] == 1.2
+    assert still["sharpen_editable"] is False
+    # The endpoint agrees — which is the whole reason the offer is withheld.
+    r = client.post("/api/videos/Lunar_video/sharpen", json={"amount": 0.6})
+    assert r.status_code == 400
