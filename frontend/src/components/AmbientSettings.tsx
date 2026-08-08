@@ -34,11 +34,13 @@ export function AmbientSettings() {
           <Text fw={600}>Ambient sound (this device)</Text>
         </Group>
         <Text size="sm" c="dimmed">
-          A quiet space-ambient soundbed for long sessions watching a stack run
-          or browsing the gallery. It is generated in your browser as it plays —
-          nothing is downloaded and no two minutes sound the same. Off unless you
-          turn it on with the speaker button in the top bar, and remembered for
-          this device only (on the lounge PC, off on your phone).
+          A quiet, slow-breathing soundbed for long sessions watching a stack run
+          or browsing the gallery — a deep pad, a soft heartbeat underneath it,
+          and the odd note trailing away into the dark. It is generated in your
+          browser as it plays — nothing is downloaded and no two minutes sound
+          the same. Off unless you turn it on with the speaker button in the top
+          bar, and remembered for this device only (on the lounge PC, off on
+          your phone).
         </Text>
         <div>
           <Text size="sm" fw={500} mb={4}>Volume</Text>

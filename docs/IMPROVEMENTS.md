@@ -9357,8 +9357,58 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-08-07, spotted while shipping the sharpening slice v0.247.0) — trying a different
-  sharpening strength costs a whole second decode of the capture, when the crop next to it costs none.**
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while shipping the sharpening slice v0.247.0) — trying a different
+  sharpening strength costs a whole second decode of the capture, when the crop next to it costs none.**~~ —
+  **SHIPPED v0.249.0** (Builder 2026-08-08, branch `claude/elegant-bohr-cdbcoy`). *(Friendliness / autonomy —
+  PRIORITY 2–3.)* A finished Moon/Sun still now carries the same offer the crop does — *"Stacking averages your
+  frames together, which makes the picture cleaner but slightly softer…"* with the four-strength menu right under
+  it — and acting on it is a single instant request (`POST /api/videos/{id}/sharpen`), not a multi-minute
+  re-decode of a capture that may not even be on the NAS any more.
+  **The entry's "decide the crop interaction before writing code" note is the whole design, and it was answered by
+  making both edits *one derivation* rather than two layers on the file:**
+
+      stack.*  =  crop( sharpen(stack-full.*, sharpen_amount), crop_box )
+
+  `stack-full.*` — which used to mean "the uncropped original" — is now "the picture as it stood before the first
+  *in-place* edit", written once and never re-taken; whatever the **stack** did (including a stack-time crop) is
+  baked into it, and `crop_box` describes only an in-place crop. Every operation then just changes one number in
+  `meta.json` and re-derives, which is what makes each of them independently reversible **and** makes the ordering
+  question the entry worried about disappear: there is no order, only a formula. Crop keeps the sharpening, uncrop
+  keeps the sharpening, sharpen keeps the crop, unsharpen keeps the crop. Sharpening always renders from the kept
+  original, never from the sharpened file, so trying strengths **cannot compound** (pinned by a test that reaches
+  the same strength by two different routes and asserts the pixels are identical). With neither op active the
+  original is *moved* back — byte-for-byte the render the stack wrote — so an unedited still leaves no duplicate,
+  which is exactly the property `crop_restorable` already relied on.
+  **The 8-bit re-render the entry asks about was measured and then designed away:** `_rebuild_still` has three
+  paths, and only the sharpened one is a render. "Nothing to apply" is a file move; **crop-only slices each
+  artifact in its own integer domain**, so a crop is still byte-for-byte the pixels that were there (the existing
+  `test_the_cropped_pixels_are_the_ones_the_full_frame_had` passes unchanged); and the sharpened path derives the
+  **16-bit TIFF from the 16-bit original**, so the file anyone edits elsewhere is sharpened at full precision
+  rather than from the 8-bit picture beside it. Every write lands on a `.part` and is swapped in, so a failure
+  part-way leaves the picture that was already there (pinned).
+  **Upgrade safety, all four cases pinned:** a `meta.json` with none of the new fields reads as an unsharpened,
+  un-cropped picture and can be sharpened; a still saved before 16-bit TIFFs existed works (and its undo is still
+  exact); a still cropped in place before the box was recorded has it **re-measured from the original** — which is
+  deterministic on the same picture, since that is what chose it — and the box is written back so the next rebuild
+  needn't guess; and a still whose *stack* sharpened it before the soft render was kept beside it (v0.247.x, one
+  day of pictures) reports `sharpen_editable: false`, keeps its provenance line, and hides the control rather than
+  offering a change that would compound. New stacks that sharpen now keep the soft render alongside, so this last
+  case can't recur; an **unsharpened** stack keeps no second copy, because it is its own original.
+  Additive throughout: one new endpoint, two additive nullable response fields (`sharpen_editable`, plus
+  `sharpen_baked`/`crop_box` in the on-disk meta), no default flipped, no existing shape changed.
+  **Deliberately not done:** the Gallery's video-still card, which is still read-only by design — filed below as
+  its own entry alongside the crop-there idea, since both want the same decision.
+  **Tests (+27):** `tests/webapp/test_video_sharpen_still.py` (**new, +21** — the feature; strengths never
+  compound; undo restores the PNG *and* the TIFF byte-for-byte; no duplicate left behind; the TIFF is sharpened
+  too; and the full crop × sharpen × undo matrix: sharpen-a-cropped-still, crop-a-sharpened-still,
+  uncrop-keeps-the-sharpening, unsharpen-keeps-the-crop, both orders landing on the same picture, and a whole
+  round trip returning the stack's own render exactly — plus every refusal, the four upgrade cases and the
+  crash-safety one), `tests/webapp/test_video_api.py` (+2 — a sharpening stack keeps the soft render and can be
+  un-sharpened from it; an unsharpened one grows no second copy) and `MoonSun.test.tsx` (+4 — the offer's wording
+  before and after, silence when the backend can't do it, the strength snapped to the menu, the control acting
+  in place without ever calling the stack endpoint, and the hidden-control case).
+
+  *(Original spec kept below for provenance.)*
   *(Friendliness / autonomy — PRIORITY 2–3; size M.)* Sharpening is a decision you can only really make by
   *looking at the picture* — exactly like the crop — but it was shipped as a stack-time option, so changing your
   mind means "Stack again" and another multi-minute grade+stack pass on a long capture. The crop already solved
@@ -11258,9 +11308,53 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-REQUESTED (2026-08-07, follow-on to v0.239.0) — restyle the ambient bed toward *psychill / psybient*
+- ~~**⭐ OWNER-REQUESTED (2026-08-07, follow-on to v0.239.0) — restyle the ambient bed toward *psychill / psybient*
   (the owner named **A.e.r.o.** and **AstroPilot** as the reference feel). The current bed is "decent but not
-  really it".** *(Enjoyment polish; size M. Same standing as the original: **must not displace a bug or
+  really it".**~~ — **SHIPPED v0.248.0** (Builder 2026-08-08, branch `claude/elegant-bohr-cdbcoy`), all six
+  named gaps built, and pulled on exactly the run the entry asks for: the Bugs section holds nothing an agent can
+  fix without owner-side data, so nothing PRIORITY 1–4 was displaced. **Original material in the idiom only** — a
+  tempo, a mode and a set of textures; nothing is transcribed, and the bed is still procedurally generated at
+  runtime with no audio file shipped or fetched.
+  1. **A slow pulse (`TEMPO_BPM = 76`).** Not a drum: `subPulseGainForBeat` puts full weight on the downbeat and a
+     0.55 answer on beat 3, and leaves beats 2 and 4 empty. Everything rhythmic derives from `beatSeconds()`.
+  2. **Warm sub-bass + sidechain-style duck.** One *persistent* sine an octave under the root, enveloped on the
+     grid (a stopped oscillator can never be restarted, so a root drift **ramps its pitch** over the fade instead
+     of rebuilding it — pinned by a test). A `duck` gain the pad and noise pass through — but not the sub that
+     causes the dip, and not the bells, where a ducked tail reads as a fault — dips `DUCK_DEPTH` 0.34 and eases
+     back over 0.5 s. Linear ramps, because this parameter passes through 1.
+  3. **Tempo-synced ping-pong delay.** Two `DelayNode`s at `dottedEighthSeconds()` (there was no `DelayNode` in
+     the graph at all before), cross-fed at 0.52 and panned ±0.85, fed by short sparse plucks
+     (`PLUCK_PROBABILITY` 0.3, never on the downbeat where the sub already is).
+  4. **A darker mode.** `MINOR_PENTATONIC_SEMITONES` with `DORIAN_COLOUR_SEMITONES` (the 9th and the *natural*
+     6th) reached for ~22 % of the time; the bells and the plucks share one `scaleDegreeSemitones`, an octave
+     apart, so they can't drift into different keys.
+  5. **A warmer, wider pad.** Each voice is now a **detuned sawtooth pair** (halved so a pair is no louder than
+     the sine it replaced) through a `StereoPannerNode`, then a two-line modulated **chorus** panned ±0.7. The
+     root stays near centre — a wide bottom end smears the mix.
+  6. **Macro structure.** `macroLevelAt` is a raised cosine over `MACRO_PERIOD_S` = 8 min that opens the pad's
+     cutoff and thins the plucks toward a floor (never to silence) — felt, not noticed.
+  **Architecture kept:** every decision above is a pure, unit-tested function in `voicing.ts`; `player.ts` stays
+  the thin node layer. **CPU/node count held:** the pad, chorus, delay and sub are built once and reused, only
+  the short-lived bells and plucks allocate and each stops itself at the end of its own decay, and a root drift
+  now `disconnect()`s the chain it replaces (a small pre-existing leak) — pinned by a test that ten scheduler
+  ticks add **zero** nodes. **Grid accuracy:** a lookahead scheduler (200 ms tick, 0.6 s ahead) places every event
+  at an exact audio-clock time, so timer jitter never reaches the pulse; and because a background tab's timers are
+  throttled to ~1/minute, the scheduler **re-joins** the grid rather than firing a minute of missed pulses at once
+  (pinned). Constraints unchanged: default **off**, `localStorage` per device, context created/resumed only from
+  the user gesture, **suspend** not mute, every start/stop/volume change faded, no new npm dependency. The
+  second "mood" the entry offers as a fallback was deliberately **not** built — the entry says ship the restyle
+  first and only add the choice if it's wanted. Frontend-only: no engine, API, schema, config, DB, on-disk or
+  default change. Settings copy now describes what you'd actually hear. **Tests (+22):** `voicing.test.ts` (+18 —
+  the pair detune and stereo spread, the mode is minor with Dorian colour and no semitone clash, pluck register,
+  the tempo band and dotted-eighth derivation, the pulse pattern including a far-future and a negative beat
+  index, pluck sparsity and arc-thinning that never reaches silence, and the arc's range/period/smoothness/
+  nonsense-clock behaviour) and `player.test.ts` (+8 — the first downbeat pulses without waiting for a timer, the
+  bed dips and comes all the way back, events land on whole beats of the grid, a throttled tab doesn't burst,
+  the grid re-arms and stops dead, plucks feed a dotted-eighth ping-pong whose feedback decays, the pad is panned
+  and chorused, the sub survives a root drift by ramping, and the node count is flat).
+
+  *(Original spec kept below for provenance.)*
+  *(Enjoyment polish; size M. Same standing as the original: **must not displace a bug or
   PRIORITY 1–4 work** — pull it on a slow run. Frontend-only, cannot touch the imaging path.)*
 
   **⚠️ Write ORIGINAL material in the genre idiom. Do NOT attempt to reproduce, transcribe or approximate any
@@ -11528,6 +11622,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   keep it to the crop pair, and reuse `cropSuggestion`/`cropNote` from `MoonSun.tsx` rather than re-wording them, so
   the two surfaces can't drift. Note `_video_stills` would want the same `ensure_framing_measured` backfill
   `_result_out` got in v0.245.2, or an old still would show no offer there.
+
+- **NEW IDEA (Builder 2026-08-08, filed while shipping the in-place sharpen v0.249.0) — the Gallery's video-still
+  card now lags the Moon & Sun page by *two* in-place edits, not one.** *(Friendliness — PRIORITY 3; size S;
+  frontend-only.)* The filed "carry the four framing fields onto `VideoStillItem` and put the Crop/Undo pair on the
+  Gallery card" entry above has a twin now: `sharpen_editable` + `sharpen_amount` are the same shape of additive
+  field, and `sharpenOffer`/`sharpenValueOf` in `components/videoFraming.ts` are already shared, pure and tested —
+  they were put there precisely so a second surface can use them without re-wording anything. Someone who has
+  cleared the clip off the NAS finds their picture **only** in the Gallery, which is exactly the person who can't
+  re-stack to change the sharpening, so this is the surface where the in-place edits matter most. **Do both in one
+  pass** — the "the still card is deliberately read-only" decision should be made once, for crop *and* sharpen
+  together, rather than half-reversed twice. Same care as the crop entry: reuse the shared copy, invalidate
+  `["gallery"]` and `["videos"]`, and give `_video_stills` the `ensure_framing_measured`-style backfill so an old
+  still isn't silently offered nothing.
 
 - **NEW IDEA (Builder 2026-08-06, same run) — a beginner can crop the Moon, but there is no way to crop anything
   else.** *(Friendliness — PRIORITY 3; size M; **think before building**.)* The framing crop is disk-shaped by
@@ -15712,10 +15819,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY 3; Builder-filed 2026-07-16.)*
 
 ### Performance (only with a measurement)
-- **NEW IDEA (Builder 2026-08-07, spotted while adversarially reading `accumulator.py`; TRACED, NOT MEASURED) —
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while adversarially reading `accumulator.py`; TRACED, NOT MEASURED) —
   `MinMaxRejectAccumulator._add_into` writes its whole k-plane extremes buffer back over itself once per frame,
-  for nothing.** *(Performance / clarity — PRIORITY 4; size XS; **not a correctness bug** — the result is
-  identical either way.)* `mins = self._mins[:, ys, xs]` is *basic* indexing (two slices), so it returns a
+  for nothing.**~~ — **CLOSED, NOT BUILT: measured, and the memcpy this is premised on does not happen**
+  (Builder 2026-08-08, branch `claude/elegant-bohr-cdbcoy`). The entry's own closing sentence — *"measure the
+  actual saving on a realistic canvas before claiming one"* — is what closed it. **NumPy elides a self-assignment
+  entirely** when the source and destination are the same memory with the same layout, which is exactly what
+  `self._mins[:, ys, xs] = mins` is: timed directly on a 1920×1080 RGB canvas, the write-back costs **0.001 ms**
+  for three k-planes, against **14.4 ms** for a genuine copy of the identical region — on the windowed
+  (`add_window`-shaped, offset-slice) path as well as the full-frame one. So there is no ~50 MB memcpy per frame
+  to remove; the claim was traced correctly but never timed.
+  **Built the entry's preferred "clearer" form anyway and A/B-timed it** (`self._mins[j, ys, xs] = slot` inside
+  the loop, write-backs dropped), same process, best-of-3, 8 frames of a 1080×1920×3 float32 canvas:
+  **k=1 70.9 → 71.8 ms/frame, k=3 165.0 → 166.9 ms/frame** — i.e. ~1 % *slower*, because the per-plane indexing
+  costs `2k` extra NumPy calls per frame and buys nothing back. Results were byte-for-byte identical either way
+  (checked at k=1 and k=3, `equal_nan=True`), as the entry predicted. Per AGENTS.md §2/§3 a refactor that is
+  neither a correctness fix nor a measured win is churn on the stack hot path, so **the change was reverted and
+  nothing shipped**. Recorded here so the next reader of this file doesn't re-derive it — and as a general note
+  worth keeping: `a[basic_slices] = a[same_basic_slices]` is free in NumPy, so "redundant write-back" findings in
+  this codebase need a timing before they're worth acting on. *(Performance / clarity — PRIORITY 4; size XS;
+  **not a correctness bug** — the result is identical either way.)*
+
+  *(Original spec kept below for provenance.)* `mins = self._mins[:, ys, xs]` is *basic* indexing (two slices), so it returns a
   **view**, and the `mins[j] = slot` loop already mutates `self._mins` in place. The trailing
   `self._mins[:, ys, xs] = mins` (and its `_maxs` twin) is therefore a self-assignment that copies `2k`
   canvas-sized float32 planes per frame per side — at the default `k=1` on a 1920×1080 RGB canvas that is ~50 MB
