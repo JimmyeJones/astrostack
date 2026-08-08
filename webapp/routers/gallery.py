@@ -230,9 +230,7 @@ def _video_stills(request: Request) -> list[VideoStillItem]:
     for m in metas:
         try:
             meta = video.ensure_framing_measured(settings, m.capture_id, m)
-            restorable = meta.crop_applied and video.has_full_frame_backup(
-                settings, m.capture_id,
-            )
+            restorable = video.crop_is_restorable(settings, m.capture_id, meta)
             has_tiff = video.has_tiff(settings, m.capture_id)
         except Exception:  # noqa: BLE001 — one unreadable still must not hide the rest
             meta, restorable, has_tiff = m, False, False

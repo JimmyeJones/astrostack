@@ -15,11 +15,41 @@ self-contained store rather than an extension of the library:
         quicklook.png ← the sharpest single frame from that pass — a two-second
                         look at what the capture actually holds, before spending
                         a full stack finding out
-        stack-full.*  ← the uncropped originals, kept only while a still is
-                        cropped in place, so "Undo crop" is always possible
+        stack-full.*  ← the picture as it stood before the first *in-place* edit,
+                        so a crop or a sharpen is always undoable
 
 Adding a directory alongside ``incoming/``/``library/``/``state/`` is additive:
 nothing existing moves, and an install that never stacks a video never grows one.
+
+In-place edits (the state model — read this before touching them)
+-----------------------------------------------------------------
+Cropping and sharpening a *finished* still both work off the saved artifacts, so
+neither costs another decode of the capture. They compose, and getting that
+composition wrong would lose someone's picture, so both are expressed as one
+derivation from a single kept original rather than as edits layered on the file:
+
+    stack.*  =  crop( sharpen(stack-full.*, sharpen_amount), crop_box )
+
+``stack-full.*`` is written **once**, the first time an in-place edit happens (or
+at stack time when the stack itself sharpened, so the kept copy is still the soft
+one). Whatever the *stack* did — including a stack-time crop — is baked into it;
+``crop_box`` describes only an in-place crop. Every operation therefore just
+changes one number in ``meta.json`` and re-derives, which is what makes each of
+them independently reversible:
+
+    crop        crop_box := measured box      → derive   (keeps any sharpen)
+    undo crop   crop_box := none              → derive   (keeps any sharpen)
+    sharpen     sharpen_amount := a           → derive   (keeps any crop)
+    unsharpen   sharpen_amount := 0           → derive   (keeps any crop)
+
+Sharpening always starts from the kept original, never from the already-sharpened
+file, so moving the slider can never compound. When neither op is active the
+original is simply moved back over ``stack.*`` — byte-for-byte the render the
+stack wrote — and no duplicate is left behind.
+
+The one case this cannot serve is a still whose *stack* sharpened it before that
+copy was kept (``sharpen_baked > 0``): there is no soft version to go back to, so
+the strength is reported but not offered for change.
 """
 
 from __future__ import annotations
@@ -32,7 +62,7 @@ from pathlib import Path
 from typing import Any
 
 from seestack.stack.output import write_full_res_png
-from seestack.video.detail import sharpen_still
+from seestack.video.detail import SHARPEN_MAX, sharpen_still
 from seestack.video.discover import VideoCapture, find_video_capture
 from seestack.video.ffmpeg import ffmpeg_available, probe_video
 from seestack.video.framing import crop_to_disk, measure_framing
@@ -124,8 +154,21 @@ class VideoStackMeta:
     #: How hard this still was sharpened after stacking (0 = not at all, which is
     #: the default and what every ``meta.json`` written before sharpening existed
     #: reads as). Recorded so the picture can say so rather than leaving the owner
-    #: wondering why one Moon looks crisper than the last.
+    #: wondering why one Moon looks crisper than the last. This is the amount
+    #: *currently* applied to the picture, whichever way it got there.
     sharpen_amount: float = 0.0
+    #: How much of that is already baked into the kept original (``stack-full.*``)
+    #: and therefore cannot be taken back off. Zero for everything the current
+    #: version writes — the stack keeps the *soft* render — and non-zero only for
+    #: a still sharpened at stack time by a version that kept no copy, which is
+    #: exactly the case where the strength can be reported but not changed.
+    sharpen_baked: float = 0.0
+    #: The in-place crop's box as ``[y0, x0, y1, x1]`` in the kept original's
+    #: pixels, so the picture can be re-derived when something else about it
+    #: changes. Empty when no in-place crop is applied. A still cropped in place
+    #: by an older version has none; the box is re-measured from the original in
+    #: that case, which is deterministic on the same picture.
+    crop_box: list[int] = field(default_factory=list)
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -368,16 +411,53 @@ class StillCropError(ValueError):
     """A crop/restore that can't be done, with a line the user can act on."""
 
 
-#: The full frame, kept beside the cropped still so a crop is always undoable.
-#: Written only when a crop actually happens, so an install that never crops one
-#: never grows them.
+#: The picture as it stood before the first in-place edit, kept beside the edited
+#: one so every such edit is undoable (see the state model in the module
+#: docstring). Written only when one actually happens, so an install that never
+#: crops or sharpens a finished still never grows them.
 FULL_PNG_NAME = "stack-full.png"
 FULL_TIFF_NAME = "stack-full.tiff"
 
 
 def has_full_frame_backup(settings: Settings, capture_id: str) -> bool:
-    """True when a cropped still's original full frame is still on disk."""
+    """True when a still's pre-edit original is still on disk."""
     return (result_dir(settings, capture_id) / FULL_PNG_NAME).is_file()
+
+
+def crop_is_restorable(
+    settings: Settings, capture_id: str, meta: VideoStackMeta | None,
+) -> bool:
+    """Whether "Undo crop" would actually give the user a bigger picture back.
+
+    The kept original is now taken by the *first* in-place edit, whichever it is,
+    so its mere existence no longer proves there is a crop to undo: a still the
+    **stack** cropped and the user then sharpened has one, and it holds the same
+    framing the picture already has. Asking the file how big it is answers the
+    question exactly, and costs one PNG header read.
+    """
+    if meta is None or not meta.crop_applied:
+        return False
+    path = result_dir(settings, capture_id) / FULL_PNG_NAME
+    if not path.is_file():
+        return False
+    from PIL import Image
+
+    try:
+        with Image.open(path) as img:
+            width, height = img.size
+    except (OSError, ValueError):
+        return False
+    return width > meta.width or height > meta.height
+
+
+def can_resharpen(meta: VideoStackMeta | None) -> bool:
+    """Whether this still's sharpening can still be changed without re-stacking.
+
+    False only for a picture whose stack sharpened it before the soft render was
+    kept beside it — there is nothing to go back to, so offering a strength that
+    would compound on top of the baked one would be a lie.
+    """
+    return meta is not None and float(meta.sharpen_baked or 0.0) <= 0.0
 
 
 def _clear_full_frame_backup(out_dir: Path) -> None:
@@ -404,29 +484,140 @@ def _read_png(path: Path):
     return arr / 255.0
 
 
-def _crop_saved_artifacts(out_dir: Path, box: tuple[int, int, int, int]) -> None:
-    """Slice the saved PNG (and TIFF, when present) to ``box``, in place.
+def _read_display(out_dir: Path, png_name: str, tiff_name: str):
+    """A saved picture as a 0–1 float image, preferring its 16-bit TIFF.
 
-    Each file is cropped in its *own* domain rather than re-rendered from one
-    array, so neither is re-quantised: the cropped PNG holds exactly the 8-bit
-    values the full-frame PNG held, and likewise for the 16-bit TIFF.
+    The TIFF is the same display render at higher precision, so measuring on it
+    is what the crop has always done; the PNG keeps a result saved before TIFFs
+    existed measurable.
+    """
+    tiff_path = out_dir / tiff_name
+    if tiff_path.is_file():
+        try:
+            import numpy as np
+            import tifffile
+
+            return np.asarray(tifffile.imread(tiff_path), dtype=np.float32) / 65535.0
+        except (OSError, ValueError):
+            pass
+    return _read_png(out_dir / png_name)
+
+
+def _ensure_orig_backup(out_dir: Path) -> None:
+    """Keep the picture as it is now, so an in-place edit can be undone.
+
+    A no-op once the copy exists: the original is whatever stood there before the
+    *first* edit, and re-taking it after a crop would freeze the cropped picture
+    as the thing every later undo restores.
+    """
+    import shutil
+
+    if (out_dir / FULL_PNG_NAME).is_file():
+        return
+    shutil.copy2(out_dir / PNG_NAME, out_dir / FULL_PNG_NAME)
+    if (out_dir / TIFF_NAME).is_file():
+        shutil.copy2(out_dir / TIFF_NAME, out_dir / FULL_TIFF_NAME)
+
+
+def _rebuild_still(
+    out_dir: Path, *, sharpen: float, box: tuple[int, int, int, int] | None,
+) -> tuple[int, int]:
+    """Re-derive ``stack.*`` from the kept original. Returns ``(height, width)``.
+
+    Three paths, deliberately, because "nothing to apply" and "crop only" both
+    have an exact answer that a float round-trip would spoil:
+
+    * **Neither op** — the original is *moved* back over ``stack.*``, which
+      restores the stack's own render byte-for-byte and leaves no duplicate.
+    * **Crop only** — each artifact is sliced in its own integer domain, so the
+      cropped PNG holds exactly the 8-bit values the original held (and likewise
+      the 16-bit TIFF). Nothing is re-quantised.
+    * **Sharpened** — the values change anyway, so this one is a real render.
+      Each artifact is still derived from its *own* original, so the 16-bit TIFF
+      that anyone editing elsewhere downloads is sharpened at full precision
+      rather than from the 8-bit picture beside it.
+
+    Every write lands on a temporary first and is swapped in, so a failure part
+    way through leaves the picture that was already there.
     """
     import numpy as np
     from PIL import Image
 
-    y0, x0, y1, x1 = box
     png_path = out_dir / PNG_NAME
-    with Image.open(png_path) as img:
-        img.convert("RGB").crop((x0, y0, x1, y1)).save(png_path, format="PNG")
-
     tiff_path = out_dir / TIFF_NAME
-    if tiff_path.is_file():
+    full_png = out_dir / FULL_PNG_NAME
+    full_tiff = out_dir / FULL_TIFF_NAME
+
+    if sharpen <= 0 and box is None:
+        with Image.open(full_png) as img:
+            width, height = img.size
+        full_png.replace(png_path)
+        if full_tiff.is_file():
+            full_tiff.replace(tiff_path)
+        return int(height), int(width)
+
+    if sharpen <= 0:
+        y0, x0, y1, x1 = box  # type: ignore[misc]
+        tmp_png = out_dir / (PNG_NAME + ".part")
+        with Image.open(full_png) as img:
+            img.convert("RGB").crop((x0, y0, x1, y1)).save(tmp_png, format="PNG")
+        tmp_png.replace(png_path)
+        if full_tiff.is_file():
+            import tifffile
+
+            arr = np.asarray(tifffile.imread(full_tiff))
+            tmp_tiff = out_dir / (TIFF_NAME + ".part")
+            tifffile.imwrite(
+                tmp_tiff, arr[y0:y1, x0:x1], photometric="rgb", compression="zlib",
+            )
+            tmp_tiff.replace(tiff_path)
+        return int(y1 - y0), int(x1 - x0)
+
+    def derive(arr):
+        out = sharpen_still(arr, sharpen)
+        if box is not None:
+            y0, x0, y1, x1 = box
+            out = out[y0:y1, x0:x1]
+        return out
+
+    with Image.open(full_png) as img:
+        src8 = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
+    derived = derive(src8)
+    tmp_png = out_dir / (PNG_NAME + ".part")
+    write_full_res_png(tmp_png, derived)
+    tmp_png.replace(png_path)
+
+    if full_tiff.is_file():
         import tifffile
 
-        arr = np.asarray(tifffile.imread(tiff_path))
-        tifffile.imwrite(
-            tiff_path, arr[y0:y1, x0:x1], photometric="rgb", compression="zlib",
-        )
+        src16 = np.asarray(tifffile.imread(full_tiff), dtype=np.float32) / 65535.0
+        tmp_tiff = out_dir / (TIFF_NAME + ".part")
+        _write_tiff16(tmp_tiff, derive(src16))
+        tmp_tiff.replace(tiff_path)
+    return int(derived.shape[0]), int(derived.shape[1])
+
+
+def _measured_box(out_dir: Path, meta: VideoStackMeta):
+    """The in-place crop's box, re-measured from the original when unrecorded.
+
+    A still cropped by a version that didn't record the box still has to be
+    re-derivable, and ``measure_framing`` is deterministic on the same picture —
+    it is what chose the box in the first place. Returns ``None`` when this still
+    isn't cropped in place, or when the box can no longer be established.
+    """
+    if not meta.crop_applied:
+        return None
+    if len(meta.crop_box) == 4:
+        return tuple(int(v) for v in meta.crop_box)  # type: ignore[return-value]
+    if not (out_dir / FULL_PNG_NAME).is_file():
+        return None
+    display = _read_display(out_dir, FULL_PNG_NAME, FULL_TIFF_NAME)
+    if display is None:
+        return None
+    framing = measure_framing(display)
+    if framing is None or not framing.worthwhile:
+        return None
+    return tuple(int(v) for v in framing.box)
 
 
 def ensure_framing_measured(
@@ -483,21 +674,9 @@ def crop_saved_still(settings: Settings, capture_id: str) -> VideoStackMeta:
     if meta.crop_applied:
         raise StillCropError("This picture has already been cropped.")
 
-    # Measure on the 16-bit TIFF when it exists (it is the same display image the
-    # crop was measured on at stack time, at higher precision); fall back to the
-    # PNG for a result saved before TIFFs, so an old still can still be cropped.
-    display = None
-    if (out_dir / TIFF_NAME).is_file():
-        try:
-            import numpy as np
-            import tifffile
-
-            display = np.asarray(tifffile.imread(out_dir / TIFF_NAME),
-                                 dtype=np.float32) / 65535.0
-        except (OSError, ValueError):
-            display = None
-    if display is None:
-        display = _read_png(out_dir / PNG_NAME)
+    # Measured on the picture as it stands, which is what the user is looking at
+    # and asking to trim — the same thing a re-stack would have measured.
+    display = _read_display(out_dir, PNG_NAME, TIFF_NAME)
     if display is None:
         raise StillCropError(
             "This picture couldn't be read back — stack the capture again."
@@ -510,19 +689,13 @@ def crop_saved_still(settings: Settings, capture_id: str) -> VideoStackMeta:
             "so the picture was left as it is."
         )
 
-    # Keep the full frame beside the cropped one so the crop is reversible. Only
-    # ever written once: cropping twice is refused above, so a backup that exists
-    # is always the true original.
-    import shutil
-
-    if not (out_dir / FULL_PNG_NAME).is_file():
-        shutil.copy2(out_dir / PNG_NAME, out_dir / FULL_PNG_NAME)
-        if (out_dir / TIFF_NAME).is_file():
-            shutil.copy2(out_dir / TIFF_NAME, out_dir / FULL_TIFF_NAME)
-
-    _crop_saved_artifacts(out_dir, framing.box)
-
-    height, width = framing.size
+    # Keep the pre-edit picture so the crop is reversible, then derive. The box
+    # is measured on the current picture but recorded against the original —
+    # they are the same picture whenever no sharpen has been applied, and when
+    # one has, the sharpen doesn't move the disk it was measured from.
+    _ensure_orig_backup(out_dir)
+    box = tuple(int(v) for v in framing.box)
+    height, width = _rebuild_still(out_dir, sharpen=_applied_sharpen(meta), box=box)
     updated = replace(
         meta,
         width=int(width),
@@ -535,6 +708,72 @@ def crop_saved_still(settings: Settings, capture_id: str) -> VideoStackMeta:
         crop_available=False,
         crop_measured=True,
         crop_trim_fraction=round(framing.trim_fraction, 4),
+        crop_box=list(box),
+    )
+    _write_meta(out_dir, updated)
+    return updated
+
+
+def _applied_sharpen(meta: VideoStackMeta) -> float:
+    """How much sharpening a rebuild has to *re-apply* to the kept original.
+
+    Zero when the original already carries it (``sharpen_baked``): that picture
+    can be cropped and uncropped freely, it simply can't be un-sharpened.
+    """
+    if float(meta.sharpen_baked or 0.0) > 0.0:
+        return 0.0
+    return float(meta.sharpen_amount or 0.0)
+
+
+def sharpen_saved_still(
+    settings: Settings, capture_id: str, amount: float,
+) -> VideoStackMeta:
+    """Change how hard a finished still is sharpened, without decoding again.
+
+    Always rendered from the kept original, never from the picture on disk, so
+    moving between strengths — or back to none — can never compound. ``amount``
+    of 0 removes the sharpening entirely.
+    """
+    meta = read_meta(settings, capture_id)
+    out_dir = result_dir(settings, capture_id)
+    if meta is None or not (out_dir / PNG_NAME).is_file():
+        raise StillCropError("There's no finished picture for this capture yet.")
+    if not can_resharpen(meta):
+        raise StillCropError(
+            "This picture was sharpened while it was being stacked, so the "
+            "unsharpened version isn't saved beside it — stack the capture "
+            "again to change how sharp it is."
+        )
+    a = float(amount)
+    if not (a >= 0.0) or a > SHARPEN_MAX:
+        raise StillCropError(
+            f"Sharpening has to be between 0 and {SHARPEN_MAX:g}."
+        )
+    if abs(a - float(meta.sharpen_amount or 0.0)) < 1e-9:
+        raise StillCropError("This picture is already sharpened by that much.")
+
+    # Worked out *before* the original is kept, because taking that copy is what
+    # would make an unanswerable crop look answerable. With no original there is
+    # nothing to re-derive from and the picture on disk is the original — so a
+    # crop the *stack* applied is simply baked into it, exactly like a stack-time
+    # sharpen, and needs no box.
+    had_original = (out_dir / FULL_PNG_NAME).is_file()
+    box = _measured_box(out_dir, meta)
+    if meta.crop_applied and had_original and box is None:
+        raise StillCropError(
+            "This picture's crop can't be worked out any more, so changing the "
+            "sharpening would lose it — stack the capture again instead."
+        )
+    _ensure_orig_backup(out_dir)
+    height, width = _rebuild_still(out_dir, sharpen=a, box=box)
+    updated = replace(
+        meta,
+        width=int(width),
+        height=int(height),
+        sharpen_amount=a,
+        # Recorded now if it wasn't before, so a later rebuild reproduces this
+        # crop exactly rather than re-measuring a sharpened picture.
+        crop_box=list(box) if box is not None else [],
     )
     _write_meta(out_dir, updated)
     return updated
@@ -543,9 +782,11 @@ def crop_saved_still(settings: Settings, capture_id: str) -> VideoStackMeta:
 def restore_full_still(settings: Settings, capture_id: str) -> VideoStackMeta:
     """Put the full frame back, undoing :func:`crop_saved_still`.
 
-    The kept originals are moved back over the cropped files (not copied), so a
-    restored still leaves no duplicate behind and "can this be undone?" stays a
-    simple question of whether the backup is there.
+    Any sharpening survives — it is re-applied to the restored frame, because
+    "undo the crop" is not a request to change how sharp the picture is. With
+    nothing left to apply the original is simply moved back, so an uncropped,
+    unsharpened still leaves no duplicate behind and "can this be undone?" stays
+    a simple question of whether the backup is there.
     """
     meta = read_meta(settings, capture_id)
     out_dir = result_dir(settings, capture_id)
@@ -557,17 +798,10 @@ def restore_full_still(settings: Settings, capture_id: str) -> VideoStackMeta:
             "capture again to get it back."
         )
 
-    (out_dir / FULL_PNG_NAME).replace(out_dir / PNG_NAME)
-    if (out_dir / FULL_TIFF_NAME).is_file():
-        (out_dir / FULL_TIFF_NAME).replace(out_dir / TIFF_NAME)
-
-    display = _read_png(out_dir / PNG_NAME)
+    height, width = _rebuild_still(out_dir, sharpen=_applied_sharpen(meta), box=None)
+    display = _read_display(out_dir, PNG_NAME, TIFF_NAME)
     framing = measure_framing(display) if display is not None else None
     worthwhile = framing is not None and framing.worthwhile
-    height, width = (
-        (display.shape[0], display.shape[1]) if display is not None
-        else (meta.source_height or meta.height, meta.source_width or meta.width)
-    )
     updated = replace(
         meta,
         width=int(width),
@@ -575,6 +809,7 @@ def restore_full_still(settings: Settings, capture_id: str) -> VideoStackMeta:
         source_width=0,
         source_height=0,
         crop_applied=False,
+        crop_box=[],
         # Re-measured rather than assumed, so the offer that comes back is the
         # honest one for the picture now on disk.
         crop_available=bool(worthwhile),
@@ -790,13 +1025,13 @@ def _video_stack_body(
         return {"cancelled": True, "capture_id": capture_id}
 
     job.set_progress("save", 0, 0, "Saving your picture")
-    display = normalize_for_display(result.image)
+    soft = normalize_for_display(result.image)
     # Stacking is an average, and averaging is a low-pass filter — so the last
     # step of every planetary workflow is a sharpen. Done on the *whole* frame,
     # before any crop, so every pixel is sharpened against its real neighbours
     # rather than against a reflected crop edge. A zero amount returns the array
     # untouched, so the default path is byte-for-byte the render it always was.
-    display = sharpen_still(display, sharpen)
+    display = sharpen_still(soft, sharpen)
     # Framing is measured on the *display-rendered* picture and applied after it,
     # so the tone mapping still sees the whole frame: cropping changes what is in
     # the picture, never how bright it is. Measuring the sharpened picture is
@@ -810,6 +1045,16 @@ def _video_stack_body(
     write_full_res_png(out_dir / PNG_NAME, display)
     _write_tiff16(out_dir / TIFF_NAME, display)
     _clear_full_frame_backup(out_dir)
+    if sharpen > 0:
+        # Keep the *soft* render (with the same framing) beside the sharpened
+        # one, so the strength stays changeable afterwards without decoding the
+        # capture a second time. Only when it would differ: an unsharpened stack
+        # is its own original and grows no second copy.
+        soft_saved = crop_to_disk(soft, framing) if (
+            crop and framing is not None and framing.worthwhile
+        ) else soft
+        write_full_res_png(out_dir / FULL_PNG_NAME, soft_saved)
+        _write_tiff16(out_dir / FULL_TIFF_NAME, soft_saved)
 
     meta = VideoStackMeta(
         capture_id=capture_id,
@@ -843,6 +1088,9 @@ def _video_stack_body(
         # never needs the one-off backfill in ``ensure_framing_measured``.
         crop_measured=True,
         sharpen_amount=float(sharpen),
+        # Zero: the copy kept beside a sharpened still is the *soft* render,
+        # so the strength stays changeable from here on.
+        sharpen_baked=0.0,
     )
     _write_meta(out_dir, meta)
     return {

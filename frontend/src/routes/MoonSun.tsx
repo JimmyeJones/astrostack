@@ -5,7 +5,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import {
   IconAlertTriangle, IconArrowBackUp, IconChartBar, IconCrop, IconDownload,
-  IconMoon, IconSun, IconVideo, IconWand,
+  IconMoon, IconSparkles, IconSun, IconVideo, IconWand,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -24,10 +24,14 @@ import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
 // Re-exported here so this page stays the obvious place to look for it (and its
 // existing callers/tests keep importing it from one place).
 import {
-  DEFAULT_SHARPEN, SHARPEN_PRESETS, cropNote, cropSuggestion, sharpenNote, subjectNoun,
+  DEFAULT_SHARPEN, SHARPEN_PRESETS, cropNote, cropSuggestion, sharpenNote,
+  sharpenOffer, sharpenValueOf, subjectNoun,
 } from "../components/videoFraming";
 
-export { DEFAULT_SHARPEN, SHARPEN_PRESETS, cropNote, cropSuggestion, sharpenNote, subjectNoun };
+export {
+  DEFAULT_SHARPEN, SHARPEN_PRESETS, cropNote, cropSuggestion, sharpenNote,
+  sharpenOffer, sharpenValueOf, subjectNoun,
+};
 
 // Local, like Storage.tsx's `gb` — a video is MB-to-GB sized, and there is no
 // shared byte formatter to reach for.
@@ -146,6 +150,25 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
+  // Same bargain as the crop: how sharp a picture wants to be is a decision made
+  // by *looking at it*, so acting on it must not cost another multi-minute
+  // decode. Every strength renders from the copy kept beside the picture, which
+  // is what makes trying them safe.
+  const sharpenStill = useMutation({
+    mutationFn: (amount: number) => api.sharpenVideoStill(capture.id, amount),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["videos"] });
+      qc.invalidateQueries({ queryKey: ["gallery"] });
+      notifications.show({
+        message: (r.sharpen_amount ?? 0) > 0
+          ? `Sharpened your ${capture.label} picture — change it again any time.`
+          : `Put the unsharpened ${capture.label} picture back.`,
+        color: "teal",
+      });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
   const result = capture.result;
   // The source clip is gone from `incoming/` — cleared off the NAS, which is
   // exactly what the in-place crop was built to survive. The picture is still
@@ -155,6 +178,7 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
   const sourceGone = capture.files.length === 0;
   const suggestCrop = cropSuggestion(result, capture.kind);
   const cropped = cropNote(result, capture.kind);
+  const offerSharpen = sharpenOffer(result, capture.kind);
 
   return (
     <Card withBorder radius="md" padding="md">
@@ -238,6 +262,31 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
               >
                 Crop it
               </Button>
+            </Alert>
+          ) : null}
+          {/* …and the same offer for the detail, for the same reason: nobody
+              knows how sharp they want the picture until they can see it. */}
+          {offerSharpen ? (
+            <Alert
+              color="violet"
+              variant="light"
+              icon={<IconSparkles size={18} />}
+              p="xs"
+              mt={4}
+            >
+              <Text size="xs">{offerSharpen}</Text>
+              <Select
+                mt={6}
+                size="xs"
+                label="Bring out surface detail"
+                description="Applied to the saved picture — no re-stack."
+                data={SHARPEN_PRESETS}
+                value={sharpenValueOf(result)}
+                onChange={(v) => sharpenStill.mutate(Number(v ?? DEFAULT_SHARPEN))}
+                disabled={sharpenStill.isPending}
+                allowDeselect={false}
+                w={{ base: "100%", xs: 260 }}
+              />
             </Alert>
           ) : null}
           <Group gap="xs" mt={4}>

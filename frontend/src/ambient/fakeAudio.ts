@@ -66,6 +66,17 @@ export class FakeBufferSource extends FakeNode {
   loop = false;
 }
 
+export class FakeDelay extends FakeNode {
+  delayTime = new FakeParam();
+  constructor(public maxDelayTime = 1) {
+    super();
+  }
+}
+
+export class FakeStereoPanner extends FakeNode {
+  pan = new FakeParam();
+}
+
 class FakeConvolver extends FakeNode {
   buffer: unknown = null;
 }
@@ -99,6 +110,8 @@ export class FakeAudioContext {
   oscillators: FakeOscillator[] = [];
   gains: FakeGain[] = [];
   bufferSources: FakeBufferSource[] = [];
+  delays: FakeDelay[] = [];
+  panners: FakeStereoPanner[] = [];
   /** Set to make `resume()` reject, standing in for a browser that blocks it. */
   resumeRejects = false;
 
@@ -128,6 +141,16 @@ export class FakeAudioContext {
     const s = new FakeBufferSource();
     this.bufferSources.push(s);
     return s;
+  }
+  createDelay(maxDelayTime = 1): FakeDelay {
+    const d = new FakeDelay(maxDelayTime);
+    this.delays.push(d);
+    return d;
+  }
+  createStereoPanner(): FakeStereoPanner {
+    const p = new FakeStereoPanner();
+    this.panners.push(p);
+    return p;
   }
   createConvolver(): FakeConvolver {
     return new FakeConvolver();

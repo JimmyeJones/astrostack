@@ -1,11 +1,11 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_KEEP, DEFAULT_SHARPEN, MoonSunView, cropNote, cropSuggestion,
-  resultSummary, sharpenNote, subjectNoun,
+  resultSummary, sharpenNote, sharpenOffer, sharpenValueOf, subjectNoun,
 } from "./MoonSun";
 import * as client from "../api/client";
 import type { VideoCapture, VideoList, VideoResult } from "../api/client";
@@ -602,5 +602,100 @@ describe("sharpening a Moon or Sun picture", () => {
     renderView();
     await waitFor(() => screen.getByText(/Stacked the sharpest/));
     expect(screen.queryByText(/Sharpening:/)).not.toBeInTheDocument();
+  });
+});
+
+
+describe("changing the sharpening on a picture that already exists", () => {
+  it("offers it once there is a picture to look at, and says it never builds up",
+    () => {
+      const fresh = sharpenOffer({ sharpen_editable: true }, "lunar");
+      expect(fresh).toContain("Moon");
+      expect(fresh).toMatch(/doesn't re-stack/i);
+      const already = sharpenOffer(
+        { sharpen_editable: true, sharpen_amount: 1.2 }, "lunar",
+      );
+      // Once one is applied the offer becomes "try another", and the reassurance
+      // that matters is that strengths don't accumulate.
+      expect(already).toMatch(/nothing builds up/i);
+      expect(already).toMatch(/back exactly where you started/i);
+    });
+
+  it("stays quiet when the backend can't do it without a re-stack", () => {
+    // A still sharpened before the soft render was kept beside it: the strength
+    // is still reported, but an offer that could only fail is worse than none.
+    expect(sharpenOffer({ sharpen_amount: 1.2, sharpen_editable: false }, "lunar"))
+      .toBeNull();
+    // An older backend sends neither field.
+    expect(sharpenOffer({}, "lunar")).toBeNull();
+    expect(sharpenOffer(null, "lunar")).toBeNull();
+  });
+
+  it("shows the strength the picture actually has, snapped to the menu", () => {
+    expect(sharpenValueOf(null)).toBe(DEFAULT_SHARPEN);
+    expect(sharpenValueOf({})).toBe(DEFAULT_SHARPEN);
+    expect(sharpenValueOf({ sharpen_amount: 0 })).toBe("0");
+    expect(sharpenValueOf({ sharpen_amount: 1.2 })).toBe("1.2");
+    // A value that didn't come from the menu still selects something.
+    expect(sharpenValueOf({ sharpen_amount: 0.55 })).toBe("0.6");
+    expect(sharpenValueOf({ sharpen_amount: Number.NaN })).toBe(DEFAULT_SHARPEN);
+  });
+
+  it("sharpens a finished still in place — the capture is never decoded again",
+    async () => {
+      vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+        captures: [capture({ result: result({ sharpen_editable: true }) })],
+      }));
+      const sharpen = vi.spyOn(client.api, "sharpenVideoStill")
+        .mockResolvedValue(result({ sharpen_amount: 1.2, sharpen_editable: true }));
+      const stack = vi.spyOn(client.api, "stackVideoCapture")
+        .mockResolvedValue({ job_id: "j1" });
+      renderView();
+      await waitFor(() =>
+        expect(screen.getByText(/slightly softer/)).toBeInTheDocument());
+      // Scoped to the offer: the stack form below has its own sharpening menu
+      // showing the same "Off", so an unscoped query would match both.
+      const offer = within(
+        screen.getByText(/slightly softer/).closest("[role='alert']") as HTMLElement,
+      );
+      const input = offer.getByDisplayValue(/Off — the plain stacked picture/);
+      fireEvent.click(input);
+      // Both menus list the same strengths, so pick the option belonging to
+      // *this* combobox rather than whichever one the document finds first.
+      const listId = input.getAttribute("aria-controls");
+      const options = await screen.findAllByText(/Medium — more surface detail/);
+      const option = options.find((el) => el.closest(`#${listId}`));
+      expect(option).toBeDefined();
+      fireEvent.click(option!);
+      await waitFor(() =>
+        expect(sharpen).toHaveBeenCalledWith("Lunar_video", 1.2));
+      // The whole point of doing it on the saved picture.
+      expect(stack).not.toHaveBeenCalled();
+    });
+
+  it("offers it even when ffmpeg is missing — it only touches the picture",
+    async () => {
+      vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+        available: false,
+        hint: "no ffmpeg here",
+        captures: [capture({ result: result({ sharpen_editable: true }) })],
+      }));
+      renderView();
+      await waitFor(() =>
+        expect(screen.getByText(/slightly softer/)).toBeInTheDocument());
+    });
+
+  it("hides the control on a still that would have to be re-stacked", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        result: result({ sharpen_amount: 1.2, sharpen_editable: false }),
+      })],
+    }));
+    renderView();
+    // The provenance line still appears — the picture says how sharp it is…
+    await waitFor(() =>
+      expect(screen.getByText(/Sharpening: Medium/)).toBeInTheDocument());
+    // …but there is nothing offering to change it.
+    expect(screen.queryByLabelText(/Bring out surface detail/i)).toBeNull();
   });
 });
