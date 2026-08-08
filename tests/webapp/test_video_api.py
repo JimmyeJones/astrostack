@@ -603,6 +603,41 @@ def test_a_sharpened_still_can_still_be_cropped_to_the_disk(client, data_root):
     assert client.get("/api/videos/Lunar_video/preview.png").status_code == 200
 
 
+def test_a_stack_that_sharpens_keeps_the_soft_render_beside_it(client, data_root):
+    """So the strength stays changeable afterwards, with no second decode.
+
+    Without the kept copy, changing your mind about sharpening would mean
+    re-stacking a multi-minute capture — which is exactly the wait the in-place
+    edits exist to remove.
+    """
+    from webapp import video as videomod
+
+    _drop_capture(data_root, n_frames=12, sharp_indices=(1, 4, 7, 10))
+    cap = _stack(client, sharpen=1.2)
+    assert cap["result"]["sharpen_editable"] is True
+    out_dir = data_root / "video" / "Lunar_video"
+    assert (out_dir / videomod.FULL_PNG_NAME).is_file()
+    sharp_png = client.get("/api/videos/Lunar_video/preview.png").content
+
+    # And it really is the soft one: taking the sharpening off lands on a
+    # picture with visibly less fine detail, rendered from that copy.
+    r = client.post("/api/videos/Lunar_video/sharpen", json={"amount": 0})
+    assert r.status_code == 200, r.text
+    assert r.json()["sharpen_amount"] == 0.0
+    soft_png = client.get("/api/videos/Lunar_video/preview.png").content
+    assert _detail_energy(sharp_png) > _detail_energy(soft_png)
+
+
+def test_an_unsharpened_stack_grows_no_second_copy(client, data_root):
+    """It is its own original, so there is nothing to keep. Storage matters."""
+    from webapp import video as videomod
+
+    _drop_capture(data_root)
+    cap = _stack(client)
+    assert cap["result"]["sharpen_editable"] is True
+    assert not (data_root / "video" / "Lunar_video" / videomod.FULL_PNG_NAME).is_file()
+
+
 def test_a_full_frame_still_offers_to_crop_the_empty_sky(client, data_root):
     """The Seestar frames the Moon generously — the finished still should say so.
 

@@ -9357,8 +9357,58 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-08-07, spotted while shipping the sharpening slice v0.247.0) — trying a different
-  sharpening strength costs a whole second decode of the capture, when the crop next to it costs none.**
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while shipping the sharpening slice v0.247.0) — trying a different
+  sharpening strength costs a whole second decode of the capture, when the crop next to it costs none.**~~ —
+  **SHIPPED v0.249.0** (Builder 2026-08-08, branch `claude/elegant-bohr-cdbcoy`). *(Friendliness / autonomy —
+  PRIORITY 2–3.)* A finished Moon/Sun still now carries the same offer the crop does — *"Stacking averages your
+  frames together, which makes the picture cleaner but slightly softer…"* with the four-strength menu right under
+  it — and acting on it is a single instant request (`POST /api/videos/{id}/sharpen`), not a multi-minute
+  re-decode of a capture that may not even be on the NAS any more.
+  **The entry's "decide the crop interaction before writing code" note is the whole design, and it was answered by
+  making both edits *one derivation* rather than two layers on the file:**
+
+      stack.*  =  crop( sharpen(stack-full.*, sharpen_amount), crop_box )
+
+  `stack-full.*` — which used to mean "the uncropped original" — is now "the picture as it stood before the first
+  *in-place* edit", written once and never re-taken; whatever the **stack** did (including a stack-time crop) is
+  baked into it, and `crop_box` describes only an in-place crop. Every operation then just changes one number in
+  `meta.json` and re-derives, which is what makes each of them independently reversible **and** makes the ordering
+  question the entry worried about disappear: there is no order, only a formula. Crop keeps the sharpening, uncrop
+  keeps the sharpening, sharpen keeps the crop, unsharpen keeps the crop. Sharpening always renders from the kept
+  original, never from the sharpened file, so trying strengths **cannot compound** (pinned by a test that reaches
+  the same strength by two different routes and asserts the pixels are identical). With neither op active the
+  original is *moved* back — byte-for-byte the render the stack wrote — so an unedited still leaves no duplicate,
+  which is exactly the property `crop_restorable` already relied on.
+  **The 8-bit re-render the entry asks about was measured and then designed away:** `_rebuild_still` has three
+  paths, and only the sharpened one is a render. "Nothing to apply" is a file move; **crop-only slices each
+  artifact in its own integer domain**, so a crop is still byte-for-byte the pixels that were there (the existing
+  `test_the_cropped_pixels_are_the_ones_the_full_frame_had` passes unchanged); and the sharpened path derives the
+  **16-bit TIFF from the 16-bit original**, so the file anyone edits elsewhere is sharpened at full precision
+  rather than from the 8-bit picture beside it. Every write lands on a `.part` and is swapped in, so a failure
+  part-way leaves the picture that was already there (pinned).
+  **Upgrade safety, all four cases pinned:** a `meta.json` with none of the new fields reads as an unsharpened,
+  un-cropped picture and can be sharpened; a still saved before 16-bit TIFFs existed works (and its undo is still
+  exact); a still cropped in place before the box was recorded has it **re-measured from the original** — which is
+  deterministic on the same picture, since that is what chose it — and the box is written back so the next rebuild
+  needn't guess; and a still whose *stack* sharpened it before the soft render was kept beside it (v0.247.x, one
+  day of pictures) reports `sharpen_editable: false`, keeps its provenance line, and hides the control rather than
+  offering a change that would compound. New stacks that sharpen now keep the soft render alongside, so this last
+  case can't recur; an **unsharpened** stack keeps no second copy, because it is its own original.
+  Additive throughout: one new endpoint, two additive nullable response fields (`sharpen_editable`, plus
+  `sharpen_baked`/`crop_box` in the on-disk meta), no default flipped, no existing shape changed.
+  **Deliberately not done:** the Gallery's video-still card, which is still read-only by design — filed below as
+  its own entry alongside the crop-there idea, since both want the same decision.
+  **Tests (+27):** `tests/webapp/test_video_sharpen_still.py` (**new, +21** — the feature; strengths never
+  compound; undo restores the PNG *and* the TIFF byte-for-byte; no duplicate left behind; the TIFF is sharpened
+  too; and the full crop × sharpen × undo matrix: sharpen-a-cropped-still, crop-a-sharpened-still,
+  uncrop-keeps-the-sharpening, unsharpen-keeps-the-crop, both orders landing on the same picture, and a whole
+  round trip returning the stack's own render exactly — plus every refusal, the four upgrade cases and the
+  crash-safety one), `tests/webapp/test_video_api.py` (+2 — a sharpening stack keeps the soft render and can be
+  un-sharpened from it; an unsharpened one grows no second copy) and `MoonSun.test.tsx` (+4 — the offer's wording
+  before and after, silence when the backend can't do it, the strength snapped to the menu, the control acting
+  in place without ever calling the stack endpoint, and the hidden-control case).
+
+  *(Original spec kept below for provenance.)*
   *(Friendliness / autonomy — PRIORITY 2–3; size M.)* Sharpening is a decision you can only really make by
   *looking at the picture* — exactly like the crop — but it was shipped as a stack-time option, so changing your
   mind means "Stack again" and another multi-minute grade+stack pass on a long capture. The crop already solved
@@ -11572,6 +11622,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   keep it to the crop pair, and reuse `cropSuggestion`/`cropNote` from `MoonSun.tsx` rather than re-wording them, so
   the two surfaces can't drift. Note `_video_stills` would want the same `ensure_framing_measured` backfill
   `_result_out` got in v0.245.2, or an old still would show no offer there.
+
+- **NEW IDEA (Builder 2026-08-08, filed while shipping the in-place sharpen v0.249.0) — the Gallery's video-still
+  card now lags the Moon & Sun page by *two* in-place edits, not one.** *(Friendliness — PRIORITY 3; size S;
+  frontend-only.)* The filed "carry the four framing fields onto `VideoStillItem` and put the Crop/Undo pair on the
+  Gallery card" entry above has a twin now: `sharpen_editable` + `sharpen_amount` are the same shape of additive
+  field, and `sharpenOffer`/`sharpenValueOf` in `components/videoFraming.ts` are already shared, pure and tested —
+  they were put there precisely so a second surface can use them without re-wording anything. Someone who has
+  cleared the clip off the NAS finds their picture **only** in the Gallery, which is exactly the person who can't
+  re-stack to change the sharpening, so this is the surface where the in-place edits matter most. **Do both in one
+  pass** — the "the still card is deliberately read-only" decision should be made once, for crop *and* sharpen
+  together, rather than half-reversed twice. Same care as the crop entry: reuse the shared copy, invalidate
+  `["gallery"]` and `["videos"]`, and give `_video_stills` the `ensure_framing_measured`-style backfill so an old
+  still isn't silently offered nothing.
 
 - **NEW IDEA (Builder 2026-08-06, same run) — a beginner can crop the Moon, but there is no way to crop anything
   else.** *(Friendliness — PRIORITY 3; size M; **think before building**.)* The framing crop is disk-shaped by

@@ -1386,6 +1386,10 @@ export interface VideoResult {
   // How hard this picture was sharpened (0 = not at all). Optional: a still
   // stacked before sharpening existed sends nothing and reads as unsharpened.
   sharpen_amount?: number;
+  // True when that strength can still be changed from the saved picture, with no
+  // second decode. Optional/false from an older backend, which then simply
+  // doesn't offer the control.
+  sharpen_editable?: boolean;
   // True when the still was cropped in place and its full frame is still saved
   // beside it, so the crop can be undone in one click.
   crop_restorable?: boolean;
@@ -2161,4 +2165,11 @@ export const api = {
     req<VideoResult>(`/api/videos/${encodeURIComponent(id)}/crop`, { method: "POST" }),
   restoreVideoStill: (id: string) =>
     req<VideoResult>(`/api/videos/${encodeURIComponent(id)}/uncrop`, { method: "POST" }),
+  // Change how sharp a finished still is, for the same reason and in the same
+  // way as the crop: it re-renders from the copy kept beside the picture, so it
+  // is instant, never compounds, and `amount: 0` puts the soft picture back.
+  sharpenVideoStill: (id: string, amount: number) =>
+    req<VideoResult>(`/api/videos/${encodeURIComponent(id)}/sharpen`, {
+      method: "POST", body: JSON.stringify({ amount }),
+    }),
 };
