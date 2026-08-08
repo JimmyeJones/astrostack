@@ -120,6 +120,13 @@ class VideoStillItem(BaseModel):
     #: Sun page does. Additive with a ``0.0`` default, which is exactly what
     #: every still made before sharpening existed was.
     sharpen_amount: float = 0.0
+    #: Whether that strength can still be changed in place, i.e. without decoding
+    #: the video again — false only for a picture whose *stack* sharpened it
+    #: before the soft render was kept beside it. Same
+    #: :func:`webapp.video.can_resharpen` call the Moon & Sun page's result uses,
+    #: so neither surface can offer an edit the other knows would fail. Additive
+    #: with a ``False`` default, which simply offers nothing.
+    sharpen_editable: bool = False
 
 
 class GalleryResponse(BaseModel):
@@ -254,6 +261,7 @@ def _video_stills(request: Request) -> list[VideoStillItem]:
             source_height=meta.source_height,
             crop_restorable=restorable,
             sharpen_amount=meta.sharpen_amount,
+            sharpen_editable=video.can_resharpen(meta),
         ))
     return items
 

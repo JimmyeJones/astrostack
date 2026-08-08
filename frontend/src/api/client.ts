@@ -957,6 +957,10 @@ export interface VideoStill {
   // in the same words the Moon & Sun page does. Optional: an older backend omits
   // it and a still made before sharpening existed reads as unsharpened.
   sharpen_amount?: number;
+  // Whether that strength can still be changed without re-stacking. Optional:
+  // an older backend omits it and the card simply offers no sharpening control,
+  // which is what it did before this field existed.
+  sharpen_editable?: boolean;
 }
 
 export interface BestPicture {
