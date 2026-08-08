@@ -11459,8 +11459,33 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-08) — "How many more clear nights?": a plain-language ETA to a target's
-  integration goal, from the owner's own recent pace.** *(Pillar: autonomy + friendliness, PRIORITY 2–3; size M —
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-08) — "How many more clear nights?": a plain-language ETA to a target's
+  integration goal, from the owner's own recent pace.**~~ — **SHIPPED v0.252.0** (Builder 2026-08-08, branch
+  `claude/elegant-bohr-tp5639`), built to the filed shape. `frontend/src/components/clearNights.ts` is the pure
+  helper (`estimateClearNights(gapSeconds, nights)`); the Target page's "Is it enough yet?" card renders its one
+  sentence between the verdict and the √N line, which is where the unanswered question actually sits. It reads the
+  target's existing night-by-night breakdown (`/api/targets/{safe}/nights`, **newest first**) under the *same*
+  query key the Nights card uses, so TanStack serves one request to both — **no new endpoint, no new response
+  field, no engine/schema/DB/config change**, and nothing persisted.
+  **The pace:** the median kept integration over the most recent `PACE_LOOKBACK_NIGHTS` = 5 nights that really
+  accrued something (≥2 min kept — below that a "night" is a test frame or two, and counting it would drag the
+  median down and inflate the ETA). Median, not mean, so one short night doesn't skew it; a 5-night window so a
+  change of habit shows up quickly instead of being averaged against old marathons. The gap is then divided by it
+  and rounded **up** — you can't shoot 1.2 nights.
+  **Every self-hiding rule the entry asked for, each pinned by a test:** silent when the goal is met (the verdict
+  already celebrates), when there's no night history, from a single night (one session is not a pace), and when
+  only one of several recent nights accrued anything (that's data, not a pace — projecting the whole remaining
+  goal off it would be a confident guess from nothing). The one non-numeric answer is the all-duds case the entry
+  called out — recent nights recorded subs but kept next to none — where it says so and suggests checking focus
+  and framing rather than dividing by ~zero. Wording is *"clear nights"* throughout: the app cannot promise
+  weather, and any other phrasing would be the dishonest way to say this. A far goal at a slow pace prints the
+  real (large) number rather than a silently capped one, so nobody plans around a flattering figure.
+  **Tests (+16):** `clearNights.test.ts` (+13 — the division and its median/lookback behaviour, singular vs plural,
+  round-up, goal met, no history, one night, one-productive-night, the all-duds advisory, never dividing by zero,
+  NaN/∞ gaps refused, and the honest big number) and `Target.test.tsx` (+3 — the line renders end-to-end with the
+  real card, and stays absent when the goal is met or there's a single night of history).
+  *(Original spec kept below for provenance.)*
+  *(Pillar: autonomy + friendliness, PRIORITY 2–3; size M —
   one new pure helper + one Target-page line, no engine/schema change.)* The app already lets a beginner set a
   per-target integration goal and gives an "Is it enough yet?" readiness verdict (shipped), but when the answer is
   "not yet" it stops there — it never answers the question the beginner actually has next: *"so how much longer will
