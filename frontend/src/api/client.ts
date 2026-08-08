@@ -953,6 +953,11 @@ export interface VideoStill {
   source_width?: number;
   source_height?: number;
   crop_restorable?: boolean;
+  // Anything the stack wants said about this picture (frames that couldn't be
+  // aligned, a truncated tail frame). The same engine strings the Moon & Sun
+  // card shows, so one picture reads the same on both. Optional: an older
+  // backend omits them and the card simply says nothing extra.
+  warnings?: string[];
   // How hard this picture was sharpened (0 = not at all), so the card can say so
   // in the same words the Moon & Sun page does. Optional: an older backend omits
   // it and a still made before sharpening existed reads as unsharpened.

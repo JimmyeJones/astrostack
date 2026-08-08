@@ -729,6 +729,38 @@ describe("Gallery Moon & Sun stills", () => {
     expect(screen.getByDisplayValue(/Medium — more surface detail/)).toBeInTheDocument();
   });
 
+  it("shows a still's warnings, so the Gallery isn't the quiet surface", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [],
+      videos: [{
+        ...still("Lunar_video"),
+        warnings: ["12 frames couldn't be aligned.", "The last frame was truncated."],
+      }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    // Verbatim engine strings — the same ones the Moon & Sun card renders.
+    expect(await screen.findByText("12 frames couldn't be aligned.")).toBeInTheDocument();
+    expect(screen.getByText("The last frame was truncated.")).toBeInTheDocument();
+  });
+
+  it("says nothing extra for a still with no warnings, or an older backend", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      // No `warnings` key at all — what a backend from before the field sends.
+      items: [], videos: [still("Lunar_video")],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    // Renders the card without throwing on the missing list.
+    expect(await screen.findByText("Moon")).toBeInTheDocument();
+  });
+
   it("hides the control on a still that would have to be stacked again", async () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({
       items: [],

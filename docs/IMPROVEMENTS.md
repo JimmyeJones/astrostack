@@ -6351,6 +6351,58 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- ~~**NEW IDEA (Builder 2026-08-08, spotted while closing the Gallery's sharpen gap in v0.250.0) — the Gallery's
+  still card silently drops a finished picture's *warnings*, so the one surface a cleared-NAS user has is the one
+  that doesn't tell them anything went wrong.**~~ — **SHIPPED v0.250.2** (Builder 2026-08-08, same run and branch
+  that filed it — it was XS and the context was already open, so filing it and leaving it would have been the more
+  expensive choice). *(Friendliness / trust — PRIORITY 3.)* `VideoStillItem` gained an additive
+  `warnings: list[str] = []`, filled from `meta.warnings` exactly as `video.py` does, and the Gallery card renders
+  the lines dimmed under the caption the way the Moon & Sun card does — **verbatim**, not re-worded, because they
+  are engine strings and one picture must read the same on both surfaces. With this the three-item parity list is
+  closed: crop (v0.244.0), sharpen (v0.250.0), warnings (v0.250.2). **One premise in the filed spec turned out to
+  be wrong, and is worth knowing:** there is no "older `meta.json`" case for this field the way there is for the
+  framing and sharpening ones — `warnings` is a **required** field on `VideoStackMeta`, written by every version
+  that ever made a still, so a `meta.json` lacking it isn't an old still but a broken one, which `read_meta`
+  already drops (covered by the existing half-written-result test). The test that tried to simulate the old case
+  by deleting the key proved exactly that, and was rewritten to say so. Additive and upgrade-safe: one optional
+  response field with an empty default, no endpoint, schema, config, on-disk or default change. **Tests (+4):**
+  `tests/webapp/test_gallery.py` (+2 — warnings carried verbatim, and an empty list rather than a missing key when
+  there is nothing to say), `Gallery.test.tsx` (+2 — both lines render, and a payload with no `warnings` key at
+  all still renders the card).
+  *(Original spec kept below for provenance.)*
+  *(Friendliness / trust — PRIORITY 3; size XS; the last of the
+  three-item parity list, and the only one left.)* `VideoResultOut` carries `warnings: list[str]`
+  (`webapp/routers/video.py:110`, filled from `meta.warnings`) and the Moon & Sun card renders every line of it —
+  *"12 frames couldn't be aligned"*, *"the last frame was truncated"*, and so on. `VideoStillItem`
+  (`webapp/routers/gallery.py`) has **no such field at all**, so the Gallery shows the picture with no hint that
+  part of the capture was dropped. That is the same shape of gap the crop (v0.244.0) and the sharpen (v0.250.0)
+  had — and the worst of the three to leave open, because the other two withheld an *action* while this withholds
+  the *reason the picture looks how it does*. **Slice:** add `warnings: list[str] = []` to `VideoStillItem`
+  (additive, empty default — an older still and an older frontend both read as "nothing to say"), fill it from
+  `meta.warnings` exactly as `video.py` does, and render the lines dimmed under the caption the way the Moon & Sun
+  card already does. **Care:** don't re-word them — they are engine strings shared by both surfaces, and the whole
+  point of `components/videoFraming.ts` is that one picture is described in one voice. Verify a still with no
+  warnings gains no empty block.
+
+- **ENGINE QA NOTE (Builder 2026-08-08, read adversarially while looking for a stacking-engine bug to fix; nothing
+  found — recorded so the rotation doesn't re-tread it).** Four areas of the Current-focus §1 list traced **clean**
+  on a close read: (1) `seestack/stack/accumulator.py` — the weighted-sum path's `_count` any-channel coverage, the
+  min/max `k`-set insertion (the ±inf identities can never form an `inf − inf` because the `full` band requires
+  `count ≥ 2k+1`, which fills every slot; the `single`/`lt3` degradation bands are disjoint and complete), and both
+  Welford paths (`add_window`'s in-place view writes compute `new_mean` before overwriting `sub_mean`, so the
+  M2 update reads the old mean, which is correct); (2) `seestack/stack/weighting.py` — every factor guards its own
+  divisor, the geometric mean keeps the result inside `[min_weight, 1]`, and the empty-`weighted_list`
+  `WeightingStats` positional construction is right; (3) `seestack/calibrate/apply.py` — the no-data pedestal
+  masks, the wrong-shaped-bias gating (one predicate shared by the scaling path, the advisory warning *and* the
+  provenance stamp) and the "returns a new array" contract on the empty-bundle path all hold; (4) the
+  weight-vs-frame-count question in `seestack/bg/coverage_leveling.py`, which was the one thing that looked like a
+  live bug from the outside — it is **not**: the leveler rounds the Σ-weight map to the nearest integer before
+  `np.unique`, and says so, so quality weighting does not shatter it into a bin per pixel. The only real finding
+  was the sidecar's mislabelled `BUNIT`, shipped this run as v0.250.1. **What is still worth a future adversarial
+  pass:** `stacker.py` (2 400 lines — the κ-σ two-pass gating and the memory-budget drizzle-scale logic in
+  particular) and `drizzle_path.py`, neither of which this run had the budget to read end to end.
+
 - **MEASURED OBSERVATION (Builder 2026-08-06, measured while building the v0.240.1 nudge — file this before anyone
   "improves" the shoulder blind) — "Hold back highlights" rescues an *ordinary* blown core and is essentially
   powerless on an extreme one, because the Reinhard shoulder is asymptotic.** *(Image quality — PRIORITY 4; size M;
