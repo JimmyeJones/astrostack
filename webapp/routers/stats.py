@@ -17,6 +17,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from webapp import deps, video
+from webapp.goals import read_goal_s
 from webapp.site_location import resolve_site_lon
 
 router = APIRouter(tags=["stats"])
@@ -111,11 +112,6 @@ class LastNightResponse(BaseModel):
 # ``last_activity_utc``) so a just-changed goal shows within a minute.
 _PROGRESS_CACHE_TTL_S = 60.0
 
-# Project-meta key holding a target's user-set integration goal (accepted-sub
-# exposure, seconds). Mirrors ``routers.targets._GOAL_META_KEY`` — kept in sync
-# by hand (a tiny stable constant); read-only here.
-_GOAL_META_KEY = "integration_goal_s"
-
 
 class TargetProgressOut(BaseModel):
     """One target's inputs for the Dashboard "Target progress" overview. The
@@ -135,21 +131,6 @@ class TargetProgressOut(BaseModel):
     # client-side from its night list. Additive and optional: an older frontend
     # ignores it, and a null simply means the row says nothing about nights.
     recent_pace_s: float | None = None
-
-
-def _read_goal_s(proj) -> float | None:  # noqa: ANN001
-    """Parse a target's stored integration goal, tolerating a stale/garbage value
-    (treated as unset) so a hand-edited project can never 500 the overview."""
-    raw = proj.get_meta(_GOAL_META_KEY)
-    if raw is None:
-        return None
-    try:
-        val = float(raw)
-    except (TypeError, ValueError):
-        return None
-    if not (val > 0) or val != val:  # non-positive or NaN → unset
-        return None
-    return val
 
 
 def _collect_progress(lib, targets) -> list[TargetProgressOut]:
@@ -177,7 +158,7 @@ def _collect_progress(lib, targets) -> list[TargetProgressOut]:
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
-            goal_s = _read_goal_s(proj)
+            goal_s = read_goal_s(proj)
             pace_s = recent_night_pace_s(proj)
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
             pass

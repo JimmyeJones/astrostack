@@ -281,6 +281,11 @@ class PlannedTarget:
     target_safe: str | None = None
     frames_accepted: int | None = None
     total_exposure_s: float | None = None
+    # The user's own integration goal for this target (seconds), when they set
+    # one — so the row's readiness hint uses the same goal as every other screen.
+    # ``None`` for a catalog row, for a target with no goal set, and on an older
+    # backend; the per-object-type default then applies as before.
+    goal_s: float | None = None
     # "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
     # verdict derived from it, for catalog candidates the bundled catalog has a
     # size for; ``None`` otherwise (library rows carry none — the Target page
@@ -797,6 +802,14 @@ class LibraryTarget:
     # and the Dashboard "Target progress" card. Empty when unknown.
     object_type: str = ""
     con: str = ""
+    # The user's own integration goal for this target (accepted-sub exposure,
+    # seconds), or None when they haven't set one and the per-object-type default
+    # applies. Carried so the planner's "have I shot enough of this?" row hint
+    # answers with the goal the *user* set, exactly as the Target page and the
+    # Dashboard overview do — a target the owner deliberately wants 12 h of must
+    # not be labelled "try something new" at 7 h just because the type default is
+    # 6 h. Purely annotation: it never affects scoring or ranking.
+    goal_s: float | None = None
 
 
 def plan_tonight(observer: Observer, when_utc: datetime, *,
@@ -890,6 +903,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 usable_end_utc=o.usable_end_utc.isoformat() if o.usable_end_utc else None,
                 target_safe=t.safe, frames_accepted=t.frames_accepted,
                 total_exposure_s=round(t.total_exposure_s, 1),
+                goal_s=t.goal_s,
             ))
         else:
             obj: CatalogObject = m["obj"]
