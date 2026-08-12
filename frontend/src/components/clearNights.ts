@@ -94,14 +94,42 @@ export function estimateClearNights(
   if (productive.length < 2) return null;
 
   const paceSeconds = median(productive.map((n) => n.kept_exposure_s));
+  const est = clearNightsFromPace(gapSeconds, paceSeconds);
+  if (!est) return null;
+  return { ...est, nightsUsed: productive.length };
+}
+
+/**
+ * The arithmetic half of the estimate: how many more clear nights a `gapSeconds`
+ * goal gap takes at a known `paceSeconds` per night, and the sentence for it.
+ *
+ * Split out because the pace can arrive two ways — derived here from a target's
+ * night list (the Target page), or precomputed server-side over the whole library
+ * (the Dashboard's "Target progress" overview, which can't fetch a night list per
+ * target). Both then divide and phrase it *identically*, so the two screens can
+ * never quote different ETAs for the same picture.
+ *
+ * Returns null when there's nothing to say: no gap left, or no usable pace.
+ */
+export function clearNightsFromPace(
+  gapSeconds: number,
+  paceSeconds: number | null | undefined,
+): Omit<ClearNightsEstimate, "nightsUsed"> | null {
+  if (!Number.isFinite(gapSeconds) || gapSeconds <= 0) return null;
+  if (typeof paceSeconds !== "number" || !Number.isFinite(paceSeconds) || paceSeconds <= 0) {
+    return null;
+  }
   const nightsToGo = Math.max(1, Math.ceil(gapSeconds / paceSeconds));
-  const nightWord = nightsToGo === 1 ? "night" : "nights";
   return {
     nights: nightsToGo,
     paceSeconds,
-    nightsUsed: productive.length,
     text:
       `At your recent pace (~${formatIntegration(paceSeconds)} of kept subs per ` +
-      `clear night), that's about ${nightsToGo} more clear ${nightWord}.`,
+      `clear night), that's about ${nightsToGo} more clear ${nightWord(nightsToGo)}.`,
   };
+}
+
+/** "night" / "nights" — one word, one place, so every phrasing agrees. */
+export function nightWord(n: number): string {
+  return n === 1 ? "night" : "nights";
 }

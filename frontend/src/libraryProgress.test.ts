@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { TargetProgress } from "./api/client";
 import {
+  FINISH_FIRST_MAX_NIGHTS,
   describeLibraryProgress,
+  finishFirstHint,
+  nightsToGoLabel,
   objectTypeLabel,
   rankLibraryProgress,
 } from "./libraryProgress";
@@ -13,6 +16,7 @@ function row(over: Partial<TargetProgress> & { safe: string }): TargetProgress {
     total_exposure_s: over.total_exposure_s ?? 0,
     object_type: over.object_type ?? null,
     goal_s: over.goal_s ?? null,
+    recent_pace_s: over.recent_pace_s ?? null,
   };
 }
 
@@ -93,5 +97,188 @@ describe("describeLibraryProgress", () => {
     expect(describeLibraryProgress(ranked)).toBe(
       "All 2 targets have plenty of integration for a clean image.",
     );
+  });
+});
+
+// --- "Finish this one first" (clear nights to go, from each target's own pace)
+
+const H = 3600;
+
+describe("rankLibraryProgress — nights to go", () => {
+  it("divides the remaining gap by the target's own recent pace", () => {
+    // Galaxy, 6 h goal, 4 h shot → 2 h to go at 1 h of kept subs per night.
+    const [r] = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy",
+        total_exposure_s: 4 * H, recent_pace_s: 1 * H,
+      }),
+    ]);
+    expect(r.nightsToGo).toBe(2);
+  });
+
+  it("rounds up — you cannot shoot 1.2 nights", () => {
+    const [r] = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy",
+        total_exposure_s: 4 * H, recent_pace_s: 1.8 * H, // 2 h gap / 1.8 h
+      }),
+    ]);
+    expect(r.nightsToGo).toBe(2);
+  });
+
+  it("says nothing without a pace (an older backend, or too little history)", () => {
+    const [none] = rankLibraryProgress([
+      row({ safe: "A", object_type: "galaxy", total_exposure_s: 4 * H }),
+    ]);
+    expect(none.nightsToGo).toBeNull();
+    const [zero] = rankLibraryProgress([
+      row({
+        safe: "B", object_type: "galaxy",
+        total_exposure_s: 4 * H, recent_pace_s: 0,
+      }),
+    ]);
+    expect(zero.nightsToGo).toBeNull();
+  });
+
+  it("says nothing once a target already has plenty", () => {
+    const [r] = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy",
+        total_exposure_s: 9 * H, recent_pace_s: 1 * H,
+      }),
+    ]);
+    expect(r.readiness.level).toBe("plenty");
+    expect(r.nightsToGo).toBeNull();
+  });
+
+  it("measures the gap against a user-set goal, not the per-type default", () => {
+    const [r] = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy", total_exposure_s: 4 * H,
+        goal_s: 5 * H, recent_pace_s: 1 * H, // 1 h to go, not 2
+      }),
+    ]);
+    expect(r.nightsToGo).toBe(1);
+  });
+});
+
+describe("finishFirstHint", () => {
+  it("names the target closest to done and how many nights it needs", () => {
+    const ranked = rankLibraryProgress([
+      row({
+        safe: "NGC_7000", name: "NGC 7000", object_type: "nebula",
+        total_exposure_s: 1 * H, recent_pace_s: 1 * H, // 3 h to go → 3 nights
+      }),
+      row({
+        safe: "M_31", name: "M 31", object_type: "galaxy",
+        total_exposure_s: 5.5 * H, recent_pace_s: 1 * H, // 0.5 h to go → 1 night
+      }),
+    ]);
+    expect(finishFirstHint(ranked)).toBe(
+      "Closest to done: M 31 — about 1 more clear night at your recent pace on it.",
+    );
+  });
+
+  it("pluralises a multi-night answer", () => {
+    const ranked = rankLibraryProgress([
+      row({
+        safe: "A", name: "A", object_type: "galaxy",
+        total_exposure_s: 4 * H, recent_pace_s: 1 * H, // 2 nights
+      }),
+      row({
+        safe: "B", name: "B", object_type: "galaxy",
+        total_exposure_s: 1 * H, recent_pace_s: 1 * H, // 5 nights — past the cap
+      }),
+    ]);
+    expect(finishFirstHint(ranked)).toContain("about 2 more clear nights");
+  });
+
+  it("stays silent when nothing is within reach — encouragement, never a scold", () => {
+    const ranked = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy",
+        total_exposure_s: 1 * H, recent_pace_s: 1 * H, // 5 nights
+      }),
+      row({
+        safe: "B", object_type: "galaxy",
+        total_exposure_s: 0.5 * H, recent_pace_s: 1 * H, // 6 nights
+      }),
+    ]);
+    expect(ranked.every((r) => (r.nightsToGo ?? 0) > FINISH_FIRST_MAX_NIGHTS)).toBe(true);
+    expect(finishFirstHint(ranked)).toBeNull();
+  });
+
+  it("stays silent with only one target in progress (there is no 'first')", () => {
+    const ranked = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy",
+        total_exposure_s: 5.5 * H, recent_pace_s: 1 * H,
+      }),
+      row({ safe: "B", object_type: "galaxy", total_exposure_s: 9 * H }), // plenty
+    ]);
+    expect(ranked[0].nightsToGo).toBe(1);
+    expect(finishFirstHint(ranked)).toBeNull();
+  });
+
+  it("stays silent when no target has a measured pace", () => {
+    const ranked = rankLibraryProgress([
+      row({ safe: "A", object_type: "galaxy", total_exposure_s: 4 * H }),
+      row({ safe: "B", object_type: "galaxy", total_exposure_s: 2 * H }),
+    ]);
+    expect(finishFirstHint(ranked)).toBeNull();
+  });
+
+  it("breaks a tie toward the target furthest along its goal", () => {
+    const ranked = rankLibraryProgress([
+      row({
+        safe: "A", name: "A", object_type: "galaxy",
+        total_exposure_s: 3 * H, recent_pace_s: 3 * H, // 3 h gap / 3 h → 1 night, 50%
+      }),
+      row({
+        safe: "B", name: "B", object_type: "galaxy",
+        total_exposure_s: 5.5 * H, recent_pace_s: 3 * H, // 0.5 h gap → 1 night, 92%
+      }),
+    ]);
+    expect(finishFirstHint(ranked)).toContain("Closest to done: B");
+  });
+
+  it("is silent on an empty library", () => {
+    expect(finishFirstHint([])).toBeNull();
+  });
+});
+
+describe("nightsToGoLabel", () => {
+  it("is a terse badge for a target within reach", () => {
+    const [r] = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy",
+        total_exposure_s: 4 * H, recent_pace_s: 1 * H,
+      }),
+    ]);
+    expect(nightsToGoLabel(r)).toBe("~2 more nights");
+  });
+
+  it("is singular for the last night", () => {
+    const [r] = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy",
+        total_exposure_s: 5.5 * H, recent_pace_s: 1 * H,
+      }),
+    ]);
+    expect(nightsToGoLabel(r)).toBe("~1 more night");
+  });
+
+  it("is absent past the cap, and with no pace", () => {
+    const [far] = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy",
+        total_exposure_s: 1 * H, recent_pace_s: 1 * H, // 5 nights
+      }),
+    ]);
+    expect(nightsToGoLabel(far)).toBeNull();
+    const [none] = rankLibraryProgress([
+      row({ safe: "B", object_type: "galaxy", total_exposure_s: 4 * H }),
+    ]);
+    expect(nightsToGoLabel(none)).toBeNull();
   });
 });

@@ -14,6 +14,7 @@ function row(over: Partial<TargetProgress> & { safe: string }): TargetProgress {
     total_exposure_s: over.total_exposure_s ?? 0,
     object_type: over.object_type ?? null,
     goal_s: over.goal_s ?? null,
+    recent_pace_s: over.recent_pace_s ?? null,
   };
 }
 
@@ -79,5 +80,41 @@ describe("LibraryProgressCard", () => {
     renderCard();
     await waitFor(() => expect(screen.getByText("Target progress")).toBeInTheDocument());
     expect(screen.getByText("+2 more targets in your Library.")).toBeInTheDocument();
+  });
+
+  it("names the target closest to done and badges its nights to go", async () => {
+    // Both galaxies (6 h goal) with a 1 h/night pace: M 51 needs one more
+    // night, M 31 needs five — so only M 51 is worth pointing at.
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([
+      row({
+        safe: "M_31", name: "M 31", object_type: "galaxy",
+        total_exposure_s: 1 * 3600, recent_pace_s: 3600,
+      }),
+      row({
+        safe: "M_51", name: "M 51", object_type: "galaxy",
+        total_exposure_s: 5.5 * 3600, recent_pace_s: 3600,
+      }),
+    ]);
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Target progress")).toBeInTheDocument());
+    expect(
+      screen.getByText(
+        "Closest to done: M 51 — about 1 more clear night at your recent pace on it.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("~1 more night")).toBeInTheDocument();
+    // The far-off target keeps its bar and says nothing about nights.
+    expect(screen.queryByText(/~5 more nights/)).toBeNull();
+  });
+
+  it("says nothing about nights when no target has a measured pace", async () => {
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([
+      row({ safe: "M_31", name: "M 31", object_type: "galaxy", total_exposure_s: 5.5 * 3600 }),
+      row({ safe: "M_51", name: "M 51", object_type: "galaxy", total_exposure_s: 4 * 3600 }),
+    ]);
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Target progress")).toBeInTheDocument());
+    expect(screen.queryByText(/Closest to done/)).toBeNull();
+    expect(screen.queryByText(/more night/)).toBeNull();
   });
 });

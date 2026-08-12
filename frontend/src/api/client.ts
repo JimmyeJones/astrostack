@@ -462,6 +462,11 @@ export interface TargetProgress {
   total_exposure_s: number;
   object_type: string | null;
   goal_s: number | null;
+  // Median kept integration per clear night over this target's recent nights,
+  // or null when there isn't enough history to call it a pace. Optional: an
+  // older backend simply doesn't send it, and the card then says nothing about
+  // how many more nights a target needs.
+  recent_pace_s?: number | null;
 }
 
 export interface NightActivity {

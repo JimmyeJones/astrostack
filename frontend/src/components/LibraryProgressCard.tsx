@@ -6,6 +6,8 @@ import { api } from "../api/client";
 import { formatIntegration } from "../format";
 import {
   describeLibraryProgress,
+  finishFirstHint,
+  nightsToGoLabel,
   objectTypeLabel,
   rankLibraryProgress,
   type RankedProgress,
@@ -23,6 +25,9 @@ function ProgressRow({ r }: { r: RankedProgress }) {
   // Show the object type ("galaxy"/"nebula"/…) next to the goal so a beginner
   // sees why the goal differs per target; omitted for an unrecognised type.
   const typeLabel = objectTypeLabel(readiness.bucket);
+  // "~2 more nights" — the one thing the integration figure and the bar can't
+  // say. Absent unless this target is genuinely close at its own recent pace.
+  const nights = nightsToGoLabel(r);
   return (
     <div>
       <Group gap="xs" justify="space-between" wrap="nowrap" mb={2}>
@@ -35,6 +40,9 @@ function ProgressRow({ r }: { r: RankedProgress }) {
             {typeLabel ? `${typeLabel} · ` : ""}
             {formatIntegration(row.total_exposure_s)} of ~{readiness.goalHours}h
           </Text>
+          {nights && (
+            <Badge variant="light" color={color} size="xs">{nights}</Badge>
+          )}
           {readiness.level === "plenty" && (
             <Badge variant="light" color={color} size="xs">plenty</Badge>
           )}
@@ -69,6 +77,10 @@ export function LibraryProgressCard() {
 
   const shown = ranked.slice(0, MAX_ROWS);
   const extra = ranked.length - shown.length;
+  // "Closest to done: M 31 — about 1 more clear night." Answers which of several
+  // half-finished targets to point at on the next clear night; silent unless one
+  // is genuinely close at the owner's own measured pace.
+  const finishFirst = finishFirstHint(ranked);
   return (
     <Paper withBorder p="sm" radius="md">
       <Group gap="sm" wrap="nowrap" align="flex-start">
@@ -83,6 +95,7 @@ export function LibraryProgressCard() {
             </Text>
           </Group>
           <Text size="sm" c="dimmed">{describeLibraryProgress(ranked)}</Text>
+          {finishFirst && <Text size="sm" c="violet">{finishFirst}</Text>}
           <Stack gap={8} mt={2}>
             {shown.map((r) => <ProgressRow key={r.row.safe} r={r} />)}
           </Stack>
