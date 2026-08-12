@@ -49,6 +49,34 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**CROSS-SCREEN BUG (Builder 2026-08-12, found while shipping v0.253.0; REPRODUCED) — the Tonight planner ignores
+  the integration goal you set, so it tells you to move on from the very target you told the app you want more
+  of.**~~ — **FIXED v0.253.1** (Builder 2026-08-12, branch `claude/elegant-bohr-eglrga`). *(Friendliness / trust —
+  PRIORITY 3; the two screens disagreed about the same picture.)* `Tonight.tsx` called
+  `readinessRowHint(t.total_exposure_s, t.type)` — which had **no way to take a goal override** — while the Target
+  page's readiness card and the Dashboard's "Target progress" card both honour the user's stored goal. So an owner
+  who set a **12 h** goal on M 31 and had 7 h saw *"Plenty — try something new"* on the planner and *"7 h of 12 h —
+  keep going"* on the Target page, about the same target, on the same evening. It cuts the other way too: a
+  deliberately modest 2 h goal on a target at 3 h still read as "keep topping up" on the planner. **Reproduced** as
+  the two fail-before tests. This is the same class of defect as the v0.2xx fix that gave already-targeted rows
+  their catalog object *type* (they used to bucket as "Other" and contradict the card) — the goal was the other
+  half of that inconsistency, and the planner never read it.
+  **The fix, one value carried end to end:** `LibraryTarget`/`PlannedTarget` gained a nullable `goal_s`,
+  `_library_targets` fills it from the target's project meta (a broken project costs that row its goal, never the
+  plan — pinned by a test), and `readinessRowHint` grew the same optional `goalHoursOverride` third parameter
+  `integrationReadiness` already had, passing it straight through. Calling it without the argument is byte-for-byte
+  the old behaviour, so every existing assertion stands unchanged.
+  **Shipped with it (the reason the drift was possible):** the goal's meta key, its sanity bounds and its tolerant
+  parse were **three hand-synced copies** across `routers/targets.py`, `routers/stats.py` and now the planner —
+  with a comment in one of them literally saying "kept in sync by hand". They are now one definition in the new
+  `webapp/goals.py`, which every surface imports; a test asserts the three modules share the *same object*, so a
+  fourth copy can't quietly appear. Upgrade-safe: additive optional field on both sides (an older frontend ignores
+  it, an older backend omitting it falls back to the per-type default exactly as today), no config/DB/on-disk
+  change, no default flipped, no endpoint reshaped. **Tests (+7):** `tests/webapp/test_plan.py` (+2 — the goal
+  reaches the planner and agrees with `/api/library-progress`, a catalog row carries none, and an unreadable
+  project doesn't 500 the plan), `tests/webapp/test_target_integration_goal.py` (+2 — the one-definition guard and
+  the garbled-value parse), `readiness.test.ts` (+2, one fail-before) and `Tonight.test.tsx` (+1, fail-before).
+
 - ~~**🔒⭐⭐ OWNER REQUIREMENT (2026-08-07) — add an automated SAFETY NET that fails CI if any code path can delete,
   move, rename or overwrite a file under `incoming/`.**~~ — **SHIPPED v0.247.1** (Builder 2026-08-07, branch
   `claude/elegant-bohr-izzmou`). *(Data-integrity / regression prevention.)* `tests/webapp/test_incoming_readonly_guard.py`
@@ -11506,9 +11534,86 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Builder 2026-08-08, the natural follow-on to "How many more clear nights?" v0.252.0) —
+- **NEW IDEA (Builder 2026-08-12, the one surface v0.253.0 deliberately left out) — put the "~N more clear nights"
+  figure on the *Tonight* planner's already-targeted rows too, where the beginner is literally choosing what to
+  point at.** *(Pillar: autonomy + friendliness, PRIORITY 2–3; size S–M — the plumbing is now a known quantity.)*
+  v0.253.0 answers "which target should I finish first?" on the **Dashboard**; v0.253.1 taught the planner to read
+  each target's user-set goal. The missing third piece is the *pace*: with it, a Tonight row could replace the
+  vague "Nearly there" badge with "~1 more night finishes this" at the exact moment the user is deciding.
+  **The work is a straight repeat of what v0.253.1 just did for `goal_s`:** add a nullable `recent_pace_s` to
+  `LibraryTarget`/`PlannedTarget`, fill it in `_library_targets` from `recent_night_pace_s(proj)` (the project is
+  already being opened there now, so it costs the three-column dated-frame scan and nothing else), and render it
+  with the *existing* `clearNightsFromPace` + `FINISH_FIRST_MAX_NIGHTS` cap so the wording matches the other two
+  screens verbatim. **The one real decision:** the row already carries `readinessRowHint` ("Nearly there" /
+  "Plenty — try something new"), and printing both a badge and a nights figure would be clutter — the nights
+  number should *replace* the badge on a row that has a pace, exactly as the original "Finish this one first"
+  entry warned. **Watch the cost first:** see the perf note below; if that cache lands, do it in the same pass.
+
+- **PERF NOTE / WATCH ITEM (Builder 2026-08-12, introduced knowingly by v0.253.1) — `/api/plan/tonight` now opens
+  every positioned target's SQLite, and unlike its Dashboard sibling it is *not* cached.** *(Infra —
+  PRIORITY 3; size S; **not a problem today, filed so it is spotted before it is**.)* `_library_targets` was
+  registry-only until this run; it now opens each project for the goal-meta read (one `get_meta`, so ~1 ms a
+  target — tens of ms on a large library, against an endpoint that already does batched ephemeris over the whole
+  catalog). That is a fair trade for two screens agreeing, and it is the same read `_collect_progress` has always
+  done. **But `/api/library-progress` caches it** on `app.state` behind a registry signature + 60 s TTL
+  (`_PROGRESS_CACHE_TTL_S`), and the planner does not — so a library of many hundreds of targets, or the pace scan
+  the idea above would add, is where this starts to show. **Fix direction when it does:** lift the same
+  signature-keyed cache pattern (`(safe, last_activity_utc, n_frames_accepted)` + short TTL) into a shared helper
+  and use it on both endpoints, rather than growing a second bespoke cache. **Measure before building** — do not
+  add a cache on a hunch.
+
+- **VERIFIED NON-ISSUE (Builder 2026-08-12) — the "say 'another hour would cut its noise about N%' in *one* voice"
+  item (filed 2026-08-04, above in Friendliness) is **already consistent** for the two surfaces that actually make
+  the marginal-return claim; nothing to build unless a third one appears.** *(Checked, not assumed.)*
+  `seestack/nightplan.noise_gain_from_more_time(t)` returns `1 − √(t/(t+1 h))` and its callers print
+  `round(gain·100)`; the frontend's `readiness.noiseReductionHint(t)` computes
+  `Math.round((1 − √(T/(T+3600)))·100)` — the same formula, the same extra hour, the same rounding, so the Tonight
+  card and the Target page's readiness card cannot disagree on the number. The remaining surfaces the entry listed
+  (`integrationTrend`, the "cut your noise ~N×" at-completion badge) answer a **different** question — noise
+  removed *so far* by stacking N subs, not the marginal return of one more hour — and the entry's own "care" note
+  says not to collapse those. Recorded so a future run doesn't re-derive this; if the two ever drift, the fix is a
+  frontend mirror of the engine helper, not a re-wording.
+
+- ~~**NEW BEGINNER FEATURE (Builder 2026-08-08, the natural follow-on to "How many more clear nights?" v0.252.0) —
   "Finish this one first": tell the beginner which of their in-flight targets is *closest to done*, so a clear
-  night goes to the target one more session would finish rather than the one that needs six more.** *(Pillar:
+  night goes to the target one more session would finish rather than the one that needs six more.**~~ —
+  **SHIPPED v0.253.0** (Builder 2026-08-12, branch `claude/elegant-bohr-eglrga`), built as **shape (a)**, the one
+  the entry called "almost certainly right": one additive field on the **existing** `/api/library-progress`
+  response — no new endpoint, no client fan-out, no extra request. The Dashboard's "Target progress" card now
+  leads with *"Closest to done: M 51 — about 1 more clear night at your recent pace on it."* and badges each
+  near-finished row *"~2 more nights"*.
+  **The data:** `TargetProgressOut.recent_pace_s` (nullable, default `None`) carries the target's median kept
+  integration per clear night, computed server-side by the new engine function
+  `seestack.session_recap.recent_night_pace_s` inside the project-open that roll-up already did for the goal
+  meta — so the card costs one query as before. The read is deliberately lean: a new
+  `Project.iter_frame_capture_rows()` selects the **three** columns a cadence question needs
+  (`timestamp_utc, exposure_s, accept`) instead of building a ~40-column `FrameRow` per sub, and
+  `_split_sessions` was made generic over what rides along with the timestamp so the pace and the "Nights" card
+  share **one** definition of where a night starts and ends (pinned by a test asserting the pace equals the
+  median of `nights_breakdown`'s own `kept_exposure_s`, including a session spanning UTC midnight).
+  **One arithmetic, one sentence:** `clearNights.ts` grew `clearNightsFromPace(gap, pace)` — the divide-and-phrase
+  half of v0.252.0's helper — and `estimateClearNights` now delegates to it, so the Target page (pace derived
+  client-side from its night list) and the library overview (pace from the server) can never quote different ETAs
+  for the same picture; a test asserts the two paths return the identical `nights` **and** text. The two pace
+  constants are mirrored by hand in `session_recap.py` with a comment on both sides saying to change them together.
+  **Care, exactly as the entry asked:** it is encouragement, never a scold — `FINISH_FIRST_MAX_NIGHTS = 3` caps
+  what's named, so a target six nights out simply keeps its bar and says nothing; the lead line is silent unless
+  **two or more** targets are in progress (with one target there is no "first", and its own card already says it);
+  and a row at "plenty", with no pace, or with too little history says nothing rather than guessing. `readinessRowHint`
+  is untouched — it lives on the Tonight planner's rows, not this card, so nothing prints two verdicts. The
+  existing rank order is **unchanged** (nearest-to-goal first, plenty last); the nights figure is added
+  information, not a re-sort.
+  **Upgrade-safe:** additive optional field (an older frontend ignores it, and the TS type marks it optional so an
+  older backend that omits it renders the card exactly as before), no config/DB-schema/on-disk change, no default
+  flipped, no endpoint removed or reshaped.
+  **Tests (+28):** `tests/test_session_recap.py` (+9 — the median-per-night pace, kept-subs-only, the recent-nights
+  window, the test-frame-night floor, single-night/all-rejected/undated → `None`, agreement with the Nights card
+  across UTC midnight, and the lean three-column read's undated skip + NULL-exposure default),
+  `tests/webapp/test_library_progress.py` (+2 — a seeded two-night target reports its 1200 s pace while a
+  single-night sibling reports `null`), `clearNights.test.ts` (+5), `libraryProgress.test.ts` (+13) and
+  `LibraryProgressCard.test.tsx` (+2 — the line and badge render end-to-end, and both vanish with no pace).
+  *(Original spec kept below for provenance.)*
+  *(Pillar:
   autonomy + friendliness, PRIORITY 2–3; size M — mostly a data-plumbing question, see the caveat.)* v0.252.0 put
   a real number on "how much longer will this take me?" — but **per target, on the Target page**, which is the one
   place you only look once you've already decided what you're shooting. The decision it should inform happens

@@ -17,6 +17,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from webapp import deps, video
+from webapp.goals import read_goal_s
 from webapp.site_location import resolve_site_lon
 
 router = APIRouter(tags=["stats"])
@@ -111,11 +112,6 @@ class LastNightResponse(BaseModel):
 # ``last_activity_utc``) so a just-changed goal shows within a minute.
 _PROGRESS_CACHE_TTL_S = 60.0
 
-# Project-meta key holding a target's user-set integration goal (accepted-sub
-# exposure, seconds). Mirrors ``routers.targets._GOAL_META_KEY`` — kept in sync
-# by hand (a tiny stable constant); read-only here.
-_GOAL_META_KEY = "integration_goal_s"
-
 
 class TargetProgressOut(BaseModel):
     """One target's inputs for the Dashboard "Target progress" overview. The
@@ -128,32 +124,26 @@ class TargetProgressOut(BaseModel):
     total_exposure_s: float
     object_type: str | None = None
     goal_s: float | None = None
-
-
-def _read_goal_s(proj) -> float | None:  # noqa: ANN001
-    """Parse a target's stored integration goal, tolerating a stale/garbage value
-    (treated as unset) so a hand-edited project can never 500 the overview."""
-    raw = proj.get_meta(_GOAL_META_KEY)
-    if raw is None:
-        return None
-    try:
-        val = float(raw)
-    except (TypeError, ValueError):
-        return None
-    if not (val > 0) or val != val:  # non-positive or NaN → unset
-        return None
-    return val
+    # This target's recent productive pace — median kept integration per clear
+    # night over its last few nights (seconds), or null when there isn't enough
+    # history to call it a pace. Lets the overview turn "how far to go?" into
+    # "about N more clear nights", the same figure the Target page derives
+    # client-side from its night list. Additive and optional: an older frontend
+    # ignores it, and a null simply means the row says nothing about nights.
+    recent_pace_s: float | None = None
 
 
 def _collect_progress(lib, targets) -> list[TargetProgressOut]:
     """For every target that has collected some light, gather the inputs the
     readiness overview needs: total integration, the offline catalog object type,
-    and any user-set goal. Opens each project only for the cheap goal-meta read
-    (the object type is resolved offline from the library entry). A broken
-    project is skipped, never 500s the dashboard."""
+    any user-set goal, and the target's recent per-night pace. Opens each project
+    once for the cheap goal-meta read plus a three-column scan of its dated frames
+    (the object type is resolved offline from the library entry). A broken project
+    is skipped, never 500s the dashboard."""
     from seestack.io.project import Project
     from seestack.nightplan import load_catalog
     from seestack.objectinfo import identify_object
+    from seestack.session_recap import recent_night_pace_s
 
     catalog = load_catalog()
     rows: list[TargetProgressOut] = []
@@ -164,10 +154,12 @@ def _collect_progress(lib, targets) -> list[TargetProgressOut]:
             continue
         info = identify_object(t.name, t.ra_deg, t.dec_deg, catalog=catalog)
         goal_s: float | None = None
+        pace_s: float | None = None
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
-            goal_s = _read_goal_s(proj)
+            goal_s = read_goal_s(proj)
+            pace_s = recent_night_pace_s(proj)
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
             pass
         finally:
@@ -179,6 +171,7 @@ def _collect_progress(lib, targets) -> list[TargetProgressOut]:
             total_exposure_s=t.total_exposure_s,
             object_type=info.type if info is not None else None,
             goal_s=goal_s,
+            recent_pace_s=pace_s,
         ))
     return rows
 

@@ -36,6 +36,7 @@ from seestack.nightplan import (
     suggest_targets,
 )
 from webapp import deps
+from webapp.goals import read_goal_s
 from webapp.ics import IcsEvent, to_ics
 from webapp.site_location import detect_site_from_library as _detect_site_from_library
 
@@ -109,6 +110,15 @@ def _library_targets(request: Request) -> list[LibraryTarget]:
     the same ``identify_object`` path the Dashboard "Target progress" card uses, so
     the two surfaces agree (previously these were left blank, so every already-owned
     target bucketed as "Other" and got the flat 4 h goal, contradicting the card).
+
+    The same reasoning carries the user's own **integration goal**: the planner's
+    "have I shot enough of this?" row hint has to answer with the goal the user
+    set, or the two screens disagree about the same target — a target the owner
+    deliberately wants 12 h of would read "Plenty — try something new" here at
+    7 h, while the Target page correctly says "keep going". Read exactly as the
+    Dashboard roll-up reads it (a project-meta lookup, tolerating a garbage value
+    as unset); a project that won't open simply keeps the per-type default rather
+    than failing the whole plan.
     """
     from seestack.objectinfo import identify_object
 
@@ -121,6 +131,16 @@ def _library_targets(request: Request) -> list[LibraryTarget]:
                 continue
             info = identify_object(t.name, float(t.ra_deg), float(t.dec_deg),
                                    catalog=catalog)
+            goal_s: float | None = None
+            proj = None
+            try:
+                proj = lib.open_target(t.safe_name)
+                goal_s = read_goal_s(proj)
+            except Exception:  # noqa: BLE001 — a broken project must not 500 the plan
+                pass
+            finally:
+                if proj is not None:
+                    proj.close()
             out.append(LibraryTarget(
                 safe=t.safe_name, name=t.name,
                 ra_deg=float(t.ra_deg), dec_deg=float(t.dec_deg),
@@ -128,6 +148,7 @@ def _library_targets(request: Request) -> list[LibraryTarget]:
                 total_exposure_s=float(t.total_exposure_s or 0.0),
                 object_type=info.type if info is not None else "",
                 con=info.constellation_abbr if info is not None else "",
+                goal_s=goal_s,
             ))
         return out
     finally:

@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from webapp import deps
+from webapp.goals import GOAL_META_KEY, MAX_GOAL_S, MIN_GOAL_S, read_goal_s
 from webapp.schemas import (
     BackgroundModeHintOut,
     BestFrameOut,
@@ -39,31 +40,10 @@ from webapp.site_location import resolve_site_lon
 
 router = APIRouter(prefix="/api/targets", tags=["targets"])
 
-# Project-meta key holding the user's integration goal (total accepted exposure,
-# seconds) for a target. Stored in the existing key/value ``project_meta`` table
-# so it needs no schema migration — an old project simply has the key absent.
-_GOAL_META_KEY = "integration_goal_s"
-
-# Sanity bound so a fat-fingered value can't poison the readiness card: 1 minute
-# to 1000 hours. A goal is a gentle suggestion, never a gate, so the bound only
-# guards against nonsense, not against an ambitious deep-integration target.
-_MIN_GOAL_S = 60.0
-_MAX_GOAL_S = 1000.0 * 3600.0
-
-
-def _read_goal_s(proj) -> float | None:  # noqa: ANN001
-    """Parse the stored integration goal, tolerating a stale/garbage value
-    (treated as unset) so a hand-edited project can never 500 the card."""
-    raw = proj.get_meta(_GOAL_META_KEY)
-    if raw is None:
-        return None
-    try:
-        val = float(raw)
-    except (TypeError, ValueError):
-        return None
-    if not (val > 0) or val != val:  # non-positive or NaN → unset
-        return None
-    return val
+# The user's per-target integration goal — its meta key, its sanity bounds and
+# the tolerant parse — lives in ``webapp.goals``: one definition shared by this
+# router, the Dashboard roll-up and the Tonight planner, so no two screens can
+# disagree about the same target's goal.
 
 
 def _to_out(entry) -> TargetOut:  # noqa: ANN001
@@ -606,7 +586,7 @@ def get_integration_goal(safe: str, request: Request) -> IntegrationGoalOut:
     sane per-object-type default. Read-only; a plain project-meta lookup."""
     lib, proj = deps.open_target_project(request, safe)
     try:
-        return IntegrationGoalOut(goal_s=_read_goal_s(proj))
+        return IntegrationGoalOut(goal_s=read_goal_s(proj))
     finally:
         proj.close()
         lib.close()
@@ -623,14 +603,14 @@ def set_integration_goal(
     lib, proj = deps.open_target_project(request, safe)
     try:
         if body.goal_s is None:
-            proj.delete_meta(_GOAL_META_KEY)
+            proj.delete_meta(GOAL_META_KEY)
             stored: float | None = None
         else:
             goal = float(body.goal_s)
             if not (goal == goal) or goal <= 0:  # NaN or non-positive
                 raise HTTPException(status_code=422, detail="goal_s must be positive")
-            goal = min(max(goal, _MIN_GOAL_S), _MAX_GOAL_S)
-            proj.set_meta(_GOAL_META_KEY, repr(goal))
+            goal = min(max(goal, MIN_GOAL_S), MAX_GOAL_S)
+            proj.set_meta(GOAL_META_KEY, repr(goal))
             stored = goal
         return IntegrationGoalOut(goal_s=stored)
     finally:

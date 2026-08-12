@@ -21,8 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from statistics import median
+from typing import Sequence, TypeVar
 
 from seestack.io.project import FrameRow, Project
+
+# Any row whose first element is its capture time — see ``_split_sessions``.
+_TimedT = TypeVar("_TimedT", bound=Sequence)
 
 # A night's subs land minutes apart; the gap to the previous night is many hours.
 # Six hours cleanly separates two nights without splitting a single long session.
@@ -114,19 +118,23 @@ def _parse(ts: str | None) -> datetime | None:
     return dt
 
 
-def _split_sessions(
-    frames: list[tuple[datetime, FrameRow]], gap_hours: float
-) -> list[list[tuple[datetime, FrameRow]]]:
-    """Partition (capture-time, frame) pairs sorted ascending into sessions,
+def _split_sessions(frames: list[_TimedT], gap_hours: float) -> list[list[_TimedT]]:
+    """Partition capture-time-tagged rows sorted ascending into sessions,
     starting a new session wherever consecutive captures are more than
-    ``gap_hours`` apart. Returns a list of sessions, oldest first."""
+    ``gap_hours`` apart. Returns a list of sessions, oldest first.
+
+    Generic in what rides along with the timestamp: callers pass
+    ``(datetime, FrameRow)`` pairs, and the lean pace path passes
+    ``(datetime, exposure_s, accept)`` triples — only element 0 is read here, and
+    keeping one implementation is what makes every screen agree on where a night
+    starts and ends."""
     if not frames:
         return []
     gap_s = gap_hours * 3600.0
-    sessions: list[list[tuple[datetime, FrameRow]]] = [[frames[0]]]
+    sessions: list[list[_TimedT]] = [[frames[0]]]
     for i in range(1, len(frames)):
-        prev_dt, _ = frames[i - 1]
-        this_dt, _ = frames[i]
+        prev_dt = frames[i - 1][0]
+        this_dt = frames[i][0]
         if (this_dt - prev_dt).total_seconds() <= gap_s:
             sessions[-1].append(frames[i])
         else:
@@ -657,6 +665,71 @@ def nights_breakdown(
 
     out.reverse()  # newest night first
     return out
+
+
+# --- recent capture pace ("how much is a clear night worth to me?") ---------
+#
+# These two numbers are mirrored, deliberately and by hand, in the frontend's
+# ``clearNights.ts`` (PACE_LOOKBACK_NIGHTS / MIN_PRODUCTIVE_NIGHT_S). The Target
+# page derives the pace client-side from the night list it already fetches; the
+# Library-wide overview gets it from the server, computed here. Both must land on
+# the same figure for the same target, or the two screens would quote different
+# ETAs for the same picture — so change them together.
+
+# How many recent nights the pace is taken over. Long enough that one short night
+# doesn't dominate, short enough that a change of habit shows up quickly.
+PACE_LOOKBACK_NIGHTS = 5
+
+# Below this much kept integration a "night" is a test frame or two, not a
+# session — counting it would drag the median down and inflate every estimate.
+MIN_PRODUCTIVE_NIGHT_S = 120.0
+
+
+def recent_night_pace_s(
+    project: Project,
+    *,
+    gap_hours: float = DEFAULT_SESSION_GAP_HOURS,
+    lookback_nights: int = PACE_LOOKBACK_NIGHTS,
+) -> float | None:
+    """This target's recent productive pace: the **median kept integration per
+    clear night**, in seconds, over its most recent nights — or ``None`` when
+    there isn't enough history to call it a pace.
+
+    This is what turns an abstract "3.2 h of a 5 h goal" gap into a plan a
+    beginner can act on ("about 2 more clear nights"), because only the target's
+    own history knows what a clear night is really worth to *this* owner: this
+    sky, this framing, this rejection rate.
+
+    Nights are the same 6 h-gap capture sessions :func:`nights_breakdown` shows,
+    so the number agrees with the "Nights" card. Only the most recent
+    ``lookback_nights`` count, and within those only the *productive* ones (at
+    least ``MIN_PRODUCTIVE_NIGHT_S`` of kept subs). Returns ``None`` unless at
+    least two of them qualify — one session is not a pace, and projecting a whole
+    remaining goal off it would be a confident guess from nothing.
+
+    Read-only and offline; it reads three columns per dated frame and never
+    writes anything.
+    """
+    dated: list[tuple[datetime, float, bool]] = [
+        (dt, exposure, accept)
+        for ts, exposure, accept in project.iter_frame_capture_rows()
+        if (dt := _parse(ts)) is not None
+    ]
+    if not dated:
+        return None
+    dated.sort(key=lambda row: row[0])
+    sessions = _split_sessions(dated, gap_hours)
+
+    # Newest first, then the same window + productivity filter the Target page's
+    # client-side estimate applies.
+    recent = sessions[-lookback_nights:] if lookback_nights > 0 else []
+    kept_per_night = [
+        sum(exposure for _dt, exposure, accept in s if accept) for s in recent
+    ]
+    productive = [k for k in kept_per_night if k >= MIN_PRODUCTIVE_NIGHT_S]
+    if len(productive) < 2:
+        return None
+    return float(median(productive))
 
 
 def night_frame_ids(
