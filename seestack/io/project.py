@@ -862,6 +862,22 @@ class Project:
                 out[night] = n
         return out
 
+    def iter_frame_capture_rows(self) -> Iterator[tuple[str, float, bool]]:
+        """Yield ``(timestamp_utc, exposure_s, accept)`` for every dated frame.
+
+        The three columns a capture-*cadence* question needs, and nothing else:
+        `iter_frames` builds a full ``FrameRow`` per row (~40 columns), which is
+        wasted work for a caller that only wants to group subs into nights and
+        add up their exposure. Undated frames are skipped — they carry no night —
+        and a NULL exposure reads as 0.0, exactly as the night rollups treat it.
+        Order is unspecified (the caller sorts by parsed capture time)."""
+        assert self._conn is not None
+        for ts, exposure, accept in self._conn.execute(
+            "SELECT timestamp_utc, exposure_s, accept FROM frames "
+            "WHERE timestamp_utc IS NOT NULL AND timestamp_utc <> ''"
+        ):
+            yield str(ts), float(exposure or 0.0), bool(accept)
+
     # ---- stack runs ----------------------------------------------------
 
     def add_stack_run(self, run: StackRunRow) -> int:

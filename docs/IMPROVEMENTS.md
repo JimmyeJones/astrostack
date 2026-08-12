@@ -11506,9 +11506,46 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Builder 2026-08-08, the natural follow-on to "How many more clear nights?" v0.252.0) —
+- ~~**NEW BEGINNER FEATURE (Builder 2026-08-08, the natural follow-on to "How many more clear nights?" v0.252.0) —
   "Finish this one first": tell the beginner which of their in-flight targets is *closest to done*, so a clear
-  night goes to the target one more session would finish rather than the one that needs six more.** *(Pillar:
+  night goes to the target one more session would finish rather than the one that needs six more.**~~ —
+  **SHIPPED v0.253.0** (Builder 2026-08-12, branch `claude/elegant-bohr-eglrga`), built as **shape (a)**, the one
+  the entry called "almost certainly right": one additive field on the **existing** `/api/library-progress`
+  response — no new endpoint, no client fan-out, no extra request. The Dashboard's "Target progress" card now
+  leads with *"Closest to done: M 51 — about 1 more clear night at your recent pace on it."* and badges each
+  near-finished row *"~2 more nights"*.
+  **The data:** `TargetProgressOut.recent_pace_s` (nullable, default `None`) carries the target's median kept
+  integration per clear night, computed server-side by the new engine function
+  `seestack.session_recap.recent_night_pace_s` inside the project-open that roll-up already did for the goal
+  meta — so the card costs one query as before. The read is deliberately lean: a new
+  `Project.iter_frame_capture_rows()` selects the **three** columns a cadence question needs
+  (`timestamp_utc, exposure_s, accept`) instead of building a ~40-column `FrameRow` per sub, and
+  `_split_sessions` was made generic over what rides along with the timestamp so the pace and the "Nights" card
+  share **one** definition of where a night starts and ends (pinned by a test asserting the pace equals the
+  median of `nights_breakdown`'s own `kept_exposure_s`, including a session spanning UTC midnight).
+  **One arithmetic, one sentence:** `clearNights.ts` grew `clearNightsFromPace(gap, pace)` — the divide-and-phrase
+  half of v0.252.0's helper — and `estimateClearNights` now delegates to it, so the Target page (pace derived
+  client-side from its night list) and the library overview (pace from the server) can never quote different ETAs
+  for the same picture; a test asserts the two paths return the identical `nights` **and** text. The two pace
+  constants are mirrored by hand in `session_recap.py` with a comment on both sides saying to change them together.
+  **Care, exactly as the entry asked:** it is encouragement, never a scold — `FINISH_FIRST_MAX_NIGHTS = 3` caps
+  what's named, so a target six nights out simply keeps its bar and says nothing; the lead line is silent unless
+  **two or more** targets are in progress (with one target there is no "first", and its own card already says it);
+  and a row at "plenty", with no pace, or with too little history says nothing rather than guessing. `readinessRowHint`
+  is untouched — it lives on the Tonight planner's rows, not this card, so nothing prints two verdicts. The
+  existing rank order is **unchanged** (nearest-to-goal first, plenty last); the nights figure is added
+  information, not a re-sort.
+  **Upgrade-safe:** additive optional field (an older frontend ignores it, and the TS type marks it optional so an
+  older backend that omits it renders the card exactly as before), no config/DB-schema/on-disk change, no default
+  flipped, no endpoint removed or reshaped.
+  **Tests (+28):** `tests/test_session_recap.py` (+9 — the median-per-night pace, kept-subs-only, the recent-nights
+  window, the test-frame-night floor, single-night/all-rejected/undated → `None`, agreement with the Nights card
+  across UTC midnight, and the lean three-column read's undated skip + NULL-exposure default),
+  `tests/webapp/test_library_progress.py` (+2 — a seeded two-night target reports its 1200 s pace while a
+  single-night sibling reports `null`), `clearNights.test.ts` (+5), `libraryProgress.test.ts` (+13) and
+  `LibraryProgressCard.test.tsx` (+2 — the line and badge render end-to-end, and both vanish with no pace).
+  *(Original spec kept below for provenance.)*
+  *(Pillar:
   autonomy + friendliness, PRIORITY 2–3; size M — mostly a data-plumbing question, see the caveat.)* v0.252.0 put
   a real number on "how much longer will this take me?" — but **per target, on the Target page**, which is the one
   place you only look once you've already decided what you're shooting. The decision it should inform happens

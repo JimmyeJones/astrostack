@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { NightSummary } from "../api/client";
-import { PACE_LOOKBACK_NIGHTS, estimateClearNights } from "./clearNights";
+import {
+  PACE_LOOKBACK_NIGHTS,
+  clearNightsFromPace,
+  estimateClearNights,
+  nightWord,
+} from "./clearNights";
 
 /** One night's summary, newest-first order supplied by the caller. Only the two
  *  fields the estimate reads are interesting; the rest carry sane filler. */
@@ -112,5 +117,47 @@ describe("estimateClearNights", () => {
     // silently capped figure the owner would plan around.
     const e = estimateClearNights(20 * HOUR, [night(1800), night(1800), night(1800)]);
     expect(e?.nights).toBe(40);
+  });
+});
+
+describe("clearNightsFromPace", () => {
+  it("gives the same answer and wording as the night-list estimate", () => {
+    // The Library overview gets its pace from the server; the Target page
+    // derives it from the night list. Same target, same sentence — otherwise the
+    // two screens would quote different ETAs for the same picture.
+    const fromNights = estimateClearNights(2 * HOUR, [night(HOUR), night(HOUR)]);
+    const fromPace = clearNightsFromPace(2 * HOUR, HOUR);
+    expect(fromPace?.nights).toBe(fromNights?.nights);
+    expect(fromPace?.text).toBe(fromNights?.text);
+  });
+
+  it("rounds up and never promises less than one more night", () => {
+    expect(clearNightsFromPace(2.1 * HOUR, HOUR)?.nights).toBe(3);
+    expect(clearNightsFromPace(60, 10 * HOUR)?.nights).toBe(1);
+  });
+
+  it("says nothing without a gap or a usable pace", () => {
+    expect(clearNightsFromPace(0, HOUR)).toBeNull();
+    expect(clearNightsFromPace(-HOUR, HOUR)).toBeNull();
+    expect(clearNightsFromPace(NaN, HOUR)).toBeNull();
+    expect(clearNightsFromPace(HOUR, null)).toBeNull();
+    expect(clearNightsFromPace(HOUR, undefined)).toBeNull();
+    expect(clearNightsFromPace(HOUR, 0)).toBeNull();
+    expect(clearNightsFromPace(HOUR, -HOUR)).toBeNull();
+    expect(clearNightsFromPace(HOUR, Infinity)).toBeNull();
+  });
+
+  it("reports the honest big number rather than a flattering cap", () => {
+    // 40 h to go at 30 min a night really is 80 clear nights; the *card* decides
+    // whether that's worth showing, this helper never softens it.
+    expect(clearNightsFromPace(40 * HOUR, 0.5 * HOUR)?.nights).toBe(80);
+  });
+});
+
+describe("nightWord", () => {
+  it("is singular only for one", () => {
+    expect(nightWord(1)).toBe("night");
+    expect(nightWord(2)).toBe("nights");
+    expect(nightWord(0)).toBe("nights");
   });
 });
