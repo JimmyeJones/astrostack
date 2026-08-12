@@ -65,3 +65,36 @@ def test_unknown_target_404(client):
     assert client.get("/api/targets/does_not_exist/integration-goal").status_code == 404
     assert client.put("/api/targets/does_not_exist/integration-goal",
                       json={"goal_s": 3600}).status_code == 404
+
+
+def test_every_surface_reads_the_goal_through_one_definition(client, built_library):
+    """The goal's meta key, bounds and tolerant parse live in ``webapp.goals``.
+
+    Three screens read it — the goal endpoints, the Dashboard roll-up and the
+    Tonight planner — and they used to carry hand-synced copies of the key. One
+    definition is what stops them drifting apart and telling the user two
+    different things about the same target."""
+    from webapp import goals
+    from webapp.routers import plan, stats, targets
+
+    assert targets.GOAL_META_KEY is goals.GOAL_META_KEY
+    assert stats.read_goal_s is goals.read_goal_s
+    assert plan.read_goal_s is goals.read_goal_s
+
+
+def test_a_garbled_stored_goal_reads_as_unset_rather_than_raising(tmp_path):
+    """A hand-edited or stale value must never 500 a screen that only wants to
+    *show* the goal — it simply falls back to the per-object-type default."""
+    from seestack.io.project import Project
+    from webapp.goals import GOAL_META_KEY, read_goal_s
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        assert read_goal_s(proj) is None  # absent
+        for bad in ("not-a-number", "", "-30", "0", "nan"):
+            proj.set_meta(GOAL_META_KEY, bad)
+            assert read_goal_s(proj) is None, bad
+        proj.set_meta(GOAL_META_KEY, "3600.0")
+        assert read_goal_s(proj) == 3600.0
+    finally:
+        proj.close()

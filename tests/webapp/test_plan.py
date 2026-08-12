@@ -113,6 +113,54 @@ def test_tonight_already_targeted_rows_carry_object_type(client, solved_library)
         assert m42_prog["object_type"] == m42["type"]
 
 
+def test_tonight_already_targeted_rows_carry_a_user_set_goal(client, solved_library):
+    """A goal the owner set has to reach the planner, or the two screens disagree
+    about the same target: Tonight would say "Plenty — try something new" from the
+    per-type default while the Target page correctly says "keep going"."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+
+    # No goal set → the field is present and null, so the per-type default applies
+    # exactly as before.
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert m42["goal_s"] is None
+
+    put = client.put("/api/targets/M_42/integration-goal", json={"goal_s": 12 * 3600.0})
+    assert put.status_code == 200
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert m42["goal_s"] == 12 * 3600.0
+    # ...and it is the same number /api/library-progress reports for that target.
+    prog = client.get("/api/library-progress").json()
+    m42_prog = next((r for r in prog if r["safe"] == "M_42"), None)
+    if m42_prog is not None:
+        assert m42_prog["goal_s"] == m42["goal_s"]
+
+    # A catalog row the user has never shot carries no goal at all.
+    catalog_row = next(t for t in body["targets"] if not t["already_targeted"])
+    assert catalog_row["goal_s"] is None
+
+
+def test_tonight_survives_an_unreadable_project_when_reading_goals(
+    client, solved_library, monkeypatch
+):
+    """A project that won't open must cost that row its goal, not the whole plan."""
+    from seestack.io.library import Library
+
+    def _boom(self, safe):  # noqa: ANN001
+        raise OSError("project is toast")
+
+    monkeypatch.setattr(Library, "open_target", _boom)
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/tonight", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    m42 = next(t for t in r.json()["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert m42["goal_s"] is None
+
+
 def test_tonight_min_alt_override_changes_usable_window(client, solved_library):
     client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
     low = client.get("/api/plan/tonight", params={"when": JAN_EVENING, "min_alt": 10}).json()

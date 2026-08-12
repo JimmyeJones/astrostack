@@ -49,6 +49,34 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**CROSS-SCREEN BUG (Builder 2026-08-12, found while shipping v0.253.0; REPRODUCED) — the Tonight planner ignores
+  the integration goal you set, so it tells you to move on from the very target you told the app you want more
+  of.**~~ — **FIXED v0.253.1** (Builder 2026-08-12, branch `claude/elegant-bohr-eglrga`). *(Friendliness / trust —
+  PRIORITY 3; the two screens disagreed about the same picture.)* `Tonight.tsx` called
+  `readinessRowHint(t.total_exposure_s, t.type)` — which had **no way to take a goal override** — while the Target
+  page's readiness card and the Dashboard's "Target progress" card both honour the user's stored goal. So an owner
+  who set a **12 h** goal on M 31 and had 7 h saw *"Plenty — try something new"* on the planner and *"7 h of 12 h —
+  keep going"* on the Target page, about the same target, on the same evening. It cuts the other way too: a
+  deliberately modest 2 h goal on a target at 3 h still read as "keep topping up" on the planner. **Reproduced** as
+  the two fail-before tests. This is the same class of defect as the v0.2xx fix that gave already-targeted rows
+  their catalog object *type* (they used to bucket as "Other" and contradict the card) — the goal was the other
+  half of that inconsistency, and the planner never read it.
+  **The fix, one value carried end to end:** `LibraryTarget`/`PlannedTarget` gained a nullable `goal_s`,
+  `_library_targets` fills it from the target's project meta (a broken project costs that row its goal, never the
+  plan — pinned by a test), and `readinessRowHint` grew the same optional `goalHoursOverride` third parameter
+  `integrationReadiness` already had, passing it straight through. Calling it without the argument is byte-for-byte
+  the old behaviour, so every existing assertion stands unchanged.
+  **Shipped with it (the reason the drift was possible):** the goal's meta key, its sanity bounds and its tolerant
+  parse were **three hand-synced copies** across `routers/targets.py`, `routers/stats.py` and now the planner —
+  with a comment in one of them literally saying "kept in sync by hand". They are now one definition in the new
+  `webapp/goals.py`, which every surface imports; a test asserts the three modules share the *same object*, so a
+  fourth copy can't quietly appear. Upgrade-safe: additive optional field on both sides (an older frontend ignores
+  it, an older backend omitting it falls back to the per-type default exactly as today), no config/DB/on-disk
+  change, no default flipped, no endpoint reshaped. **Tests (+7):** `tests/webapp/test_plan.py` (+2 — the goal
+  reaches the planner and agrees with `/api/library-progress`, a catalog row carries none, and an unreadable
+  project doesn't 500 the plan), `tests/webapp/test_target_integration_goal.py` (+2 — the one-definition guard and
+  the garbled-value parse), `readiness.test.ts` (+2, one fail-before) and `Tonight.test.tsx` (+1, fail-before).
+
 - ~~**🔒⭐⭐ OWNER REQUIREMENT (2026-08-07) — add an automated SAFETY NET that fails CI if any code path can delete,
   move, rename or overwrite a file under `incoming/`.**~~ — **SHIPPED v0.247.1** (Builder 2026-08-07, branch
   `claude/elegant-bohr-izzmou`). *(Data-integrity / regression prevention.)* `tests/webapp/test_incoming_readonly_guard.py`

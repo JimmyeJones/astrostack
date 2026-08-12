@@ -107,6 +107,31 @@ describe("readinessRowHint", () => {
   it("returns null when there's no integration", () => {
     expect(readinessRowHint(0, "galaxy")).toBeNull();
   });
+
+  it("honours a user-set goal, so the planner can't contradict the Target page", () => {
+    // 7 h on a galaxy is "plenty" against the 6 h type default — but an owner who
+    // set a 12 h goal has said they want more, and the row must not tell them to
+    // move on. (The Target page and the Dashboard card already read it this way.)
+    expect(readinessRowHint(7 * H, "galaxy")).toEqual({
+      label: "Plenty — try something new", color: "green",
+    });
+    expect(readinessRowHint(7 * H, "galaxy", 12)).toBeNull();
+
+    // ...and the other direction: a modest goal the owner set means a target the
+    // default would still nag them to top up is genuinely finished.
+    expect(readinessRowHint(3 * H, "galaxy")).toBeNull();
+    expect(readinessRowHint(3 * H, "galaxy", 2)).toEqual({
+      label: "Plenty — try something new", color: "green",
+    });
+  });
+
+  it("ignores an absent or nonsensical goal, falling back to the type default", () => {
+    for (const bad of [null, undefined, 0, -5, NaN]) {
+      expect(readinessRowHint(7 * H, "galaxy", bad as number | null)).toEqual({
+        label: "Plenty — try something new", color: "green",
+      });
+    }
+  });
 });
 
 describe("noiseReductionHint", () => {

@@ -133,12 +133,17 @@ export function noiseReductionHint(exposureSeconds: number): string | null {
 // something new once a target has close-to / more-than its suggested goal, and
 // stay quiet (null) while it's still worth topping up (the row's integration
 // figure already implies "keep going"). Caller supplies the accepted-sub
-// exposure total + catalog type for one already-targeted row.
+// exposure total + catalog type for one already-targeted row, plus that
+// target's user-set goal in **hours** when it has one — a goal the owner set
+// deliberately has to win here exactly as it does on the Target page and the
+// Dashboard overview, or the planner tells them to move on from a target they
+// have told the app they want more of.
 export function readinessRowHint(
   exposureSeconds: number,
   type: string | null | undefined,
+  goalHoursOverride?: number | null,
 ): { label: string; color: string } | null {
-  const r = integrationReadiness(exposureSeconds, type);
+  const r = integrationReadiness(exposureSeconds, type, goalHoursOverride);
   if (!r) return null;
   if (r.level === "plenty") return { label: "Plenty — try something new", color: "green" };
   if (r.level === "close") return { label: "Nearly there", color: "teal" };
