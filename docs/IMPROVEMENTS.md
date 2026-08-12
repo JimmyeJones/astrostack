@@ -11534,6 +11534,46 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW IDEA (Builder 2026-08-12, the one surface v0.253.0 deliberately left out) — put the "~N more clear nights"
+  figure on the *Tonight* planner's already-targeted rows too, where the beginner is literally choosing what to
+  point at.** *(Pillar: autonomy + friendliness, PRIORITY 2–3; size S–M — the plumbing is now a known quantity.)*
+  v0.253.0 answers "which target should I finish first?" on the **Dashboard**; v0.253.1 taught the planner to read
+  each target's user-set goal. The missing third piece is the *pace*: with it, a Tonight row could replace the
+  vague "Nearly there" badge with "~1 more night finishes this" at the exact moment the user is deciding.
+  **The work is a straight repeat of what v0.253.1 just did for `goal_s`:** add a nullable `recent_pace_s` to
+  `LibraryTarget`/`PlannedTarget`, fill it in `_library_targets` from `recent_night_pace_s(proj)` (the project is
+  already being opened there now, so it costs the three-column dated-frame scan and nothing else), and render it
+  with the *existing* `clearNightsFromPace` + `FINISH_FIRST_MAX_NIGHTS` cap so the wording matches the other two
+  screens verbatim. **The one real decision:** the row already carries `readinessRowHint` ("Nearly there" /
+  "Plenty — try something new"), and printing both a badge and a nights figure would be clutter — the nights
+  number should *replace* the badge on a row that has a pace, exactly as the original "Finish this one first"
+  entry warned. **Watch the cost first:** see the perf note below; if that cache lands, do it in the same pass.
+
+- **PERF NOTE / WATCH ITEM (Builder 2026-08-12, introduced knowingly by v0.253.1) — `/api/plan/tonight` now opens
+  every positioned target's SQLite, and unlike its Dashboard sibling it is *not* cached.** *(Infra —
+  PRIORITY 3; size S; **not a problem today, filed so it is spotted before it is**.)* `_library_targets` was
+  registry-only until this run; it now opens each project for the goal-meta read (one `get_meta`, so ~1 ms a
+  target — tens of ms on a large library, against an endpoint that already does batched ephemeris over the whole
+  catalog). That is a fair trade for two screens agreeing, and it is the same read `_collect_progress` has always
+  done. **But `/api/library-progress` caches it** on `app.state` behind a registry signature + 60 s TTL
+  (`_PROGRESS_CACHE_TTL_S`), and the planner does not — so a library of many hundreds of targets, or the pace scan
+  the idea above would add, is where this starts to show. **Fix direction when it does:** lift the same
+  signature-keyed cache pattern (`(safe, last_activity_utc, n_frames_accepted)` + short TTL) into a shared helper
+  and use it on both endpoints, rather than growing a second bespoke cache. **Measure before building** — do not
+  add a cache on a hunch.
+
+- **VERIFIED NON-ISSUE (Builder 2026-08-12) — the "say 'another hour would cut its noise about N%' in *one* voice"
+  item (filed 2026-08-04, above in Friendliness) is **already consistent** for the two surfaces that actually make
+  the marginal-return claim; nothing to build unless a third one appears.** *(Checked, not assumed.)*
+  `seestack/nightplan.noise_gain_from_more_time(t)` returns `1 − √(t/(t+1 h))` and its callers print
+  `round(gain·100)`; the frontend's `readiness.noiseReductionHint(t)` computes
+  `Math.round((1 − √(T/(T+3600)))·100)` — the same formula, the same extra hour, the same rounding, so the Tonight
+  card and the Target page's readiness card cannot disagree on the number. The remaining surfaces the entry listed
+  (`integrationTrend`, the "cut your noise ~N×" at-completion badge) answer a **different** question — noise
+  removed *so far* by stacking N subs, not the marginal return of one more hour — and the entry's own "care" note
+  says not to collapse those. Recorded so a future run doesn't re-derive this; if the two ever drift, the fix is a
+  frontend mirror of the engine helper, not a re-wording.
+
 - ~~**NEW BEGINNER FEATURE (Builder 2026-08-08, the natural follow-on to "How many more clear nights?" v0.252.0) —
   "Finish this one first": tell the beginner which of their in-flight targets is *closest to done*, so a clear
   night goes to the target one more session would finish rather than the one that needs six more.**~~ —
