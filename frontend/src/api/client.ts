@@ -33,6 +33,11 @@ export interface PlannedTarget {
   target_safe: string | null;
   frames_accepted: number | null;
   total_exposure_s: number | null;
+  // The user's own integration goal for this target (seconds), when they set one
+  // — so this row's readiness hint uses the same goal as the Target page and the
+  // Dashboard overview. null/absent for a catalog row, for a target with no goal
+  // set, and on an older backend; the per-object-type default then applies.
+  goal_s?: number | null;
   // "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
   // verdict, for catalog candidates the bundled catalog has a size for. Absent
   // on library rows and older backends. See FramingHint.
@@ -462,6 +467,11 @@ export interface TargetProgress {
   total_exposure_s: number;
   object_type: string | null;
   goal_s: number | null;
+  // Median kept integration per clear night over this target's recent nights,
+  // or null when there isn't enough history to call it a pace. Optional: an
+  // older backend simply doesn't send it, and the card then says nothing about
+  // how many more nights a target needs.
+  recent_pace_s?: number | null;
 }
 
 export interface NightActivity {

@@ -771,3 +771,148 @@ def test_transparency_trend_none_without_timestamps(tmp_path):
         assert transparency_trend(proj) is None
     finally:
         proj.close()
+
+
+# --- Recent capture pace ("how much is a clear night worth to me?") ---------
+
+from statistics import median  # noqa: E402
+
+from seestack.session_recap import (  # noqa: E402
+    MIN_PRODUCTIVE_NIGHT_S,
+    PACE_LOOKBACK_NIGHTS,
+    recent_night_pace_s,
+)
+
+
+def _night(proj, day: int, *, n: int, exposure: float = 10.0, accept: bool = True,
+           month: int = 7, year: int = 2026) -> None:
+    """Add one capture night of ``n`` subs, 30 s apart from 22:00 UTC."""
+    base = datetime(year, month, day, 22, 0, 0)
+    for i in range(n):
+        proj.add_frame(_frame(base + timedelta(seconds=30 * i),
+                              exposure=exposure, accept=accept))
+
+
+def test_pace_is_the_median_kept_integration_per_recent_night(tmp_path):
+    """Three nights of 300 s / 600 s / 900 s kept → a 600 s median pace."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _night(proj, 1, n=30)   # 300 s
+        _night(proj, 8, n=60)   # 600 s
+        _night(proj, 15, n=90)  # 900 s
+        assert recent_night_pace_s(proj) == 600.0
+    finally:
+        proj.close()
+
+
+def test_pace_counts_only_the_kept_subs(tmp_path):
+    """Set-aside subs are time spent, not integration gained — the pace is what a
+    clear night is really *worth*, so it must follow the kept exposure only."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for day in (1, 8):
+            _night(proj, day, n=40)                 # 400 s kept
+            _night(proj, day, n=40, accept=False)   # + 400 s set aside, same night
+        assert recent_night_pace_s(proj) == 400.0
+    finally:
+        proj.close()
+
+
+def test_pace_uses_only_the_most_recent_nights(tmp_path):
+    """A change of habit shows up: old marathon nights outside the lookback
+    window can't drag a recent, shorter cadence upward."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for wk in range(4):  # four old nights of 1200 s
+            _night(proj, 1 + 7 * wk, n=120, month=5)
+        for wk in range(PACE_LOOKBACK_NIGHTS):  # then five recent 300 s nights
+            _night(proj, 1 + 7 * wk, n=30, month=7)
+        assert recent_night_pace_s(proj) == 300.0
+    finally:
+        proj.close()
+
+
+def test_pace_ignores_a_test_frame_night(tmp_path):
+    """A night that kept less than the productive floor is a test frame or two,
+    not a session — counting it would halve the median and inflate every ETA."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _night(proj, 1, n=60)   # 600 s
+        _night(proj, 8, n=60)   # 600 s
+        _night(proj, 15, n=1)   # 10 s — under MIN_PRODUCTIVE_NIGHT_S
+        assert MIN_PRODUCTIVE_NIGHT_S == 120.0
+        assert recent_night_pace_s(proj) == 600.0
+    finally:
+        proj.close()
+
+
+def test_pace_is_none_from_a_single_night(tmp_path):
+    """One session is not a pace — say nothing rather than project a whole goal
+    off it."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _night(proj, 1, n=60)
+        assert recent_night_pace_s(proj) is None
+    finally:
+        proj.close()
+
+
+def test_pace_is_none_when_recent_nights_kept_almost_nothing(tmp_path):
+    """Recent nights that recorded subs but kept next to none give no pace to
+    divide by (the Target page says so in words; the library card stays quiet)."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for day in (1, 8, 15):
+            _night(proj, day, n=40, accept=False)
+        assert recent_night_pace_s(proj) is None
+    finally:
+        proj.close()
+
+
+def test_pace_is_none_without_dated_frames(tmp_path):
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for i in range(20):
+            f = _frame(None)
+            f.source_path = f"/x/undated-{i}.fit"
+            proj.add_frame(f)
+        assert recent_night_pace_s(proj) is None
+    finally:
+        proj.close()
+
+
+def test_pace_splits_nights_the_same_way_the_nights_card_does(tmp_path):
+    """The number must agree with the "Nights" breakdown the user can read: same
+    6 h-gap sessions, so a session spanning UTC midnight stays one night."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        # 21:00 → 01:00 across midnight, twice, a week apart.
+        for day in (1, 8):
+            base = datetime(2026, 7, day, 21, 0, 0)
+            for i in range(40):
+                proj.add_frame(_frame(base + timedelta(minutes=6 * i)))
+        nights = nights_breakdown(proj)
+        assert len(nights) == 2  # not four UTC-date buckets
+        assert recent_night_pace_s(proj) == median(
+            [n.kept_exposure_s for n in nights]
+        )
+    finally:
+        proj.close()
+
+
+def test_iter_frame_capture_rows_skips_undated_and_defaults_a_null_exposure(tmp_path):
+    """The lean three-column read behind the pace: dated rows only, a NULL
+    exposure reading as 0.0 exactly as the night rollups treat it."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        proj.add_frame(_frame(datetime(2026, 7, 1, 22, 0, 0), exposure=10.0))
+        proj.add_frame(_frame(datetime(2026, 7, 1, 22, 1, 0), accept=False))
+        proj.add_frame(_frame(None))
+        fid = proj.add_frame(_frame(datetime(2026, 7, 1, 22, 2, 0)))
+        proj.update_frame(fid, exposure_s=None)
+        rows = sorted(proj.iter_frame_capture_rows())
+        assert len(rows) == 3
+        assert [r[1] for r in rows] == [10.0, 10.0, 0.0]
+        assert [r[2] for r in rows] == [True, False, True]
+    finally:
+        proj.close()

@@ -32,8 +32,14 @@ function TargetRow({ t }: { t: PlannedTarget }) {
   // For a target already in the library, nudge toward starting something new
   // once it's close to / past its suggested integration goal ("Is it enough
   // yet?"); silent while it's still worth topping up.
+  // Honours the goal the user set for this target (seconds → hours), so the
+  // planner never contradicts the Target page about the same picture.
   const readyHint = t.already_targeted
-    ? readinessRowHint(t.total_exposure_s ?? 0, t.type)
+    ? readinessRowHint(
+        t.total_exposure_s ?? 0,
+        t.type,
+        t.goal_s == null ? null : t.goal_s / 3600,
+      )
     : null;
   // Pre-capture "will it fit?" nudge for a catalog candidate that's bigger than
   // (or as wide as) a single Seestar frame — so a beginner reaches for mosaic

@@ -292,6 +292,23 @@ describe("TonightView", () => {
     expect(screen.queryByText("Nearly there")).not.toBeInTheDocument();
   });
 
+  it("uses the goal the owner set for a target, not the per-type default", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [
+        // 7 h on a galaxy is past the 6 h type default — but the owner set a 12 h
+        // goal on this one, so the planner must not tell them to move on.
+        target({ id: "M31", name: "Andromeda", type: "galaxy", already_targeted: true,
+                 target_safe: "M_31", frames_accepted: 200, total_exposure_s: 7 * 3600,
+                 goal_s: 12 * 3600, score: 80 }),
+      ],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    expect(screen.queryByText("Plenty — try something new")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nearly there")).not.toBeInTheDocument();
+  });
+
   it("keeps the Night picker mounted on error so a bad date doesn't strand the user", async () => {
     vi.spyOn(client.api, "getTonight").mockRejectedValue(new Error("boom"));
     render(
