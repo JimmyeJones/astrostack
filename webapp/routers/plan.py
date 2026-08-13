@@ -38,6 +38,7 @@ from seestack.nightplan import (
 from webapp import deps
 from webapp.goals import read_goal_s
 from webapp.ics import IcsEvent, to_ics
+from webapp.registry_cache import cached_for_registry, registry_signature
 from webapp.site_location import detect_site_from_library as _detect_site_from_library
 
 log = logging.getLogger(__name__)
@@ -119,40 +120,61 @@ def _library_targets(request: Request) -> list[LibraryTarget]:
     Dashboard roll-up reads it (a project-meta lookup, tolerating a garbage value
     as unset); a project that won't open simply keeps the per-type default rather
     than failing the whole plan.
-    """
-    from seestack.objectinfo import identify_object
 
+    The same open also reads the target's **recent per-night pace**, so a row can
+    say "~1 more clear night finishes this" at the moment the user is choosing
+    what to point at — the figure the Dashboard and Target page already show,
+    rather than a vague "Nearly there". That read is the expensive one (it scans
+    every dated frame; measured ~5 ms a target against ~0.6 ms for the goal
+    alone), so the whole annotated list is cached behind the shared
+    registry-signature cache the Dashboard roll-up uses.
+    """
     lib = deps.open_library(request)
     try:
-        catalog = load_catalog()
-        out: list[LibraryTarget] = []
-        for t in lib.list_targets():
-            if t.ra_deg is None or t.dec_deg is None:
-                continue
-            info = identify_object(t.name, float(t.ra_deg), float(t.dec_deg),
-                                   catalog=catalog)
-            goal_s: float | None = None
-            proj = None
-            try:
-                proj = lib.open_target(t.safe_name)
-                goal_s = read_goal_s(proj)
-            except Exception:  # noqa: BLE001 — a broken project must not 500 the plan
-                pass
-            finally:
-                if proj is not None:
-                    proj.close()
-            out.append(LibraryTarget(
-                safe=t.safe_name, name=t.name,
-                ra_deg=float(t.ra_deg), dec_deg=float(t.dec_deg),
-                frames_accepted=int(t.n_frames_accepted or 0),
-                total_exposure_s=float(t.total_exposure_s or 0.0),
-                object_type=info.type if info is not None else "",
-                con=info.constellation_abbr if info is not None else "",
-                goal_s=goal_s,
-            ))
-        return out
+        targets = lib.list_targets()
+        return cached_for_registry(
+            request.app, "plan_library_targets", registry_signature(targets),
+            lambda: _annotate_library_targets(lib, targets),
+        )
     finally:
         lib.close()
+
+
+def _annotate_library_targets(lib, targets) -> list[LibraryTarget]:  # noqa: ANN001
+    """Build the annotated 'already targeted' rows (see :func:`_library_targets`)."""
+    from seestack.objectinfo import identify_object
+    from seestack.session_recap import recent_night_pace_s
+
+    catalog = load_catalog()
+    out: list[LibraryTarget] = []
+    for t in targets:
+        if t.ra_deg is None or t.dec_deg is None:
+            continue
+        info = identify_object(t.name, float(t.ra_deg), float(t.dec_deg),
+                               catalog=catalog)
+        goal_s: float | None = None
+        pace_s: float | None = None
+        proj = None
+        try:
+            proj = lib.open_target(t.safe_name)
+            goal_s = read_goal_s(proj)
+            pace_s = recent_night_pace_s(proj)
+        except Exception:  # noqa: BLE001 — a broken project must not 500 the plan
+            pass
+        finally:
+            if proj is not None:
+                proj.close()
+        out.append(LibraryTarget(
+            safe=t.safe_name, name=t.name,
+            ra_deg=float(t.ra_deg), dec_deg=float(t.dec_deg),
+            frames_accepted=int(t.n_frames_accepted or 0),
+            total_exposure_s=float(t.total_exposure_s or 0.0),
+            object_type=info.type if info is not None else "",
+            con=info.constellation_abbr if info is not None else "",
+            goal_s=goal_s,
+            recent_pace_s=pace_s,
+        ))
+    return out
 
 
 @router.get("/tonight")

@@ -38,6 +38,11 @@ export interface PlannedTarget {
   // Dashboard overview. null/absent for a catalog row, for a target with no goal
   // set, and on an older backend; the per-object-type default then applies.
   goal_s?: number | null;
+  // This target's recent productive pace (median kept integration per clear
+  // night, seconds), so the row can say how many more clear nights would finish
+  // it instead of only that it's "Nearly there". null/absent for a catalog row,
+  // for a target without enough night history, and on an older backend.
+  recent_pace_s?: number | null;
   // "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
   // verdict, for catalog candidates the bundled catalog has a size for. Absent
   // on library rows and older backends. See FramingHint.
