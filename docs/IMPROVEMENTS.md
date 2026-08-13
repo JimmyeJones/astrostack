@@ -9760,6 +9760,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   content-order/above-the-fold → (d) sidebar grouping → (e) Dashboard. Ship and let the owner react between
   slices; his reaction to (a) and (b) should inform the rest.
 
+  **✅ SLICE (a) SHIPPED — v0.255.0** (Builder 2026-08-13, branch `claude/serene-goldberg-2bpxcs`). The Target
+  page's banner wall is now one prioritised notes area. **Measured, as the acceptance criterion asks:** always-on
+  note blocks above the page's own title went **15 → at most 2**, plus one `"N more notes"` line; the other 13 are
+  **still mounted, still rendered, one click away** (nothing removed — the hard constraint). `Target.tsx` is 1512 →
+  1524 lines (+12: the win here is visual, not line count — the wall's JSX is unchanged, just re-homed into an
+  array), and the new shared `components/NoticeBoard.tsx` is 137 lines.
+  **The design decision worth knowing:** most of those notes are **self-hiding components that fetch their own
+  data** (`SkyBrightnessNote`, `SharpestYetBadge`, `StackNoiseBadge`, `CalibrationSkippedNote`,
+  `NextBestMoveBadge`, `IntegrationTrendBadge`…), so the page genuinely cannot know how many will speak up — and a
+  disclosure that promises *"2 more notes"* and opens onto nothing is worse than none. `NoticeBoard` therefore
+  **measures the DOM**: it renders every note, counts the ones that actually produced output (a `MutationObserver`
+  catches the ones that arrive late, since a child's own query resolving doesn't re-render the parent), shows the
+  top `inlineCount` by severity and hides the rest **with CSS rather than unmounting** — so expanding never
+  remounts or refetches anything, and a note that changes its mind is picked up automatically.
+  Severity is declared per note via the exported `NOTICE_PRIORITY` ladder (`blocking` > `warning` > `advisory` >
+  `info` > `praise`), so a congratulation can never take a warning's slot — the entry's explicit requirement. The
+  one note deliberately left **outside** the board is `SampleTourNote`: it *is* the first-run guidance the entry
+  says to preserve, and it self-hides off the sample demo anyway. The `mixedRejected`/`mixedPointings` ternary pair
+  was split into two independently-ranked notes that keep their exact mutual exclusion.
+  **This is the reusable grouping primitive the entry asks for** — a later feature with something to say should add
+  a `Notice` with a priority instead of appending one more always-on banner. **Tests (+8):**
+  `NoticeBoard.test.tsx` (+6 — severity ranking beats declaration order, one-click open/close, silent notes are not
+  counted, an all-silent board renders nothing at all, a late-arriving note is picked up, and nothing folds when
+  there is nothing to fold) and `Target.test.tsx` (+2 — the real page keeps its two urgent notes inline and folds
+  the third, and a lone note shows with no disclosure). All 66 pre-existing `Target.test.tsx` assertions pass
+  **unchanged** (hidden notes stay in the DOM), so nothing was rewritten to go green. Frontend-only: no API,
+  schema, config, on-disk or default change. **Next slice: (b) — group the 9 stacked analysis cards.**
+
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
   first paint, and route file length. A slice that doesn't move those numbers hasn't done the job.
