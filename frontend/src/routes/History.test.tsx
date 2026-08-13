@@ -107,6 +107,48 @@ describe("HistoryView", () => {
     expect(screen.getByText(/Combined: κ-σ \(sigma-clip\) outlier rejection/)).toBeInTheDocument();
   });
 
+  it("says how this run framed its target when Info is open", async () => {
+    // The verdict is per-run, and History is where two stacks of one target get
+    // compared — so it has to say "this one caught all of it" here too, in the
+    // same words the Target page uses.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 840, weighting: null, cards: [],
+    });
+    const framing = vi.spyOn(client.api, "stackFraming").mockResolvedValue({
+      level: "clipped", coverage: 0.68, off_centre: 0.5,
+      object_name: "Orion Nebula", size_arcmin: 85,
+      text: "runs off the edge of the frame — about 70% of it made it in. It "
+        + "would fit whole, so just re-centre it next session.",
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    // Not fetched (and nothing shown) until the Info panel is actually opened.
+    expect(framing).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    await waitFor(() => expect(framing).toHaveBeenCalledWith("M_42", 1));
+    expect(await screen.findByText("Part of it is outside the frame")).toBeInTheDocument();
+    expect(screen.getByText(/^Orion Nebula runs off the edge/)).toBeInTheDocument();
+  });
+
+  it("says nothing about framing for a run the endpoint can't judge", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 840, weighting: null, cards: [],
+    });
+    const framing = vi.spyOn(client.api, "stackFraming").mockResolvedValue(null);
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    await waitFor(() => expect(framing).toHaveBeenCalled());
+    expect(screen.queryByTestId("framing-verdict")).not.toBeInTheDocument();
+  });
+
   it("shows the auto-edit note for a silently auto-edited run", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({

@@ -6581,9 +6581,22 @@ to **Shipped**.)_
   more than, say, a third of the frame. **Grep first:** check whether the editor's geometry ops already carry a
   centred-crop helper before writing one.
 
-- **NEW IDEA (Builder 2026-08-13, parity gap spotted while shipping the framing verdict v0.256.0) — the framing
+- ~~**NEW IDEA (Builder 2026-08-13, parity gap spotted while shipping the framing verdict v0.256.0) — the framing
   verdict is on the Target page only; History's per-run Info panel says nothing about it, so comparing two stacks
-  of the same target can't show that one of them was framed better.** *(Pillar: friendliness / trust, PRIORITY 3;
+  of the same target can't show that one of them was framed better.**~~ — **SHIPPED v0.257.1** (Builder
+  2026-08-13, branch `claude/serene-goldberg-h9ki9i`). *(Friendliness / trust — PRIORITY 3.)* Built exactly as
+  specced: `<FramingVerdictNote>` is rendered **verbatim** (not re-worded) inside History's Info panel, beside
+  `StackHealthCard`, so one picture reads the same on both surfaces — and, now that the note carries the
+  "Re-centre this picture" offer shipped in v0.257.0, History gets that button for free on any run whose target
+  landed off to one side. It lives **inside** the existing Info disclosure rather than as a new always-on card, so
+  it adds nothing to the standing-owner-priority block count and costs no query until the user opens Info (pinned
+  by a test that asserts `stackFraming` is *not* called before the click). Self-hiding as before on a run the
+  endpoint can't judge. Frontend-only, one component + one import: no engine, endpoint, schema, config, DB,
+  on-disk or default change. **Tests (+2 in `History.test.tsx`):** the verdict renders in the panel with the same
+  title and sentence the Target page shows (and only after Info is opened), and a run with no honest answer shows
+  nothing at all.
+  *(Original spec kept below for provenance.)*
+  *(Pillar: friendliness / trust, PRIORITY 3;
   size XS.)* The endpoint is already **per-run** (`/stack-runs/{run_id}/framing`), so a second surface is one query
   and one line — and History is where a beginner compares runs, which is precisely where "this one caught all of
   it, that one clipped it" earns its keep. Same shape as the crop/sharpen/warnings parity list the Gallery work
