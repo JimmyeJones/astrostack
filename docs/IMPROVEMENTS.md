@@ -9583,6 +9583,62 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **⭐⭐ OWNER-REQUESTED (2026-08-08) — INFORMATION-ARCHITECTURE OVERHAUL: the pages are "extremely busy"; you have
+  to scroll a long way past ~30 stacked things to reach the actual content.** *(PRIORITY 3 friendliness, and the
+  owner's top UX complaint about the live build. A standing, MULTI-RUN effort — one page per run, see the slicing
+  below. Size L overall, M per slice.)*
+
+  **🚫 THE HARD CONSTRAINT — NOTHING MAY BE REMOVED.** The owner was explicit: *"don't get rid of features — just
+  move them to a more organized layout."* No feature, card, badge, note, control or route may be deleted, and
+  nothing may become unreachable or undiscoverable. This is **pure information architecture**: same capability,
+  better arrangement. If a slice can only hit its numbers by dropping something, the slice is wrong — regroup
+  instead. (An agent that "simplifies" by deleting a card has failed this item.)
+
+  **Measured on `main` @ v0.254.1 — the owner is not exaggerating:**
+  - **`routes/Target.tsx` is the worst offender: 1481 lines, ~28 distinct imported UI components, 17
+    `Card`/`Paper`/`Alert` blocks.** Its vertical order is: header → **~15 consecutive `Alert`/note/badge blocks
+    (lines ~745–956)** → preview/stack → **9 full analysis cards stacked one below another (lines ~1192–1294:
+    `SessionRecap`, `Nights`, `FocusTrend`, `TransparencyTrend`, `StackHealth`, `DeepeningReel`, `NextSession`,
+    `BestMonths`, `MoonInterference`)** → **the frames table — the actual data — does not begin until line ~1339
+    of 1481.** That is the "30 things at the top" and the long scroll, literally.
+  - **`routes/Dashboard.tsx`: ~28 component references.** Second worst.
+  - **The sidebar is a flat list of 15 destinations** with no grouping.
+  - Cause is honest feature accretion: nearly every shipped feature added one more always-on card or banner, and
+    no run has ever owned the *sum*.
+
+  **Direction (the Builder should exercise judgement, but hit these shapes):**
+  1. **Collapse the banner wall into one prioritised "needs your attention" area.** Rank the ~15 alerts by
+     severity (blocking error > warning > advisory > congratulatory), **show the top 1–2 inline, and put the rest
+     behind a single "N more notes" disclosure** that is open-able in one click. Congratulatory/"nice job" notes
+     (`SharpestYetBadge`, praise alerts) should never outrank a real warning for the inline slot.
+  2. **Group the 9 stacked analysis cards instead of stacking them.** Either **tabs** (suggested split:
+     *Overview* — recap/nights · *Quality* — focus/transparency/stack-health · *Planning* — next session/best
+     months/moon · *Story* — deepening reel) **or a responsive multi-column grid**. Tabs cut scroll hardest;
+     a grid is the lower-risk change. Pick one and be consistent across pages.
+  3. **Put what the user came for at the top.** On a target that means the picture and the frames table; the
+     analysis belongs below or behind a tab. Aim for **the primary content visible without scrolling** on a
+     1080p desktop window.
+  4. **Group the sidebar** into a few labelled sections (e.g. *Capture · Pictures · Planning · System*) —
+     15 flat links is its own kind of busy. No route removed.
+  5. **Then apply the same pass to `Dashboard.tsx`**, reusing whatever grouping primitive slice 2 lands on.
+
+  **Slice it — do NOT attempt all of this in one run.** Suggested order, one per run, each independently
+  shippable and revertible: (a) Target banner-wall consolidation → (b) Target analysis-card grouping → (c) Target
+  content-order/above-the-fold → (d) sidebar grouping → (e) Dashboard. Ship and let the owner react between
+  slices; his reaction to (a) and (b) should inform the rest.
+
+  **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
+  count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
+  first paint, and route file length. A slice that doesn't move those numbers hasn't done the job.
+
+  **Cautions.** These pages carry the app's biggest test files (`Target.test.tsx` 1258 lines, `Editor.test.tsx`
+  2489) — **update the assertions to the new layout, never delete them to go green** (§10). Keep it
+  **mobile/responsive**: the owner reads these on a phone (that's why the share/scan-to-phone work exists), and a
+  tab strip must not overflow. **Preserve first-run guidance**: empty states, `SampleTourNote` and the "Your
+  first image" checklist are what orient a beginner — they may move, but a brand-new library must still be
+  walked through. Prefer a shared, reusable grouping component over per-page bespoke layout, so later features
+  have an obvious home to slot into instead of appending one more banner.
+
 - ~~**NEW IDEA (Builder 2026-08-07, spotted while shipping the sharpening slice v0.247.0) — trying a different
   sharpening strength costs a whole second decode of the capture, when the crop next to it costs none.**~~ —
   **SHIPPED v0.249.0** (Builder 2026-08-08, branch `claude/elegant-bohr-cdbcoy`). *(Friendliness / autonomy —
