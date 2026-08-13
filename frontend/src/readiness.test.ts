@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   integrationReadiness,
   readinessColor,
+  readinessRowBadge,
   readinessRowHint,
   noiseReductionHint,
 } from "./readiness";
@@ -131,6 +132,88 @@ describe("readinessRowHint", () => {
         label: "Plenty — try something new", color: "green",
       });
     }
+  });
+});
+
+describe("readinessRowBadge", () => {
+  it("prefers the owner's own pace over the vague readiness word", () => {
+    // Galaxy goal 6 h, 5 h shot → a 1 h gap. At 2 h of kept subs a clear night
+    // that's a single night, and saying so beats "Nearly there" at the moment
+    // the user is choosing what to point at.
+    expect(readinessRowBadge(5 * H, "galaxy", null, 2 * H)).toMatchObject({
+      label: "~1 more night", color: "teal",
+    });
+    // A 3 h gap at 1.5 h a night → 2 nights, pluralised.
+    expect(readinessRowBadge(3 * H, "galaxy", null, 1.5 * H)).toMatchObject({
+      label: "~2 more nights", color: "teal",
+    });
+  });
+
+  it("explains the chip on hover, so three terse words aren't the whole story", () => {
+    // The tooltip has to answer "of what, toward what?": where the pace came
+    // from, and the goal it's counting toward.
+    const paced = readinessRowBadge(5 * H, "galaxy", null, 2 * H);
+    expect(paced!.tooltip).toContain("of ~6 h");
+    expect(paced!.tooltip).toContain("At your recent pace");
+    expect(paced!.tooltip).toContain("1 more clear night");
+    // The fallback badges are explained too — by the same readiness verdict the
+    // Target page prints, so the two screens say the same thing about the target.
+    expect(readinessRowBadge(7 * H, "galaxy")!.tooltip)
+      .toBe(integrationReadiness(7 * H, "galaxy")!.verdict);
+    expect(readinessRowBadge(5 * H, "galaxy")!.tooltip)
+      .toBe(integrationReadiness(5 * H, "galaxy")!.verdict);
+  });
+
+  it("speaks up on a row the plain hint stays silent on", () => {
+    // 3 h of a 6 h galaxy goal is "solid" — the badge-only version says nothing,
+    // because "keep going" is already implied by the row's integration figure.
+    // A measured pace turns that silence into something actionable.
+    expect(readinessRowHint(3 * H, "galaxy")).toBeNull();
+    expect(readinessRowBadge(3 * H, "galaxy", null, 3 * H)).toMatchObject({
+      label: "~1 more night", color: "teal",
+    });
+  });
+
+  it("falls back to the plain hint, verbatim, whenever there's no number", () => {
+    // No pace at all (fewer than two productive nights) — every shape of "none".
+    for (const noPace of [null, undefined, 0, -1, NaN, Infinity]) {
+      expect(readinessRowBadge(5 * H, "galaxy", null, noPace as number | null))
+        .toMatchObject(readinessRowHint(5 * H, "galaxy")!);
+      expect(readinessRowBadge(3 * H, "galaxy", null, noPace as number | null))
+        .toBeNull();
+    }
+    // Goal already met: the "try something new" nudge is the useful thing, and a
+    // nights count would be meaningless (there's no gap left to divide).
+    expect(readinessRowBadge(7 * H, "galaxy", null, 2 * H)).toMatchObject({
+      label: "Plenty — try something new", color: "green",
+    });
+    // No integration yet → nothing to say either way.
+    expect(readinessRowBadge(0, "galaxy", null, 2 * H)).toBeNull();
+  });
+
+  it("stays quiet about nights on a target further out than the cap", () => {
+    // 1 h of a 6 h goal at 0.5 h a night is 10 nights away. Printing that reads
+    // as a scold rather than encouragement, so the row keeps its ordinary badge
+    // (here: none — it's still plainly worth topping up).
+    expect(readinessRowBadge(1 * H, "galaxy", null, 0.5 * H)).toBeNull();
+    // The cap is 3, so 3 nights still prints and 4 doesn't. A 3 h gap at 1 h a
+    // night is exactly 3; at 0.75 h a night it's 4.
+    expect(readinessRowBadge(3 * H, "galaxy", null, 1 * H)).toMatchObject({
+      label: "~3 more nights", color: "teal",
+    });
+    expect(readinessRowBadge(3 * H, "galaxy", null, 0.75 * H)).toBeNull();
+  });
+
+  it("measures the gap against the goal the owner set", () => {
+    // 7 h on a galaxy is past the 6 h default → "plenty". With a 12 h goal set
+    // there are 5 h to go, which at 2.5 h a night is 2 more nights — the planner
+    // must answer against the user's goal, exactly as every other screen does.
+    expect(readinessRowBadge(7 * H, "galaxy", null, 2.5 * H)).toMatchObject({
+      label: "Plenty — try something new", color: "green",
+    });
+    expect(readinessRowBadge(7 * H, "galaxy", 12, 2.5 * H)).toMatchObject({
+      label: "~2 more nights", color: "teal",
+    });
   });
 });
 

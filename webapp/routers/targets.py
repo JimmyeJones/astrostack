@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 
 from webapp import deps
 from webapp.goals import GOAL_META_KEY, MAX_GOAL_S, MIN_GOAL_S, read_goal_s
+from webapp.registry_cache import invalidate_registry_cache
 from webapp.schemas import (
     BackgroundModeHintOut,
     BestFrameOut,
@@ -612,6 +613,11 @@ def set_integration_goal(
             goal = min(max(goal, MIN_GOAL_S), MAX_GOAL_S)
             proj.set_meta(GOAL_META_KEY, repr(goal))
             stored = goal
+        # The Dashboard roll-up and the Tonight planner both fold this goal into
+        # a cached per-target answer, and a goal write leaves the registry
+        # signature untouched — so drop those caches here rather than making the
+        # user wait out a TTL to see the goal they just set.
+        invalidate_registry_cache(request.app)
         return IntegrationGoalOut(goal_s=stored)
     finally:
         proj.close()

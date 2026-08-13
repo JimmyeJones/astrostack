@@ -11534,9 +11534,43 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-08-12, the one surface v0.253.0 deliberately left out) — put the "~N more clear nights"
+- ~~**NEW IDEA (Builder 2026-08-12, the one surface v0.253.0 deliberately left out) — put the "~N more clear nights"
   figure on the *Tonight* planner's already-targeted rows too, where the beginner is literally choosing what to
-  point at.** *(Pillar: autonomy + friendliness, PRIORITY 2–3; size S–M — the plumbing is now a known quantity.)*
+  point at.**~~ — **SHIPPED v0.254.0** (Builder 2026-08-13, branch `claude/elegant-bohr-6pvn9g`), built as specced,
+  **with the perf note below shipped in the same pass because the measurement said to.** *(Autonomy +
+  friendliness — PRIORITY 2–3.)* A nullable `recent_pace_s` now rides `LibraryTarget` → `PlannedTarget` exactly as
+  `goal_s` does, filled in the planner's per-target annotation from `recent_night_pace_s(proj)` on the project it
+  already opens. On the row, the new `readinessRowBadge` **replaces** the "Nearly there" badge with `~N more
+  night(s)` whenever the target has a measured pace, a gap left, and is within the shared
+  `FINISH_FIRST_MAX_NIGHTS` cap — and falls back to `readinessRowHint` **verbatim** otherwise (no pace, goal met,
+  or further out than the cap), so a library with no night history anywhere sees byte-for-byte what it saw before.
+  The cap moved from `libraryProgress.ts` to `components/clearNights.ts` (re-exported from its old home, so every
+  existing import and test is untouched) — it now lives with the arithmetic and the wording, which is what let
+  `readiness.ts` apply it without the two modules importing each other. **One thing not in the spec, added because
+  the beginner bar demands it:** every one of these badges now carries a hover **tooltip**, like the row's
+  difficulty and framing badges already do — "~1 more night" is three words that mean nothing without *of what,
+  toward what?*, so the hover gives the readiness verdict plus the sentence naming the measured pace it divided by.
+  The fallback badges get the same treatment (the Target page's own verdict text), so the two screens explain a
+  target in the same words.
+  **The perf half, measured first as the note demanded:** on a synthetic 40-target library of 1500 frames each,
+  open + goal read costs **0.59 ms a target** and adding the pace scan takes it to **5.42 ms** (24 ms → 217 ms for
+  the library) — real enough to cache, so the bespoke cache in `routers/stats.py` became the shared
+  `webapp/registry_cache.py` (`registry_signature` + `cached_for_registry` + `invalidate_registry_cache`) and both
+  endpoints use it. **One genuine bug fixed on the way:** a goal write doesn't move the registry signature, so
+  caching the planner would have made the user wait out a 60 s TTL to see a goal they just set (it broke an
+  existing test, which is how it was caught) — `PUT /integration-goal` now drops both roll-ups explicitly, which
+  also removes that staleness from the Dashboard, where it has been live all along. Upgrade-safe: additive
+  optional field on both sides (an older frontend ignores it; an older backend omitting it falls back to the badge),
+  no config/DB/on-disk change, no default flipped, no endpoint reshaped; the cache is in-process only and holds
+  nothing that isn't re-derivable from disk. **Tests (+18):** `tests/webapp/test_plan.py` (+2, both fail-before —
+  the pace reaches the planner and agrees with `/api/library-progress`, a single-night target and a catalog row
+  carry none, an unreadable project costs that row its pace not the plan; and the cache is reused across renders
+  but dropped by a goal write *and* by new subs), `tests/webapp/test_registry_cache.py` (+9, new — signature
+  order-stability and what moves it, reuse/rebuild/TTL, key isolation, a failed build not pinning itself, targeted
+  and blanket invalidation, and the Starlette-`State` `KeyError` regression that a plain-object test could not
+  have caught), `readiness.test.ts` (+5, fail-before) and `Tonight.test.tsx` (+1, fail-before).
+  *(Original spec kept below for provenance.)*
+  *(Pillar: autonomy + friendliness, PRIORITY 2–3; size S–M — the plumbing is now a known quantity.)*
   v0.253.0 answers "which target should I finish first?" on the **Dashboard**; v0.253.1 taught the planner to read
   each target's user-set goal. The missing third piece is the *pace*: with it, a Tonight row could replace the
   vague "Nearly there" badge with "~1 more night finishes this" at the exact moment the user is deciding.
@@ -11549,8 +11583,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   number should *replace* the badge on a row that has a pace, exactly as the original "Finish this one first"
   entry warned. **Watch the cost first:** see the perf note below; if that cache lands, do it in the same pass.
 
-- **PERF NOTE / WATCH ITEM (Builder 2026-08-12, introduced knowingly by v0.253.1) — `/api/plan/tonight` now opens
-  every positioned target's SQLite, and unlike its Dashboard sibling it is *not* cached.** *(Infra —
+- ~~**PERF NOTE / WATCH ITEM (Builder 2026-08-12, introduced knowingly by v0.253.1) — `/api/plan/tonight` now opens
+  every positioned target's SQLite, and unlike its Dashboard sibling it is *not* cached.**~~ — **SHIPPED v0.254.0**
+  (Builder 2026-08-13, branch `claude/elegant-bohr-6pvn9g`), in the same pass as the nights figure above and in
+  the direction this note specified: the cache pattern is now the shared `webapp/registry_cache.py`, used by both
+  `/api/library-progress` and `/api/plan/tonight`, rather than a second bespoke copy. **Measured before building,
+  as the note demanded** — 40 synthetic targets × 1500 frames: 0.59 ms a target for open + goal, **5.42 ms** once
+  the pace scan is added (24 ms → 217 ms for the library). See the shipped entry above for the full write-up,
+  including the goal-write staleness the cache exposed and fixed. *(Infra —
   PRIORITY 3; size S; **not a problem today, filed so it is spotted before it is**.)* `_library_targets` was
   registry-only until this run; it now opens each project for the goal-meta read (one `get_meta`, so ~1 ms a
   target — tens of ms on a large library, against an endpoint that already does batched ephemeris over the whole
@@ -16363,6 +16403,56 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- ~~**DRIFT GUARD (Builder 2026-08-13, spotted while shipping v0.254.0) — the "how many more clear nights?" pace
+  rules are mirrored by hand across Python and TypeScript, with nothing but a comment holding them together.**~~ —
+  **SHIPPED v0.254.1** (Builder 2026-08-13, branch `claude/elegant-bohr-6pvn9g`). *(Trust / consistency —
+  PRIORITY 3; test-only.)* Three screens now answer *"how much longer will this target take me?"* — the Target page
+  derives the pace client-side from its night list (`clearNights.ts`), while the Dashboard overview and (as of
+  v0.254.0) the Tonight planner get it from the server (`session_recap.recent_night_pace_s`). The two numbers that
+  *define* the pace — the 5-night lookback and the 120 s "this counts as a session" floor — exist in both files,
+  with a comment in each saying "change them together". That is the same arrangement this repo has already been
+  bitten by twice (the integration goal's three hand-synced copies, unified into `webapp/goals.py` in v0.253.1), and
+  a prose instruction is not enforcement: change one side and two screens quote different ETAs for the same picture,
+  silently. `tests/test_pace_constants_mirror.py` now reads the TS source and asserts both constants match Python's.
+  **Mutation-verified** rather than assumed: changing the lookback 5 → 7 fails it, and *renaming*
+  `MIN_PRODUCTIVE_NIGHT_S` fails it too (the regex fails loudly when it can't find its subject, because a guard that
+  passes when it can't find what it's guarding enforces nothing). Test-only: no engine, API, schema, config,
+  on-disk or default change.
+
+- **VERIFIED NON-ISSUE (Builder 2026-08-13, checked rather than assumed while shipping the guard above) — the two
+  pace *implementations* agree; only the constants were ever the drift risk.** *(Recorded so nobody re-treads it.)*
+  `session_recap.recent_night_pace_s` (server) and `clearNights.ts::estimateClearNights` (Target page) were driven
+  against each other over **300 randomised night sets** — varying night counts (1–9), subs per night (1–60),
+  exposures and per-night rejection rates — built as real projects and read back through `nights_breakdown`, and
+  they agreed on **every** case, to within 1e-6. That includes the edges worth naming: fewer than two productive
+  nights → no pace on both sides; the all-duds set where the client shows its *"kept almost nothing — worth
+  checking focus"* advisory and the server reports no number (both surfaces then say nothing about nights); and the
+  `n_frames > 0` pre-filter the client applies, which is a no-op because a night is a group of frames by
+  construction. So the *ordering, windowing, productivity filter and median* all match; the constants guard above is
+  the only enforcement that was missing. **If a fourth surface ever needs the pace, prefer serving the server's
+  number over adding a third implementation.**
+
+- **NOTE / WATCH ITEM (Builder 2026-08-13, left deliberately undone while shipping v0.254.0) — `routers/stats.py`
+  still holds three hand-rolled `{sig, at, data}` caches now that a fourth moved to the shared
+  `webapp/registry_cache.py`.** *(Infra — PRIORITY 3; size S; **do not do this on a hunch**.)* The library-progress
+  roll-up now goes through `cached_for_registry`, but the "Your sky, so far" summary and two others still inline the
+  same six lines. They were left alone on purpose: each keys on a **different** signature (the summary folds in each
+  target's latest preview `stat`, which the shared `registry_signature` deliberately doesn't), so folding them in
+  would mean either widening the shared signature for everyone or growing a parameterised key-builder — more
+  machinery than three copies of six lines justify today. **Revisit if a fifth cache appears, or if one of the
+  existing ones grows an invalidation rule** (the shared helper's `invalidate_registry_cache` is where that belongs).
+
+- **NEW IDEA (Builder 2026-08-13, the sibling of the tooltip shipped in v0.254.0) — the Dashboard's "~2 more
+  nights" badge has no hover explanation, unlike the planner's now does.** *(Friendliness — PRIORITY 3; size XS;
+  frontend-only.)* `LibraryProgressCard`'s `ProgressRow` renders `nightsToGoLabel(r)` as a bare chip. The planner's
+  equivalent now explains itself on hover (the readiness verdict plus the sentence naming the measured pace it
+  divided by), and the same two sentences are already computable here — `r.readiness.verdict` is in hand and
+  `clearNightsFromPace` returns the `text` alongside the count that `rankLibraryProgress` currently discards.
+  **Lower value than it was on the planner, which is why it wasn't done in the same pass:** this card already prints
+  "2.0 h of ~6h" inline on the row *and* the `finishFirstHint` sentence above it, so the chip is far better
+  contextualised than a lone chip in a dense plan table. Worth one line if someone is in the file; not worth a trip.
+
 - ~~**NEW IDEA (Builder 2026-08-04, cost me most of a run) — the "*(Original spec kept for provenance.)*" copies are
   indistinguishable from open work, so a Builder scanning this file re-picks already-shipped features.**~~ —
   **DONE v0.229.5** (Builder 2026-08-04, branch `claude/relaxed-turing-15aq36`) — and confirmed first-hand: this

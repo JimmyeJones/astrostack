@@ -7,7 +7,9 @@
 // a gate.
 
 import type { TargetProgress } from "./api/client";
-import { clearNightsFromPace, nightWord } from "./components/clearNights";
+import {
+  clearNightsFromPace, FINISH_FIRST_MAX_NIGHTS, nightWord,
+} from "./components/clearNights";
 import { integrationReadiness, type IntegrationReadiness } from "./readiness";
 import type { TypeBucket } from "./tonight";
 
@@ -20,11 +22,13 @@ export interface RankedProgress {
   nightsToGo: number | null;
 }
 
-// Only targets this close to done are named as "finish this one first". Past it
-// the number stops being encouragement and starts reading as a scold ("6 nights
-// behind"), which is the opposite of what this card is for — so a target further
-// out simply says nothing about nights and keeps its progress bar.
-export const FINISH_FIRST_MAX_NIGHTS = 3;
+// Only targets this close to done are named as "finish this one first" — the
+// shared cutoff every compact nights surface uses. Re-exported here because this
+// module's own consumers (and their tests) have always imported it from the
+// progress card; its definition now lives with the nights arithmetic itself in
+// ``components/clearNights``, so the planner can apply the same cap without this
+// module and ``readiness`` importing each other.
+export { FINISH_FIRST_MAX_NIGHTS };
 
 // A short friendly object-type word ("galaxy"/"nebula"/"cluster") for a
 // recognised bucket, so the card can show *why* a target's goal is what it is
