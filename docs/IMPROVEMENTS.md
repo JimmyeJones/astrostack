@@ -6535,8 +6535,37 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-13, the obvious next step after shipping the "Did I frame it well?" verdict v0.256.0)
-  — when the verdict says the target landed off-centre, offer to *re-centre the picture* in one click.**
+- ~~**NEW IDEA (Builder 2026-08-13, the obvious next step after shipping the "Did I frame it well?" verdict
+  v0.256.0) — when the verdict says the target landed off-centre, offer to *re-centre the picture* in one
+  click.**~~ — **SHIPPED v0.257.0** (Builder 2026-08-13, branch `claude/serene-goldberg-h9ki9i`). *(Friendliness +
+  editor, PRIORITY 1/3.)* Built as specced, with **one deliberate departure the spec's own numbers force**: a crop
+  that puts the object *dead centre* is unaffordable. Cropping to a rectangle centred on an object that sits
+  halfway out to an edge keeps only a quarter of the picture — and the spec's "skip if it throws away more than a
+  third" would then have made the button **literally unreachable** (keeping ⅔ of the area needs the object inside
+  17 % of centre, which the verdict already calls *centred*, so no `off_centre` picture could ever qualify). So the
+  goal is the one the beginner actually asked for: **the largest crop the verdict itself would call well framed** —
+  the biggest rectangle that keeps the frame's aspect ratio and leaves the object within 25 % of the crop's centre
+  (comfortably inside the verdict's own 0.34 "centred" band). That equivalence is pinned by a test that re-runs
+  `framing_result_verdict` on the proposed crop and asserts it comes back `centred` with full coverage — the
+  promise the button makes, checked rather than described. In practice it fires for an object roughly 0.34–0.53 of
+  the way out; further than that no crop is offered, because it would keep under 40 % of the frame.
+  **Where it appears:** the Target page's framing note grows a *"Re-centre this picture"* link (with the honest
+  cost — "keeps 64 % of the picture") that deep-links into the editor at `?recentre=1`, which arrives with the crop
+  **previewed as a dashed outline, not applied**; and the editor itself grows a "Re-centre" button beside
+  "Trim border". Both end in one ordinary, adjustable `geometry.crop` op the user can fine-tune or delete, so it
+  stays fully undoable. The two crop offers now share one preview mode (`cropProposal: "trim" | "recentre"`), each
+  captioning what *it* keeps; only the trim forces the coverage heatmap on, since only the trim is about coverage.
+  **Refused, never guessed:** `recentre_crop` returns `None` — no button at all — on a centred picture, on
+  `clipped`/`partial` (cropping cannot un-clip what was never captured; it falls out of the margin test rather
+  than needing its own rule), when the crop would hug the object (needs 0.6·radius of clear space), and when it
+  would keep under 40 % of the frame. The endpoint only asks it on an `off_centre` verdict. Upgrade-safe: one
+  additive nullable response field (an older frontend ignores it; an older backend omitting it reads as "no
+  offer" — pinned by a test), no config, DB, on-disk, endpoint or default change, and nothing happens without a
+  click. **Tests (+18):** `tests/test_framing.py` (+8, engine geometry incl. the verdict round-trip),
+  `tests/webapp/test_stack_framing.py` (+2), `recentreCrop.test.ts` (+5), `FramingVerdictNote.test.tsx` (+3) and
+  `Editor.test.tsx` (+4 — preview→Apply, Cancel leaves the recipe alone, the deep link, and no button when there's
+  no offer).
+  *(Original spec kept below for provenance.)*
   *(Pillar: friendliness + editor, PRIORITY 1/3; size S–M — no new engine maths, and the hardest part, knowing
   where the object actually is, already shipped.)* `/stack-runs/{id}/framing` now returns the object's coverage and
   how far off-centre it sits, and the `off_centre` verdict already tells the beginner *"re-centring it next session

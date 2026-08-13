@@ -199,3 +199,128 @@ def framing_result_verdict(
         "is nicely centred and completely inside the frame — well framed.",
         coverage, off_centre,
     )
+
+
+@dataclass(frozen=True)
+class RecentreCrop:
+    """A fractional (0..1) crop rectangle that puts an off-centre object in the
+    middle of the picture.
+
+    The bounds use the same fractional convention as the editor's
+    ``geometry.crop`` op, so they apply identically to the live-preview proxy and
+    the full-resolution export. ``kept`` is the fraction of the frame's *area*
+    the crop keeps (0–1), for the "keeps N% of the frame" copy.
+    """
+
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    kept: float
+
+
+# How much clear space to leave around the object's own box, as a fraction of its
+# radius. A crop that hugs the object looks cramped — worse than the off-centre
+# framing it set out to fix — so a proposal that can't afford this margin is not
+# made at all.
+_RECENTRE_MARGIN = 0.6
+# How far off the *crop's* centre the object may still sit. Cropping to put the
+# object dead centre costs far more field than it's worth — an object 50 % of the
+# way out would keep only a quarter of the picture — and it isn't what the beginner
+# is asking for anyway. The goal is a picture the verdict itself would call well
+# framed, so aim comfortably inside its own `_OFF_CENTRE_LIMIT` band rather than at
+# the exact middle: the same standard, met with margin to spare.
+_RECENTRE_TOLERANCE = 0.25
+# Never offer a crop that keeps less than this much of the frame's area. Past that
+# the beginner loses more field (and more of the clean, well-stacked interior) than
+# the re-centring is worth — with the tolerance above, that's an object more than
+# about half-way out to an edge. Same spirit as the verdict's refusal to guess: no
+# offer is better than a bad one.
+_RECENTRE_MIN_KEPT = 0.40
+
+
+def recentre_crop(
+    *,
+    x_px: float,
+    y_px: float,
+    width_px: int,
+    height_px: int,
+    arcsec_per_px: float,
+    size_arcmin: float | None,
+    margin: float = _RECENTRE_MARGIN,
+    tolerance: float = _RECENTRE_TOLERANCE,
+    min_kept: float = _RECENTRE_MIN_KEPT,
+) -> RecentreCrop | None:
+    """The largest crop of this picture that brings an off-centre object back to
+    the middle.
+
+    Where :func:`framing_result_verdict` says *"it landed off to one side"*, this
+    answers *"and here's the picture you could have"*: the biggest rectangle that
+    fits inside the frame, keeps the frame's own aspect ratio (so the picture
+    doesn't change shape) and leaves the object within ``tolerance`` of its
+    centre — i.e. a picture the verdict itself would call well framed. Takes the
+    same already-projected inputs as the verdict, so it stays pure arithmetic —
+    no WCS, no astropy, no I/O.
+
+    Returns ``None`` — no offer at all — whenever re-centring wouldn't honestly
+    help: the object is already near the middle (nothing to fix), the crop can't
+    keep :data:`_RECENTRE_MARGIN` of clear space around the object, or it would
+    keep less than ``min_kept`` of the frame. Cropping also cannot un-clip an
+    object that ran off an edge, and that case falls out of the margin test
+    rather than needing its own rule.
+    """
+    if size_arcmin is None or size_arcmin <= 0:
+        return None
+    if width_px <= 0 or height_px <= 0 or arcsec_per_px <= 0:
+        return None
+    if not (math.isfinite(x_px) and math.isfinite(y_px)):
+        return None
+
+    hi_x, hi_y = float(width_px - 1), float(height_px - 1)
+    if hi_x <= 0 or hi_y <= 0:
+        return None
+    radius_px = (size_arcmin * 60.0 / arcsec_per_px) / 2.0
+    if radius_px <= 0:
+        return None
+
+    # Same off-centre measure the verdict reports, so the two always agree about
+    # whether this picture is off-centre at all.
+    half_x, half_y = hi_x / 2.0, hi_y / 2.0
+    off_centre = max(abs(x_px - half_x) / half_x, abs(y_px - half_y) / half_y)
+    if off_centre <= _OFF_CENTRE_LIMIT:
+        return None  # already about as centred as it needs to be — nothing to offer
+
+    # Per axis, the largest half-size a crop can have. A crop of half-size ``s``
+    # whose centre sits within ``tolerance·s`` of the object must still fit the
+    # frame, which needs ``s·(1 − tolerance) ≤ distance to the nearer edge``; and
+    # it can never be wider than the frame itself.
+    slack = 1.0 - min(max(tolerance, 0.0), 0.9)
+    max_w = min(half_x, min(x_px, hi_x - x_px) / slack)
+    max_h = min(half_y, min(y_px, hi_y - y_px) / slack)
+    if max_w <= 0 or max_h <= 0:
+        return None
+
+    # Hold the frame's aspect ratio: the binding axis sets both half-sizes.
+    aspect = hi_x / hi_y
+    half_w = min(max_w, max_h * aspect)
+    half_h = half_w / aspect
+
+    # Room for the object plus clear space around it, or no offer.
+    needed = radius_px * (1.0 + margin)
+    if half_w < needed or half_h < needed:
+        return None
+
+    # Put the crop's centre on the object, pulled back only as far as the frame's
+    # edges demand — so the object lands as close to the middle as it can get.
+    cx = min(max(x_px, half_w), hi_x - half_w)
+    cy = min(max(y_px, half_h), hi_y - half_h)
+
+    w, h = float(width_px), float(height_px)
+    x0 = min(max((cx - half_w) / w, 0.0), 1.0)
+    x1 = min(max((cx + half_w) / w, 0.0), 1.0)
+    y0 = min(max((cy - half_h) / h, 0.0), 1.0)
+    y1 = min(max((cy + half_h) / h, 0.0), 1.0)
+    kept = (x1 - x0) * (y1 - y0)
+    if kept < min_kept:
+        return None
+    return RecentreCrop(x0, y0, x1, y1, kept)

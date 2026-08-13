@@ -695,7 +695,7 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
         return None
 
     def work() -> dict[str, Any] | None:
-        from seestack.framing import framing_result_verdict
+        from seestack.framing import framing_result_verdict, recentre_crop
         from seestack.io.wcs_io import celestial_wcs_from_fits
 
         wcs, width, height = celestial_wcs_from_fits(fits_path)
@@ -715,11 +715,26 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
         )
         if v is None:
             return None
+        # "Re-centre this picture": the crop that would bring an off-centre object
+        # back to the middle, offered only when the verdict is exactly that — a
+        # clipped or oversized object can't be helped by cropping, and a centred
+        # one has nothing to gain. `recentre_crop` refuses on its own terms too
+        # (too destructive, or too cramped around the object), so this is `null`
+        # far more often than it isn't. An offer, never an automatic change.
+        rc = recentre_crop(
+            x_px=x_px, y_px=y_px, width_px=width, height_px=height,
+            arcsec_per_px=scale, size_arcmin=info.size_arcmin,
+        ) if v.level == "off_centre" else None
         return {
             "level": v.level,
             "text": v.text,
             "coverage": v.coverage,
             "off_centre": v.off_centre,
+            # Fractional (0..1) crop bounds in the editor's own `geometry.crop`
+            # convention, plus the fraction of the frame it keeps.
+            "recentre": None if rc is None else {
+                "x0": rc.x0, "y0": rc.y0, "x1": rc.x1, "y1": rc.y1, "kept": rc.kept,
+            },
             # The name the sentence is prefixed with, so one voice covers this
             # card and the pre-shoot "will it fit?" hint.
             "object_name": info.name or info.id,

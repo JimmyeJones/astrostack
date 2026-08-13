@@ -8,6 +8,7 @@ size, so it answers what actually happened rather than what was intended.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from seestack.io.library import Library
@@ -107,6 +108,47 @@ def test_an_object_bigger_than_the_canvas_is_told_to_use_mosaic_mode(client,
     body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
     assert body["level"] == "partial"
     assert "mosaic mode" in body["text"]
+
+
+def test_an_off_centre_picture_is_offered_a_re_centring_crop(client, solved_library):
+    safe = _m42(client)
+    # A generous 5° × 3.75° canvas pointed 0.7° north of M 42: the whole nebula is
+    # in frame, but well down the picture — the one case cropping can actually fix.
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC + 0.7,
+                      w=6000, h=4500, arcsec_per_px=3.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "off_centre"
+    rc = body["recentre"]
+    assert rc is not None
+    # Fractional bounds in the editor's crop convention, keeping most of the frame
+    # and the frame's own shape.
+    assert 0.0 <= rc["x0"] < rc["x1"] <= 1.0
+    assert 0.0 <= rc["y0"] < rc["y1"] <= 1.0
+    assert rc["kept"] > 0.4
+    # Not a symmetric trim: the kept band is offset toward the object. Pointing
+    # north of M 42 puts the nebula at *low* y on this WCS (dec grows with y), so
+    # the crop hugs that edge.
+    assert (rc["y0"] + rc["y1"]) / 2.0 < 0.45
+    assert (rc["x0"] + rc["x1"]) / 2.0 == pytest.approx(0.5, abs=0.02)  # centred in x
+
+
+def test_no_re_centring_offer_when_cropping_could_not_help(client, solved_library):
+    safe = _m42(client)
+    # Already well framed: nothing to gain, so no offer (the button would just
+    # take field away).
+    centred = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                       w=4000, h=3000, arcsec_per_px=3.0)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{centred}/framing").json()
+    assert body["level"] == "centred"
+    assert body["recentre"] is None
+
+    # Ran off an edge: cropping cannot un-clip what was never captured.
+    clipped = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC + 1.0,
+                       w=4000, h=3000, arcsec_per_px=3.0)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{clipped}/framing").json()
+    assert body["level"] == "clipped"
+    assert body["recentre"] is None
 
 
 def test_no_verdict_when_the_run_has_no_usable_wcs(client, solved_library):
