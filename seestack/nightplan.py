@@ -286,6 +286,12 @@ class PlannedTarget:
     # ``None`` for a catalog row, for a target with no goal set, and on an older
     # backend; the per-object-type default then applies as before.
     goal_s: float | None = None
+    # This target's recent productive pace (median kept integration per clear
+    # night, seconds), so the row can say how many more clear nights would
+    # finish it rather than only that it is "Nearly there". ``None`` for a
+    # catalog row, for a target without enough night history, and on an older
+    # backend — the row then falls back to the readiness badge as before.
+    recent_pace_s: float | None = None
     # "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
     # verdict derived from it, for catalog candidates the bundled catalog has a
     # size for; ``None`` otherwise (library rows carry none — the Target page
@@ -810,6 +816,13 @@ class LibraryTarget:
     # not be labelled "try something new" at 7 h just because the type default is
     # 6 h. Purely annotation: it never affects scoring or ranking.
     goal_s: float | None = None
+    # This target's recent productive pace — median kept integration per clear
+    # night, in seconds — or None when there isn't enough history to call it a
+    # pace. Carried for the same reason as ``goal_s``: it turns the planner's
+    # vague "Nearly there" into the figure the user is actually choosing on
+    # ("~1 more night finishes this"), in the same words the Dashboard and the
+    # Target page use. Purely annotation: it never affects scoring or ranking.
+    recent_pace_s: float | None = None
 
 
 def plan_tonight(observer: Observer, when_utc: datetime, *,
@@ -904,6 +917,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 target_safe=t.safe, frames_accepted=t.frames_accepted,
                 total_exposure_s=round(t.total_exposure_s, 1),
                 goal_s=t.goal_s,
+                recent_pace_s=t.recent_pace_s,
             ))
         else:
             obj: CatalogObject = m["obj"]

@@ -6,6 +6,9 @@
 // enough subs for a clean image, or should I keep shooting this target?" The
 // goal is a *suggestion, never a gate* (nothing here blocks stacking).
 
+import {
+  clearNightsFromPace, FINISH_FIRST_MAX_NIGHTS, nightWord,
+} from "./components/clearNights";
 import { formatIntegration } from "./format";
 import { objectTypeBucket, type TypeBucket } from "./tonight";
 
@@ -148,6 +151,50 @@ export function readinessRowHint(
   if (r.level === "plenty") return { label: "Plenty — try something new", color: "green" };
   if (r.level === "close") return { label: "Nearly there", color: "teal" };
   return null;
+}
+
+// The same planner-row hint, upgraded to a *pace* when the target has one: how
+// many more clear nights would finish it, in the wording the Dashboard's "Target
+// progress" card and the Target page already use.
+//
+// Why this replaces the badge rather than sitting beside it: "Nearly there" and
+// "~1 more night" answer the same question, and the second answers it better —
+// it's the number the user is actually deciding on while choosing what to point
+// at tonight. Printing both would be clutter on an already-dense table row.
+//
+// Falls back to `readinessRowHint` verbatim whenever there's no number to give:
+// no measured pace (fewer than two productive nights), a goal already met (the
+// "Plenty — try something new" nudge is the useful thing then), or a target
+// further from done than the shared cap — past which a nights count reads as a
+// scold rather than encouragement. So a library with no pace history anywhere
+// sees exactly what it saw before.
+//
+// Every badge carries a `tooltip` — the full sentence behind the chip, exactly
+// as the row's difficulty and framing badges do. A three-word chip in a dense
+// table has to be terse, but "~1 more night" is meaningless without "of what,
+// toward what?", so the hover says where the number came from (the owner's own
+// measured pace) and what it is counting toward (their goal).
+export function readinessRowBadge(
+  exposureSeconds: number,
+  type: string | null | undefined,
+  goalHoursOverride?: number | null,
+  paceSeconds?: number | null,
+): { label: string; color: string; tooltip: string } | null {
+  const r = integrationReadiness(exposureSeconds, type, goalHoursOverride);
+  if (r && r.level !== "plenty") {
+    const est = clearNightsFromPace((r.goalHours - r.hours) * 3600, paceSeconds);
+    if (est && est.nights !== null && est.nights <= FINISH_FIRST_MAX_NIGHTS) {
+      return {
+        label: `~${est.nights} more ${nightWord(est.nights)}`,
+        color: "teal",
+        tooltip: `${r.verdict} ${est.text}`,
+      };
+    }
+  }
+  const hint = readinessRowHint(exposureSeconds, type, goalHoursOverride);
+  // `readinessRowHint` only returns a hint when the readiness itself exists, so
+  // `r` is non-null here; the guard keeps the types honest rather than asserting.
+  return hint && r ? { ...hint, tooltip: r.verdict } : null;
 }
 
 // Mantine colour for the readiness level, so the progress bar and any accent

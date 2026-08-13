@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from webapp import deps, video
 from webapp.goals import read_goal_s
+from webapp.registry_cache import cached_for_registry, registry_signature
 from webapp.site_location import resolve_site_lon
 
 router = APIRouter(tags=["stats"])
@@ -186,17 +187,11 @@ def get_library_progress(request: Request) -> list[TargetProgressOut]:
     lib = deps.open_library(request)
     try:
         targets = lib.list_targets()
-        sig = tuple(sorted(
-            (t.safe_name, t.last_activity_utc or "", t.n_frames_accepted)
-            for t in targets
-        ))
-        cache = getattr(request.app.state, "progress_cache", None)
-        now = time.monotonic()
-        if cache and cache["sig"] == sig and (now - cache["at"]) < _PROGRESS_CACHE_TTL_S:
-            rows = cache["data"]
-        else:
-            rows = _collect_progress(lib, targets)
-            request.app.state.progress_cache = {"sig": sig, "at": now, "data": rows}
+        rows = cached_for_registry(
+            request.app, "library_progress", registry_signature(targets),
+            lambda: _collect_progress(lib, targets),
+            ttl_s=_PROGRESS_CACHE_TTL_S,
+        )
     finally:
         lib.close()
     return rows
