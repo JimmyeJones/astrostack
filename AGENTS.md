@@ -80,6 +80,21 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
+**🎨 STANDING OWNER PRIORITY (2026-08-08) — the UI is "extremely busy"; fix the information
+architecture, page by page.** The owner's top complaint about the live build: *"there are like 30
+different things on the top of some of the pages and I have to scroll a fair bit to get to the actual
+info."* Measured and confirmed — `routes/Target.tsx` renders **~15 consecutive alert/note/badge blocks,
+then 9 stacked analysis cards, before the frames table starts at line ~1339 of 1481**; `Dashboard.tsx`
+is close behind; the sidebar is 15 flat links. **The hard constraint is the owner's own: NOTHING MAY BE
+REMOVED — "don't get rid of features, just move them to a more organized layout."** This is pure
+regrouping (consolidate the banner wall behind one prioritised "N more notes" disclosure, tab/grid the
+stacked cards, put the picture and frames table above the fold, group the nav). **It is a multi-run
+effort: take ONE slice per run**, state the before/after block counts in the commit, and let the owner
+react between slices. Full entry, measurements, slicing order and cautions: `docs/IMPROVEMENTS.md` →
+"Friendliness (PRIORITY 3)", top item. A verified bug still outranks it; feature-piling does not —
+**prefer a slice of this over inventing another card**, and when you *do* add a feature, put it inside
+the new grouping rather than appending one more always-on banner.
+
 **⚡ IMMEDIATE PRIORITY (refreshed 2026-07-30, latest) — the owner-reported mosaic
 "multicolour grid" regression is FIXED (v0.225.0); its root cause was confirmed by repro
 and measured.** `analyze_proxy` measured sky noise as the MAD of the sky's *levels*, which
