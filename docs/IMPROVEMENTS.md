@@ -11765,8 +11765,37 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — "Did I frame it well?": a
-  post-stack, plain-language centring / edge-cutoff verdict on the *finished* picture.** *(Pillar: friendliness /
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — "Did I frame it well?": a
+  post-stack, plain-language centring / edge-cutoff verdict on the *finished* picture.**~~ — **SHIPPED v0.256.0**
+  (Builder 2026-08-13, branch `claude/serene-goldberg-2bpxcs`), built to the spec with one deliberate reshape.
+  **The reshape: the engine helper is pure arithmetic, not a WCS consumer.** The spec suggested
+  `framing_result_verdict(wcs, w, h, ra, dec, size_arcmin)`; it ships as
+  `framing_result_verdict(*, x_px, y_px, width_px, height_px, arcsec_per_px, size_arcmin)` — the object's position
+  **already projected** into the result's pixel grid. The webapp owns the projection (it is the half that needs
+  astropy), and `seestack/framing.py` stays import-light and trivially unit-testable, exactly like
+  `seestack/scalebar.py` next door. It returns `None` — never a guess — for an unsized object, a non-positive
+  scale/canvas or a non-finite position (an object behind the projection).
+  **One thing the spec didn't separate, and it matters to a beginner:** "some of it is missing" covers two
+  problems with *opposite* fixes. An object that would have fitted whole was simply aimed badly (**`clipped`** →
+  *"about 70% of it made it in. It would fit whole, so just re-centre it next session."*), while one bigger than
+  the canvas can never fit however well aimed (**`partial`** → *"only about 40% of it is in this picture. Shoot it
+  in mosaic mode to capture all of it."*). The verdict picks by comparing the object's extent to the canvas, so it
+  never tells someone to re-centre something that cannot fit, or to shoot a mosaic of something that would have
+  fitted. The other two levels are **`centred`** and **`off_centre`** (all of it in frame, but well out to one
+  side). The object is modelled as a **square box of its major-axis size**, which is deliberately generous for an
+  edge-on galaxy — it errs toward "some of it is outside" rather than promising a beginner that everything landed.
+  **Surface:** `GET /api/targets/{safe}/stack-runs/{run_id}/framing` (new, additive; returns `null` rather than
+  404ing where the run exists) and a self-hiding `FramingVerdictNote` on the Target page — added as a **`Notice`
+  inside the new NoticeBoard** rather than as one more always-on banner, which is exactly what the IA entry asks a
+  new feature to do. Shipped alongside: `_arcsec_per_px()` factored out of `_scale_bar_from_wcs` so the scale bar
+  and the framing verdict read one plate scale, not two hand-mirrored ones. **Tests (+16):**
+  `tests/test_framing.py` (+8 — the four levels, the friendly never-0%/never-100% percentage, no verdict without a
+  vetted size, degenerate canvas/scale/NaN position, and the "sentence names no object so the caller prefixes it"
+  contract it shares with `framing_hint`), `tests/webapp/test_stack_framing.py` (+5, end-to-end through a real
+  master FITS with a TAN WCS: well-pointed, pointed 1° off, a single frame too small for the object, no-WCS → null,
+  unknown run → 404) and the frontend (+3 component, +1 page). Upgrade-safe: read-only additive endpoint, no
+  config/DB/on-disk/API-shape change and no default touched.
+  *(Original spec kept below for provenance.)* *(Pillar: friendliness /
   understand — PRIORITY 3; size S–M.)* A beginner's most common framing surprise isn't caught until *after* a night
   is spent: the target came out off-centre, or half of it runs off an edge, and they didn't know to use mosaic mode.
   We already have a **pre-shoot** hint (`seestack/framing.py` `framing_hint` → "M 31 is bigger than one frame — use

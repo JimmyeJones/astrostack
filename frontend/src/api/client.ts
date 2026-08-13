@@ -837,6 +837,19 @@ export interface StackAnnotations {
   scale_bar: ScaleBar | null;
 }
 
+/** "Did I frame it well?" — the post-stack verdict on how a finished picture
+ *  actually caught its target, from the run's own WCS and the object's catalog
+ *  size. The endpoint returns null (never a guess) when the target isn't in the
+ *  catalog, carries no vetted size, or the run has no usable celestial WCS. */
+export interface StackFraming {
+  level: "centred" | "off_centre" | "clipped" | "partial";
+  text: string;           // the sentence, prefixed by the caller with the name
+  coverage: number;       // 0–1: how much of the object landed in the frame
+  off_centre: number;     // 0 = dead centre, 1 = on the frame's edge
+  object_name: string;    // the catalog's friendly name ("Orion Nebula")
+  size_arcmin: number;
+}
+
 export interface StackRunInfo {
   run_id: number;
   integration_s: number | null;
@@ -1759,6 +1772,8 @@ export const api = {
   // "What's in this picture?" — catalog objects that fall inside a run's field.
   stackAnnotations: (safe: string, id: number) =>
     req<StackAnnotations>(`/api/targets/${safe}/stack-runs/${id}/annotations`),
+  stackFraming: (safe: string, id: number) =>
+    req<StackFraming | null>(`/api/targets/${safe}/stack-runs/${id}/framing`),
   // The finished picture as a native-resolution PNG (same look as the preview
   // thumbnail, just full-size instead of the 1024px preview cap) — the direct
   // answer to "why is my downloaded picture low-res?".
