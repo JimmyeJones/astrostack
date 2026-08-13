@@ -176,6 +176,91 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
+- **⚠ INGEST IDEMPOTENCY (Scout 2026-08-13, branch `claude/focused-keller-zi700s`; TRACED) — a benign *mtime-only*
+  change to an already-ingested source (identical bytes) is treated as an in-place content swap, which wipes the
+  frame's QC metrics, **silently re-accepts an auto-rejected sub**, and nulls its plate solution — potentially
+  across the whole library at once on a single re-copy of `incoming/`.** *(Autonomy / trust — PRIORITY 2; severity
+  broken-UX + wasted-compute + a transient wrong-result window; NOT permanent data loss — it re-derives on the next
+  QC/solve pass, and this NEVER writes to `incoming/`, only to the project DB.)*
+  **Symptom / cost:** the owner's raw subs live in `incoming/` and are re-synced/backed-up like any NAS folder. Any
+  operation that changes mtimes without changing bytes — `cp` without `-p`, an SMB/robocopy re-copy, `rsync` without
+  `--times`, a backup restore, a NAS migration — makes *every* touched frame look content-swapped. On the next scan
+  each one gets its QC nuked and, if it was auto-rejected (`auto:streak` / `auto:grade`, `user_override=False`),
+  flipped back to `accept=True`. If an unattended auto-stack fires in the window before the re-QC re-rejects it, the
+  stack silently combines streaked/soft subs and drops the (now-unsolved) frames — a worse image with no warning.
+  **Repro (traced, not yet reproduced):**
+  1. `seestack/io/ingest.py:98-113` — `_source_fingerprint` = `(st.st_size, st.st_mtime)`.
+  2. Frame ingested; fingerprint stored (`ingest.py:329-333`, `291`). Frame is solved (`wcs_json` set) and
+     auto-rejected (`reject_reason="auto:streak"`, `accept=False`, `user_override=False`).
+  3. Source re-copied by a tool that doesn't preserve mtime — **bytes identical, size identical, mtime differs**.
+  4. Next scan: `fp != stored_fp` (mtime differs) → `content_changed = True` (`ingest.py:232-234`).
+  5. `if content_changed and not refreshed …:` (`ingest.py:272`) fires on the **default** `copy_to_cache=False`
+     path → `project.reset_frame_qc(prior.id)` (`:279`) + `_refresh_frame_metadata` → `reset_frame_solution`.
+  6. `reset_frame_qc` (`project.py:646-657`): because `not user_override`, sets `accept=True, reject_reason=None`
+     and nulls every metric; `reset_frame_solution` (`:659-672`) nulls `wcs_json`/centres/pixscale/rotation.
+  **Why it's subtle:** `source_mtime` is a SQLite `REAL` with an exact roundtrip, so it does *not* false-positive on
+  an ordinary re-scan of an untouched file (same mtime → no reset) — it only fires on a genuine mtime change. That's
+  what kept it out of the existing idempotency test (`test_qc_idempotent` re-scans the *same* files).
+  **Fix direction (do NOT blind-flip on the on-by-default hot path — AGENTS.md §1):** the mtime half of the
+  fingerprint exists to catch a *same-size* in-place content swap (`ingest.py:266-271`), which size alone misses —
+  so you can't just drop mtime. The clean fix is to only treat a size-equal-but-mtime-changed source as a *candidate*
+  swap and confirm it with a cheap content check before the destructive reset — a partial/streaming hash (first+last
+  block + size), or a full hash gated on the rare `size==stored and mtime!=stored` case — so a benign touch is a
+  no-op while a real same-size overwrite is still caught. Add a regression test: an mtime-only touch of an
+  auto-rejected, solved frame must leave `accept`/`reject_reason`/`wcs_json` untouched, while a genuine same-size
+  byte change still resets. Store the new fingerprint either way so it doesn't re-fire every scan.
+
+- **COSMETIC (Scout 2026-08-13, branch `claude/focused-keller-zi700s`; TRACED) — the "watch it deepen night after
+  night" reel geometrically distorts earlier frames when the stack canvas's *aspect ratio* changes across nights
+  (round stars → ellipses in the older frames).** *(Friendliness / polish — PRIORITY 3; severity cosmetic — only
+  the decorative `_deepening.webp`/`.png` reel is affected; the scientific `master.fits`/`.tif`/`_preview.png` are
+  untouched.)*
+  **Location:** `seestack/render/deepening.py:241-247` (`render_deepening_frames`) and `:260-262`
+  (`write_deepening_reel`) — both do `im.resize(target_size, Image.BOX)` onto the *last* frame's exact `(w, h)` with
+  no aspect-preserving fit and no letterbox.
+  **Repro (traced):** every frame is loaded via `load_stack_rgb(fp, max_width=1024)` (`:209`), which caps *width* to
+  1024 but keeps each master's own aspect ratio, so heights differ when the canvas shape changes. A target shot as a
+  single portrait panel night 1 (master 3000×4000 → loaded 1024×1365) that grows into a 2-wide landscape mosaic by
+  night 5 (8000×4000 → loaded 1024×512): `target_size = (1024, 512)`, so night-1's 1024×1365 frame is
+  `resize((1024, 512))` — a 2.7× vertical squash. The module docstring explicitly anticipates the canvas "growing
+  across nights", so it's the intended use case, not an exotic edge.
+  **Fix direction (safe, isolated):** fit each frame aspect-preserving onto a black `target_size` canvas (black pad
+  matches the app's NaN=uncovered=black convention), in both spots. One file; a regression test asserting a
+  differently-shaped input frame comes back at `target_size` with its content centred and un-stretched. Small enough
+  to be a Builder micro-task (or a Scout ship under the full bar).
+
+- **MINOR / low-confidence — NOT filed as verified bugs, recorded so they aren't re-investigated (Scout 2026-08-13):**
+  - `seestack/render/thumbnail.py:837-838` — `_downsample_rgb` floors NaN to the frame's darkest finite value before
+    box-averaging (unlike the main path's NaN-aware downscale), which would fill genuine coverage gaps with the
+    darkest real value *and* darken pixels adjacent to a gap. **Not a live bug:** its only callers (`generate_thumbnail`,
+    `render_sub_preview`) pass raw single subs with no NaN, so it's a no-op today. A **caution**: don't repurpose it
+    for a mosaic/reprojected array without switching to the NaN-aware path.
+  - `seestack/qc/runner.py:115-127` — with `auto_reject` **off**, an `auto:streak` frame is re-accepted on re-QC
+    without re-checking `streak_detected`. Traced but **plausibly intended** (turning streak auto-reject off should
+    undo its prior auto-rejections), so not filed as a bug; flagged only if the contract is meant to require the
+    streak to be gone.
+  - `webapp/watcher.py:81` (`self._stable &= seen`) — a one-poll transient `stat()` failure on an already-stable
+    file drops it from `_stable`, re-arms it, and re-fires `on_batch_ready` a poll later. **Benign** — ingest dedup
+    (`_dedup_key`) prevents any double DB row; cosmetic/perf only.
+
+> **SCOUT ADVERSARIAL QA — stacking-engine + adjacent re-audit traced CLEAN; the two bugs above are in ingest /
+> render, not the stacking math (Scout 2026-08-13, branch `claude/focused-keller-zi700s`).** Baseline: the
+> stacking + calibrate subset is green (**845 passed / 2 skipped / 1801 deselected**, `-k "stack or accumul or
+> align or mosaic or drizzle or calibrat or reject or weight"`) on a fresh `source scripts/agent-setup.sh`. Read
+> adversarially, end to end (NaN/coverage semantics, rejection/weighting math, memory bounds, preview↔export
+> parity): `accumulator.py` (all four accumulators; ±inf k-set identities; any-channel `_count`; Welford n<2→NaN),
+> `stacker.py` (`_kappa_sigma_keep_mask`'s two keep-all widenings; photometric + weight application is identical
+> across *both* κ-σ passes and the drizzle passes; `_resolve_auto_reject`), `align.py` (windowed reproject
+> inset/valid; order-1 NaN-mask propagation `cval=1.0`), `mosaic.py` (wrap-safe circular mean at both outlier
+> passes; pixel + megapixel caps), `drizzle_path.py` (`_clip_tolerance` float64 var, `neff`=true-frame-count gate,
+> ULP(m²) resolution floor; half-open in-bounds), `weighting.py` / `photometric.py` (factor guards; `1/s²` fold),
+> `reference.py`, `pointings.py`, `output.py` (already-display path; covered-only percentiles; channel order
+> R/G/B write↔read), `calibrate/apply.py` (dark-vs-bias never-double-subtract; exposure-scale with both no-data
+> masks restored). Also re-read `qc/grading.py` (reconsider fixed-point + cap determinism), `qc/noise_ratio.py`,
+> and the planner pace math (`session_recap.recent_night_pace_s` vs frontend `clearNights.ts` — consistent, and
+> guarded by v0.254.1's shared-constant test). No verified bug in any of these — consistent with the ~16 prior
+> clean re-audits. The rotation's yield this run was in **ingest idempotency** and the **deepening reel**.
+
 > **SCOUT ADVERSARIAL QA — stacking-engine core re-audit traced CLEAN; no verified bug found (Scout 2026-08-08,
 > branch `claude/focused-keller-g87d0d`).** Baseline before the audit: the stacking + calibrate subset is green
 > (**839 passed / 2 skipped / 1766 deselected** via the `-p no:pytest-qt` fallback, `-k "stack or accumul or align
@@ -10404,6 +10489,20 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **IDEA (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — the 16-bit *linear* export TIFF clips the
+  brightest 0.1% (star / galaxy / nebula cores) to pure white, which its own docstring calls "the full data
+  preserved".** *(Pillar: image quality / trust — PRIORITY 4; size S; **VERIFY the convention before changing —
+  every existing linear TIFF's pixels would move**, so this is filed as an idea, not a bug.)* `output.py`
+  `_to_uint16_linear` maps the data's **[0.5%, 99.9%] percentile** range → 0..65535 (`output.py:413-419`), so
+  everything above the 99.9th percentile saturates to 65535 with no gradient — a bright star core reads as a flat
+  white disc in the file a user re-imports into Siril/PixInsight to keep processing. That contradicts the "no
+  stretching… full data preserved" claim in the `tiff_mode="linear"` docstring, and it's the one export sold as the
+  *scientific* one. **Consider:** use the true covered max (or a far-higher high percentile like 99.99) for the
+  linear TIFF's white point so highlight structure survives, and/or expose the percentiles. **Do NOT just change it
+  blind:** confirm what DSS/Siril actually write for a "linear" 16-bit TIFF (some do percentile-scale for range
+  use), and add a test that a synthetic bright core keeps a monotone gradient into the top of the 16-bit range. The
+  autostretch/preview paths are unaffected — this is only the linear TIFF's white point.
+
 - ~~**NEW IDEA (Scout 2026-08-07, spotted while adversarially tracing `seestack/video/lucky.py`) — the Moon/Sun
   lucky stack aligns every kept frame to the *earliest* kept frame, not the *sharpest* one.**~~ — **SHIPPED
   v0.246.3** (Builder 2026-08-07, branch `claude/elegant-bohr-9kc2et`), **measured before and after** as the entry
@@ -11604,6 +11703,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — "Did I frame it well?": a
+  post-stack, plain-language centring / edge-cutoff verdict on the *finished* picture.** *(Pillar: friendliness /
+  understand — PRIORITY 3; size S–M.)* A beginner's most common framing surprise isn't caught until *after* a night
+  is spent: the target came out off-centre, or half of it runs off an edge, and they didn't know to use mosaic mode.
+  We already have a **pre-shoot** hint (`seestack/framing.py` `framing_hint` → "M 31 is bigger than one frame — use
+  mosaic mode"), but nothing tells them, once the stack exists, whether they *actually* captured it well. This new
+  card answers that from the **real result**: e.g. *"M 31 is well-centred, and its full ~3° span fits with room to
+  spare"* / *"heads up — M 31 runs off the top edge; nudge the framing south next session"* / *"only about 60% of
+  the Veil is in frame — shoot it in mosaic mode to get all of it."*
+  **Why it's genuinely new and cheap:** it composes two things that already exist — the catalog object's
+  angular size + centre (`seestack.objectinfo.identify_object` → `size_arcmin`, RA/Dec) and the stack's output-WCS
+  footprint (`seestack.io.wcs_io.footprint_radec_deg(wcs, w, h)`) — into one verdict: project the object's centre
+  and its size-box into the result's pixel space, compare to the frame bounds, and phrase the result. Pure/offline,
+  no new dependency, no expert knob. **Beginner bar:** a non-expert immediately understands "your target is off the
+  edge" and it's directly actionable on their next clear night. **Shape:** an engine helper
+  `framing_result_verdict(wcs, w, h, object_ra, object_dec, size_arcmin) -> FramingResult | None` (returns `None`
+  when size/position is unknown — never guess), surfaced on the stack-result/Target page beside the existing
+  health/first-look cards; self-hides when the target has no catalog size or the stack has no WCS. Add a couple of
+  engine tests (centred-and-fits, off-top-edge, partial-coverage-needs-mosaic, unknown-size→None). Upgrade-safe:
+  purely additive read-only surface, no config/DB/on-disk/API change.
 
 - ~~**NEW IDEA (Builder 2026-08-12, the one surface v0.253.0 deliberately left out) — put the "~N more clear nights"
   figure on the *Tonight* planner's already-targeted rows too, where the beginner is literally choosing what to
