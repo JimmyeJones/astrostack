@@ -16,6 +16,7 @@ import { api, type Frame } from "../api/client";
 import { formatIntegration } from "../format";
 import { integrationReadiness, readinessColor, noiseReductionHint } from "../readiness";
 import { QueryError } from "../components/QueryError";
+import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { NightsCard } from "../components/NightsCard";
 import { estimateClearNights } from "../components/clearNights";
@@ -43,6 +44,7 @@ import { thinStackWarning } from "../components/target/thinStack";
 import { missingFilesNote } from "../components/target/missingFiles";
 import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
 import { NextBestMoveBadge } from "../components/target/NextBestMoveBadge";
+import { FramingVerdictNote } from "../components/target/FramingVerdictNote";
 import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
 import { nextBestMove } from "../components/target/nextBestMove";
 import { softerThanUsual } from "../components/target/softStars";
@@ -767,218 +769,235 @@ export function TargetView() {
     <Stack>
       {/* First-run coaching, on the sample demo only (see SampleTourNote). */}
       <SampleTourNote step="target" safe={safe} />
-      {solveSetup ? (
-        <Alert color="orange" icon={<IconAlertTriangle size={18} />}
-          title={solveSetup.kind === "astap"
-            ? "Plate-solving isn't set up — ASTAP wasn't found"
-            : "Plate-solving needs a star database"}>
-          <Text size="sm">
-            {solveSetup.kind === "astap"
-              ? `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
-                + "plate-solved because ASTAP (the plate-solver) wasn't found. Frames need "
-                + "sky coordinates before they can be stacked, so this blocks the whole "
-                + "target. Install ASTAP and set its path in Settings, then re-run solving."
-              : `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
-                + "plate-solved because ASTAP couldn't find a star database to match against. "
-                + "Download an ASTAP star database (e.g. the D50/H17/H18 catalog) into ASTAP's "
-                + "folder, then re-run solving."}
-          </Text>
-          <Group gap="xs" mt="xs">
-            <Button size="xs" variant="filled" color="orange"
-              loading={qcSolve.isPending} onClick={() => qcSolve.mutate()}>
-              Re-run QC + Solve
-            </Button>
-            <Button size="xs" variant="light" color="orange"
-              component={Link} to="/settings">
-              Open Settings
-            </Button>
-          </Group>
-        </Alert>
-      ) : null}
-      {needsProcessing ? (
-        <Alert color="violet" icon={<IconSparkles size={18} />}
-          title="Ready to process?">
-          <Text size="sm">
-            One click runs quality-check, plate-solving and stacking for this
-            target — no form to fill. You'll get a finished master image to edit.
-          </Text>
-          <Group gap="xs" mt="xs">
-            <Button size="xs" variant="filled" color="violet"
-              leftSection={<IconSparkles size={14} />}
-              loading={process.isPending} onClick={() => process.mutate()}>
-              Process target
-            </Button>
-          </Group>
-        </Alert>
-      ) : null}
-      {newSubsSinceStack > 0 ? (
-        <Alert color="blue" variant="light" icon={<IconStack2 size={18} />}
-          title={`${newSubsSinceStack} new sub${newSubsSinceStack === 1 ? "" : "s"} since your last stack`}>
-          <Text size="sm">
-            {newSubsSinceStack === 1 ? "A frame has" : `${newSubsSinceStack} frames have`}{" "}
-            been accepted and solved since this target was last stacked, so the
-            current master doesn't include{" "}
-            {newSubsSinceStack === 1 ? "it" : "them"} yet. Restack to fold in the
-            new data.
-          </Text>
-          <Group gap="xs" mt="xs">
-            <Button size="xs" variant="filled" color="blue"
-              leftSection={<IconStack2 size={14} />}
-              loading={process.isPending} onClick={() => process.mutate()}>
-              Restack
-            </Button>
-          </Group>
-        </Alert>
-      ) : null}
-      {missingFiles !== null ? (
-        <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
-          title={missingFiles.title}>
-          <Text size="sm">{missingFiles.message}</Text>
-          <Group gap="xs" mt="xs">
-            <Button size="xs" variant="light" color="orange"
-              loading={rejectSummary.isFetching}
-              onClick={() => {
-                qc.invalidateQueries({ queryKey: ["reject-summary", safe] });
-              }}>
-              Check again
-            </Button>
-          </Group>
-        </Alert>
-      ) : null}
-      {qcUncheckable > 0 ? (
-        <Alert color="gray" variant="light" icon={<IconAlertTriangle size={18} />}
-          title={`${qcUncheckable} frame${qcUncheckable === 1 ? "" : "s"} couldn't be quality-checked`}>
-          <Text size="sm">
-            {qcUncheckable === 1 ? "A frame" : `${qcUncheckable} frames`} couldn't be
-            read during quality-check (an unreadable, corrupt or truncated FITS
-            file), so {qcUncheckable === 1 ? "it has" : "they have"} no metrics and{" "}
-            {qcUncheckable === 1 ? "is" : "are"} skipped when stacking. Re-check{" "}
-            {qcUncheckable === 1 ? "it" : "them"} in case the read failure was
-            transient (a copy still in progress).
-          </Text>
-          <Group gap="xs" mt="xs">
-            <Button size="xs" variant="light" color="gray"
-              loading={qcSolve.isPending} onClick={() => qcSolve.mutate()}>
-              Re-check these frames
-            </Button>
-          </Group>
-        </Alert>
-      ) : null}
-      {mixedRejected !== null ? (
-        <Alert color="teal" variant="light" icon={<IconCheck size={18} />}
-          title="Rejected the odd-target frames">
-          <Text size="sm">
-            Rejected {mixedRejected.length} sub{mixedRejected.length === 1 ? "" : "s"} that
-            didn't match the main pointing — the batch is a single target now, so a
-            stack won't waste itself on part of the data.
-          </Text>
-          <Button mt="xs" size="xs" variant="light" color="teal"
-            leftSection={<IconArrowBackUp size={14} />}
-            loading={undoMixed.isPending}
-            onClick={() => undoMixed.mutate(mixedRejected)}>
-            Undo — re-accept {mixedRejected.length} frame{mixedRejected.length === 1 ? "" : "s"}
-          </Button>
-        </Alert>
-      ) : mixedPointings ? (
-        <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
-          title={`This batch looks like ${mixedPointings.pointings} different targets`}>
-          <Text size="sm">
-            {mixedPointings.majority} of your accepted, plate-solved subs point at
-            one place and {mixedPointings.others} point about{" "}
-            {Math.round(mixedPointings.separationDeg)}° away — that usually means two
-            different targets' frames landed in the same folder (or some subs
-            plate-solved to the wrong place). If you stack now, only the frames
-            matching the reference pointing are combined and the other{" "}
-            {mixedPointings.others === 1 ? "one is" : `${mixedPointings.others} are`}{" "}
-            silently dropped, so you'd waste a stack on part of the data. Reject the
-            odd frames to keep just the main pointing, or check each frame's solved
-            RA/Dec in the Frames table below and split them into their own target.
-          </Text>
-          {mixedPointings.minorityIds.length ? (
-            <Button mt="xs" size="xs" variant="light" color="orange"
-              loading={rejectMixed.isPending}
-              onClick={() => rejectMixed.mutate(mixedPointings.minorityIds)}>
-              Reject the {mixedPointings.minorityIds.length} odd-target frame
-              {mixedPointings.minorityIds.length === 1 ? "" : "s"}
-            </Button>
-          ) : null}
-        </Alert>
-      ) : null}
-      {/* Was the sky brighter than usual on the latest night? Explains a washed-out
-          result the owner would otherwise blame on themselves. Self-hides. */}
-      <SkyBrightnessNote read={skyBrightness.data?.read} />
-      {heldForSolve ? (
-        <Alert
-          color="blue"
-          variant="light"
-          icon={<IconClock size={18} />}
-          title="Auto-stack is waiting for more of your subs to be located"
-        >
-          <Text size="sm">
-            {heldForSolve.located === 0
-              ? "None of your accepted subs have been located (plate-solved) yet"
-              : `Only ${heldForSolve.located} of your accepted subs `
-                + `${heldForSolve.located === 1 ? "has" : "have"} been located `
-                + "(plate-solved) so far"}
-            {`, so the hands-off auto-stack is holding off rather than making a `
-              + `picture out of one or two frames (that would just be noise). It `
-              + `will stack automatically once at least ${heldForSolve.floor} subs `
-              + `are located — run Plate Solve to locate more, or use "Stack" / `
-              + `"Process this target" to make one now anyway.`}
-          </Text>
-        </Alert>
-      ) : null}
-      {thinStack ? (
-        <Alert
-          color={thinStack.level === "single" ? "orange" : "yellow"}
-          variant="light"
-          icon={<IconAlertTriangle size={18} />}
-          title={thinStack.level === "single"
-            ? "This stack is really just one frame"
-            : "Very few frames were combined"}
-        >
-          <Text size="sm">{thinStack.message}</Text>
-        </Alert>
-      ) : null}
-      {/* The concrete "stacking cut your noise ~N×" payoff, right where a beginner
-          lands on the finished picture (self-hides for a thin/unmeasurable stack). */}
-      {latestRun?.has_preview ? (
-        <StackNoiseBadge safe={safe} runId={latestRun.id}
-          nFrames={latestRun.n_frames_used ?? null} />
-      ) : null}
-      {/* A calibration master the user explicitly saved that the newest run had
-          to drop — recorded by the unattended stack and, until now, only visible
-          if they expanded History's Info panel. Self-hides on a clean run. */}
-      {latestRun ? (
-        <CalibrationSkippedNote safe={safe} runId={latestRun.id} />
-      ) : null}
-      {/* Per-target personal-record beat: celebrate when the newest stack came
-          out sharper than any previous stack of this target (self-hides on the
-          first run or when it's not a record). */}
-      {latestRun?.has_preview ? (
-        <SharpestYetBadge name={target.data?.name ?? "target"} runs={runs.data} />
-      ) : null}
-      {/* "To make this even better": one plain-language coaching line naming the
-          single highest-leverage next step (locate more subs / add subs / add
-          time), or a short well-done note. Suppressed while the louder thin-stack
-          warning is up so the two never duplicate the "add more subs" nudge. */}
-      {latestRun?.has_preview && !thinStack ? (
-        <NextBestMoveBadge
-          name={target.data?.name ?? "target"}
-          nFramesUsed={latestRun.n_frames_used}
-          integrationS={latestRun.total_exposure_s}
-          nUnsolved={unsolvedCount}
-          runs={runs.data}
-        />
-      ) : null}
-      {/* "About as clean as your sky allows": when this target's measured noise
-          has plateaued (sky-limited), tell the beginner more subs won't help it
-          much — right where they decide whether to revisit it. Self-hiding, and
-          suppressed whenever the coaching above is nudging "add more time" so the
-          two never contradict. */}
-      {latestRun?.has_preview ? (
-        <IntegrationTrendBadge runs={runs.data} coachKind={coachKind} />
-      ) : null}
+      {/* Every note this page can raise, in one prioritised area: the top two
+          speak inline and the rest fold behind a "N more notes" line. Nothing is
+          dropped — see NoticeBoard, which measures which of these self-hiding
+          notes actually has something to say. */}
+      <NoticeBoard
+        inlineCount={2}
+        data-testid="target-notes"
+        items={[
+          { key: "solve-setup", priority: NOTICE_PRIORITY.blocking, node: solveSetup ? (
+            <Alert color="orange" icon={<IconAlertTriangle size={18} />}
+              title={solveSetup.kind === "astap"
+                ? "Plate-solving isn't set up — ASTAP wasn't found"
+                : "Plate-solving needs a star database"}>
+              <Text size="sm">
+                {solveSetup.kind === "astap"
+                  ? `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
+                    + "plate-solved because ASTAP (the plate-solver) wasn't found. Frames need "
+                    + "sky coordinates before they can be stacked, so this blocks the whole "
+                    + "target. Install ASTAP and set its path in Settings, then re-run solving."
+                  : `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
+                    + "plate-solved because ASTAP couldn't find a star database to match against. "
+                    + "Download an ASTAP star database (e.g. the D50/H17/H18 catalog) into ASTAP's "
+                    + "folder, then re-run solving."}
+              </Text>
+              <Group gap="xs" mt="xs">
+                <Button size="xs" variant="filled" color="orange"
+                  loading={qcSolve.isPending} onClick={() => qcSolve.mutate()}>
+                  Re-run QC + Solve
+                </Button>
+                <Button size="xs" variant="light" color="orange"
+                  component={Link} to="/settings">
+                  Open Settings
+                </Button>
+              </Group>
+            </Alert>
+          ) : null },
+          { key: "needs-processing", priority: NOTICE_PRIORITY.advisory, node: needsProcessing ? (
+            <Alert color="violet" icon={<IconSparkles size={18} />}
+              title="Ready to process?">
+              <Text size="sm">
+                One click runs quality-check, plate-solving and stacking for this
+                target — no form to fill. You'll get a finished master image to edit.
+              </Text>
+              <Group gap="xs" mt="xs">
+                <Button size="xs" variant="filled" color="violet"
+                  leftSection={<IconSparkles size={14} />}
+                  loading={process.isPending} onClick={() => process.mutate()}>
+                  Process target
+                </Button>
+              </Group>
+            </Alert>
+          ) : null },
+          { key: "new-subs", priority: NOTICE_PRIORITY.advisory, node: newSubsSinceStack > 0 ? (
+            <Alert color="blue" variant="light" icon={<IconStack2 size={18} />}
+              title={`${newSubsSinceStack} new sub${newSubsSinceStack === 1 ? "" : "s"} since your last stack`}>
+              <Text size="sm">
+                {newSubsSinceStack === 1 ? "A frame has" : `${newSubsSinceStack} frames have`}{" "}
+                been accepted and solved since this target was last stacked, so the
+                current master doesn't include{" "}
+                {newSubsSinceStack === 1 ? "it" : "them"} yet. Restack to fold in the
+                new data.
+              </Text>
+              <Group gap="xs" mt="xs">
+                <Button size="xs" variant="filled" color="blue"
+                  leftSection={<IconStack2 size={14} />}
+                  loading={process.isPending} onClick={() => process.mutate()}>
+                  Restack
+                </Button>
+              </Group>
+            </Alert>
+          ) : null },
+          { key: "missing-files", priority: NOTICE_PRIORITY.warning, node: missingFiles !== null ? (
+            <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
+              title={missingFiles.title}>
+              <Text size="sm">{missingFiles.message}</Text>
+              <Group gap="xs" mt="xs">
+                <Button size="xs" variant="light" color="orange"
+                  loading={rejectSummary.isFetching}
+                  onClick={() => {
+                    qc.invalidateQueries({ queryKey: ["reject-summary", safe] });
+                  }}>
+                  Check again
+                </Button>
+              </Group>
+            </Alert>
+          ) : null },
+          { key: "qc-uncheckable", priority: NOTICE_PRIORITY.warning, node: qcUncheckable > 0 ? (
+            <Alert color="gray" variant="light" icon={<IconAlertTriangle size={18} />}
+              title={`${qcUncheckable} frame${qcUncheckable === 1 ? "" : "s"} couldn't be quality-checked`}>
+              <Text size="sm">
+                {qcUncheckable === 1 ? "A frame" : `${qcUncheckable} frames`} couldn't be
+                read during quality-check (an unreadable, corrupt or truncated FITS
+                file), so {qcUncheckable === 1 ? "it has" : "they have"} no metrics and{" "}
+                {qcUncheckable === 1 ? "is" : "are"} skipped when stacking. Re-check{" "}
+                {qcUncheckable === 1 ? "it" : "them"} in case the read failure was
+                transient (a copy still in progress).
+              </Text>
+              <Group gap="xs" mt="xs">
+                <Button size="xs" variant="light" color="gray"
+                  loading={qcSolve.isPending} onClick={() => qcSolve.mutate()}>
+                  Re-check these frames
+                </Button>
+              </Group>
+            </Alert>
+          ) : null },
+          { key: "mixed-pointings", priority: NOTICE_PRIORITY.warning, node: mixedRejected === null && mixedPointings ? (
+            <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
+              title={`This batch looks like ${mixedPointings.pointings} different targets`}>
+              <Text size="sm">
+                {mixedPointings.majority} of your accepted, plate-solved subs point at
+                one place and {mixedPointings.others} point about{" "}
+                {Math.round(mixedPointings.separationDeg)}° away — that usually means two
+                different targets' frames landed in the same folder (or some subs
+                plate-solved to the wrong place). If you stack now, only the frames
+                matching the reference pointing are combined and the other{" "}
+                {mixedPointings.others === 1 ? "one is" : `${mixedPointings.others} are`}{" "}
+                silently dropped, so you'd waste a stack on part of the data. Reject the
+                odd frames to keep just the main pointing, or check each frame's solved
+                RA/Dec in the Frames table below and split them into their own target.
+              </Text>
+              {mixedPointings.minorityIds.length ? (
+                <Button mt="xs" size="xs" variant="light" color="orange"
+                  loading={rejectMixed.isPending}
+                  onClick={() => rejectMixed.mutate(mixedPointings.minorityIds)}>
+                  Reject the {mixedPointings.minorityIds.length} odd-target frame
+                  {mixedPointings.minorityIds.length === 1 ? "" : "s"}
+                </Button>
+              ) : null}
+            </Alert>
+          ) : null },
+          { key: "mixed-rejected", priority: NOTICE_PRIORITY.info, node: mixedRejected !== null ? (
+            <Alert color="teal" variant="light" icon={<IconCheck size={18} />}
+              title="Rejected the odd-target frames">
+              <Text size="sm">
+                Rejected {mixedRejected.length} sub{mixedRejected.length === 1 ? "" : "s"} that
+                didn't match the main pointing — the batch is a single target now, so a
+                stack won't waste itself on part of the data.
+              </Text>
+              <Button mt="xs" size="xs" variant="light" color="teal"
+                leftSection={<IconArrowBackUp size={14} />}
+                loading={undoMixed.isPending}
+                onClick={() => undoMixed.mutate(mixedRejected)}>
+                Undo — re-accept {mixedRejected.length} frame{mixedRejected.length === 1 ? "" : "s"}
+              </Button>
+            </Alert>
+          ) : null },
+          /* Was the sky brighter than usual on the latest night? Explains a washed-out
+              result the owner would otherwise blame on themselves. Self-hides. */
+          { key: "sky-brightness", priority: NOTICE_PRIORITY.info, node: <SkyBrightnessNote read={skyBrightness.data?.read} /> },
+          { key: "held-for-solve", priority: NOTICE_PRIORITY.advisory, node: heldForSolve ? (
+            <Alert
+              color="blue"
+              variant="light"
+              icon={<IconClock size={18} />}
+              title="Auto-stack is waiting for more of your subs to be located"
+            >
+              <Text size="sm">
+                {heldForSolve.located === 0
+                  ? "None of your accepted subs have been located (plate-solved) yet"
+                  : `Only ${heldForSolve.located} of your accepted subs `
+                    + `${heldForSolve.located === 1 ? "has" : "have"} been located `
+                    + "(plate-solved) so far"}
+                {`, so the hands-off auto-stack is holding off rather than making a `
+                  + `picture out of one or two frames (that would just be noise). It `
+                  + `will stack automatically once at least ${heldForSolve.floor} subs `
+                  + `are located — run Plate Solve to locate more, or use "Stack" / `
+                  + `"Process this target" to make one now anyway.`}
+              </Text>
+            </Alert>
+          ) : null },
+          { key: "thin-stack", priority: NOTICE_PRIORITY.warning, node: thinStack ? (
+            <Alert
+              color={thinStack.level === "single" ? "orange" : "yellow"}
+              variant="light"
+              icon={<IconAlertTriangle size={18} />}
+              title={thinStack.level === "single"
+                ? "This stack is really just one frame"
+                : "Very few frames were combined"}
+            >
+              <Text size="sm">{thinStack.message}</Text>
+            </Alert>
+          ) : null },
+          /* The concrete "stacking cut your noise ~N×" payoff, right where a beginner
+              lands on the finished picture (self-hides for a thin/unmeasurable stack). */
+          { key: "stack-noise", priority: NOTICE_PRIORITY.praise, node: latestRun?.has_preview ? (
+            <StackNoiseBadge safe={safe} runId={latestRun.id}
+              nFrames={latestRun.n_frames_used ?? null} />
+          ) : null },
+          /* A calibration master the user explicitly saved that the newest run had
+              to drop — recorded by the unattended stack and, until now, only visible
+              if they expanded History's Info panel. Self-hides on a clean run. */
+          { key: "calibration-skipped", priority: NOTICE_PRIORITY.warning, node: latestRun ? (
+            <CalibrationSkippedNote safe={safe} runId={latestRun.id} />
+          ) : null },
+          /* Per-target personal-record beat: celebrate when the newest stack came
+              out sharper than any previous stack of this target (self-hides on the
+              first run or when it's not a record). */
+          { key: "sharpest-yet", priority: NOTICE_PRIORITY.praise, node: latestRun?.has_preview ? (
+            <SharpestYetBadge name={target.data?.name ?? "target"} runs={runs.data} />
+          ) : null },
+          /* "To make this even better": one plain-language coaching line naming the
+              single highest-leverage next step (locate more subs / add subs / add
+              time), or a short well-done note. Suppressed while the louder thin-stack
+              warning is up so the two never duplicate the "add more subs" nudge. */
+          { key: "next-best-move", priority: NOTICE_PRIORITY.advisory, node: latestRun?.has_preview && !thinStack ? (
+            <NextBestMoveBadge
+              name={target.data?.name ?? "target"}
+              nFramesUsed={latestRun.n_frames_used}
+              integrationS={latestRun.total_exposure_s}
+              nUnsolved={unsolvedCount}
+              runs={runs.data}
+            />
+          ) : null },
+          /* "About as clean as your sky allows": when this target's measured noise
+              has plateaued (sky-limited), tell the beginner more subs won't help it
+              much — right where they decide whether to revisit it. Self-hiding, and
+              suppressed whenever the coaching above is nudging "add more time" so the
+              two never contradict. */
+          { key: "integration-trend", priority: NOTICE_PRIORITY.info, node: latestRun?.has_preview ? (
+            <IntegrationTrendBadge runs={runs.data} coachKind={coachKind} />
+          ) : null },
+          /* "Did I frame it well?" — how the finished picture actually caught the
+              target, measured from the run's own WCS. Self-hides when the target
+              isn't a sized catalog object or the run has no solved WCS. */
+          { key: "framing-verdict", priority: NOTICE_PRIORITY.advisory, node: latestRun?.has_fits ? (
+            <FramingVerdictNote safe={safe} runId={latestRun.id} />
+          ) : null },
+        ]}
+      />
       <Group justify="space-between" gap="xs">
         <Group gap="xs" style={{ minWidth: 0 }}>
           <Title order={2} style={{ wordBreak: "break-word" }}>{target.data?.name}</Title>
