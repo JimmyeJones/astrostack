@@ -159,6 +159,104 @@ def test_tonight_survives_an_unreadable_project_when_reading_goals(
     m42 = next(t for t in r.json()["targets"]
                if t["already_targeted"] and t["target_safe"] == "M_42")
     assert m42["goal_s"] is None
+    # The pace read shares that same failed open, so it degrades the same way.
+    assert m42["recent_pace_s"] is None
+
+
+def _seed_nights(data_root, safe: str, nights: list[int], *, subs: int = 40) -> None:
+    """Give one target ``len(nights)`` capture nights of ``subs`` × 30 s subs, a
+    week apart, so it has a measurable recent pace. Mirrors the helper in
+    ``test_library_progress.py`` — the two surfaces must agree on the number."""
+    from seestack.io.library import Library
+    from seestack.io.project import FrameRow
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for day in nights:
+                base = datetime(2026, 7, day, 22, 0, 0)
+                for i in range(subs):
+                    ts = base + timedelta(seconds=30 * i)
+                    proj.add_frame(FrameRow(
+                        source_path=f"/seed/{safe}-{day}-{i}.fit",
+                        timestamp_utc=ts.isoformat(),
+                        exposure_s=30.0,
+                        accept=True,
+                    ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_tonight_already_targeted_rows_carry_a_recent_pace(client, solved_library):
+    """The planner row is where the user picks tonight's target, so it has to be
+    able to say "~1 more clear night finishes this" — which needs the target's own
+    recent pace, the same figure the Dashboard overview reports."""
+    _seed_nights(solved_library, "M_42", [1, 8])
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    by_safe = {t["target_safe"]: t for t in body["targets"] if t["already_targeted"]}
+    # 40 subs × 30 s = 1200 s a night, twice → median 1200 s.
+    assert by_safe["M_42"]["recent_pace_s"] == 1200.0
+    # ...and it is the same number /api/library-progress reports for that target,
+    # so the planner and the Dashboard can never quote different ETAs.
+    prog = {r["safe"]: r for r in client.get("/api/library-progress").json()}
+    assert prog["M_42"]["recent_pace_s"] == by_safe["M_42"]["recent_pace_s"]
+
+    # A target with a single ingest night has no pace — one session is not a
+    # pace, so the row says nothing about nights rather than guessing.
+    assert by_safe["NGC_7000"]["recent_pace_s"] is None
+    # A catalog row the user has never shot carries none at all.
+    catalog_row = next(t for t in body["targets"] if not t["already_targeted"])
+    assert catalog_row["recent_pace_s"] is None
+
+
+def test_tonight_reuses_the_cached_per_target_annotation(
+    client, solved_library, monkeypatch
+):
+    """The pace read scans every dated frame of every target, so the planner must
+    not redo it on every render — but it must never serve a stale answer either."""
+    import seestack.session_recap as session_recap
+
+    calls: list[int] = []
+    real = session_recap.recent_night_pace_s
+
+    def _counted(proj, **kw):  # noqa: ANN001
+        calls.append(1)
+        return real(proj, **kw)
+
+    monkeypatch.setattr(session_recap, "recent_night_pace_s", _counted)
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+
+    client.get("/api/plan/tonight", params={"when": JAN_EVENING})
+    after_first = len(calls)
+    assert after_first > 0
+    # Second render of the same unchanged library: served from the cache.
+    client.get("/api/plan/tonight", params={"when": JAN_EVENING})
+    assert len(calls) == after_first
+
+    # Setting a goal doesn't move the registry signature (it writes project
+    # meta), so the cache is dropped explicitly — the user must not have to wait
+    # out a TTL to see the goal they just set.
+    client.put("/api/targets/M_42/integration-goal", json={"goal_s": 9 * 3600.0})
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    assert len(calls) > after_first
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert m42["goal_s"] == 9 * 3600.0
+
+    # New subs *do* move the signature, so they invalidate it on their own.
+    before_seed = len(calls)
+    _seed_nights(solved_library, "M_42", [1, 8])
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    assert len(calls) > before_seed
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert m42["recent_pace_s"] == 1200.0
 
 
 def test_tonight_min_alt_override_changes_usable_window(client, solved_library):

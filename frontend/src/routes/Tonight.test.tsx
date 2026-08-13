@@ -309,6 +309,29 @@ describe("TonightView", () => {
     expect(screen.queryByText("Nearly there")).not.toBeInTheDocument();
   });
 
+  it("tells a row how many more clear nights would finish it", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [
+        // 5 h of a 6 h galaxy goal, and this owner keeps ~2 h a clear night on
+        // it → one more night finishes it. That replaces the vague "Nearly
+        // there" badge: it's the number they're actually deciding on.
+        target({ id: "M31", name: "Andromeda", type: "galaxy", already_targeted: true,
+                 target_safe: "M_31", frames_accepted: 200, total_exposure_s: 5 * 3600,
+                 recent_pace_s: 2 * 3600, score: 80 }),
+        // Same standing, but no measured pace → the old badge, unchanged.
+        target({ id: "M81", name: "Bode's", type: "galaxy", already_targeted: true,
+                 target_safe: "M_81", frames_accepted: 200, total_exposure_s: 5 * 3600,
+                 score: 70 }),
+      ],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    expect(screen.getByText("~1 more night")).toBeInTheDocument();
+    // Exactly one row keeps the badge — the paced row swapped it for the figure.
+    expect(screen.getAllByText("Nearly there")).toHaveLength(1);
+  });
+
   it("keeps the Night picker mounted on error so a bad date doesn't strand the user", async () => {
     vi.spyOn(client.api, "getTonight").mockRejectedValue(new Error("boom"));
     render(

@@ -28,6 +28,16 @@ export const PACE_LOOKBACK_NIGHTS = 5;
  * a session — counting it would drag the median down and inflate the ETA. */
 const MIN_PRODUCTIVE_NIGHT_S = 120;
 
+/** How close to done a target has to be before a *compact* surface (a Dashboard
+ * row, a Tonight planner row) names the number of nights left. Past it the
+ * figure stops being encouragement and starts reading as a scold ("6 nights
+ * behind"), which is the opposite of what those surfaces are for — so a target
+ * further out simply says nothing about nights and keeps its ordinary badge.
+ * The full sentence on the Target page has room to be honest about a long haul;
+ * a chip in a table does not. Lives here, with the arithmetic and the wording,
+ * so every compact surface applies the same cutoff. */
+export const FINISH_FIRST_MAX_NIGHTS = 3;
+
 export interface ClearNightsEstimate {
   /** Whole clear nights still needed (≥1), or null when there's no usable pace
    *  and the estimate is an advisory instead of a number. */

@@ -9,7 +9,7 @@ import { Link } from "react-router-dom";
 import { api, type PlannedTarget } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
-import { readinessRowHint } from "../readiness";
+import { readinessRowBadge } from "../readiness";
 import {
   difficultyRowBadge, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge, minAltOptions,
   moonCueForTarget, moonPhaseLabel, moonWindowNote, notUpTonightNote,
@@ -29,16 +29,19 @@ function ScoreBadge({ score }: { score: number }) {
 
 function TargetRow({ t }: { t: PlannedTarget }) {
   const label = t.name && t.name !== t.id ? `${t.id} — ${t.name}` : t.id;
-  // For a target already in the library, nudge toward starting something new
-  // once it's close to / past its suggested integration goal ("Is it enough
-  // yet?"); silent while it's still worth topping up.
+  // For a target already in the library: how many more clear nights would
+  // finish it at the owner's own recent pace on it ("~1 more night"), or — when
+  // there's no pace to go on — the plain readiness nudge toward starting
+  // something new once it's close to / past its goal. Silent while it's still
+  // worth topping up and nothing specific can be said.
   // Honours the goal the user set for this target (seconds → hours), so the
   // planner never contradicts the Target page about the same picture.
   const readyHint = t.already_targeted
-    ? readinessRowHint(
+    ? readinessRowBadge(
         t.total_exposure_s ?? 0,
         t.type,
         t.goal_s == null ? null : t.goal_s / 3600,
+        t.recent_pace_s,
       )
     : null;
   // Pre-capture "will it fit?" nudge for a catalog candidate that's bigger than
@@ -65,9 +68,11 @@ function TargetRow({ t }: { t: PlannedTarget }) {
             : ""}
         </Text>
         {readyHint ? (
-          <Badge mt={4} size="xs" variant="light" color={readyHint.color}>
-            {readyHint.label}
-          </Badge>
+          <Tooltip label={readyHint.tooltip} multiline w={260} withArrow>
+            <Badge mt={4} size="xs" variant="light" color={readyHint.color}>
+              {readyHint.label}
+            </Badge>
+          </Tooltip>
         ) : null}
         {difficultyBadge ? (
           <Tooltip label={difficultyBadge.tooltip} multiline w={240} withArrow>
