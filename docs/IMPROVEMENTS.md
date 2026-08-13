@@ -176,10 +176,31 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **⚠ INGEST IDEMPOTENCY (Scout 2026-08-13, branch `claude/focused-keller-zi700s`; TRACED) — a benign *mtime-only*
+- ~~**⚠ INGEST IDEMPOTENCY (Scout 2026-08-13, branch `claude/focused-keller-zi700s`; TRACED) — a benign *mtime-only*
   change to an already-ingested source (identical bytes) is treated as an in-place content swap, which wipes the
   frame's QC metrics, **silently re-accepts an auto-rejected sub**, and nulls its plate solution — potentially
-  across the whole library at once on a single re-copy of `incoming/`.** *(Autonomy / trust — PRIORITY 2; severity
+  across the whole library at once on a single re-copy of `incoming/`.**~~ — **FIXED v0.254.2** (Builder 2026-08-13,
+  branch `claude/serene-goldberg-2bpxcs`). **Reproduced** as the fail-before test: an `os.utime` touch of an
+  already-ingested, solved, `auto:streak`-rejected frame came back `accept=True`, `reject_reason=None`,
+  `wcs_json=None` and every metric nulled. **The fix, on the one genuinely ambiguous case only:** the mtime half of
+  the fingerprint exists to catch a *same-size* in-place swap (every Seestar sub of one camera is the same byte
+  size), so it can't be dropped — instead, when the size is **equal** and only the mtime moved, ingest now asks the
+  file who it is before doing anything destructive. `_same_capture()` reads the FITS **header only** (no pixel data,
+  and only on this rare path — an ordinary re-scan never gets there) and requires a *positive* identity match:
+  `DATE-OBS` equal and non-empty, plus exposure/gain/dimensions/Bayer agreeing wherever the row recorded them. A
+  match ⇒ benign touch ⇒ nothing is reset; a mismatch, an unreadable header or a row with **no recorded timestamp**
+  ⇒ "don't know" ⇒ the old conservative reset, unchanged. The new mtime is adopted either way (a new `fp_changed`
+  flag drives the fingerprint write, `content_changed` the destructive path), so the header re-check happens once
+  per touch, not on every scan. Size-different sources, the `copy_to_cache` cache-staleness path, and NULL-
+  fingerprint (pre-upgrade) rows all behave exactly as before. **Known, accepted blind spot:** a swap that keeps the
+  identical size *and* the identical `DATE-OBS`/exposure/gain/shape (i.e. a re-export of the same sub) is now read
+  as benign — the case where inheriting the old WCS is right anyway. No schema, config, API, on-disk or default
+  change; nothing writes to `incoming/`. **Tests (+3 in `tests/test_ingest.py`, one fail-before):** the mtime-only
+  touch keeps the QC verdict, metrics and solution and re-checks only once; a same-size *different* capture (same
+  dimensions, different `DATE-OBS`) still resets and re-reads its header; and a row with no recorded timestamp still
+  takes the conservative path. `tests/synth.py::write_seestar_fits` gained an optional `date_obs` (default
+  unchanged, so every existing fixture is byte-identical).
+  *(Original entry kept below for provenance.)* *(Autonomy / trust — PRIORITY 2; severity
   broken-UX + wasted-compute + a transient wrong-result window; NOT permanent data loss — it re-derives on the next
   QC/solve pass, and this NEVER writes to `incoming/`, only to the project DB.)*
   **Symptom / cost:** the owner's raw subs live in `incoming/` and are re-synced/backed-up like any NAS folder. Any
@@ -210,9 +231,21 @@ when you take it.
   auto-rejected, solved frame must leave `accept`/`reject_reason`/`wcs_json` untouched, while a genuine same-size
   byte change still resets. Store the new fingerprint either way so it doesn't re-fire every scan.
 
-- **COSMETIC (Scout 2026-08-13, branch `claude/focused-keller-zi700s`; TRACED) — the "watch it deepen night after
+- ~~**COSMETIC (Scout 2026-08-13, branch `claude/focused-keller-zi700s`; TRACED) — the "watch it deepen night after
   night" reel geometrically distorts earlier frames when the stack canvas's *aspect ratio* changes across nights
-  (round stars → ellipses in the older frames).** *(Friendliness / polish — PRIORITY 3; severity cosmetic — only
+  (round stars → ellipses in the older frames).**~~ — **FIXED v0.254.3** (Builder 2026-08-13, branch
+  `claude/serene-goldberg-2bpxcs`), exactly as specced. Both size-unifying spots
+  (`render_deepening_frames`'s `target_size` pass and `write_deepening_reel`'s defensive re-normalise) now go
+  through one new `_fit_onto()` helper: scale to fit *inside* the target preserving aspect, centre on a **black**
+  canvas (matching the app's NaN = uncovered = black convention, so the pad reads as "no data here yet"). A frame
+  that already matches the target — or merely differs in size at the *same* aspect ratio, which is the ordinary
+  single-field "canvas grew" case — comes back byte-for-byte what the plain resize produced, so nothing changes for
+  a normal target. **Tests (+2 in `tests/test_deepening_reel.py`, one fail-before):** a 1:2 portrait night fitted
+  into a 2:1 landscape final frame keeps its aspect ratio (within a pixel) with equal black margins either side and
+  a still-uniform series size; and a same-aspect pair still fills its canvas edge to edge with no bars. Engine
+  render only — no schema, config, API, on-disk or default change, and the scientific `master.fits`/`.tif`/
+  `_preview.png` were never involved.
+  *(Original entry kept below for provenance.)* *(Friendliness / polish — PRIORITY 3; severity cosmetic — only
   the decorative `_deepening.webp`/`.png` reel is affected; the scientific `master.fits`/`.tif`/`_preview.png` are
   untouched.)*
   **Location:** `seestack/render/deepening.py:241-247` (`render_deepening_frames`) and `:260-262`
@@ -9727,6 +9760,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   content-order/above-the-fold → (d) sidebar grouping → (e) Dashboard. Ship and let the owner react between
   slices; his reaction to (a) and (b) should inform the rest.
 
+  **✅ SLICE (a) SHIPPED — v0.255.0** (Builder 2026-08-13, branch `claude/serene-goldberg-2bpxcs`). The Target
+  page's banner wall is now one prioritised notes area. **Measured, as the acceptance criterion asks:** always-on
+  note blocks above the page's own title went **15 → at most 2**, plus one `"N more notes"` line; the other 13 are
+  **still mounted, still rendered, one click away** (nothing removed — the hard constraint). `Target.tsx` is 1512 →
+  1524 lines (+12: the win here is visual, not line count — the wall's JSX is unchanged, just re-homed into an
+  array), and the new shared `components/NoticeBoard.tsx` is 137 lines.
+  **The design decision worth knowing:** most of those notes are **self-hiding components that fetch their own
+  data** (`SkyBrightnessNote`, `SharpestYetBadge`, `StackNoiseBadge`, `CalibrationSkippedNote`,
+  `NextBestMoveBadge`, `IntegrationTrendBadge`…), so the page genuinely cannot know how many will speak up — and a
+  disclosure that promises *"2 more notes"* and opens onto nothing is worse than none. `NoticeBoard` therefore
+  **measures the DOM**: it renders every note, counts the ones that actually produced output (a `MutationObserver`
+  catches the ones that arrive late, since a child's own query resolving doesn't re-render the parent), shows the
+  top `inlineCount` by severity and hides the rest **with CSS rather than unmounting** — so expanding never
+  remounts or refetches anything, and a note that changes its mind is picked up automatically.
+  Severity is declared per note via the exported `NOTICE_PRIORITY` ladder (`blocking` > `warning` > `advisory` >
+  `info` > `praise`), so a congratulation can never take a warning's slot — the entry's explicit requirement. The
+  one note deliberately left **outside** the board is `SampleTourNote`: it *is* the first-run guidance the entry
+  says to preserve, and it self-hides off the sample demo anyway. The `mixedRejected`/`mixedPointings` ternary pair
+  was split into two independently-ranked notes that keep their exact mutual exclusion.
+  **This is the reusable grouping primitive the entry asks for** — a later feature with something to say should add
+  a `Notice` with a priority instead of appending one more always-on banner. **Tests (+8):**
+  `NoticeBoard.test.tsx` (+6 — severity ranking beats declaration order, one-click open/close, silent notes are not
+  counted, an all-silent board renders nothing at all, a late-arriving note is picked up, and nothing folds when
+  there is nothing to fold) and `Target.test.tsx` (+2 — the real page keeps its two urgent notes inline and folds
+  the third, and a lone note shows with no disclosure). All 66 pre-existing `Target.test.tsx` assertions pass
+  **unchanged** (hidden notes stay in the DOM), so nothing was rewritten to go green. Frontend-only: no API,
+  schema, config, on-disk or default change. **Next slice: (b) — group the 9 stacked analysis cards.**
+
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
   first paint, and route file length. A slice that doesn't move those numbers hasn't done the job.
@@ -11704,8 +11765,37 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — "Did I frame it well?": a
-  post-stack, plain-language centring / edge-cutoff verdict on the *finished* picture.** *(Pillar: friendliness /
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — "Did I frame it well?": a
+  post-stack, plain-language centring / edge-cutoff verdict on the *finished* picture.**~~ — **SHIPPED v0.256.0**
+  (Builder 2026-08-13, branch `claude/serene-goldberg-2bpxcs`), built to the spec with one deliberate reshape.
+  **The reshape: the engine helper is pure arithmetic, not a WCS consumer.** The spec suggested
+  `framing_result_verdict(wcs, w, h, ra, dec, size_arcmin)`; it ships as
+  `framing_result_verdict(*, x_px, y_px, width_px, height_px, arcsec_per_px, size_arcmin)` — the object's position
+  **already projected** into the result's pixel grid. The webapp owns the projection (it is the half that needs
+  astropy), and `seestack/framing.py` stays import-light and trivially unit-testable, exactly like
+  `seestack/scalebar.py` next door. It returns `None` — never a guess — for an unsized object, a non-positive
+  scale/canvas or a non-finite position (an object behind the projection).
+  **One thing the spec didn't separate, and it matters to a beginner:** "some of it is missing" covers two
+  problems with *opposite* fixes. An object that would have fitted whole was simply aimed badly (**`clipped`** →
+  *"about 70% of it made it in. It would fit whole, so just re-centre it next session."*), while one bigger than
+  the canvas can never fit however well aimed (**`partial`** → *"only about 40% of it is in this picture. Shoot it
+  in mosaic mode to capture all of it."*). The verdict picks by comparing the object's extent to the canvas, so it
+  never tells someone to re-centre something that cannot fit, or to shoot a mosaic of something that would have
+  fitted. The other two levels are **`centred`** and **`off_centre`** (all of it in frame, but well out to one
+  side). The object is modelled as a **square box of its major-axis size**, which is deliberately generous for an
+  edge-on galaxy — it errs toward "some of it is outside" rather than promising a beginner that everything landed.
+  **Surface:** `GET /api/targets/{safe}/stack-runs/{run_id}/framing` (new, additive; returns `null` rather than
+  404ing where the run exists) and a self-hiding `FramingVerdictNote` on the Target page — added as a **`Notice`
+  inside the new NoticeBoard** rather than as one more always-on banner, which is exactly what the IA entry asks a
+  new feature to do. Shipped alongside: `_arcsec_per_px()` factored out of `_scale_bar_from_wcs` so the scale bar
+  and the framing verdict read one plate scale, not two hand-mirrored ones. **Tests (+16):**
+  `tests/test_framing.py` (+8 — the four levels, the friendly never-0%/never-100% percentage, no verdict without a
+  vetted size, degenerate canvas/scale/NaN position, and the "sentence names no object so the caller prefixes it"
+  contract it shares with `framing_hint`), `tests/webapp/test_stack_framing.py` (+5, end-to-end through a real
+  master FITS with a TAN WCS: well-pointed, pointed 1° off, a single frame too small for the object, no-WCS → null,
+  unknown run → 404) and the frontend (+3 component, +1 page). Upgrade-safe: read-only additive endpoint, no
+  config/DB/on-disk/API-shape change and no default touched.
+  *(Original spec kept below for provenance.)* *(Pillar: friendliness /
   understand — PRIORITY 3; size S–M.)* A beginner's most common framing surprise isn't caught until *after* a night
   is spent: the target came out off-centre, or half of it runs off an edge, and they didn't know to use mosaic mode.
   We already have a **pre-shoot** hint (`seestack/framing.py` `framing_hint` → "M 31 is bigger than one frame — use

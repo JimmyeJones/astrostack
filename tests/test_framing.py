@@ -8,6 +8,7 @@ from seestack.framing import (
     SEESTAR_FOV_LONG_ARCMIN,
     SEESTAR_FOV_SHORT_ARCMIN,
     framing_hint,
+    framing_result_verdict,
 )
 from seestack.nightplan import load_catalog
 
@@ -95,3 +96,90 @@ def test_every_catalog_object_now_carries_a_size():
     # addition without a vetted size trips this, prompting the author to add one.
     unsized = [o.id for o in load_catalog() if o.size_arcmin is None]
     assert unsized == [], f"catalog objects missing a vetted size_arcmin: {unsized}"
+
+
+# ---------------------------------------------------------------------------
+# "Did I frame it well?" — the post-stack verdict on the finished picture.
+# ---------------------------------------------------------------------------
+
+# A stand-in for a finished Seestar stack: 1000 × 800 px at 5"/px, so the canvas
+# spans ~83' × 67' and a 30' object is 360 px across — comfortably inside it.
+FRAME = {"width_px": 1000, "height_px": 800, "arcsec_per_px": 5.0}
+
+
+def verdict(x, y, size_arcmin, **over):
+    return framing_result_verdict(
+        x_px=x, y_px=y, size_arcmin=size_arcmin, **{**FRAME, **over},
+    )
+
+
+def test_a_centred_object_that_fits_reads_as_well_framed():
+    v = verdict(500, 400, 30)
+    assert v is not None
+    assert v.level == "centred"
+    assert v.coverage == pytest.approx(1.0)
+    assert v.off_centre < 0.01
+    assert "centred" in v.text
+
+
+def test_an_object_pushed_to_a_corner_is_flagged_even_though_it_all_fits():
+    v = verdict(900, 700, 10)
+    assert v is not None
+    assert v.level == "off_centre"
+    assert v.coverage == pytest.approx(1.0)   # nothing is missing...
+    assert v.off_centre > 0.34                # ...it just sits well out
+    assert "off to one side" in v.text
+
+
+def test_an_object_that_would_fit_but_runs_off_an_edge_says_re_centre():
+    # 30' object (360 px across) centred only 60 px from the top: two thirds of it
+    # made it in. It fits the canvas easily, so the fix is aim, not mosaic mode.
+    v = verdict(500, 60, 30)
+    assert v is not None
+    assert v.level == "clipped"
+    assert v.coverage == pytest.approx(2 / 3, abs=0.01)
+    assert "re-centre it next session" in v.text
+    assert "mosaic" not in v.text
+
+
+def test_an_object_bigger_than_the_canvas_says_mosaic_not_re_centre():
+    # M 31-sized (3°) on this canvas can never fit however well it is aimed.
+    v = verdict(500, 400, 180)
+    assert v is not None
+    assert v.level == "partial"
+    assert v.coverage < 0.5
+    assert "mosaic mode" in v.text
+    assert "re-centre" not in v.text
+
+
+def test_the_reported_percentage_is_friendly_and_never_absurd():
+    # Rounded to the nearest 5, and never "0%"/"100%" — either would contradict
+    # the sentence it sits in ("only about 0% of it is in this picture").
+    text = verdict(500, 400, 3000).text          # a sliver of a vast object
+    assert "about 5% of it" in text
+    text = verdict(500, 60, 30).text
+    assert "about 65% of it" in text
+
+
+def test_no_verdict_without_a_vetted_size():
+    # We never guess: an unsized catalog object gets no card at all.
+    assert verdict(500, 400, None) is None
+    assert verdict(500, 400, 0) is None
+
+
+def test_no_verdict_from_a_degenerate_frame_or_projection():
+    assert verdict(500, 400, 30, width_px=0) is None
+    assert verdict(500, 400, 30, height_px=0) is None
+    assert verdict(500, 400, 30, arcsec_per_px=0.0) is None
+    # An object behind the projection comes back non-finite from the WCS.
+    assert verdict(float("nan"), 400, 30) is None
+    assert verdict(500, float("inf"), 30) is None
+
+
+def test_the_verdict_names_no_object_so_the_caller_can_prefix_it():
+    # Same contract as framing_hint: the sentence starts with a verb, so the UI
+    # renders "M 31 " + text and one voice covers both cards.
+    for v in (verdict(500, 400, 30), verdict(900, 700, 10), verdict(500, 60, 30),
+              verdict(500, 400, 180)):
+        assert v is not None
+        assert v.text[0].islower()

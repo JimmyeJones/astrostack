@@ -113,6 +113,58 @@ def _source_fingerprint(src: Path) -> tuple[int, float] | None:
     return (st.st_size, st.st_mtime)
 
 
+def _same_capture(prior: FrameRow, src: Path) -> bool:
+    """True if ``src`` still holds the **same capture** the frame row was built
+    from, judged by its FITS header identity.
+
+    Used to disambiguate the one genuinely ambiguous fingerprint case: the
+    source's *size* is unchanged but its *mtime* moved. That happens for two
+    very different reasons, and they want opposite handling:
+
+    * A **benign touch** — the same bytes re-copied by something that doesn't
+      preserve timestamps (``cp`` without ``-p``, an SMB/robocopy re-copy,
+      ``rsync`` without ``--times``, a backup restore, a NAS migration). The
+      owner's raws live on a NAS and get re-synced like any other folder, so
+      this can hit *every* frame in the library at once.
+    * A **same-size in-place swap** — a different capture written over a reused
+      filename (a re-export or a rename collision). Every Seestar sub of one
+      camera is the same byte size, so this is exactly the case a size compare
+      can't see and the mtime half of the fingerprint exists to catch.
+
+    Treating the first as the second is expensive and wrong: it resets the
+    frame's QC metrics, re-accepts an auto-rejected sub (a streaked frame is
+    silently readmitted until the next QC pass) and drops its plate solution.
+    So before doing anything destructive we ask the file itself who it is: a
+    different capture carries a different ``DATE-OBS``. We require a *positive*
+    match — a missing/unreadable timestamp on either side answers "don't know",
+    which falls through to the old, conservative "treat it as changed"
+    behaviour. Fields the row never recorded (NULL) carry no information and are
+    skipped rather than counted as a mismatch.
+
+    Reads the header only (no pixel data), and only on the rare size-equal /
+    mtime-changed path — an ordinary re-scan never gets here.
+    """
+    if not prior.timestamp_utc:
+        return False  # no recorded identity to compare against → don't guess
+    try:
+        info = load_header(src)
+    except Exception as exc:  # noqa: BLE001 — astropy raises a zoo of exceptions
+        log.warning("could not re-read header for touched %s: %s", src, exc)
+        return False
+    if info.timestamp_utc != prior.timestamp_utc:
+        return False
+    for new, old in (
+        (info.exposure_s, prior.exposure_s),
+        (info.gain, prior.gain),
+        (info.width_px, prior.width_px),
+        (info.height_px, prior.height_px),
+        (info.bayer_pattern, prior.bayer_pattern),
+    ):
+        if old is not None and new != old:
+            return False
+    return True
+
+
 def _cache_stale(cached_path: str | Path, src: Path) -> bool:
     """True if the Stage-1 cache no longer matches its source and should be
     refreshed. A size mismatch means the source grew after it was cached — the
@@ -229,9 +281,17 @@ def ingest_files(
                 if prior.source_size_bytes is not None
                 else None
             )
-            content_changed = (
+            fp_changed = (
                 fp is not None and stored_fp is not None and fp != stored_fp
             )
+            content_changed = fp_changed
+            if fp_changed and fp[0] == stored_fp[0] and _same_capture(prior, src):
+                # Same size, moved mtime, and the header says it's still the same
+                # capture → a re-copy that didn't preserve timestamps, not a
+                # content swap. Nothing about the frame has changed, so leave its
+                # QC verdict and plate solution alone; the new mtime is still
+                # recorded below so this doesn't re-check on every future scan.
+                content_changed = False
             if copy_to_cache and prior.id is not None:
                 if not prior.cached_path:
                     recovered = _copy_to_stage1(project, cache, src, prior.id)
@@ -280,12 +340,13 @@ def ingest_files(
                 _refresh_frame_metadata(project, prior.id, src)
                 refreshed = True
             # Keep the stored fingerprint current: backfill a NULL (a pre-upgrade
-            # row seen again — recorded *without* forcing a re-solve) and record
-            # the new baseline after a detected swap. An unchanged frame writes
-            # nothing.
+            # row seen again — recorded *without* forcing a re-solve), record the
+            # new baseline after a detected swap, and adopt the new mtime after a
+            # benign touch (so the header re-read above happens once, not on every
+            # scan). An unchanged frame writes nothing.
             if (
                 fp is not None and prior.id is not None
-                and (stored_fp is None or content_changed)
+                and (stored_fp is None or fp_changed)
             ):
                 project.update_frame(
                     prior.id, source_size_bytes=fp[0], source_mtime=fp[1]
