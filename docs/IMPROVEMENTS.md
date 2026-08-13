@@ -176,10 +176,31 @@ ordered by severity (wrong-result > broken-UX > cosmetic). Each is scoped to be
 fixable in one sitting; move an entry to **In progress**/**Shipped** as usual
 when you take it.
 
-- **⚠ INGEST IDEMPOTENCY (Scout 2026-08-13, branch `claude/focused-keller-zi700s`; TRACED) — a benign *mtime-only*
+- ~~**⚠ INGEST IDEMPOTENCY (Scout 2026-08-13, branch `claude/focused-keller-zi700s`; TRACED) — a benign *mtime-only*
   change to an already-ingested source (identical bytes) is treated as an in-place content swap, which wipes the
   frame's QC metrics, **silently re-accepts an auto-rejected sub**, and nulls its plate solution — potentially
-  across the whole library at once on a single re-copy of `incoming/`.** *(Autonomy / trust — PRIORITY 2; severity
+  across the whole library at once on a single re-copy of `incoming/`.**~~ — **FIXED v0.254.2** (Builder 2026-08-13,
+  branch `claude/serene-goldberg-2bpxcs`). **Reproduced** as the fail-before test: an `os.utime` touch of an
+  already-ingested, solved, `auto:streak`-rejected frame came back `accept=True`, `reject_reason=None`,
+  `wcs_json=None` and every metric nulled. **The fix, on the one genuinely ambiguous case only:** the mtime half of
+  the fingerprint exists to catch a *same-size* in-place swap (every Seestar sub of one camera is the same byte
+  size), so it can't be dropped — instead, when the size is **equal** and only the mtime moved, ingest now asks the
+  file who it is before doing anything destructive. `_same_capture()` reads the FITS **header only** (no pixel data,
+  and only on this rare path — an ordinary re-scan never gets there) and requires a *positive* identity match:
+  `DATE-OBS` equal and non-empty, plus exposure/gain/dimensions/Bayer agreeing wherever the row recorded them. A
+  match ⇒ benign touch ⇒ nothing is reset; a mismatch, an unreadable header or a row with **no recorded timestamp**
+  ⇒ "don't know" ⇒ the old conservative reset, unchanged. The new mtime is adopted either way (a new `fp_changed`
+  flag drives the fingerprint write, `content_changed` the destructive path), so the header re-check happens once
+  per touch, not on every scan. Size-different sources, the `copy_to_cache` cache-staleness path, and NULL-
+  fingerprint (pre-upgrade) rows all behave exactly as before. **Known, accepted blind spot:** a swap that keeps the
+  identical size *and* the identical `DATE-OBS`/exposure/gain/shape (i.e. a re-export of the same sub) is now read
+  as benign — the case where inheriting the old WCS is right anyway. No schema, config, API, on-disk or default
+  change; nothing writes to `incoming/`. **Tests (+3 in `tests/test_ingest.py`, one fail-before):** the mtime-only
+  touch keeps the QC verdict, metrics and solution and re-checks only once; a same-size *different* capture (same
+  dimensions, different `DATE-OBS`) still resets and re-reads its header; and a row with no recorded timestamp still
+  takes the conservative path. `tests/synth.py::write_seestar_fits` gained an optional `date_obs` (default
+  unchanged, so every existing fixture is byte-identical).
+  *(Original entry kept below for provenance.)* *(Autonomy / trust — PRIORITY 2; severity
   broken-UX + wasted-compute + a transient wrong-result window; NOT permanent data loss — it re-derives on the next
   QC/solve pass, and this NEVER writes to `incoming/`, only to the project DB.)*
   **Symptom / cost:** the owner's raw subs live in `incoming/` and are re-synced/backed-up like any NAS folder. Any
