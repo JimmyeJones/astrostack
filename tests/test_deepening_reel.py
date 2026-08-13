@@ -105,6 +105,50 @@ def test_frames_unified_to_deepest_size(tmp_path):
     assert frames[0].size == frames[-1].size
 
 
+def test_a_differently_shaped_night_is_letterboxed_not_squashed(tmp_path):
+    """A night whose canvas has a different *aspect ratio* (a single portrait
+    panel that later grew into a wide mosaic) must be fitted whole and centred,
+    not stretched to the final frame's shape.
+
+    Regression: both size-unifying spots did a plain ``resize(target_size)``, so
+    the earlier nights were geometrically distorted — round stars became
+    ellipses in exactly the frames the reel exists to compare."""
+    tall = _write_cube(tmp_path / "n1.fits", _same_target_scene(64, 32, noise=0.03, seed=21))
+    wide = _write_cube(tmp_path / "n2.fits", _same_target_scene(32, 64, noise=0.01, seed=22))
+    frames = render_deepening_frames([tall, wide], max_width=64)
+    assert len(frames) == 2
+    target = frames[-1].size
+    assert frames[0].size == target  # uniform series for the encoder
+
+    arr = np.asarray(frames[0])
+    h, w = arr.shape[:2]
+    # The 64×32 (h×w) night, fitted into a 32×64 canvas, keeps its 1:2 ratio →
+    # a 16-wide column of picture with black bars either side (fail-before: the
+    # whole width was filled by a 2× horizontal stretch).
+    lit_cols = np.flatnonzero(arr.reshape(h, w, 3).max(axis=(0, 2)) > 0)
+    assert lit_cols.size < w  # something is padded, not stretched edge to edge
+    # ...and the content is centred: equal blank margins left and right.
+    assert lit_cols[0] == w - 1 - lit_cols[-1]
+    assert arr[:, :lit_cols[0]].max() == 0 and arr[:, lit_cols[-1] + 1:].max() == 0
+    # The picture's own aspect ratio survives the fit (1:2, within a pixel).
+    lit_rows = np.flatnonzero(arr.reshape(h, w, 3).max(axis=(1, 2)) > 0)
+    fitted_h, fitted_w = lit_rows.size, lit_cols.size
+    assert abs(fitted_h / fitted_w - 2.0) < 0.1
+
+
+def test_same_aspect_frames_are_resized_exactly_as_before(tmp_path):
+    """The common case — every night the same shape, the canvas just bigger — must
+    be untouched by the letterboxing: a full-bleed resize with no black bars."""
+    small = _write_cube(tmp_path / "s.fits", _same_target_scene(32, 48, noise=0.03, seed=23))
+    big = _write_cube(tmp_path / "g.fits", _same_target_scene(64, 96, noise=0.01, seed=24))
+    frames = render_deepening_frames([small, big], max_width=96)
+    arr = np.asarray(frames[0])
+    assert frames[0].size == frames[-1].size
+    # No padded rows/columns anywhere — the frame fills its canvas.
+    assert arr.max(axis=(0, 2)).min() > 0
+    assert arr.max(axis=(1, 2)).min() > 0
+
+
 def test_reel_needs_two_stacks(tmp_path):
     one = _write_cube(tmp_path / "only.fits", _same_target_scene(32, 32, noise=0.02, seed=7))
     assert render_deepening_frames([one], max_width=32) == []
