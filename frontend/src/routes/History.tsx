@@ -19,6 +19,7 @@ import { autoSkyCastCaption } from "../components/editor/skyCast";
 import { autoColorCalCaption } from "../components/editor/colorCal";
 import { RejectionBadge } from "../components/RejectionBadge";
 import { FocusChip } from "../components/target/FocusChip";
+import { FramingVerdictNote } from "../components/target/FramingVerdictNote";
 import { focusChips, type FocusVerdict } from "../components/target/focusChips";
 import { integrationTrend } from "../components/target/integrationTrend";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
@@ -1099,6 +1100,13 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           {/* "How's my stack?" for *this* run — self-hides for non-genuine
               (editor/combine) runs the endpoint declines to grade. */}
           <StackHealthCard safe={safe} runId={run.id} />
+          {/* "Did I frame it well?" for *this* run. The verdict is per-run, and
+              History is where a beginner compares two stacks of one target — the
+              place "this one caught all of it, that one clipped it" earns its
+              keep. The same component as the Target page's note, not a re-wording:
+              one picture must read the same on both surfaces. Self-hides when the
+              endpoint has no honest answer. */}
+          <FramingVerdictNote safe={safe} runId={run.id} />
         </>
       ) : null}
 
