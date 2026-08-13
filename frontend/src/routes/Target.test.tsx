@@ -609,6 +609,57 @@ describe("TargetView missing-files preflight", () => {
   });
 });
 
+describe("TargetView note board", () => {
+  // The owner's top complaint was that this page opened with ~15 stacked
+  // alert/note blocks before anything he came for. They are all still here and
+  // still one click away — but only the most urgent two speak on first paint.
+  const twoPointings = (): Frame[] => [
+    ...Array.from({ length: 18 }, (_, i) =>
+      mkFrame(1 + i, { ra_center_deg: 10 + ((i % 3) - 1) * 0.3, dec_center_deg: 20 })),
+    ...Array.from({ length: 12 }, (_, i) =>
+      mkFrame(100 + i, { ra_center_deg: 83 + ((i % 3) - 1) * 0.3, dec_center_deg: -5 })),
+  ];
+
+  it("keeps the urgent notes inline and folds the rest behind one line", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      ...twoPointings(),
+      mkFrame(200, { accept: false, reject_reason: "qc_error: unreadable" }),
+    ]);
+
+    renderTarget();
+
+    // Three notes want the page: a mixed-pointing warning, an unreadable-frame
+    // warning and the "ready to process?" offer. Two slots, ranked by severity.
+    const mixed = await screen.findByText("This batch looks like 2 different targets");
+    expect(mixed).toBeVisible();
+    expect(
+      screen.getByText("1 frame couldn't be quality-checked"),
+    ).toBeVisible();
+    const offer = screen.getByText("Ready to process?");
+    expect(offer).not.toBeVisible();
+
+    // Nothing is lost: the rest are one click away, and go back when done.
+    const more = screen.getByRole("button", { name: /1 more note$/ });
+    fireEvent.click(more);
+    expect(screen.getByText("Ready to process?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Hide 1 note/ }));
+    expect(screen.getByText("Ready to process?")).not.toBeVisible();
+  });
+
+  it("shows a lone note inline with no disclosure to open", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+
+    renderTarget();
+
+    expect(await screen.findByText("Ready to process?")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /more notes?$/ })).toBeNull();
+  });
+});
+
 describe("TargetView mixed-pointings callout", () => {
   const cluster = (n: number, ra: number, dec: number, startId: number): Frame[] =>
     Array.from({ length: n }, (_, i) =>
