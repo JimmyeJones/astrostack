@@ -684,6 +684,61 @@ describe("TargetView note board", () => {
   });
 });
 
+describe("TargetView insight tabs", () => {
+  // IA slice (b) of the owner's "the pages are extremely busy" item: the nine
+  // analysis cards that used to stack one below another between the picture and
+  // the frames table now share one tabbed area. Nothing is gone — one group is on
+  // screen at a time, the rest are one click away.
+  it("groups the analysis cards behind tabs instead of stacking them", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    // Two groups have something to say: Overview (a target spanning more than one
+    // night) and Quality (a stack-health note).
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([
+      mkNight(3600),
+      { ...mkNight(3600), start_utc: "2026-01-03T21:00:00Z",
+        end_utc: "2026-01-04T02:00:00Z" },
+    ]);
+    vi.spyOn(client.api, "stackHealth").mockResolvedValue({
+      run_id: 1,
+      notes: [{ kind: "frames", severity: "good",
+                message: "42 subs went into this picture", action: null }],
+    });
+
+    renderTarget();
+
+    // The frames table (what the user came for) and both group tabs are there...
+    const quality = await screen.findByRole("tab", { name: "Quality" });
+    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    // ...but only the open group's cards take up the page.
+    expect(screen.getByText("42 subs went into this picture")).not.toBeVisible();
+
+    fireEvent.click(quality);
+    expect(screen.getByText("42 subs went into this picture")).toBeVisible();
+  });
+
+  it("gives no tab to a group whose cards have nothing to say", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    // Only the Quality group speaks; every other card self-hides.
+    vi.spyOn(client.api, "stackHealth").mockResolvedValue({
+      run_id: 1,
+      notes: [{ kind: "frames", severity: "good",
+                message: "42 subs went into this picture", action: null }],
+    });
+
+    renderTarget();
+
+    // A lone speaking group needs no tab strip at all — and no empty tabs are
+    // offered for the groups that had nothing.
+    await waitFor(() =>
+      expect(screen.getByText("42 subs went into this picture")).toBeVisible());
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+  });
+});
+
 describe("TargetView mixed-pointings callout", () => {
   const cluster = (n: number, ra: number, dec: number, startId: number): Frame[] =>
     Array.from({ length: n }, (_, i) =>
