@@ -629,26 +629,104 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
                     headers={"Cache-Control": "no-store"})
 
 
-def _scale_bar_from_wcs(wcs, width: int, height: int):  # noqa: ANN001, ANN202
-    """A :class:`~seestack.scalebar.ScaleBar` for a run from its celestial WCS.
-
-    Derives the local plate scale (arcsec/px) from the WCS's pixel-scale matrix —
-    the mean of the two axis scales, which is exact for the square, unrotated
-    Seestar grid and a sane average for a mosaic canvas — and hands it to the
-    pure :func:`scale_bar_for`. Returns ``None`` when there is no usable WCS or
-    the scale can't be measured, so the caller omits the scale bar cleanly."""
-    from seestack.scalebar import scale_bar_for
-
-    if wcs is None or width <= 0:
+def _arcsec_per_px(wcs) -> float | None:  # noqa: ANN001
+    """The local plate scale (arcsec/px) of a run's celestial WCS — the mean of
+    the two axis scales, which is exact for the square, unrotated Seestar grid
+    and a sane average for a mosaic canvas. ``None`` when there is no usable WCS
+    or the scale can't be measured, so every caller can omit its answer cleanly
+    rather than working from a made-up number."""
+    if wcs is None:
         return None
     try:
         from astropy.wcs.utils import proj_plane_pixel_scales
 
         scales_deg = proj_plane_pixel_scales(wcs)  # deg/px per axis
-        arcsec_per_px = float(sum(scales_deg) / len(scales_deg)) * 3600.0
-    except Exception:  # noqa: BLE001 — a degenerate WCS just means "no scale bar"
+        scale = float(sum(scales_deg) / len(scales_deg)) * 3600.0
+    except Exception:  # noqa: BLE001 — a degenerate WCS just means "no answer"
+        return None
+    return scale if scale > 0 else None
+
+
+def _scale_bar_from_wcs(wcs, width: int, height: int):  # noqa: ANN001, ANN202
+    """A :class:`~seestack.scalebar.ScaleBar` for a run from its celestial WCS
+    and :func:`_arcsec_per_px`, via the pure :func:`scale_bar_for`. Returns
+    ``None`` when there is no usable WCS or scale, so the caller omits the scale
+    bar cleanly."""
+    from seestack.scalebar import scale_bar_for
+
+    if wcs is None or width <= 0:
+        return None
+    arcsec_per_px = _arcsec_per_px(wcs)
+    if arcsec_per_px is None:
         return None
     return scale_bar_for(arcsec_per_px, width, height)
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/framing")
+async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[str, Any] | None:
+    """"Did I frame it well?" — a plain-language verdict on how this finished
+    stack actually caught its target.
+
+    The app already tells a beginner *before* the shoot whether a target fits one
+    Seestar frame (`framing_hint`). Nothing told them afterwards whether it
+    landed well — the most common framing surprise (the object off-centre, or
+    half of it running off an edge) is only discoverable once the picture exists,
+    and by then a whole night has been spent. This answers it from the result:
+    the catalog object's centre and size, projected through the run's own solved
+    output WCS.
+
+    Returns ``null`` — never a 404 for a run that exists, and never a guess —
+    when the target doesn't match the catalog, has no vetted size, or the run has
+    no usable celestial WCS. Read-only; the header read + projection run in a
+    threadpool so they never block the job worker."""
+    from seestack.objectinfo import identify_object
+
+    _, fits_path = _run_fits_path(request, safe, run_id)  # raises 404 for an unknown run
+    lib = deps.open_library(request)
+    try:
+        entry = lib.find_target(safe)
+        info = (
+            identify_object(entry.name, entry.ra_deg, entry.dec_deg)
+            if entry is not None else None
+        )
+    finally:
+        lib.close()
+    if info is None or info.size_arcmin is None or not fits_path:
+        return None
+
+    def work() -> dict[str, Any] | None:
+        from seestack.framing import framing_result_verdict
+        from seestack.io.wcs_io import celestial_wcs_from_fits
+
+        wcs, width, height = celestial_wcs_from_fits(fits_path)
+        if wcs is None:
+            return None
+        try:
+            xs, ys = wcs.world_to_pixel_values(info.ra_deg, info.dec_deg)
+            x_px, y_px = float(xs), float(ys)
+        except Exception:  # noqa: BLE001 — a degenerate WCS just means "no verdict"
+            return None
+        scale = _arcsec_per_px(wcs)
+        if scale is None:
+            return None
+        v = framing_result_verdict(
+            x_px=x_px, y_px=y_px, width_px=width, height_px=height,
+            arcsec_per_px=scale, size_arcmin=info.size_arcmin,
+        )
+        if v is None:
+            return None
+        return {
+            "level": v.level,
+            "text": v.text,
+            "coverage": v.coverage,
+            "off_centre": v.off_centre,
+            # The name the sentence is prefixed with, so one voice covers this
+            # card and the pre-shoot "will it fit?" hint.
+            "object_name": info.name or info.id,
+            "size_arcmin": info.size_arcmin,
+        }
+
+    return await run_in_threadpool(work)
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/annotations")

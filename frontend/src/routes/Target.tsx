@@ -44,6 +44,7 @@ import { thinStackWarning } from "../components/target/thinStack";
 import { missingFilesNote } from "../components/target/missingFiles";
 import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
 import { NextBestMoveBadge } from "../components/target/NextBestMoveBadge";
+import { FramingVerdictNote } from "../components/target/FramingVerdictNote";
 import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
 import { nextBestMove } from "../components/target/nextBestMove";
 import { softerThanUsual } from "../components/target/softStars";
@@ -988,6 +989,12 @@ export function TargetView() {
               two never contradict. */
           { key: "integration-trend", priority: NOTICE_PRIORITY.info, node: latestRun?.has_preview ? (
             <IntegrationTrendBadge runs={runs.data} coachKind={coachKind} />
+          ) : null },
+          /* "Did I frame it well?" — how the finished picture actually caught the
+              target, measured from the run's own WCS. Self-hides when the target
+              isn't a sized catalog object or the run has no solved WCS. */
+          { key: "framing-verdict", priority: NOTICE_PRIORITY.advisory, node: latestRun?.has_fits ? (
+            <FramingVerdictNote safe={safe} runId={latestRun.id} />
           ) : null },
         ]}
       />

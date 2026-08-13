@@ -609,6 +609,30 @@ describe("TargetView missing-files preflight", () => {
   });
 });
 
+describe("TargetView framing verdict", () => {
+  it("tells the user how the finished picture actually caught the target", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 7 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    const framing = vi.spyOn(client.api, "stackFraming").mockResolvedValue({
+      level: "clipped",
+      text: "runs off the edge of the frame — about 70% of it made it in. It would "
+        + "fit whole, so just re-centre it next session.",
+      coverage: 0.7,
+      off_centre: 0.8,
+      object_name: "Orion Nebula",
+      size_arcmin: 85,
+    });
+
+    renderTarget();
+
+    await waitFor(() => expect(framing).toHaveBeenCalledWith("M_42", 7));
+    expect(
+      await screen.findByText(/^Orion Nebula runs off the edge of the frame/),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("TargetView note board", () => {
   // The owner's top complaint was that this page opened with ~15 stacked
   // alert/note blocks before anything he came for. They are all still here and
