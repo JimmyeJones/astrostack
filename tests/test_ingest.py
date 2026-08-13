@@ -1,5 +1,6 @@
 """Ingest pipeline — find files, copy to cache, register in DB."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -364,6 +365,124 @@ def test_ingest_does_not_reset_qc_on_a_plain_dedup_skip(tmp_path):
         assert second[0].refreshed is False
         row = next(iter(proj.iter_frames()))
         assert row.star_count == 200 and row.fwhm_px == 2.1  # QC untouched
+    finally:
+        proj.close()
+
+
+def test_ingest_mtime_only_touch_keeps_qc_verdict_and_solution(tmp_path):
+    """Re-copying an unchanged source with a tool that doesn't preserve
+    timestamps must be a no-op — not an in-place content swap.
+
+    Regression: the fingerprint was ``(size, mtime)`` and *any* difference was
+    treated as new content, so ``cp`` without ``-p`` / an SMB re-copy / a backup
+    restore of ``incoming/`` wiped every touched frame's QC metrics, **silently
+    re-accepted its auto-rejected subs** and dropped its plate solution — across
+    the whole library at once. A size-equal, mtime-moved source is now confirmed
+    against the file's own header identity before anything destructive."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    frame_file = src / "a.fit"
+    write_seestar_fits(frame_file, seed=3)
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        first = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        frame_id = first[0].frame_id
+        # A solved frame that QC auto-rejected for trailing (no user override).
+        proj.update_frame(
+            frame_id,
+            wcs_json='{"CRVAL1": 10.0}', ra_center_deg=10.0, pixscale_arcsec=5.0,
+            star_count=180, fwhm_px=3.2, streak_detected=True, streak_count=4,
+            accept=False, reject_reason="auto:streak", user_override=False,
+        )
+        old_mtime = proj.get_frame(frame_id).source_mtime
+
+        # Identical bytes, new mtime (a re-sync that didn't preserve timestamps).
+        os.utime(frame_file, (1_600_000_000, 1_600_000_000))
+
+        second = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert second[0].skipped is True
+        assert second[0].refreshed is False  # fail-before: refreshed as a "swap"
+        row = proj.get_frame(frame_id)
+        # The auto-rejection stands — fail-before: accept flipped back to True.
+        assert row.accept is False and row.reject_reason == "auto:streak"
+        # QC metrics and the plate solution survive.
+        assert row.star_count == 180 and row.fwhm_px == 3.2
+        assert row.streak_detected is True and row.streak_count == 4
+        assert row.wcs_json == '{"CRVAL1": 10.0}'
+        assert row.ra_center_deg == 10.0 and row.pixscale_arcsec == 5.0
+        # The new mtime is adopted, so the header re-check happens once only.
+        assert row.source_mtime != old_mtime
+        assert row.source_mtime == pytest.approx(frame_file.stat().st_mtime)
+
+        third = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert third[0].refreshed is False
+    finally:
+        proj.close()
+
+
+def test_ingest_same_size_swap_still_resets_after_the_touch_fix(tmp_path):
+    """The mtime-touch tolerance must not blind the swap detector: a *different*
+    capture written over a reused filename at the identical byte size (every
+    Seestar sub of one camera is the same size) still resets QC and drops the
+    stale solution — the case size alone can never see."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    frame_file = src / "a.fit"
+    write_seestar_fits(frame_file, seed=3, date_obs="2024-09-12T03:14:55.123")
+    size_before = frame_file.stat().st_size
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        first = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        frame_id = first[0].frame_id
+        proj.update_frame(
+            frame_id,
+            wcs_json='{"CRVAL1": 10.0}', ra_center_deg=10.0, star_count=180,
+            accept=False, reject_reason="auto:streak",
+        )
+
+        # A different exposure at the same path: same dimensions (so the same
+        # byte size), different DATE-OBS.
+        write_seestar_fits(frame_file, seed=99, date_obs="2024-09-13T22:01:02.000")
+        assert frame_file.stat().st_size == size_before  # the case size misses
+
+        second = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert second[0].refreshed is True
+        assert second[0].refreshed_frame_id == frame_id
+        row = proj.get_frame(frame_id)
+        assert row.wcs_json is None and row.ra_center_deg is None
+        assert row.star_count is None
+        assert row.accept is True and row.reject_reason is None  # re-offered to QC
+        assert row.timestamp_utc.startswith("2024-09-13")  # header re-read
+    finally:
+        proj.close()
+
+
+def test_ingest_touch_of_a_frame_with_no_recorded_timestamp_stays_conservative(
+    tmp_path,
+):
+    """With no recorded capture identity to compare against, an mtime-only
+    change is still treated as a possible swap — "don't know" must fall back to
+    the safe answer rather than assuming the file is unchanged."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    frame_file = src / "a.fit"
+    write_seestar_fits(frame_file, seed=4)
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        first = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        frame_id = first[0].frame_id
+        proj.update_frame(frame_id, timestamp_utc=None, wcs_json='{"CRVAL1": 1.0}')
+
+        os.utime(frame_file, (1_600_000_000, 1_600_000_000))
+        second = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert second[0].refreshed is True
+        assert proj.get_frame(frame_id).wcs_json is None
     finally:
         proj.close()
 
