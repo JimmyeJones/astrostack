@@ -18,6 +18,7 @@ import { integrationReadiness, readinessColor, noiseReductionHint } from "../rea
 import { QueryError } from "../components/QueryError";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
+import { InsightTabs } from "../components/InsightTabs";
 import { NightsCard } from "../components/NightsCard";
 import { estimateClearNights } from "../components/clearNights";
 import { FocusTrendCard } from "../components/FocusTrendCard";
@@ -1232,22 +1233,68 @@ export function TargetView() {
         <Box mt="xs"><ObjectInfoCard safe={safe} /></Box>
       ) : null}
 
-      <SessionRecapCard safe={safe} />
-
-      <NightsCard safe={safe} />
-
-      <FocusTrendCard safe={safe} />
-
-      <TransparencyTrendCard safe={safe} />
-
-      <StackHealthCard safe={safe} />
-
-      {/* "Night after night" — the same target getting deeper across re-stacks
-          (self-hides until there are ≥2 stacks to compare). */}
-      <DeepeningReelCard safe={safe} name={target.data?.name} />
+      {/* The page's analysis cards, grouped instead of stacked (IA slice (b) of the
+          owner's "the pages are extremely busy" item). Nine full cards used to sit
+          one below another between the picture and the frames table; they are all
+          still here, still one click away, but only one group is on screen at a
+          time. A group whose cards have nothing to say gets no tab at all — see
+          `InsightTabs`. A later analysis card should join a group here rather than
+          add a tenth stacked card. */}
+      <InsightTabs
+        data-testid="target-insights"
+        groups={[
+          { key: "overview", label: "Overview", node: (
+            <>
+              <SessionRecapCard safe={safe} />
+              <NightsCard safe={safe} />
+            </>
+          ) },
+          { key: "quality", label: "Quality", node: (
+            <>
+              <FocusTrendCard safe={safe} />
+              <TransparencyTrendCard safe={safe} />
+              <StackHealthCard safe={safe} />
+            </>
+          ) },
+          { key: "planning", label: "Planning", node: (
+            <>
+              {/* Forward-looking companion to "Is it enough yet?" (which stays
+                  inline below — it answers the question the beginner came with):
+                  when there's still a goal gap, join it with the night planner's
+                  next dark window(s) for this object. Self-hides when the goal's
+                  met or no window can be computed. */}
+              {readiness ? (
+                <NextSessionCard
+                  safe={safe}
+                  gapSeconds={Math.max(0, (readiness.goalHours - readiness.hours) * 3600)}
+                  subExposureSeconds={
+                    target.data && target.data.n_frames_accepted > 0
+                      ? target.data.total_exposure_s / target.data.n_frames_accepted
+                      : null
+                  }
+                />
+              ) : null}
+              {/* Which months of the year this object is actually up. Self-hides
+                  without a location/position. */}
+              <BestMonthsStrip safe={safe} />
+              {/* "Is the Moon going to wash this out tonight?" — a plain-language
+                  Moon-interference readout so a beginner points at a bright target
+                  instead of wasting a bright-Moon night. Self-hides without a
+                  location/position. */}
+              <MoonInterferenceCard safe={safe} />
+            </>
+          ) },
+          { key: "story", label: "Story", node: (
+            /* "Night after night" — the same target getting deeper across
+               re-stacks (self-hides until there are ≥2 stacks to compare). */
+            <DeepeningReelCard safe={safe} name={target.data?.name} />
+          ) },
+        ]}
+      />
 
       {/* Pre-stack reassurance: the sharpest sub, shown until a finished picture
-          exists — then the real stack supersedes it. */}
+          exists — then the real stack supersedes it. Deliberately *not* in a tab:
+          it is the first-run guidance a brand-new target leans on. */}
       {!latestRun?.has_preview ? <FirstLookCard safe={safe} /> : null}
 
       {readiness ? (
@@ -1318,30 +1365,6 @@ export function TargetView() {
           </Group>
         </Paper>
       ) : null}
-
-      {/* Forward-looking companion to "Is it enough yet?": when there's still a
-          goal gap, join it with the night planner's next dark window(s) for this
-          object. Self-hides when the goal's met or no window can be computed. */}
-      {readiness ? (
-        <NextSessionCard
-          safe={safe}
-          gapSeconds={Math.max(0, (readiness.goalHours - readiness.hours) * 3600)}
-          subExposureSeconds={
-            target.data && target.data.n_frames_accepted > 0
-              ? target.data.total_exposure_s / target.data.n_frames_accepted
-              : null
-          }
-        />
-      ) : null}
-
-      {/* Plan-ahead companion to "your next window": which months of the year
-          this object is actually up. Self-hides without a location/position. */}
-      <BestMonthsStrip safe={safe} />
-
-      {/* "Is the Moon going to wash this out tonight?" — a plain-language Moon-
-          interference readout so a beginner points at a bright target instead of
-          wasting a bright-Moon night. Self-hides without a location/position. */}
-      <MoonInterferenceCard safe={safe} />
 
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>

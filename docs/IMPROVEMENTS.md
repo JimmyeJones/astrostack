@@ -9860,13 +9860,41 @@ problems. Dogfood it every big-picture run and fix root causes.
   says to preserve, and it self-hides off the sample demo anyway. The `mixedRejected`/`mixedPointings` ternary pair
   was split into two independently-ranked notes that keep their exact mutual exclusion.
   **This is the reusable grouping primitive the entry asks for** — a later feature with something to say should add
-  a `Notice` with a priority instead of appending one more always-on banner. **Tests (+8):**
+  a `Notice` with a priority instead of appending one more always-on banner. (Slice (b) reused its DOM-measuring
+  approach for the analysis cards; see `InsightTabs`.) **Tests (+8):**
   `NoticeBoard.test.tsx` (+6 — severity ranking beats declaration order, one-click open/close, silent notes are not
   counted, an all-silent board renders nothing at all, a late-arriving note is picked up, and nothing folds when
   there is nothing to fold) and `Target.test.tsx` (+2 — the real page keeps its two urgent notes inline and folds
   the third, and a lone note shows with no disclosure). All 66 pre-existing `Target.test.tsx` assertions pass
   **unchanged** (hidden notes stay in the DOM), so nothing was rewritten to go green. Frontend-only: no API,
   schema, config, on-disk or default change. **Next slice: (b) — group the 9 stacked analysis cards.**
+
+  **✅ SLICE (b) SHIPPED — v0.258.0** (Builder 2026-08-13, branch `claude/serene-goldberg-h9ki9i`). The nine
+  stacked analysis cards are now one tabbed area. **Measured, as the acceptance criterion asks:** analysis cards
+  rendered *always-on* between the picture and the frames table went **9 → 2** on first paint (the open group;
+  at most 3 for any group), plus one tab strip — the other six or seven are **still mounted, still one click
+  away** (nothing removed — the hard constraint). `Target.tsx` is 1531 → 1554 lines (+23; as with slice (a) the
+  win is vertical space, not line count), and the new shared `components/InsightTabs.tsx` is 118 lines.
+  **Tabs, not a grid** — the entry offered either, and tabs cut scroll hardest, which is the complaint. Groups:
+  *Overview* (last session · nights) · *Quality* (focus trend · transparency · stack health) · *Planning* (next
+  session · best months · Moon interference) · *Story* (the deepening reel) — exactly the split the entry
+  suggested. **Two cards were deliberately left inline, and that is the judgement call worth knowing:**
+  "Is it enough yet?" (the question the beginner came with — it is an answer, not analysis) and `FirstLookCard`
+  (first-run reassurance the cautions say to preserve, and it self-hides the moment a real picture exists).
+  **`InsightTabs` reuses `NoticeBoard`'s DOM-measuring trick, for the same reason:** most of these cards
+  self-hide on data they fetch themselves, so the page cannot know which will speak — and *a tab that opens onto
+  an empty panel is worse than no tab*. It renders every group, counts the ones that produced DOM (a
+  `MutationObserver` catches the late arrivals), and gives a tab only to those; a lone speaking group gets no tab
+  strip at all, and an all-silent board renders nothing. Panels stay mounted (`keepMounted`), so switching tabs
+  never remounts or refetches a card. Short labels on purpose: the owner reads this on a phone. **This is the
+  grouping primitive slice (e) should reuse on the Dashboard** — and a future analysis card should join a group
+  rather than become a tenth stacked card. **Tests (+9):** `InsightTabs.test.tsx` (+7 — one group on screen at a
+  time with the rest mounted, one-click switching, no tab for a silent group, no strip for a lone group, nothing
+  at all when every group is silent, a late-arriving card getting its tab back, and the chosen tab surviving a
+  re-render) and `Target.test.tsx` (+2 — the real page tabs its groups, and offers no empty tabs). All 69
+  pre-existing `Target.test.tsx` assertions pass **unchanged** (hidden panels stay in the DOM), so nothing was
+  rewritten to go green. Frontend-only: no API, schema, config, on-disk or default change.
+  **Next slice: (c) — content order / above the fold.**
 
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
