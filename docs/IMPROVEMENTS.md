@@ -6535,6 +6535,32 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-13, the gap left by shipping the re-centring crop v0.257.0) — when a target landed
+  *so* far off-centre that no crop can rescue it, the app goes quiet about the one thing it just measured.**
+  *(Pillar: friendliness / trust — PRIORITY 3; size XS–S; frontend copy + one already-computed number.)*
+  `recentre_crop` refuses when the crop would keep under 40 % of the frame, which is right — but the result is
+  that the *worst-framed* pictures get **less** help than the mildly off-centre ones: the note says "it sits well
+  off to one side" and stops, while a picture half as badly framed gets an actionable button. The honest sentence
+  is already computable: *"Cropping it back to the middle would leave only about a fifth of the picture, so it's
+  better to re-point next session than to crop this one."* **Slice:** have the endpoint return the refusal
+  *reason* alongside the (null) offer — it already knows which test failed — and render the "too destructive"
+  case as a dimmed line under the verdict. Keep the other refusals silent: "the object is bigger than the frame"
+  is already said by the `partial` verdict, and "already centred" needs no words. **Care:** don't turn this into
+  a second nudge — one line, inside the existing note, never a new banner (the IA work).
+
+- **NEW IDEA (Builder 2026-08-13, spotted while wiring the re-centre offer into two surfaces) — the framing
+  verdict describes the *stack*, so it keeps offering to re-centre a picture the user has already re-centred.**
+  *(Pillar: trust / friendliness — PRIORITY 3; size S.)* The verdict is measured from the run's own FITS, which is
+  correct and cheap — but the editor's saved recipe may already carry a `geometry.crop` that fixed exactly what
+  the note is complaining about. The user then sees "Re-centre this picture" on a picture they re-centred an hour
+  ago, which reads as the app not noticing their work (the same class of "the sentence was wrong even though the
+  engine was right" mistake recorded in the v0.251.0 → v0.252.1 note above). **Slice:** the Target page already
+  has the run's recipe within reach (`api.getRecipe`); when it contains an *enabled* `geometry.crop`, either
+  suppress the offer or re-word it ("you've already cropped this — open the editor to adjust it"). **Grep first:**
+  `cropCoveragePct`/`removeCropOps` in `components/editor/mosaicTrim.ts` already reason about enabled crops in a
+  recipe, so the predicate exists. **Care:** the verdict *itself* should stay as it is — it describes what the
+  stack caught, which is the honest thing for it to describe; only the offer needs to know about the edit.
+
 - ~~**NEW IDEA (Builder 2026-08-13, the obvious next step after shipping the "Did I frame it well?" verdict
   v0.256.0) — when the verdict says the target landed off-centre, offer to *re-centre the picture* in one
   click.**~~ — **SHIPPED v0.257.0** (Builder 2026-08-13, branch `claude/serene-goldberg-h9ki9i`). *(Friendliness +
