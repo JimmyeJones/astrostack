@@ -9,6 +9,7 @@ from seestack.framing import (
     SEESTAR_FOV_SHORT_ARCMIN,
     framing_hint,
     framing_result_verdict,
+    recentre_crop,
 )
 from seestack.nightplan import load_catalog
 
@@ -183,3 +184,105 @@ def test_the_verdict_names_no_object_so_the_caller_can_prefix_it():
               verdict(500, 400, 180)):
         assert v is not None
         assert v.text[0].islower()
+
+
+# ---------------------------------------------------------------------------
+# "Re-centre this picture" — the crop offered on an off-centre verdict.
+# ---------------------------------------------------------------------------
+
+
+def recentre(x, y, size_arcmin, **over):
+    return recentre_crop(
+        x_px=x, y_px=y, size_arcmin=size_arcmin, **{**FRAME, **over},
+    )
+
+
+def _reverdict(crop, x, y, size_arcmin):
+    """The verdict a *cropped* picture would get — the contract the offer makes."""
+    w = int(round((crop.x1 - crop.x0) * FRAME["width_px"]))
+    h = int(round((crop.y1 - crop.y0) * FRAME["height_px"]))
+    return framing_result_verdict(
+        x_px=x - crop.x0 * FRAME["width_px"], y_px=y - crop.y0 * FRAME["height_px"],
+        width_px=w, height_px=h, arcsec_per_px=FRAME["arcsec_per_px"],
+        size_arcmin=size_arcmin,
+    )
+
+
+def test_the_offered_crop_turns_an_off_centre_picture_into_a_well_framed_one():
+    # A 10' object halfway out to the right edge: the verdict flags it, and the
+    # crop it offers is a picture the *same verdict* calls well framed — that
+    # equivalence is the whole promise of the button.
+    assert verdict(750, 400, 10).level == "off_centre"
+    c = recentre(750, 400, 10)
+    assert c is not None
+    after = _reverdict(c, 750, 400, 10)
+    assert after.level == "centred"
+    assert after.coverage == pytest.approx(1.0)   # nothing of it is cropped away
+
+
+def test_the_offered_crop_keeps_the_frame_shape_and_most_of_the_picture():
+    c = recentre(750, 400, 10)
+    assert c is not None
+    frame_aspect = FRAME["width_px"] / FRAME["height_px"]
+    crop_aspect = ((c.x1 - c.x0) * FRAME["width_px"]) / ((c.y1 - c.y0) * FRAME["height_px"])
+    assert crop_aspect == pytest.approx(frame_aspect, rel=0.01)
+    assert c.kept == pytest.approx((c.x1 - c.x0) * (c.y1 - c.y0))
+    assert c.kept > 0.4
+    # Fractional bounds, in range and ordered — the editor's crop-op contract.
+    assert 0.0 <= c.x0 < c.x1 <= 1.0
+    assert 0.0 <= c.y0 < c.y1 <= 1.0
+
+
+def test_no_offer_when_the_picture_is_already_well_centred():
+    # Nothing to fix: a centred object must never be offered a crop (the button
+    # would take field away for no gain).
+    assert verdict(500, 400, 10).level == "centred"
+    assert recentre(500, 400, 10) is None
+
+
+def test_no_offer_when_re_centring_would_gut_the_picture():
+    # Pushed right into a corner, a crop that centres it keeps a tenth of the
+    # frame — the cure is worse than the off-centre framing, so no offer at all.
+    assert verdict(900, 700, 10).level == "off_centre"
+    assert recentre(900, 700, 10) is None
+
+
+def test_no_offer_for_a_clipped_or_oversized_object():
+    # Cropping cannot un-clip what was never captured, and on an object bigger
+    # than the frame it just throws away more of it.
+    assert verdict(500, 60, 30).level == "clipped"
+    assert recentre(500, 60, 30) is None
+    assert verdict(500, 400, 180).level == "partial"
+    assert recentre(500, 400, 180) is None
+
+
+def test_the_crop_leaves_clear_space_around_the_object():
+    # A big (60') object halfway out has no room to be re-framed without hugging
+    # it — a cramped crop is worse than the off-centre picture.
+    assert recentre(750, 400, 60) is None
+    # ...and where a crop *is* offered, the object's own box sits comfortably
+    # inside it with margin to spare.
+    c = recentre(750, 400, 10)
+    assert c is not None
+    radius_px = (10 * 60.0 / FRAME["arcsec_per_px"]) / 2.0
+    assert 750 - radius_px > c.x0 * FRAME["width_px"] + 0.5 * radius_px
+    assert 750 + radius_px < c.x1 * FRAME["width_px"] - 0.5 * radius_px
+
+
+def test_the_offer_works_off_either_axis_and_in_either_direction():
+    for x, y in ((750, 400), (250, 400), (500, 600), (500, 200), (700, 600)):
+        c = recentre(x, y, 10)
+        assert c is not None, (x, y)
+        assert _reverdict(c, x, y, 10).level == "centred", (x, y)
+
+
+def test_no_offer_without_a_vetted_size_or_from_a_degenerate_frame():
+    # Same "never guess" contract as the verdict itself.
+    assert recentre(750, 400, None) is None
+    assert recentre(750, 400, 0) is None
+    assert recentre(750, 400, 10, width_px=0) is None
+    assert recentre(750, 400, 10, height_px=0) is None
+    assert recentre(750, 400, 10, width_px=1) is None
+    assert recentre(750, 400, 10, arcsec_per_px=0.0) is None
+    assert recentre(float("nan"), 400, 10) is None
+    assert recentre(750, float("inf"), 10) is None

@@ -841,6 +841,19 @@ export interface StackAnnotations {
  *  actually caught its target, from the run's own WCS and the object's catalog
  *  size. The endpoint returns null (never a guess) when the target isn't in the
  *  catalog, carries no vetted size, or the run has no usable celestial WCS. */
+/** The crop that would bring an off-centre object back to the middle of its own
+ *  picture — fractional (0..1) bounds in the editor's `geometry.crop` convention,
+ *  plus the fraction of the frame's area it keeps. Only ever present on an
+ *  `off_centre` verdict, and only when it's honestly worth offering (cropping
+ *  can't un-clip an object, and a crop that gutted the picture isn't offered). */
+export interface StackRecentreCrop {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  kept: number;
+}
+
 export interface StackFraming {
   level: "centred" | "off_centre" | "clipped" | "partial";
   text: string;           // the sentence, prefixed by the caller with the name
@@ -848,6 +861,8 @@ export interface StackFraming {
   off_centre: number;     // 0 = dead centre, 1 = on the frame's edge
   object_name: string;    // the catalog's friendly name ("Orion Nebula")
   size_arcmin: number;
+  // Additive (an older backend omits it entirely — read as "no offer").
+  recentre?: StackRecentreCrop | null;
 }
 
 export interface StackRunInfo {

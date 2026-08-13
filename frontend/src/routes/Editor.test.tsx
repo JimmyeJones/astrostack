@@ -111,14 +111,14 @@ describe("editor fixtures vs the engine spec", () => {
   });
 });
 
-function renderEditor() {
+function renderEditor(entry = "/targets/M_42/edit/3") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return {
     qc,
     ...render(
       <MantineProvider>
         <QueryClientProvider client={qc}>
-          <MemoryRouter initialEntries={["/targets/M_42/edit/3"]}>
+          <MemoryRouter initialEntries={[entry]}>
             <Routes>
               <Route path="/targets/:safe/edit/:runId" element={<EditorView />} />
             </Routes>
@@ -2077,6 +2077,94 @@ describe("EditorView", () => {
     await waitFor(() => expect(screen.getAllByText("Crop").length).toBeGreaterThan(1));
     // ...and its adjustable bounds panel is shown; the preview caption is gone.
     expect(screen.getByText("Left")).toBeInTheDocument();
+    expect(screen.queryByText(/Proposed crop/)).not.toBeInTheDocument();
+  });
+
+  // --- "Re-centre this picture": the second crop offer, for a target that landed
+  // well off to one side. Same preview→Apply flow as Trim border, and the same
+  // adjustable Crop op at the end.
+  const OFF_CENTRE_FRAMING = {
+    level: "off_centre" as const,
+    text: "is all in frame, but sits well off to one side.",
+    coverage: 1,
+    off_centre: 0.5,
+    object_name: "Orion Nebula",
+    size_arcmin: 85,
+    recentre: { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9, kept: 0.64 },
+  };
+
+  function mockCropOffers(framing: client.StackFraming | null) {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    // Not a mosaic: no "Trim border" offer, so this exercises the re-centring
+    // crop on its own.
+    vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({ is_mosaic: false, crop: null });
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(framing);
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+  }
+
+  it("previews the re-centring crop then adds a Crop op on Apply", async () => {
+    mockCropOffers(OFF_CENTRE_FRAMING);
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Re-centre/ }));
+    // Previewed first, and captioned in its own words (what it keeps of the
+    // picture, not "the central W% × H%" — this crop is offset, not central).
+    await waitFor(() =>
+      expect(screen.getByText(/Proposed crop — keeps 64% of the picture/)).toBeInTheDocument());
+    expect(screen.queryByText("Left")).not.toBeInTheDocument();
+    // Apply commits it as an ordinary, adjustable Crop op.
+    fireEvent.click(screen.getByRole("button", { name: /Apply crop/ }));
+    await waitFor(() => expect(screen.getAllByText("Crop").length).toBeGreaterThan(1));
+    expect(screen.getByText("Left")).toBeInTheDocument();
+    expect(screen.queryByText(/Proposed crop/)).not.toBeInTheDocument();
+  });
+
+  it("cancels the re-centring preview without touching the recipe", async () => {
+    mockCropOffers(OFF_CENTRE_FRAMING);
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Re-centre/ }));
+    await waitFor(() => expect(screen.getByText(/Proposed crop/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Cancel/ }));
+    await waitFor(() => expect(screen.queryByText(/Proposed crop/)).not.toBeInTheDocument());
+    // No Crop op was added — only the pipeline's Stretch remains.
+    expect(screen.queryByText("Left")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Re-centre/ })).toBeInTheDocument();
+  });
+
+  it("opens the re-centring preview straight away when linked from the framing note",
+    async () => {
+      mockCropOffers(OFF_CENTRE_FRAMING);
+
+      renderEditor("/targets/M_42/edit/3?recentre=1");
+
+      // The offer the user accepted on the Target page is what they land in front
+      // of — still a proposal, not an edit made for them.
+      await waitFor(() =>
+        expect(screen.getByText(/Proposed crop — keeps 64% of the picture/)).toBeInTheDocument());
+      expect(screen.getByRole("button", { name: /Apply crop/ })).toBeInTheDocument();
+    });
+
+  it("offers no re-centring crop when the picture doesn't need one", async () => {
+    // A well-framed picture (and, equally, an older backend with no verdict at
+    // all): nothing to fix, so no button.
+    mockCropOffers(null);
+
+    renderEditor();
+
+    await waitFor(() => expect(client.api.stackFraming).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: /Re-centre/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/Proposed crop/)).not.toBeInTheDocument();
   });
 
