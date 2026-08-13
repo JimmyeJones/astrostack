@@ -6535,6 +6535,44 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-13, the obvious next step after shipping the "Did I frame it well?" verdict v0.256.0)
+  — when the verdict says the target landed off-centre, offer to *re-centre the picture* in one click.**
+  *(Pillar: friendliness + editor, PRIORITY 1/3; size S–M — no new engine maths, and the hardest part, knowing
+  where the object actually is, already shipped.)* `/stack-runs/{id}/framing` now returns the object's coverage and
+  how far off-centre it sits, and the `off_centre` verdict already tells the beginner *"re-centring it next session
+  would give it more room"* — but the picture they have **right now** can also be improved: an off-centre object in
+  a stack that comfortably contains it can be cropped so it sits in the middle, which is exactly what a beginner
+  does by eye and usually badly. The editor already has a crop op, and the endpoint already knows the object's
+  pixel position, its size and the canvas — so the suggestion is a pure geometry step: the largest centred crop
+  that keeps the object's box plus a sensible margin, clamped to the covered area. **Ship it as an offer, never
+  automatically** (§9: new behaviour opt-in) — a button on the framing note reading *"Re-centre this picture"*,
+  landing in the editor with the crop pre-filled so it stays undoable. **Only offer it when it's honest:** skip
+  entirely when `level` is `partial`/`clipped` (cropping cannot un-clip what was never captured, and cropping a
+  target that's already spilling off the edge makes the picture *worse*), and skip when the crop would throw away
+  more than, say, a third of the frame. **Grep first:** check whether the editor's geometry ops already carry a
+  centred-crop helper before writing one.
+
+- **NEW IDEA (Builder 2026-08-13, parity gap spotted while shipping the framing verdict v0.256.0) — the framing
+  verdict is on the Target page only; History's per-run Info panel says nothing about it, so comparing two stacks
+  of the same target can't show that one of them was framed better.** *(Pillar: friendliness / trust, PRIORITY 3;
+  size XS.)* The endpoint is already **per-run** (`/stack-runs/{run_id}/framing`), so a second surface is one query
+  and one line — and History is where a beginner compares runs, which is precisely where "this one caught all of
+  it, that one clipped it" earns its keep. Same shape as the crop/sharpen/warnings parity list the Gallery work
+  closed in v0.244.0–v0.250.2. Reuse `FramingVerdictNote` verbatim rather than re-wording it: one picture must read
+  the same on both surfaces (the lesson from the Gallery warnings item).
+
+- **PERF WATCH ITEM (Builder 2026-08-13, introduced knowingly by the ingest mtime fix v0.254.2) — a mass re-sync of
+  `incoming/` now costs one FITS *header* read per touched frame, where it used to cost a QC reset.** *(Not a bug;
+  recorded so a future run doesn't rediscover it as a mystery.)* `_same_capture()` only runs on the
+  size-equal/mtime-moved path, so an ordinary re-scan of untouched files reads nothing extra and the hot path is
+  unchanged. But the case it exists for is exactly the *mass* one: re-copy 8 000 subs without preserving
+  timestamps and the next scan opens 8 000 headers. That is far cheaper than what it replaces (nulling QC on all
+  8 000, re-QC'ing and re-solving them, plus the risk of an auto-stack firing in the gap), and it happens **once**
+  per touch because the new mtime is adopted either way. **If it ever does show up as slow,** the cheap next step
+  is to short-circuit on the *first* mismatch across a batch (if the first N touched frames all confirm as benign,
+  the whole re-copy almost certainly is) — but measure before building that; a header read is milliseconds and the
+  scan is already I/O-bound on the same files.
+
 - **NEW IDEA (Builder 2026-08-08, the sibling question raised by shipping the walk-away quality weighting v0.251.0)
   — should the walk-away path also turn on `photometric_normalize`? NOT blind-shippable; needs a Scout vet on real
   data first.** *(Pillar: autonomy + image quality, PRIORITY 2/4; size S to build, M to justify.)* Weighting and
