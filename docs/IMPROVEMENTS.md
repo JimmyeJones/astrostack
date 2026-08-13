@@ -9606,6 +9606,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   - Cause is honest feature accretion: nearly every shipped feature added one more always-on card or banner, and
     no run has ever owned the *sum*.
 
+  **✅ ADDING NEW PAGES IS EXPLICITLY ALLOWED AND OFTEN THE RIGHT ANSWER (owner, 2026-08-08):** *"even if they
+  need to add pages, that is fine. I just want the organization to be clean, simplistic, and make sense."* So do
+  **not** feel obliged to cram everything back into one screen with tabs and disclosures — **splitting an
+  overloaded page across several focused pages is a first-class option**, and usually reads cleaner than a dense
+  page with four tab strips. Prefer **nested routes** for this (e.g. `/library/<target>` stays the picture +
+  frames, with `/library/<target>/insights` or `…/planning` carrying the analysis cards): a sub-route is
+  URL-addressable, bookmarkable, back-button-friendly and shareable, which a tab's internal state is not. A tab
+  strip that *drives* sub-routes is a good middle ground — it looks like tabs, behaves like pages.
+  **The bar the owner set is "clean, simplistic, and makes sense"**, so judge every arrangement by: could a
+  beginner *predict* which page a given thing lives on, from its name alone? **Counter-caution — don't
+  over-fragment.** Twenty thin pages is just clutter moved into the nav. Each page should have **one purpose you
+  can name in two or three words**, and reaching anything routine should take **at most one click from where you
+  already are**. If a split would strand something the user needs *while looking at something else*, keep them
+  together. When you add a page, add it to the grouped nav (slice d) in the same run, so nothing is orphaned.
+
   **Direction (the Builder should exercise judgement, but hit these shapes):**
   1. **Collapse the banner wall into one prioritised "needs your attention" area.** Rank the ~15 alerts by
      severity (blocking error > warning > advisory > congratulatory), **show the top 1–2 inline, and put the rest
