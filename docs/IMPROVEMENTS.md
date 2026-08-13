@@ -16403,6 +16403,56 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- ~~**DRIFT GUARD (Builder 2026-08-13, spotted while shipping v0.254.0) — the "how many more clear nights?" pace
+  rules are mirrored by hand across Python and TypeScript, with nothing but a comment holding them together.**~~ —
+  **SHIPPED v0.254.1** (Builder 2026-08-13, branch `claude/elegant-bohr-6pvn9g`). *(Trust / consistency —
+  PRIORITY 3; test-only.)* Three screens now answer *"how much longer will this target take me?"* — the Target page
+  derives the pace client-side from its night list (`clearNights.ts`), while the Dashboard overview and (as of
+  v0.254.0) the Tonight planner get it from the server (`session_recap.recent_night_pace_s`). The two numbers that
+  *define* the pace — the 5-night lookback and the 120 s "this counts as a session" floor — exist in both files,
+  with a comment in each saying "change them together". That is the same arrangement this repo has already been
+  bitten by twice (the integration goal's three hand-synced copies, unified into `webapp/goals.py` in v0.253.1), and
+  a prose instruction is not enforcement: change one side and two screens quote different ETAs for the same picture,
+  silently. `tests/test_pace_constants_mirror.py` now reads the TS source and asserts both constants match Python's.
+  **Mutation-verified** rather than assumed: changing the lookback 5 → 7 fails it, and *renaming*
+  `MIN_PRODUCTIVE_NIGHT_S` fails it too (the regex fails loudly when it can't find its subject, because a guard that
+  passes when it can't find what it's guarding enforces nothing). Test-only: no engine, API, schema, config,
+  on-disk or default change.
+
+- **VERIFIED NON-ISSUE (Builder 2026-08-13, checked rather than assumed while shipping the guard above) — the two
+  pace *implementations* agree; only the constants were ever the drift risk.** *(Recorded so nobody re-treads it.)*
+  `session_recap.recent_night_pace_s` (server) and `clearNights.ts::estimateClearNights` (Target page) were driven
+  against each other over **300 randomised night sets** — varying night counts (1–9), subs per night (1–60),
+  exposures and per-night rejection rates — built as real projects and read back through `nights_breakdown`, and
+  they agreed on **every** case, to within 1e-6. That includes the edges worth naming: fewer than two productive
+  nights → no pace on both sides; the all-duds set where the client shows its *"kept almost nothing — worth
+  checking focus"* advisory and the server reports no number (both surfaces then say nothing about nights); and the
+  `n_frames > 0` pre-filter the client applies, which is a no-op because a night is a group of frames by
+  construction. So the *ordering, windowing, productivity filter and median* all match; the constants guard above is
+  the only enforcement that was missing. **If a fourth surface ever needs the pace, prefer serving the server's
+  number over adding a third implementation.**
+
+- **NOTE / WATCH ITEM (Builder 2026-08-13, left deliberately undone while shipping v0.254.0) — `routers/stats.py`
+  still holds three hand-rolled `{sig, at, data}` caches now that a fourth moved to the shared
+  `webapp/registry_cache.py`.** *(Infra — PRIORITY 3; size S; **do not do this on a hunch**.)* The library-progress
+  roll-up now goes through `cached_for_registry`, but the "Your sky, so far" summary and two others still inline the
+  same six lines. They were left alone on purpose: each keys on a **different** signature (the summary folds in each
+  target's latest preview `stat`, which the shared `registry_signature` deliberately doesn't), so folding them in
+  would mean either widening the shared signature for everyone or growing a parameterised key-builder — more
+  machinery than three copies of six lines justify today. **Revisit if a fifth cache appears, or if one of the
+  existing ones grows an invalidation rule** (the shared helper's `invalidate_registry_cache` is where that belongs).
+
+- **NEW IDEA (Builder 2026-08-13, the sibling of the tooltip shipped in v0.254.0) — the Dashboard's "~2 more
+  nights" badge has no hover explanation, unlike the planner's now does.** *(Friendliness — PRIORITY 3; size XS;
+  frontend-only.)* `LibraryProgressCard`'s `ProgressRow` renders `nightsToGoLabel(r)` as a bare chip. The planner's
+  equivalent now explains itself on hover (the readiness verdict plus the sentence naming the measured pace it
+  divided by), and the same two sentences are already computable here — `r.readiness.verdict` is in hand and
+  `clearNightsFromPace` returns the `text` alongside the count that `rankLibraryProgress` currently discards.
+  **Lower value than it was on the planner, which is why it wasn't done in the same pass:** this card already prints
+  "2.0 h of ~6h" inline on the row *and* the `finishFirstHint` sentence above it, so the chip is far better
+  contextualised than a lone chip in a dense plan table. Worth one line if someone is in the file; not worth a trip.
+
 - ~~**NEW IDEA (Builder 2026-08-04, cost me most of a run) — the "*(Original spec kept for provenance.)*" copies are
   indistinguishable from open work, so a Builder scanning this file re-picks already-shipped features.**~~ —
   **DONE v0.229.5** (Builder 2026-08-04, branch `claude/relaxed-turing-15aq36`) — and confirmed first-hand: this
