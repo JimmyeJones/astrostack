@@ -88,7 +88,11 @@ then 9 stacked analysis cards, before the frames table starts at line ~1339 of 1
 is close behind; the sidebar is 15 flat links. **The hard constraint is the owner's own: NOTHING MAY BE
 REMOVED — "don't get rid of features, just move them to a more organized layout."** This is pure
 regrouping (consolidate the banner wall behind one prioritised "N more notes" disclosure, tab/grid the
-stacked cards, put the picture and frames table above the fold, group the nav). **It is a multi-run
+stacked cards, put the picture and frames table above the fold, group the nav). **Adding NEW PAGES is
+explicitly allowed** — *"even if they need to add pages, that is fine. I just want the organization to
+be clean, simplistic, and make sense."* Splitting an overloaded page across focused **nested routes**
+(`/library/<target>/insights`) usually beats cramming it back into one screen, and stays bookmarkable;
+just don't over-fragment — one nameable purpose per page, routine things ≤1 click away. **It is a multi-run
 effort: take ONE slice per run**, state the before/after block counts in the commit, and let the owner
 react between slices. Full entry, measurements, slicing order and cautions: `docs/IMPROVEMENTS.md` →
 "Friendliness (PRIORITY 3)", top item. A verified bug still outranks it; feature-piling does not —
