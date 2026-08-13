@@ -231,9 +231,21 @@ when you take it.
   auto-rejected, solved frame must leave `accept`/`reject_reason`/`wcs_json` untouched, while a genuine same-size
   byte change still resets. Store the new fingerprint either way so it doesn't re-fire every scan.
 
-- **COSMETIC (Scout 2026-08-13, branch `claude/focused-keller-zi700s`; TRACED) — the "watch it deepen night after
+- ~~**COSMETIC (Scout 2026-08-13, branch `claude/focused-keller-zi700s`; TRACED) — the "watch it deepen night after
   night" reel geometrically distorts earlier frames when the stack canvas's *aspect ratio* changes across nights
-  (round stars → ellipses in the older frames).** *(Friendliness / polish — PRIORITY 3; severity cosmetic — only
+  (round stars → ellipses in the older frames).**~~ — **FIXED v0.254.3** (Builder 2026-08-13, branch
+  `claude/serene-goldberg-2bpxcs`), exactly as specced. Both size-unifying spots
+  (`render_deepening_frames`'s `target_size` pass and `write_deepening_reel`'s defensive re-normalise) now go
+  through one new `_fit_onto()` helper: scale to fit *inside* the target preserving aspect, centre on a **black**
+  canvas (matching the app's NaN = uncovered = black convention, so the pad reads as "no data here yet"). A frame
+  that already matches the target — or merely differs in size at the *same* aspect ratio, which is the ordinary
+  single-field "canvas grew" case — comes back byte-for-byte what the plain resize produced, so nothing changes for
+  a normal target. **Tests (+2 in `tests/test_deepening_reel.py`, one fail-before):** a 1:2 portrait night fitted
+  into a 2:1 landscape final frame keeps its aspect ratio (within a pixel) with equal black margins either side and
+  a still-uniform series size; and a same-aspect pair still fills its canvas edge to edge with no bars. Engine
+  render only — no schema, config, API, on-disk or default change, and the scientific `master.fits`/`.tif`/
+  `_preview.png` were never involved.
+  *(Original entry kept below for provenance.)* *(Friendliness / polish — PRIORITY 3; severity cosmetic — only
   the decorative `_deepening.webp`/`.png` reel is affected; the scientific `master.fits`/`.tif`/`_preview.png` are
   untouched.)*
   **Location:** `seestack/render/deepening.py:241-247` (`render_deepening_frames`) and `:260-262`

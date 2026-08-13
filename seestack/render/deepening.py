@@ -179,6 +179,40 @@ def _draw_corner_label(img, text: str):
     return Image.alpha_composite(base, overlay).convert("RGB")
 
 
+def _fit_onto(img, target_size: tuple[int, int]):
+    """Return ``img`` scaled to ``target_size`` **without distorting it**:
+    fitted whole inside the target and centred on a black canvas.
+
+    The reel unifies every night onto the deepest frame's size, and each frame
+    is loaded with its *own* aspect ratio (``load_stack_rgb`` caps the width, not
+    the shape). That is fine while the canvas only grows in one direction, but
+    the moment the stack's shape changes — a single portrait panel on night 1
+    that has become a 2-wide landscape mosaic by night 5 — a straight
+    ``resize(target_size)`` squashes the earlier nights, turning round stars into
+    ellipses in exactly the frames the reel is meant to compare. Letterboxing
+    keeps every night's geometry true; black padding matches the app's
+    NaN = uncovered = black convention, so the pad reads as "no data here yet",
+    which is what it is.
+
+    A frame that already matches, or whose aspect ratio matches, comes back
+    exactly as a plain resize would have produced it — the common single-field
+    case is unchanged."""
+    from PIL import Image
+
+    tw, th = target_size
+    if img.size == (tw, th):
+        return img
+    w, h = img.size
+    scale = min(tw / w, th / h)
+    nw, nh = max(1, round(w * scale)), max(1, round(h * scale))
+    fitted = img.resize((nw, nh), Image.BOX)
+    if (nw, nh) == (tw, th):
+        return fitted
+    canvas = Image.new("RGB", (tw, th), (0, 0, 0))
+    canvas.paste(fitted, ((tw - nw) // 2, (th - nh) // 2))
+    return canvas
+
+
 def render_deepening_frames(fits_paths: list[str | Path], *,
                             labels: list[str] | None = None,
                             max_width: int = 1024) -> list:
@@ -241,8 +275,7 @@ def render_deepening_frames(fits_paths: list[str | Path], *,
     target_size = images[-1].size
     # Unify size first (so the label is drawn crisp at the final output
     # resolution, not up/down-scaled with the frame), then burn each label in.
-    resized = [im if im.size == target_size else im.resize(target_size, Image.BOX)
-               for im in images]
+    resized = [_fit_onto(im, target_size) for im in images]
     return [_draw_corner_label(im, lbl)
             for im, lbl in zip(resized, frame_labels, strict=True)]
 
@@ -253,12 +286,12 @@ def write_deepening_reel(frames: list, out_dir: Path, out_basename: str) -> Path
     beside the target's outputs. Each night holds ~0.9 s with a longer hold on
     the finished, deepest frame. Returns the written path, or ``None`` if there's
     nothing to write."""
-    from PIL import Image, features
+    from PIL import features
 
     if len(frames) < 2:
         return None
     base = frames[-1]
-    norm = [f if f.size == base.size else f.resize(base.size, Image.BOX) for f in frames]
+    norm = [_fit_onto(f, base.size) for f in frames]
     durations = [900] * (len(norm) - 1) + [2200]
     out_dir = Path(out_dir)
     if features.check("webp"):
