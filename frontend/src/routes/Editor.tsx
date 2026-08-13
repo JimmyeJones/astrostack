@@ -11,7 +11,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
@@ -36,6 +36,7 @@ import { canNeutraliseSkyCast, neutraliseBackgroundOps, skyCastCaption }
 import { autoColorCalCaption } from "../components/editor/colorCal";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
+import { recentreCropRect, recentreKeptLabel } from "../components/editor/recentreCrop";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
   cropCoveragePct, removeCropOps }
   from "../components/editor/mosaicTrim";
@@ -207,6 +208,15 @@ export function EditorView() {
   const trim = useQuery({
     queryKey: ["trim-suggestion", safe, rid],
     queryFn: () => api.trimSuggestion(safe, rid),
+    staleTime: 60_000,
+  });
+  // "Did I frame it well?" for *this* run — the same verdict the Target page
+  // shows. Read here only for its re-centring crop offer, which exists on the
+  // small minority of runs whose target landed well off to one side; the query
+  // returns null (no card, no button) on every other run.
+  const framing = useQuery({
+    queryKey: ["stack-framing", safe, rid],
+    queryFn: () => api.stackFraming(safe, rid),
     staleTime: 60_000,
   });
 
@@ -975,7 +985,7 @@ export function EditorView() {
       // Look-compare owns the preview box: turn off the other overlays/splits.
       setShowBase(false); setShowMask(false); setShowCoverage(false);
       setSoloExclude(false); setSoloSplit(false); setSplitCompare(false);
-      setTrimPreview(false); setSplitFrac(0.5);
+      setCropProposal(null); setSplitFrac(0.5);
       setLookSplit(true);
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
@@ -1016,31 +1026,45 @@ export function EditorView() {
   // The trim-border crop is only offered when this run is a mosaic and a
   // well-covered rectangle worth cropping to was found.
   const trimCrop = trim.data?.is_mosaic ? trim.data.crop : null;
-  // Show the proposed crop as a dashed outline on the preview first (a
-  // lower-commitment step than applying immediately), with an explicit "Apply".
-  const [trimPreview, setTrimPreview] = useState(false);
-  // During trim preview the coverage overlay is only a backdrop for the proposed
-  // crop rectangle, so keep the old fall-back there (and don't let a coverage
+  // "Re-centre this picture": the crop that brings an off-centre object back to
+  // the middle. Offered only when the framing verdict is exactly that and the
+  // crop is honestly worth taking — the endpoint declines otherwise, so on most
+  // runs there is simply no button.
+  const recentreCrop = recentreCropRect(framing.data?.recentre);
+  // Which crop is being proposed on the preview, if any. Both offers share one
+  // preview mode — a dashed outline over the image first, with an explicit
+  // "Apply" — because they end in the same place: one adjustable Crop op.
+  const [cropProposal, setCropProposal] = useState<null | "trim" | "recentre">(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const wantsRecentre = searchParams.get("recentre") === "1";
+  const recentreDeepLinked = useRef(false);
+  const proposedCrop = cropProposal === "trim" ? trimCrop
+    : cropProposal === "recentre" ? recentreCrop : null;
+  // A proposal only owns the preview box while its crop actually exists (a query
+  // that refetches to "no offer" mid-preview must not leave the box captured).
+  const cropPreview = proposedCrop !== null;
+  // While a crop is being proposed the coverage overlay is only a backdrop for the
+  // proposed rectangle, so keep the old fall-back there (and don't let a coverage
   // failure block the crop UI); for a genuine A/B overlay, surface the error.
-  const overlayError = overlay?.q.isError && !trimPreview ? overlay : null;
+  const overlayError = overlay?.q.isError && !cropPreview ? overlay : null;
   // No silent fall-back to the edited preview for A/B overlays: while an overlay
   // is on we show only that overlay's own data (a loader while it loads, an error
   // if it fails) so the caption never mislabels the edited image as the overlay.
   const shownSrc = overlay
-    ? (overlay.q.data ?? (trimPreview ? preview.data : undefined))
+    ? (overlay.q.data ?? (cropPreview ? preview.data : undefined))
     : preview.data;
   // Split before/after is its own mode: it renders over the edited preview
   // (`preview.data`, i.e. no `overlay`), so it's only live when no other overlay
-  // and no trim preview owns the box.
-  const splitActive = splitCompare && !overlay && !trimPreview;
+  // and no crop proposal owns the box.
+  const splitActive = splitCompare && !overlay && !cropPreview;
   // Per-op split: only when its mode is on, the selected op is enabled, and no
-  // other overlay/trim owns the box (the toggles keep these mutually exclusive,
+  // other overlay/crop proposal owns the box (the toggles keep these exclusive,
   // but guard defensively). Shares the whole-recipe split's divider/drag state.
   const soloSplitActive = soloSplit && !!selForSolo && selForSolo.enabled
-    && !overlay && !trimPreview;
+    && !overlay && !cropPreview;
   // "Compare a look" split: shows another look (Auto / a preset) as the "before"
-  // side, only when a look is chosen and no other overlay/trim owns the box.
-  const lookSplitActive = lookSplit && !!lookSel && !overlay && !trimPreview;
+  // side, only when a look is chosen and no other overlay/crop owns the box.
+  const lookSplitActive = lookSplit && !!lookSel && !overlay && !cropPreview;
   // The split overlay's left ("before") image + labels, so one render block serves
   // the whole-recipe split (Original vs Edited), the per-op split (without-this-op
   // vs with-this-op) and the look split (a chosen look vs the current edit).
@@ -1054,13 +1078,13 @@ export function EditorView() {
     : "Original";
   const splitRightLabel = soloSplitActive ? "With" : "Edited";
   const anySplitActive = splitActive || soloSplitActive || lookSplitActive;
-  // Entering trim preview auto-shows the coverage heatmap so the proposed crop is
-  // drawn over exactly what it's addressing — you can see it lands on the
+  // Entering the *trim* preview auto-shows the coverage heatmap so the proposed
+  // crop is drawn over exactly what it's addressing — you can see it lands on the
   // well-covered interior. Remember the prior overlay state so Cancel/Apply
   // restores it (null = we didn't change it, e.g. the histogram isn't a mosaic).
   const [coverageBeforeTrim, setCoverageBeforeTrim] = useState<boolean | null>(null);
-  const enterTrimPreview = () => {
-    setTrimPreview(true);
+  const enterCropPreview = (kind: "trim" | "recentre") => {
+    setCropProposal(kind);
     setSplitCompare(false);
     setSoloSplit(false);
     setLookSplit(false);
@@ -1073,7 +1097,9 @@ export function EditorView() {
     setShowMask(false);
     setShowBase(false);
     setSoloExclude(false);
-    if (hist.data?.is_mosaic) {
+    // Only the border trim is *about* coverage; a re-centring crop is about where
+    // the object landed, so the heatmap would be a distraction there.
+    if (kind === "trim" && hist.data?.is_mosaic) {
       // On a mosaic, auto-show the coverage heatmap so the crop is drawn over
       // exactly what it addresses; remember the prior state so Cancel/Apply
       // restores it (null = we didn't change it).
@@ -1087,10 +1113,26 @@ export function EditorView() {
       setCoverageBeforeTrim(null);
     }
   };
-  const cancelTrim = () => {
-    setTrimPreview(false);
+  const cancelCropPreview = () => {
+    setCropProposal(null);
     restoreCoverageAfterTrim();
   };
+  // Deep link from the Target page's framing note ("Re-centre this picture"):
+  // arrive with the crop already previewed, so what the beginner clicked on is
+  // what they land in front of — still a proposal they must Apply, never an edit
+  // made for them. Fires at most once, and only while the offer really exists
+  // (an older backend, or a run whose crop wouldn't help, simply lands in the
+  // ordinary editor). The flag is then dropped from the URL so a refresh doesn't
+  // re-enter the preview over work in progress.
+  useEffect(() => {
+    if (!wantsRecentre || recentreDeepLinked.current || !recentreCrop) return;
+    recentreDeepLinked.current = true;
+    enterCropPreview("recentre");
+    const next = new URLSearchParams(searchParams);
+    next.delete("recentre");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsRecentre, recentreCrop]);
   const applyPreviousRecipe = () => {
     const prev = prevRecipe.data;
     if (!prev?.ops?.length) return;
@@ -1132,18 +1174,21 @@ export function EditorView() {
       color: "violet",
     });
   };
-  const applyTrim = () => {
-    if (!trimCrop) return;
-    const next = applyTrimCrop(ops, trimCrop, specs, uid);
+  const applyProposedCrop = () => {
+    if (!proposedCrop) return;
+    const kind = cropProposal;
+    const next = applyTrimCrop(ops, proposedCrop, specs, uid);
     setOps(() => next);
-    setTrimPreview(false);
+    setCropProposal(null);
     restoreCoverageAfterTrim();
     // Select the crop op so its (adjustable) bounds are visible immediately — it's
     // a normal op the user can fine-tune or remove, not a baked-in change.
     const crop = next.find((o) => o.id === "geometry.crop");
     if (crop) setSelected(crop.uid);
     notifications.show({
-      message: `Trimmed to the well-covered area (${trimKeptLabel(trimCrop)})`
+      message: (kind === "recentre"
+        ? `Re-centred on your target (${recentreKeptLabel(proposedCrop)})`
+        : `Trimmed to the well-covered area (${trimKeptLabel(proposedCrop)})`)
         + " — adjust or remove the Crop op to undo",
       color: "violet",
     });
@@ -1209,23 +1254,39 @@ export function EditorView() {
                 onChange={(e) => setAutoCropOverride(e.currentTarget.checked)} />
             </Tooltip>
           ) : null}
-          {trimCrop ? (
-            trimPreview ? (
-              <Button.Group>
-                <Tooltip label="Add the Crop op for this rectangle (you can fine-tune or remove it after)">
-                  <Button variant="filled" color="grape" leftSection={<IconCrop size={16} />}
-                    onClick={applyTrim}>Apply crop</Button>
-                </Tooltip>
-                <Button variant="default" onClick={cancelTrim}>Cancel</Button>
-              </Button.Group>
-            ) : (
-              <Tooltip multiline w={250} withArrow
-                label="This is a mosaic with ragged, low-coverage edges. Preview the largest well-covered rectangle as a dashed outline over the coverage heatmap, then apply it as a Crop op you can fine-tune or remove.">
-                <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
-                  onClick={enterTrimPreview}>Trim border</Button>
+          {/* One preview mode serves both crop offers ("Trim border" and
+              "Re-centre"), because they end in the same place: one adjustable
+              Crop op you can fine-tune or remove. */}
+          {cropPreview ? (
+            <Button.Group>
+              <Tooltip label="Add the Crop op for this rectangle (you can fine-tune or remove it after)">
+                <Button variant="filled" color="grape" leftSection={<IconCrop size={16} />}
+                  onClick={applyProposedCrop}>Apply crop</Button>
               </Tooltip>
-            )
-          ) : null}
+              <Button variant="default" onClick={cancelCropPreview}>Cancel</Button>
+            </Button.Group>
+          ) : (
+            <>
+              {trimCrop ? (
+                <Tooltip multiline w={250} withArrow
+                  label="This is a mosaic with ragged, low-coverage edges. Preview the largest well-covered rectangle as a dashed outline over the coverage heatmap, then apply it as a Crop op you can fine-tune or remove.">
+                  <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
+                    onClick={() => enterCropPreview("trim")}>Trim border</Button>
+                </Tooltip>
+              ) : null}
+              {/* Only shown when this picture's target really did land off to one
+                  side *and* a crop can fix it without gutting the frame — so it's
+                  an answer to something the user was already told, never a
+                  standing invitation to crop. */}
+              {recentreCrop ? (
+                <Tooltip multiline w={260} withArrow
+                  label={`Your target landed off to one side of this picture. Preview the crop that puts it back in the middle (${recentreKeptLabel(recentreCrop)}) as a dashed outline, then apply it as a Crop op you can fine-tune or remove.`}>
+                  <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
+                    onClick={() => enterCropPreview("recentre")}>Re-centre</Button>
+                </Tooltip>
+              ) : null}
+            </>
+          )}
           {/* Built-in presets carry a fixed op list with generic sizes: seed their
               data-driven params (sharpen radius, star size) from this target's own
               stars, and on a mosaic prepend a Coverage-leveling pass to flatten the
@@ -1371,13 +1432,13 @@ export function EditorView() {
                         {splitRightLabel}</Text>
                     </>
                   ) : null}
-                  {/* Proposed "Trim border" crop, drawn as a dashed outline over
-                      the image so the user sees exactly what would be kept before
-                      it's applied. Inside the image box so it stays aligned when
-                      the preview is letterboxed. */}
-                  {trimPreview && trimCrop ? (
+                  {/* The proposed crop ("Trim border" or "Re-centre"), drawn as a
+                      dashed outline over the image so the user sees exactly what
+                      would be kept before it's applied. Inside the image box so it
+                      stays aligned when the preview is letterboxed. */}
+                  {proposedCrop ? (
                     <div aria-label="proposed crop" style={{ position: "absolute",
-                      ...trimRectStyle(trimCrop), boxSizing: "border-box",
+                      ...trimRectStyle(proposedCrop), boxSizing: "border-box",
                       border: "2px dashed #f0e", pointerEvents: "none",
                       outline: "9999px solid rgba(0,0,0,0.35)" }} />
                   ) : null}
@@ -1385,7 +1446,7 @@ export function EditorView() {
               ) : (
                 <Center h={240}><Loader /></Center>
               )}
-              {overlay && !overlayError && !trimPreview ? (
+              {overlay && !overlayError && !cropPreview ? (
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
                   {showCoverage
@@ -1394,13 +1455,16 @@ export function EditorView() {
                     : `Without: ${specs[selForSolo!.id]?.label ?? selForSolo!.id}`}
                 </Text>
               ) : null}
-              {/* Caption for the proposed "Trim border" crop (the dashed rectangle
-                  itself is drawn inside the image box above so it stays aligned
-                  on a letterboxed preview). */}
-              {trimPreview && trimCrop && shownSrc ? (
+              {/* Caption for the proposed crop (the dashed rectangle itself is
+                  drawn inside the image box above so it stays aligned on a
+                  letterboxed preview). Each offer says what *it* is keeping: the
+                  trim keeps the well-covered centre, the re-centring keeps a band
+                  around the target. */}
+              {proposedCrop && shownSrc ? (
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
-                  Proposed crop{showCoverage ? " over coverage" : ""} — {trimKeptLabel(trimCrop)}
+                  Proposed crop{showCoverage ? " over coverage" : ""} — {cropProposal === "recentre"
+                    ? recentreKeptLabel(proposedCrop) : trimKeptLabel(proposedCrop)}
                 </Text>
               ) : null}
               {/* Coverage heatmap legend: the overlay is a viridis map (dark blue =
@@ -1432,7 +1496,7 @@ export function EditorView() {
                     label="Show this mosaic's frame-coverage map as a colour heatmap: yellow where the most frames overlap, dark blue at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
                     <Button size="xs" variant={showCoverage ? "filled" : "default"}
                       color="grape"
-                      disabled={!preview.data || trimPreview}
+                      disabled={!preview.data || cropPreview}
                       loading={showCoverage && coveragePreview.isLoading}
                       onClick={() => setShowCoverage((s) => {
                         if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); setSoloSplit(false); setSplitCompare(false); setLookSplit(false); }
@@ -1445,7 +1509,7 @@ export function EditorView() {
                 <Tooltip label="Show the soft mask that gates star ops (white = treated as a star)">
                   <Button size="xs" variant={showMask ? "filled" : "default"}
                     color="grape"
-                    disabled={!preview.data || trimPreview}
+                    disabled={!preview.data || cropPreview}
                     loading={showMask && maskPreview.isLoading}
                     onClick={() => setShowMask((s) => {
                       if (!s) { setShowBase(false); setSoloExclude(false); setSoloSplit(false); setShowCoverage(false); setSplitCompare(false); setLookSplit(false); }
@@ -1455,14 +1519,14 @@ export function EditorView() {
                   </Button>
                 </Tooltip>
                 <Button size="xs" variant={showBase ? "filled" : "default"}
-                  disabled={!preview.data || showMask || showCoverage || splitCompare || lookSplit || trimPreview}
+                  disabled={!preview.data || showMask || showCoverage || splitCompare || lookSplit || cropPreview}
                   onClick={() => setShowBase((s) => { if (!s) { setSoloExclude(false); setSoloSplit(false); setLookSplit(false); } return !s; })}>
                   {showBase ? "Edited" : "Compare"}
                 </Button>
                 <Tooltip multiline w={230} withArrow
                   label="Drag a divider across the preview to reveal the Original on the left and your edit on the right in one frame — the clearest way to judge exactly what a change did.">
                   <Button size="xs" variant={splitCompare ? "filled" : "default"}
-                    disabled={!preview.data || showMask || showCoverage || trimPreview}
+                    disabled={!preview.data || showMask || showCoverage || cropPreview}
                     onClick={() => setSplitCompare((s) => {
                       if (!s) { setShowBase(false); setShowMask(false);
                         setShowCoverage(false); setSoloExclude(false); setSoloSplit(false);
@@ -1478,7 +1542,7 @@ export function EditorView() {
                 <LookComparePicker
                   builtin={lookPresets.data?.builtin ?? []}
                   user={lookPresets.data?.user ?? []}
-                  disabled={!preview.data || showMask || showCoverage || trimPreview}
+                  disabled={!preview.data || showMask || showCoverage || cropPreview}
                   active={lookSplit}
                   activeLabel={lookSel?.label ?? null}
                   loading={pickLook.isPending}
@@ -1964,7 +2028,7 @@ export function EditorView() {
                         <Button size="compact-xs"
                           variant={soloActive ? "filled" : "default"} color="grape"
                           loading={soloActive && withoutOpPreview.isLoading}
-                          disabled={!preview.data || reshapesFrame(selectedOp.id) || trimPreview}
+                          disabled={!preview.data || reshapesFrame(selectedOp.id) || cropPreview}
                           onClick={() => setSoloExclude((s) => {
                             if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false); setSoloSplit(false); setSplitCompare(false); setLookSplit(false); }
                             return !s;
@@ -1985,7 +2049,7 @@ export function EditorView() {
                         <Button size="compact-xs"
                           variant={soloSplitActive ? "filled" : "default"} color="grape"
                           loading={soloSplitActive && withoutOpPreview.isLoading}
-                          disabled={!preview.data || reshapesFrame(selectedOp.id) || trimPreview}
+                          disabled={!preview.data || reshapesFrame(selectedOp.id) || cropPreview}
                           onClick={() => setSoloSplit((s) => {
                             if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false);
                               setSoloExclude(false); setSplitCompare(false); setLookSplit(false); setSplitFrac(0.5); }

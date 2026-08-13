@@ -6535,8 +6535,63 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-13, the obvious next step after shipping the "Did I frame it well?" verdict v0.256.0)
-  — when the verdict says the target landed off-centre, offer to *re-centre the picture* in one click.**
+- **NEW IDEA (Builder 2026-08-13, the gap left by shipping the re-centring crop v0.257.0) — when a target landed
+  *so* far off-centre that no crop can rescue it, the app goes quiet about the one thing it just measured.**
+  *(Pillar: friendliness / trust — PRIORITY 3; size XS–S; frontend copy + one already-computed number.)*
+  `recentre_crop` refuses when the crop would keep under 40 % of the frame, which is right — but the result is
+  that the *worst-framed* pictures get **less** help than the mildly off-centre ones: the note says "it sits well
+  off to one side" and stops, while a picture half as badly framed gets an actionable button. The honest sentence
+  is already computable: *"Cropping it back to the middle would leave only about a fifth of the picture, so it's
+  better to re-point next session than to crop this one."* **Slice:** have the endpoint return the refusal
+  *reason* alongside the (null) offer — it already knows which test failed — and render the "too destructive"
+  case as a dimmed line under the verdict. Keep the other refusals silent: "the object is bigger than the frame"
+  is already said by the `partial` verdict, and "already centred" needs no words. **Care:** don't turn this into
+  a second nudge — one line, inside the existing note, never a new banner (the IA work).
+
+- **NEW IDEA (Builder 2026-08-13, spotted while wiring the re-centre offer into two surfaces) — the framing
+  verdict describes the *stack*, so it keeps offering to re-centre a picture the user has already re-centred.**
+  *(Pillar: trust / friendliness — PRIORITY 3; size S.)* The verdict is measured from the run's own FITS, which is
+  correct and cheap — but the editor's saved recipe may already carry a `geometry.crop` that fixed exactly what
+  the note is complaining about. The user then sees "Re-centre this picture" on a picture they re-centred an hour
+  ago, which reads as the app not noticing their work (the same class of "the sentence was wrong even though the
+  engine was right" mistake recorded in the v0.251.0 → v0.252.1 note above). **Slice:** the Target page already
+  has the run's recipe within reach (`api.getRecipe`); when it contains an *enabled* `geometry.crop`, either
+  suppress the offer or re-word it ("you've already cropped this — open the editor to adjust it"). **Grep first:**
+  `cropCoveragePct`/`removeCropOps` in `components/editor/mosaicTrim.ts` already reason about enabled crops in a
+  recipe, so the predicate exists. **Care:** the verdict *itself* should stay as it is — it describes what the
+  stack caught, which is the honest thing for it to describe; only the offer needs to know about the edit.
+
+- ~~**NEW IDEA (Builder 2026-08-13, the obvious next step after shipping the "Did I frame it well?" verdict
+  v0.256.0) — when the verdict says the target landed off-centre, offer to *re-centre the picture* in one
+  click.**~~ — **SHIPPED v0.257.0** (Builder 2026-08-13, branch `claude/serene-goldberg-h9ki9i`). *(Friendliness +
+  editor, PRIORITY 1/3.)* Built as specced, with **one deliberate departure the spec's own numbers force**: a crop
+  that puts the object *dead centre* is unaffordable. Cropping to a rectangle centred on an object that sits
+  halfway out to an edge keeps only a quarter of the picture — and the spec's "skip if it throws away more than a
+  third" would then have made the button **literally unreachable** (keeping ⅔ of the area needs the object inside
+  17 % of centre, which the verdict already calls *centred*, so no `off_centre` picture could ever qualify). So the
+  goal is the one the beginner actually asked for: **the largest crop the verdict itself would call well framed** —
+  the biggest rectangle that keeps the frame's aspect ratio and leaves the object within 25 % of the crop's centre
+  (comfortably inside the verdict's own 0.34 "centred" band). That equivalence is pinned by a test that re-runs
+  `framing_result_verdict` on the proposed crop and asserts it comes back `centred` with full coverage — the
+  promise the button makes, checked rather than described. In practice it fires for an object roughly 0.34–0.53 of
+  the way out; further than that no crop is offered, because it would keep under 40 % of the frame.
+  **Where it appears:** the Target page's framing note grows a *"Re-centre this picture"* link (with the honest
+  cost — "keeps 64 % of the picture") that deep-links into the editor at `?recentre=1`, which arrives with the crop
+  **previewed as a dashed outline, not applied**; and the editor itself grows a "Re-centre" button beside
+  "Trim border". Both end in one ordinary, adjustable `geometry.crop` op the user can fine-tune or delete, so it
+  stays fully undoable. The two crop offers now share one preview mode (`cropProposal: "trim" | "recentre"`), each
+  captioning what *it* keeps; only the trim forces the coverage heatmap on, since only the trim is about coverage.
+  **Refused, never guessed:** `recentre_crop` returns `None` — no button at all — on a centred picture, on
+  `clipped`/`partial` (cropping cannot un-clip what was never captured; it falls out of the margin test rather
+  than needing its own rule), when the crop would hug the object (needs 0.6·radius of clear space), and when it
+  would keep under 40 % of the frame. The endpoint only asks it on an `off_centre` verdict. Upgrade-safe: one
+  additive nullable response field (an older frontend ignores it; an older backend omitting it reads as "no
+  offer" — pinned by a test), no config, DB, on-disk, endpoint or default change, and nothing happens without a
+  click. **Tests (+18):** `tests/test_framing.py` (+8, engine geometry incl. the verdict round-trip),
+  `tests/webapp/test_stack_framing.py` (+2), `recentreCrop.test.ts` (+5), `FramingVerdictNote.test.tsx` (+3) and
+  `Editor.test.tsx` (+4 — preview→Apply, Cancel leaves the recipe alone, the deep link, and no button when there's
+  no offer).
+  *(Original spec kept below for provenance.)*
   *(Pillar: friendliness + editor, PRIORITY 1/3; size S–M — no new engine maths, and the hardest part, knowing
   where the object actually is, already shipped.)* `/stack-runs/{id}/framing` now returns the object's coverage and
   how far off-centre it sits, and the `off_centre` verdict already tells the beginner *"re-centring it next session
@@ -6552,9 +6607,22 @@ to **Shipped**.)_
   more than, say, a third of the frame. **Grep first:** check whether the editor's geometry ops already carry a
   centred-crop helper before writing one.
 
-- **NEW IDEA (Builder 2026-08-13, parity gap spotted while shipping the framing verdict v0.256.0) — the framing
+- ~~**NEW IDEA (Builder 2026-08-13, parity gap spotted while shipping the framing verdict v0.256.0) — the framing
   verdict is on the Target page only; History's per-run Info panel says nothing about it, so comparing two stacks
-  of the same target can't show that one of them was framed better.** *(Pillar: friendliness / trust, PRIORITY 3;
+  of the same target can't show that one of them was framed better.**~~ — **SHIPPED v0.257.1** (Builder
+  2026-08-13, branch `claude/serene-goldberg-h9ki9i`). *(Friendliness / trust — PRIORITY 3.)* Built exactly as
+  specced: `<FramingVerdictNote>` is rendered **verbatim** (not re-worded) inside History's Info panel, beside
+  `StackHealthCard`, so one picture reads the same on both surfaces — and, now that the note carries the
+  "Re-centre this picture" offer shipped in v0.257.0, History gets that button for free on any run whose target
+  landed off to one side. It lives **inside** the existing Info disclosure rather than as a new always-on card, so
+  it adds nothing to the standing-owner-priority block count and costs no query until the user opens Info (pinned
+  by a test that asserts `stackFraming` is *not* called before the click). Self-hiding as before on a run the
+  endpoint can't judge. Frontend-only, one component + one import: no engine, endpoint, schema, config, DB,
+  on-disk or default change. **Tests (+2 in `History.test.tsx`):** the verdict renders in the panel with the same
+  title and sentence the Target page shows (and only after Info is opened), and a run with no honest answer shows
+  nothing at all.
+  *(Original spec kept below for provenance.)*
+  *(Pillar: friendliness / trust, PRIORITY 3;
   size XS.)* The endpoint is already **per-run** (`/stack-runs/{run_id}/framing`), so a second surface is one query
   and one line — and History is where a beginner compares runs, which is precisely where "this one caught all of
   it, that one clipped it" earns its keep. Same shape as the crop/sharpen/warnings parity list the Gallery work
@@ -9818,13 +9886,41 @@ problems. Dogfood it every big-picture run and fix root causes.
   says to preserve, and it self-hides off the sample demo anyway. The `mixedRejected`/`mixedPointings` ternary pair
   was split into two independently-ranked notes that keep their exact mutual exclusion.
   **This is the reusable grouping primitive the entry asks for** — a later feature with something to say should add
-  a `Notice` with a priority instead of appending one more always-on banner. **Tests (+8):**
+  a `Notice` with a priority instead of appending one more always-on banner. (Slice (b) reused its DOM-measuring
+  approach for the analysis cards; see `InsightTabs`.) **Tests (+8):**
   `NoticeBoard.test.tsx` (+6 — severity ranking beats declaration order, one-click open/close, silent notes are not
   counted, an all-silent board renders nothing at all, a late-arriving note is picked up, and nothing folds when
   there is nothing to fold) and `Target.test.tsx` (+2 — the real page keeps its two urgent notes inline and folds
   the third, and a lone note shows with no disclosure). All 66 pre-existing `Target.test.tsx` assertions pass
   **unchanged** (hidden notes stay in the DOM), so nothing was rewritten to go green. Frontend-only: no API,
   schema, config, on-disk or default change. **Next slice: (b) — group the 9 stacked analysis cards.**
+
+  **✅ SLICE (b) SHIPPED — v0.258.0** (Builder 2026-08-13, branch `claude/serene-goldberg-h9ki9i`). The nine
+  stacked analysis cards are now one tabbed area. **Measured, as the acceptance criterion asks:** analysis cards
+  rendered *always-on* between the picture and the frames table went **9 → 2** on first paint (the open group;
+  at most 3 for any group), plus one tab strip — the other six or seven are **still mounted, still one click
+  away** (nothing removed — the hard constraint). `Target.tsx` is 1531 → 1554 lines (+23; as with slice (a) the
+  win is vertical space, not line count), and the new shared `components/InsightTabs.tsx` is 118 lines.
+  **Tabs, not a grid** — the entry offered either, and tabs cut scroll hardest, which is the complaint. Groups:
+  *Overview* (last session · nights) · *Quality* (focus trend · transparency · stack health) · *Planning* (next
+  session · best months · Moon interference) · *Story* (the deepening reel) — exactly the split the entry
+  suggested. **Two cards were deliberately left inline, and that is the judgement call worth knowing:**
+  "Is it enough yet?" (the question the beginner came with — it is an answer, not analysis) and `FirstLookCard`
+  (first-run reassurance the cautions say to preserve, and it self-hides the moment a real picture exists).
+  **`InsightTabs` reuses `NoticeBoard`'s DOM-measuring trick, for the same reason:** most of these cards
+  self-hide on data they fetch themselves, so the page cannot know which will speak — and *a tab that opens onto
+  an empty panel is worse than no tab*. It renders every group, counts the ones that produced DOM (a
+  `MutationObserver` catches the late arrivals), and gives a tab only to those; a lone speaking group gets no tab
+  strip at all, and an all-silent board renders nothing. Panels stay mounted (`keepMounted`), so switching tabs
+  never remounts or refetches a card. Short labels on purpose: the owner reads this on a phone. **This is the
+  grouping primitive slice (e) should reuse on the Dashboard** — and a future analysis card should join a group
+  rather than become a tenth stacked card. **Tests (+9):** `InsightTabs.test.tsx` (+7 — one group on screen at a
+  time with the rest mounted, one-click switching, no tab for a silent group, no strip for a lone group, nothing
+  at all when every group is silent, a late-arriving card getting its tab back, and the chosen tab surviving a
+  re-render) and `Target.test.tsx` (+2 — the real page tabs its groups, and offers no empty tabs). All 69
+  pre-existing `Target.test.tsx` assertions pass **unchanged** (hidden panels stay in the DOM), so nothing was
+  rewritten to go green. Frontend-only: no API, schema, config, on-disk or default change.
+  **Next slice: (c) — content order / above the fold.**
 
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on

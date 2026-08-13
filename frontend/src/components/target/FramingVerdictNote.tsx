@@ -1,7 +1,9 @@
-import { Alert, Group, Text } from "@mantine/core";
+import { Alert, Anchor, Group, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 
 import { api, type StackFraming } from "../../api/client";
+import { recentreCropRect, recentreKeptLabel } from "../editor/recentreCrop";
 
 const TONE: Record<StackFraming["level"], { color: string; icon: string }> = {
   centred: { color: "teal", icon: "🎯" },
@@ -40,6 +42,12 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
   const v = q.data;
   if (!v) return null;
   const tone = TONE[v.level] ?? TONE.centred;
+  // The picture they have *now* can often be improved too: when the target landed
+  // off to one side and a crop can put it back in the middle without gutting the
+  // frame, offer that as a one-click trip into the editor. An offer, never an
+  // automatic change — it lands as a normal Crop op they preview, apply, adjust
+  // or drop. Absent (older backend, or a crop that wouldn't help) → no link.
+  const recentre = recentreCropRect(v.recentre);
   return (
     <Alert
       color={tone.color}
@@ -53,6 +61,17 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
       }
     >
       <Text size="sm">{`${v.object_name} ${v.text}`}</Text>
+      {recentre ? (
+        <Text size="sm" mt={6}>
+          <Anchor component={Link} to={`/targets/${safe}/edit/${runId}?recentre=1`}
+            data-testid="framing-recentre">
+            Re-centre this picture
+          </Anchor>
+          {` — crop it so ${v.object_name} sits in the middle `}
+          ({recentreKeptLabel(recentre)}). You can adjust or remove the crop
+          afterwards.
+        </Text>
+      ) : null}
       <Text size="xs" c="dimmed" mt={4}>
         Measured from where {v.object_name} actually landed in this picture and its
         catalogue size (about {Math.round(v.size_arcmin)}′ across).
