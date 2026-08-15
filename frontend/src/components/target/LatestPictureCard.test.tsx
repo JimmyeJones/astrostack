@@ -1,8 +1,10 @@
 import { MantineProvider } from "@mantine/core";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LatestPictureCard, latestPictureCaption } from "./LatestPictureCard";
+import * as client from "../../api/client";
 import type { StackRun } from "../../api/client";
 
 function mkRun(over: Partial<StackRun> = {}): StackRun {
@@ -14,15 +16,31 @@ function mkRun(over: Partial<StackRun> = {}): StackRun {
   };
 }
 
+/** Render and hand back the QueryClient, for tests that assert on invalidation. */
+function renderCardWithClient(run: StackRun | null) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  renderWith(qc, run);
+  return qc;
+}
+
 function renderCard(run: StackRun | null) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderWith(qc, run);
+}
+
+function renderWith(qc: QueryClient, run: StackRun | null) {
   return render(
     <MantineProvider>
-      <MemoryRouter>
-        <LatestPictureCard safe="M_42" name="M42" run={run} />
-      </MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <LatestPictureCard safe="M_42" name="M42" run={run} />
+        </MemoryRouter>
+      </QueryClientProvider>
     </MantineProvider>,
   );
 }
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("latestPictureCaption", () => {
   it("says when it was stacked, out of how many subs, and how much light", () => {
@@ -75,5 +93,47 @@ describe("LatestPictureCard", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(img.parentElement!);
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+});
+
+// The picture on this card is the run's baked preview. When the user saved an
+// edit and never exported it, that preview is NOT the picture they made — so the
+// card has to say so rather than quietly present the auto-stretch as theirs.
+describe("LatestPictureCard — a saved edit that was never exported", () => {
+  it("says nothing on an ordinary run", () => {
+    renderCard(mkRun());
+    expect(screen.queryByTestId("unexported-edit")).not.toBeInTheDocument();
+  });
+
+  it("tells the user their edit isn't in this picture, and offers both ways out", () => {
+    renderCard(mkRun({ unexported_edit: true }));
+    const note = screen.getByTestId("unexported-edit");
+    expect(note).toHaveTextContent(/never exported it/);
+    expect(note).toHaveTextContent(/still the un-edited version/);
+    expect(screen.getByRole("button", { name: "Finish my edit" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open the editor" }))
+      .toHaveAttribute("href", "/targets/M_42/edit/7");
+  });
+
+  it("finishes the edit in one click, without the browser handling the recipe", async () => {
+    const spy = vi.spyOn(client.api, "exportSavedEdit")
+      .mockResolvedValue({ job_id: "job-9" });
+    vi.spyOn(client.api, "getJob").mockResolvedValue(
+      { id: "job-9", state: "done" } as client.Job);
+    renderCard(mkRun({ unexported_edit: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish my edit" }));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("M_42", 7, "M_42_edit"));
+  });
+
+  it("refreshes the picture when the export lands, so the promise it made holds", async () => {
+    vi.spyOn(client.api, "exportSavedEdit").mockResolvedValue({ job_id: "job-9" });
+    const getJob = vi.spyOn(client.api, "getJob")
+      .mockResolvedValue({ id: "job-9", state: "done" } as client.Job);
+    const qc = renderCardWithClient(mkRun({ unexported_edit: true }));
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    fireEvent.click(screen.getByRole("button", { name: "Finish my edit" }));
+    await waitFor(() => expect(getJob).toHaveBeenCalledWith("job-9"));
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["runs", "M_42"] }));
   });
 });

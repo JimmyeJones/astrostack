@@ -413,6 +413,12 @@ class StackRunOut(BaseModel):
     # The AstroStack version that produced this run, for provenance ("made with
     # v0.75.0"). None for runs recorded before this was tracked (schema < 9).
     engine_version: str | None = None
+    # True when the user saved an edit for this run in the editor but never
+    # exported it, so the preview every surface shows is still the plain
+    # auto-stretch of the linear stack rather than the picture they made. Lets
+    # those surfaces say so — and offer to finish the export — instead of
+    # silently presenting the wrong image. False for every ordinary run.
+    unexported_edit: bool = False
 
 
 class JobOut(BaseModel):

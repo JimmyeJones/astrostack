@@ -9867,8 +9867,71 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-08-15, the question raised by putting the picture on the Target page — IA slice (c),
-  v0.259.0) — the hero picture shows the *stack's* auto-stretch, not the edit the user made of it.**
+- **NEW IDEA (Builder 2026-08-15, the one surface v0.261.0 deliberately left out) — the *Gallery* still shows an
+  un-exported edit's picture with no hint that it isn't the user's version.** *(Pillar: trust — PRIORITY 3;
+  size S; grep first.)* v0.261.0 added `StackRunOut.unexported_edit` and used it on the Target page's hero (note +
+  one-click **Finish my edit**) and History's run card (a label). The Gallery was left alone on purpose: its
+  roll-up spans the **whole library**, so it would need a recipe-meta read per run across every target rather than
+  inside one already-open project DB, and that cost wanted measuring before it was paid — not guessing. **Slice:**
+  measure `_gallery_items`' current per-target work first; if it already opens each project, the meta read is
+  nearly free and `GalleryItem` gains the same additive optional field plus the same badge the History card uses
+  (`edit not exported`). If it does *not* open each project, don't — file what it would cost instead. **Reuse, do
+  not re-derive:** `webapp/routers/stack.py::_unexported_edit` is the one definition of the predicate (it checks
+  *both* display-space markers and ignores empty/all-disabled recipes); a second copy is exactly the hand-synced
+  drift the `webapp/goals.py` consolidation was written to stop.
+
+- **NEW IDEA (Builder 2026-08-15, the upstream half of the same problem) — the editor's **Save** button doesn't say
+  that a saved edit is invisible everywhere else until you Export.** *(Pillar: friendliness / trust — PRIORITY 3;
+  size S; frontend-only.)* v0.261.0 fixed the *downstream* symptom — the Target page and History now admit that
+  their picture isn't the user's edit. But the moment the misunderstanding is *created* is the editor: **Save** and
+  **Export** sit next to each other, both sound final, and Save's success is silent, so a beginner reasonably
+  believes pressing Save made their picture. **Slice:** after a successful `saveRecipe`, say what actually
+  happened in one sentence — *"Saved. This look is kept with the picture; press **Export** to make it the picture
+  everyone sees."* — as the save notification's message rather than a new always-on block (the IA overhaul's whole
+  point is not to add another banner). **Care:** don't nag on every save of an *already-exported* run — the editor
+  already knows whether the run is display-space (`_run_display_space` / the histogram's `already_display` flag),
+  so gate on that, and check whether the export button's own copy should change with it so the two never
+  contradict each other.
+
+- ~~**NEW IDEA (Builder 2026-08-15, the question raised by putting the picture on the Target page — IA slice (c),
+  v0.259.0) — the hero picture shows the *stack's* auto-stretch, not the edit the user made of it.**~~ —
+  **SHIPPED v0.261.0** (Builder 2026-08-15, branch `claude/serene-goldberg-dglvf3`). *(Trust / friendliness —
+  PRIORITY 3.)* **The entry offered two options and this took the honest one, then went one step further:** say
+  so *and* offer the single click that fixes it. Rendering the recipe for the thumbnail was rejected for exactly
+  the reason the entry's own caution gives — it puts a proxy render on the load path of the app's most-visited
+  page, on a RAM-capped NAS, and it would still leave the Gallery, History and every share serving the un-edited
+  preview. Saying so costs nothing and is true everywhere.
+  **The predicate, server-side and shared:** `webapp/routers/stack.py::_unexported_edit(options_json,
+  recipe_json)` is True when a run carries a saved recipe with at least one **enabled** op *and* its stored
+  preview is not already an edit — checking **both** display-space markers, `display_space` (an editor export,
+  tone-mapped FITS) and `preview_display_space` (an in-place "Process target" Auto edit, linear FITS + baked
+  PNG). An empty or fully-disabled recipe, unparseable JSON, or a recipe on an already-baked run all read False,
+  so the app never nags about an edit that changes nothing. It surfaces as one additive
+  `StackRunOut.unexported_edit` field on the existing runs listing (one small meta read per run on the
+  already-open project DB), so every surface gets the same answer and none can drift.
+  **What the user sees:** the Target page's hero picture grows a violet note — *"You edited this picture and
+  saved it, but never exported it — so this is still the un-edited version. Finishing it makes your edit the
+  picture shown here, in the Gallery, and in anything you share."* — with **Finish my edit** and **Open the
+  editor**. History's run card gets the matching `edit not exported` badge (label only; the one-click action
+  lives on the hero, not on every row).
+  **"Finish my edit" is the beginner half:** `POST …/editor/export` now accepts a body with **no `recipe`**, in
+  which case the server loads the run's *saved* recipe (through `recipe_from_json`, so stale ops are dropped and
+  params clamped exactly as everywhere else) and exports that; nothing saved ⇒ a clean **400**, not a broken job.
+  So the browser never has to fetch and round-trip an edit it isn't editing, and someone who pressed Save and
+  closed the editor doesn't have to reopen it just to press Export. The editor itself always sends its live
+  recipe, so its behaviour is byte-for-byte unchanged.
+  **Upgrade-safe:** one additive response field defaulting `False` (an older frontend ignores it; an older
+  backend omitting it reads as "no unfinished edit" and shows nothing), and one request field widened from
+  required to optional — no endpoint, schema, config, on-disk or default change, and the export stays
+  non-destructive (a new run; the source run is untouched).
+  **Tests (+11):** `tests/webapp/test_unexported_edit.py` (**new, +6** — the predicate in isolation over both
+  markers and no-recipe; recipes that change nothing (empty / all-disabled / garbage) never nagging while one
+  enabled op among disabled ones does; the flag flipping on the real listing when a recipe is saved; an exported
+  run *not* being flagged; the no-recipe export using the saved one end-to-end and leaving the source run in
+  place; and the empty-recipe 400) plus `LatestPictureCard.test.tsx` (+3 — silent on an ordinary run, the note's
+  wording and both ways out, and one click calling `exportSavedEdit("M_42", 7, "M_42_edit")`) and
+  `History.test.tsx` (+2 — the badge appears for a flagged run and not otherwise).
+  *(Original spec kept below for provenance.)*
   *(Pillar: trust / friendliness — PRIORITY 3; size S; grep first.)* `LatestPictureCard` serves the run's baked
   preview PNG. For a run the user exported from the editor that *is* their picture (the preview is written in
   display space, verbatim). But for a run they edited and **saved a recipe for without exporting**, the preview is
