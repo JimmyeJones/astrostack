@@ -488,15 +488,25 @@ def _unexported_edit(options_json: str | None, recipe_json: str | None) -> bool:
     those surfaces say so honestly (and offer to finish the export) instead of
     quietly presenting an image the user didn't make.
 
-    False whenever the preview already reflects an edit (either marker), when
-    there is no recipe, when the recipe is unparseable, and when every op in it
-    is disabled — a recipe that changes nothing is not an unfinished edit."""
+    False when there is no recipe, when the recipe is unparseable, when every op
+    in it is disabled — a recipe that changes nothing is not an unfinished edit —
+    and for an in-place "Process target" Auto edit, whose recipe *is* what its
+    preview shows.
+
+    Note which display-space marker is checked and which is not, because the two
+    are written by different paths and only one of them bakes the stored recipe:
+    ``preview_display_space`` marks the in-place Auto edit, which stamps the
+    recipe it just baked onto the *same* run (``pipeline._auto_process_run``), so
+    a recipe there is already visible and must not be flagged. ``display_space``
+    marks an editor *export*, which writes a **new** run and deliberately stores
+    no recipe on it — so a recipe on such a run can only have come from the user
+    re-opening that export, editing it further and saving, which is exactly the
+    unfinished edit this flags. Excluding it would silently miss every
+    second-round edit."""
     if not recipe_json:
         return False
     opts = _parse_options(options_json)
-    # ``display_space`` = an editor export (the FITS itself is tone-mapped);
-    # ``preview_display_space`` = an in-place Auto edit (linear FITS, baked PNG).
-    if opts.get("display_space") or opts.get("preview_display_space"):
+    if opts.get("preview_display_space"):
         return False
     try:
         parsed = json.loads(recipe_json)

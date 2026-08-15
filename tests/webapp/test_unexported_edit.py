@@ -32,11 +32,20 @@ def test_unexported_edit_predicate():
     # No recipe at all — the overwhelmingly common case.
     assert _unexported_edit("{}", None) is False
     assert _unexported_edit("{}", "") is False
-    # The preview already shows an edit, by either marker: an editor export
-    # (display_space) or an in-place "Process target" Auto edit
-    # (preview_display_space). Nothing is unfinished.
-    assert _unexported_edit('{"display_space": true}', saved) is False
+    # An in-place "Process target" Auto edit stamps the recipe it just baked onto
+    # the same run, so its preview already shows it. Nothing is unfinished.
     assert _unexported_edit('{"preview_display_space": true}', saved) is False
+
+
+def test_a_re_edited_export_is_still_flagged():
+    """An editor *export* writes a new run and stores no recipe on it, so a recipe
+    on a display-space run can only have come from the user re-opening that export,
+    editing it further and saving. That second-round edit is just as invisible as
+    the first, and must not be excluded by the display-space marker."""
+    saved = json.dumps(STRETCH)
+    assert _unexported_edit('{"display_space": true}', saved) is True
+    # …but the export itself, which carries no recipe, stays quiet.
+    assert _unexported_edit('{"display_space": true}', None) is False
 
 
 def test_unexported_edit_ignores_recipes_that_change_nothing():
@@ -117,3 +126,25 @@ def test_export_without_a_recipe_and_nothing_saved_is_a_clean_400(client, solved
                     json={"output_name": "nope"})
     assert r.status_code == 400
     assert "no saved edit" in r.json()["detail"]
+
+
+def test_re_editing_an_export_and_saving_flags_the_exported_run(client, solved_library):
+    """End to end: export, then edit the export and press Save without exporting
+    again. The exported run's preview is the *first* edit, so the second one is
+    invisible and has to be flagged — the case the display-space marker would have
+    swallowed."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="round1_src")
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"recipe": STRETCH, "output_name": "round1"})
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+    exported = next(x for x in client.get(f"/api/targets/{safe}/stack-runs").json()
+                    if x["output_basename"] == "round1")
+    assert exported["unexported_edit"] is False   # nothing saved on it yet
+
+    client.put(f"/api/targets/{safe}/stack-runs/{exported['id']}/editor/recipe",
+               json={"ops": [{"id": "tone.saturation", "params": {"amount": 1.3}}]})
+
+    again = next(x for x in client.get(f"/api/targets/{safe}/stack-runs").json()
+                 if x["id"] == exported["id"])
+    assert again["unexported_edit"] is True
