@@ -1465,3 +1465,72 @@ describe("TargetView error state", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 });
+
+describe("TargetView content order (IA slice (c))", () => {
+  // IA slice (c) of the owner's "the pages are extremely busy" item: the page now
+  // opens onto what the user came for — the finished picture and the frames table
+  // — with everything that merely *describes* the target (its catalog card, the
+  // insight tabs) moved below. Nothing was removed; the order changed.
+  const precedes = (a: Element, b: Element) =>
+    !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it("puts the picture and the frames table above the analysis, not below it", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M42", name: "Orion Nebula", type: "nebula",
+      constellation: "Orion", constellation_abbr: "Ori",
+      ra_deg: 83.8, dec_deg: -5.4, matched_by: "name",
+    });
+    // One insight group with something to say, so the tabbed area is rendered.
+    vi.spyOn(client.api, "stackHealth").mockResolvedValue({
+      run_id: 9,
+      notes: [{ kind: "frames", severity: "good",
+                message: "42 subs went into this picture", action: null }],
+    });
+
+    renderTarget();
+
+    const picture = await screen.findByTestId("latest-picture");
+    const table = screen.getByRole("button", { name: "Reject worst" });
+    const insights = await screen.findByTestId("target-insights");
+    const objectCard = screen.getByText("A nebula in the constellation Orion.");
+
+    // The picture leads, the frames table follows it, and the analysis that used
+    // to sit between them is now after both.
+    expect(precedes(picture, table)).toBe(true);
+    expect(precedes(table, insights)).toBe(true);
+    expect(precedes(table, objectCard)).toBe(true);
+    // "Is it enough yet?" stays above the fold too — beside the picture, not
+    // below the table (it's the question the beginner opened the page with).
+    expect(precedes(screen.getByText("Is it enough yet?"), table)).toBe(true);
+  });
+
+  it("shows the target's newest finished picture on the page itself", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 9, n_frames_used: 128, total_exposure_s: 7560 }),
+      mkRun({ id: 3, n_frames_used: 40 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    // The newest run (listStackRuns returns newest first), captioned honestly.
+    const img = await screen.findByAltText("Latest stacked picture of M42");
+    expect(img.getAttribute("src")).toContain("/stack-runs/9/preview");
+    expect(screen.getByText(/128 frames/)).toBeInTheDocument();
+  });
+
+  it("shows no picture card on a target that has never been stacked", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await screen.findByRole("button", { name: "Process this target" });
+    expect(screen.queryByTestId("latest-picture")).not.toBeInTheDocument();
+  });
+});

@@ -9941,6 +9941,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   rewritten to go green. Frontend-only: no API, schema, config, on-disk or default change.
   **Next slice: (c) — content order / above the fold.**
 
+  **✅ SLICE (c) SHIPPED — v0.259.0** (Builder 2026-08-15, branch `claude/serene-goldberg-wa400h`). The Target page
+  now opens onto **what the user came for**, with everything that merely *describes* the target moved below it.
+  **Measured, as the acceptance criterion asks:** always-visible blocks between the page header and the primary
+  content went **3 → 0** (the catalog card, the insight tab strip and its open group all sat there; the readiness
+  card sat there too and now shares the hero row *beside* the picture rather than stacking above the table), and
+  the frames table's controls now begin **~140 lines earlier in the render** — on a 1080p window the picture and
+  the table's first rows share the first screen. `Target.tsx` is 1554 → 1568 lines (+14), plus the new
+  `components/target/LatestPictureCard.tsx` (99 lines).
+  **The gap this slice exposed, and closed:** the entry says "put the picture and the frames table at the top" —
+  but the Target page **had no picture at all**. A beginner's finished image lived only on History or behind a
+  download menu, so the page about a target showed notes, analysis and a table of filenames and never the thing
+  they were making. `LatestPictureCard` puts the newest finished stack on the page, height-capped at 260 px on
+  purpose (so it cannot push the frames table off the fold), captioned with the three facts that identify it
+  (*"Stacked 14/08/2026 · 128 frames · 2 h 6 m of light"*), with **Edit this picture** / **All versions** links and
+  click-to-open in the **same zoomable `ImageLightbox`** — and therefore the same PNG/JPEG/full-res/FITS downloads
+  and OS share — the Gallery, History and editor already use. It self-hides before the first stack, where the
+  existing pre-stack `FirstLookCard` reassurance still speaks, unchanged.
+  **New order:** notes (slice a) → header → **hero: picture · "Is it enough yet?"** → frames table + frame preview
+  + notes → catalog card → insight tabs (slice b). Nothing was removed and nothing became a click further away
+  except by scrolling *down* instead of up. **Tests (+11):** `LatestPictureCard.test.tsx` (**new, +8** — the
+  caption's three facts, the singular "1 frame", a run with no recorded integration, an unparseable timestamp not
+  printing "Invalid Date", the editor/history routes, silence before the first picture and for a preview-less run,
+  and the lightbox opening) and `Target.test.tsx` (+3 — a `compareDocumentPosition` assertion that the picture
+  precedes the table which precedes both the insights and the catalog card, that readiness stays above the table,
+  that the *newest* run is the one shown, and that an unstacked target shows no picture card). All 71 pre-existing
+  `Target.test.tsx` assertions pass **unchanged**. Frontend-only: no API, schema, config, on-disk or default change.
+  **Next slice: (d) — sidebar grouping.**
+
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
   first paint, and route file length. A slice that doesn't move those numbers hasn't done the job.
