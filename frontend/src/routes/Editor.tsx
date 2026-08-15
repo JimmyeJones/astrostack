@@ -24,6 +24,7 @@ import { Histogram } from "../components/editor/Histogram";
 import { tonalHistGuides } from "../components/editor/tonalGuides";
 import { OpList } from "../components/editor/OpList";
 import { AutoFeedback } from "../components/editor/AutoFeedback";
+import { saveRecipeMessage } from "../components/editor/saveMessage";
 import { degenerateLevelsUids, extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
   from "../components/editor/stageConflicts";
 import { autoCauseSentence, autoSummarySentence, autoValueSentence, presetSuggestionSentence } from "../components/editor/autoSummary";
@@ -673,7 +674,10 @@ export function EditorView() {
   const saveRecipe = useMutation({
     mutationFn: () => api.putRecipe(safe, rid, recipe),
     onSuccess: () => {
-      notifications.show({ message: "Recipe saved", color: "teal" });
+      // Say what Save actually did: the look is stored with the picture, but it
+      // is Export that makes it the picture every other screen shows. See
+      // `saveRecipeMessage`.
+      notifications.show({ message: saveRecipeMessage(ops), color: "teal" });
       qc.invalidateQueries({ queryKey: ["recipe", safe, rid] });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),

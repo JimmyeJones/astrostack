@@ -9867,8 +9867,97 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-08-15, the question raised by putting the picture on the Target page — IA slice (c),
-  v0.259.0) — the hero picture shows the *stack's* auto-stretch, not the edit the user made of it.**
+- **NEW IDEA (Builder 2026-08-15, the one surface v0.261.0 deliberately left out) — the *Gallery* still shows an
+  un-exported edit's picture with no hint that it isn't the user's version.** *(Pillar: trust — PRIORITY 3;
+  size S; grep first.)* v0.261.0 added `StackRunOut.unexported_edit` and used it on the Target page's hero (note +
+  one-click **Finish my edit**) and History's run card (a label). The Gallery was left alone on purpose: its
+  roll-up spans the **whole library**, so it would need a recipe-meta read per run across every target rather than
+  inside one already-open project DB, and that cost wanted measuring before it was paid — not guessing. **Slice:**
+  measure `_gallery_items`' current per-target work first; if it already opens each project, the meta read is
+  nearly free and `GalleryItem` gains the same additive optional field plus the same badge the History card uses
+  (`edit not exported`). If it does *not* open each project, don't — file what it would cost instead. **Reuse, do
+  not re-derive:** `webapp/routers/stack.py::_unexported_edit` is the one definition of the predicate (it checks
+  *both* display-space markers and ignores empty/all-disabled recipes); a second copy is exactly the hand-synced
+  drift the `webapp/goals.py` consolidation was written to stop.
+
+- ~~**NEW IDEA (Builder 2026-08-15, the upstream half of the same problem) — the editor's **Save** button doesn't say
+  that a saved edit is invisible everywhere else until you Export.**~~ — **SHIPPED v0.261.1** (Builder 2026-08-15,
+  branch `claude/serene-goldberg-dglvf3`, in the same run that shipped the downstream half). *(Friendliness /
+  trust — PRIORITY 3.)* Save's confirmation was the bare words *"Recipe saved"*; it now says
+  *"Saved — this look is kept with the picture. Press Export to make it the picture shown everywhere else."*
+  One pure, tested helper (`components/editor/saveMessage.ts`) inside the **existing** notification — not a new
+  always-on block, per the IA overhaul's own rule. **The gate is emptiness, not display-space:** saving a recipe
+  with nothing enabled *clears* the look, so it keeps the plain confirmation (there is nothing waiting to be
+  exported and nagging would be wrong); one live op among disabled ones still points at Export. The entry
+  suggested gating on `already_display` instead — that turned out to be **wrong**, for the reason the sibling fix
+  below found: a re-edit of an exported run needs exporting just as much as a first edit does. **Tests (+4,
+  `saveMessage.test.ts`).** Frontend-only: no API, schema, config, on-disk or default change.
+
+- ~~**FOLLOW-UP FIX to v0.261.0 (Builder 2026-08-15, found by reading the export path while writing the entry
+  above) — the un-exported-edit flag silently missed every *second-round* edit.**~~ — **FIXED v0.261.1**
+  (same run/branch). `_unexported_edit` excluded a run carrying **either** display-space marker, but the two are
+  written by different paths and only one of them bakes the stored recipe: the in-place "Process target" Auto
+  edit (`preview_display_space`) stamps the recipe it just baked onto the *same* run, so a recipe there is
+  already visible and must not be flagged — but an editor **export** (`display_space`) writes a *new* run and
+  deliberately stores **no** recipe on it (`pipeline._apply_editor_to_run`), so a recipe on such a run can only
+  have come from the user re-opening that export, editing it further and pressing Save. That second-round edit is
+  exactly as invisible as the first, and was being swallowed. Now only `preview_display_space` suppresses the
+  flag, with the asymmetry written down where the next reader will hit it. **Tests (+2, one fail-before):** the
+  predicate flags a display-space run *with* a recipe and stays quiet on one without, and an end-to-end
+  export → re-edit → Save flags the exported run.
+
+  *(Original spec kept below for provenance.)*
+  *(Pillar: friendliness / trust — PRIORITY 3;
+  size S; frontend-only.)* v0.261.0 fixed the *downstream* symptom — the Target page and History now admit that
+  their picture isn't the user's edit. But the moment the misunderstanding is *created* is the editor: **Save** and
+  **Export** sit next to each other, both sound final, and Save's success is silent, so a beginner reasonably
+  believes pressing Save made their picture. **Slice:** after a successful `saveRecipe`, say what actually
+  happened in one sentence — *"Saved. This look is kept with the picture; press **Export** to make it the picture
+  everyone sees."* — as the save notification's message rather than a new always-on block (the IA overhaul's whole
+  point is not to add another banner). **Care:** don't nag on every save of an *already-exported* run — the editor
+  already knows whether the run is display-space (`_run_display_space` / the histogram's `already_display` flag),
+  so gate on that, and check whether the export button's own copy should change with it so the two never
+  contradict each other.
+
+- ~~**NEW IDEA (Builder 2026-08-15, the question raised by putting the picture on the Target page — IA slice (c),
+  v0.259.0) — the hero picture shows the *stack's* auto-stretch, not the edit the user made of it.**~~ —
+  **SHIPPED v0.261.0** (Builder 2026-08-15, branch `claude/serene-goldberg-dglvf3`). *(Trust / friendliness —
+  PRIORITY 3.)* **The entry offered two options and this took the honest one, then went one step further:** say
+  so *and* offer the single click that fixes it. Rendering the recipe for the thumbnail was rejected for exactly
+  the reason the entry's own caution gives — it puts a proxy render on the load path of the app's most-visited
+  page, on a RAM-capped NAS, and it would still leave the Gallery, History and every share serving the un-edited
+  preview. Saying so costs nothing and is true everywhere.
+  **The predicate, server-side and shared:** `webapp/routers/stack.py::_unexported_edit(options_json,
+  recipe_json)` is True when a run carries a saved recipe with at least one **enabled** op *and* its stored
+  preview is not already an edit — checking **both** display-space markers, `display_space` (an editor export,
+  tone-mapped FITS) and `preview_display_space` (an in-place "Process target" Auto edit, linear FITS + baked
+  PNG). An empty or fully-disabled recipe, unparseable JSON, or a recipe on an already-baked run all read False,
+  so the app never nags about an edit that changes nothing. It surfaces as one additive
+  `StackRunOut.unexported_edit` field on the existing runs listing (one small meta read per run on the
+  already-open project DB), so every surface gets the same answer and none can drift.
+  **What the user sees:** the Target page's hero picture grows a violet note — *"You edited this picture and
+  saved it, but never exported it — so this is still the un-edited version. Finishing it makes your edit the
+  picture shown here, in the Gallery, and in anything you share."* — with **Finish my edit** and **Open the
+  editor**. History's run card gets the matching `edit not exported` badge (label only; the one-click action
+  lives on the hero, not on every row).
+  **"Finish my edit" is the beginner half:** `POST …/editor/export` now accepts a body with **no `recipe`**, in
+  which case the server loads the run's *saved* recipe (through `recipe_from_json`, so stale ops are dropped and
+  params clamped exactly as everywhere else) and exports that; nothing saved ⇒ a clean **400**, not a broken job.
+  So the browser never has to fetch and round-trip an edit it isn't editing, and someone who pressed Save and
+  closed the editor doesn't have to reopen it just to press Export. The editor itself always sends its live
+  recipe, so its behaviour is byte-for-byte unchanged.
+  **Upgrade-safe:** one additive response field defaulting `False` (an older frontend ignores it; an older
+  backend omitting it reads as "no unfinished edit" and shows nothing), and one request field widened from
+  required to optional — no endpoint, schema, config, on-disk or default change, and the export stays
+  non-destructive (a new run; the source run is untouched).
+  **Tests (+11):** `tests/webapp/test_unexported_edit.py` (**new, +6** — the predicate in isolation over both
+  markers and no-recipe; recipes that change nothing (empty / all-disabled / garbage) never nagging while one
+  enabled op among disabled ones does; the flag flipping on the real listing when a recipe is saved; an exported
+  run *not* being flagged; the no-recipe export using the saved one end-to-end and leaving the source run in
+  place; and the empty-recipe 400) plus `LatestPictureCard.test.tsx` (+3 — silent on an ordinary run, the note's
+  wording and both ways out, and one click calling `exportSavedEdit("M_42", 7, "M_42_edit")`) and
+  `History.test.tsx` (+2 — the badge appears for a flagged run and not otherwise).
+  *(Original spec kept below for provenance.)*
   *(Pillar: trust / friendliness — PRIORITY 3; size S; grep first.)* `LatestPictureCard` serves the run's baked
   preview PNG. For a run the user exported from the editor that *is* their picture (the preview is written in
   display space, verbatim). But for a run they edited and **saved a recipe for without exporting**, the preview is
@@ -10028,7 +10117,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   precedes the table which precedes both the insights and the catalog card, that readiness stays above the table,
   that the *newest* run is the one shown, and that an unstacked target shows no picture card). All 71 pre-existing
   `Target.test.tsx` assertions pass **unchanged**. Frontend-only: no API, schema, config, on-disk or default change.
-  **Next slice: (d) — sidebar grouping.**
+  **Next slice: (e) — the Dashboard.**
+
+  **✅ SLICE (d) SHIPPED — v0.260.0** (Builder 2026-08-15, branch `claude/serene-goldberg-dglvf3`). The sidebar's
+  15 flat links are now four named groups plus the Dashboard. **Measured, as the acceptance criterion asks:**
+  unlabelled links in a single flat run went **15 → 0**; the longest run a beginner has to read to find something
+  went **15 → 4** (the biggest group); destinations **15 → 15** — *nothing removed*, and **nothing hidden**:
+  every link is still visible with **zero** clicks, because the headings only *label* the groups, they do not
+  collapse them. (Collapsible groups were considered and rejected: they'd trade the owner's "busy" complaint for a
+  worse one — a destination you can no longer see.) `App.tsx` is 192 → 191 lines, with the link list lifted into
+  the new `src/nav.tsx` (85 lines) so the sidebar's shape is data a test can read rather than JSX buried in the
+  layout.
+  **The groups, named so a beginner can predict which one a thing lives in:** *(lead, unlabelled)* Dashboard ·
+  **Your pictures** — Library, Gallery, My best pictures, Your sky so far · **Plan a night** — Tonight, Sky Map ·
+  **Capture & process** — Telescope, Moon & Sun, Calibration, Channel combine · **System** — Jobs, Storage, Logs,
+  Settings. The Settings link keeps its `OutdatedTargetsBadge`, the mobile drawer still closes on click, and
+  `isNavActive` highlighting is untouched. Each group is a real `role="group"` labelled by its heading, so a
+  screen-reader user gets the grouping too, not just a sighted one.
+  **Tests (+5, `src/nav.test.tsx`):** the frozen pre-slice flat list is checked link-for-link against
+  `NAV_LINKS` — so a future run that "tidies" a destination away fails immediately — plus no duplicate route, the
+  Dashboard staying `end`-matched (and no other link claiming it), the section shape (few groups, only the lead
+  one unlabelled, no heading over a single link, unique titles), and two render tests over the real `App`: every
+  one of the 15 links is present and visible with its correct `href`, and each named group holds exactly its own
+  links. Frontend-only: no route added or removed, no API, schema, config, on-disk or default change.
 
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on

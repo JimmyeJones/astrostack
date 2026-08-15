@@ -1405,7 +1405,12 @@ async def preset_suggestion(safe: str, run_id: int, request: Request) -> dict:
 # ---- export + batch (jobs) -------------------------------------------------
 
 class ExportRequest(BaseModel):
-    recipe: dict
+    # Omit ``recipe`` to export the run's own *saved* recipe — the "finish the
+    # edit I already saved" path used by the Target page, so a user who pressed
+    # Save and closed the editor doesn't have to reopen it just to press Export.
+    # The editor itself always sends the live recipe, so its behaviour is
+    # unchanged.
+    recipe: dict | None = None
     output_name: str | None = None
     tiff_mode: str = "linear"
 
@@ -1414,10 +1419,29 @@ class ExportRequest(BaseModel):
 def export_run(safe: str, run_id: int, body: ExportRequest, request: Request) -> dict:
     from webapp import pipeline
 
+    from seestack.edit.recipe import recipe_from_json
+
+    recipe_dict = body.recipe
+    if recipe_dict is None:
+        lib, proj = deps.open_target_project(request, safe)
+        try:
+            raw = proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
+        finally:
+            proj.close()
+            lib.close()
+        # Validated on load (stale ops dropped, params clamped), same as every
+        # other read of a stored recipe — a hand-edited DB can't 500 the job.
+        saved = recipe_from_json(raw)
+        if not saved.ops:
+            raise HTTPException(
+                status_code=400,
+                detail="This picture has no saved edit to export.")
+        recipe_dict = saved.to_dict()
+
     settings = deps.get_settings(request)
     jm = deps.get_job_manager(request)
     job = pipeline.submit_editor_export(
-        settings, jm, safe, run_id, body.recipe,
+        settings, jm, safe, run_id, recipe_dict,
         output_name=body.output_name, tiff_mode=body.tiff_mode,
     )
     return {"job_id": job.id}
