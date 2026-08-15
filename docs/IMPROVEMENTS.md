@@ -49,6 +49,25 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**⚠ RED BASELINE (Builder 2026-08-15, hit on the first suite run of the run; REPRODUCED on clean `origin/main`)
+  — a Tonight test hard-coded `"2026-08-15"` as "a future night", so the frontend suite went red the day the
+  calendar reached it, and stays red.**~~ — **FIXED v0.258.1** (Builder 2026-08-15, branch
+  `claude/serene-goldberg-wa400h`). *(Infra / test hygiene — it blocks every run's §5 gate until fixed.)*
+  `Tonight.test.tsx`'s "plans a chosen future night" test typed a literal date into the Night picker and then
+  asserted the page renamed its sections to *"Start something new on …"*. But `planNightLabel` returns `""` for a
+  date **equal to today** — by design, so tonight keeps its "…tonight" copy — so on 2026-08-15 the "future" night
+  *was* tonight, the heading stayed "Start something new tonight", and the assertion failed. **Verified
+  pre-existing**: stashing this run's work and running the file on clean `origin/main` fails identically
+  (1 failed / 18 passed), so it was not caused by any change in flight. The Python suite was green throughout
+  (2674 passed / 2 skipped). **Fix:** one shared `futureNight()` helper derives the date from the clock
+  (`isoDate(now + 7 days)` — inside the picker's own `MAX_PLAN_LOOKAHEAD_DAYS` bound), used by both tests that
+  needed a not-tonight date (the second one asserted only the API call, so it was rotting quietly rather than
+  failing). **No assertion was weakened, skipped or deleted** — both still assert exactly what they did, now
+  against a date that is always in the future. Test-only: no app code, config, schema or default touched.
+  **Checked for siblings while there:** `Tonight.test.tsx` is the *only* frontend test file that reads the real
+  clock at all (every other date-sensitive test injects an explicit `now`), and the Python date tests all pass
+  `today=`/`now=` explicitly — so there is no second bomb of this shape waiting.
+
 - ~~**CROSS-SCREEN BUG (Builder 2026-08-12, found while shipping v0.253.0; REPRODUCED) — the Tonight planner ignores
   the integration goal you set, so it tells you to move on from the very target you told the app you want more
   of.**~~ — **FIXED v0.253.1** (Builder 2026-08-12, branch `claude/elegant-bohr-eglrga`). *(Friendliness / trust —
@@ -6535,8 +6554,32 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-13, the gap left by shipping the re-centring crop v0.257.0) — when a target landed
-  *so* far off-centre that no crop can rescue it, the app goes quiet about the one thing it just measured.**
+- ~~**NEW IDEA (Builder 2026-08-13, the gap left by shipping the re-centring crop v0.257.0) — when a target landed
+  *so* far off-centre that no crop can rescue it, the app goes quiet about the one thing it just measured.**~~ —
+  **SHIPPED v0.259.1** (Builder 2026-08-15, branch `claude/serene-goldberg-wa400h`), together with the
+  already-cropped entry below: both are the same paragraph of UI, so shipping them apart would have meant editing
+  the same six lines twice. Built to the filed slice — **the refusal reason travels with the (null) offer, and only
+  the destructive case gets words.**
+  **Engine, one implementation and two views** (the alternative — a second function re-deriving the geometry — is
+  exactly the hand-synced-copies mistake the `webapp/goals.py` entry above was filed for): `recentre_crop` is now a
+  thin wrapper over a new `recentre_outcome`, which returns `RecentreOutcome(crop, reason, kept)`. Every early
+  return names itself (`unknown_size`, `degenerate`, `centred`, `cramped`, `too_destructive`), and the destructive
+  one carries **the kept fraction it would have had** — the number that makes the sentence honest. `recentre_crop`
+  keeps its exact signature and semantics, so all 14 pre-existing engine assertions pass untouched, and a test
+  walks eight geometries asserting the two views can never disagree.
+  **Frontend:** `recentreRefusalLine()` renders *only* `too_destructive`, and only with a usable fraction — every
+  other reason, a missing `kept`, and an older backend that omits the field all stay silent, as the entry's "keep
+  the other refusals silent" instruction asks. It reads as one dimmed line **inside the existing note**, never a
+  new banner (the entry's "Care", and the IA work). The fraction is worded rather than percented
+  (`keptFractionWords`: 0.19 → *"a fifth"*), falling back to a percentage below a twelfth where a fraction word
+  would be worse than a number. Additive and upgrade-safe: one new nullable response field, one new engine
+  function, nothing renamed, no default changed. **Tests (+16):** `tests/test_framing.py` (+4 — the destructive
+  refusal's reason and kept fraction, each other reason, an offer reporting no reason, and the two-views agreement),
+  `tests/webapp/test_stack_framing.py` (+2 — a small object cornered on a real WCS returns
+  `too_destructive` with its fraction; an offered crop and a verdict cropping can't address both carry no refusal),
+  `recentreCrop.test.ts` (+5) and `FramingVerdictNote.test.tsx` (+2 — the sentence, and silence on every other
+  reason).
+  *(Original spec kept below for provenance.)*
   *(Pillar: friendliness / trust — PRIORITY 3; size XS–S; frontend copy + one already-computed number.)*
   `recentre_crop` refuses when the crop would keep under 40 % of the frame, which is right — but the result is
   that the *worst-framed* pictures get **less** help than the mildly off-centre ones: the note says "it sits well
@@ -6548,8 +6591,25 @@ to **Shipped**.)_
   is already said by the `partial` verdict, and "already centred" needs no words. **Care:** don't turn this into
   a second nudge — one line, inside the existing note, never a new banner (the IA work).
 
-- **NEW IDEA (Builder 2026-08-13, spotted while wiring the re-centre offer into two surfaces) — the framing
-  verdict describes the *stack*, so it keeps offering to re-centre a picture the user has already re-centred.**
+- ~~**NEW IDEA (Builder 2026-08-13, spotted while wiring the re-centre offer into two surfaces) — the framing
+  verdict describes the *stack*, so it keeps offering to re-centre a picture the user has already re-centred.**~~ —
+  **SHIPPED v0.259.1** (Builder 2026-08-15, branch `claude/serene-goldberg-wa400h`), with the refusal-reason entry
+  above. Built to the filed slice, including its "grep first": the predicate already existed —
+  `cropCoverageFraction` (`components/editor/mosaicTrim.ts`) returns `null` exactly when no *enabled*
+  `geometry.crop` is shrinking the picture, so a **disabled** crop op correctly still gets the offer (pinned by a
+  test). `FramingVerdictNote` now asks `api.getRecipe` — **only when there is actually an offer to make**
+  (`enabled: !!recentre`), so an ordinary target page costs no extra request — and, on an already-cropped picture,
+  swaps the offer for *"You've already cropped this picture — open the editor to adjust it"*, linking to the editor
+  without the `?recentre=1` deep-link. **The verdict itself is untouched**, as the entry's "Care" insists: it
+  describes what the *stack* caught, which is the honest thing for it to describe. A recipe that can't be read
+  falls back to making the offer — withholding a good offer on a failed request is the worse error of the two.
+  **Deliberately not changed: the editor's own Re-centre button.** There, the recipe *is* the visible state — the
+  crop op is on screen in the op list — and `applyTrimCrop` updates an existing crop in place rather than stacking
+  a second one, so the button can't mislead or compound the way the Target page's offer could. **Tests (+4,
+  `FramingVerdictNote.test.tsx`):** an enabled crop replaces the offer with the already-cropped line (and the
+  verdict text survives unchanged), a disabled crop still gets the offer, an unreadable recipe still gets the
+  offer, and no recipe request is made when there's no offer.
+  *(Original spec kept below for provenance.)*
   *(Pillar: trust / friendliness — PRIORITY 3; size S.)* The verdict is measured from the run's own FITS, which is
   correct and cheap — but the editor's saved recipe may already carry a `geometry.crop` that fixed exactly what
   the note is complaining about. The user then sees "Re-centre this picture" on a picture they re-centred an hour
@@ -9807,6 +9867,23 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-15, the question raised by putting the picture on the Target page — IA slice (c),
+  v0.259.0) — the hero picture shows the *stack's* auto-stretch, not the edit the user made of it.**
+  *(Pillar: trust / friendliness — PRIORITY 3; size S; grep first.)* `LatestPictureCard` serves the run's baked
+  preview PNG. For a run the user exported from the editor that *is* their picture (the preview is written in
+  display space, verbatim). But for a run they edited and **saved a recipe for without exporting**, the preview is
+  still the STF auto-stretch of the linear stack — so the page's headline image is not the picture they made, and
+  the *only* place their edit exists is behind the editor's own preview. That is the same class of "the app didn't
+  notice my work" problem as the re-centre offer fixed in v0.259.1, and it is now on the most prominent surface in
+  the app. **Slice:** decide what the hero should show when a saved recipe exists but no export does — either
+  render the recipe through the existing proxy path for the thumbnail (cost: one render per view; may need a cached
+  sibling, so measure before choosing), or say so in a line under the picture (*"you have unsaved editor changes —
+  open the editor to export them"*), which is nearly free and arguably more honest. **Grep first:** History and the
+  Gallery serve the same baked preview, so whatever this lands on should be considered for them too; and
+  `has_export`/the editor's export path already knows the difference, so the predicate probably exists. **Care:**
+  do not make the Target page do a full-resolution render on load — the RAM-capped NAS is the reason the preview
+  cap exists at all.
+
 - **⭐⭐ OWNER-REQUESTED (2026-08-08) — INFORMATION-ARCHITECTURE OVERHAUL: the pages are "extremely busy"; you have
   to scroll a long way past ~30 stacked things to reach the actual content.** *(PRIORITY 3 friendliness, and the
   owner's top UX complaint about the live build. A standing, MULTI-RUN effort — one page per run, see the slicing
@@ -9921,6 +9998,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   pre-existing `Target.test.tsx` assertions pass **unchanged** (hidden panels stay in the DOM), so nothing was
   rewritten to go green. Frontend-only: no API, schema, config, on-disk or default change.
   **Next slice: (c) — content order / above the fold.**
+
+  **✅ SLICE (c) SHIPPED — v0.259.0** (Builder 2026-08-15, branch `claude/serene-goldberg-wa400h`). The Target page
+  now opens onto **what the user came for**, with everything that merely *describes* the target moved below it.
+  **Measured, as the acceptance criterion asks:** always-visible blocks between the page header and the primary
+  content went **3 → 0** (the catalog card, the insight tab strip and its open group all sat there; the readiness
+  card sat there too and now shares the hero row *beside* the picture rather than stacking above the table), and
+  the frames table now begins at render line **1319, down from 1369** (measured; an earlier draft of this
+  paragraph said "~140 lines earlier", which was wrong — the hero grid's own wrapper gives some of it back), and
+  what it displaced is the *tall* content: ~61 lines of always-on analysis JSX moved below the table, and the
+  readiness card moved beside the picture instead of above it. On a 1080p window the picture and the table's first
+  rows share the first screen. `Target.tsx` is 1554 → 1568 lines (+14), plus the new
+  `components/target/LatestPictureCard.tsx` (99 lines).
+  **The gap this slice exposed, and closed:** the entry says "put the picture and the frames table at the top" —
+  but the Target page **had no picture at all**. A beginner's finished image lived only on History or behind a
+  download menu, so the page about a target showed notes, analysis and a table of filenames and never the thing
+  they were making. `LatestPictureCard` puts the newest finished stack on the page, height-capped at 260 px on
+  purpose (so it cannot push the frames table off the fold), captioned with the three facts that identify it
+  (*"Stacked 14/08/2026 · 128 frames · 2 h 6 m of light"*), with **Edit this picture** / **All versions** links and
+  click-to-open in the **same zoomable `ImageLightbox`** — and therefore the same PNG/JPEG/full-res/FITS downloads
+  and OS share — the Gallery, History and editor already use. It self-hides before the first stack, where the
+  existing pre-stack `FirstLookCard` reassurance still speaks, unchanged.
+  **New order:** notes (slice a) → header → **hero: picture · "Is it enough yet?"** → frames table + frame preview
+  + notes → catalog card → insight tabs (slice b). Nothing was removed and nothing became a click further away
+  except by scrolling *down* instead of up. **Tests (+11):** `LatestPictureCard.test.tsx` (**new, +8** — the
+  caption's three facts, the singular "1 frame", a run with no recorded integration, an unparseable timestamp not
+  printing "Invalid Date", the editor/history routes, silence before the first picture and for a preview-less run,
+  and the lightbox opening) and `Target.test.tsx` (+3 — a `compareDocumentPosition` assertion that the picture
+  precedes the table which precedes both the insights and the catalog card, that readiness stays above the table,
+  that the *newest* run is the one shown, and that an unstacked target shows no picture card). All 71 pre-existing
+  `Target.test.tsx` assertions pass **unchanged**. Frontend-only: no API, schema, config, on-disk or default change.
+  **Next slice: (d) — sidebar grouping.**
 
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
@@ -16818,6 +16926,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **NEW IDEA (Builder 2026-08-15, filed the moment after a wall-clock test cost this run its first task) — a guard
+  that no test may read the real clock, so a date-bomb can't quietly go red on a future date.**
+  *(Pillar: infra / trust — PRIORITY 3 in effect, because a red baseline outranks everything an hour later; size S;
+  test-only.)* This run opened on a **red frontend suite**: `Tonight.test.tsx` had hard-coded `"2026-08-15"` as
+  "a future night", and 2026-08-15 arrived (fixed in v0.258.1). It was green in CI for weeks and would have gone
+  red on a day nobody was looking — and it burns a whole Builder run's first task every time. **The class matters
+  more than the instance:** a test that mixes a literal date with the *real* clock is deterministic today and
+  broken later, and no amount of care at review time catches it. **Slice:** a meta-test that reads every
+  `*.test.ts(x)` (and, on the Python side, every `tests/**/*.py`) and fails on an unannotated wall-clock read —
+  `new Date()` with no argument, `Date.now()`, `datetime.now()`, `date.today()`, `utcnow()` — with an explicit
+  opt-out comment (`// wall-clock: <why>`) for the handful of tests that legitimately need one (`futureNight()` in
+  `Tonight.test.tsx` is exactly that case, and would carry the marker). Today the frontend has **one** such file
+  and the Python date tests all inject `today=`/`now=`, so the guard lands green with a single annotation — which
+  is the right time to add it. **Care:** grep-based guards rot into noise if they over-fire; scope it to test files
+  only, keep the message explanatory ("a literal date + the real clock is a test that fails on a future date"), and
+  prove it fires by mutation (add a wall-clock read, watch it fail) exactly as the `incoming/` guard does.
 
 - ~~**DRIFT GUARD (Builder 2026-08-13, spotted while shipping v0.254.0) — the "how many more clear nights?" pace
   rules are mirrored by hand across Python and TypeScript, with nothing but a comment holding them together.**~~ —

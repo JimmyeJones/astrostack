@@ -3,7 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { api, type StackFraming } from "../../api/client";
-import { recentreCropRect, recentreKeptLabel } from "../editor/recentreCrop";
+import {
+  recentreCropRect, recentreKeptLabel, recentreRefusalLine,
+} from "../editor/recentreCrop";
+import { cropCoverageFraction } from "../editor/mosaicTrim";
 
 const TONE: Record<StackFraming["level"], { color: string; icon: string }> = {
   centred: { color: "teal", icon: "🎯" },
@@ -40,14 +43,32 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
     queryFn: () => api.stackFraming(safe, runId),
   });
   const v = q.data;
-  if (!v) return null;
-  const tone = TONE[v.level] ?? TONE.centred;
   // The picture they have *now* can often be improved too: when the target landed
   // off to one side and a crop can put it back in the middle without gutting the
   // frame, offer that as a one-click trip into the editor. An offer, never an
   // automatic change — it lands as a normal Crop op they preview, apply, adjust
   // or drop. Absent (older backend, or a crop that wouldn't help) → no link.
-  const recentre = recentreCropRect(v.recentre);
+  const recentre = recentreCropRect(v?.recentre);
+  // …but the verdict is measured from the *stack*, which can't see that the user
+  // already cropped this picture in the editor an hour ago. Offering to re-centre
+  // something they re-centred themselves reads as the app not noticing their work,
+  // so ask the saved recipe — only when there's actually an offer to make, so an
+  // ordinary target page costs no extra request.
+  const recipe = useQuery({
+    queryKey: ["recipe", safe, runId],
+    queryFn: () => api.getRecipe(safe, runId),
+    enabled: !!recentre,
+  });
+  if (!v) return null;
+  const tone = TONE[v.level] ?? TONE.centred;
+  // A *disabled* crop op isn't shrinking anything, which `cropCoverageFraction`
+  // already knows. An unreadable recipe falls back to making the offer — the old
+  // behaviour — rather than silently withholding it.
+  const alreadyCropped = !!recentre
+    && recipe.isSuccess
+    && cropCoverageFraction(recipe.data?.ops ?? []) != null;
+  const offerRecentre = !!recentre && !recipe.isLoading && !alreadyCropped;
+  const refusal = recentre ? null : recentreRefusalLine(v.recentre_refused, v.object_name);
   return (
     <Alert
       color={tone.color}
@@ -61,7 +82,7 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
       }
     >
       <Text size="sm">{`${v.object_name} ${v.text}`}</Text>
-      {recentre ? (
+      {offerRecentre && recentre ? (
         <Text size="sm" mt={6}>
           <Anchor component={Link} to={`/targets/${safe}/edit/${runId}?recentre=1`}
             data-testid="framing-recentre">
@@ -70,6 +91,22 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
           {` — crop it so ${v.object_name} sits in the middle `}
           ({recentreKeptLabel(recentre)}). You can adjust or remove the crop
           afterwards.
+        </Text>
+      ) : null}
+      {alreadyCropped ? (
+        <Text size="sm" mt={6} data-testid="framing-already-cropped">
+          You've already cropped this picture —{" "}
+          <Anchor component={Link} to={`/targets/${safe}/edit/${runId}`}>
+            open the editor
+          </Anchor>
+          {" "}to adjust it.
+        </Text>
+      ) : null}
+      {/* The worst-framed pictures used to get the *least* help: no offer and no
+          explanation. This is the sentence the refusal already knew. */}
+      {refusal ? (
+        <Text size="sm" c="dimmed" mt={6} data-testid="framing-recentre-refused">
+          {refusal}
         </Text>
       ) : null}
       <Text size="xs" c="dimmed" mt={4}>

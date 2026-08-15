@@ -5,7 +5,18 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TonightView } from "./Tonight";
 import * as client from "../api/client";
+import { isoDate } from "../tonight";
 import type { NightPlan, PlannedTarget } from "../api/client";
+
+/** A night that is genuinely in the future, whenever this suite happens to run.
+ *
+ * These two tests need a date the page will treat as "not tonight". A hard-coded
+ * literal can't: `planNightLabel` reads a date equal to today as tonight, so the
+ * original `"2026-08-15"` quietly became a *passing-then-failing* time bomb that
+ * went red the moment the calendar reached it. Derived from the clock, the same
+ * assertions hold forever — and +7 days stays inside the picker's own
+ * `MAX_PLAN_LOOKAHEAD_DAYS` bound. */
+const futureNight = () => isoDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
 
 function target(over: Partial<PlannedTarget>): PlannedTarget {
   return {
@@ -154,7 +165,7 @@ describe("TonightView", () => {
     expect(spy).toHaveBeenLastCalledWith(expect.not.objectContaining({ date: expect.anything() }));
 
     // Picking a future date refetches with that date and renames the sections.
-    const future = "2026-08-15";
+    const future = futureNight();
     fireEvent.change(screen.getByLabelText("Night"), { target: { value: future } });
     await waitFor(() =>
       expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ date: future })));
@@ -212,9 +223,10 @@ describe("TonightView", () => {
 
     // Re-plan a night whose fresh data has no nebula — the stale "Nebula"
     // selection must fall back to All rather than filtering the table to empty.
-    fireEvent.change(screen.getByLabelText("Night"), { target: { value: "2026-08-15" } });
+    const future = futureNight();
+    fireEvent.change(screen.getByLabelText("Night"), { target: { value: future } });
     await waitFor(() =>
-      expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ date: "2026-08-15" })));
+      expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ date: future })));
     await waitFor(() => expect(screen.getByText(/M81/)).toBeInTheDocument());
     expect(screen.queryByText(/No targets of that type/)).not.toBeInTheDocument();
   });

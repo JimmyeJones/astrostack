@@ -10,6 +10,7 @@ from seestack.framing import (
     framing_hint,
     framing_result_verdict,
     recentre_crop,
+    recentre_outcome,
 )
 from seestack.nightplan import load_catalog
 
@@ -286,3 +287,50 @@ def test_no_offer_without_a_vetted_size_or_from_a_degenerate_frame():
     assert recentre(750, 400, 10, arcsec_per_px=0.0) is None
     assert recentre(float("nan"), 400, 10) is None
     assert recentre(750, float("inf"), 10) is None
+
+
+# ---------------------------------------------------------------------------
+# Why there's no offer — the refusal reason, so the worst-framed pictures don't
+# get *less* help than the mildly off-centre ones.
+# ---------------------------------------------------------------------------
+
+
+def outcome(x, y, size_arcmin, **over):
+    return recentre_outcome(
+        x_px=x, y_px=y, size_arcmin=size_arcmin, **{**FRAME, **over},
+    )
+
+
+def test_the_too_destructive_refusal_says_how_little_the_crop_would_keep():
+    # The case the app used to go quiet on: pushed into a corner, the crop that
+    # would centre it exists and is measurable — it just isn't worth taking. That
+    # number is what makes "better to re-point next session" an honest sentence.
+    o = outcome(900, 700, 10)
+    assert o.crop is None
+    assert o.reason == "too_destructive"
+    assert o.kept is not None and 0.0 < o.kept < 0.4
+
+
+def test_each_other_refusal_carries_its_own_reason():
+    assert outcome(500, 400, 10).reason == "centred"        # nothing to fix
+    assert outcome(750, 400, 60).reason == "cramped"        # no room around it
+    assert outcome(750, 400, None).reason == "unknown_size"  # never guess
+    assert outcome(750, 400, 10, width_px=0).reason == "degenerate"
+    assert outcome(float("nan"), 400, 10).reason == "degenerate"
+
+
+def test_an_offer_reports_no_reason_and_the_kept_fraction_it_chose():
+    o = outcome(750, 400, 10)
+    assert o.crop is not None
+    assert o.reason is None
+    assert o.kept == pytest.approx(o.crop.kept)
+
+
+def test_the_two_views_of_the_same_answer_can_never_disagree():
+    # `recentre_crop` is a thin view over `recentre_outcome`, so every case the
+    # offer covers must agree with the outcome's crop — one implementation.
+    for x, y, size in (
+        (750, 400, 10), (900, 700, 10), (500, 400, 10), (750, 400, 60),
+        (250, 400, 10), (500, 600, 10), (500, 60, 30), (500, 400, 180),
+    ):
+        assert recentre(x, y, size) == outcome(x, y, size).crop, (x, y, size)
