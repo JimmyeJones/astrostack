@@ -846,6 +846,16 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           <HazyNightBadge ratio={run.transparency_ratio} />
           <PanelSeamsBadge verdict={run.seam_verdict} />
           <CalibrationBadge calstat={run.calstat} />
+          {/* Same honesty as the Target page's hero: this card's thumbnail is the
+              baked preview, so a saved-but-never-exported edit isn't in it. The
+              one-click finish lives on the hero; here it's just a truthful label
+              next to the picture it applies to. */}
+          {run.unexported_edit && (
+            <Badge variant="light" color="violet"
+                   title="You saved an edit for this stack but never exported it, so this thumbnail is the un-edited version. Open the editor to export it.">
+              edit not exported
+            </Badge>
+          )}
           <Badge variant="light">{run.n_frames_used} frames</Badge>
         </Group>
       </Group>

@@ -721,6 +721,11 @@ export interface StackRun {
   calstat?: string | null;
   options?: Record<string, unknown>;
   engine_version?: string | null;
+  // True when an edit was saved for this run in the editor but never exported —
+  // so the preview shown here (and on History and the Gallery) is still the plain
+  // auto-stretch of the linear stack, not the picture the user made. Absent on an
+  // older backend, which reads as "no unfinished edit" and shows nothing.
+  unexported_edit?: boolean;
 }
 
 export interface StackInfoCard {
@@ -2144,6 +2149,15 @@ export const api = {
     req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/export`, {
       method: "POST",
       body: JSON.stringify({ recipe, output_name: outputName, tiff_mode: tiffMode }),
+    }),
+  /** Export the run's own *saved* recipe — "finish the edit I already saved",
+   *  for someone who pressed Save in the editor and closed it. Omitting `recipe`
+   *  makes the server use the stored one, so the browser never has to fetch and
+   *  round-trip a recipe it isn't editing. */
+  exportSavedEdit: (safe: string, runId: number, outputName: string) =>
+    req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/export`, {
+      method: "POST",
+      body: JSON.stringify({ output_name: outputName, tiff_mode: "linear" }),
     }),
   getAutoPreferences: () => req<AutoPreferences>("/api/editor/auto-preferences"),
   /** The profile scoped to a run's archetype (galaxy/nebula/cluster), so the
