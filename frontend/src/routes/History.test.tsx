@@ -1318,3 +1318,23 @@ describe("HistoryView adjustable render", () => {
     expect(screen.queryByText(SAMPLE_TOUR_COPY.history.title)).not.toBeInTheDocument();
   });
 });
+
+// The History card's thumbnail is the same baked preview the Target hero shows,
+// so it needs the same honesty about an edit that was saved but never exported.
+describe("HistoryView — an edit saved but never exported", () => {
+  it("labels the run whose picture doesn't include the saved edit", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ unexported_edit: true }),
+    ]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(screen.getByText("edit not exported")).toBeInTheDocument();
+  });
+
+  it("says nothing on an ordinary run", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(screen.queryByText("edit not exported")).not.toBeInTheDocument();
+  });
+});

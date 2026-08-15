@@ -1,9 +1,12 @@
-import { useState } from "react";
-import { Anchor, Box, Group, Image, Paper, Text } from "@mantine/core";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Anchor, Box, Button, Group, Image, Paper, Text } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type StackRun } from "../../api/client";
 import { formatIntegration } from "../../format";
 import { ImageLightbox } from "../ImageLightbox";
+import { isJobPollAbort, pollJobUntilDone } from "../editor/pollJob";
 import { sharePictureText } from "../../share";
 
 /**
@@ -48,6 +51,35 @@ export function LatestPictureCard({
   run?: StackRun | null;
 }) {
   const [light, setLight] = useState(false);
+  const qc = useQueryClient();
+  // Hooks must run unconditionally, so this is declared before the early return.
+  // `run` is captured lazily inside the mutation, which only fires from a button
+  // that cannot exist without one.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+  const finishEdit = useMutation({
+    mutationFn: () => api.exportSavedEdit(safe, run!.id, `${safe}_edit`),
+    onSuccess: ({ job_id }) => {
+      notifications.show({
+        message: "Making your edited version — it'll appear here when it's done.",
+        color: "violet",
+      });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      // Refresh the runs list when the export lands, so the promise the message
+      // makes ("it'll appear here") is one the page actually keeps — the new run
+      // becomes the hero and this note goes away, with no manual reload.
+      // Best-effort and unmount-guarded; the navbar job badge tracks it anyway.
+      void pollJobUntilDone(job_id, {
+        getJob: api.getJob, isAbandoned: () => !mounted.current, intervalMs: 1000,
+      })
+        .then(() => qc.invalidateQueries({ queryKey: ["runs", safe] }))
+        .catch((e) => {
+          if (isJobPollAbort(e)) return;
+          notifications.show({ message: (e as Error).message, color: "red" });
+        });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
   if (!run || !run.has_preview) return null;
   const previewSrc = api.stackArtifactUrl(safe, run.id, "preview");
   const share = sharePictureText(name, new Date(run.timestamp_utc).toLocaleDateString());
@@ -82,6 +114,35 @@ export function LatestPictureCard({
       <Text size="xs" c="dimmed" mt={6}>
         {latestPictureCaption(run)} — click to view it big
       </Text>
+      {/* The honest half of "your picture": a saved-but-never-exported edit lives
+          only in the editor, so what's shown above is still the plain auto-stretch
+          of the stack. Say so where the picture is, and offer the one step that
+          makes their version the real one — rather than quietly showing an image
+          they didn't make. */}
+      {run.unexported_edit && (
+        <Alert
+          color="violet" variant="light" p="xs" mt="xs" radius="sm"
+          data-testid="unexported-edit"
+        >
+          <Text size="xs">
+            You edited this picture and saved it, but never exported it — so this is
+            still the un-edited version. Finishing it makes your edit the picture
+            shown here, in the Gallery, and in anything you share.
+          </Text>
+          <Group gap="sm" mt={6} wrap="nowrap">
+            <Button
+              size="compact-xs" variant="light" color="violet"
+              loading={finishEdit.isPending}
+              onClick={() => finishEdit.mutate()}
+            >
+              Finish my edit
+            </Button>
+            <Anchor component={Link} to={`/targets/${safe}/edit/${run.id}`} size="xs">
+              Open the editor
+            </Anchor>
+          </Group>
+        </Alert>
+      )}
       <ImageLightbox
         src={light ? previewSrc : null}
         title={run.output_basename}

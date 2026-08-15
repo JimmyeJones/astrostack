@@ -396,12 +396,22 @@ def channel_combine(safe: str, body: dict[str, Any], request: Request) -> dict[s
 
 @router.get("/api/targets/{safe}/stack-runs", response_model=list[StackRunOut])
 def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
     lib, proj = deps.open_target_project(request, safe)
     try:
         runs = list(proj.iter_stack_runs())
         # The pinned "cover" run (library-level), so the History card can mark it.
         entry = lib.find_target(safe)
         cover_id = entry.cover_stack_run_id if entry is not None else None
+        # One small meta read per run, so every surface that shows a run's picture
+        # can tell an un-exported saved edit from a finished one (see
+        # ``_unexported_edit``). The recipes live in the same already-open DB.
+        unexported = {
+            r.id: _unexported_edit(r.options_json,
+                                   proj.get_meta(f"{RECIPE_META_PREFIX}{r.id}"))
+            for r in runs
+        }
     finally:
         proj.close()
         lib.close()
@@ -431,6 +441,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             calstat=r.calstat,
             options=_parse_options(r.options_json),
             engine_version=r.engine_version,
+            unexported_edit=unexported.get(r.id, False),
         ))
     return out
 
@@ -461,6 +472,52 @@ def _preview_is_display_space(options_json: str | None) -> bool:
     except json.JSONDecodeError:
         return False
     return isinstance(parsed, dict) and bool(parsed.get("preview_display_space", False))
+
+
+def _unexported_edit(options_json: str | None, recipe_json: str | None) -> bool:
+    """True when this run carries a **saved editor recipe that its stored preview
+    does not show** — the user edited the picture, pressed Save, and never
+    exported.
+
+    Why it matters: every surface that shows "your picture" (the Target page's
+    hero, History, the Gallery) serves the run's *baked* preview PNG. For an
+    export — or an in-place "Process target" Auto edit — that preview genuinely
+    is the finished look. But a saved-only recipe lives in the project DB and
+    nowhere else, so the app keeps showing the plain auto-stretch of the linear
+    stack and the user's work is invisible outside the editor. Flagging it lets
+    those surfaces say so honestly (and offer to finish the export) instead of
+    quietly presenting an image the user didn't make.
+
+    False when there is no recipe, when the recipe is unparseable, when every op
+    in it is disabled — a recipe that changes nothing is not an unfinished edit —
+    and for an in-place "Process target" Auto edit, whose recipe *is* what its
+    preview shows.
+
+    Note which display-space marker is checked and which is not, because the two
+    are written by different paths and only one of them bakes the stored recipe:
+    ``preview_display_space`` marks the in-place Auto edit, which stamps the
+    recipe it just baked onto the *same* run (``pipeline._auto_process_run``), so
+    a recipe there is already visible and must not be flagged. ``display_space``
+    marks an editor *export*, which writes a **new** run and deliberately stores
+    no recipe on it — so a recipe on such a run can only have come from the user
+    re-opening that export, editing it further and saving, which is exactly the
+    unfinished edit this flags. Excluding it would silently miss every
+    second-round edit."""
+    if not recipe_json:
+        return False
+    opts = _parse_options(options_json)
+    if opts.get("preview_display_space"):
+        return False
+    try:
+        parsed = json.loads(recipe_json)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    ops = parsed.get("ops")
+    if not isinstance(ops, list):
+        return False
+    return any(isinstance(op, dict) and op.get("enabled", True) for op in ops)
 
 
 def _run_is_reusable(options_json: str | None) -> bool:
