@@ -695,7 +695,7 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
         return None
 
     def work() -> dict[str, Any] | None:
-        from seestack.framing import framing_result_verdict, recentre_crop
+        from seestack.framing import framing_result_verdict, recentre_outcome
         from seestack.io.wcs_io import celestial_wcs_from_fits
 
         wcs, width, height = celestial_wcs_from_fits(fits_path)
@@ -718,13 +718,14 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
         # "Re-centre this picture": the crop that would bring an off-centre object
         # back to the middle, offered only when the verdict is exactly that — a
         # clipped or oversized object can't be helped by cropping, and a centred
-        # one has nothing to gain. `recentre_crop` refuses on its own terms too
+        # one has nothing to gain. The engine refuses on its own terms too
         # (too destructive, or too cramped around the object), so this is `null`
         # far more often than it isn't. An offer, never an automatic change.
-        rc = recentre_crop(
+        outcome = recentre_outcome(
             x_px=x_px, y_px=y_px, width_px=width, height_px=height,
             arcsec_per_px=scale, size_arcmin=info.size_arcmin,
         ) if v.level == "off_centre" else None
+        rc = outcome.crop if outcome else None
         return {
             "level": v.level,
             "text": v.text,
@@ -734,6 +735,15 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
             # convention, plus the fraction of the frame it keeps.
             "recentre": None if rc is None else {
                 "x0": rc.x0, "y0": rc.y0, "x1": rc.x1, "y1": rc.y1, "kept": rc.kept,
+            },
+            # Why there is no offer, when the verdict said "off to one side" but
+            # cropping can't help. Present so the *worst*-framed pictures don't
+            # get less help than the mildly off-centre ones: the caller can say
+            # "cropping back to the middle would leave only about a fifth of the
+            # picture" instead of going quiet. `kept` is what that crop would have
+            # kept (0–1), and is only meaningful for `too_destructive`.
+            "recentre_refused": None if (outcome is None or rc is not None) else {
+                "reason": outcome.reason, "kept": outcome.kept,
             },
             # The name the sentence is prefixed with, so one voice covers this
             # card and the pre-shoot "will it fit?" hint.

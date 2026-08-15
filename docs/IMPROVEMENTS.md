@@ -6554,8 +6554,32 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-13, the gap left by shipping the re-centring crop v0.257.0) — when a target landed
-  *so* far off-centre that no crop can rescue it, the app goes quiet about the one thing it just measured.**
+- ~~**NEW IDEA (Builder 2026-08-13, the gap left by shipping the re-centring crop v0.257.0) — when a target landed
+  *so* far off-centre that no crop can rescue it, the app goes quiet about the one thing it just measured.**~~ —
+  **SHIPPED v0.259.1** (Builder 2026-08-15, branch `claude/serene-goldberg-wa400h`), together with the
+  already-cropped entry below: both are the same paragraph of UI, so shipping them apart would have meant editing
+  the same six lines twice. Built to the filed slice — **the refusal reason travels with the (null) offer, and only
+  the destructive case gets words.**
+  **Engine, one implementation and two views** (the alternative — a second function re-deriving the geometry — is
+  exactly the hand-synced-copies mistake the `webapp/goals.py` entry above was filed for): `recentre_crop` is now a
+  thin wrapper over a new `recentre_outcome`, which returns `RecentreOutcome(crop, reason, kept)`. Every early
+  return names itself (`unknown_size`, `degenerate`, `centred`, `cramped`, `too_destructive`), and the destructive
+  one carries **the kept fraction it would have had** — the number that makes the sentence honest. `recentre_crop`
+  keeps its exact signature and semantics, so all 14 pre-existing engine assertions pass untouched, and a test
+  walks eight geometries asserting the two views can never disagree.
+  **Frontend:** `recentreRefusalLine()` renders *only* `too_destructive`, and only with a usable fraction — every
+  other reason, a missing `kept`, and an older backend that omits the field all stay silent, as the entry's "keep
+  the other refusals silent" instruction asks. It reads as one dimmed line **inside the existing note**, never a
+  new banner (the entry's "Care", and the IA work). The fraction is worded rather than percented
+  (`keptFractionWords`: 0.19 → *"a fifth"*), falling back to a percentage below a twelfth where a fraction word
+  would be worse than a number. Additive and upgrade-safe: one new nullable response field, one new engine
+  function, nothing renamed, no default changed. **Tests (+16):** `tests/test_framing.py` (+4 — the destructive
+  refusal's reason and kept fraction, each other reason, an offer reporting no reason, and the two-views agreement),
+  `tests/webapp/test_stack_framing.py` (+2 — a small object cornered on a real WCS returns
+  `too_destructive` with its fraction; an offered crop and a verdict cropping can't address both carry no refusal),
+  `recentreCrop.test.ts` (+5) and `FramingVerdictNote.test.tsx` (+2 — the sentence, and silence on every other
+  reason).
+  *(Original spec kept below for provenance.)*
   *(Pillar: friendliness / trust — PRIORITY 3; size XS–S; frontend copy + one already-computed number.)*
   `recentre_crop` refuses when the crop would keep under 40 % of the frame, which is right — but the result is
   that the *worst-framed* pictures get **less** help than the mildly off-centre ones: the note says "it sits well
@@ -6567,8 +6591,25 @@ to **Shipped**.)_
   is already said by the `partial` verdict, and "already centred" needs no words. **Care:** don't turn this into
   a second nudge — one line, inside the existing note, never a new banner (the IA work).
 
-- **NEW IDEA (Builder 2026-08-13, spotted while wiring the re-centre offer into two surfaces) — the framing
-  verdict describes the *stack*, so it keeps offering to re-centre a picture the user has already re-centred.**
+- ~~**NEW IDEA (Builder 2026-08-13, spotted while wiring the re-centre offer into two surfaces) — the framing
+  verdict describes the *stack*, so it keeps offering to re-centre a picture the user has already re-centred.**~~ —
+  **SHIPPED v0.259.1** (Builder 2026-08-15, branch `claude/serene-goldberg-wa400h`), with the refusal-reason entry
+  above. Built to the filed slice, including its "grep first": the predicate already existed —
+  `cropCoverageFraction` (`components/editor/mosaicTrim.ts`) returns `null` exactly when no *enabled*
+  `geometry.crop` is shrinking the picture, so a **disabled** crop op correctly still gets the offer (pinned by a
+  test). `FramingVerdictNote` now asks `api.getRecipe` — **only when there is actually an offer to make**
+  (`enabled: !!recentre`), so an ordinary target page costs no extra request — and, on an already-cropped picture,
+  swaps the offer for *"You've already cropped this picture — open the editor to adjust it"*, linking to the editor
+  without the `?recentre=1` deep-link. **The verdict itself is untouched**, as the entry's "Care" insists: it
+  describes what the *stack* caught, which is the honest thing for it to describe. A recipe that can't be read
+  falls back to making the offer — withholding a good offer on a failed request is the worse error of the two.
+  **Deliberately not changed: the editor's own Re-centre button.** There, the recipe *is* the visible state — the
+  crop op is on screen in the op list — and `applyTrimCrop` updates an existing crop in place rather than stacking
+  a second one, so the button can't mislead or compound the way the Target page's offer could. **Tests (+4,
+  `FramingVerdictNote.test.tsx`):** an enabled crop replaces the offer with the already-cropped line (and the
+  verdict text survives unchanged), a disabled crop still gets the offer, an unreadable recipe still gets the
+  offer, and no recipe request is made when there's no offer.
+  *(Original spec kept below for provenance.)*
   *(Pillar: trust / friendliness — PRIORITY 3; size S.)* The verdict is measured from the run's own FITS, which is
   correct and cheap — but the editor's saved recipe may already carry a `geometry.crop` that fixed exactly what
   the note is complaining about. The user then sees "Re-centre this picture" on a picture they re-centred an hour

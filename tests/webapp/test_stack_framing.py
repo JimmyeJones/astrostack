@@ -165,3 +165,53 @@ def test_framing_404s_for_an_unknown_run(client, solved_library):
     safe = _m42(client)
     assert client.get(
         f"/api/targets/{safe}/stack-runs/999999/framing").status_code == 404
+
+
+def test_a_picture_too_far_off_centre_to_rescue_says_why_not(client, solved_library):
+    """The worst-framed pictures used to get *less* help than the mildly
+    off-centre ones: no crop, and no explanation either. The endpoint now returns
+    the refusal reason and how little that crop would have kept, so the caller can
+    say "better to re-point next session" instead of going quiet."""
+    # A small object (M 57, 1.4′) so the "no room around it" refusal can't fire
+    # first, pushed right into a corner of a 2° × 1.3° mosaic canvas at the
+    # Seestar's own sampling: cropping it back to the middle is *possible* and
+    # keeps under a tenth of the picture, which is the case worth explaining.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        entry, proj = lib.create_target("M 57", ra_deg=283.396, dec_deg=33.029)
+        proj.close()
+    finally:
+        lib.close()
+    safe = entry.safe_name
+    # Pointed up and to the left of the nebula so it lands ~80 % of the way out
+    # toward the bottom-right corner (dec grows with y, RA falls with x here).
+    run_id = _add_run(solved_library, safe, ra=284.350, dec=32.495,
+                      w=3000, h=2000, arcsec_per_px=2.4)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "off_centre"
+    assert body["coverage"] == pytest.approx(1.0)   # all of it is in frame
+    assert body["recentre"] is None                 # ...but no crop is offered
+    refused = body["recentre_refused"]
+    assert refused is not None
+    assert refused["reason"] == "too_destructive"
+    assert 0.0 < refused["kept"] < 0.4              # the number the copy needs
+
+
+def test_an_offered_crop_carries_no_refusal(client, solved_library):
+    safe = _m42(client)
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC + 0.7,
+                      w=6000, h=4500, arcsec_per_px=3.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["recentre"] is not None
+    assert body["recentre_refused"] is None
+
+    # And a verdict that cropping can't address at all reports neither — the
+    # refusal is only ever about an off-centre picture.
+    centred = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                       w=4000, h=3000, arcsec_per_px=3.0)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{centred}/framing").json()
+    assert body["level"] == "centred"
+    assert body["recentre"] is None
+    assert body["recentre_refused"] is None
