@@ -1,6 +1,6 @@
 import { AppShell, Badge, Box, Burger, Button, Group, NavLink, ScrollArea, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { IconActivity, IconAward, IconDatabase, IconFileText, IconFlask, IconGauge, IconLayoutGrid, IconMoon, IconPalette, IconPhoto, IconRadar2, IconSettings, IconSparkles, IconStars, IconTelescope, IconVideo } from "@tabler/icons-react";
+import { IconActivity, IconPhoto, IconRadar2 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink as RouterNavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
@@ -9,6 +9,7 @@ import type { Job } from "./api/client";
 import { api } from "./api/client";
 import { isJobNotifyEnabled, justFinishedJobs, showJobNotification } from "./jobNotify";
 import { isNavActive } from "./navActive";
+import { NAV_SECTIONS } from "./nav";
 import { jobKindLabel } from "./routes/Jobs";
 import { AmbientToggle } from "./components/AmbientToggle";
 
@@ -113,24 +114,6 @@ export function App() {
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
-  const links = [
-    { to: "/", label: "Dashboard", icon: <IconGauge size={18} />, end: true },
-    { to: "/library", label: "Library", icon: <IconStars size={18} /> },
-    { to: "/telescope", label: "Telescope", icon: <IconTelescope size={18} /> },
-    { to: "/gallery", label: "Gallery", icon: <IconLayoutGrid size={18} /> },
-    { to: "/best", label: "My best pictures", icon: <IconAward size={18} /> },
-    { to: "/sky-so-far", label: "Your sky, so far", icon: <IconSparkles size={18} /> },
-    { to: "/tonight", label: "Tonight", icon: <IconMoon size={18} /> },
-    { to: "/moon-sun", label: "Moon & Sun", icon: <IconVideo size={18} /> },
-    { to: "/sky", label: "Sky Map", icon: <IconRadar2 size={18} /> },
-    { to: "/jobs", label: "Jobs", icon: <IconActivity size={18} /> },
-    { to: "/calibration", label: "Calibration", icon: <IconFlask size={18} /> },
-    { to: "/combine", label: "Channel combine", icon: <IconPalette size={18} /> },
-    { to: "/storage", label: "Storage", icon: <IconDatabase size={18} /> },
-    { to: "/logs", label: "Logs", icon: <IconFileText size={18} /> },
-    { to: "/settings", label: "Settings", icon: <IconSettings size={18} /> },
-  ];
-
   return (
     <AppShell
       header={{ height: 60 }}
@@ -163,19 +146,33 @@ export function App() {
 
       <AppShell.Navbar p="xs">
         <ScrollArea>
-          {links.map((l) => (
-            <NavLink
-              key={l.to}
-              component={RouterNavLink}
-              to={l.to}
-              end={l.end}
-              label={l.label}
-              leftSection={l.icon}
-              rightSection={l.to === "/settings" ? <OutdatedTargetsBadge /> : undefined}
-              onClick={closeNav}
-              active={isNavActive(location.pathname, l.to, l.end)}
-            />
-          ))}
+          {/* IA slice (d): the same 15 destinations, under plain-language headings.
+              Nothing collapses — the headings only make the list scannable. */}
+          {NAV_SECTIONS.map((section, i) => {
+            const headingId = section.title ? `nav-section-${i}` : undefined;
+            return (
+              <Box key={section.title ?? "home"} role="group" aria-labelledby={headingId} mb={4}>
+                {section.title && (
+                  <Text id={headingId} size="xs" tt="uppercase" fw={700} c="dimmed" px="sm" mt="sm" mb={4}>
+                    {section.title}
+                  </Text>
+                )}
+                {section.links.map((l) => (
+                  <NavLink
+                    key={l.to}
+                    component={RouterNavLink}
+                    to={l.to}
+                    end={l.end}
+                    label={l.label}
+                    leftSection={l.icon}
+                    rightSection={l.to === "/settings" ? <OutdatedTargetsBadge /> : undefined}
+                    onClick={closeNav}
+                    active={isNavActive(location.pathname, l.to, l.end)}
+                  />
+                ))}
+              </Box>
+            );
+          })}
           <Text size="xs" c="dimmed" mt="lg" px="sm">
             Drop Seestar folders into the watched dataset; processing runs automatically.
           </Text>
