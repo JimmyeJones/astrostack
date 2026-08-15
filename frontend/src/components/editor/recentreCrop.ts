@@ -1,4 +1,4 @@
-import type { StackRecentreCrop } from "../../api/client";
+import type { StackRecentreCrop, StackRecentreRefusal } from "../../api/client";
 import type { TrimCrop } from "./mosaicTrim";
 
 /** The re-centring crop as the editor's fractional crop rectangle, or `null`
@@ -24,4 +24,40 @@ export function recentreCropRect(
 export function recentreKeptLabel(crop: TrimCrop): string {
   const pct = Math.round((crop.x1 - crop.x0) * (crop.y1 - crop.y0) * 100);
   return `keeps ${Math.min(99, Math.max(1, pct))}% of the picture`;
+}
+
+/** How much of the picture a fraction is, in words a beginner reads without
+ * doing arithmetic: 0.21 → "a fifth". Falls back to a percentage below the
+ * smallest simple fraction, because "a twentieth" is worse than "5%". Pure. */
+export function keptFractionWords(kept: number): string {
+  const WORDS: [number, string][] = [
+    [1 / 2, "half"], [2 / 5, "two fifths"], [1 / 3, "a third"], [1 / 4, "a quarter"],
+    [1 / 5, "a fifth"], [1 / 6, "a sixth"], [1 / 8, "an eighth"], [1 / 10, "a tenth"],
+  ];
+  if (kept < 1 / 12) return `${Math.max(1, Math.round(kept * 100))}%`;
+  let best = WORDS[0];
+  for (const w of WORDS) {
+    if (Math.abs(w[0] - kept) < Math.abs(best[0] - kept)) best = w;
+  }
+  return best[1];
+}
+
+/** The honest line for a picture that landed *too* far off-centre to rescue by
+ * cropping — the case where the app used to go quiet on exactly the pictures it
+ * had the most to say about. Returns `null` for every other refusal: "the object
+ * is bigger than the frame" is already said by the `partial` verdict, "already
+ * centred" needs no words, and an unmeasurable picture has nothing honest to add.
+ * Pure. */
+export function recentreRefusalLine(
+  refused: StackRecentreRefusal | null | undefined,
+  objectName: string,
+): string | null {
+  if (!refused || refused.reason !== "too_destructive") return null;
+  const kept = refused.kept;
+  if (typeof kept !== "number" || !Number.isFinite(kept) || kept <= 0 || kept >= 1) {
+    return null;
+  }
+  return `Cropping ${objectName} back to the middle would leave only about `
+    + `${keptFractionWords(kept)} of the picture, so it's better to re-point next `
+    + "session than to crop this one.";
 }

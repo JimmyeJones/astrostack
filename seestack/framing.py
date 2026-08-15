@@ -239,6 +239,30 @@ _RECENTRE_TOLERANCE = 0.25
 _RECENTRE_MIN_KEPT = 0.40
 
 
+@dataclass(frozen=True)
+class RecentreOutcome:
+    """What asking for a re-centring crop came to — the crop, or *why not*.
+
+    :func:`recentre_crop` answers only "is there an offer?", which leaves the
+    worst-framed pictures with *less* to say than the mildly off-centre ones: a
+    picture too far out to rescue silently gets no offer and no explanation. This
+    carries the reason alongside, so a caller can say the honest sentence instead
+    of going quiet. ``reason`` is a stable machine token:
+
+    - ``None`` — there *is* a crop (``crop`` is set).
+    - ``"unknown_size"`` / ``"degenerate"`` — nothing measurable to work from.
+    - ``"centred"`` — already about as centred as it needs to be; nothing to fix.
+    - ``"cramped"`` — a crop that met the aim would hug the object too tightly.
+    - ``"too_destructive"`` — the crop exists but would throw away too much of
+      the frame to be worth offering. ``kept`` is the fraction (0–1) it *would*
+      have kept, which is the number that makes the refusal explainable.
+    """
+
+    crop: RecentreCrop | None
+    reason: str | None
+    kept: float | None = None
+
+
 def recentre_crop(
     *,
     x_px: float,
@@ -252,7 +276,33 @@ def recentre_crop(
     min_kept: float = _RECENTRE_MIN_KEPT,
 ) -> RecentreCrop | None:
     """The largest crop of this picture that brings an off-centre object back to
-    the middle.
+    the middle, or ``None`` when there is no honest offer to make.
+
+    Thin view over :func:`recentre_outcome` for the callers that only care
+    whether there is an offer — one implementation, two views, so the offer and
+    its explanation can never disagree.
+    """
+    return recentre_outcome(
+        x_px=x_px, y_px=y_px, width_px=width_px, height_px=height_px,
+        arcsec_per_px=arcsec_per_px, size_arcmin=size_arcmin,
+        margin=margin, tolerance=tolerance, min_kept=min_kept,
+    ).crop
+
+
+def recentre_outcome(
+    *,
+    x_px: float,
+    y_px: float,
+    width_px: int,
+    height_px: int,
+    arcsec_per_px: float,
+    size_arcmin: float | None,
+    margin: float = _RECENTRE_MARGIN,
+    tolerance: float = _RECENTRE_TOLERANCE,
+    min_kept: float = _RECENTRE_MIN_KEPT,
+) -> RecentreOutcome:
+    """The largest crop of this picture that brings an off-centre object back to
+    the middle — and, when there isn't one, why not.
 
     Where :func:`framing_result_verdict` says *"it landed off to one side"*, this
     answers *"and here's the picture you could have"*: the biggest rectangle that
@@ -262,33 +312,35 @@ def recentre_crop(
     same already-projected inputs as the verdict, so it stays pure arithmetic —
     no WCS, no astropy, no I/O.
 
-    Returns ``None`` — no offer at all — whenever re-centring wouldn't honestly
-    help: the object is already near the middle (nothing to fix), the crop can't
-    keep :data:`_RECENTRE_MARGIN` of clear space around the object, or it would
-    keep less than ``min_kept`` of the frame. Cropping also cannot un-clip an
-    object that ran off an edge, and that case falls out of the margin test
-    rather than needing its own rule.
+    The crop is ``None`` — no offer at all — whenever re-centring wouldn't
+    honestly help: the object is already near the middle (nothing to fix), the
+    crop can't keep :data:`_RECENTRE_MARGIN` of clear space around the object, or
+    it would keep less than ``min_kept`` of the frame. Cropping also cannot
+    un-clip an object that ran off an edge, and that case falls out of the margin
+    test rather than needing its own rule. Each of those carries its own
+    ``reason`` (see :class:`RecentreOutcome`).
     """
     if size_arcmin is None or size_arcmin <= 0:
-        return None
+        return RecentreOutcome(None, "unknown_size")
     if width_px <= 0 or height_px <= 0 or arcsec_per_px <= 0:
-        return None
+        return RecentreOutcome(None, "degenerate")
     if not (math.isfinite(x_px) and math.isfinite(y_px)):
-        return None
+        return RecentreOutcome(None, "degenerate")
 
     hi_x, hi_y = float(width_px - 1), float(height_px - 1)
     if hi_x <= 0 or hi_y <= 0:
-        return None
+        return RecentreOutcome(None, "degenerate")
     radius_px = (size_arcmin * 60.0 / arcsec_per_px) / 2.0
     if radius_px <= 0:
-        return None
+        return RecentreOutcome(None, "degenerate")
 
     # Same off-centre measure the verdict reports, so the two always agree about
     # whether this picture is off-centre at all.
     half_x, half_y = hi_x / 2.0, hi_y / 2.0
     off_centre = max(abs(x_px - half_x) / half_x, abs(y_px - half_y) / half_y)
     if off_centre <= _OFF_CENTRE_LIMIT:
-        return None  # already about as centred as it needs to be — nothing to offer
+        # Already about as centred as it needs to be — nothing to offer.
+        return RecentreOutcome(None, "centred")
 
     # Per axis, the largest half-size a crop can have. A crop of half-size ``s``
     # whose centre sits within ``tolerance·s`` of the object must still fit the
@@ -298,7 +350,7 @@ def recentre_crop(
     max_w = min(half_x, min(x_px, hi_x - x_px) / slack)
     max_h = min(half_y, min(y_px, hi_y - y_px) / slack)
     if max_w <= 0 or max_h <= 0:
-        return None
+        return RecentreOutcome(None, "cramped")
 
     # Hold the frame's aspect ratio: the binding axis sets both half-sizes.
     aspect = hi_x / hi_y
@@ -308,7 +360,7 @@ def recentre_crop(
     # Room for the object plus clear space around it, or no offer.
     needed = radius_px * (1.0 + margin)
     if half_w < needed or half_h < needed:
-        return None
+        return RecentreOutcome(None, "cramped")
 
     # Put the crop's centre on the object, pulled back only as far as the frame's
     # edges demand — so the object lands as close to the middle as it can get.
@@ -322,5 +374,8 @@ def recentre_crop(
     y1 = min(max((cy + half_h) / h, 0.0), 1.0)
     kept = (x1 - x0) * (y1 - y0)
     if kept < min_kept:
-        return None
-    return RecentreCrop(x0, y0, x1, y1, kept)
+        # The one refusal worth explaining: the crop exists and we know exactly
+        # how little of the picture it would leave, so a caller can say so rather
+        # than going quiet on the worst-framed pictures.
+        return RecentreOutcome(None, "too_destructive", kept)
+    return RecentreOutcome(RecentreCrop(x0, y0, x1, y1, kept), None, kept)

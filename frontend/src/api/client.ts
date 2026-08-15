@@ -854,6 +854,15 @@ export interface StackRecentreCrop {
   kept: number;
 }
 
+/** Why there is no re-centring crop on a picture the verdict *did* call
+ *  off-centre. `reason` is the engine's stable token (`too_destructive` is the
+ *  only one worth saying out loud — see `recentreRefusalLine`); `kept` is the
+ *  fraction of the frame that refused crop would have left. */
+export interface StackRecentreRefusal {
+  reason: string;
+  kept?: number | null;
+}
+
 export interface StackFraming {
   level: "centred" | "off_centre" | "clipped" | "partial";
   text: string;           // the sentence, prefixed by the caller with the name
@@ -863,6 +872,8 @@ export interface StackFraming {
   size_arcmin: number;
   // Additive (an older backend omits it entirely — read as "no offer").
   recentre?: StackRecentreCrop | null;
+  // Additive: why the offer above is absent (older backend → omitted).
+  recentre_refused?: StackRecentreRefusal | null;
 }
 
 export interface StackRunInfo {
