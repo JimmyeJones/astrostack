@@ -10028,7 +10028,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   precedes the table which precedes both the insights and the catalog card, that readiness stays above the table,
   that the *newest* run is the one shown, and that an unstacked target shows no picture card). All 71 pre-existing
   `Target.test.tsx` assertions pass **unchanged**. Frontend-only: no API, schema, config, on-disk or default change.
-  **Next slice: (d) — sidebar grouping.**
+  **Next slice: (e) — the Dashboard.**
+
+  **✅ SLICE (d) SHIPPED — v0.260.0** (Builder 2026-08-15, branch `claude/serene-goldberg-dglvf3`). The sidebar's
+  15 flat links are now four named groups plus the Dashboard. **Measured, as the acceptance criterion asks:**
+  unlabelled links in a single flat run went **15 → 0**; the longest run a beginner has to read to find something
+  went **15 → 4** (the biggest group); destinations **15 → 15** — *nothing removed*, and **nothing hidden**:
+  every link is still visible with **zero** clicks, because the headings only *label* the groups, they do not
+  collapse them. (Collapsible groups were considered and rejected: they'd trade the owner's "busy" complaint for a
+  worse one — a destination you can no longer see.) `App.tsx` is 192 → 191 lines, with the link list lifted into
+  the new `src/nav.tsx` (85 lines) so the sidebar's shape is data a test can read rather than JSX buried in the
+  layout.
+  **The groups, named so a beginner can predict which one a thing lives in:** *(lead, unlabelled)* Dashboard ·
+  **Your pictures** — Library, Gallery, My best pictures, Your sky so far · **Plan a night** — Tonight, Sky Map ·
+  **Capture & process** — Telescope, Moon & Sun, Calibration, Channel combine · **System** — Jobs, Storage, Logs,
+  Settings. The Settings link keeps its `OutdatedTargetsBadge`, the mobile drawer still closes on click, and
+  `isNavActive` highlighting is untouched. Each group is a real `role="group"` labelled by its heading, so a
+  screen-reader user gets the grouping too, not just a sighted one.
+  **Tests (+5, `src/nav.test.tsx`):** the frozen pre-slice flat list is checked link-for-link against
+  `NAV_LINKS` — so a future run that "tidies" a destination away fails immediately — plus no duplicate route, the
+  Dashboard staying `end`-matched (and no other link claiming it), the section shape (few groups, only the lead
+  one unlabelled, no heading over a single link, unique titles), and two render tests over the real `App`: every
+  one of the 15 links is present and visible with its correct `href`, and each named group holds exactly its own
+  links. Frontend-only: no route added or removed, no API, schema, config, on-disk or default change.
 
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
