@@ -9880,8 +9880,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   *both* display-space markers and ignores empty/all-disabled recipes); a second copy is exactly the hand-synced
   drift the `webapp/goals.py` consolidation was written to stop.
 
-- **NEW IDEA (Builder 2026-08-15, the upstream half of the same problem) — the editor's **Save** button doesn't say
-  that a saved edit is invisible everywhere else until you Export.** *(Pillar: friendliness / trust — PRIORITY 3;
+- ~~**NEW IDEA (Builder 2026-08-15, the upstream half of the same problem) — the editor's **Save** button doesn't say
+  that a saved edit is invisible everywhere else until you Export.**~~ — **SHIPPED v0.261.1** (Builder 2026-08-15,
+  branch `claude/serene-goldberg-dglvf3`, in the same run that shipped the downstream half). *(Friendliness /
+  trust — PRIORITY 3.)* Save's confirmation was the bare words *"Recipe saved"*; it now says
+  *"Saved — this look is kept with the picture. Press Export to make it the picture shown everywhere else."*
+  One pure, tested helper (`components/editor/saveMessage.ts`) inside the **existing** notification — not a new
+  always-on block, per the IA overhaul's own rule. **The gate is emptiness, not display-space:** saving a recipe
+  with nothing enabled *clears* the look, so it keeps the plain confirmation (there is nothing waiting to be
+  exported and nagging would be wrong); one live op among disabled ones still points at Export. The entry
+  suggested gating on `already_display` instead — that turned out to be **wrong**, for the reason the sibling fix
+  below found: a re-edit of an exported run needs exporting just as much as a first edit does. **Tests (+4,
+  `saveMessage.test.ts`).** Frontend-only: no API, schema, config, on-disk or default change.
+
+- ~~**FOLLOW-UP FIX to v0.261.0 (Builder 2026-08-15, found by reading the export path while writing the entry
+  above) — the un-exported-edit flag silently missed every *second-round* edit.**~~ — **FIXED v0.261.1**
+  (same run/branch). `_unexported_edit` excluded a run carrying **either** display-space marker, but the two are
+  written by different paths and only one of them bakes the stored recipe: the in-place "Process target" Auto
+  edit (`preview_display_space`) stamps the recipe it just baked onto the *same* run, so a recipe there is
+  already visible and must not be flagged — but an editor **export** (`display_space`) writes a *new* run and
+  deliberately stores **no** recipe on it (`pipeline._apply_editor_to_run`), so a recipe on such a run can only
+  have come from the user re-opening that export, editing it further and pressing Save. That second-round edit is
+  exactly as invisible as the first, and was being swallowed. Now only `preview_display_space` suppresses the
+  flag, with the asymmetry written down where the next reader will hit it. **Tests (+2, one fail-before):** the
+  predicate flags a display-space run *with* a recipe and stays quiet on one without, and an end-to-end
+  export → re-edit → Save flags the exported run.
+
+  *(Original spec kept below for provenance.)*
+  *(Pillar: friendliness / trust — PRIORITY 3;
   size S; frontend-only.)* v0.261.0 fixed the *downstream* symptom — the Target page and History now admit that
   their picture isn't the user's edit. But the moment the misunderstanding is *created* is the editor: **Save** and
   **Export** sit next to each other, both sound final, and Save's success is silent, so a beginner reasonably
