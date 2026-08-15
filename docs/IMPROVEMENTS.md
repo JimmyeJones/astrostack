@@ -10004,8 +10004,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Measured, as the acceptance criterion asks:** always-visible blocks between the page header and the primary
   content went **3 → 0** (the catalog card, the insight tab strip and its open group all sat there; the readiness
   card sat there too and now shares the hero row *beside* the picture rather than stacking above the table), and
-  the frames table's controls now begin **~140 lines earlier in the render** — on a 1080p window the picture and
-  the table's first rows share the first screen. `Target.tsx` is 1554 → 1568 lines (+14), plus the new
+  the frames table now begins at render line **1319, down from 1369** (measured; an earlier draft of this
+  paragraph said "~140 lines earlier", which was wrong — the hero grid's own wrapper gives some of it back), and
+  what it displaced is the *tall* content: ~61 lines of always-on analysis JSX moved below the table, and the
+  readiness card moved beside the picture instead of above it. On a 1080p window the picture and the table's first
+  rows share the first screen. `Target.tsx` is 1554 → 1568 lines (+14), plus the new
   `components/target/LatestPictureCard.tsx` (99 lines).
   **The gap this slice exposed, and closed:** the entry says "put the picture and the frames table at the top" —
   but the Target page **had no picture at all**. A beginner's finished image lived only on History or behind a
