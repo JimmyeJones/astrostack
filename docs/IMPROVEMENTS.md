@@ -9867,6 +9867,23 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-15, the question raised by putting the picture on the Target page — IA slice (c),
+  v0.259.0) — the hero picture shows the *stack's* auto-stretch, not the edit the user made of it.**
+  *(Pillar: trust / friendliness — PRIORITY 3; size S; grep first.)* `LatestPictureCard` serves the run's baked
+  preview PNG. For a run the user exported from the editor that *is* their picture (the preview is written in
+  display space, verbatim). But for a run they edited and **saved a recipe for without exporting**, the preview is
+  still the STF auto-stretch of the linear stack — so the page's headline image is not the picture they made, and
+  the *only* place their edit exists is behind the editor's own preview. That is the same class of "the app didn't
+  notice my work" problem as the re-centre offer fixed in v0.259.1, and it is now on the most prominent surface in
+  the app. **Slice:** decide what the hero should show when a saved recipe exists but no export does — either
+  render the recipe through the existing proxy path for the thumbnail (cost: one render per view; may need a cached
+  sibling, so measure before choosing), or say so in a line under the picture (*"you have unsaved editor changes —
+  open the editor to export them"*), which is nearly free and arguably more honest. **Grep first:** History and the
+  Gallery serve the same baked preview, so whatever this lands on should be considered for them too; and
+  `has_export`/the editor's export path already knows the difference, so the predicate probably exists. **Care:**
+  do not make the Target page do a full-resolution render on load — the RAM-capped NAS is the reason the preview
+  cap exists at all.
+
 - **⭐⭐ OWNER-REQUESTED (2026-08-08) — INFORMATION-ARCHITECTURE OVERHAUL: the pages are "extremely busy"; you have
   to scroll a long way past ~30 stacked things to reach the actual content.** *(PRIORITY 3 friendliness, and the
   owner's top UX complaint about the live build. A standing, MULTI-RUN effort — one page per run, see the slicing
@@ -16906,6 +16923,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **NEW IDEA (Builder 2026-08-15, filed the moment after a wall-clock test cost this run its first task) — a guard
+  that no test may read the real clock, so a date-bomb can't quietly go red on a future date.**
+  *(Pillar: infra / trust — PRIORITY 3 in effect, because a red baseline outranks everything an hour later; size S;
+  test-only.)* This run opened on a **red frontend suite**: `Tonight.test.tsx` had hard-coded `"2026-08-15"` as
+  "a future night", and 2026-08-15 arrived (fixed in v0.258.1). It was green in CI for weeks and would have gone
+  red on a day nobody was looking — and it burns a whole Builder run's first task every time. **The class matters
+  more than the instance:** a test that mixes a literal date with the *real* clock is deterministic today and
+  broken later, and no amount of care at review time catches it. **Slice:** a meta-test that reads every
+  `*.test.ts(x)` (and, on the Python side, every `tests/**/*.py`) and fails on an unannotated wall-clock read —
+  `new Date()` with no argument, `Date.now()`, `datetime.now()`, `date.today()`, `utcnow()` — with an explicit
+  opt-out comment (`// wall-clock: <why>`) for the handful of tests that legitimately need one (`futureNight()` in
+  `Tonight.test.tsx` is exactly that case, and would carry the marker). Today the frontend has **one** such file
+  and the Python date tests all inject `today=`/`now=`, so the guard lands green with a single annotation — which
+  is the right time to add it. **Care:** grep-based guards rot into noise if they over-fire; scope it to test files
+  only, keep the message explanatory ("a literal date + the real clock is a test that fails on a future date"), and
+  prove it fires by mutation (add a wall-clock read, watch it fail) exactly as the `incoming/` guard does.
 
 - ~~**DRIFT GUARD (Builder 2026-08-13, spotted while shipping v0.254.0) — the "how many more clear nights?" pace
   rules are mirrored by hand across Python and TypeScript, with nothing but a comment holding them together.**~~ —
