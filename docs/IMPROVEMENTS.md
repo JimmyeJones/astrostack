@@ -49,6 +49,25 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**⚠ RED BASELINE (Builder 2026-08-15, hit on the first suite run of the run; REPRODUCED on clean `origin/main`)
+  — a Tonight test hard-coded `"2026-08-15"` as "a future night", so the frontend suite went red the day the
+  calendar reached it, and stays red.**~~ — **FIXED v0.258.1** (Builder 2026-08-15, branch
+  `claude/serene-goldberg-wa400h`). *(Infra / test hygiene — it blocks every run's §5 gate until fixed.)*
+  `Tonight.test.tsx`'s "plans a chosen future night" test typed a literal date into the Night picker and then
+  asserted the page renamed its sections to *"Start something new on …"*. But `planNightLabel` returns `""` for a
+  date **equal to today** — by design, so tonight keeps its "…tonight" copy — so on 2026-08-15 the "future" night
+  *was* tonight, the heading stayed "Start something new tonight", and the assertion failed. **Verified
+  pre-existing**: stashing this run's work and running the file on clean `origin/main` fails identically
+  (1 failed / 18 passed), so it was not caused by any change in flight. The Python suite was green throughout
+  (2674 passed / 2 skipped). **Fix:** one shared `futureNight()` helper derives the date from the clock
+  (`isoDate(now + 7 days)` — inside the picker's own `MAX_PLAN_LOOKAHEAD_DAYS` bound), used by both tests that
+  needed a not-tonight date (the second one asserted only the API call, so it was rotting quietly rather than
+  failing). **No assertion was weakened, skipped or deleted** — both still assert exactly what they did, now
+  against a date that is always in the future. Test-only: no app code, config, schema or default touched.
+  **Checked for siblings while there:** `Tonight.test.tsx` is the *only* frontend test file that reads the real
+  clock at all (every other date-sensitive test injects an explicit `now`), and the Python date tests all pass
+  `today=`/`now=` explicitly — so there is no second bomb of this shape waiting.
+
 - ~~**CROSS-SCREEN BUG (Builder 2026-08-12, found while shipping v0.253.0; REPRODUCED) — the Tonight planner ignores
   the integration goal you set, so it tells you to move on from the very target you told the app you want more
   of.**~~ — **FIXED v0.253.1** (Builder 2026-08-12, branch `claude/elegant-bohr-eglrga`). *(Friendliness / trust —
