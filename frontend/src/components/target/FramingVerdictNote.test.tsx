@@ -7,10 +7,10 @@ import * as client from "../../api/client";
 import type { StackFraming } from "../../api/client";
 import { FramingVerdictNote } from "./FramingVerdictNote";
 
-function renderNote() {
+function renderNote(qc: QueryClient = new QueryClient()) {
   return render(
     <MantineProvider>
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={qc}>
         <MemoryRouter>
           <FramingVerdictNote safe="M_42" runId={7} />
         </MemoryRouter>
@@ -27,6 +27,14 @@ const verdict = (over: Partial<StackFraming> = {}): StackFraming => ({
   object_name: "Orion Nebula",
   size_arcmin: 85,
   ...over,
+});
+
+/** A saved editor recipe, optionally carrying the ops that matter here. */
+const recipe = (ops: client.OpInstance[]): client.Recipe => ({ version: 1, ops });
+
+const cropOp = (over: Partial<client.OpInstance> = {}): client.OpInstance => ({
+  uid: "c1", id: "geometry.crop", enabled: true,
+  params: { x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 }, ...over,
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -70,6 +78,7 @@ describe("FramingVerdictNote", () => {
         recentre: { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9, kept: 0.64 },
       }),
     );
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue(recipe([]));
     renderNote();
 
     const link = await screen.findByTestId("framing-recentre");
@@ -111,5 +120,92 @@ describe("FramingVerdictNote", () => {
 
     await waitFor(() => expect(call).toHaveBeenCalledWith("M_42", 7));
     expect(screen.queryByTestId("framing-verdict")).not.toBeInTheDocument();
+  });
+});
+
+describe("FramingVerdictNote — the offer tells the truth", () => {
+  const offCentre = (over: Partial<StackFraming> = {}) => verdict({
+    level: "off_centre",
+    off_centre: 0.5,
+    text: "is all in frame, but sits well off to one side.",
+    recentre: { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9, kept: 0.64 },
+    ...over,
+  });
+
+  it("doesn't offer to re-centre a picture the user already cropped", async () => {
+    // The verdict is measured from the *stack*, which can't see the editor's saved
+    // crop — so it kept offering to fix what the user fixed an hour ago.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(offCentre());
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue(recipe([cropOp()]));
+    renderNote();
+
+    const already = await screen.findByTestId("framing-already-cropped");
+    expect(already).toHaveTextContent("already cropped this picture");
+    expect(screen.getByRole("link", { name: "open the editor" }))
+      .toHaveAttribute("href", "/targets/M_42/edit/7");
+    expect(screen.queryByTestId("framing-recentre")).not.toBeInTheDocument();
+    // The verdict itself is untouched — it describes what the stack caught.
+    expect(screen.getByText(/^Orion Nebula is all in frame/)).toBeInTheDocument();
+  });
+
+  it("still offers when the recipe's crop is switched off", async () => {
+    // A disabled crop op isn't shrinking anything, so there is nothing to notice.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(offCentre());
+    vi.spyOn(client.api, "getRecipe")
+      .mockResolvedValue(recipe([cropOp({ enabled: false })]));
+    renderNote();
+
+    expect(await screen.findByTestId("framing-recentre")).toBeInTheDocument();
+    expect(screen.queryByTestId("framing-already-cropped")).not.toBeInTheDocument();
+  });
+
+  it("keeps offering when the saved recipe can't be read", async () => {
+    // Withholding a good offer on a failed request would be the worse error.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(offCentre());
+    vi.spyOn(client.api, "getRecipe").mockRejectedValue(new Error("nope"));
+    renderNote(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+
+    expect(await screen.findByTestId("framing-recentre")).toBeInTheDocument();
+  });
+
+  it("never asks for the recipe when there is no offer to make", async () => {
+    vi.spyOn(client.api, "stackFraming")
+      .mockResolvedValue(offCentre({ recentre: null }));
+    const rq = vi.spyOn(client.api, "getRecipe").mockResolvedValue(recipe([]));
+    renderNote();
+
+    await screen.findByText("It landed off to one side");
+    expect(rq).not.toHaveBeenCalled();
+  });
+
+  it("says why not when the picture is too far off-centre to rescue", async () => {
+    // The case the app used to go quiet on: no crop, and previously no words —
+    // so the worst-framed picture got less help than a mildly off-centre one.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(offCentre({
+      off_centre: 0.8,
+      recentre: null,
+      recentre_refused: { reason: "too_destructive", kept: 0.19 },
+    }));
+    renderNote();
+
+    const line = await screen.findByTestId("framing-recentre-refused");
+    expect(line).toHaveTextContent(
+      "Cropping Orion Nebula back to the middle would leave only about a fifth "
+      + "of the picture, so it's better to re-point next session than to crop this one.");
+  });
+
+  it("stays quiet about the refusals that need no words", async () => {
+    // "Already centred" needs nothing said, and "no room around it" would just be
+    // noise next to the verdict — only the destructive case is worth explaining.
+    for (const reason of ["centred", "cramped", "unknown_size", "degenerate"]) {
+      vi.spyOn(client.api, "stackFraming").mockResolvedValue(offCentre({
+        recentre: null, recentre_refused: { reason, kept: null },
+      }));
+      const { unmount } = renderNote();
+      await screen.findByText("It landed off to one side");
+      expect(screen.queryByTestId("framing-recentre-refused")).not.toBeInTheDocument();
+      unmount();
+      vi.restoreAllMocks();
+    }
   });
 });

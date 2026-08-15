@@ -46,6 +46,7 @@ import { missingFilesNote } from "../components/target/missingFiles";
 import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
 import { NextBestMoveBadge } from "../components/target/NextBestMoveBadge";
 import { FramingVerdictNote } from "../components/target/FramingVerdictNote";
+import { LatestPictureCard } from "../components/target/LatestPictureCard";
 import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
 import { nextBestMove } from "../components/target/nextBestMove";
 import { softerThanUsual } from "../components/target/softStars";
@@ -1229,142 +1230,91 @@ export function TargetView() {
         </Group>
       </Group>
 
-      {identity.data ? (
-        <Box mt="xs"><ObjectInfoCard safe={safe} /></Box>
-      ) : null}
-
-      {/* The page's analysis cards, grouped instead of stacked (IA slice (b) of the
-          owner's "the pages are extremely busy" item). Nine full cards used to sit
-          one below another between the picture and the frames table; they are all
-          still here, still one click away, but only one group is on screen at a
-          time. A group whose cards have nothing to say gets no tab at all — see
-          `InsightTabs`. A later analysis card should join a group here rather than
-          add a tenth stacked card. */}
-      <InsightTabs
-        data-testid="target-insights"
-        groups={[
-          { key: "overview", label: "Overview", node: (
-            <>
-              <SessionRecapCard safe={safe} />
-              <NightsCard safe={safe} />
-            </>
-          ) },
-          { key: "quality", label: "Quality", node: (
-            <>
-              <FocusTrendCard safe={safe} />
-              <TransparencyTrendCard safe={safe} />
-              <StackHealthCard safe={safe} />
-            </>
-          ) },
-          { key: "planning", label: "Planning", node: (
-            <>
-              {/* Forward-looking companion to "Is it enough yet?" (which stays
-                  inline below — it answers the question the beginner came with):
-                  when there's still a goal gap, join it with the night planner's
-                  next dark window(s) for this object. Self-hides when the goal's
-                  met or no window can be computed. */}
-              {readiness ? (
-                <NextSessionCard
-                  safe={safe}
-                  gapSeconds={Math.max(0, (readiness.goalHours - readiness.hours) * 3600)}
-                  subExposureSeconds={
-                    target.data && target.data.n_frames_accepted > 0
-                      ? target.data.total_exposure_s / target.data.n_frames_accepted
-                      : null
-                  }
-                />
-              ) : null}
-              {/* Which months of the year this object is actually up. Self-hides
-                  without a location/position. */}
-              <BestMonthsStrip safe={safe} />
-              {/* "Is the Moon going to wash this out tonight?" — a plain-language
-                  Moon-interference readout so a beginner points at a bright target
-                  instead of wasting a bright-Moon night. Self-hides without a
-                  location/position. */}
-              <MoonInterferenceCard safe={safe} />
-            </>
-          ) },
-          { key: "story", label: "Story", node: (
-            /* "Night after night" — the same target getting deeper across
-               re-stacks (self-hides until there are ≥2 stacks to compare). */
-            <DeepeningReelCard safe={safe} name={target.data?.name} />
-          ) },
-        ]}
-      />
-
-      {/* Pre-stack reassurance: the sharpest sub, shown until a finished picture
-          exists — then the real stack supersedes it. Deliberately *not* in a tab:
-          it is the first-run guidance a brand-new target leans on. */}
-      {!latestRun?.has_preview ? <FirstLookCard safe={safe} /> : null}
-
-      {readiness ? (
-        <Paper withBorder p="sm" radius="md" mt="xs">
-          <Group gap="sm" wrap="nowrap" align="flex-start">
-            <IconTargetArrow size={22} style={{ flexShrink: 0, marginTop: 2 }}
-              color={`var(--mantine-color-${readinessColor(readiness.level)}-5)`} />
-            <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
-              <Group gap="xs" justify="space-between" wrap="nowrap">
-                <Text size="sm" fw={500}>Is it enough yet?</Text>
-                {editingGoal ? (
-                  <Group gap={4} wrap="nowrap">
-                    <NumberInput size="xs" w={78} min={0.25} max={1000} step={0.5}
-                      suffix=" h" hideControls
-                      aria-label="Integration goal (hours)"
-                      value={goalHoursInput}
-                      onChange={(v) =>
-                        setGoalHoursInput(v === "" ? "" : Number(v))}
-                    />
-                    <Button size="compact-xs" variant="light" loading={setGoal.isPending}
-                      onClick={() => {
-                        const h = Number(goalHoursInput);
-                        if (Number.isFinite(h) && h > 0) {
-                          setGoal.mutate(Math.round(h * 3600));
-                          setEditingGoal(false);
-                        }
-                      }}>Save</Button>
-                    {goal.data?.goal_s != null ? (
-                      <Button size="compact-xs" variant="subtle" color="gray"
+      {/* What the user actually came for, above the fold (IA slice (c) of the
+          owner's "the pages are extremely busy" item): the finished picture and
+          — beside it, not below it — the one question a beginner opens this page
+          with. Everything that *describes* the target (its catalog card and the
+          insight tabs) now sits below the frames table, so the page opens onto
+          content rather than analysis. Nothing was removed; it moved. */}
+      <Grid gutter="xs">
+        <Grid.Col span={{ base: 12, md: 7 }}>
+          <LatestPictureCard safe={safe} name={target.data?.name} run={latestRun} />
+          {/* Pre-stack reassurance: the sharpest sub, shown until a finished picture
+              exists — then the real stack supersedes it. Deliberately *not* in a tab:
+              it is the first-run guidance a brand-new target leans on. */}
+          {!latestRun?.has_preview ? <FirstLookCard safe={safe} /> : null}
+        </Grid.Col>
+        {readiness ? (
+          <Grid.Col span={{ base: 12, md: 5 }}>
+            <Paper withBorder p="sm" radius="md">
+              <Group gap="sm" wrap="nowrap" align="flex-start">
+                <IconTargetArrow size={22} style={{ flexShrink: 0, marginTop: 2 }}
+                  color={`var(--mantine-color-${readinessColor(readiness.level)}-5)`} />
+                <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
+                  <Group gap="xs" justify="space-between" wrap="nowrap">
+                    <Text size="sm" fw={500}>Is it enough yet?</Text>
+                    {editingGoal ? (
+                      <Group gap={4} wrap="nowrap">
+                        <NumberInput size="xs" w={78} min={0.25} max={1000} step={0.5}
+                          suffix=" h" hideControls
+                          aria-label="Integration goal (hours)"
+                          value={goalHoursInput}
+                          onChange={(v) =>
+                            setGoalHoursInput(v === "" ? "" : Number(v))}
+                        />
+                        <Button size="compact-xs" variant="light" loading={setGoal.isPending}
+                          onClick={() => {
+                            const h = Number(goalHoursInput);
+                            if (Number.isFinite(h) && h > 0) {
+                              setGoal.mutate(Math.round(h * 3600));
+                              setEditingGoal(false);
+                            }
+                          }}>Save</Button>
+                        {goal.data?.goal_s != null ? (
+                          <Button size="compact-xs" variant="subtle" color="gray"
+                            onClick={() => {
+                              setGoal.mutate(null);
+                              setEditingGoal(false);
+                            }}>Reset</Button>
+                        ) : null}
+                      </Group>
+                    ) : (
+                      <Text size="xs" c="dimmed"
+                        style={{ whiteSpace: "nowrap", cursor: "pointer" }}
+                        title="Set your own integration goal for this target"
                         onClick={() => {
-                          setGoal.mutate(null);
-                          setEditingGoal(false);
-                        }}>Reset</Button>
-                    ) : null}
+                          setGoalHoursInput(Number(readiness.goalHours.toFixed(2)));
+                          setEditingGoal(true);
+                        }}>
+                        {readiness.customGoal ? "your goal" : "goal"} ~{readiness.goalHours} h
+                        {" "}✎
+                      </Text>
+                    )}
                   </Group>
-                ) : (
-                  <Text size="xs" c="dimmed"
-                    style={{ whiteSpace: "nowrap", cursor: "pointer" }}
-                    title="Set your own integration goal for this target"
-                    onClick={() => {
-                      setGoalHoursInput(Number(readiness.goalHours.toFixed(2)));
-                      setEditingGoal(true);
-                    }}>
-                    {readiness.customGoal ? "your goal" : "goal"} ~{readiness.goalHours} h
-                    {" "}✎
-                  </Text>
-                )}
+                  <Progress value={readiness.fraction * 100}
+                    color={readinessColor(readiness.level)} size="sm" radius="xl" />
+                  <Text size="sm" c="dimmed">{readiness.verdict}</Text>
+                  {/* "How many more clear nights?" — the goal gap projected forward at
+                      this target's own recent pace, so "not yet" comes with a plan
+                      rather than an open question. Self-hides when the goal is met or
+                      there's too little history to judge a pace. */}
+                  {clearNights ? (
+                    <Text size="xs" c="dimmed">{clearNights.text}</Text>
+                  ) : null}
+                  {/* The honest √N diminishing-returns figure: how much more a single
+                      extra hour would cut background noise, so "keep shooting?" gets a
+                      physics-based answer, not just a goal-fraction. */}
+                  {noiseReductionHint(target.data?.total_exposure_s ?? 0) ? (
+                    <Text size="xs" c="dimmed">
+                      {noiseReductionHint(target.data?.total_exposure_s ?? 0)}
+                    </Text>
+                  ) : null}
+                </Stack>
               </Group>
-              <Progress value={readiness.fraction * 100}
-                color={readinessColor(readiness.level)} size="sm" radius="xl" />
-              <Text size="sm" c="dimmed">{readiness.verdict}</Text>
-              {/* "How many more clear nights?" — the goal gap projected forward at
-                  this target's own recent pace, so "not yet" comes with a plan
-                  rather than an open question. Self-hides when the goal is met or
-                  there's too little history to judge a pace. */}
-              {clearNights ? (
-                <Text size="xs" c="dimmed">{clearNights.text}</Text>
-              ) : null}
-              {/* The honest √N diminishing-returns figure: how much more a single
-                  extra hour would cut background noise, so "keep shooting?" gets a
-                  physics-based answer, not just a goal-fraction. */}
-              {noiseReductionHint(target.data?.total_exposure_s ?? 0) ? (
-                <Text size="xs" c="dimmed">
-                  {noiseReductionHint(target.data?.total_exposure_s ?? 0)}
-                </Text>
-              ) : null}
-            </Stack>
-          </Group>
-        </Paper>
-      ) : null}
+            </Paper>
+          </Grid.Col>
+        ) : null}
+      </Grid>
 
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>
@@ -1549,6 +1499,70 @@ export function TargetView() {
           ) : null}
         </Grid.Col>
       </Grid>
+
+      {identity.data ? (
+        <Box mt="xs"><ObjectInfoCard safe={safe} /></Box>
+      ) : null}
+
+      {/* The page's analysis cards, grouped instead of stacked (IA slice (b) of the
+          owner's "the pages are extremely busy" item) and now *below* the frames
+          table rather than above it (slice (c)). Nine full cards used to sit one
+          below another before the table; they are all still here, still one click
+          away, but only one group is on screen at a time. A group whose cards have
+          nothing to say gets no tab at all — see `InsightTabs`. A later analysis
+          card should join a group here rather than add a tenth stacked card. */}
+      <InsightTabs
+        data-testid="target-insights"
+        groups={[
+          { key: "overview", label: "Overview", node: (
+            <>
+              <SessionRecapCard safe={safe} />
+              <NightsCard safe={safe} />
+            </>
+          ) },
+          { key: "quality", label: "Quality", node: (
+            <>
+              <FocusTrendCard safe={safe} />
+              <TransparencyTrendCard safe={safe} />
+              <StackHealthCard safe={safe} />
+            </>
+          ) },
+          { key: "planning", label: "Planning", node: (
+            <>
+              {/* Forward-looking companion to "Is it enough yet?" (which stays
+                  inline below — it answers the question the beginner came with):
+                  when there's still a goal gap, join it with the night planner's
+                  next dark window(s) for this object. Self-hides when the goal's
+                  met or no window can be computed. */}
+              {readiness ? (
+                <NextSessionCard
+                  safe={safe}
+                  gapSeconds={Math.max(0, (readiness.goalHours - readiness.hours) * 3600)}
+                  subExposureSeconds={
+                    target.data && target.data.n_frames_accepted > 0
+                      ? target.data.total_exposure_s / target.data.n_frames_accepted
+                      : null
+                  }
+                />
+              ) : null}
+              {/* Which months of the year this object is actually up. Self-hides
+                  without a location/position. */}
+              <BestMonthsStrip safe={safe} />
+              {/* "Is the Moon going to wash this out tonight?" — a plain-language
+                  Moon-interference readout so a beginner points at a bright target
+                  instead of wasting a bright-Moon night. Self-hides without a
+                  location/position. */}
+              <MoonInterferenceCard safe={safe} />
+            </>
+          ) },
+          { key: "story", label: "Story", node: (
+            /* "Night after night" — the same target getting deeper across
+               re-stacks (self-hides until there are ≥2 stacks to compare). */
+            <DeepeningReelCard safe={safe} name={target.data?.name} />
+          ) },
+        ]}
+      />
+
     </Stack>
   );
 }
