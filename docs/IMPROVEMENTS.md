@@ -49,6 +49,86 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run, same running build; MEASURED in the browser) — every
+  Gallery card clips its own primary button mid-word: "Edit image" renders as **"Edit imag"**.**~~ —
+  **FIXED v0.263.4** (Builder 2026-08-16, branch `claude/serene-goldberg-ldc6ih`). *(Friendliness / polish —
+  PRIORITY 3; cosmetic, but it is the main action on the screen where the owner picks a picture to work on.)*
+  **Measured, not eyeballed:** a Playwright probe on the running build read the button's own box —
+  `clientWidth 99`, label `scrollWidth 61` vs `clientWidth 52`, i.e. the label overflowed its box by 9 px inside a
+  246 px card row. **Cause:** the action row is `<Group wrap="nowrap">` with `style={{ flex: 1 }}` on the Edit
+  button. `flex: 1` is `1 1 0%`, so the button's *base* size is zero and flexbox shrinks it below its own label
+  rather than wrapping; "Edit image" needed 108 px, "Reuse settings" takes 133, and 108 + 133 + 8 = 249 > 246 — so
+  the primary button absorbed the whole 3 px shortfall and lost its last letter.
+  **The fix:** `flex: "1 1 auto"` (based on its content, so it still *fills* a wide row but can no longer be
+  squeezed under its words) and the `wrap="nowrap"` dropped, so on a card too narrow for both the pair stacks
+  instead of clipping — which is also the right behaviour on the phone the owner reads this on. Re-measured after
+  the change: label `clientWidth 61 == scrollWidth 61`, no overflow.
+  **Shipped with it (same card, same class of problem):** the target *name* beside the badges truncates to
+  "Sample: …" because the badge group is `flexShrink: 0`. Truncation itself is right — the fix is that the full
+  name is now carried as a `title`, so it is readable on hover, exactly as the notes line directly below it
+  already was. Frontend-only; no API, schema, config, on-disk or default change, and no card content added or
+  removed.
+  **Tests (+2, both fail-before, `Gallery.test.tsx`):** the Edit button is based on its own content
+  (`flex: 1 1 auto` — jsdom has no layout, so the test pins the *cause* the measurement identified), and a long
+  target name carries its full text as a `title`.
+
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run and the same running build; REPRODUCED) — the onboarding
+  sample target reports **0/0 frames and no integration** to every library-level surface, even though it really
+  has six ingested, QC'd, solved subs.**~~ — **FIXED v0.263.3** (Builder 2026-08-16, branch
+  `claude/serene-goldberg-ldc6ih`). *(Friendliness / trust — PRIORITY 3; wrong-figure on the newcomer's very first
+  screen, and the whole point of the sample is that it walks the genuine journey.)*
+  **The symptom, screenshotted:** after "Try it with a sample image", the Library card read **"0/0 FRAMES"** with
+  an em-dash for integration; the Dashboard's *Frames* tile said **0**, *Integration* **—**; and the "Worth more
+  time" card ranked the demo as *"You haven't captured any of Sample: Orion Nebula (M42) yet"*. Meanwhile
+  `GET /api/sample` correctly answered `n_frames: 6` — because it opens the project DB, and everything else reads
+  the library row.
+  **The cause:** `webapp/sample_data.load_sample` creates the target, writes the subs, ingests them, runs QC and
+  injects each frame's WCS — and then closes the project **without ever refreshing the library entry**.
+  `seestack/io/scanner.py` ends every real scan with `library.refresh_target_stats(...)`, and eleven other call
+  sites in `pipeline.py`/`routers/frames.py` do the same after anything that changes a frame; the sample path was
+  the one ingest-shaped path that didn't. So `TargetEntry.n_frames` / `n_frames_accepted` / `total_exposure_s`
+  stayed at their created-empty zeros forever.
+  **The fix:** one `lib.refresh_target_stats(entry.safe_name)` after the project is closed, mirroring the scanner
+  exactly. Idempotent, so the "already loaded" early return needs nothing; it costs one project re-open, once, on
+  an explicit user action. No API shape, config, DB, on-disk or default change — the numbers were always in the
+  project DB, they were simply never published.
+  **Test (+1, fail-before, `tests/webapp/test_sample_data.py`):** the loaded sample's **library row** carries all
+  six frames, all six accepted and a non-zero integration — asserted both by direct lookup and through
+  `list_targets()` (the row the Library list actually renders from), since the existing tests all read the project
+  DB and so could never have caught this.
+  **Why the existing coverage missed it:** every sample test opened `lib.open_target(...)` and counted frames
+  there. The bug lives precisely in the gap between the project DB and the library row, which nothing asserted.
+
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, seen in a real running build with the sample library loaded;
+  REPRODUCED) — the Dashboard's "Worth more time" card and the Tonight planner tell a beginner that
+  *"another hour would cut its noise about 100%"* for every target they haven't shot yet.**~~ — **FIXED v0.263.2**
+  (Builder 2026-08-16, branch `claude/serene-goldberg-ldc6ih`). *(Friendliness / trust — PRIORITY 3; wrong-figure,
+  on the Dashboard's most prominent recommendation and on the common path, not an edge case.)*
+  **How it was found:** built the frontend, booted the app against a scratch data root, loaded the sample library
+  and screenshotted the Dashboard. The "Worth more time" card read, verbatim: *"You haven't captured any of
+  Sample: Orion Nebula (M42) yet — another hour would cut its noise about 100%."*
+  **The cause:** `nightplan.noise_gain_from_more_time` returns **1.0** at zero integration — correct and
+  deliberate as a *ranking* score ("the first hour is an unbounded improvement", and `_depth_component` sorts on
+  it) — but both reason-builders (`_pick_reason` for the placed path, `_depth_only_picks` for the no-location one)
+  printed it as `round(gain·100)%`. An hour of imaging does not remove all of a picture's noise, and "**another**
+  hour" is the wrong word for someone who has none. It hits the *most common* case the planner exists for: a
+  target in the library you have not yet integrated. The frontend's own `readiness.noiseReductionHint` already
+  refuses to speak at zero integration (`exposureSeconds <= 0` → `null`), so the two surfaces disagreed on exactly
+  this case — which the 2026-08-12 "already consistent, nothing to build" note above missed, because it compared
+  the *formula* and not the zero guard.
+  **The other end of the same curve, fixed with it:** past ~200 h one more hour rounds to 0 %, so a very deep
+  target was told *"another hour would cut its noise about 0%"* — true, useless, and reads as a bug rather than as
+  "you're done here".
+  **The fix:** one shared `_depth_sentence(hours, subject, gain)` now builds "what you have — what an hour buys"
+  for both paths, and prints the percentage only where it means something: nothing captured → *"its first hour will
+  do more for it than any hour after"*; rounds to zero → *"it's as deep as another hour can meaningfully make
+  it"*; otherwise the existing sentence, byte-for-byte. **The score itself is untouched** — ranking, `noise_gain`
+  in the API response and every other field are unchanged, so this is copy only: no API shape, config, DB,
+  on-disk or default change. **Tests (+2, both fail-before, `tests/test_nightplan.py`):** the zero-integration
+  target on *both* planner paths (asserting `noise_gain` is still 1.0, that "100%" and "another hour would cut"
+  are gone, and that a target with 1 h still gets its honest "about 29%"), and the 500 h target that must not be
+  told "about 0%".
+
 - ~~**⚠ RED BASELINE (Builder 2026-08-15, hit on the first suite run of the run; REPRODUCED on clean `origin/main`)
   — a Tonight test hard-coded `"2026-08-15"` as "a future night", so the frontend suite went red the day the
   calendar reached it, and stays red.**~~ — **FIXED v0.258.1** (Builder 2026-08-15, branch
@@ -11086,6 +11166,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   blind:** confirm what DSS/Siril actually write for a "linear" 16-bit TIFF (some do percentile-scale for range
   use), and add a test that a synthetic bright core keeps a monotone gradient into the top of the 16-bit range. The
   autostretch/preview paths are unaffected — this is only the linear TIFF's white point.
+  _(**Builder 2026-08-16 — considered, traced, and deliberately left alone; read this before picking it up, it
+  carries a counter-argument the entry doesn't.** The clipping is real and the docstring does over-claim. But
+  "just use the covered max" is **not** free, because the percentile window is buying something: the stack is in
+  **ADU**, not [0,1] — `fits_loader` never normalises (`img = data.astype(out_dtype)`), and the per-frame flatten
+  ends in `_zero_sky_per_channel`, so the sky sits at ~0 with **half its noise negative**. That rules out the
+  Siril/PixInsight-style "write the data as-is, clip at 0" answer outright — it would delete half the sky-noise
+  distribution — and it means the black point has to stay robust/negative-aware whatever happens to the white one.
+  For the white point: with sky ≈ 0 and star cores near 60 k ADU, moving `hi` from p99.9 (~3 k) to the true max
+  compresses the sky-and-nebula band the beginner actually looks at from most of the 16-bit range into ~3 % of it
+  — roughly a 30× precision loss, landing the quantisation step at ~1σ of a 100-sub stack, which is a real (if
+  quieter) loss of faint information traded for un-flattening ~0.1 % of pixels. So the honest options are a **far
+  higher percentile** (99.99 keeps ~10× more highlight structure at ~1/10th the precision cost) or **fixing the
+  docstring instead**, and the choice needs the owner's own stack to decide — a synthetic can't say how much
+  faint structure sits in that band. It is also not a beginner surface: the linear TIFF is the re-import-elsewhere
+  export, and the History button offering it has no explanation at all next to the FITS button's tooltip, which is
+  arguably the more useful fix if this file is opened. **Stays gated; do not blind-flip either endpoint.**)_
 
 - ~~**NEW IDEA (Scout 2026-08-07, spotted while adversarially tracing `seestack/video/lucky.py`) — the Moon/Sun
   lucky stack aligns every kept frame to the *earliest* kept frame, not the *sharpest* one.**~~ — **SHIPPED
@@ -12417,6 +12513,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   removed *so far* by stacking N subs, not the marginal return of one more hour — and the entry's own "care" note
   says not to collapse those. Recorded so a future run doesn't re-derive this; if the two ever drift, the fix is a
   frontend mirror of the engine helper, not a re-wording.
+  _(**Correction, Builder 2026-08-16:** the formulas do match, but the check stopped at the formula and missed the
+  **zero-integration guard**, where the two genuinely disagreed: `noiseReductionHint` returns `null` for
+  `exposureSeconds <= 0`, while the planner printed `round(1.0·100)` = *"another hour would cut its noise about
+  100%"* on every un-shot target. Found by dogfooding a running build; fixed in **v0.263.2** (see Bugs). The
+  lesson worth keeping: "same formula" is not "same sentence" — compare the **guards** too.)_
 
 - ~~**NEW BEGINNER FEATURE (Builder 2026-08-08, the natural follow-on to "How many more clear nights?" v0.252.0) —
   "Finish this one first": tell the beginner which of their in-flight targets is *closest to done*, so a clear
@@ -17207,6 +17308,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **NEW IDEA (Builder 2026-08-16, filed because it is what made this run productive) — check in the dogfood
+  harness, so "§2 big-picture pass" means running the app rather than re-reading it.** *(Pillar: infra /
+  bug-finding — size S; nothing shipped to users.)* **Why:** AGENTS.md §2 asks for a real dogfood pass at least
+  one run in three, but every run has to reinvent how to *get* a running app, so in practice the pass degrades
+  into reading route files — which is exactly how the three bugs fixed this run (v0.263.2–v0.263.4) survived
+  months of code-level audits. **None of them was findable by reading**: the planner's "cut its noise about 100%"
+  needed a target with zero integration actually rendered; the sample's 0/0 frames needed the library row and the
+  project DB compared side by side at runtime; the clipped "Edit imag" needed a browser measuring a box.
+  **The recipe, which took ~5 minutes and should be a script** (`scripts/agent-dogfood.sh`, say): `npx vite build`
+  → boot `python -m webapp.main` with `ASTROSTACK_DATA` pointed at a scratch dir and `ASTROSTACK_PORT` off 8000 →
+  `POST /api/sample` → `POST /api/targets/<safe>/process` and poll the job → drive Playwright at
+  `/opt/pw-browsers/chromium` (already installed; `npm i playwright` in a scratch dir, **not** into
+  `frontend/package.json`) for full-page screenshots at 1440 px **and** ~420 px. **Add the overflow probe** — it
+  is the cheap half and it found a real bug: walk every leaf element and report `scrollWidth > clientWidth`,
+  skipping `text-overflow: ellipsis` (deliberate truncation). **Care:** point `ASTROSTACK_DATA` at the session
+  scratchpad, never the repo; `webapp/static/` is a build artifact and stays gitignored; and the probe is a
+  *finder*, not a test — what it finds still needs a real regression test in the suite.
+
+- **MEASURED NEGATIVE RESULT (Builder 2026-08-16, checked rather than assumed while fixing v0.263.4) — do NOT
+  spend a run sweeping the frontend for more `wrap="nowrap"` + `flex: 1` clipping; there is exactly one, and it is
+  fixed.** *(Recorded so the obvious follow-on is declined once instead of re-litigated.)* The Gallery button bug
+  looked like the tip of a pattern — `wrap="nowrap"` appears **123 times** across `frontend/src` and `flex: 1` in
+  ~20 files — so the overflow probe above was run over `/`, `/library`, `/gallery`, `/best`, `/sky-so-far`,
+  `/tonight`, `/storage`, `/calibration`, `/jobs`, `/moon-sun` and a populated target page, at **1440 px and
+  420 px**, with the sample loaded and stacked. **Zero further overflows.** So the combination is only harmful
+  when a `flex: 1` child sits next to a fixed-width sibling in a container narrower than their sum, which is rare;
+  the other 122 `nowrap`s are pairing badges or icons that genuinely fit. Re-run the probe after any card-layout
+  change rather than grepping for the pattern.
 
 - **NEW IDEA (Builder 2026-08-15, filed the moment after a wall-clock test cost this run its first task) — a guard
   that no test may read the real clock, so a date-bomb can't quietly go red on a future date.**
