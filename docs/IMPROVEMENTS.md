@@ -9950,8 +9950,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   10-second poll, so it is probably the wrong one. **Measure before choosing**; don't put an unbounded scan on a
   polling endpoint.
 
-- **NEW IDEA (Builder 2026-08-16, spotted while reordering the Dashboard for IA slice (e)) — the six stat tiles are
-  now the first thing on the page, and not one of them is clickable.** *(Pillar: friendliness — PRIORITY 3; size S;
+- ~~**NEW IDEA (Builder 2026-08-16, spotted while reordering the Dashboard for IA slice (e)) — the six stat tiles are
+  now the first thing on the page, and not one of them is clickable.**~~ — **SHIPPED v0.263.1**
+  (Builder 2026-08-16, branch `claude/serene-goldberg-9y0sw9`). *(Friendliness — PRIORITY 3.)* Built to the filed
+  slice exactly: **Targets → `/library`, Stacks → `/gallery`, Active jobs → `/jobs`, Free disk → `/storage`**, while
+  **Integration** and **Frames** stay plain because neither has one right destination and an arbitrary one would be
+  worse than none. `StatCard` gained an optional `to`; with it the whole `Paper` becomes the link (`component={Link}`
+  with `color: inherit` / `textDecoration: none`), so the tile is visually **identical** either way — the point is
+  "the number is a link", not new chrome — and it carries an `aria-label` of `"<label>: <value>"` so a screen-reader
+  user gets a link that says what it goes to rather than an unlabelled one. Frontend-only: no API, schema, config,
+  on-disk or default change; no route added. **Tests (+1, `Dashboard.test.tsx`):** the four destinations by
+  accessible name and `href`, and the two plain tiles asserted *not* to be links.
+  *(Original spec kept below for provenance.)*
+  *(Pillar: friendliness — PRIORITY 3; size S;
   frontend-only.)* "Active jobs: 2", "Free disk: 41 GB", "Targets: 7", "Stacks: 23" each answer a question whose
   natural next move is a page the app already has (`/jobs`, `/storage`, `/library`, `/gallery`), but they are inert
   text — a beginner reads "2 active jobs" and then goes hunting in the sidebar. **Slice:** wrap the four tiles that
