@@ -209,6 +209,16 @@ def load_sample(lib: Library) -> SampleStatus:
     finally:
         proj.close()
 
+    # Publish the frames to the *library* row, exactly as a scan does
+    # (``scanner.py`` ends with the same call). Without it the sample's subs
+    # exist only inside its project DB: the Library card reads "0/0 frames" with
+    # no integration, the Dashboard's frame/integration tiles stay at zero, and
+    # the Tonight planner ranks the demo as "you haven't captured any of it yet"
+    # — the newcomer's first screen contradicting the sample it just made for
+    # them. Cheap (one project re-open, once, on an explicit user action) and
+    # idempotent, so the early-return above needs nothing.
+    lib.refresh_target_stats(entry.safe_name)
+
     return SampleStatus(loaded=True, safe=entry.safe_name, n_frames=n_frames)
 
 

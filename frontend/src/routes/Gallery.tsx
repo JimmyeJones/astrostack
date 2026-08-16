@@ -364,7 +364,13 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
       </Card.Section>
 
       <Group justify="space-between" mt="sm" wrap="nowrap">
-        <Text fw={600} truncate component={Link} to={`/targets/${item.safe}/history`}>
+        {/* The badge group beside this is ``flexShrink: 0``, so on a narrow card
+            a long target name truncates hard — "Sample: Orion Nebula (M42)" can
+            end up as "Sample: …". Carry the full name as a ``title`` so it is
+            still readable on hover, exactly as the notes line below already
+            does. */}
+        <Text fw={600} truncate title={item.target_name}
+              component={Link} to={`/targets/${item.safe}/history`}>
           {item.target_name}
         </Text>
         <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
@@ -391,11 +397,18 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
         {hasNoise(item.noise_sigma) ? <> · <NoiseReadout sigma={item.noise_sigma} /></> : null}
       </Text>
 
-      <Group gap="xs" mt="xs" wrap="nowrap">
+      {/* ``wrap="nowrap"`` + ``flex: 1`` (basis 0) let the primary button shrink
+          below its own label: measured in a real build, "Edit image" needed
+          108 px of a 246 px card row and was given 99, so it rendered as
+          "Edit imag" — the card's main action, clipped mid-word. ``1 1 auto``
+          bases the button on its content, so it still fills a wide row but can
+          no longer be squeezed under its label; with wrapping allowed the pair
+          stacks on a narrow card (and on a phone) instead of clipping. */}
+      <Group gap="xs" mt="xs">
         <Button
           component={Link} to={`/targets/${item.safe}/edit/${item.run_id}`}
           leftSection={<IconWand size={14} />} variant="light" size="xs"
-          style={{ flex: 1 }}
+          style={{ flex: "1 1 auto" }}
         >
           Edit image
         </Button>

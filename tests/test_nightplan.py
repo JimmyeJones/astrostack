@@ -1101,6 +1101,45 @@ def test_best_tonight_never_says_you_have_zero_minutes():
     assert "0 min" not in fresh.picks[0].reason
 
 
+def test_a_target_with_nothing_captured_is_never_told_an_hour_cuts_100pc_of_its_noise():
+    """``noise_gain_from_more_time`` returns 1.0 at zero integration — right as a
+    *ranking* score, nonsense as a sentence. Printed, it read "another hour would
+    cut its noise about 100%": an hour does not remove all the noise, and
+    "another" hour is the wrong word for someone who has none. Both planner paths
+    (the placed one and the no-location depth-only one) must say the honest thing
+    in words instead.
+
+    The frontend's ``readiness.noiseReductionHint`` already refuses to speak at
+    zero integration, so this also stops the two surfaces disagreeing."""
+    fresh = _lib("new", "New", 10.7, 41.3, hours=0.0)
+
+    depth_only = np_plan.rank_targets_now(None, JAN_EVENING, [fresh]).picks[0]
+    placed = np_plan.rank_targets_now(LONDON, JAN_EVENING, [fresh]).picks[0]
+
+    for pick in (depth_only, placed):
+        assert pick.noise_gain == 1.0, "the ranking score itself is unchanged"
+        assert "100%" not in pick.reason
+        assert "another hour would cut" not in pick.reason
+        assert "first hour will do more for it" in pick.reason
+    # A target that *has* integration still gets its plain honest percentage.
+    started = np_plan.rank_targets_now(
+        LONDON, JAN_EVENING, [_lib("m31", "M 31", 10.7, 41.3, hours=1.0)]).picks[0]
+    assert "another hour would cut its noise about 29%" in started.reason
+
+
+def test_a_very_deep_target_is_not_told_an_hour_buys_about_0pc():
+    """The other end of the same curve: past ~200 h one more hour rounds to zero,
+    and "another hour would cut its noise about 0%" reads as a bug rather than as
+    the true, useful "this one is done". Say it in words."""
+    deep = _lib("deep", "Deep", 10.7, 41.3, hours=500.0)
+    assert round(noise_gain_from_more_time(500.0 * 3600.0) * 100) == 0
+
+    for pick in (np_plan.rank_targets_now(None, JAN_EVENING, [deep]).picks[0],
+                 np_plan.rank_targets_now(LONDON, JAN_EVENING, [deep]).picks[0]):
+        assert "0%" not in pick.reason
+        assert "as deep as another hour can meaningfully make it" in pick.reason
+
+
 def test_best_tonight_is_empty_with_no_library_targets():
     assert np_plan.rank_targets_now(LONDON, JAN_EVENING, []).picks == []
 
