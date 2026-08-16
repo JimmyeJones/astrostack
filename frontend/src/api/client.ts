@@ -563,7 +563,12 @@ export interface DashboardStats {
     has_fits?: boolean;
     preview_url: string;
   }[];
-  disk: { total_gb?: number; used_gb?: number; free_gb?: number };
+  disk: {
+    total_gb?: number; used_gb?: number; free_gb?: number;
+    /** Raw counts (additive; absent on an older backend). Prefer these — the
+     *  `*_gb` fields are decimal, the rest of the UI is binary. */
+    free_bytes?: number; total_bytes?: number;
+  };
 }
 
 export interface SampleStatus {
@@ -1124,7 +1129,12 @@ export interface SystemInfo {
     hint?: string;
     error?: string;
   };
-  disk: { total_gb?: number; used_gb?: number; free_gb?: number };
+  disk: {
+    total_gb?: number; used_gb?: number; free_gb?: number;
+    /** Raw counts (additive; absent on an older backend). Prefer these — the
+     *  `*_gb` fields are decimal, the rest of the UI is binary. */
+    free_bytes?: number; total_bytes?: number;
+  };
   memory: { total_gb?: number; available_gb?: number };
   folders?: {
     incoming: { path: string; exists: boolean; writable: boolean };

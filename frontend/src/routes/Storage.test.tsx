@@ -47,6 +47,33 @@ describe("StorageView", () => {
     expect(note.textContent).toMatch(/never moves, deletes or changes a file you dropped in/i);
   });
 
+  it("states the free disk once, in the same unit as the headroom note", async () => {
+    // Found by dogfooding: the header read "23 GB free on disk" (the server's
+    // decimal free_gb) directly above "21 GB free — not enough imaging history
+    // yet" (the same bytes in binary GiB) — one fact, two numbers, one screen.
+    const freeBytes = 23.4e9;
+    vi.spyOn(client.api, "getStorage").mockResolvedValue(
+      mkStorage({ disk: { free_gb: 23.4, total_gb: 500, free_bytes: freeBytes } }),
+    );
+
+    renderStorage();
+    await waitFor(() => expect(screen.getByText("Storage")).toBeInTheDocument());
+
+    expect(screen.getByText(/free on disk/i).textContent).toContain("22 GB");
+    // The header and the headroom note under it quote the same figure.
+    expect(screen.getAllByText(/22 GB free/)).toHaveLength(2);
+    expect(screen.queryByText(/23\.4 GB/)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the older backend's free_gb when bytes aren't served", async () => {
+    vi.spyOn(client.api, "getStorage").mockResolvedValue(
+      mkStorage({ disk: { free_gb: 23.4, total_gb: 500 } }),
+    );
+    renderStorage();
+    await waitFor(() => expect(screen.getByText("Storage")).toBeInTheDocument());
+    expect(screen.getByText(/23\.4 GB free on disk/)).toBeInTheDocument();
+  });
+
   it("offers the editor's preview cache as its own clearable stage", async () => {
     // These sit under cache/ but were in no figure and no clear stage, so an
     // install that pruned runs before the purge fix had no way to reclaim the

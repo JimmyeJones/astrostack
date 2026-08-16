@@ -7,6 +7,8 @@
 //
 // Pure and framework-free so it can be unit-tested in isolation.
 
+import { formatDiskSize } from "../format";
+
 export type HeadroomLevel = "healthy" | "short" | "unknown";
 
 export interface Headroom {
@@ -19,13 +21,6 @@ export interface Headroom {
   reclaimHint: string | null;
 }
 
-function formatGB(bytes: number): string {
-  const gb = bytes / 1024 ** 3;
-  if (gb >= 10) return `${gb.toFixed(0)} GB`;
-  if (gb >= 1) return `${gb.toFixed(1)} GB`;
-  const mb = bytes / 1024 ** 2;
-  return `${mb.toFixed(0)} MB`;
-}
 
 // A short "per night" figure — GB when that reads naturally, else MB.
 function formatRate(bytesPerNight: number): string {
@@ -69,7 +64,7 @@ export function storageHeadroom(args: {
     };
   }
 
-  const freeStr = formatGB(freeBytes);
+  const freeStr = formatDiskSize(freeBytes);
 
   if (nightlyBytes == null || nightlyBytes <= 0) {
     return {
@@ -86,7 +81,7 @@ export function storageHeadroom(args: {
 
   const reclaimHint =
     short && reclaimableCacheBytes > 0
-      ? `Clearing regenerable caches would free about ${formatGB(reclaimableCacheBytes)} — the safe thing to clear first.`
+      ? `Clearing regenerable caches would free about ${formatDiskSize(reclaimableCacheBytes)} — the safe thing to clear first.`
       : null;
 
   if (short) {

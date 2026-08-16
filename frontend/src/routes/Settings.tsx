@@ -17,6 +17,7 @@ import { compassPoint } from "../tonight";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
 import { AmbientSettings } from "../components/AmbientSettings";
 import { minMaxIgnoresWeightingHint } from "../weightingHint";
+import { formatDiskSize } from "../format";
 
 // Hover hints for every setting (shown via an info icon next to the label).
 // Exported so the copy that explains a *silent* decision — one the app makes on
@@ -567,7 +568,11 @@ export function SettingsView() {
                   </Badge>
                 ) : null}
                 {system.data.gpu_available ? <Badge color="violet">GPU</Badge> : null}
-                {system.data.disk.free_gb ? (
+                {system.data.disk.free_bytes != null ? (
+                  <Text size="sm">
+                    Free: <b>{formatDiskSize(system.data.disk.free_bytes)}</b>
+                  </Text>
+                ) : system.data.disk.free_gb ? (
                   <Text size="sm">Free: <b>{system.data.disk.free_gb} GB</b></Text>
                 ) : null}
               </Group>
