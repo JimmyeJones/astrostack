@@ -6554,6 +6554,41 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-16, the obvious next step after the library-wide un-exported-edit note v0.263.0) —
+  "Finish them all": one job that exports every edit the user saved and never exported.** *(Pillar: autonomy —
+  PRIORITY 2; size M; **read the cautions — this one is easy to get wrong**.)* The note now *names* the pictures
+  and links each into the editor, which is right for one or two. Someone who edits over several nights and never
+  exports can accumulate a dozen, and clicking through twelve editors to press Export twelve times is exactly the
+  manual chain the app exists to remove — every input is already stored (the saved recipe *is* the instruction),
+  so the app can do it unattended. **Slice:** a `POST /api/gallery/unexported-edits/export` submitting **one**
+  job that walks the same list `GET /api/gallery/unexported-edits` returns and reuses `submit_editor_export`'s
+  body per run (do **not** write a second export path — the one-definition rule that `_unexported_edit` and
+  `webapp/goals.py` exist to enforce), reporting progress per picture and skipping-with-a-reason rather than
+  aborting the batch when one run's source FITS is missing.
+  **Cautions, in order.** (1) Each export **writes a new `stack_runs` row and new files** — twelve of them at once
+  is a real disk and history event, so the button must say how many pictures and roughly how much space, and must
+  never be the *default* action of the note. (2) It must be **cancellable** and single-worker-friendly like every
+  other long job; a beginner who fires it before bed should be able to stop it. (3) Nothing may be overwritten:
+  editor export is non-destructive today and this must stay so. (4) Do not tie it to the Dashboard note's
+  dismissal — dismissing is "not now", not "do it". Worth building only once the note has been live long enough
+  to know a beginner actually accumulates several; if it turns out people finish edits one at a time, this is
+  surface nobody needs.
+
+- **NEW IDEA (Builder 2026-08-16, found while writing the un-exported-edit count's stale-key guard) — deleting a
+  stack run leaves its saved editor recipe behind in `project_meta` forever.** *(Pillar: maintainability /
+  hygiene — size S; **not a live bug**, filed so it is fixed deliberately rather than tripped over.)*
+  `Project.delete_stack_run` removes the `stack_runs` row but not the `editor_recipe:<id>` meta key the editor
+  wrote for it, so every deleted-after-editing run leaves an orphan row that nothing will ever read.
+  **Why it is not a bug today:** `stack_runs.id` is `AUTOINCREMENT`, so a new run can never inherit a deleted
+  one's id and pick up its recipe, and every consumer resolves a recipe *from* a run rather than the other way
+  round — except the new un-exported-edit count, which works back from the meta keys and therefore confirms the
+  run still exists before counting it (`Project.stack_run_options`, pinned by a test). So the only cost is a few
+  dead rows in a small table. **Slice:** have `delete_stack_run` delete the run's recipe key in the same
+  transaction, and keep the count's existence check anyway (it also covers DBs that already carry orphans — every
+  install upgrading to this will have some). **Care:** this *deletes user data*, so it must happen only for a run
+  being deleted in the same call, never as a sweep — a "tidy up orphaned recipes" pass over the whole DB is how a
+  bug there costs someone an edit they could still have recovered by re-creating the run.
+
 - ~~**NEW IDEA (Builder 2026-08-13, the gap left by shipping the re-centring crop v0.257.0) — when a target landed
   *so* far off-centre that no crop can rescue it, the app goes quiet about the one thing it just measured.**~~ —
   **SHIPPED v0.259.1** (Builder 2026-08-15, branch `claude/serene-goldberg-wa400h`), together with the
@@ -9867,8 +9902,40 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-08-16, the obvious next question after shipping the Gallery's `unexported_edit` flag
-  v0.262.1) — nothing tells you, across the whole library, that you have saved edits you never exported.**
+- ~~**NEW IDEA (Builder 2026-08-16, the obvious next question after shipping the Gallery's `unexported_edit` flag
+  v0.262.1) — nothing tells you, across the whole library, that you have saved edits you never exported.**~~ —
+  **SHIPPED v0.263.0** (Builder 2026-08-16, branch `claude/serene-goldberg-9y0sw9`). *(Trust / autonomy —
+  PRIORITY 2–3.)* The Dashboard's `NoticeBoard` (IA slice (e)) now carries one advisory note — *"You have 2 edits
+  you never finished"* — that names up to three of the pictures, links each straight into its editor, and points
+  the rest at the Gallery. Self-hides at zero, which is every ordinary install, and is dismissable **by
+  signature** (the same pattern the two setup banners use), so "not now" quiets exactly these edits while a new
+  one later still speaks up.
+  **The entry's cost note was the whole decision, and it was answered by measuring, then taking option (b).**
+  `GET /api/gallery` opens every target's project DB *and lists every run*, and `/api/stats` is polled every
+  10 s — so neither was an honest home for a note on a polling page. The new
+  `GET /api/gallery/unexported-edits` reads, per target, only the `project_meta` rows whose key starts with the
+  editor-recipe prefix (`Project.iter_meta_prefix`, matched with `substr` rather than `LIKE` because every prefix
+  in this app contains a `_`, which `LIKE` treats as a wildcard) — and **stops there** when there are none, which
+  is every target that has never been edited. Only a target that *does* carry recipes has those specific runs'
+  two columns looked up (`Project.stack_run_options`). No run listing, no file stats, no preview checks. That
+  cheapness is pinned by a test rather than asserted: `iter_stack_runs` is monkeypatched to raise, and the
+  endpoint still answers.
+  **The stale-key trap the entry didn't foresee:** `delete_stack_run` leaves a run's editor-recipe meta behind, so
+  a count worked out *from the meta keys* would nag about a picture that no longer exists. `stack_run_options`
+  returns only the ids that still have a row, which is what makes the count honest (regression test included).
+  **Reused, not re-derived:** the endpoint imports `stack.py::_unexported_edit` — the one definition — and a
+  runtime test proves it (monkeypatching that function changes what the count reports). Consolidated while
+  there: the two guarded `localStorage` dismissal accessors that were module-local to `Dashboard.tsx` are now
+  `src/dismissal.ts`, imported by both the page and the new note, so the third dismissable note doesn't re-type
+  a `try`/`catch` that a private-mode browser depends on.
+  Upgrade-safe: one new read-only endpoint, two new read-only `Project` methods, no config/DB/on-disk change, no
+  default flipped, no existing response reshaped; an older frontend simply never calls it. **Tests (+13):**
+  `tests/webapp/test_unexported_edit.py` (+5 — the count across the library newest-first, a recipe whose run was
+  deleted, the one-definition guard, the never-lists-runs cost gate, and a broken project DB not 500-ing it),
+  `tests/test_project.py` (+3 — the literal-prefix scan, the targeted read incl. deleted/unknown ids, and >999
+  ids chunked past SQLite's parameter cap), `UnexportedEditsNote.test.tsx` (**new**, +5) and `Dashboard.test.tsx`
+  (+2 — the note joins the board, and stays silent at zero).
+  *(Original spec kept below for provenance.)*
   *(Pillar: trust / autonomy — PRIORITY 2–3; size S–M; **read the cost note before starting**.)* Three surfaces now
   admit, per picture, that a thumbnail isn't the user's version — but all three require you to already be looking
   at that picture. Someone who dialled in a look, pressed **Save**, closed the editor and moved on has no reason

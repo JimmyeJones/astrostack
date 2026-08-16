@@ -1055,6 +1055,13 @@ export interface BestPicture {
   pinned?: boolean;
 }
 
+export interface UnexportedEditItem {
+  safe: string;
+  target_name: string;
+  run_id: number;
+  timestamp_utc: string;
+}
+
 export interface LogEntry {
   seq: number;
   ts: string;
@@ -1997,6 +2004,12 @@ export const api = {
     req<{ items: BestPicture[] }>(
       `/api/gallery/best${limit != null ? `?limit=${limit}` : ""}`,
     ),
+  // How many pictures library-wide carry an edit that was saved and never
+  // exported. Its own endpoint on purpose: it is deliberately cheap (one indexed
+  // meta scan per target, no run listing), because the Dashboard asks it and
+  // `/api/gallery` lists every run of every target.
+  getUnexportedEdits: () =>
+    req<{ count: number; items: UnexportedEditItem[] }>("/api/gallery/unexported-edits"),
 
   // logs
   getLogs: (level?: string, limit = 1000) =>

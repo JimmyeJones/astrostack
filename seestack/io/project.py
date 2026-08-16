@@ -597,6 +597,25 @@ class Project:
         assert self._conn is not None
         self._conn.execute("DELETE FROM project_meta WHERE key = ?", (key,))
 
+    def iter_meta_prefix(self, prefix: str) -> Iterator[tuple[str, str]]:
+        """Yield ``(key, value)`` for every project-meta key starting with ``prefix``.
+
+        A prefix *scan*, for callers that need "does this project hold any X at
+        all?" without knowing the ids up front — the library-wide un-exported-edit
+        count asks exactly that, once per target, and listing every run to find out
+        would be far more work than the answer is worth.
+
+        Matched with ``substr`` rather than ``LIKE`` so the prefix is compared
+        literally: every meta prefix in this app contains ``_``, which ``LIKE``
+        would treat as a single-character wildcard.
+        """
+        assert self._conn is not None
+        for row in self._conn.execute(
+            "SELECT key, value FROM project_meta WHERE substr(key, 1, ?) = ?",
+            (len(prefix), prefix),
+        ):
+            yield row["key"], row["value"]
+
     # ---- frames ---------------------------------------------------------
 
     def add_frame(self, frame: FrameRow) -> int:
@@ -978,6 +997,30 @@ class Project:
                     if "seam_residual" in row.keys() else None
                 ),
             )
+
+    def stack_run_options(self, run_ids: Iterable[int]) -> dict[int, tuple[str, str]]:
+        """``{run_id: (timestamp_utc, options_json)}`` for the ids that still exist.
+
+        A targeted two-column read for a caller that already knows which runs it
+        cares about, instead of materialising every :class:`StackRunRow`. It also
+        answers "is this run still here?": :meth:`delete_stack_run` leaves a run's
+        editor-recipe meta behind, so anything working *back* from meta keys must
+        confirm the row before counting it.
+        """
+        assert self._conn is not None
+        ids = sorted({int(i) for i in run_ids})
+        out: dict[int, tuple[str, str]] = {}
+        # Chunked to stay under SQLite's bound-parameter limit (999 by default),
+        # which a target with a long editing history could otherwise exceed.
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            marks = ",".join("?" * len(chunk))
+            for row in self._conn.execute(
+                f"SELECT id, timestamp_utc, options_json FROM stack_runs WHERE id IN ({marks})",
+                chunk,
+            ):
+                out[row["id"]] = (row["timestamp_utc"], row["options_json"])
+        return out
 
     def repoint_stack_runs(self, path_map: dict[str, str]) -> int:
         """Repoint history rows whose output files were moved aside on disk.
