@@ -90,6 +90,27 @@ describe("SampleImageCard", () => {
     expect(trigger).toHaveBeenCalledWith("sample_orion", {});
   });
 
+  it("lets the buttons drop to their own line instead of crushing the words", async () => {
+    // Found by dogfooding at 420 px: `wrap="nowrap"` on the row, a `minWidth: 0`
+    // wording column and a `flexShrink: 0` three-button group left the text ~50
+    // px, so "Your sample target is ready" rendered one word per line as a
+    // ~25-line ribbon on the Dashboard a beginner sees first. jsdom has no
+    // layout, so pin the cause: the row may wrap, and the wording column is
+    // based on its content width rather than zero.
+    vi.spyOn(client.api, "getSampleStatus").mockResolvedValue(
+      sample({ loaded: true, safe: "sample_orion", n_frames: 6 }),
+    );
+    vi.spyOn(client.api, "getStats").mockResolvedValue(stats(1));
+    renderCard();
+
+    const heading = await screen.findByText(/Your sample target is ready/i);
+    // Text -> Stack -> the wording Group.
+    const wording = heading.parentElement!.parentElement as HTMLElement;
+    expect(wording).toHaveStyle({ flex: "1 1 240px" });
+    const row = wording.parentElement as HTMLElement;
+    expect(getComputedStyle(row).flexWrap).not.toBe("nowrap");
+  });
+
   it("hides entirely when there's real data and no sample", async () => {
     vi.spyOn(client.api, "getSampleStatus").mockResolvedValue(sample());
     vi.spyOn(client.api, "getStats").mockResolvedValue(stats(3));

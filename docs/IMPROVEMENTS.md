@@ -10022,6 +10022,30 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run — seen in the 420 px Dashboard screenshot) — the sample
+  card's two sentences render as a one-word-per-line ribbon ~25 lines tall on a phone.**~~ — **FIXED v0.264.4**
+  (Builder 2026-08-16, branch `claude/serene-goldberg-ru8exw`). *(Friendliness — PRIORITY 3; cosmetic, but it is
+  the card that greets a brand-new owner on the Dashboard, which is the screen the app opens on, on the device the
+  owner actually reads it on.)* "Your / sample / target / is / ready" stacked vertically, then "Open / it / to /
+  try / QC, / stacking, / editing / and…" — two sentences taking a quarter of a phone screen and reading like
+  broken markup.
+  **Cause — the same family as the v0.263.4 Gallery button, but its mirror image.** The row is
+  `<Group justify="space-between" wrap="nowrap">` with a `minWidth: 0` wording column beside a `flexShrink: 0`
+  three-button group (*Stack it · Open sample · Remove*, ≈280 px). At 420 px the buttons keep their width, the
+  row may not wrap, and `minWidth: 0` lets the words shrink to ~50 px. **It is invisible to the overflow probe**
+  precisely because nothing overflows — the text wraps obediently, into a ribbon.
+  **The fix:** drop the `wrap="nowrap"` and give the wording column a real basis (`flex: "1 1 240px"`), so on a
+  narrow card the button group drops to its own line instead of squeezing the words, while a desktop card (240 +
+  280 ≪ 900) stays a single row exactly as before. The icon gains `flexShrink: 0` so it can't be squashed either.
+  Both variants of the card — sample loaded and "Try it with a sample image" — get the same treatment.
+  Frontend-only: no API, schema, config, on-disk or default change; no copy changed.
+  **Tests (+1, `SampleImageCard.test.tsx`, fails before):** jsdom has no layout, so it pins the cause the way the
+  Gallery fix's test does — the row may wrap, and the wording column is based on its content rather than zero.
+  **Worth knowing for the next probe run:** "content squeezed *below* its words without overflowing" is a second
+  failure mode the overflow probe cannot see. A future harness slice could flag a text block whose rendered width
+  is under ~120 px while its parent row is wide — until then, look at the phone screenshots, which is how this
+  one was found.
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run, same screenshot pass) — the Storage page states the free
   disk twice, ten lines apart, and the two figures disagree: "23 GB free on disk" above "21 GB free — not enough
   imaging history yet".**~~ — **FIXED v0.264.3** (Builder 2026-08-16, branch `claude/serene-goldberg-ru8exw`).
