@@ -10,11 +10,13 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { formatIntegration } from "../format";
+import { loadDismissedSig, saveDismissedSig } from "../dismissal";
 import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
 import { ContinueTonightCard } from "../components/ContinueTonightCard";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { PointHereTonightCard } from "../components/dashboard/PointHereTonightCard";
+import { UnexportedEditsNote } from "../components/dashboard/UnexportedEditsNote";
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import { ImagingCalendarCard } from "../components/ImagingCalendarCard";
 import { LastNightCard } from "../components/LastNightCard";
@@ -49,22 +51,6 @@ export function triggerPictureDownload(href: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
-}
-
-function loadDismissedSig(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function saveDismissedSig(key: string, sig: string): void {
-  try {
-    localStorage.setItem(key, sig);
-  } catch {
-    /* storage unavailable — the banner just won't stay dismissed across reloads */
-  }
 }
 
 function StatCard({ icon, label, value, sub }: {
@@ -180,6 +166,11 @@ export function Dashboard() {
                 </Button>
               </Alert>
             ) : null },
+          // Advisory, and the reason this board exists: work of the user's that
+          // the app isn't showing anywhere. Self-hiding at zero, so on an
+          // ordinary install it costs nothing and the board folds nothing.
+          { key: "unexported-edits", priority: NOTICE_PRIORITY.advisory,
+            node: <UnexportedEditsNote /> },
         ]}
       />
 

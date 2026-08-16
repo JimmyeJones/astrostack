@@ -611,3 +611,59 @@ def test_open_closes_the_connection_when_schema_check_fails(tmp_path, monkeypatc
     # handle was closed (fails before the fix, which left it open).
     with pytest.raises(sqlite3.ProgrammingError):
         opened[-1].execute("SELECT 1")
+
+
+def test_iter_meta_prefix_matches_literally(proj):
+    """A prefix *scan* over project meta, for a caller that needs "does this
+    project hold any X at all?" without knowing the ids. The `_` in every prefix
+    this app uses must be a literal underscore, not a LIKE wildcard."""
+    proj.set_meta("editor_recipe:1", "a")
+    proj.set_meta("editor_recipe:2", "b")
+    proj.set_meta("editor_other", "c")
+    assert dict(proj.iter_meta_prefix("editor_recipe:")) == {
+        "editor_recipe:1": "a", "editor_recipe:2": "b"}
+    # `_` is literal: a key that LIKE's single-character wildcard would match
+    # must not come back.
+    proj.set_meta("editorXrecipe:9", "d")
+    assert dict(proj.iter_meta_prefix("editor_recipe:")) == {
+        "editor_recipe:1": "a", "editor_recipe:2": "b"}
+    assert list(proj.iter_meta_prefix("nothing_here")) == []
+
+
+def test_stack_run_options_reads_only_the_ids_asked_for(proj):
+    """A targeted two-column read, which also answers "does this run still
+    exist?" — `delete_stack_run` leaves a run's editor-recipe meta behind, so
+    anything working back from meta keys has to confirm the row."""
+    from seestack.io.project import StackRunRow
+
+    def _add(basename, ts, options):
+        return proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc=ts, output_basename=basename,
+            fits_path=f"{basename}.fits", tiff_path=None, preview_path=None,
+            n_frames_used=5, canvas_h=10, canvas_w=10, coverage_min=5,
+            coverage_max=5, options_json=options))
+
+    a = _add("a", "2026-07-01T00:00:00+00:00", '{"k": 1}')
+    b = _add("b", "2026-07-02T00:00:00+00:00", "{}")
+
+    assert proj.stack_run_options([a]) == {a: ("2026-07-01T00:00:00+00:00", '{"k": 1}')}
+    assert proj.stack_run_options([a, b]).keys() == {a, b}
+    assert proj.stack_run_options([b])[b] == ("2026-07-02T00:00:00+00:00", "{}")
+    # An id that never existed, or one whose run was deleted, is simply absent.
+    assert proj.stack_run_options([a, 99999]).keys() == {a}
+    proj.delete_stack_run(a)
+    assert proj.stack_run_options([a, b]).keys() == {b}
+    assert proj.stack_run_options([]) == {}
+
+
+def test_stack_run_options_chunks_past_sqlites_parameter_limit(proj):
+    """More ids than SQLite's default 999 bound-parameter cap must still work —
+    a target with a long editing history would otherwise raise."""
+    from seestack.io.project import StackRunRow
+
+    ids = [proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc=f"2026-07-01T00:00:{i % 60:02d}+00:00",
+        output_basename=f"r{i}", fits_path=None, tiff_path=None, preview_path=None,
+        n_frames_used=1, canvas_h=4, canvas_w=4, coverage_min=1, coverage_max=1,
+        options_json="{}")) for i in range(1200)]
+    assert len(proj.stack_run_options(ids)) == 1200

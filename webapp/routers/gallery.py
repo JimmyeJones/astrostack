@@ -443,3 +443,87 @@ def get_best_pictures(
         pic = by_key[r.key]
         items.append(pic.model_copy(update={"score": r.score}))
     return BestPicturesResponse(items=items)
+
+
+class UnexportedEditItem(BaseModel):
+    safe: str
+    target_name: str
+    run_id: int
+    timestamp_utc: str
+
+
+class UnexportedEditsResponse(BaseModel):
+    #: How many pictures across the whole Library carry a saved-but-never-exported
+    #: edit. Never capped — this is the number the note says out loud.
+    count: int
+    #: The newest few of them, so a note can link straight at one instead of
+    #: sending the user hunting. Capped at :data:`UNEXPORTED_EDITS_MAX`.
+    items: list[UnexportedEditItem] = []
+
+
+# How many un-exported edits the response names. The count is exact; this only
+# bounds the list, which exists so a single one can be linked directly.
+UNEXPORTED_EDITS_MAX = 12
+
+
+@router.get("/api/gallery/unexported-edits", response_model=UnexportedEditsResponse)
+def get_unexported_edits(request: Request) -> UnexportedEditsResponse:
+    """How many pictures in the whole Library carry an edit the user saved and
+    never exported (see :func:`webapp.routers.stack._unexported_edit`).
+
+    Why its own endpoint rather than a field on something existing: the three
+    surfaces that admit "this thumbnail isn't your version" all need you to be
+    *looking at that picture* already, so someone who dialled in a look, pressed
+    Save and moved on never finds out. Answering it library-wide needs a
+    cross-target read — but ``/api/gallery`` lists every run of every target, and
+    ``/api/stats`` is polled every 10 s, so neither is an honest place to put it.
+
+    **This is the cheap path, and that is the whole design.** Per target it reads
+    the ``project_meta`` rows whose key starts with the editor-recipe prefix
+    (:meth:`Project.iter_meta_prefix`) and stops there when there are none — which
+    is every target that has never been edited. Only when a target *does* carry
+    recipes does it look up those specific runs' two columns
+    (:meth:`Project.stack_run_options`); no run listing, no file stats, no preview
+    checks. A broken project DB is skipped exactly as the other cross-target reads
+    skip it, so one corrupt target can't cost the whole count.
+    """
+    from seestack.io.project import Project
+    from webapp.routers.editor import RECIPE_META_PREFIX
+    from webapp.routers.stack import _unexported_edit
+
+    found: list[UnexportedEditItem] = []
+    lib = deps.open_library(request)
+    try:
+        for t in lib.list_targets():
+            proj = None
+            try:
+                proj = Project.open(lib.target_dir(t))
+                recipes: dict[int, str] = {}
+                for key, value in proj.iter_meta_prefix(RECIPE_META_PREFIX):
+                    try:
+                        recipes[int(key[len(RECIPE_META_PREFIX):])] = value
+                    except ValueError:  # a meta key we don't own — ignore it
+                        continue
+                # The common case: this target has never been edited, so nothing
+                # else is read from its DB at all.
+                summaries = (
+                    proj.stack_run_options(recipes) if recipes else {}
+                )
+            except Exception:  # noqa: BLE001 — one broken project must not 500 the count
+                continue
+            finally:
+                if proj is not None:
+                    proj.close()
+            for run_id, (timestamp_utc, options_json) in summaries.items():
+                if _unexported_edit(options_json, recipes.get(run_id)):
+                    found.append(UnexportedEditItem(
+                        safe=t.safe_name,
+                        target_name=t.name,
+                        run_id=run_id,
+                        timestamp_utc=timestamp_utc,
+                    ))
+    finally:
+        lib.close()
+
+    found.sort(key=lambda it: it.timestamp_utc, reverse=True)
+    return UnexportedEditsResponse(count=len(found), items=found[:UNEXPORTED_EDITS_MAX])
