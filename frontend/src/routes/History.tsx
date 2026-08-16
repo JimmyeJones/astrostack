@@ -14,6 +14,7 @@ import { postCaption, formatCaptionDate } from "../components/postCaption";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
+import { UnexportedEditBadge } from "../components/UnexportedEditBadge";
 import { calibrationSummaryText } from "../components/calibrationSummary";
 import { autoSkyCastCaption } from "../components/editor/skyCast";
 import { autoColorCalCaption } from "../components/editor/colorCal";
@@ -850,12 +851,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               baked preview, so a saved-but-never-exported edit isn't in it. The
               one-click finish lives on the hero; here it's just a truthful label
               next to the picture it applies to. */}
-          {run.unexported_edit && (
-            <Badge variant="light" color="violet"
-                   title="You saved an edit for this stack but never exported it, so this thumbnail is the un-edited version. Open the editor to export it.">
-              edit not exported
-            </Badge>
-          )}
+          <UnexportedEditBadge show={run.unexported_edit} />
           <Badge variant="light">{run.n_frames_used} frames</Badge>
         </Group>
       </Group>

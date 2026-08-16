@@ -153,6 +153,118 @@ describe("Dashboard recent-stack picture download", () => {
   });
 });
 
+describe("Dashboard information architecture (IA slice (e))", () => {
+  function statsWithStack(): DashboardStats {
+    return {
+      ...mkStats(),
+      n_stack_runs: 1, n_targets_with_stacks: 1,
+      recent_stacks: [{
+        safe: "m31", target_name: "M31", run_id: 7, output_basename: "m31_stack",
+        timestamp_utc: "2026-07-14T00:00:00Z", n_frames_used: 100,
+        has_preview: true, has_fits: true, preview_url: "/api/targets/m31/stack-runs/7/preview",
+      }],
+    };
+  }
+
+  function recap(): client.LibrarySessionRecap {
+    return {
+      n_targets: 1, n_frames: 10, n_kept: 10, n_set_aside: 0,
+      session_exposure_s: 600, kept_exposure_s: 600,
+      start_utc: "2026-07-08T21:00:00+00:00", end_utc: "2026-07-08T22:00:00+00:00",
+      night_date: "2026-07-08",
+      targets: [{
+        name: "M 31", safe: "M_31", n_frames: 10, n_kept: 10, n_set_aside: 0,
+        exposure_s: 600, kept_exposure_s: 600,
+      }],
+      reject_buckets: {},
+    };
+  }
+
+  function progress(): client.TargetProgress[] {
+    return [{
+      safe: "M_31", name: "M 31", total_exposure_s: 3600,
+      object_type: "galaxy", goal_s: null, recent_pace_s: null,
+    }];
+  }
+
+  it("opens onto your pictures, with the analysis grouped below them", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(statsWithStack());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "getLastNight").mockResolvedValue(recap());
+
+    renderDashboard();
+
+    const pictures = await screen.findByText("Recent stacks");
+    const insights = await screen.findByTestId("dashboard-insights");
+    // The user's own pictures come *before* everything that merely describes the
+    // library — the whole point of the slice.
+    expect(pictures.compareDocumentPosition(insights))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    // And the analysis card really is inside that grouped area, not stacked above.
+    await waitFor(() => expect(insights).toHaveTextContent(/Last night/));
+  });
+
+  it("groups the analysis cards into tabs, one group on screen at a time", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "getLastNight").mockResolvedValue(recap());
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue(progress());
+
+    renderDashboard();
+
+    // Exactly the two groups that have something to say get a tab — "Tonight"'s
+    // cards are all silent here, so it gets none (an empty tab is worse than no
+    // tab; see `InsightTabs`).
+    await waitFor(() =>
+      expect(screen.getAllByRole("tab").map((t) => t.textContent))
+        .toEqual(["Recent", "Progress"]));
+
+    // Nothing was removed: the group that isn't open is still mounted (so it
+    // never refetches on a switch), just out of the way.
+    await waitFor(() => expect(screen.getByText(/Last night/)).toBeVisible());
+    expect(screen.getByText("Target progress")).not.toBeVisible();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Progress" }));
+    await waitFor(() => expect(screen.getByText("Target progress")).toBeVisible());
+    expect(screen.getByText(/Last night/)).not.toBeVisible();
+  });
+
+  it("gives no tab to a group whose cards have nothing to say", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "getLastNight").mockResolvedValue(recap());
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+
+    renderDashboard();
+
+    await waitFor(() => expect(screen.getByText(/Last night/)).toBeVisible());
+    // One speaking group gets no tab strip at all, and a silent group never gets
+    // a tab that opens onto nothing.
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+  });
+
+  it("keeps both setup warnings in one notes area above the page title", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue({
+      ...mkSystem({ found: false }),
+      folders: {
+        incoming: { path: "/incoming", exists: false, writable: false },
+        library: { path: "/library", exists: true, writable: true },
+      },
+    });
+
+    renderDashboard();
+
+    const notes = await screen.findByTestId("dashboard-notes");
+    await waitFor(() =>
+      expect(notes).toHaveTextContent("Your incoming folder doesn't exist yet"));
+    expect(notes).toHaveTextContent("Plate-solving isn't set up yet");
+    // The notes sit above the title, like the Target page's board (slice (a)).
+    expect(notes.compareDocumentPosition(screen.getByText("Dashboard")))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+});
+
 describe("Dashboard integration stat", () => {
   it("shows an em-dash, not \"0.0h\", on a fresh empty library", async () => {
     // A first-time user lands on the Dashboard with zero integration. The card

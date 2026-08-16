@@ -983,6 +983,10 @@ export interface GalleryItem {
   // when there's nothing honest to say. Resolved server-side from the same
   // thresholds the "How's my stack?" seam notes use — see `StackRun`.
   seam_verdict?: string | null;
+  // True when an edit was saved for this run but never exported, so this card's
+  // thumbnail isn't the user's version. Same server-side decision as `StackRun`;
+  // absent on an older backend, which reads as "no unfinished edit".
+  unexported_edit?: boolean;
 }
 
 // A finished Moon/Sun still, as the Gallery lists it alongside stack runs. It is
