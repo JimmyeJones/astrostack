@@ -49,6 +49,33 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run and the same running build; REPRODUCED) — the onboarding
+  sample target reports **0/0 frames and no integration** to every library-level surface, even though it really
+  has six ingested, QC'd, solved subs.**~~ — **FIXED v0.263.3** (Builder 2026-08-16, branch
+  `claude/serene-goldberg-ldc6ih`). *(Friendliness / trust — PRIORITY 3; wrong-figure on the newcomer's very first
+  screen, and the whole point of the sample is that it walks the genuine journey.)*
+  **The symptom, screenshotted:** after "Try it with a sample image", the Library card read **"0/0 FRAMES"** with
+  an em-dash for integration; the Dashboard's *Frames* tile said **0**, *Integration* **—**; and the "Worth more
+  time" card ranked the demo as *"You haven't captured any of Sample: Orion Nebula (M42) yet"*. Meanwhile
+  `GET /api/sample` correctly answered `n_frames: 6` — because it opens the project DB, and everything else reads
+  the library row.
+  **The cause:** `webapp/sample_data.load_sample` creates the target, writes the subs, ingests them, runs QC and
+  injects each frame's WCS — and then closes the project **without ever refreshing the library entry**.
+  `seestack/io/scanner.py` ends every real scan with `library.refresh_target_stats(...)`, and eleven other call
+  sites in `pipeline.py`/`routers/frames.py` do the same after anything that changes a frame; the sample path was
+  the one ingest-shaped path that didn't. So `TargetEntry.n_frames` / `n_frames_accepted` / `total_exposure_s`
+  stayed at their created-empty zeros forever.
+  **The fix:** one `lib.refresh_target_stats(entry.safe_name)` after the project is closed, mirroring the scanner
+  exactly. Idempotent, so the "already loaded" early return needs nothing; it costs one project re-open, once, on
+  an explicit user action. No API shape, config, DB, on-disk or default change — the numbers were always in the
+  project DB, they were simply never published.
+  **Test (+1, fail-before, `tests/webapp/test_sample_data.py`):** the loaded sample's **library row** carries all
+  six frames, all six accepted and a non-zero integration — asserted both by direct lookup and through
+  `list_targets()` (the row the Library list actually renders from), since the existing tests all read the project
+  DB and so could never have caught this.
+  **Why the existing coverage missed it:** every sample test opened `lib.open_target(...)` and counted frames
+  there. The bug lives precisely in the gap between the project DB and the library row, which nothing asserted.
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-16, seen in a real running build with the sample library loaded;
   REPRODUCED) — the Dashboard's "Worth more time" card and the Tonight planner tell a beginner that
   *"another hour would cut its noise about 100%"* for every target they haven't shot yet.**~~ — **FIXED v0.263.2**
