@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from seestack.core.cache import CacheManager
+from seestack.edit.proxy import proxy_dir
 from seestack.io.project import StackRunRow
 from seestack.render.thumbnail import thumbs_dir
 from webapp import deps
@@ -28,8 +30,10 @@ from webapp.storage_estimate import estimate_nightly_bytes
 router = APIRouter(tags=["storage"])
 
 # Cache stages the user can clear. "stage1"/"stage2" map to CacheManager;
-# "thumbs" is the per-frame thumbnail cache; "all" clears every regenerable bit.
-_CLEARABLE = ("stage1", "stage2", "thumbs", "all")
+# "thumbs" is the per-frame thumbnail cache; "proxies" is the editor's
+# downsampled preview cache (rebuilt from the stack FITS on the next open);
+# "all" clears every regenerable bit.
+_CLEARABLE = ("stage1", "stage2", "thumbs", "proxies", "all")
 
 
 def _dir_bytes(path: Path) -> int:
@@ -56,14 +60,56 @@ def _dir_bytes(path: Path) -> int:
 
 
 def delete_run_artifacts(run: StackRunRow) -> None:
-    """Unlink a stack run's output files (FITS/TIFF/preview). Best-effort."""
+    """Unlink a stack run's output files. Best-effort.
+
+    Not only the three paths recorded on the ``stack_runs`` row
+    (FITS/TIFF/preview): a finished stack also writes a per-pixel
+    ``_coverage.fits`` and, when asked for, a ``_progress`` reel, both resolved
+    from the FITS *basename* rather than a column (see
+    :data:`seestack.stack.output.RUN_ARTEFACT_SUFFIXES`). Unlinking only the
+    recorded three left those behind for good — the coverage map alone is ~8 MB
+    on a 1080×1920 stack and far more on a mosaic, and reclaiming space is the
+    entire point of deleting a run.
+    """
+    from seestack.stack.output import RUN_ARTEFACT_SUFFIXES
+
+    paths: list[Path] = []
     for attr in ("fits_path", "tiff_path", "preview_path"):
         p = getattr(run, attr, None)
         if p:
-            try:
-                Path(p).unlink(missing_ok=True)
-            except OSError:
-                pass
+            paths.append(Path(p))
+    fits = getattr(run, "fits_path", None)
+    if fits:
+        fp = Path(fits)
+        stem = fp.name[:-len(fp.suffix)] if fp.suffix else fp.name
+        paths.extend(fp.with_name(f"{stem}{sfx}")
+                     for sfx in RUN_ARTEFACT_SUFFIXES.values())
+    for p in paths:
+        try:
+            p.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def purge_stack_run(proj: Any, run: StackRunRow) -> None:
+    """Delete a stack run and everything the app hung off its id.
+
+    One definition, because a run is more than its history row: its output file
+    set, the editor's cached preview proxy (up to ~27 MB of ``.npy``), and up to
+    six ``project_meta`` annotations (:mod:`webapp.run_meta`). The single-run
+    delete endpoint used to clear some of that and the "Prune old stacks" path
+    none of it, so pruning — the *disk-space* feature — left the proxy behind for
+    every run it removed.
+    """
+    from seestack.edit.proxy import clear_proxy
+    from webapp.run_meta import delete_run_meta
+
+    delete_run_artifacts(run)
+    if run.id is None:
+        return
+    proj.delete_stack_run(run.id)
+    clear_proxy(Path(proj.project_dir), run.id)
+    delete_run_meta(proj, run.id)
 
 
 class TargetStorage(BaseModel):
@@ -75,6 +121,10 @@ class TargetStorage(BaseModel):
     stage1_bytes: int
     stage2_bytes: int
     thumbs_bytes: int
+    # The editor's downsampled preview proxies. Additive with a default so an
+    # older frontend (which doesn't read it) and an older backend (which doesn't
+    # send it) both keep working.
+    proxies_bytes: int = 0
     n_stack_runs: int
 
 
@@ -112,6 +162,7 @@ def get_storage(request: Request) -> StorageResponse:
                 # best-effort and never raises.)
                 stage1 = stage2 = 0
             thumbs = _dir_bytes(thumbs_dir(tdir))
+            proxies = _dir_bytes(proxy_dir(tdir))
             output = _dir_bytes(tdir / "output")
             total = _dir_bytes(tdir)
             n_runs = 0
@@ -130,8 +181,9 @@ def get_storage(request: Request) -> StorageResponse:
             rows.append(TargetStorage(
                 safe=t.safe_name, name=t.name,
                 total_bytes=total, output_bytes=output,
-                cache_bytes=stage1 + stage2 + thumbs,
+                cache_bytes=stage1 + stage2 + thumbs + proxies,
                 stage1_bytes=stage1, stage2_bytes=stage2, thumbs_bytes=thumbs,
+                proxies_bytes=proxies,
                 n_stack_runs=n_runs,
             ))
     finally:
@@ -195,6 +247,15 @@ def clear_cache(safe: str, request: Request, stage: str = "all") -> dict:
         if td.exists():
             shutil.rmtree(td, ignore_errors=True)
         cleared.append("thumbs")
+    if stage in ("proxies", "all"):
+        # The editor's live-preview proxies: pure derived data, rebuilt from the
+        # stack FITS the next time a run is opened. Clearing them is also the
+        # only way an install that pruned runs before v0.264.0 gets back the
+        # proxies those deletions used to orphan.
+        pd = proxy_dir(tdir)
+        if pd.exists():
+            shutil.rmtree(pd, ignore_errors=True)
+        cleared.append("proxies")
     return {"safe": safe, "cleared": cleared}
 
 
@@ -221,9 +282,7 @@ def prune_stack_runs(safe: str, body: PruneRequest, request: Request) -> dict:
         else:
             to_delete = runs[body.keep:]
         for run in to_delete:
-            delete_run_artifacts(run)
-            if run.id is not None:
-                proj.delete_stack_run(run.id)
+            purge_stack_run(proj, run)
     finally:
         proj.close()
         lib.close()
