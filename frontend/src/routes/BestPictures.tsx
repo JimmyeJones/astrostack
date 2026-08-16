@@ -6,6 +6,7 @@ import { IconSparkles, IconStarFilled } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type BestPicture } from "../api/client";
+import { formatStampDate } from "../format";
 import { sharePictureText } from "../share";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
@@ -135,7 +136,7 @@ export function BestPicturesView() {
           ? (() => {
               const { title, text, filename } = sharePictureText(
                 viewing.target_name,
-                new Date(viewing.timestamp_utc).toLocaleDateString(),
+                formatStampDate(viewing.timestamp_utc),
               );
               return { shareFilename: filename, shareTitle: title, shareText: text };
             })()

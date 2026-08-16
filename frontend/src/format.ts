@@ -55,6 +55,29 @@ export function formatNightDate(iso: string | null | undefined): string {
   return p ? `${p.day} ${MONTHS_ABBR[p.month - 1]} ${p.year}` : "—";
 }
 
+/**
+ * A picture's date, in the viewer's own locale but never ambiguous: "16 Aug
+ * 2026" / "Aug 16, 2026", **never** "8/16/2026".
+ *
+ * This is for a *moment* — when a stack was run, when a still was made — which
+ * is why it goes through `Date` and shows local time, unlike `formatNightDate`
+ * above (an observing night is a date already, and must not shift). The one
+ * thing it will not do is print the month as a number: half the world reads
+ * 8/16 as the 8th of month 16, and the app puts these captions on the same
+ * screen as "15 Nov 2024" from the night surfaces, so a bare
+ * `toLocaleDateString()` made two dates on one page disagree about their own
+ * format. Empty string for a missing or unparseable stamp, so a caller can drop
+ * the clause rather than print "Invalid Date".
+ */
+export function formatStampDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    day: "numeric", month: "short", year: "numeric",
+  });
+}
+
 /** The `YYYY-MM-DD` head of an ISO date/stamp, validated. `null` when absent or
  *  malformed, so every caller can distinguish "no night" from a real one. */
 function parseNightDate(
