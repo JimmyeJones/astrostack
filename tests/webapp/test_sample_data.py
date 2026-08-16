@@ -53,6 +53,25 @@ def test_load_builds_a_valid_solved_target(lib):
         proj.close()
 
 
+def test_load_publishes_the_sample_frames_to_the_library_row(lib):
+    """The demo's subs must be visible to every *library-level* surface, not only
+    inside its own project DB.
+
+    ``load_sample`` ingested and QC'd six frames but never refreshed the library
+    entry, so the Library card read "0/0 frames" with no integration, the
+    Dashboard's Frames/Integration tiles stayed at zero, and the Tonight planner
+    ranked the demo as "you haven't captured any of it yet" — on the very screen
+    a newcomer sees right after asking for a sample."""
+    status = sample_data.load_sample(lib)
+    entry = lib.find_target(status.safe)
+    assert entry.n_frames == sample_data._N_SUBS
+    assert entry.n_frames_accepted == sample_data._N_SUBS
+    assert entry.total_exposure_s > 0.0
+    # The same row the Library list renders from, not just a direct lookup.
+    listed = next(e for e in lib.list_targets() if e.safe_name == status.safe)
+    assert listed.n_frames == sample_data._N_SUBS
+
+
 def test_sample_actually_stacks_and_reduces_noise(lib):
     """The demo is only worth offering if it stacks cleanly — combining the
     dithered subs must average the sky noise down (~√N), the whole point of
