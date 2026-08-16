@@ -10117,7 +10117,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   precedes the table which precedes both the insights and the catalog card, that readiness stays above the table,
   that the *newest* run is the one shown, and that an unstacked target shows no picture card). All 71 pre-existing
   `Target.test.tsx` assertions pass **unchanged**. Frontend-only: no API, schema, config, on-disk or default change.
-  **Next slice: (e) — the Dashboard.**
+  **Next slice: (e) — the Dashboard.** *(Shipped v0.262.0 — see below.)*
 
   **✅ SLICE (d) SHIPPED — v0.260.0** (Builder 2026-08-15, branch `claude/serene-goldberg-dglvf3`). The sidebar's
   15 flat links are now four named groups plus the Dashboard. **Measured, as the acceptance criterion asks:**
@@ -10140,6 +10140,45 @@ problems. Dogfood it every big-picture run and fix root causes.
   one unlabelled, no heading over a single link, unique titles), and two render tests over the real `App`: every
   one of the 15 links is present and visible with its correct `href`, and each named group holds exactly its own
   links. Frontend-only: no route added or removed, no API, schema, config, on-disk or default change.
+
+  **✅ SLICE (e) SHIPPED — v0.262.0** (Builder 2026-08-16, branch `claude/serene-goldberg-tgh2g6`). The Dashboard
+  now opens onto **your pictures**, with everything that merely *describes* the library grouped behind three tabs.
+  **Measured, as the acceptance criterion asks:** always-on full-width cards a user had to scroll past before
+  reaching their pictures ("Recent stacks") went **8 → 0** (`PointHereTonightCard`, `LastNightCard`,
+  `VideoCapturesCard`, `ImagingCalendarCard`, `LibraryProgressCard`, `ContinueTonightCard`, `SuggestTargetsCard`,
+  `BestPicturesStrip` all sat there); cards rendered below the stat row on first paint went **8 stacked → at most
+  3** (the open tab group) plus one tab strip; the two setup alerts moved into one `NoticeBoard` above the title.
+  Destinations, cards and controls **15 → 15 — nothing removed** (the hard constraint): every card is still
+  mounted, still one click away. `Dashboard.tsx` is 299 → 334 lines (+35; as with every slice the win is vertical
+  space, not line count) and **no new component was written** — this slice is entirely the two primitives slices
+  (a) and (b) already built.
+  **New order:** notes → title → first-run guidance (`FirstImageCard`, `SampleImageCard`) → the six-tile stat row →
+  **Recent stacks** → `BestPicturesStrip` → insight tabs. On a 1080p window the stat row and the recent-stack
+  pictures share the first screen; previously the pictures were the *last* thing on the page, under eight cards.
+  **The groups, named so a beginner can predict where a thing lives:** *Tonight* (point here right now · continue
+  tonight · suggested targets) · *Recent* (last night · Moon & Sun videos waiting) · *Progress* (target progress ·
+  imaging calendar). *Tonight* leads because its cards are the actionable ones; when they are all silent (no
+  location set yet) the strip simply falls through to the first group that speaks.
+  **Two judgement calls worth knowing.** (1) `FirstImageCard` and `SampleImageCard` were deliberately left
+  **outside** both the board and the tabs — they are the first-run guidance the entry's cautions say to preserve,
+  they self-hide the moment the install is established, and burying a beginner's map behind a tab would trade the
+  busy complaint for a worse one. (2) `BestPicturesStrip` moved *down* to sit directly under the recent stacks
+  rather than into a tab: both are "your pictures", so they belong together above the analysis.
+  **The `NoticeBoard` is worth it even at two notes:** with `inlineCount=2` nothing folds today, so the visible
+  behaviour is unchanged — the point is that the Dashboard now has the same obvious home for a future warning that
+  the Target page has, instead of a ninth always-on banner. Both alerts keep their own close button and their
+  signature-keyed dismissal.
+  **Tests (+4, `Dashboard.test.tsx`):** the pictures precede the insights area (`compareDocumentPosition`) and the
+  analysis really is inside it; exactly the two speaking groups get a tab (a silent *Tonight* gets none), one group
+  is visible at a time, the other stays **mounted** (`not.toBeVisible()`, so nothing refetches on a switch), and a
+  click switches in one step; a lone speaking group gets no tab strip at all; and both setup warnings live in one
+  notes area above the title. All 8 pre-existing `Dashboard.test.tsx` assertions pass **unchanged** — including the
+  banner-dismissal test that reaches for the Mantine close button — so nothing was rewritten to go green.
+  Frontend-only: no API, schema, config, on-disk or default change; no route added or removed.
+  **All five named slices (a)–(e) are now shipped.** The entry stays open as the standing IA reference (the
+  primitives, the hard constraint and the acceptance measurement); the natural next candidates, *if the owner
+  reacts and wants more*, are the Library and Editor screens — but neither has been measured as "busy" the way
+  Target and Dashboard were, so **don't start one speculatively**.
 
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
