@@ -9867,8 +9867,61 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-08-15, the one surface v0.261.0 deliberately left out) — the *Gallery* still shows an
-  un-exported edit's picture with no hint that it isn't the user's version.** *(Pillar: trust — PRIORITY 3;
+- **NEW IDEA (Builder 2026-08-16, the obvious next question after shipping the Gallery's `unexported_edit` flag
+  v0.262.1) — nothing tells you, across the whole library, that you have saved edits you never exported.**
+  *(Pillar: trust / autonomy — PRIORITY 2–3; size S–M; **read the cost note before starting**.)* Three surfaces now
+  admit, per picture, that a thumbnail isn't the user's version — but all three require you to already be looking
+  at that picture. Someone who dialled in a look, pressed **Save**, closed the editor and moved on has no reason
+  to revisit, so their work stays invisible indefinitely. The Dashboard now has an obvious home for exactly this
+  (the `NoticeBoard` from IA slice (e)): one advisory note — *"2 pictures have an edit you saved but never
+  exported"* — linking to them, self-hiding at zero. **The cost note, which is the whole decision:** the flag is
+  library-wide only on `GET /api/gallery`, and that endpoint **opens every target's project DB and lists every
+  run** — fine for a page the user deliberately opened, questionable on the Dashboard, which polls. So either
+  (a) give the note its own long `staleTime` and accept one heavy call per visit, (b) add a *cheap* count-only
+  endpoint (a `SELECT` over `project_meta` keys per target, no run listing), or (c) fold the count into the
+  existing `/api/stats` the Dashboard already fetches — (c) is tempting but would put the per-project scan on a
+  10-second poll, so it is probably the wrong one. **Measure before choosing**; don't put an unbounded scan on a
+  polling endpoint.
+
+- **NEW IDEA (Builder 2026-08-16, spotted while reordering the Dashboard for IA slice (e)) — the six stat tiles are
+  now the first thing on the page, and not one of them is clickable.** *(Pillar: friendliness — PRIORITY 3; size S;
+  frontend-only.)* "Active jobs: 2", "Free disk: 41 GB", "Targets: 7", "Stacks: 23" each answer a question whose
+  natural next move is a page the app already has (`/jobs`, `/storage`, `/library`, `/gallery`), but they are inert
+  text — a beginner reads "2 active jobs" and then goes hunting in the sidebar. **Slice:** wrap the four tiles that
+  have an obvious destination in the existing `Link`, keep "Integration" and "Frames" plain (they have no single
+  right target), and keep the tiles visually identical so this reads as "the number is a link", not as new
+  chrome. Additive, reversible, no API change. *Judgement: genuinely small and it removes a real hop, but it is
+  polish — don't let it displace a bug or a beginner feature.*
+
+- **DECLINED ONCE, recorded so it isn't re-litigated (Builder 2026-08-16) — do NOT add a "Finish it" button next to
+  the `edit not exported` label on the History and Gallery cards.** *(Considered while shipping v0.262.1.)* The
+  one-click finish exists on the Target page's hero (`LatestPictureCard`), which covers the case that actually
+  happens: you edited your *newest* picture, saved, and closed. On an *older* run the realistic next step is to
+  reopen the editor and look at it again, not to export it blind — and the badge row on both cards is exactly the
+  clutter the IA overhaul is trying to reduce, so paying a button there for a rare action is the wrong trade. The
+  label stays what it is: honest, and one click from the editor via the card it sits on.
+
+- ~~**NEW IDEA (Builder 2026-08-15, the one surface v0.261.0 deliberately left out) — the *Gallery* still shows an
+  un-exported edit's picture with no hint that it isn't the user's version.**~~ — **SHIPPED v0.262.1**
+  (Builder 2026-08-16, branch `claude/serene-goldberg-tgh2g6`). *(Trust — PRIORITY 3.)* **The gate the entry set
+  was measured first, and it passed:** `get_gallery` **already opens each target's project DB** and iterates its
+  runs (`gallery.py:170-184`), so the recipe read is one keyed `project_meta` lookup on a connection that is open
+  anyway — the same near-free lookup the per-target run listing does, not the per-run DB open the entry feared.
+  So `GalleryItem` gained the same additive optional `unexported_edit` field `StackRunOut` carries, and the card
+  shows the same `edit not exported` label History does.
+  **Reused, not re-derived, as the entry insisted:** the Gallery imports `stack.py::_unexported_edit` (function-
+  local, to keep the router import graph acyclic) — and the *label* was consolidated too, into one
+  `components/UnexportedEditBadge.tsx` that History and the Gallery both render, because two surfaces explaining
+  the same state in slightly different words is the same drift on the client side. A test proves the sharing at
+  **runtime**: monkeypatching `stack._unexported_edit` changes what `/api/gallery` reports, which a private copy
+  could not do.
+  Upgrade-safe: one additive field defaulting to `False` (an older frontend ignores it; an older backend omitting
+  it reads as "no unfinished edit"), no config/DB/on-disk change, no default flipped, no endpoint reshaped.
+  **Tests (+4):** `tests/webapp/test_unexported_edit.py` (+2 — the Gallery flags a saved-but-unexported edit and
+  leaves its siblings alone; the one-definition guard above) and `Gallery.test.tsx` (+2 — exactly the one card is
+  labelled and explains itself on hover; an ordinary run and an older backend's missing field both say nothing).
+  *(Original spec kept below for provenance.)*
+  *(Pillar: trust — PRIORITY 3;
   size S; grep first.)* v0.261.0 added `StackRunOut.unexported_edit` and used it on the Target page's hero (note +
   one-click **Finish my edit**) and History's run card (a label). The Gallery was left alone on purpose: its
   roll-up spans the **whole library**, so it would need a recipe-meta read per run across every target rather than
@@ -10117,7 +10170,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   precedes the table which precedes both the insights and the catalog card, that readiness stays above the table,
   that the *newest* run is the one shown, and that an unstacked target shows no picture card). All 71 pre-existing
   `Target.test.tsx` assertions pass **unchanged**. Frontend-only: no API, schema, config, on-disk or default change.
-  **Next slice: (e) — the Dashboard.**
+  **Next slice: (e) — the Dashboard.** *(Shipped v0.262.0 — see below.)*
 
   **✅ SLICE (d) SHIPPED — v0.260.0** (Builder 2026-08-15, branch `claude/serene-goldberg-dglvf3`). The sidebar's
   15 flat links are now four named groups plus the Dashboard. **Measured, as the acceptance criterion asks:**
@@ -10140,6 +10193,45 @@ problems. Dogfood it every big-picture run and fix root causes.
   one unlabelled, no heading over a single link, unique titles), and two render tests over the real `App`: every
   one of the 15 links is present and visible with its correct `href`, and each named group holds exactly its own
   links. Frontend-only: no route added or removed, no API, schema, config, on-disk or default change.
+
+  **✅ SLICE (e) SHIPPED — v0.262.0** (Builder 2026-08-16, branch `claude/serene-goldberg-tgh2g6`). The Dashboard
+  now opens onto **your pictures**, with everything that merely *describes* the library grouped behind three tabs.
+  **Measured, as the acceptance criterion asks:** always-on full-width cards a user had to scroll past before
+  reaching their pictures ("Recent stacks") went **8 → 0** (`PointHereTonightCard`, `LastNightCard`,
+  `VideoCapturesCard`, `ImagingCalendarCard`, `LibraryProgressCard`, `ContinueTonightCard`, `SuggestTargetsCard`,
+  `BestPicturesStrip` all sat there); cards rendered below the stat row on first paint went **8 stacked → at most
+  3** (the open tab group) plus one tab strip; the two setup alerts moved into one `NoticeBoard` above the title.
+  Destinations, cards and controls **15 → 15 — nothing removed** (the hard constraint): every card is still
+  mounted, still one click away. `Dashboard.tsx` is 299 → 334 lines (+35; as with every slice the win is vertical
+  space, not line count) and **no new component was written** — this slice is entirely the two primitives slices
+  (a) and (b) already built.
+  **New order:** notes → title → first-run guidance (`FirstImageCard`, `SampleImageCard`) → the six-tile stat row →
+  **Recent stacks** → `BestPicturesStrip` → insight tabs. On a 1080p window the stat row and the recent-stack
+  pictures share the first screen; previously the pictures were the *last* thing on the page, under eight cards.
+  **The groups, named so a beginner can predict where a thing lives:** *Tonight* (point here right now · continue
+  tonight · suggested targets) · *Recent* (last night · Moon & Sun videos waiting) · *Progress* (target progress ·
+  imaging calendar). *Tonight* leads because its cards are the actionable ones; when they are all silent (no
+  location set yet) the strip simply falls through to the first group that speaks.
+  **Two judgement calls worth knowing.** (1) `FirstImageCard` and `SampleImageCard` were deliberately left
+  **outside** both the board and the tabs — they are the first-run guidance the entry's cautions say to preserve,
+  they self-hide the moment the install is established, and burying a beginner's map behind a tab would trade the
+  busy complaint for a worse one. (2) `BestPicturesStrip` moved *down* to sit directly under the recent stacks
+  rather than into a tab: both are "your pictures", so they belong together above the analysis.
+  **The `NoticeBoard` is worth it even at two notes:** with `inlineCount=2` nothing folds today, so the visible
+  behaviour is unchanged — the point is that the Dashboard now has the same obvious home for a future warning that
+  the Target page has, instead of a ninth always-on banner. Both alerts keep their own close button and their
+  signature-keyed dismissal.
+  **Tests (+4, `Dashboard.test.tsx`):** the pictures precede the insights area (`compareDocumentPosition`) and the
+  analysis really is inside it; exactly the two speaking groups get a tab (a silent *Tonight* gets none), one group
+  is visible at a time, the other stays **mounted** (`not.toBeVisible()`, so nothing refetches on a switch), and a
+  click switches in one step; a lone speaking group gets no tab strip at all; and both setup warnings live in one
+  notes area above the title. All 8 pre-existing `Dashboard.test.tsx` assertions pass **unchanged** — including the
+  banner-dismissal test that reaches for the Mantine close button — so nothing was rewritten to go green.
+  Frontend-only: no API, schema, config, on-disk or default change; no route added or removed.
+  **All five named slices (a)–(e) are now shipped.** The entry stays open as the standing IA reference (the
+  primitives, the hard constraint and the acceptance measurement); the natural next candidates, *if the owner
+  reacts and wants more*, are the Library and Editor screens — but neither has been measured as "busy" the way
+  Target and Dashboard were, so **don't start one speculatively**.
 
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
