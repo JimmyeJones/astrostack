@@ -49,6 +49,36 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, seen in a real running build with the sample library loaded;
+  REPRODUCED) — the Dashboard's "Worth more time" card and the Tonight planner tell a beginner that
+  *"another hour would cut its noise about 100%"* for every target they haven't shot yet.**~~ — **FIXED v0.263.2**
+  (Builder 2026-08-16, branch `claude/serene-goldberg-ldc6ih`). *(Friendliness / trust — PRIORITY 3; wrong-figure,
+  on the Dashboard's most prominent recommendation and on the common path, not an edge case.)*
+  **How it was found:** built the frontend, booted the app against a scratch data root, loaded the sample library
+  and screenshotted the Dashboard. The "Worth more time" card read, verbatim: *"You haven't captured any of
+  Sample: Orion Nebula (M42) yet — another hour would cut its noise about 100%."*
+  **The cause:** `nightplan.noise_gain_from_more_time` returns **1.0** at zero integration — correct and
+  deliberate as a *ranking* score ("the first hour is an unbounded improvement", and `_depth_component` sorts on
+  it) — but both reason-builders (`_pick_reason` for the placed path, `_depth_only_picks` for the no-location one)
+  printed it as `round(gain·100)%`. An hour of imaging does not remove all of a picture's noise, and "**another**
+  hour" is the wrong word for someone who has none. It hits the *most common* case the planner exists for: a
+  target in the library you have not yet integrated. The frontend's own `readiness.noiseReductionHint` already
+  refuses to speak at zero integration (`exposureSeconds <= 0` → `null`), so the two surfaces disagreed on exactly
+  this case — which the 2026-08-12 "already consistent, nothing to build" note above missed, because it compared
+  the *formula* and not the zero guard.
+  **The other end of the same curve, fixed with it:** past ~200 h one more hour rounds to 0 %, so a very deep
+  target was told *"another hour would cut its noise about 0%"* — true, useless, and reads as a bug rather than as
+  "you're done here".
+  **The fix:** one shared `_depth_sentence(hours, subject, gain)` now builds "what you have — what an hour buys"
+  for both paths, and prints the percentage only where it means something: nothing captured → *"its first hour will
+  do more for it than any hour after"*; rounds to zero → *"it's as deep as another hour can meaningfully make
+  it"*; otherwise the existing sentence, byte-for-byte. **The score itself is untouched** — ranking, `noise_gain`
+  in the API response and every other field are unchanged, so this is copy only: no API shape, config, DB,
+  on-disk or default change. **Tests (+2, both fail-before, `tests/test_nightplan.py`):** the zero-integration
+  target on *both* planner paths (asserting `noise_gain` is still 1.0, that "100%" and "another hour would cut"
+  are gone, and that a target with 1 h still gets its honest "about 29%"), and the 500 h target that must not be
+  told "about 0%".
+
 - ~~**⚠ RED BASELINE (Builder 2026-08-15, hit on the first suite run of the run; REPRODUCED on clean `origin/main`)
   — a Tonight test hard-coded `"2026-08-15"` as "a future night", so the frontend suite went red the day the
   calendar reached it, and stays red.**~~ — **FIXED v0.258.1** (Builder 2026-08-15, branch
@@ -12417,6 +12447,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   removed *so far* by stacking N subs, not the marginal return of one more hour — and the entry's own "care" note
   says not to collapse those. Recorded so a future run doesn't re-derive this; if the two ever drift, the fix is a
   frontend mirror of the engine helper, not a re-wording.
+  _(**Correction, Builder 2026-08-16:** the formulas do match, but the check stopped at the formula and missed the
+  **zero-integration guard**, where the two genuinely disagreed: `noiseReductionHint` returns `null` for
+  `exposureSeconds <= 0`, while the planner printed `round(1.0·100)` = *"another hour would cut its noise about
+  100%"* on every un-shot target. Found by dogfooding a running build; fixed in **v0.263.2** (see Bugs). The
+  lesson worth keeping: "same formula" is not "same sentence" — compare the **guards** too.)_
 
 - ~~**NEW BEGINNER FEATURE (Builder 2026-08-08, the natural follow-on to "How many more clear nights?" v0.252.0) —
   "Finish this one first": tell the beginner which of their in-flight targets is *closest to done*, so a clear
