@@ -10022,6 +10022,18 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **FOUND BY DOGFOODING, FILED NOT FIXED (Builder 2026-08-16, seen in the 1440 px Library screenshot; the run had
+  already shipped five items and stopped rather than churn) — the Library card's "go to target" chevron falls onto
+  its own line under any name long enough to fill the card.** *(Friendliness — PRIORITY 3; size XS; frontend-only;
+  cosmetic.)* `routes/Library.tsx:95-98` puts the name and an `IconChevronRight` in a
+  `<Group justify="space-between">`, which **wraps by default** — so "Sample: Orion Nebula (M42)" pushes the
+  chevron down and the card shows a stray "›" hanging alone on the line below the title. **Slice:** the same shape
+  the Gallery card fix (v0.263.4) landed on — `wrap="nowrap"` on that Group, `flexShrink: 0` on the icon, and the
+  name `truncate` with its full text carried as a `title` so a long name is still readable on hover rather than
+  silently cut. **Care:** do *not* just add `wrap="nowrap"` — that is what turns a wrap into a squeeze (see the
+  sample-card entry below); the name needs the truncation, and the icon needs to be the thing that can't shrink.
+  Worth doing next time this file is open; not worth a run of its own.
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run — seen in the 420 px Dashboard screenshot) — the sample
   card's two sentences render as a one-word-per-line ribbon ~25 lines tall on a phone.**~~ — **FIXED v0.264.4**
   (Builder 2026-08-16, branch `claude/serene-goldberg-ru8exw`). *(Friendliness — PRIORITY 3; cosmetic, but it is
