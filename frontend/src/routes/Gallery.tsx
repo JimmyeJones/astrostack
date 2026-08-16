@@ -15,7 +15,7 @@ import {
   api, type GalleryItem, type StackOptionField, type VideoStill,
 } from "../api/client";
 import { sharePictureText } from "../share";
-import { formatIntegration } from "../format";
+import { formatIntegration, formatStampDate } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
@@ -700,7 +700,7 @@ export function GalleryView() {
           ? (() => {
               const { title, text, filename } = sharePictureText(
                 viewing.target_name,
-                new Date(viewing.timestamp_utc).toLocaleDateString(),
+                formatStampDate(viewing.timestamp_utc),
               );
               return { shareFilename: filename, shareTitle: title, shareText: text };
             })()
@@ -727,7 +727,7 @@ export function GalleryView() {
               // app it lands in.
               const { title, text, filename } = sharePictureText(
                 viewingStill.label,
-                new Date(viewingStill.created_utc).toLocaleDateString(),
+                formatStampDate(viewingStill.created_utc),
                 "png",
               );
               return { shareFilename: filename, shareTitle: title, shareText: text };

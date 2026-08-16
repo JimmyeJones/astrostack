@@ -9,7 +9,7 @@ import { IconAdjustments, IconCheck, IconClipboardText, IconCopy, IconDeviceFlop
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting } from "../api/client";
-import { formatIntegration } from "../format";
+import { formatIntegration, formatStampDate } from "../format";
 import { postCaption, formatCaptionDate } from "../components/postCaption";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
@@ -1047,7 +1047,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
               {...sharePictureText(
                 run.output_basename,
-                new Date(run.timestamp_utc).toLocaleDateString(),
+                formatStampDate(run.timestamp_utc),
               )}
               text={shareCaption}
             />
@@ -1139,7 +1139,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           ? (() => {
               const { title, filename } = sharePictureText(
                 run.output_basename,
-                new Date(run.timestamp_utc).toLocaleDateString(),
+                formatStampDate(run.timestamp_utc),
               );
               return { shareFilename: filename, shareTitle: title, shareText: shareCaption };
             })()

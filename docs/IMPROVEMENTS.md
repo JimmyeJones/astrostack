@@ -10022,6 +10022,27 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, first run of the new `scripts/agent-dogfood.sh` — seen in a
+  screenshot, not read out of the code) — every surface that dates a *picture* printed an ambiguous numeric
+  date, on the same screen as the night surfaces' unambiguous one.**~~ — **FIXED v0.264.2** (Builder 2026-08-16,
+  branch `claude/serene-goldberg-ru8exw`). *(Friendliness / trust — PRIORITY 3; cosmetic severity, but it is the
+  caption under the picture the whole app exists to make.)* The phone screenshot of the Target page shows the hero
+  card reading **"Stacked 8/16/2026"** and, four cards below it, the last-session line reading **"15 Nov 2024"** —
+  two dates on one screen that don't agree about their own format. `latestPictureCaption` (and History ×2, the
+  Gallery ×2, My best pictures, Moon & Sun, and the sharpest-yet badge) called bare
+  `toLocaleDateString()`, whose numeric form half the world reads the other way round: 8/16 is the 8th of month 16
+  to a `en-GB`/`de`/`fr` reader, and the owner's own surfaces elsewhere all use day-month-year.
+  **The fix reuses what was already there.** `Compare.tsx` had privately solved this months ago
+  (`compareDateLabel` — `{day:"numeric", month:"short", year:"numeric"}`, so the month is a *name* and can never
+  be misread). That is now `format.ts::formatStampDate`, the one definition, and `compareDateLabel` is an alias
+  kept for its callers and tests. Every one of the eight call sites goes through it. It is deliberately **not**
+  `formatNightDate`: a night is a date already and must not shift across a timezone, but "when this stack was run"
+  is a *moment*, so it keeps its `Date`-through-local-time semantics — only the ambiguity goes. A missing or
+  unparseable stamp still yields `""` so the caller drops the clause instead of printing "Invalid Date".
+  Frontend-only: no API, schema, config, on-disk or default change. **Tests (+3):** `format.test.ts` (+2 — a
+  named month and no `d/d/` form; empty for null/blank/garbage) and `LatestPictureCard.test.tsx` (+1, **fails
+  before** — the hero caption names its month).
+
 - ~~**NEW IDEA (Builder 2026-08-16, the obvious next question after shipping the Gallery's `unexported_edit` flag
   v0.262.1) — nothing tells you, across the whole library, that you have saved edits you never exported.**~~ —
   **SHIPPED v0.263.0** (Builder 2026-08-16, branch `claude/serene-goldberg-9y0sw9`). *(Trust / autonomy —

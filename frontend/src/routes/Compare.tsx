@@ -7,7 +7,7 @@ import { IconArrowLeft, IconGitCompare } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type GalleryItem } from "../api/client";
-import { formatIntegration } from "../format";
+import { formatIntegration, formatStampDate } from "../format";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
@@ -97,13 +97,10 @@ function CardMeta({ item }: { item: GalleryItem }) {
 }
 
 /** Short, locale-friendly capture date for a compare side ("18 Jul 2026"), or
- * "" for a missing/unparseable timestamp so the clause is simply dropped. */
-export function compareDateLabel(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
-}
+ * "" for a missing/unparseable timestamp so the clause is simply dropped. This
+ * shape is now the app-wide one (`formatStampDate`); the name is kept for its
+ * callers and tests. */
+export const compareDateLabel = formatStampDate;
 
 /** One side of the A/B provenance strip: which stack this is (colour-keyed to the
  * split/blink badge) and its plain-language provenance — basename, frame count,

@@ -59,6 +59,16 @@ describe("latestPictureCaption", () => {
       .not.toContain("of light");
   });
 
+  it("names the month instead of numbering it", () => {
+    // Found by dogfooding: the hero read "Stacked 8/16/2026" directly above the
+    // Nights card's "15 Nov 2024", and half the world reads 8/16 as the 8th of
+    // month 16. Every picture-dating surface now goes through formatStampDate.
+    const cap = latestPictureCaption(mkRun({ timestamp_utc: "2026-08-16T12:00:00Z" }));
+    expect(cap).toMatch(/Stacked .*2026/);
+    expect(cap).toMatch(/Stacked [^·]*[A-Za-z]{3}/);
+    expect(cap).not.toMatch(/\d{1,2}\/\d{1,2}\//);
+  });
+
   it("omits an unparseable timestamp rather than printing 'Invalid Date'", () => {
     const cap = latestPictureCaption(mkRun({ timestamp_utc: "not-a-date" }));
     expect(cap).not.toMatch(/Stacked/);
