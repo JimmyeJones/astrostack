@@ -1878,20 +1878,22 @@ def update_stack_run(
 
 @router.delete("/api/targets/{safe}/stack-runs/{run_id}")
 def delete_stack_run(safe: str, run_id: int, request: Request) -> dict:
-    from webapp.routers.storage import delete_run_artifacts
-
     from seestack.edit.proxy import clear_proxy
+    from webapp.routers.storage import purge_stack_run
+    from webapp.run_meta import delete_run_meta
 
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
         if run is not None:
-            delete_run_artifacts(run)
-        proj.delete_stack_run(run_id)
-        # Drop the editor's cached proxy + saved recipe for this run.
-        clear_proxy(Path(proj.project_dir), run_id)
-        with contextlib.suppress(Exception):
-            proj.set_meta(f"editor_recipe:{run_id}", "")
+            # Files, row, editor proxy and every per-run annotation, in one place
+            # (shared with "Prune old stacks" so the two can't drift).
+            purge_stack_run(proj, run)
+        else:
+            # No such row — still drop anything an earlier partial delete left.
+            proj.delete_stack_run(run_id)
+            clear_proxy(Path(proj.project_dir), run_id)
+            delete_run_meta(proj, run_id)
     finally:
         proj.close()
         lib.close()

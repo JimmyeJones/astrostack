@@ -581,6 +581,8 @@ export interface TargetStorage {
   stage1_bytes: number;
   stage2_bytes: number;
   thumbs_bytes: number;
+  /** The editor's live-preview proxies. Optional: an older backend omits it. */
+  proxies_bytes?: number;
   n_stack_runs: number;
 }
 
@@ -2037,7 +2039,7 @@ export const api = {
 
   // storage / housekeeping
   getStorage: () => req<StorageInfo>("/api/storage"),
-  clearCache: (safe: string, stage: "stage1" | "stage2" | "thumbs" | "all") =>
+  clearCache: (safe: string, stage: "stage1" | "stage2" | "thumbs" | "proxies" | "all") =>
     req<{ cleared: string[] }>(`/api/targets/${safe}/cache/clear?stage=${stage}`, {
       method: "POST",
     }),

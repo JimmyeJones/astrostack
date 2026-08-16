@@ -6654,8 +6654,48 @@ to **Shipped**.)_
   to know a beginner actually accumulates several; if it turns out people finish edits one at a time, this is
   surface nobody needs.
 
-- **NEW IDEA (Builder 2026-08-16, found while writing the un-exported-edit count's stale-key guard) — deleting a
-  stack run leaves its saved editor recipe behind in `project_meta` forever.** *(Pillar: maintainability /
+- ~~**NEW IDEA (Builder 2026-08-16, found while writing the un-exported-edit count's stale-key guard) — deleting a
+  stack run leaves its saved editor recipe behind in `project_meta` forever.**~~ — **SHIPPED v0.264.0**
+  (Builder 2026-08-16, branch `claude/serene-goldberg-ru8exw`) — **and picking it up turned the "not a live bug"
+  verdict over: the orphan meta rows were the *smallest* thing a deleted run left behind.** *(Pillar: correctness /
+  friendliness — the two buttons whose entire purpose is reclaiming disk were reclaiming about two thirds of it.)*
+  **What was actually leaking, measured on the file set a real `write_stack_outputs` produces:** a finished stack
+  writes **six** files under `output/` but only three are recorded as columns on the `stack_runs` row, and
+  `delete_run_artifacts` unlinked exactly those three — so every delete left `{base}_coverage.fits` (a full-res
+  float32 map: ~8 MB on a 1080×1920 stack, far more on a mosaic) and the `{base}_progress` reel behind for good,
+  in the `output/` directory the Storage page counts and offers no other way to clear. On top of that,
+  **"Prune old stacks" cleared none of the editor's side-artifacts at all** — not the ~27 MB `.npy` preview proxy,
+  not one meta row — because the proxy/recipe cleanup lived inline in the *single-run* delete endpoint and the
+  prune path called `Project.delete_stack_run` directly. Pruning ten edited runs orphaned ~270 MB of proxy that
+  nothing would ever read or reclaim.
+  **The fix is one definition of "delete a run", used by both paths.** `webapp/routers/storage.py::purge_stack_run`
+  removes the file set, the history row, the editor proxy and every per-run annotation; the delete endpoint and the
+  prune loop both call it, so they can no longer drift. `delete_run_artifacts` derives the unrecorded siblings from
+  the FITS basename using the new `seestack.stack.output.RUN_ARTEFACT_SUFFIXES` — the same set
+  `_archive_existing_outputs` already had inline, now defined once, so a seventh output can't be added in one place
+  and forgotten in the other. The six per-run `project_meta` prefixes (editor recipe, the Auto note, the two Auto
+  colour measurements, the two calibration notes) are collected in a new `webapp/run_meta.py`, each still owned by
+  the module that writes it, with a drift test that fails if a new `<prefix><run_id>` key isn't registered.
+  **Deleting user data stays scoped exactly as the entry insisted:** the recipe is removed only for the run being
+  deleted in the same call — there is no sweep over the table, and the un-exported-edit count keeps its existence
+  check, which is what covers the orphans every upgrading install already carries.
+  **The already-leaked proxies are recoverable too, which is the other half:** `cache/edit_proxies/` sits under
+  `cache/` but was in **no** storage figure and **no** clear stage, so an install that had pruned could never get
+  that space back. It is now its own `proxies` stage (and part of `all`), reported as an additive
+  `TargetStorage.proxies_bytes` and folded into `cache_bytes`, with an **Editor previews** entry in the Storage
+  page's Clear-cache menu. Safe to clear by construction — a proxy is rebuilt from the stack FITS the next time a
+  run is opened.
+  Upgrade-safe: one additive response field with a default (an older frontend ignores it, an older backend omitting
+  it reads as 0), one new *accepted* stage value (no existing value changed), no config/DB-schema/on-disk/default
+  change, and nothing outside the library's own `targets/` tree is touched — `incoming/` is not reachable from any
+  of it (§10). **Tests (+7+3):** `tests/webapp/test_run_purge.py` (**new** — the whole file set, proxy and notes
+  gone after a single-run delete; prune reclaiming as much while leaving the kept run's eight files and six meta
+  rows untouched; the proxy cache counted and clearable on its own and inside `all`; a delete of a
+  non-existent id still answering; the per-run-meta drift guard; and a **real** `write_stack_outputs` whose every
+  output the delete path finds — five of the seven fail before) and `Storage.test.tsx` (+2 — the menu entry clears
+  the `proxies` stage, and an older backend's missing field reads as zero rather than `NaN`).
+  *(Original spec kept below for provenance.)*
+  *(Pillar: maintainability /
   hygiene — size S; **not a live bug**, filed so it is fixed deliberately rather than tripped over.)*
   `Project.delete_stack_run` removes the `stack_runs` row but not the `editor_recipe:<id>` meta key the editor
   wrote for it, so every deleted-after-editing run leaves an orphan row that nothing will ever read.
