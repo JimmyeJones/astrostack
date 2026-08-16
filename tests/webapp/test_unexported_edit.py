@@ -128,6 +128,49 @@ def test_export_without_a_recipe_and_nothing_saved_is_a_clean_400(client, solved
     assert "no saved edit" in r.json()["detail"]
 
 
+# ---- the same flag on the library-wide Gallery ------------------------------
+
+def test_gallery_flags_a_saved_but_unexported_edit(client, solved_library):
+    """The Gallery shows the same baked previews as History, so it has to be as
+    honest about them. Its loop already opens each project, so the recipe read is
+    one keyed lookup on an open DB."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="gallery_src")
+
+    items = client.get("/api/gallery").json()["items"]
+    assert next(x for x in items if x["run_id"] == rid)["unexported_edit"] is False
+
+    client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", json=STRETCH)
+
+    items = client.get("/api/gallery").json()["items"]
+    assert next(x for x in items if x["run_id"] == rid)["unexported_edit"] is True
+    # Only the run that carries the saved edit — a sibling run is untouched.
+    assert all(x["unexported_edit"] is False
+               for x in items if x["run_id"] != rid)
+
+
+def test_gallery_reuses_the_run_listings_predicate(client, solved_library, monkeypatch):
+    """One definition, not two. Two surfaces answering "is this edit unfinished?"
+    from two copies of the rule is exactly the hand-synced drift `webapp/goals.py`
+    was written to stop — so prove it at *runtime*: replacing the run listing's
+    function changes what the Gallery reports. A private copy wouldn't budge."""
+    import inspect
+
+    import webapp.routers.gallery as gallery_mod
+    import webapp.routers.stack as stack_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="one_definition")
+    assert next(x for x in client.get("/api/gallery").json()["items"]
+                if x["run_id"] == rid)["unexported_edit"] is False
+
+    monkeypatch.setattr(stack_mod, "_unexported_edit", lambda options, recipe: True)
+    assert next(x for x in client.get("/api/gallery").json()["items"]
+                if x["run_id"] == rid)["unexported_edit"] is True
+    # …and no second copy has crept into the gallery module itself.
+    assert "def _unexported_edit" not in inspect.getsource(gallery_mod)
+
+
 def test_re_editing_an_export_and_saving_flags_the_exported_run(client, solved_library):
     """End to end: export, then edit the export and press Save without exporting
     again. The exported run's preview is the *first* edit, so the second one is

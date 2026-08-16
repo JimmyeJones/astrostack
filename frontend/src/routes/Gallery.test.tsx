@@ -776,3 +776,40 @@ describe("Gallery Moon & Sun stills", () => {
     expect(screen.queryByLabelText(/Bring out surface detail/i)).toBeNull();
   });
 });
+
+describe("Gallery unfinished-edit honesty", () => {
+  it("labels a card whose thumbnail isn't the picture the user made", async () => {
+    // The Gallery serves the same baked preview History does, so a saved-but-
+    // never-exported edit isn't in it. v0.261.0 said so on the Target hero and
+    // History; this is the third surface, from the same server-side flag.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), unexported_edit: true }, item(2)],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    // Exactly one card is labelled — the one that carries the unfinished edit.
+    await waitFor(() => expect(screen.getAllByText("edit not exported")).toHaveLength(1));
+    // …and it explains itself on hover rather than just labelling the card
+    // (the title sits on the badge root, above the label's own span).
+    expect(screen.getByText("edit not exported").closest("[title]"))
+      .toHaveAttribute("title", expect.stringContaining("never exported it"));
+  });
+
+  it("says nothing about an ordinary run, or on an older backend", async () => {
+    // `unexported_edit` absent (an older backend) must read as "nothing to say",
+    // never as a nag.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [item(1), { ...item(2), unexported_edit: false }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getAllByText("5 frames").length).toBe(2));
+    expect(screen.queryByText("edit not exported")).not.toBeInTheDocument();
+  });
+});

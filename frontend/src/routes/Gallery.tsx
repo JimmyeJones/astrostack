@@ -19,6 +19,7 @@ import { formatIntegration } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
+import { UnexportedEditBadge } from "../components/UnexportedEditBadge";
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import {
   RejectionBadge, combineMethodKey, COMBINE_METHOD_LABELS, type CombineMethod,
@@ -371,6 +372,10 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
           <HazyNightBadge ratio={item.transparency_ratio} />
           <PanelSeamsBadge verdict={item.seam_verdict} />
           <CalibrationBadge calstat={item.calstat} />
+          {/* This card's thumbnail is the run's baked preview, so a saved-but-
+              never-exported edit isn't in it — say so here too, not just on
+              History and the Target hero. */}
+          <UnexportedEditBadge show={item.unexported_edit} />
           <FrameCountBadge nFramesUsed={item.n_frames_used} />
         </Group>
       </Group>

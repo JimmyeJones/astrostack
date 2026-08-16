@@ -69,6 +69,13 @@ class GalleryItem(BaseModel):
     # stack?" notes use, so every surface reads one decision; drives the
     # "Panels even" / "Panels: check" chip on the Gallery and Compare cards.
     seam_verdict: str | None = None
+    # True when the user saved an edit for this run in the editor but never
+    # exported it, so the thumbnail here is still the plain auto-stretch of the
+    # linear stack rather than the picture they made. Same
+    # `webapp.routers.stack._unexported_edit` decision the Target hero and the
+    # History card use — one definition, so the three surfaces can't drift.
+    # Additive with a False default, which is what every ordinary run is.
+    unexported_edit: bool = False
 
 
 class VideoStillItem(BaseModel):
@@ -166,6 +173,8 @@ def get_gallery(request: Request) -> GalleryResponse:
     lib = deps.open_library(request)
     try:
         from seestack.io.project import Project
+        from webapp.routers.editor import RECIPE_META_PREFIX
+        from webapp.routers.stack import _unexported_edit
 
         for t in lib.list_targets():
             proj = None
@@ -207,6 +216,14 @@ def get_gallery(request: Request) -> GalleryResponse:
                         noise_sigma=run.noise_sigma,
                         calstat=run.calstat,
                         seam_verdict=seam_verdict(run.seam_residual),
+                        # One extra keyed read on the project DB this loop
+                        # already has open — the same near-free lookup the run
+                        # listing does, which is what made this affordable
+                        # library-wide.
+                        unexported_edit=_unexported_edit(
+                            run.options_json,
+                            proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}"),
+                        ),
                     ))
             finally:
                 if proj is not None:
