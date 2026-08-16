@@ -469,6 +469,15 @@ the repo.
 > the steps. Wiring it into a `SessionStart` hook makes every run start green with
 > no setup tax.
 
+> Tip: **`scripts/agent-dogfood.sh` boots a real app with real data** for the §2
+> big-picture pass — scratch data root, the bundled sample loaded and stacked,
+> then Playwright full-page screenshots at 1440 px **and** 420 px plus an
+> overflow probe. Use it instead of re-reading route files: the bugs that survive
+> code-level audits are the ones only a running app shows. `--serve` leaves it up
+> to poke by hand; `--no-probe` skips the browser half. Everything lands in a
+> scratch dir, never the repo. Whatever it finds still needs a real regression
+> test in the suite — it is a finder, not a test.
+
 ---
 
 ## 8. Git and shipping (zero-touch — no human reviews or merges)

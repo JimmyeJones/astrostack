@@ -17349,8 +17349,31 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Infra / maintainability
 
-- **NEW IDEA (Builder 2026-08-16, filed because it is what made this run productive) — check in the dogfood
-  harness, so "§2 big-picture pass" means running the app rather than re-reading it.** *(Pillar: infra /
+- ~~**NEW IDEA (Builder 2026-08-16, filed because it is what made this run productive) — check in the dogfood
+  harness, so "§2 big-picture pass" means running the app rather than re-reading it.**~~ — **SHIPPED v0.264.1**
+  (Builder 2026-08-16, branch `claude/serene-goldberg-ru8exw`), built to the filed recipe and then **actually run,
+  which is how the last three of its bugs got shaken out.** `scripts/agent-dogfood.sh` boots the app on a scratch
+  data root and its own port, loads the bundled sample, runs `process` and polls the job, then drives
+  `scripts/dogfood_probe.mjs` over the real route table at **1440 px and 420 px** — full-page screenshots plus the
+  overflow probe and a console-error watch. `--serve` leaves it up to poke by hand, `--no-stack` / `--no-probe`
+  skip the slow halves, and everything lands under `$DOGFOOD_DIR` (default `${TMPDIR}/astrostack-dogfood`), never
+  the repo. AGENTS.md §7 now points at it next to `agent-setup.sh`.
+  **The four things that only came out by running it**, recorded so the next person doesn't re-find them: (1) an
+  ESM `import "playwright"` resolves from the *script's* directory and ignores `NODE_PATH`, so the probe is copied
+  into the scratch dir beside its `node_modules`; (2) the npm package wants a newer chromium build than
+  `/opt/pw-browsers` ships, so it launches the bundled binary by `executablePath` rather than running the
+  forbidden `playwright install`; (3) `page.evaluate` given a *string* evaluates it as an expression and hands
+  back the function itself — it takes a real function; (4) the routes are `/targets/<safe>` and `/telescope`, not
+  `/library/<safe>` and `/seestar`, and a wrong URL reads as a convincing app bug ("Unexpected Application Error!
+  404 Not Found") that is entirely the probe's.
+  **The probe's exclusions are each a false positive it produced on a real page** — a text input scrolls its own
+  value (Settings), a scrollbar thumb is *meant* to be narrower than its track (Logs), and an offline container
+  makes the Sky Map's remote survey fail loudly, which says nothing about this app. **Result on
+  v0.264.0: zero overflows and no app-originated console errors** across fifteen routes plus the target hub,
+  Stack form, History and **editor**, at both widths — an independent confirmation of the 2026-08-16 negative
+  result below. Nothing ships to users; no config/DB/API/default change.
+  *(Original spec kept below for provenance.)*
+  *(Pillar: infra /
   bug-finding — size S; nothing shipped to users.)* **Why:** AGENTS.md §2 asks for a real dogfood pass at least
   one run in three, but every run has to reinvent how to *get* a running app, so in practice the pass degrades
   into reading route files — which is exactly how the three bugs fixed this run (v0.263.2–v0.263.4) survived
