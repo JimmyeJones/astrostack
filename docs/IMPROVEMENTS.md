@@ -9867,8 +9867,27 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-08-15, the one surface v0.261.0 deliberately left out) — the *Gallery* still shows an
-  un-exported edit's picture with no hint that it isn't the user's version.** *(Pillar: trust — PRIORITY 3;
+- ~~**NEW IDEA (Builder 2026-08-15, the one surface v0.261.0 deliberately left out) — the *Gallery* still shows an
+  un-exported edit's picture with no hint that it isn't the user's version.**~~ — **SHIPPED v0.262.1**
+  (Builder 2026-08-16, branch `claude/serene-goldberg-tgh2g6`). *(Trust — PRIORITY 3.)* **The gate the entry set
+  was measured first, and it passed:** `get_gallery` **already opens each target's project DB** and iterates its
+  runs (`gallery.py:170-184`), so the recipe read is one keyed `project_meta` lookup on a connection that is open
+  anyway — the same near-free lookup the per-target run listing does, not the per-run DB open the entry feared.
+  So `GalleryItem` gained the same additive optional `unexported_edit` field `StackRunOut` carries, and the card
+  shows the same `edit not exported` label History does.
+  **Reused, not re-derived, as the entry insisted:** the Gallery imports `stack.py::_unexported_edit` (function-
+  local, to keep the router import graph acyclic) — and the *label* was consolidated too, into one
+  `components/UnexportedEditBadge.tsx` that History and the Gallery both render, because two surfaces explaining
+  the same state in slightly different words is the same drift on the client side. A test proves the sharing at
+  **runtime**: monkeypatching `stack._unexported_edit` changes what `/api/gallery` reports, which a private copy
+  could not do.
+  Upgrade-safe: one additive field defaulting to `False` (an older frontend ignores it; an older backend omitting
+  it reads as "no unfinished edit"), no config/DB/on-disk change, no default flipped, no endpoint reshaped.
+  **Tests (+4):** `tests/webapp/test_unexported_edit.py` (+2 — the Gallery flags a saved-but-unexported edit and
+  leaves its siblings alone; the one-definition guard above) and `Gallery.test.tsx` (+2 — exactly the one card is
+  labelled and explains itself on hover; an ordinary run and an older backend's missing field both say nothing).
+  *(Original spec kept below for provenance.)*
+  *(Pillar: trust — PRIORITY 3;
   size S; grep first.)* v0.261.0 added `StackRunOut.unexported_edit` and used it on the Target page's hero (note +
   one-click **Finish my edit**) and History's run card (a label). The Gallery was left alone on purpose: its
   roll-up spans the **whole library**, so it would need a recipe-meta read per run across every target rather than
