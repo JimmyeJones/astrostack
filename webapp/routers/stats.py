@@ -463,6 +463,13 @@ def get_stats(request: Request, recent_limit: int = 8) -> StatsResponse:
             "total_gb": round(usage.total / 1e9, 1),
             "used_gb": round(usage.used / 1e9, 1),
             "free_gb": round(usage.free / 1e9, 1),
+            # Additive raw counts, and the ones the UI renders: the *_gb fields
+            # are decimal (1e9) while every other size the app prints is binary
+            # (1024**3), which had the Dashboard's "Free disk" tile disagreeing
+            # with the Storage page's headroom note by ~7 %. See
+            # webapp/routers/system.py for the same pair.
+            "free_bytes": int(usage.free),
+            "total_bytes": int(usage.total),
         }
     except OSError:
         pass

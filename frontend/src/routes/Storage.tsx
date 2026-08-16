@@ -10,6 +10,7 @@ import { api, type TargetStorage } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { sanitizeKeep } from "../components/pruneKeep";
 import { storageHeadroom } from "../components/storageHeadroom";
+import { formatDiskSize } from "../format";
 
 function gb(bytes: number): string {
   if (!bytes) return "0 MB";
@@ -22,7 +23,8 @@ function TargetRow({ row, total }: { row: TargetStorage; total: number }) {
   const [keep, setKeep] = useState<number | string>(3);
 
   const clear = useMutation({
-    mutationFn: (stage: "stage1" | "stage2" | "thumbs" | "all") => api.clearCache(row.safe, stage),
+    mutationFn: (stage: "stage1" | "stage2" | "thumbs" | "proxies" | "all") =>
+      api.clearCache(row.safe, stage),
     onSuccess: (r) => {
       notifications.show({ message: `Cleared ${r.cleared.join(", ")} for ${row.name}`, color: "teal" });
       qc.invalidateQueries({ queryKey: ["storage"] });
@@ -42,7 +44,9 @@ function TargetRow({ row, total }: { row: TargetStorage; total: number }) {
   const pct = total ? (row.total_bytes / total) * 100 : 0;
   const cachePct = row.total_bytes ? (row.cache_bytes / row.total_bytes) * 100 : 0;
 
-  const confirmClear = (stage: "stage1" | "stage2" | "thumbs" | "all", label: string) => {
+  const confirmClear = (
+    stage: "stage1" | "stage2" | "thumbs" | "proxies" | "all", label: string,
+  ) => {
     if (window.confirm(
       `Clear ${label} for ${row.name}?\n\nThis deletes regenerable cache files only — your `
       + `frames and stacked outputs are kept and the cache rebuilds on the next run.`)) {
@@ -113,6 +117,9 @@ function TargetRow({ row, total }: { row: TargetStorage; total: number }) {
             <Menu.Item onClick={() => confirmClear("thumbs", "thumbnails")}>
               Thumbnails ({gb(row.thumbs_bytes)})
             </Menu.Item>
+            <Menu.Item onClick={() => confirmClear("proxies", "editor previews")}>
+              Editor previews ({gb(row.proxies_bytes ?? 0)})
+            </Menu.Item>
           </Menu.Dropdown>
         </Menu>
 
@@ -157,7 +164,9 @@ export function StorageView() {
         <Text size="sm">Library total: <b>{gb(data.total_bytes)}</b></Text>
         <Text size="sm">Cache: <b>{gb(data.cache_bytes)}</b></Text>
         <Text size="sm">Outputs: <b>{gb(data.output_bytes)}</b></Text>
-        {data.disk.free_gb != null ? (
+        {data.disk.free_bytes != null ? (
+          <Text size="sm" c="dimmed">{formatDiskSize(data.disk.free_bytes)} free on disk</Text>
+        ) : data.disk.free_gb != null ? (
           <Text size="sm" c="dimmed">{data.disk.free_gb} GB free on disk</Text>
         ) : null}
       </Group>

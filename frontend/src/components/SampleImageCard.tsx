@@ -94,9 +94,13 @@ export function SampleImageCard() {
   if (loaded) {
     return (
       <Paper withBorder radius="md" p="md">
-        <Group justify="space-between" wrap="nowrap" gap="md">
-          <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-            <ThemeIcon variant="light" color="violet" size="lg" radius="md">
+        {/* Wraps, and the wording column is based on 240 px rather than 0 — see
+            the note on the identical row below. */}
+        <Group justify="space-between" gap="md">
+          <Group gap="sm" wrap="nowrap"
+                 style={{ flex: "1 1 240px", minWidth: 0 }}>
+            <ThemeIcon variant="light" color="violet" size="lg" radius="md"
+                       style={{ flexShrink: 0 }}>
               <IconSparkles size={20} />
             </ThemeIcon>
             <Stack gap={2} style={{ minWidth: 0 }}>
@@ -107,7 +111,7 @@ export function SampleImageCard() {
               </Text>
             </Stack>
           </Group>
-          <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+          <Group gap="xs" style={{ flexShrink: 0 }}>
             <Button size="xs" color="violet"
               leftSection={<IconPlayerPlay size={14} />}
               loading={stack.isPending}
@@ -132,9 +136,17 @@ export function SampleImageCard() {
 
   return (
     <Paper withBorder radius="md" p="md">
-      <Group justify="space-between" wrap="nowrap" gap="md">
-        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-          <ThemeIcon variant="light" color="violet" size="lg" radius="md">
+      {/* The row may wrap, and the wording column is based on 240 px rather
+          than 0. With `wrap="nowrap"` and a `minWidth: 0` text column beside a
+          `flexShrink: 0` button group, a phone-width card squeezed the words
+          into a one-word-per-line ribbon ~25 lines tall — flexbox will shrink a
+          zero-basis child below its own content rather than wrap the row. A
+          real basis makes the buttons drop to their own line instead; on a
+          desktop card the row is unchanged. */}
+      <Group justify="space-between" gap="md">
+        <Group gap="sm" wrap="nowrap" style={{ flex: "1 1 240px", minWidth: 0 }}>
+          <ThemeIcon variant="light" color="violet" size="lg" radius="md"
+                     style={{ flexShrink: 0 }}>
             <IconSparkles size={20} />
           </ThemeIcon>
           <Stack gap={2} style={{ minWidth: 0 }}>

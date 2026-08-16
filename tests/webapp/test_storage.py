@@ -163,3 +163,31 @@ def test_stack_runs_options_defaults_empty_when_unrecorded(client, solved_librar
     runs = {r["output_basename"]: r
             for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
     assert runs["plain"]["options"] == {}
+
+
+def test_disk_figures_are_served_as_raw_bytes_too(client, solved_library):
+    """Every endpoint that reports free disk serves the byte count beside its
+    rounded ``*_gb``.
+
+    The ``*_gb`` fields are decimal (1e9) while every size the UI prints is
+    binary (1024**3), so rendering one figure from each had the Storage page
+    saying "23 GB free on disk" directly above "21 GB free — not enough imaging
+    history yet". The client now formats the bytes; the old fields stay for
+    anything already reading them.
+    """
+    for path in ("/api/storage", "/api/stats", "/api/system"):
+        disk = client.get(path).json()["disk"]
+        assert "free_gb" in disk, path          # not removed — upgrade-safe
+        assert isinstance(disk["free_bytes"], int), path
+        assert disk["free_bytes"] > 0, path
+        # The two must describe the same disk: decimal GB of the byte count.
+        assert abs(disk["free_bytes"] / 1e9 - disk["free_gb"]) < 0.2, path
+
+
+def test_stats_and_system_agree_with_storage_on_free_disk(client, solved_library):
+    """Three endpoints, one disk — a beginner sees these figures on three
+    different screens and must not have to reconcile them."""
+    seen = {p: client.get(p).json()["disk"]["free_bytes"]
+            for p in ("/api/storage", "/api/stats", "/api/system")}
+    lo, hi = min(seen.values()), max(seen.values())
+    assert hi - lo < 50_000_000, seen   # same filesystem, moments apart

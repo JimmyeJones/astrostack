@@ -451,6 +451,22 @@ def _autostretch_for_export(rgb: np.ndarray) -> np.ndarray:
 
 # ---- file management -----------------------------------------------------
 
+#: Every file a finished stack writes into ``output/``, as the suffix appended to
+#: the run's *basename*. Only the first three are recorded as columns on the
+#: ``stack_runs`` row; the coverage map and the "watch it appear" reel (webp, or
+#: an APNG fallback) are resolved from the basename instead. Both operations that
+#: act on a run's whole file set — archiving it aside on a re-stack, and deleting
+#: it — need the same list, so it lives here once rather than being retyped.
+RUN_ARTEFACT_SUFFIXES: dict[str, str] = {
+    "fits": ".fits",
+    "tiff": ".tif",
+    "preview": "_preview.png",
+    "coverage": "_coverage.fits",
+    "progress_webp": "_progress.webp",
+    "progress_apng": "_progress.png",
+}
+
+
 def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str]:
     """Move an existing output set aside under a single timestamped *basename*.
 
@@ -464,9 +480,12 @@ def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str
 
     Returns ``{original_path: archived_path}`` for the ``fits``/``tiff``/
     ``preview`` artefacts (the ones recorded in ``stack_runs``), so the caller
-    can repoint the previous run's row. The coverage sibling is archived too but
-    isn't in the returned map (it has no dedicated history column — it's resolved
-    from the FITS basename).
+    can repoint the previous run's row. The coverage sibling and the "watch it
+    appear" reel are archived too but aren't in the returned map (they have no
+    dedicated history column — they're resolved from the FITS basename).
+
+    The set moved is :data:`RUN_ARTEFACT_SUFFIXES`; the compound ``_preview`` /
+    ``_coverage`` / ``_progress`` names rebuild cleanly from the new basename.
     """
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     archived_basename = f"{out_basename}_{stamp}"
@@ -475,27 +494,13 @@ def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str
     n = 2
     while any(
         (out_dir / f"{archived_basename}{suffix}").exists()
-        for suffix in (".fits", ".tif", "_preview.png", "_coverage.fits",
-                       "_progress.webp", "_progress.png")
+        for suffix in RUN_ARTEFACT_SUFFIXES.values()
     ):
         archived_basename = f"{out_basename}_{stamp}_{n}"
         n += 1
 
-    # (original suffix, archived suffix) — same for all, but explicit so the
-    # compound _preview / _coverage / _progress names rebuild from the new
-    # basename cleanly. The "watch it appear" reel (webp or apng fallback) is
-    # archived like coverage — kept a sibling of its FITS, resolved from the
-    # basename, not recorded in a dedicated history column.
-    artefacts = {
-        "fits": ".fits",
-        "tiff": ".tif",
-        "preview": "_preview.png",
-        "coverage": "_coverage.fits",
-        "progress_webp": "_progress.webp",
-        "progress_apng": "_progress.png",
-    }
     mapping: dict[str, str] = {}
-    for kind, suffix in artefacts.items():
+    for kind, suffix in RUN_ARTEFACT_SUFFIXES.items():
         orig = out_dir / f"{out_basename}{suffix}"
         if not orig.exists():
             continue

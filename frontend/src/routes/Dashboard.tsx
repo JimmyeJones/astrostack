@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { formatIntegration } from "../format";
+import { formatDiskSize, formatIntegration } from "../format";
 import { loadDismissedSig, saveDismissedSig } from "../dismissal";
 import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
@@ -113,8 +113,16 @@ export function Dashboard() {
   }
 
   const accept = data.acceptance_rate == null ? "—" : `${Math.round(data.acceptance_rate * 100)}%`;
-  const free = data.disk.free_gb != null ? `${data.disk.free_gb} GB` : "—";
-  const usedSub = data.disk.total_gb != null ? `of ${data.disk.total_gb} GB` : undefined;
+  // Rendered from the raw byte counts so this tile agrees with the Storage
+  // page's headroom note; the decimal `*_gb` fields are the fallback for an
+  // older backend that doesn't send bytes.
+  const free = data.disk.free_bytes != null
+    ? formatDiskSize(data.disk.free_bytes)
+    : data.disk.free_gb != null ? `${data.disk.free_gb} GB` : "—";
+  const total = data.disk.total_bytes != null
+    ? formatDiskSize(data.disk.total_bytes)
+    : data.disk.total_gb != null ? `${data.disk.total_gb} GB` : null;
+  const usedSub = total ? `of ${total}` : undefined;
 
   return (
     <Stack>

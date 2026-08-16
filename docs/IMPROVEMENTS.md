@@ -6654,8 +6654,48 @@ to **Shipped**.)_
   to know a beginner actually accumulates several; if it turns out people finish edits one at a time, this is
   surface nobody needs.
 
-- **NEW IDEA (Builder 2026-08-16, found while writing the un-exported-edit count's stale-key guard) — deleting a
-  stack run leaves its saved editor recipe behind in `project_meta` forever.** *(Pillar: maintainability /
+- ~~**NEW IDEA (Builder 2026-08-16, found while writing the un-exported-edit count's stale-key guard) — deleting a
+  stack run leaves its saved editor recipe behind in `project_meta` forever.**~~ — **SHIPPED v0.264.0**
+  (Builder 2026-08-16, branch `claude/serene-goldberg-ru8exw`) — **and picking it up turned the "not a live bug"
+  verdict over: the orphan meta rows were the *smallest* thing a deleted run left behind.** *(Pillar: correctness /
+  friendliness — the two buttons whose entire purpose is reclaiming disk were reclaiming about two thirds of it.)*
+  **What was actually leaking, measured on the file set a real `write_stack_outputs` produces:** a finished stack
+  writes **six** files under `output/` but only three are recorded as columns on the `stack_runs` row, and
+  `delete_run_artifacts` unlinked exactly those three — so every delete left `{base}_coverage.fits` (a full-res
+  float32 map: ~8 MB on a 1080×1920 stack, far more on a mosaic) and the `{base}_progress` reel behind for good,
+  in the `output/` directory the Storage page counts and offers no other way to clear. On top of that,
+  **"Prune old stacks" cleared none of the editor's side-artifacts at all** — not the ~27 MB `.npy` preview proxy,
+  not one meta row — because the proxy/recipe cleanup lived inline in the *single-run* delete endpoint and the
+  prune path called `Project.delete_stack_run` directly. Pruning ten edited runs orphaned ~270 MB of proxy that
+  nothing would ever read or reclaim.
+  **The fix is one definition of "delete a run", used by both paths.** `webapp/routers/storage.py::purge_stack_run`
+  removes the file set, the history row, the editor proxy and every per-run annotation; the delete endpoint and the
+  prune loop both call it, so they can no longer drift. `delete_run_artifacts` derives the unrecorded siblings from
+  the FITS basename using the new `seestack.stack.output.RUN_ARTEFACT_SUFFIXES` — the same set
+  `_archive_existing_outputs` already had inline, now defined once, so a seventh output can't be added in one place
+  and forgotten in the other. The six per-run `project_meta` prefixes (editor recipe, the Auto note, the two Auto
+  colour measurements, the two calibration notes) are collected in a new `webapp/run_meta.py`, each still owned by
+  the module that writes it, with a drift test that fails if a new `<prefix><run_id>` key isn't registered.
+  **Deleting user data stays scoped exactly as the entry insisted:** the recipe is removed only for the run being
+  deleted in the same call — there is no sweep over the table, and the un-exported-edit count keeps its existence
+  check, which is what covers the orphans every upgrading install already carries.
+  **The already-leaked proxies are recoverable too, which is the other half:** `cache/edit_proxies/` sits under
+  `cache/` but was in **no** storage figure and **no** clear stage, so an install that had pruned could never get
+  that space back. It is now its own `proxies` stage (and part of `all`), reported as an additive
+  `TargetStorage.proxies_bytes` and folded into `cache_bytes`, with an **Editor previews** entry in the Storage
+  page's Clear-cache menu. Safe to clear by construction — a proxy is rebuilt from the stack FITS the next time a
+  run is opened.
+  Upgrade-safe: one additive response field with a default (an older frontend ignores it, an older backend omitting
+  it reads as 0), one new *accepted* stage value (no existing value changed), no config/DB-schema/on-disk/default
+  change, and nothing outside the library's own `targets/` tree is touched — `incoming/` is not reachable from any
+  of it (§10). **Tests (+7+3):** `tests/webapp/test_run_purge.py` (**new** — the whole file set, proxy and notes
+  gone after a single-run delete; prune reclaiming as much while leaving the kept run's eight files and six meta
+  rows untouched; the proxy cache counted and clearable on its own and inside `all`; a delete of a
+  non-existent id still answering; the per-run-meta drift guard; and a **real** `write_stack_outputs` whose every
+  output the delete path finds — five of the seven fail before) and `Storage.test.tsx` (+2 — the menu entry clears
+  the `proxies` stage, and an older backend's missing field reads as zero rather than `NaN`).
+  *(Original spec kept below for provenance.)*
+  *(Pillar: maintainability /
   hygiene — size S; **not a live bug**, filed so it is fixed deliberately rather than tripped over.)*
   `Project.delete_stack_run` removes the `stack_runs` row but not the `editor_recipe:<id>` meta key the editor
   wrote for it, so every deleted-after-editing run leaves an orphan row that nothing will ever read.
@@ -9981,6 +10021,85 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **FOUND BY DOGFOODING, FILED NOT FIXED (Builder 2026-08-16, seen in the 1440 px Library screenshot; the run had
+  already shipped five items and stopped rather than churn) — the Library card's "go to target" chevron falls onto
+  its own line under any name long enough to fill the card.** *(Friendliness — PRIORITY 3; size XS; frontend-only;
+  cosmetic.)* `routes/Library.tsx:95-98` puts the name and an `IconChevronRight` in a
+  `<Group justify="space-between">`, which **wraps by default** — so "Sample: Orion Nebula (M42)" pushes the
+  chevron down and the card shows a stray "›" hanging alone on the line below the title. **Slice:** the same shape
+  the Gallery card fix (v0.263.4) landed on — `wrap="nowrap"` on that Group, `flexShrink: 0` on the icon, and the
+  name `truncate` with its full text carried as a `title` so a long name is still readable on hover rather than
+  silently cut. **Care:** do *not* just add `wrap="nowrap"` — that is what turns a wrap into a squeeze (see the
+  sample-card entry below); the name needs the truncation, and the icon needs to be the thing that can't shrink.
+  Worth doing next time this file is open; not worth a run of its own.
+
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run — seen in the 420 px Dashboard screenshot) — the sample
+  card's two sentences render as a one-word-per-line ribbon ~25 lines tall on a phone.**~~ — **FIXED v0.264.4**
+  (Builder 2026-08-16, branch `claude/serene-goldberg-ru8exw`). *(Friendliness — PRIORITY 3; cosmetic, but it is
+  the card that greets a brand-new owner on the Dashboard, which is the screen the app opens on, on the device the
+  owner actually reads it on.)* "Your / sample / target / is / ready" stacked vertically, then "Open / it / to /
+  try / QC, / stacking, / editing / and…" — two sentences taking a quarter of a phone screen and reading like
+  broken markup.
+  **Cause — the same family as the v0.263.4 Gallery button, but its mirror image.** The row is
+  `<Group justify="space-between" wrap="nowrap">` with a `minWidth: 0` wording column beside a `flexShrink: 0`
+  three-button group (*Stack it · Open sample · Remove*, ≈280 px). At 420 px the buttons keep their width, the
+  row may not wrap, and `minWidth: 0` lets the words shrink to ~50 px. **It is invisible to the overflow probe**
+  precisely because nothing overflows — the text wraps obediently, into a ribbon.
+  **The fix:** drop the `wrap="nowrap"` and give the wording column a real basis (`flex: "1 1 240px"`), so on a
+  narrow card the button group drops to its own line instead of squeezing the words, while a desktop card (240 +
+  280 ≪ 900) stays a single row exactly as before. The icon gains `flexShrink: 0` so it can't be squashed either.
+  Both variants of the card — sample loaded and "Try it with a sample image" — get the same treatment.
+  Frontend-only: no API, schema, config, on-disk or default change; no copy changed.
+  **Tests (+1, `SampleImageCard.test.tsx`, fails before):** jsdom has no layout, so it pins the cause the way the
+  Gallery fix's test does — the row may wrap, and the wording column is based on its content rather than zero.
+  **Worth knowing for the next probe run:** "content squeezed *below* its words without overflowing" is a second
+  failure mode the overflow probe cannot see. A future harness slice could flag a text block whose rendered width
+  is under ~120 px while its parent row is wide — until then, look at the phone screenshots, which is how this
+  one was found.
+
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run, same screenshot pass) — the Storage page states the free
+  disk twice, ten lines apart, and the two figures disagree: "23 GB free on disk" above "21 GB free — not enough
+  imaging history yet".**~~ — **FIXED v0.264.3** (Builder 2026-08-16, branch `claude/serene-goldberg-ru8exw`).
+  *(Friendliness / trust — PRIORITY 3; wrong-figure, on the page whose whole job is telling you how much room you
+  have left.)* One fact, two numbers, one screen — and on a 12 TB NAS the same 7.4 % gap is ~900 GB of apparent
+  disagreement. **Cause:** the server rounds free space **decimally** (`round(usage.free / 1e9, 1)` → `free_gb`)
+  while *every other size the app prints* is binary — the Storage page's own `gb()` breakdown, the headroom note's
+  `formatGB`, and `df -h` all divide by 1024³. The header rendered the server's decimal figure and the note under
+  it the binary one, so they could not agree by construction.
+  **The fix makes the client the single authority.** `/api/storage`, `/api/stats` and `/api/system` now serve an
+  additive `free_bytes` / `total_bytes` beside the untouched `*_gb` fields, and the three surfaces that show free
+  disk — the Storage header, the Dashboard's **Free disk** tile, and Settings' system line — render them through
+  one shared `format.ts::formatDiskSize` (which is `storageHeadroom`'s own private `formatGB`, promoted and
+  reused, not a fourth copy). So all four figures move together, and the Dashboard tile no longer disagrees with
+  the Storage page a click away either. Every call site keeps a `free_gb` fallback, so an older backend still
+  renders exactly what it does today.
+  Upgrade-safe: additive response fields only, nothing renamed or removed, no config/DB/on-disk/default change.
+  **Tests (+5):** `tests/webapp/test_storage.py` (+2 — all three endpoints serve the byte count *and* keep
+  `free_gb`, and the byte counts agree with each other), `format.test.ts` (+1 — binary, with the exact
+  23.4e9 → "22 GB" case) and `Storage.test.tsx` (+2, **one fails before** — the header and the headroom note quote
+  the same figure and 23.4 appears nowhere; an older backend still falls back).
+
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, first run of the new `scripts/agent-dogfood.sh` — seen in a
+  screenshot, not read out of the code) — every surface that dates a *picture* printed an ambiguous numeric
+  date, on the same screen as the night surfaces' unambiguous one.**~~ — **FIXED v0.264.2** (Builder 2026-08-16,
+  branch `claude/serene-goldberg-ru8exw`). *(Friendliness / trust — PRIORITY 3; cosmetic severity, but it is the
+  caption under the picture the whole app exists to make.)* The phone screenshot of the Target page shows the hero
+  card reading **"Stacked 8/16/2026"** and, four cards below it, the last-session line reading **"15 Nov 2024"** —
+  two dates on one screen that don't agree about their own format. `latestPictureCaption` (and History ×2, the
+  Gallery ×2, My best pictures, Moon & Sun, and the sharpest-yet badge) called bare
+  `toLocaleDateString()`, whose numeric form half the world reads the other way round: 8/16 is the 8th of month 16
+  to a `en-GB`/`de`/`fr` reader, and the owner's own surfaces elsewhere all use day-month-year.
+  **The fix reuses what was already there.** `Compare.tsx` had privately solved this months ago
+  (`compareDateLabel` — `{day:"numeric", month:"short", year:"numeric"}`, so the month is a *name* and can never
+  be misread). That is now `format.ts::formatStampDate`, the one definition, and `compareDateLabel` is an alias
+  kept for its callers and tests. Every one of the eight call sites goes through it. It is deliberately **not**
+  `formatNightDate`: a night is a date already and must not shift across a timezone, but "when this stack was run"
+  is a *moment*, so it keeps its `Date`-through-local-time semantics — only the ambiguity goes. A missing or
+  unparseable stamp still yields `""` so the caller drops the clause instead of printing "Invalid Date".
+  Frontend-only: no API, schema, config, on-disk or default change. **Tests (+3):** `format.test.ts` (+2 — a
+  named month and no `d/d/` form; empty for null/blank/garbage) and `LatestPictureCard.test.tsx` (+1, **fails
+  before** — the hero caption names its month).
 
 - ~~**NEW IDEA (Builder 2026-08-16, the obvious next question after shipping the Gallery's `unexported_edit` flag
   v0.262.1) — nothing tells you, across the whole library, that you have saved edits you never exported.**~~ —
@@ -17309,8 +17428,31 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Infra / maintainability
 
-- **NEW IDEA (Builder 2026-08-16, filed because it is what made this run productive) — check in the dogfood
-  harness, so "§2 big-picture pass" means running the app rather than re-reading it.** *(Pillar: infra /
+- ~~**NEW IDEA (Builder 2026-08-16, filed because it is what made this run productive) — check in the dogfood
+  harness, so "§2 big-picture pass" means running the app rather than re-reading it.**~~ — **SHIPPED v0.264.1**
+  (Builder 2026-08-16, branch `claude/serene-goldberg-ru8exw`), built to the filed recipe and then **actually run,
+  which is how the last three of its bugs got shaken out.** `scripts/agent-dogfood.sh` boots the app on a scratch
+  data root and its own port, loads the bundled sample, runs `process` and polls the job, then drives
+  `scripts/dogfood_probe.mjs` over the real route table at **1440 px and 420 px** — full-page screenshots plus the
+  overflow probe and a console-error watch. `--serve` leaves it up to poke by hand, `--no-stack` / `--no-probe`
+  skip the slow halves, and everything lands under `$DOGFOOD_DIR` (default `${TMPDIR}/astrostack-dogfood`), never
+  the repo. AGENTS.md §7 now points at it next to `agent-setup.sh`.
+  **The four things that only came out by running it**, recorded so the next person doesn't re-find them: (1) an
+  ESM `import "playwright"` resolves from the *script's* directory and ignores `NODE_PATH`, so the probe is copied
+  into the scratch dir beside its `node_modules`; (2) the npm package wants a newer chromium build than
+  `/opt/pw-browsers` ships, so it launches the bundled binary by `executablePath` rather than running the
+  forbidden `playwright install`; (3) `page.evaluate` given a *string* evaluates it as an expression and hands
+  back the function itself — it takes a real function; (4) the routes are `/targets/<safe>` and `/telescope`, not
+  `/library/<safe>` and `/seestar`, and a wrong URL reads as a convincing app bug ("Unexpected Application Error!
+  404 Not Found") that is entirely the probe's.
+  **The probe's exclusions are each a false positive it produced on a real page** — a text input scrolls its own
+  value (Settings), a scrollbar thumb is *meant* to be narrower than its track (Logs), and an offline container
+  makes the Sky Map's remote survey fail loudly, which says nothing about this app. **Result on
+  v0.264.0: zero overflows and no app-originated console errors** across fifteen routes plus the target hub,
+  Stack form, History and **editor**, at both widths — an independent confirmation of the 2026-08-16 negative
+  result below. Nothing ships to users; no config/DB/API/default change.
+  *(Original spec kept below for provenance.)*
+  *(Pillar: infra /
   bug-finding — size S; nothing shipped to users.)* **Why:** AGENTS.md §2 asks for a real dogfood pass at least
   one run in three, but every run has to reinvent how to *get* a running app, so in practice the pass degrades
   into reading route files — which is exactly how the three bugs fixed this run (v0.263.2–v0.263.4) survived

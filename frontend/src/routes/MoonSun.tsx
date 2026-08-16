@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type VideoCapture } from "../api/client";
+import { formatStampDate } from "../format";
 import { QueryError } from "../components/QueryError";
 import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
 import { SharePictureButton } from "../components/SharePictureButton";
@@ -327,7 +328,7 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
               {...(() => {
                 const { title, text, filename } = sharePictureText(
                   capture.label,
-                  new Date(result.created_utc).toLocaleDateString(),
+                  formatStampDate(result.created_utc),
                   "png",
                 );
                 return { filename, title, text };

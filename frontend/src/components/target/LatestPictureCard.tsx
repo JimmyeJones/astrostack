@@ -4,7 +4,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type StackRun } from "../../api/client";
-import { formatIntegration } from "../../format";
+import { formatIntegration, formatStampDate } from "../../format";
 import { ImageLightbox } from "../ImageLightbox";
 import { isJobPollAbort, pollJobUntilDone } from "../editor/pollJob";
 import { sharePictureText } from "../../share";
@@ -19,10 +19,8 @@ import { sharePictureText } from "../../share";
  */
 export function latestPictureCaption(run: StackRun): string {
   const parts: string[] = [];
-  const t = new Date(run.timestamp_utc);
-  if (!Number.isNaN(t.getTime())) {
-    parts.push(`Stacked ${t.toLocaleDateString()}`);
-  }
+  const stacked = formatStampDate(run.timestamp_utc);
+  if (stacked) parts.push(`Stacked ${stacked}`);
   parts.push(`${run.n_frames_used} frame${run.n_frames_used === 1 ? "" : "s"}`);
   if (run.total_exposure_s) parts.push(`${formatIntegration(run.total_exposure_s)} of light`);
   return parts.join(" · ");
@@ -82,7 +80,7 @@ export function LatestPictureCard({
   });
   if (!run || !run.has_preview) return null;
   const previewSrc = api.stackArtifactUrl(safe, run.id, "preview");
-  const share = sharePictureText(name, new Date(run.timestamp_utc).toLocaleDateString());
+  const share = sharePictureText(name, formatStampDate(run.timestamp_utc));
   return (
     <Paper withBorder p="sm" radius="md" data-testid="latest-picture">
       <Group justify="space-between" gap="xs" mb={6} wrap="nowrap">

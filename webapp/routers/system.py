@@ -304,6 +304,15 @@ def system(request: Request) -> dict:
             "total_gb": round(usage.total / 1e9, 1),
             "used_gb": round(usage.used / 1e9, 1),
             "free_gb": round(usage.free / 1e9, 1),
+            # Additive, and the one the UI now renders: the three *_gb fields
+            # above are decimal (1e9), while every other size the app prints —
+            # the Storage page's breakdown, its "N more nights" headroom note,
+            # and `df -h` — is binary (1024³). Serving the raw byte count lets
+            # one client-side formatter decide, so two figures for the same free
+            # disk can't disagree by 7 % on one screen. The old fields stay for
+            # any older frontend or script reading them.
+            "free_bytes": int(usage.free),
+            "total_bytes": int(usage.total),
         }
     except OSError:
         pass

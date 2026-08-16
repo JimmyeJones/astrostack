@@ -55,6 +55,47 @@ export function formatNightDate(iso: string | null | undefined): string {
   return p ? `${p.day} ${MONTHS_ABBR[p.month - 1]} ${p.year}` : "—";
 }
 
+/**
+ * A byte count as a friendly disk figure: "21 GB" / "4.2 GB" / "830 MB".
+ *
+ * Binary (1024³), because that is what every other size this app prints uses —
+ * the Storage page's per-target breakdown and `df -h` both do — and because the
+ * *only* thing that matters is that all of them agree. The server also serves
+ * pre-rounded decimal `*_gb` fields (1e9); rendering one figure from those and
+ * another from raw bytes is how the Storage page came to show "23 GB free on
+ * disk" directly above "21 GB free — not enough imaging history yet".
+ */
+export function formatDiskSize(bytes: number): string {
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 10) return `${gb.toFixed(0)} GB`;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = bytes / 1024 ** 2;
+  return `${mb.toFixed(0)} MB`;
+}
+
+/**
+ * A picture's date, in the viewer's own locale but never ambiguous: "16 Aug
+ * 2026" / "Aug 16, 2026", **never** "8/16/2026".
+ *
+ * This is for a *moment* — when a stack was run, when a still was made — which
+ * is why it goes through `Date` and shows local time, unlike `formatNightDate`
+ * above (an observing night is a date already, and must not shift). The one
+ * thing it will not do is print the month as a number: half the world reads
+ * 8/16 as the 8th of month 16, and the app puts these captions on the same
+ * screen as "15 Nov 2024" from the night surfaces, so a bare
+ * `toLocaleDateString()` made two dates on one page disagree about their own
+ * format. Empty string for a missing or unparseable stamp, so a caller can drop
+ * the clause rather than print "Invalid Date".
+ */
+export function formatStampDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    day: "numeric", month: "short", year: "numeric",
+  });
+}
+
 /** The `YYYY-MM-DD` head of an ISO date/stamp, validated. `null` when absent or
  *  malformed, so every caller can distinguish "no night" from a real one. */
 function parseNightDate(
