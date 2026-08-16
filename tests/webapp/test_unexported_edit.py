@@ -191,3 +191,94 @@ def test_re_editing_an_export_and_saving_flags_the_exported_run(client, solved_l
     again = next(x for x in client.get(f"/api/targets/{safe}/stack-runs").json()
                  if x["id"] == exported["id"])
     assert again["unexported_edit"] is True
+
+
+# ---- the library-wide count (the Dashboard's note) --------------------------
+
+def test_unexported_edits_counts_across_the_library(client, solved_library):
+    """The one surface that doesn't need you to already be looking at the picture:
+    a count over every target, so an edit you saved and forgot can still find you."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="counted_src")
+
+    r = client.get("/api/gallery/unexported-edits").json()
+    assert r["count"] == 0 and r["items"] == []
+
+    client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", json=STRETCH)
+
+    r = client.get("/api/gallery/unexported-edits").json()
+    assert r["count"] == 1
+    assert [(x["safe"], x["run_id"]) for x in r["items"]] == [(safe, rid)]
+    assert r["items"][0]["target_name"]
+
+    # A second edited run is counted too, newest first.
+    rid2 = _make_run(solved_library, safe, basename="counted_src2",
+                     ts="2026-05-03T00:00:00Z")
+    client.put(f"/api/targets/{safe}/stack-runs/{rid2}/editor/recipe", json=STRETCH)
+    r = client.get("/api/gallery/unexported-edits").json()
+    assert r["count"] == 2
+    assert [x["run_id"] for x in r["items"]] == [rid2, rid]
+
+
+def test_unexported_edits_ignores_a_recipe_whose_run_is_gone(client, solved_library):
+    """Deleting a run leaves its editor-recipe meta behind, so a count worked out
+    *from the meta keys* would keep nagging about a picture that no longer exists."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="deleted_src")
+    client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", json=STRETCH)
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 1
+
+    assert client.delete(f"/api/targets/{safe}/stack-runs/{rid}").status_code == 200
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
+
+
+def test_unexported_edits_reuses_the_one_predicate(client, solved_library, monkeypatch):
+    """Same one-definition guard the Gallery has: replacing the run listing's
+    predicate changes what the count reports, which a private copy could not do."""
+    import webapp.routers.stack as stack_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _make_run(solved_library, safe, basename="count_one_definition")
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
+
+    monkeypatch.setattr(stack_mod, "_unexported_edit", lambda options, recipe: True)
+    # Still 0: a run with no recipe at all is never even looked up, which is the
+    # cheapness the endpoint is built around.
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
+
+
+def test_unexported_edits_never_lists_a_never_edited_targets_runs(client, solved_library,
+                                                                 monkeypatch):
+    """The cost gate, as a test. The whole reason this isn't a field on
+    ``/api/gallery`` is that listing every run of every target is too much work for
+    a note — so an un-edited target must cost one indexed meta scan and nothing
+    more. Making ``iter_stack_runs`` explode proves the endpoint never calls it."""
+    from seestack.io.project import Project
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _make_run(solved_library, safe, basename="never_edited")
+
+    def _boom(self):
+        raise AssertionError("the un-exported-edit count must not list runs")
+
+    monkeypatch.setattr(Project, "iter_stack_runs", _boom)
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
+
+
+def test_unexported_edits_survives_a_broken_project(client, solved_library, monkeypatch):
+    """One corrupt/newer-schema project DB must not 500 the count — the same guard
+    every other cross-target read uses."""
+    from seestack.io.project import Project
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="broken_src")
+    client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", json=STRETCH)
+
+    real_open = Project.open
+    monkeypatch.setattr(Project, "open",
+                        classmethod(lambda cls, d: (_ for _ in ()).throw(RuntimeError("nope"))))
+    r = client.get("/api/gallery/unexported-edits")
+    assert r.status_code == 200 and r.json()["count"] == 0
+
+    monkeypatch.setattr(Project, "open", real_open)
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 1

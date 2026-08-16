@@ -263,6 +263,62 @@ describe("Dashboard information architecture (IA slice (e))", () => {
     expect(notes.compareDocumentPosition(screen.getByText("Dashboard")))
       .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
+
+  it("tells you about an edit you saved and never exported", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "getUnexportedEdits").mockResolvedValue({
+      count: 1,
+      items: [{
+        safe: "M_31", target_name: "M 31", run_id: 4,
+        timestamp_utc: "2026-08-15T21:00:00Z",
+      }],
+    });
+
+    renderDashboard();
+
+    // It joins the board rather than becoming one more always-on banner, and it
+    // is the only note here, so nothing folds.
+    const notes = await screen.findByTestId("dashboard-notes");
+    await waitFor(() =>
+      expect(notes).toHaveTextContent("You have an edit you never finished"));
+    expect(screen.getByRole("link", { name: "Finish M 31" }))
+      .toHaveAttribute("href", "/targets/M_31/edit/4");
+  });
+
+  it("makes the stat tiles with an obvious destination clickable", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue({
+      ...mkStats(), n_targets: 7, n_stack_runs: 23, active_jobs: 2,
+    });
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    renderDashboard();
+
+    // The four questions with one right answer each go straight there.
+    for (const [name, href] of [
+      ["Targets: 7", "/library"],
+      ["Stacks: 23", "/gallery"],
+      ["Active jobs: 2", "/jobs"],
+      ["Free disk: 100 GB", "/storage"],
+    ] as const) {
+      expect(await screen.findByRole("link", { name })).toHaveAttribute("href", href);
+    }
+    // …and the two with no single right destination stay plain text, rather than
+    // being given an arbitrary one.
+    expect(screen.queryByRole("link", { name: /^Integration:/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^Frames:/ })).not.toBeInTheDocument();
+  });
+
+  it("says nothing about unfinished edits when there are none", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "getUnexportedEdits").mockResolvedValue({ count: 0, items: [] });
+
+    renderDashboard();
+
+    await waitFor(() => expect(client.api.getUnexportedEdits).toHaveBeenCalled());
+    expect(screen.queryByTestId("unexported-edits-note")).not.toBeInTheDocument();
+  });
 });
 
 describe("Dashboard integration stat", () => {
