@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatIntegration, formatMonthYear, formatNightDate, formatNightDayMonth,
-  isRecentNight, nightAgeDays,
+  formatDiskSize, formatIntegration, formatMonthYear, formatNightDate,
+  formatNightDayMonth, formatStampDate, isRecentNight, nightAgeDays,
 } from "./format";
 
 describe("formatIntegration", () => {
@@ -61,6 +61,36 @@ describe("formatNightDate", () => {
     expect(formatNightDate("nope")).toBe("—");
     expect(formatNightDate("2026-13-01T00:00:00Z")).toBe("—");
     expect(formatNightDate("2026-07-00T00:00:00Z")).toBe("—");
+  });
+});
+
+describe("formatDiskSize", () => {
+  it("is binary, so it agrees with the rest of the page", () => {
+    // The bug this exists to stop: the server's free_gb is decimal (1e9), so
+    // 23.4e9 bytes printed as "23 GB" above a headroom note saying "21 GB".
+    expect(formatDiskSize(23.4e9)).toBe("22 GB");
+    expect(formatDiskSize(2 * 1024 ** 3)).toBe("2.0 GB");
+    expect(formatDiskSize(830 * 1024 ** 2)).toBe("830 MB");
+    expect(formatDiskSize(0)).toBe("0 MB");
+  });
+});
+
+describe("formatStampDate", () => {
+  it("never prints the month as a number", () => {
+    // The whole point: "8/16/2026" is read as the 8th of month 16 by half the
+    // world, and these captions sit on the same screen as "15 Nov 2024".
+    const out = formatStampDate("2026-08-16T12:00:00Z");
+    expect(out).not.toBe("");
+    expect(out).toContain("2026");
+    expect(out).toMatch(/[A-Za-z]{3}/);          // a named month
+    expect(out).not.toMatch(/\b\d{1,2}\/\d{1,2}\//);  // no 8/16/2026
+  });
+
+  it("drops the clause rather than printing Invalid Date", () => {
+    expect(formatStampDate(null)).toBe("");
+    expect(formatStampDate(undefined)).toBe("");
+    expect(formatStampDate("")).toBe("");
+    expect(formatStampDate("not-a-date")).toBe("");
   });
 });
 

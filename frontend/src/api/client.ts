@@ -563,7 +563,12 @@ export interface DashboardStats {
     has_fits?: boolean;
     preview_url: string;
   }[];
-  disk: { total_gb?: number; used_gb?: number; free_gb?: number };
+  disk: {
+    total_gb?: number; used_gb?: number; free_gb?: number;
+    /** Raw counts (additive; absent on an older backend). Prefer these — the
+     *  `*_gb` fields are decimal, the rest of the UI is binary. */
+    free_bytes?: number; total_bytes?: number;
+  };
 }
 
 export interface SampleStatus {
@@ -581,6 +586,8 @@ export interface TargetStorage {
   stage1_bytes: number;
   stage2_bytes: number;
   thumbs_bytes: number;
+  /** The editor's live-preview proxies. Optional: an older backend omits it. */
+  proxies_bytes?: number;
   n_stack_runs: number;
 }
 
@@ -1122,7 +1129,12 @@ export interface SystemInfo {
     hint?: string;
     error?: string;
   };
-  disk: { total_gb?: number; used_gb?: number; free_gb?: number };
+  disk: {
+    total_gb?: number; used_gb?: number; free_gb?: number;
+    /** Raw counts (additive; absent on an older backend). Prefer these — the
+     *  `*_gb` fields are decimal, the rest of the UI is binary. */
+    free_bytes?: number; total_bytes?: number;
+  };
   memory: { total_gb?: number; available_gb?: number };
   folders?: {
     incoming: { path: string; exists: boolean; writable: boolean };
@@ -2037,7 +2049,7 @@ export const api = {
 
   // storage / housekeeping
   getStorage: () => req<StorageInfo>("/api/storage"),
-  clearCache: (safe: string, stage: "stage1" | "stage2" | "thumbs" | "all") =>
+  clearCache: (safe: string, stage: "stage1" | "stage2" | "thumbs" | "proxies" | "all") =>
     req<{ cleared: string[] }>(`/api/targets/${safe}/cache/clear?stage=${stage}`, {
       method: "POST",
     }),

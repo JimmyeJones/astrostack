@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Alert, Text } from "@mantine/core";
 import { IconSparkles } from "@tabler/icons-react";
 import type { StackRun } from "../../api/client";
+import { formatStampDate } from "../../format";
 import { sharpestYet } from "./sharpestYet";
 
 /**
@@ -22,7 +23,7 @@ export function SharpestYetBadge(
   const beat = useMemo(() => sharpestYet(runs), [runs]);
   if (!beat) return null;
 
-  const date = new Date(beat.priorBestDate).toLocaleDateString();
+  const date = formatStampDate(beat.priorBestDate);
   return (
     <Alert
       color="grape"
