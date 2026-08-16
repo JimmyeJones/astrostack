@@ -49,6 +49,29 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run, same running build; MEASURED in the browser) — every
+  Gallery card clips its own primary button mid-word: "Edit image" renders as **"Edit imag"**.**~~ —
+  **FIXED v0.263.4** (Builder 2026-08-16, branch `claude/serene-goldberg-ldc6ih`). *(Friendliness / polish —
+  PRIORITY 3; cosmetic, but it is the main action on the screen where the owner picks a picture to work on.)*
+  **Measured, not eyeballed:** a Playwright probe on the running build read the button's own box —
+  `clientWidth 99`, label `scrollWidth 61` vs `clientWidth 52`, i.e. the label overflowed its box by 9 px inside a
+  246 px card row. **Cause:** the action row is `<Group wrap="nowrap">` with `style={{ flex: 1 }}` on the Edit
+  button. `flex: 1` is `1 1 0%`, so the button's *base* size is zero and flexbox shrinks it below its own label
+  rather than wrapping; "Edit image" needed 108 px, "Reuse settings" takes 133, and 108 + 133 + 8 = 249 > 246 — so
+  the primary button absorbed the whole 3 px shortfall and lost its last letter.
+  **The fix:** `flex: "1 1 auto"` (based on its content, so it still *fills* a wide row but can no longer be
+  squeezed under its words) and the `wrap="nowrap"` dropped, so on a card too narrow for both the pair stacks
+  instead of clipping — which is also the right behaviour on the phone the owner reads this on. Re-measured after
+  the change: label `clientWidth 61 == scrollWidth 61`, no overflow.
+  **Shipped with it (same card, same class of problem):** the target *name* beside the badges truncates to
+  "Sample: …" because the badge group is `flexShrink: 0`. Truncation itself is right — the fix is that the full
+  name is now carried as a `title`, so it is readable on hover, exactly as the notes line directly below it
+  already was. Frontend-only; no API, schema, config, on-disk or default change, and no card content added or
+  removed.
+  **Tests (+2, both fail-before, `Gallery.test.tsx`):** the Edit button is based on its own content
+  (`flex: 1 1 auto` — jsdom has no layout, so the test pins the *cause* the measurement identified), and a long
+  target name carries its full text as a `title`.
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run and the same running build; REPRODUCED) — the onboarding
   sample target reports **0/0 frames and no integration** to every library-level surface, even though it really
   has six ingested, QC'd, solved subs.**~~ — **FIXED v0.263.3** (Builder 2026-08-16, branch

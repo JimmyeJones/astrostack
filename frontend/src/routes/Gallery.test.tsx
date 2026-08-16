@@ -813,3 +813,40 @@ describe("Gallery unfinished-edit honesty", () => {
     expect(screen.queryByText("edit not exported")).not.toBeInTheDocument();
   });
 });
+
+describe("Gallery card layout", () => {
+  it("never squeezes the card's own primary action under its label", async () => {
+    // Measured in a real build: `wrap="nowrap"` + `flex: 1` (basis 0) gave the
+    // Edit button 99 px of a 246 px card row when its label needed 108, so the
+    // app's main action on every picture rendered as "Edit imag". jsdom has no
+    // layout, so pin the cause: the button must be based on its own content
+    // (`1 1 auto`), which lets it fill a wide row but never shrink below the
+    // words in it.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), target_name: "Sample: Orion Nebula (M42)" }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    const edit = await screen.findByRole("link", { name: "Edit image" });
+    expect(edit).toHaveStyle({ flex: "1 1 auto" });
+  });
+
+  it("keeps a long target name readable even when the card truncates it", async () => {
+    // The badges beside the name are `flexShrink: 0`, so a long name truncates
+    // to "Sample: …". The full name has to stay recoverable on hover, the way
+    // the notes line right below it already is.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), target_name: "Sample: Orion Nebula (M42)" }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    const name = await screen.findByText("Sample: Orion Nebula (M42)");
+    expect(name).toHaveAttribute("title", "Sample: Orion Nebula (M42)");
+  });
+});
