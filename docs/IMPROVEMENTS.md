@@ -11166,6 +11166,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   blind:** confirm what DSS/Siril actually write for a "linear" 16-bit TIFF (some do percentile-scale for range
   use), and add a test that a synthetic bright core keeps a monotone gradient into the top of the 16-bit range. The
   autostretch/preview paths are unaffected — this is only the linear TIFF's white point.
+  _(**Builder 2026-08-16 — considered, traced, and deliberately left alone; read this before picking it up, it
+  carries a counter-argument the entry doesn't.** The clipping is real and the docstring does over-claim. But
+  "just use the covered max" is **not** free, because the percentile window is buying something: the stack is in
+  **ADU**, not [0,1] — `fits_loader` never normalises (`img = data.astype(out_dtype)`), and the per-frame flatten
+  ends in `_zero_sky_per_channel`, so the sky sits at ~0 with **half its noise negative**. That rules out the
+  Siril/PixInsight-style "write the data as-is, clip at 0" answer outright — it would delete half the sky-noise
+  distribution — and it means the black point has to stay robust/negative-aware whatever happens to the white one.
+  For the white point: with sky ≈ 0 and star cores near 60 k ADU, moving `hi` from p99.9 (~3 k) to the true max
+  compresses the sky-and-nebula band the beginner actually looks at from most of the 16-bit range into ~3 % of it
+  — roughly a 30× precision loss, landing the quantisation step at ~1σ of a 100-sub stack, which is a real (if
+  quieter) loss of faint information traded for un-flattening ~0.1 % of pixels. So the honest options are a **far
+  higher percentile** (99.99 keeps ~10× more highlight structure at ~1/10th the precision cost) or **fixing the
+  docstring instead**, and the choice needs the owner's own stack to decide — a synthetic can't say how much
+  faint structure sits in that band. It is also not a beginner surface: the linear TIFF is the re-import-elsewhere
+  export, and the History button offering it has no explanation at all next to the FITS button's tooltip, which is
+  arguably the more useful fix if this file is opened. **Stays gated; do not blind-flip either endpoint.**)_
 
 - ~~**NEW IDEA (Scout 2026-08-07, spotted while adversarially tracing `seestack/video/lucky.py`) — the Moon/Sun
   lucky stack aligns every kept frame to the *earliest* kept frame, not the *sharpest* one.**~~ — **SHIPPED
@@ -17292,6 +17308,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **NEW IDEA (Builder 2026-08-16, filed because it is what made this run productive) — check in the dogfood
+  harness, so "§2 big-picture pass" means running the app rather than re-reading it.** *(Pillar: infra /
+  bug-finding — size S; nothing shipped to users.)* **Why:** AGENTS.md §2 asks for a real dogfood pass at least
+  one run in three, but every run has to reinvent how to *get* a running app, so in practice the pass degrades
+  into reading route files — which is exactly how the three bugs fixed this run (v0.263.2–v0.263.4) survived
+  months of code-level audits. **None of them was findable by reading**: the planner's "cut its noise about 100%"
+  needed a target with zero integration actually rendered; the sample's 0/0 frames needed the library row and the
+  project DB compared side by side at runtime; the clipped "Edit imag" needed a browser measuring a box.
+  **The recipe, which took ~5 minutes and should be a script** (`scripts/agent-dogfood.sh`, say): `npx vite build`
+  → boot `python -m webapp.main` with `ASTROSTACK_DATA` pointed at a scratch dir and `ASTROSTACK_PORT` off 8000 →
+  `POST /api/sample` → `POST /api/targets/<safe>/process` and poll the job → drive Playwright at
+  `/opt/pw-browsers/chromium` (already installed; `npm i playwright` in a scratch dir, **not** into
+  `frontend/package.json`) for full-page screenshots at 1440 px **and** ~420 px. **Add the overflow probe** — it
+  is the cheap half and it found a real bug: walk every leaf element and report `scrollWidth > clientWidth`,
+  skipping `text-overflow: ellipsis` (deliberate truncation). **Care:** point `ASTROSTACK_DATA` at the session
+  scratchpad, never the repo; `webapp/static/` is a build artifact and stays gitignored; and the probe is a
+  *finder*, not a test — what it finds still needs a real regression test in the suite.
+
+- **MEASURED NEGATIVE RESULT (Builder 2026-08-16, checked rather than assumed while fixing v0.263.4) — do NOT
+  spend a run sweeping the frontend for more `wrap="nowrap"` + `flex: 1` clipping; there is exactly one, and it is
+  fixed.** *(Recorded so the obvious follow-on is declined once instead of re-litigated.)* The Gallery button bug
+  looked like the tip of a pattern — `wrap="nowrap"` appears **123 times** across `frontend/src` and `flex: 1` in
+  ~20 files — so the overflow probe above was run over `/`, `/library`, `/gallery`, `/best`, `/sky-so-far`,
+  `/tonight`, `/storage`, `/calibration`, `/jobs`, `/moon-sun` and a populated target page, at **1440 px and
+  420 px**, with the sample loaded and stacked. **Zero further overflows.** So the combination is only harmful
+  when a `flex: 1` child sits next to a fixed-width sibling in a container narrower than their sum, which is rare;
+  the other 122 `nowrap`s are pairing badges or icons that genuinely fit. Re-run the probe after any card-layout
+  change rather than grepping for the pattern.
 
 - **NEW IDEA (Builder 2026-08-15, filed the moment after a wall-clock test cost this run its first task) — a guard
   that no test may read the real clock, so a date-bomb can't quietly go red on a future date.**
