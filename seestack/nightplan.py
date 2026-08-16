@@ -1515,10 +1515,7 @@ def _depth_only_picks(targets: list[LibraryTarget], limit: int, *,
             frames_accepted=int(t.frames_accepted or 0),
             noise_gain=round(gain, 3),
             score=round(100.0 * depth, 1),
-            reason=(
-                f"{_have_phrase(hours, t.name)} — another hour would cut its "
-                f"noise about {round(gain * 100)}%. {hint}"
-            ),
+            reason=f"{_depth_sentence(hours, t.name, gain)} {hint}",
         ))
     picks.sort(key=lambda p: (-p.score, -p.hours_captured))
     return picks[:max(0, int(limit))]
@@ -1537,12 +1534,11 @@ def _pick_reason(name: str, altitude_deg: float, minutes_left: float,
     where = (f"{name} is {round(altitude_deg)}° up right now" if placed_now
              else f"{name} climbs to {round(altitude_deg)}° tonight")
     window = _hours_phrase(minutes_left / 60.0)
-    have = _have_phrase(hours_captured, "it", capitalise=False)
+    depth = _depth_sentence(hours_captured, "it", gain, capitalise=False)
     moon = (" The Moon is fairly close to it tonight, so expect a brighter sky."
             if moon_spoil >= _MOON_WORTH_MENTIONING else "")
     return (f"{where} and stays shootable for another {window}. "
-            f"So far {have} — another hour would cut its noise about "
-            f"{round(gain * 100)}%.{moon}")
+            f"So far {depth}{moon}")
 
 
 def _have_phrase(hours: float, subject: str, *, capitalise: bool = True) -> str:
@@ -1555,3 +1551,34 @@ def _have_phrase(hours: float, subject: str, *, capitalise: bool = True) -> str:
     else:
         text = f"you've got {_hours_phrase(hours)} on {subject}"
     return text[0].upper() + text[1:] if capitalise else text
+
+
+def _depth_sentence(hours: float, subject: str, gain: float, *,
+                    capitalise: bool = True) -> str:
+    """"You've got 45 min on M 31 — another hour would cut its noise about 33%."
+
+    One sentence, both halves: what the user has, and what one more hour buys.
+    The percentage is only printed where it *means* something, because
+    :func:`noise_gain_from_more_time` is a **ranking** score first and a figure
+    second, and at both ends of the curve the figure it returns is not a sentence
+    a beginner should be shown:
+
+    * **Nothing captured yet** — the helper returns 1.0 ("the first hour is an
+      unbounded improvement", which is the right thing to *sort* on), but printed
+      it read *"another hour would cut its noise about 100%"*: an hour does not
+      remove all the noise, and "another" is the wrong word for someone who has
+      none. The frontend's ``readiness.noiseReductionHint`` already stays silent
+      at zero integration; the planner claimed 100%.
+    * **Very deeply integrated** — past roughly 200 h one more hour rounds to
+      zero, so the same sentence claimed *"about 0%"*, which reads as a bug
+      rather than the (true, useful) "you're done here".
+
+    Both ends now say the honest thing in words instead of a number.
+    """
+    have = _have_phrase(hours, subject, capitalise=capitalise)
+    if hours <= 0.0:
+        return f"{have} — its first hour will do more for it than any hour after."
+    pct = round(gain * 100)
+    if pct <= 0:
+        return f"{have} — it's as deep as another hour can meaningfully make it."
+    return f"{have} — another hour would cut its noise about {pct}%."
