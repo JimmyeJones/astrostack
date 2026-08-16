@@ -9867,6 +9867,40 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-16, the obvious next question after shipping the Gallery's `unexported_edit` flag
+  v0.262.1) — nothing tells you, across the whole library, that you have saved edits you never exported.**
+  *(Pillar: trust / autonomy — PRIORITY 2–3; size S–M; **read the cost note before starting**.)* Three surfaces now
+  admit, per picture, that a thumbnail isn't the user's version — but all three require you to already be looking
+  at that picture. Someone who dialled in a look, pressed **Save**, closed the editor and moved on has no reason
+  to revisit, so their work stays invisible indefinitely. The Dashboard now has an obvious home for exactly this
+  (the `NoticeBoard` from IA slice (e)): one advisory note — *"2 pictures have an edit you saved but never
+  exported"* — linking to them, self-hiding at zero. **The cost note, which is the whole decision:** the flag is
+  library-wide only on `GET /api/gallery`, and that endpoint **opens every target's project DB and lists every
+  run** — fine for a page the user deliberately opened, questionable on the Dashboard, which polls. So either
+  (a) give the note its own long `staleTime` and accept one heavy call per visit, (b) add a *cheap* count-only
+  endpoint (a `SELECT` over `project_meta` keys per target, no run listing), or (c) fold the count into the
+  existing `/api/stats` the Dashboard already fetches — (c) is tempting but would put the per-project scan on a
+  10-second poll, so it is probably the wrong one. **Measure before choosing**; don't put an unbounded scan on a
+  polling endpoint.
+
+- **NEW IDEA (Builder 2026-08-16, spotted while reordering the Dashboard for IA slice (e)) — the six stat tiles are
+  now the first thing on the page, and not one of them is clickable.** *(Pillar: friendliness — PRIORITY 3; size S;
+  frontend-only.)* "Active jobs: 2", "Free disk: 41 GB", "Targets: 7", "Stacks: 23" each answer a question whose
+  natural next move is a page the app already has (`/jobs`, `/storage`, `/library`, `/gallery`), but they are inert
+  text — a beginner reads "2 active jobs" and then goes hunting in the sidebar. **Slice:** wrap the four tiles that
+  have an obvious destination in the existing `Link`, keep "Integration" and "Frames" plain (they have no single
+  right target), and keep the tiles visually identical so this reads as "the number is a link", not as new
+  chrome. Additive, reversible, no API change. *Judgement: genuinely small and it removes a real hop, but it is
+  polish — don't let it displace a bug or a beginner feature.*
+
+- **DECLINED ONCE, recorded so it isn't re-litigated (Builder 2026-08-16) — do NOT add a "Finish it" button next to
+  the `edit not exported` label on the History and Gallery cards.** *(Considered while shipping v0.262.1.)* The
+  one-click finish exists on the Target page's hero (`LatestPictureCard`), which covers the case that actually
+  happens: you edited your *newest* picture, saved, and closed. On an *older* run the realistic next step is to
+  reopen the editor and look at it again, not to export it blind — and the badge row on both cards is exactly the
+  clutter the IA overhaul is trying to reduce, so paying a button there for a rare action is the wrong trade. The
+  label stays what it is: honest, and one click from the editor via the card it sits on.
+
 - ~~**NEW IDEA (Builder 2026-08-15, the one surface v0.261.0 deliberately left out) — the *Gallery* still shows an
   un-exported edit's picture with no hint that it isn't the user's version.**~~ — **SHIPPED v0.262.1**
   (Builder 2026-08-16, branch `claude/serene-goldberg-tgh2g6`). *(Trust — PRIORITY 3.)* **The gate the entry set
