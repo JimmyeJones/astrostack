@@ -53,21 +53,41 @@ export function triggerPictureDownload(href: string): void {
   a.remove();
 }
 
-function StatCard({ icon, label, value, sub }: {
-  icon: React.ReactNode; label: string; value: string; sub?: string;
+/**
+ * One number on the stat row. When the question it answers has an obvious next
+ * screen (`to`), the whole tile becomes a link to it — "2 active jobs" should not
+ * send a beginner hunting in the sidebar for the Jobs page. Deliberately styled
+ * identically either way: this should read as "the number is a link", not as new
+ * chrome, and the tiles with no single right destination ("Integration",
+ * "Frames") stay plain rather than being given an arbitrary one.
+ */
+function StatCard({ icon, label, value, sub, to }: {
+  icon: React.ReactNode; label: string; value: string; sub?: string; to?: string;
 }) {
+  const body = (
+    <Group gap="sm" wrap="nowrap">
+      <Center w={40} h={40} bg="dark.6" style={{ borderRadius: 8, flexShrink: 0 }}>
+        {icon}
+      </Center>
+      <div style={{ minWidth: 0 }}>
+        <Text size="xs" c="dimmed">{label}</Text>
+        <Text fw={700} size="lg" lh={1.2}>{value}</Text>
+        {sub ? <Text size="xs" c="dimmed">{sub}</Text> : null}
+      </div>
+    </Group>
+  );
+  if (!to) {
+    return <Paper withBorder p="md" radius="md">{body}</Paper>;
+  }
   return (
-    <Paper withBorder p="md" radius="md">
-      <Group gap="sm" wrap="nowrap">
-        <Center w={40} h={40} bg="dark.6" style={{ borderRadius: 8, flexShrink: 0 }}>
-          {icon}
-        </Center>
-        <div style={{ minWidth: 0 }}>
-          <Text size="xs" c="dimmed">{label}</Text>
-          <Text fw={700} size="lg" lh={1.2}>{value}</Text>
-          {sub ? <Text size="xs" c="dimmed">{sub}</Text> : null}
-        </div>
-      </Group>
+    <Paper
+      withBorder p="md" radius="md" component={Link} to={to}
+      // An <a> would otherwise take the browser's link colour and underline —
+      // the tile must look exactly like its plain siblings.
+      style={{ color: "inherit", textDecoration: "none" }}
+      aria-label={`${label}: ${value}`}
+    >
+      {body}
     </Paper>
   );
 }
@@ -187,18 +207,18 @@ export function Dashboard() {
       <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }}>
         <StatCard icon={<IconStars size={22} color="var(--mantine-color-violet-4)" />}
           label="Targets" value={String(data.n_targets)}
-          sub={`${data.n_targets_with_stacks} stacked`} />
+          sub={`${data.n_targets_with_stacks} stacked`} to="/library" />
         <StatCard icon={<IconClock size={22} color="var(--mantine-color-violet-4)" />}
           label="Integration" value={formatIntegration(data.integration_hours * 3600)} />
         <StatCard icon={<IconPhoto size={22} color="var(--mantine-color-violet-4)" />}
           label="Frames" value={String(data.n_frames)}
           sub={`${data.n_frames_accepted} kept · ${accept}`} />
         <StatCard icon={<IconStack2 size={22} color="var(--mantine-color-violet-4)" />}
-          label="Stacks" value={String(data.n_stack_runs)} />
+          label="Stacks" value={String(data.n_stack_runs)} to="/gallery" />
         <StatCard icon={<IconActivity size={22} color="var(--mantine-color-violet-4)" />}
-          label="Active jobs" value={String(data.active_jobs)} />
+          label="Active jobs" value={String(data.active_jobs)} to="/jobs" />
         <StatCard icon={<IconLayoutGrid size={22} color="var(--mantine-color-violet-4)" />}
-          label="Free disk" value={free} sub={usedSub} />
+          label="Free disk" value={free} sub={usedSub} to="/storage" />
       </SimpleGrid>
 
       <Group justify="space-between" mt="sm">

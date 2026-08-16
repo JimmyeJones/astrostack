@@ -286,6 +286,29 @@ describe("Dashboard information architecture (IA slice (e))", () => {
       .toHaveAttribute("href", "/targets/M_31/edit/4");
   });
 
+  it("makes the stat tiles with an obvious destination clickable", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue({
+      ...mkStats(), n_targets: 7, n_stack_runs: 23, active_jobs: 2,
+    });
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    renderDashboard();
+
+    // The four questions with one right answer each go straight there.
+    for (const [name, href] of [
+      ["Targets: 7", "/library"],
+      ["Stacks: 23", "/gallery"],
+      ["Active jobs: 2", "/jobs"],
+      ["Free disk: 100 GB", "/storage"],
+    ] as const) {
+      expect(await screen.findByRole("link", { name })).toHaveAttribute("href", href);
+    }
+    // …and the two with no single right destination stay plain text, rather than
+    // being given an arbitrary one.
+    expect(screen.queryByRole("link", { name: /^Integration:/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^Frames:/ })).not.toBeInTheDocument();
+  });
+
   it("says nothing about unfinished edits when there are none", async () => {
     vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
     vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
