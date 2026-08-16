@@ -56,6 +56,24 @@ export function formatNightDate(iso: string | null | undefined): string {
 }
 
 /**
+ * A byte count as a friendly disk figure: "21 GB" / "4.2 GB" / "830 MB".
+ *
+ * Binary (1024³), because that is what every other size this app prints uses —
+ * the Storage page's per-target breakdown and `df -h` both do — and because the
+ * *only* thing that matters is that all of them agree. The server also serves
+ * pre-rounded decimal `*_gb` fields (1e9); rendering one figure from those and
+ * another from raw bytes is how the Storage page came to show "23 GB free on
+ * disk" directly above "21 GB free — not enough imaging history yet".
+ */
+export function formatDiskSize(bytes: number): string {
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 10) return `${gb.toFixed(0)} GB`;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = bytes / 1024 ** 2;
+  return `${mb.toFixed(0)} MB`;
+}
+
+/**
  * A picture's date, in the viewer's own locale but never ambiguous: "16 Aug
  * 2026" / "Aug 16, 2026", **never** "8/16/2026".
  *

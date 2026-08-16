@@ -10,6 +10,7 @@ import { api, type TargetStorage } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { sanitizeKeep } from "../components/pruneKeep";
 import { storageHeadroom } from "../components/storageHeadroom";
+import { formatDiskSize } from "../format";
 
 function gb(bytes: number): string {
   if (!bytes) return "0 MB";
@@ -163,7 +164,9 @@ export function StorageView() {
         <Text size="sm">Library total: <b>{gb(data.total_bytes)}</b></Text>
         <Text size="sm">Cache: <b>{gb(data.cache_bytes)}</b></Text>
         <Text size="sm">Outputs: <b>{gb(data.output_bytes)}</b></Text>
-        {data.disk.free_gb != null ? (
+        {data.disk.free_bytes != null ? (
+          <Text size="sm" c="dimmed">{formatDiskSize(data.disk.free_bytes)} free on disk</Text>
+        ) : data.disk.free_gb != null ? (
           <Text size="sm" c="dimmed">{data.disk.free_gb} GB free on disk</Text>
         ) : null}
       </Group>

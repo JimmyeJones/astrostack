@@ -10022,6 +10022,28 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run, same screenshot pass) — the Storage page states the free
+  disk twice, ten lines apart, and the two figures disagree: "23 GB free on disk" above "21 GB free — not enough
+  imaging history yet".**~~ — **FIXED v0.264.3** (Builder 2026-08-16, branch `claude/serene-goldberg-ru8exw`).
+  *(Friendliness / trust — PRIORITY 3; wrong-figure, on the page whose whole job is telling you how much room you
+  have left.)* One fact, two numbers, one screen — and on a 12 TB NAS the same 7.4 % gap is ~900 GB of apparent
+  disagreement. **Cause:** the server rounds free space **decimally** (`round(usage.free / 1e9, 1)` → `free_gb`)
+  while *every other size the app prints* is binary — the Storage page's own `gb()` breakdown, the headroom note's
+  `formatGB`, and `df -h` all divide by 1024³. The header rendered the server's decimal figure and the note under
+  it the binary one, so they could not agree by construction.
+  **The fix makes the client the single authority.** `/api/storage`, `/api/stats` and `/api/system` now serve an
+  additive `free_bytes` / `total_bytes` beside the untouched `*_gb` fields, and the three surfaces that show free
+  disk — the Storage header, the Dashboard's **Free disk** tile, and Settings' system line — render them through
+  one shared `format.ts::formatDiskSize` (which is `storageHeadroom`'s own private `formatGB`, promoted and
+  reused, not a fourth copy). So all four figures move together, and the Dashboard tile no longer disagrees with
+  the Storage page a click away either. Every call site keeps a `free_gb` fallback, so an older backend still
+  renders exactly what it does today.
+  Upgrade-safe: additive response fields only, nothing renamed or removed, no config/DB/on-disk/default change.
+  **Tests (+5):** `tests/webapp/test_storage.py` (+2 — all three endpoints serve the byte count *and* keep
+  `free_gb`, and the byte counts agree with each other), `format.test.ts` (+1 — binary, with the exact
+  23.4e9 → "22 GB" case) and `Storage.test.tsx` (+2, **one fails before** — the header and the headroom note quote
+  the same figure and 23.4 appears nowhere; an older backend still falls back).
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-16, first run of the new `scripts/agent-dogfood.sh` — seen in a
   screenshot, not read out of the code) — every surface that dates a *picture* printed an ambiguous numeric
   date, on the same screen as the night surfaces' unambiguous one.**~~ — **FIXED v0.264.2** (Builder 2026-08-16,
