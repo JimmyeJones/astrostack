@@ -1238,18 +1238,27 @@ def render_run_recipe_fullres_png(
     return buf.getvalue()
 
 
-def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict,
+def _apply_editor_to_run(lib: Library, safe: str, run_id: int,
+                         recipe_dict: dict | None,
                          *, output_name: str | None, tiff_mode: str,
                          progress) -> dict[str, Any]:
     """Apply an editor recipe to one run's full-res FITS and record a NEW run.
-    Non-destructive: the source run is untouched."""
+    Non-destructive: the source run is untouched.
+
+    ``recipe_dict=None`` means **this run's own saved recipe** — the "finish the
+    edit I already saved" case. Resolved here, inside the project this function
+    already opens, so the batch that finishes a whole library of saved edits
+    needs no second export path and no extra project open per picture.
+    """
     import json as _json
     from datetime import datetime, timezone
 
     import numpy as np
 
+    from seestack.edit.recipe import recipe_from_json
     from seestack.io.project import Project, StackRunRow
     from seestack.stack.output import write_stack_outputs
+    from webapp.routers.editor import RECIPE_META_PREFIX
 
     entry = lib.find_target(safe)
     if entry is None:
@@ -1259,6 +1268,13 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
         if run is None or not run.fits_path or not Path(run.fits_path).exists():
             raise FileNotFoundError(f"run {run_id} has no FITS")
+        if recipe_dict is None:
+            # Validated on load (stale ops dropped, params clamped), like every
+            # other read of a stored recipe.
+            saved = recipe_from_json(proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}"))
+            if not saved.ops:
+                raise ValueError(f"run {run_id} has no saved edit to export")
+            recipe_dict = saved.to_dict()
         base = output_name or f"{run.output_basename}_edit"
 
         op_errors: list[str] = []
@@ -1432,8 +1448,16 @@ def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: i
 
 
 def submit_editor_batch(settings: Settings, jm: JobManager, items: list[dict],
-                        recipe_dict: dict, *, output_name: str | None = None,
+                        recipe_dict: dict | None, *, output_name: str | None = None,
                         tiff_mode: str = "linear") -> Job:
+    """Export several pictures in one cancellable job.
+
+    ``recipe_dict`` is the one look to apply to every item ("apply this to N
+    pictures"); pass **None** to give each item its *own* saved recipe instead,
+    which is what "finish every edit I saved and never exported" needs. Same loop
+    either way — one item's failure is isolated and reported, never sinking the
+    batch, and a cancel stops before the next picture rather than mid-write.
+    """
     def body(job: Job) -> dict[str, Any]:
         lib = Library.open_or_create(settings.resolved_library_root)
         exported: list[dict] = []

@@ -93,6 +93,59 @@ describe("UnexportedEditsNote", () => {
     expect(await screen.findByTestId("unexported-edits-note")).toBeInTheDocument();
   });
 
+  it("offers to finish them all, but only as the secondary action", async () => {
+    vi.spyOn(client.api, "getUnexportedEdits").mockResolvedValue({
+      count: 3,
+      items: [
+        item({ safe: "A", target_name: "M 31", run_id: 1 }),
+        item({ safe: "B", target_name: "M 42", run_id: 2 }),
+        item({ safe: "C", target_name: "NGC 7000", run_id: 3 }),
+      ],
+    });
+    const post = vi.spyOn(client.api, "exportUnexportedEdits")
+      .mockResolvedValue({ job_id: "j1", count: 3 });
+    renderNote();
+
+    // Asks first — pressing the offer opens a confirmation, it does not export.
+    fireEvent.click(await screen.findByTestId("finish-all-edits"));
+    expect(post).not.toHaveBeenCalled();
+    // The confirmation says how many, that nothing is replaced, and where the
+    // disk cost lands — this is the one action in the note that writes files.
+    expect(await screen.findByText("Finish all 3 edits?")).toBeInTheDocument();
+    expect(screen.getByText(/Nothing is replaced or deleted/)).toBeInTheDocument();
+    expect(screen.getByText(/3 new sets of files/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Storage" })).toHaveAttribute("href", "/storage");
+
+    fireEvent.click(screen.getByTestId("finish-all-confirm"));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not offer a batch for a single edit — the named button already is one", async () => {
+    vi.spyOn(client.api, "getUnexportedEdits").mockResolvedValue({
+      count: 1, items: [item()],
+    });
+    renderNote();
+    await screen.findByText("You have an edit you never finished");
+    expect(screen.queryByTestId("finish-all-edits")).not.toBeInTheDocument();
+  });
+
+  it("treats dismissing the note as 'not now', never as 'do it'", async () => {
+    vi.spyOn(client.api, "getUnexportedEdits").mockResolvedValue({
+      count: 2,
+      items: [
+        item({ safe: "A", target_name: "M 31", run_id: 1 }),
+        item({ safe: "B", target_name: "M 42", run_id: 2 }),
+      ],
+    });
+    const post = vi.spyOn(client.api, "exportUnexportedEdits")
+      .mockResolvedValue({ job_id: "j1", count: 2 });
+    renderNote();
+    await screen.findByText("You have 2 edits you never finished");
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(screen.queryByTestId("unexported-edits-note")).not.toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("survives a backend that can't answer", async () => {
     vi.spyOn(client.api, "getUnexportedEdits").mockRejectedValue(new Error("boom"));
     renderNote();
