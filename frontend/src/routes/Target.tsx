@@ -46,7 +46,7 @@ import { thinStackWarning } from "../components/target/thinStack";
 import { missingFilesNote } from "../components/target/missingFiles";
 import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
 import { NextBestMoveBadge } from "../components/target/NextBestMoveBadge";
-import { FramingVerdictNote } from "../components/target/FramingVerdictNote";
+import { FramingVerdictNote, useStackFraming } from "../components/target/FramingVerdictNote";
 import { LatestPictureCard } from "../components/target/LatestPictureCard";
 import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
 import { nextBestMove } from "../components/target/nextBestMove";
@@ -404,6 +404,13 @@ export function TargetView() {
   });
   const runs = useQuery({ queryKey: ["runs", safe], queryFn: () => api.listStackRuns(safe) });
   const latestRun = runs.data?.[0];  // listStackRuns returns newest first
+  // The *measured* framing verdict for the newest picture, if there is one. The
+  // note below renders it; this page reads the same answer (one shared query) so
+  // the object card can drop its catalog "will it fit?" prediction while the
+  // measurement of the very same thing is on screen — the page said "it's bigger
+  // than one frame" twice, near the top and again at the bottom.
+  const measuredFraming = useStackFraming(
+    safe, latestRun?.has_fits ? latestRun.id : null);
   // Whether to offer the wallpaper "North up" toggle: only when the latest run's
   // WCS yields a real orientation correction (else the endpoint no-ops). One
   // cheap read of the run's own suggestion, gated on it having a FITS to read.
@@ -1508,7 +1515,9 @@ export function TargetView() {
       </Grid>
 
       {identity.data ? (
-        <Box mt="xs"><ObjectInfoCard safe={safe} /></Box>
+        <Box mt="xs">
+          <ObjectInfoCard safe={safe} hideFraming={!!measuredFraming} />
+        </Box>
       ) : null}
 
       {/* The page's analysis cards, grouped instead of stacked (IA slice (b) of the

@@ -11,11 +11,11 @@ import {
 } from "./ObjectInfoCard";
 import * as client from "../api/client";
 
-function renderCard(safe = "M_31") {
+function renderCard(safe = "M_31", hideFraming = false) {
   return render(
     <MantineProvider>
       <QueryClientProvider client={new QueryClient()}>
-        <ObjectInfoCard safe={safe} />
+        <ObjectInfoCard safe={safe} hideFraming={hideFraming} />
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -87,6 +87,27 @@ describe("ObjectInfoCard", () => {
     expect(
       screen.getByText(/Andromeda Galaxy is bigger than the Seestar's single frame/),
     ).toBeInTheDocument();
+  });
+
+  it("drops only the framing line when the page already measured it", async () => {
+    // A page showing FramingVerdictNote for a finished picture already says
+    // "…is bigger than one frame" — and says it about the picture that exists,
+    // not the catalogue. The prediction steps aside; the rest of the card stays.
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+      size_arcmin: 178,
+      framing: { level: "mosaic", text: "is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of it." },
+      blurb: "The nearest large spiral galaxy to our own, about 2.5 million light-years away.",
+    });
+    const { container } = renderCard("M_31", true);
+    await waitFor(() =>
+      expect(screen.getByText("Andromeda Galaxy")).toBeInTheDocument());
+    expect(container.textContent).not.toContain("bigger than the Seestar's single frame");
+    // Everything else the card exists for is untouched.
+    expect(screen.getByText("A galaxy in the constellation Andromeda.")).toBeInTheDocument();
+    expect(screen.getByText(/nearest large spiral galaxy/)).toBeInTheDocument();
   });
 
   it("renders the difficulty badge and honest sentence when vetted", async () => {

@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type PlannedTarget } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { WorthMoreTimeList } from "../components/tonight/WorthMoreTimeList";
 import { formatIntegration } from "../format";
 import { readinessRowBadge } from "../readiness";
 import { settingsLink } from "../settingsSections";
@@ -281,6 +282,7 @@ export function TonightView() {
             <Anchor component={Link} to={settingsLink("observing-site")}>Settings → Observing site</Anchor>.
           </Text>
         </Alert>
+        <WorthMoreTimeList />
       </Stack>
     );
   }
@@ -295,6 +297,7 @@ export function TonightView() {
             the height of summer), so there's no usable dark window to plan around.
           </Text>
         </Alert>
+        <WorthMoreTimeList />
       </Stack>
     );
   }

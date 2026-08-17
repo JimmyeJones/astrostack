@@ -47,8 +47,18 @@ export function difficultyColor(level: DifficultyHint["level"]): string {
  * confident match resolves, so it's safe to drop onto any page that knows the
  * target's safe name (Target, History, editor). Shares its query key with the
  * Target page's own identify fetch, so react-query dedupes to one request.
+ *
+ * `hideFraming` drops just the catalog "will it fit?" line, for a page that is
+ * already showing the *measured* verdict for a finished picture of this target
+ * (`FramingVerdictNote`). The two say the same thing — "M 42 is bigger than the
+ * Seestar's single frame, shoot it in mosaic mode" — except the measured one
+ * also knows how much of it actually landed, so on a page carrying both, the
+ * prediction is the copy to drop. Defaults to showing it, so the editor and any
+ * other caller are unchanged.
  */
-export function ObjectInfoCard({ safe }: { safe: string }) {
+export function ObjectInfoCard(
+  { safe, hideFraming = false }: { safe: string; hideFraming?: boolean },
+) {
   const identity = useQuery({
     queryKey: ["identify", safe],
     queryFn: () => api.identifyTarget(safe),
@@ -84,7 +94,7 @@ export function ObjectInfoCard({ safe }: { safe: string }) {
               <Text size="sm" c="dimmed">{d.difficulty.text}</Text>
             </Group>
           ) : null}
-          {d.framing ? (
+          {d.framing && !hideFraming ? (
             <Text size="sm" c={framingColor(d.framing.level)}>
               {framingSentence(d.name || d.id, d.framing)}
             </Text>

@@ -1045,7 +1045,11 @@ def test_best_tonight_falls_back_to_depth_alone_with_no_location():
     assert plan.dark_now is False
     assert [p.safe for p in plan.picks] == ["thin", "deep"]
     assert all(p.altitude_now_deg is None for p in plan.picks)
-    assert "Set your location in Settings" in plan.picks[0].reason
+    # Why it can't place them is said once, for the whole answer — not glued onto
+    # every pick's own sentence (which the card then printed N times under a
+    # subtitle that had already said it).
+    assert "Set your location in Settings" in (plan.note or "")
+    assert all("Set your location" not in p.reason for p in plan.picks)
 
 
 def test_best_tonight_penalises_a_target_the_moon_is_sitting_on():
@@ -1082,14 +1086,16 @@ def test_best_tonight_says_why_it_cannot_place_a_target():
     a wild goose chase."""
     targets = [_lib("m31", "M 31", 10.7, 41.3, hours=0.75)]
     no_site = np_plan.rank_targets_now(None, JAN_EVENING, targets)
-    assert "Set your location in Settings" in no_site.picks[0].reason
+    assert "Set your location in Settings" in (no_site.note or "")
 
     tromso = Observer(lat_deg=69.7, lon_deg=19.0, elevation_m=10.0)
     midsummer = datetime(2026, 6, 21, 22, 0, tzinfo=timezone.utc)
     no_dark = np_plan.rank_targets_now(tromso, midsummer, targets)
     assert no_dark.dark_now is False
-    assert "no astronomical darkness" in no_dark.picks[0].reason
-    assert "Settings" not in no_dark.picks[0].reason
+    assert "no astronomical darkness" in (no_dark.note or "")
+    assert "Settings" not in (no_dark.note or "")
+    # The placed path has nothing to explain away, so it carries no note at all.
+    assert np_plan.rank_targets_now(LONDON, JAN_EVENING, targets).note is None
 
 
 def test_best_tonight_never_says_you_have_zero_minutes():

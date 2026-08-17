@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TonightView } from "./Tonight";
 import * as client from "../api/client";
 import { isoDate } from "../tonight";
-import type { NightPlan, PlannedTarget } from "../api/client";
+import type { BestTonight, NightPlan, PlannedTarget, TonightPick } from "../api/client";
 
 /** A night that is genuinely in the future, whenever this suite happens to run.
  *
@@ -41,6 +41,24 @@ function plan(over: Partial<NightPlan>): NightPlan {
   };
 }
 
+/** The depth-only ranking `/api/plan/best-tonight` still answers with when the
+ *  planner can't place anything (no location, or no darkness at all tonight).
+ *  Both of those branches of the page mount `WorthMoreTimeList`, so they need it
+ *  stubbed; every other test takes the placed path, where it never mounts. */
+function bestTonight(picks: Partial<TonightPick>[]): BestTonight {
+  return {
+    location_source: "none", observer: null,
+    generated_utc: "2026-01-15T20:00:00+00:00",
+    dark_now: false, dark_minutes_left: 0, min_altitude_deg: 30,
+    picks: picks.map((p) => ({
+      safe: "M_31", name: "M 31", ra_deg: 10.68, dec_deg: 41.27,
+      altitude_now_deg: null, minutes_usable_left: 0, hours_captured: 0.75,
+      frames_accepted: 90, noise_gain: 0.345, score: 34.5,
+      reason: "another hour would cut its noise about 35%", ...p,
+    })),
+  };
+}
+
 function renderTonight() {
   const qc = new QueryClient();
   return render(
@@ -58,11 +76,35 @@ describe("TonightView", () => {
   it("prompts for a location when none is known", async () => {
     vi.spyOn(client.api, "getTonight").mockResolvedValue(
       plan({ location_source: "none", observer: null, dark_window: null, moon_illumination: null }));
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight([]));
     renderTonight();
     await waitFor(() =>
       expect(screen.getByText("Set your observing location")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: /Settings/i }))
       .toHaveAttribute("href", "/settings/observing-site");
+  });
+
+  it("still ranks your own targets by depth when no location is known", async () => {
+    // The Dashboard's "Worth more time" card answers this case and links here
+    // with "See the whole night" — so this page must not be the emptier of the two.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(
+      plan({ location_source: "none", observer: null, dark_window: null, moon_illumination: null }));
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight([{}]));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByTestId("worth-more-time")).toBeInTheDocument());
+    expect(screen.getByText("Set your observing location")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "M 31" }))
+      .toHaveAttribute("href", "/targets/M_31");
+  });
+
+  it("still ranks your own targets by depth on a night with no darkness", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ dark_window: null }));
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight([{}]));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByTestId("worth-more-time")).toBeInTheDocument());
+    expect(screen.getByText("No darkness tonight")).toBeInTheDocument();
   });
 
   it("offers to save a FITS-detected location and PATCHes Settings on click", async () => {
@@ -87,6 +129,7 @@ describe("TonightView", () => {
 
   it("explains a polar-day night with no dark window", async () => {
     vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ dark_window: null }));
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight([]));
     renderTonight();
     await waitFor(() =>
       expect(screen.getByText("No darkness tonight")).toBeInTheDocument());
