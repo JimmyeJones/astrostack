@@ -173,7 +173,10 @@ def get_gallery(request: Request) -> GalleryResponse:
     lib = deps.open_library(request)
     try:
         from seestack.io.project import Project
-        from webapp.routers.editor import RECIPE_META_PREFIX
+        from webapp.routers.editor import (
+            EXPORTED_RECIPE_META_PREFIX,
+            RECIPE_META_PREFIX,
+        )
         from webapp.routers.stack import _unexported_edit
 
         for t in lib.list_targets():
@@ -216,13 +219,14 @@ def get_gallery(request: Request) -> GalleryResponse:
                         noise_sigma=run.noise_sigma,
                         calstat=run.calstat,
                         seam_verdict=seam_verdict(run.seam_residual),
-                        # One extra keyed read on the project DB this loop
-                        # already has open — the same near-free lookup the run
+                        # Two extra keyed reads on the project DB this loop
+                        # already has open — the same near-free lookups the run
                         # listing does, which is what made this affordable
                         # library-wide.
                         unexported_edit=_unexported_edit(
                             run.options_json,
                             proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}"),
+                            proj.get_meta(f"{EXPORTED_RECIPE_META_PREFIX}{run.id}"),
                         ),
                     ))
             finally:
@@ -482,14 +486,25 @@ def get_unexported_edits(request: Request) -> UnexportedEditsResponse:
     the ``project_meta`` rows whose key starts with the editor-recipe prefix
     (:meth:`Project.iter_meta_prefix`) and stops there when there are none — which
     is every target that has never been edited. Only when a target *does* carry
-    recipes does it look up those specific runs' two columns
-    (:meth:`Project.stack_run_options`); no run listing, no file stats, no preview
-    checks. A broken project DB is skipped exactly as the other cross-target reads
-    skip it, so one corrupt target can't cost the whole count.
+    recipes does it take a second prefix scan for the already-exported markers and
+    look up those specific runs' two columns (:meth:`Project.stack_run_options`);
+    no run listing, no file stats, no preview checks. A broken project DB is
+    skipped exactly as the other cross-target reads skip it, so one corrupt target
+    can't cost the whole count.
     """
     from seestack.io.project import Project
-    from webapp.routers.editor import RECIPE_META_PREFIX
+    from webapp.routers.editor import EXPORTED_RECIPE_META_PREFIX, RECIPE_META_PREFIX
     from webapp.routers.stack import _unexported_edit
+
+    def _by_run_id(proj: Project, prefix: str) -> dict[int, str]:
+        """``{run_id: value}`` for one per-run meta prefix, in one prefix scan."""
+        out: dict[int, str] = {}
+        for key, value in proj.iter_meta_prefix(prefix):
+            try:
+                out[int(key[len(prefix):])] = value
+            except ValueError:  # a meta key we don't own — ignore it
+                continue
+        return out
 
     found: list[UnexportedEditItem] = []
     lib = deps.open_library(request)
@@ -498,14 +513,13 @@ def get_unexported_edits(request: Request) -> UnexportedEditsResponse:
             proj = None
             try:
                 proj = Project.open(lib.target_dir(t))
-                recipes: dict[int, str] = {}
-                for key, value in proj.iter_meta_prefix(RECIPE_META_PREFIX):
-                    try:
-                        recipes[int(key[len(RECIPE_META_PREFIX):])] = value
-                    except ValueError:  # a meta key we don't own — ignore it
-                        continue
-                # The common case: this target has never been edited, so nothing
-                # else is read from its DB at all.
+                # The common case: this target has never been edited, so the one
+                # prefix scan comes back empty and nothing else is read from its
+                # DB at all — neither the already-exported markers nor any run.
+                recipes = _by_run_id(proj, RECIPE_META_PREFIX)
+                exported = (
+                    _by_run_id(proj, EXPORTED_RECIPE_META_PREFIX) if recipes else {}
+                )
                 summaries = (
                     proj.stack_run_options(recipes) if recipes else {}
                 )
@@ -515,7 +529,8 @@ def get_unexported_edits(request: Request) -> UnexportedEditsResponse:
                 if proj is not None:
                     proj.close()
             for run_id, (timestamp_utc, options_json) in summaries.items():
-                if _unexported_edit(options_json, recipes.get(run_id)):
+                if _unexported_edit(options_json, recipes.get(run_id),
+                                    exported.get(run_id)):
                     found.append(UnexportedEditItem(
                         safe=t.safe_name,
                         target_name=t.name,

@@ -114,9 +114,14 @@ def test_pruning_reclaims_as_much_as_deleting_one_run(client, solved_library):
     assert meta == [], f"orphan meta keys: {meta}"
 
     # The kept run is untouched — nothing derived a sibling name too eagerly.
+    # Its annotation count is read off the registry rather than hard-coded, so
+    # registering a new per-run prefix (as it should be) doesn't fail this for
+    # the wrong reason — the assertion is "every one of them survived".
+    from webapp.run_meta import per_run_meta_prefixes
+
     kept_files, kept_meta = _leftovers(solved_library, safe, "newest", keep)
     assert len(kept_files) == 8   # six outputs + two proxy files
-    assert len(kept_meta) == 6
+    assert kept_meta == list(per_run_meta_prefixes())
 
 
 def test_storage_counts_and_clears_the_editor_proxy_cache(client, solved_library):
