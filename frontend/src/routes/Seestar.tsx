@@ -1,6 +1,6 @@
 import {
-  Alert, Badge, Button, Card, Center, Group, Loader, NumberInput, Paper, Progress,
-  RingProgress, SimpleGrid, Stack, Text, TextInput, Title,
+  Alert, Anchor, Badge, Button, Card, Center, Group, Loader, NumberInput, Paper,
+  Progress, RingProgress, SimpleGrid, Stack, Text, TextInput, Title,
 } from "@mantine/core";
 import {
   IconAlertTriangle, IconBattery2, IconPlayerStop, IconPlugConnected,
@@ -9,8 +9,10 @@ import {
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api, type SeestarDevice } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { settingsLink } from "../settingsSections";
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
@@ -214,7 +216,10 @@ export function SeestarView() {
       {!data.enabled ? (
         <Alert color="yellow" icon={<IconAlertTriangle size={16} />}>
           <Text size="sm">
-            Seestar integration is off. Enable it under <b>Settings → Telescope</b>. The container
+            Seestar integration is off. Enable it under{" "}
+            <Anchor component={Link} to={settingsLink("telescope")} fw={700}>
+              Settings → Telescope
+            </Anchor>. The container
             must be able to reach your Seestar on the LAN (the scope must be in <b>Station mode</b>,
             joined to your network).
           </Text>
@@ -226,7 +231,15 @@ export function SeestarView() {
               This uses Seestar's unofficial local API; it depends on the scope's firmware and may
               break across updates. {data.control_enabled
                 ? "Control is enabled — commands here can interrupt an in-progress session."
-                : "Control is disabled (monitoring only). Enable it in Settings to send commands."}
+                : (
+                  <>
+                    Control is disabled (monitoring only).{" "}
+                    <Anchor component={Link} to={settingsLink("telescope")}>
+                      Enable it in Settings
+                    </Anchor>{" "}
+                    to send commands.
+                  </>
+                )}
             </Text>
           </Alert>
           {data.devices.length === 0 ? (
@@ -236,7 +249,10 @@ export function SeestarView() {
                 <Text c="dimmed">No Seestars found yet.</Text>
                 <Text c="dimmed" size="sm">
                   Make sure the scope is on and in Station mode, then click “Scan network”.
-                  You can also pin its IP under Settings → Telescope.
+                  You can also pin its IP under{" "}
+                  <Anchor component={Link} to={settingsLink("telescope")}>
+                    Settings → Telescope
+                  </Anchor>.
                 </Text>
               </Stack>
             </Card>
