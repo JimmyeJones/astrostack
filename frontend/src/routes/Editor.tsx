@@ -113,6 +113,11 @@ export function EditorView() {
   const rid = Number(runId);
   const qc = useQueryClient();
 
+  // Only for the heading: the editor otherwise works entirely off `safe`, but a
+  // page title has to say the target's *name*. Shares the query key every other
+  // target screen uses, so arriving from History (or the Target page) is a cache
+  // hit rather than a fetch, and a failure just leaves the old `safe` heading.
+  const target = useQuery({ queryKey: ["target", safe], queryFn: () => api.getTarget(safe) });
   const opsSchema = useQuery({ queryKey: ["editor-ops"], queryFn: api.editorOps, staleTime: 60_000 });
   const saved = useQuery({ queryKey: ["recipe", safe, rid], queryFn: () => api.getRecipe(safe, rid) });
   // Carry-over: the newest *other* run's saved edit, offered as a one-click seed
@@ -1222,7 +1227,7 @@ export function EditorView() {
           <Button component={Link} to={`/targets/${safe}/history`} variant="subtle"
             leftSection={<IconArrowLeft size={16} />}>History</Button>
           <div>
-            <Title order={2}>Editor — {safe}</Title>
+            <Title order={2}>Editor — {target.data?.name ?? safe}</Title>
             {measuredText ? (
               <Tooltip multiline w={260} withArrow
                 label="What the editor measured from this stack — the same values behind the 'From your data' suggestion buttons.">
@@ -2311,7 +2316,7 @@ export function EditorView() {
       </Grid>
 
       <ImageLightbox src={lightbox ? (shownSrc ?? null) : null}
-        title={`${safe} — ${overlay ? overlay.label : "edited"}`
+        title={`${target.data?.name ?? safe} — ${overlay ? overlay.label : "edited"}`
           + (previewScaleCaption(hist.data) ? ` · ${previewScaleCaption(hist.data)}` : "")}
         onClose={() => setLightbox(false)} />
     </Stack>

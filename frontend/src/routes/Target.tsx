@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
-import { formatIntegration } from "../format";
+import { formatIntegration, formatStampDate } from "../format";
 import { integrationReadiness, readinessColor, noiseReductionHint } from "../readiness";
 import { QueryError } from "../components/QueryError";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
@@ -1209,7 +1209,11 @@ export function TargetView() {
               variant="default"
               {...sharePictureText(
                 target.data?.name,
-                new Date(latestRun.timestamp_utc).toLocaleDateString(),
+                // The same date `LatestPictureCard`'s share text uses for the
+                // same picture: a bare `toLocaleDateString()` prints the numeric
+                // form half the world reads the other way round ("8/16/2026"),
+                // and this text is what the owner posts publicly.
+                formatStampDate(latestRun.timestamp_utc),
               )}
             />
           ) : null}

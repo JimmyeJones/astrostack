@@ -8,6 +8,7 @@ import { IconStars } from "@tabler/icons-react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
+import { formatStampDate } from "../format";
 import { AladinSky } from "./AladinSky";
 import {
   angularToWorld,
@@ -20,6 +21,25 @@ import {
 
 const STAR_RADIUS = 100;
 const IMAGE_RADIUS = 98; // just inside the stars so images sit in front
+
+/**
+ * The "where and when" line under a selected footprint's name.
+ *
+ * The date is the app-wide picture stamp (`formatStampDate`, a *named* month) so
+ * this footprint is dated exactly as the same run is on the Gallery, History and
+ * the Target hero. It used to be a raw `timestamp_utc.slice(0, 10)`, which not
+ * only reads back-to-front to half the world but is the **UTC** calendar day —
+ * a different day from every other surface for an evening stack west of UTC.
+ * A missing or unreadable stamp drops the clause and its separator rather than
+ * printing "Invalid Date" or a bare trailing " · ".
+ */
+export function skyFootprintLine(
+  image: Pick<SkyImage, "ra_deg" | "dec_deg" | "timestamp_utc">,
+): string {
+  const where = `RA ${image.ra_deg.toFixed(3)}° · Dec ${image.dec_deg.toFixed(3)}°`;
+  const when = formatStampDate(image.timestamp_utc);
+  return when ? `${where} · ${when}` : where;
+}
 
 /** Bright-star background, split into two size buckets for a bit of depth. */
 function Stars({ stars }: { stars: SkyStar[] }) {
@@ -290,8 +310,7 @@ export function SkyView() {
             </Text>
           </Group>
           <Text size="xs" c="dimmed" mb={8}>
-            RA {selected.ra_deg.toFixed(3)}° · Dec {selected.dec_deg.toFixed(3)}°
-            {selected.timestamp_utc ? ` · ${selected.timestamp_utc.slice(0, 10)}` : ""}
+            {skyFootprintLine(selected)}
           </Text>
           <Group gap={8}>
             <Button size="xs" onClick={() => navigate(`/targets/${selected.safe}/history`)}>
