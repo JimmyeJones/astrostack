@@ -1159,6 +1159,7 @@ export function TargetView() {
             title="Quality-check, plate-solve and stack this target in one step"
           >
             <Box visibleFrom="sm">Process target</Box>
+            <Box hiddenFrom="sm">Process</Box>
           </Button>
           <Button
             variant="default"
@@ -1168,15 +1169,16 @@ export function TargetView() {
             aria-label="Re-run QC and Solve"
           >
             <Box visibleFrom="sm">Re-run QC + Solve</Box>
+            <Box hiddenFrom="sm">Re-check</Box>
           </Button>
           <Button component={Link} to={`/targets/${safe}/history`} variant="default"
             leftSection={<IconHistory size={16} />} aria-label="History">
-            <Box visibleFrom="sm">History</Box>
+            History
           </Button>
           {latestRun ? (
             <Button component={Link} to={`/targets/${safe}/edit/${latestRun.id}`} variant="default"
               leftSection={<IconWand size={16} />} aria-label="Edit latest stack">
-              <Box visibleFrom="sm">Edit</Box>
+              Edit
             </Button>
           ) : null}
           {latestRun?.has_preview ? (
@@ -1185,7 +1187,7 @@ export function TargetView() {
                 <Tooltip label="Download the latest finished picture (PNG or JPEG)">
                   <Button variant="default" leftSection={<IconPhotoDown size={16} />}
                     aria-label="Download latest picture">
-                    <Box visibleFrom="sm">Picture</Box>
+                    Picture
                   </Button>
                 </Tooltip>
               </Menu.Target>
@@ -1230,7 +1232,7 @@ export function TargetView() {
           ) : null}
           <Button component={Link} to={`/targets/${safe}/stack`}
             leftSection={<IconStack2 size={16} />} aria-label="Stack">
-            <Box visibleFrom="sm">Stack</Box>
+            Stack
           </Button>
         </Group>
       </Group>
