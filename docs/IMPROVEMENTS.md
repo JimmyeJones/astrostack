@@ -49,6 +49,33 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, measured in a real running build at 420 px) — on a phone the Target
+  page's own actions are unlabelled icons, while the *secondary* buttons beside them keep their words. The two
+  things a beginner opens this page to do — **Process target** and **Stack** — are two of the wordless squares.**~~
+  — **FIXED v0.266.1** (Builder 2026-08-17, branch `claude/serene-goldberg-qhoaat`). *(Friendliness — PRIORITY 3;
+  the owner reads this app on a phone, and this is the page where the work happens.)*
+  **What the screenshot showed:** with a finished stack, the action row at 420 px rendered **six bare icon squares**
+  and then, beside them, **"To phone"** and **"Wallpaper"** spelled out in full. Every one of the page's own actions
+  had hidden its label and every borrowed component had kept one — so the row read as "five mystery buttons, then
+  two clear ones, then another mystery button".
+  **The cause is one prop, used six times:** `Target.tsx` wrapped each action's label in
+  `<Box visibleFrom="sm">`, which is a CSS media query — below Mantine's `sm` the words are simply not painted, and
+  a phone has no hover to recover the `title` with. `SharePictureButton` / `ScanToPhoneButton` / `WallpaperMenu`
+  are separate components that render `{label}` unconditionally, which is why the *secondary* actions were the
+  legible ones. The `aria-label`s were all correct throughout, so a screen-reader user was fine and a sighted phone
+  user was not — which is why no test caught it.
+  **The fix:** the four short labels (History, Edit, Picture, Stack — all ≤7 characters) simply stop hiding, and
+  the two long ones keep their full wording on a wide screen and gain a short phone form: *Process target →
+  **Process***, *Re-run QC + Solve → **Re-check***. Nothing was removed, reordered or renamed on the desktop.
+  **Measured, before and after, on the same running build:** icon-only actions in the row at 420 px **6 → 0**;
+  the page is **2981 px → 3027 px** (+46 px, +1.5 % — the row wraps the same three lines, just taller), which is
+  the honest cost of the words and a good trade against a beginner guessing which square stacks their picture.
+  **Tests (+2, `Target.test.tsx`, both fail-before):** a `phoneLabel()` helper strips the `visible-from-*` wrappers
+  Mantine emits — jsdom has no layout, so this is what "the label a phone shows" means in a test — and asserts all
+  six actions have one (`Process`, `Re-check`, `History`, `Edit`, `Picture`, `Stack`); a second test asserts the two
+  long labels are still rendered in full, so the short forms were an addition, not a trade. Frontend-only: no API,
+  schema, config, on-disk or default change.
+
 - ~~**FOUND WHILE SCOPING "Finish them all" (Builder 2026-08-17, branch `claude/serene-goldberg-03783o`;
   REPRODUCED) — finishing an edit does not stop the app asking you to finish it. Pressing **Finish my edit**
   exports the picture and then every surface — the Dashboard's library-wide note included — goes on saying you

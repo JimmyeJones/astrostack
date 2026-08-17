@@ -84,6 +84,61 @@ describe("TargetView process action", () => {
   });
 });
 
+// The label a *phone* shows. Mantine's `visibleFrom` is a CSS media query and
+// jsdom has no layout, so both the wide and the narrow label are in the DOM —
+// stripping the wide-only ones is what tells us what the owner reads on the
+// screen he actually uses.
+function phoneLabel(button: HTMLElement): string {
+  const clone = button.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll('[class*="visible-from"]').forEach((n) => n.remove());
+  return (clone.textContent ?? "").trim();
+}
+
+describe("TargetView action row on a phone", () => {
+  // Found by dogfooding the running build at 420 px: every one of the page's own
+  // actions — Process target, Re-run QC + Solve, History, Edit, Picture, Stack —
+  // hid its label below `sm` and rendered as a bare icon, while the *secondary*
+  // Share / Scan to phone / Wallpaper buttons beside them kept their words. So on
+  // the screen the owner reads, the two things a beginner comes to this page to
+  // do were the two unlabelled squares.
+  it("names every action, not just the secondary ones", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget({ has_preview: true }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    // Three of the six are `component={Link}`, so they are links, not buttons.
+    const named: [string, "button" | "link", string][] = [
+      ["Process this target", "button", "Process"],
+      ["Re-run QC and Solve", "button", "Re-check"],
+      ["History", "link", "History"],
+      ["Edit latest stack", "link", "Edit"],
+      ["Download latest picture", "button", "Picture"],
+      ["Stack", "link", "Stack"],
+    ];
+    for (const [aria, role, label] of named) {
+      const btn = await screen.findByRole(role, { name: aria });
+      expect(phoneLabel(btn)).toBe(label);
+    }
+  });
+
+  it("still spells the two long actions out in full on a wide screen", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    // Nothing was traded away for the short labels: the full wording is still
+    // rendered, behind the same `visibleFrom` it always used.
+    const process = await screen.findByRole("button", { name: "Process this target" });
+    expect(process).toHaveTextContent("Process target");
+    const recheck = await screen.findByRole("button", { name: "Re-run QC and Solve" });
+    expect(recheck).toHaveTextContent("Re-run QC + Solve");
+  });
+});
+
 describe("TargetView noise-reduction payoff", () => {
   it("shows the measured 'cut your noise ~N×' line on the finished stack", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
