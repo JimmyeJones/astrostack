@@ -49,6 +49,32 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, second run of the day, in the same running build, visible at both
+  1440 px and 420 px) — the Target page tells you "it's bigger than one frame" **twice**: once as a top-of-page
+  alert measured from your own picture, and again in the object card at the bottom as a catalogue prediction of
+  the very same thing.**~~ — **FIXED v0.266.4** (Builder 2026-08-17, branch `claude/serene-goldberg-v585n3`).
+  *(Friendliness / the standing "the UI is extremely busy" priority — PRIORITY 3; this is the page the owner
+  complained about by name, and this is one of its banners saying something the page already says.)*
+  **What the screenshots showed**, verbatim, on one screen: near the top, *"Orion Nebula is bigger than your
+  frame — only about 15% of it is in this picture. Shoot it in mosaic mode to capture all of it."*; near the
+  bottom, *"Orion Nebula is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of
+  it."* Same object, same advice, two blocks apart.
+  **The cause is two surfaces that don't know about each other.** `FramingVerdictNote` measures how the finished
+  picture actually caught the target (from the run's own WCS + the catalogue size); `ObjectInfoCard`'s
+  `d.framing` line is the *pre-capture* "will it fit?" prediction from the catalogue alone. Each is right where
+  it's the only one — the editor and the Tonight rows carry the prediction, History carries the measurement —
+  but `Target.tsx` renders **both**, and neither could see the other.
+  **The fix:** the measurement wins on a page that has one. `useStackFraming(safe, runId | null)` is extracted
+  from the note (same query key, so react-query still makes exactly one request) and the Target page reads it to
+  pass a new optional `hideFraming` to `ObjectInfoCard`. Deliberately gated on the verdict *actually resolving*,
+  not merely on a run existing: a run with no usable WCS makes the note self-hide, and there the prediction is
+  the only answer available and stays. `hideFraming` defaults to `false`, so the editor — the other caller — is
+  byte-for-byte unchanged, and only that one line is dropped: the name, badge, one-liner, blurb and difficulty
+  sentence all stay. Frontend-only: no API, schema, config, on-disk or default change, and no copy reworded.
+  **Tests (+3, two fail-before):** `Target.test.tsx` (+2 — the page says it once with the object card otherwise
+  intact, and a target with *no* stack still gets the catalogue line) and `ObjectInfoCard.test.tsx` (+1 — the
+  prop drops the framing line and nothing else).
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-17, second run of the day, seen in a real running build with the sample
   library loaded) — the Dashboard offers a ranked "Worth more time" answer with no observing location set, and its
   own **See the whole night** button links to `/tonight`, which shows strictly *less*: a "set your location" prompt
