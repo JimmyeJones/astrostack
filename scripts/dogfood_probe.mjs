@@ -8,7 +8,14 @@
 //   * an OVERFLOW PROBE — every leaf element whose scrollWidth exceeds its
 //     clientWidth, minus the ones that opted into truncation with
 //     text-overflow: ellipsis. That is the check that caught the Gallery's
-//     primary button rendering as "Edit imag" (v0.263.4).
+//     primary button rendering as "Edit imag" (v0.263.4);
+//   * a SQUEEZE PROBE — text shrunk *below* its own words without overflowing,
+//     which is the ribbon the overflow probe is blind to by construction (the
+//     Dashboard sample card, v0.264.4, was found by eye instead).
+//
+// It also reports each page's full-page height, tallest first: the standing
+// information-architecture work is scored on exactly that number, and it kept
+// being measured by hand off these screenshots after the fact.
 //
 // It is a FINDER, not a test: what it reports still needs a real regression test
 // in the suite before anything is called fixed.
@@ -46,9 +53,46 @@ const WIDTHS = [
   { name: "phone", width: 420, height: 860 },
 ];
 
-/** Leaf elements whose content is wider than the box drawn for it. Passed to
- * page.evaluate as a function (a *string* would be evaluated as an expression
- * and hand back the function itself), so it must not close over module scope. */
+// Both probes below run inside the page. They are passed to page.evaluate as
+// functions (a *string* would be evaluated as an expression and hand back the
+// function itself), so neither may close over module scope, and `evaluate`
+// takes exactly one argument — hence the options object on `squeezedText`.
+
+/** Text squeezed *below* its own words without overflowing — the failure mode
+ * the overflow probe is blind to by construction. A `flexShrink`-0 neighbour in
+ * a `nowrap` row can shrink a paragraph to ~50 px, at which point it wraps
+ * obediently into a one-word-per-line ribbon; nothing overflows, so
+ * `overflowingLeaves` reports nothing. That is exactly how the Dashboard's
+ * sample card rendered ~25 lines tall on a phone (fixed v0.264.4), and it was
+ * found by eye rather than by this harness. Flags a text block whose own box is
+ * narrow while the row it sits in is comfortably wide — the signature of a
+ * squeeze rather than of a genuinely narrow screen. */
+function squeezedText({ minChars, minRatio }) {
+  const out = [];
+  for (const el of document.querySelectorAll("body *")) {
+    if (el.children.length) continue;                 // leaves only
+    const text = (el.textContent || "").trim();
+    if (text.length < minChars) continue;             // a badge is meant to be small
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) continue;              // hidden
+    const parent = el.parentElement?.parentElement;
+    if (!parent) continue;
+    const pw = parent.getBoundingClientRect().width;
+    if (!pw || r.width / pw > minRatio) continue;
+    // Wrapping to two or three lines is normal; a ribbon is not. Approximate the
+    // line count from the box's own height against its line-height.
+    const lh = parseFloat(getComputedStyle(el).lineHeight) || 16;
+    const lines = Math.round(r.height / lh);
+    if (lines < 6) continue;
+    out.push({
+      tag: el.tagName.toLowerCase(), text: text.slice(0, 60),
+      width: Math.round(r.width), parentWidth: Math.round(pw), lines,
+    });
+  }
+  return out;
+}
+
+/** Leaf elements whose content is wider than the box drawn for it. */
 function overflowingLeaves() {
   // Exclusions, each earned by a false positive on a real page: a text input
   // scrolls its own value by design (Settings), a scrollbar thumb is *meant* to
@@ -81,6 +125,8 @@ const browser = await chromium.launch(
   BUNDLED ? { executablePath: BUNDLED } : {},
 );
 let findings = 0;
+/** [width name, route, full-page scroll height] — reported at the end. */
+const heights = [];
 for (const { name, width, height } of WIDTHS) {
   const ctx = await browser.newContext({ viewport: { width, height } });
   const page = await ctx.newPage();
@@ -116,12 +162,32 @@ for (const { name, width, height } of WIDTHS) {
         `${o.scrollWidth}px content — "${o.text}" (${o.cls})`,
       );
     }
+    for (const s of await page.evaluate(squeezedText, { minChars: 40, minRatio: 0.35 })) {
+      findings++;
+      console.log(
+        `[${name}] ${route}: SQUEEZED <${s.tag}> ${s.width}px of a ${s.parentWidth}px ` +
+        `row, ${s.lines} lines — "${s.text}"`,
+      );
+    }
     for (const e of errors.slice(0, 3)) {
       findings++;
       console.log(`[${name}] ${route}: CONSOLE ERROR ${e.slice(0, 200)}`);
     }
+    // How far the owner has to scroll. Not a finding on its own — a settings
+    // page is legitimately long — but the standing information-architecture
+    // work (AGENTS.md §1) is scored on exactly this number, and it has twice
+    // been measured by hand from these screenshots afterwards. Report it here
+    // so "which page is the wall?" is answered by the run.
+    heights.push([name, route, (await page.evaluate(
+      () => document.documentElement.scrollHeight))]);
   }
   await ctx.close();
 }
 await browser.close();
+
+// Tallest first, so the worst offender is the first line you read.
+console.log("\npage height (full-page scroll height, tallest first):");
+for (const [name, route, h] of heights.sort((a, b) => b[2] - a[2]).slice(0, 8)) {
+  console.log(`  [${name}] ${route}: ${h}px`);
+}
 console.log(findings ? `${findings} thing(s) to look at` : "nothing overflowing, no console errors");

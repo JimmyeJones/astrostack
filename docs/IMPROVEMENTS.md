@@ -10572,6 +10572,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   reacts and wants more*, are the Library and Editor screens — but neither has been measured as "busy" the way
   Target and Dashboard were, so **don't start one speculatively**.
 
+  **📏 SLICE (f) IS NOW MEASURED AND READY — Settings is the app's tallest page by a factor of two, and no slice
+  has ever touched it (Builder 2026-08-17, measured on a real running build via `scripts/agent-dogfood.sh`).**
+  The entry above says the next candidates are "the Library and Editor screens — but neither has been measured as
+  'busy' the way Target and Dashboard were, so don't start one speculatively". **Measured now, on the full-page
+  screenshots, they are both the wrong answer — Settings is the offender:**
+  - **Settings: 5827 px tall on a 420 px phone (≈6.8 phone screens) and 4606 px on a 1440 px desktop (≈5 screens).**
+  - Target (post-slice-(c)): 2981 px phone / 1988 px desktop. Editor: 2575 / 1614. Dashboard (post-slice-(e)):
+    1757 / 1253. Stack: 1544 / 1249. **Settings is ~2× the next-tallest page on both widths.**
+  **The shape, read off `routes/Settings.tsx` (891 lines):** one system alert plus **7 always-on full-width blocks**
+  stacked one below another — *Watched folders · Ambient sound · Telescope (Seestar) · Automated stacking defaults ·
+  Reprocess everything (`Maintenance`) · Backup & restore · Access control* — and the first of those is itself a
+  monster carrying **six `Divider`-labelled sub-sections** (folders · Watcher · Automatic pipeline · Plate solving
+  & compute · Observing site · Stacking). That last point is a finding in its own right: a card titled **"Watched
+  folders" currently contains the observing site, the ASTAP path, the stack memory budget and the job-history
+  depth**, none of which a beginner would look for under that name — the entry's own test ("could a beginner
+  *predict* which page a given thing lives on, from its name alone?") fails here today.
+  **Suggested slice, reusing what already exists — no new primitive needed:** group the seven blocks with the same
+  `InsightTabs` slices (b)/(e) built, or split them across nested routes (`/settings/…`), keeping the first-run
+  essentials (the system alert, folders, plate solving) on the landing view and grouping the rest — e.g.
+  *Capture & pipeline* · *Stacking defaults* · *This device* (ambient sound, telescope) · *Maintenance & access*
+  (reprocess, backup, access control). Re-home the mis-filed sub-sections of "Watched folders" into the group whose
+  name predicts them while you are there. **The hard constraint still governs: nothing may be removed**, and every
+  setting must stay reachable — a setting you cannot find is worse than one you have to scroll to. **Care:**
+  `Settings.test.tsx` is large and several settings are cross-linked from elsewhere in the app ("Fix in Settings",
+  "Settings → Observing site", the `OutdatedTargetsBadge` on the nav link) — those deep links must still land on a
+  *visible* control, which is the one thing a tab strip can break. Prefer nested routes, or open the right tab from
+  the link's hash/param, and pin it with a test per inbound link. (M; PRIORITY 3.)
+
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
   first paint, and route file length. A slice that doesn't move those numbers hasn't done the job.
@@ -11810,6 +11838,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   file for owner sign-off if it must change the bare default. **Tests:** a synthetic 3-frame stack with a bright
   trail/hot pixel in one sub → assert the trail is gone from the result and `STACKER`/`REJMODE` reflect min-max (pairs
   cleanly with the STACKER-label fix shipped v0.179.2). Confidence: traced.
+  **▶ LARGELY OVERTAKEN BY EVENTS — re-check before spending a run on it (Builder 2026-08-17, verified in the
+  code, not assumed).** This was filed in July, and the two paths a beginner actually reaches have both been
+  given `auto_reject` since: **(1)** the *manual* Stack form seeds `auto_reject=True` for a never-configured
+  target (`webapp/routers/stack.py::get_stack_defaults`, v0.149.0), and **(2)** the *walk-away* auto-stack injects
+  `auto_reject=True` whenever the merged options carry no explicit rejection key
+  (`webapp/pipeline.py::_stack_target`, ~L2101). `_resolve_auto_reject` then picks order-statistic min/max below
+  `kappa_min_frames`, which is exactly the protection this entry asks for. **What is genuinely left is only the
+  case the entry's own caveat says needs care:** a user who has *explicitly saved* `sigma_clip` defaults and then
+  stacks 3 frames — i.e. someone who took control of the setting. Changing the pixels for them would be a default
+  flip on a live install (§9) to override a choice they made, which is the wrong trade. **So: don't re-pick this
+  as filed.** If anything is worth building here it is *advisory* — say on the Stack form that κ-σ can't remove a
+  lone trail at this sub count and offer the one-click switch, the same shape as the shipped photometric-
+  normalization nudge — not a silent change to their combine.
 - **VALIDATION FOLLOW-UP (Scout 2026-07-23) — confirm on real nebula data that the now-live SExtractor skew
   guard (`abs(mean − median) > 0.3·σ → revert to median`) doesn't over-revert on heavy diffuse nebulosity.**
   *(Image-quality / correctness; PRIORITY 4; size S — one real-data check, no blind code change.)* The
