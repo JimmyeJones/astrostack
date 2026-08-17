@@ -15,9 +15,7 @@ function pick(overrides: Partial<TonightPick> = {}): TonightPick {
     altitude_now_deg: null,
     minutes_usable_left: 0, hours_captured: 0.75, frames_accepted: 90,
     noise_gain: 0.345, score: 34.5,
-    reason: "You've got 45 min on M 31 — another hour would cut its noise about "
-      + "35%. Set your location in Settings and this can also tell you whether "
-      + "it's up right now.",
+    reason: "You've got 45 min on M 31 — another hour would cut its noise about 35%.",
     ...overrides,
   };
 }
@@ -30,6 +28,8 @@ function payload(overrides: Partial<BestTonight> = {}): BestTonight {
     dark_now: false,
     dark_minutes_left: 0,
     min_altitude_deg: 30,
+    note: "Set your location in Settings and this can also tell you whether "
+      + "it's up right now.",
     picks: [pick()],
     ...overrides,
   };
@@ -63,6 +63,9 @@ describe("WorthMoreTimeList", () => {
     expect(screen.getByText(/another hour would cut its noise about 35%/))
       .toBeInTheDocument();
     expect(screen.getByText("Second best.")).toBeInTheDocument();
+    // The page's own alert directly above already says why nothing can be
+    // placed, so the list must not repeat the backend's note under each pick.
+    expect(screen.queryByText(/Set your location in Settings/)).toBeNull();
   });
 
   it("shows nothing at all when there's nothing to rank", async () => {

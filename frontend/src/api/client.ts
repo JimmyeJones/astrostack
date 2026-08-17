@@ -82,6 +82,10 @@ export interface BestTonight {
   dark_minutes_left: number;
   min_altitude_deg: number;
   picks: TonightPick[];
+  // Why the picks carry no placement, for the whole answer rather than per pick
+  // (it used to be repeated inside every `reason`). Absent on the ordinary placed
+  // path — and on a backend too old to send it, hence optional.
+  note?: string | null;
 }
 
 export interface NightPlan {

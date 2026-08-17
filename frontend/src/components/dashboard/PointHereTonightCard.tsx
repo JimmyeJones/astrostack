@@ -31,6 +31,12 @@ export function pointHereTitle(data: BestTonight | undefined): string | null {
  * left when we know, so "right now" carries its own deadline. */
 export function pointHereSubtitle(data: BestTonight | undefined): string | null {
   if (!data || !data.picks.length) return null;
+  // The depth-only paths: the backend's own one-sentence explanation of why it
+  // can't place anything, said here **once** for the whole card. It used to be
+  // glued onto every pick's reason, so a three-pick card repeated it three times
+  // under a subtitle that had already said it. A backend too old to send `note`
+  // falls back to the wording this line has always carried.
+  if (data.note) return `Ranked by how much another hour would help. ${data.note}`;
   if (data.observer === null) {
     return "Ranked by how much another hour would help. Set your location in "
       + "Settings to also see what's up right now.";

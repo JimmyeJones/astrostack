@@ -77,6 +77,17 @@ describe("pointHereSubtitle", () => {
     expect(pointHereSubtitle(payload({ dark_now: false, dark_minutes_left: 0 })))
       .toBe("Ranked by how much another hour would help.");
   });
+  it("carries the backend's own reason for not placing anything", () => {
+    // A high-latitude summer used to get no explanation at all here — the
+    // sentence existed, but it was buried in each pick's reason instead.
+    expect(pointHereSubtitle(payload({
+      dark_now: false, dark_minutes_left: 0,
+      note: "There's no astronomical darkness where you are tonight, so this "
+        + "can't say what's well-placed.",
+    }))).toBe("Ranked by how much another hour would help. There's no "
+      + "astronomical darkness where you are tonight, so this can't say what's "
+      + "well-placed.");
+  });
 });
 
 describe("PointHereTonightCard", () => {
@@ -120,17 +131,25 @@ describe("PointHereTonightCard", () => {
     vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload({
       location_source: "none", observer: null, dark_now: false,
       dark_minutes_left: 0,
-      picks: [pick({
-        altitude_now_deg: null,
-        reason: "You've got 45 min on M 31 — another hour would cut its noise "
-          + "about 35%. Set your location in Settings and this can also tell you "
-          + "whether it's up right now.",
-      })],
+      note: "Set your location in Settings and this can also tell you whether "
+        + "it's up right now.",
+      picks: [
+        pick({
+          altitude_now_deg: null,
+          reason: "You've got 45 min on M 31 — another hour would cut its noise "
+            + "about 35%.",
+        }),
+        pick({
+          safe: "NGC_7000", name: "NGC 7000", altitude_now_deg: null, score: 30,
+          reason: "You've got 2 h on NGC 7000 — another hour would cut its noise "
+            + "about 22%.",
+        }),
+      ],
     }));
     renderCard();
     await waitFor(() => expect(screen.getByText("Worth more time")).toBeInTheDocument());
     expect(screen.queryByText(/° up$/)).toBeNull();
-    // Both the subtitle and the pick's own reason point at the missing setting.
-    expect(screen.getAllByText(/Set your location in Settings/).length).toBeGreaterThan(0);
+    // Said exactly once, in the subtitle — not once per pick underneath it.
+    expect(screen.getAllByText(/Set your location in Settings/)).toHaveLength(1);
   });
 });
