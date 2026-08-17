@@ -35,6 +35,16 @@ from webapp.schemas import EditOpOut, editor_ops_schema
 router = APIRouter(tags=["editor"])
 
 RECIPE_META_PREFIX = "editor_recipe:"
+# The recipe an *export* of this run actually rendered, stamped on the **source**
+# run by ``pipeline._apply_editor_to_run``. The saved recipe above stays where it
+# is (it is the user's document, and re-opening the editor must still find it), so
+# without this marker there is nothing on disk to tell "saved and never exported"
+# from "saved, and exported — done", and every surface kept asking the user to
+# finish an edit they had already finished. Compared by look rather than by bytes
+# (``stack._recipe_look``), so editing further and saving flags the run again.
+# Absent on every run that has never been exported, which is the whole library on
+# an upgrading install — read as "not exported", exactly as before it existed.
+EXPORTED_RECIPE_META_PREFIX = "editor_exported:"
 # Plain-language "what Auto did (and why)" note, stamped per run whenever an
 # *unattended* job auto-edits it (Process-target / reprocess-everything / watcher
 # auto-stack). Surfaced on the History Info panel so a beginner sees what the

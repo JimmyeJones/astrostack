@@ -396,7 +396,7 @@ def channel_combine(safe: str, body: dict[str, Any], request: Request) -> dict[s
 
 @router.get("/api/targets/{safe}/stack-runs", response_model=list[StackRunOut])
 def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
-    from webapp.routers.editor import RECIPE_META_PREFIX
+    from webapp.routers.editor import EXPORTED_RECIPE_META_PREFIX, RECIPE_META_PREFIX
 
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -404,12 +404,16 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
         # The pinned "cover" run (library-level), so the History card can mark it.
         entry = lib.find_target(safe)
         cover_id = entry.cover_stack_run_id if entry is not None else None
-        # One small meta read per run, so every surface that shows a run's picture
-        # can tell an un-exported saved edit from a finished one (see
-        # ``_unexported_edit``). The recipes live in the same already-open DB.
+        # Two small meta reads per run, so every surface that shows a run's
+        # picture can tell an un-exported saved edit from a finished one (see
+        # ``_unexported_edit``): the saved recipe, and the one an export of this
+        # run already rendered. Both live in the same already-open DB.
         unexported = {
-            r.id: _unexported_edit(r.options_json,
-                                   proj.get_meta(f"{RECIPE_META_PREFIX}{r.id}"))
+            r.id: _unexported_edit(
+                r.options_json,
+                proj.get_meta(f"{RECIPE_META_PREFIX}{r.id}"),
+                proj.get_meta(f"{EXPORTED_RECIPE_META_PREFIX}{r.id}"),
+            )
             for r in runs
         }
     finally:
@@ -474,7 +478,46 @@ def _preview_is_display_space(options_json: str | None) -> bool:
     return isinstance(parsed, dict) and bool(parsed.get("preview_display_space", False))
 
 
-def _unexported_edit(options_json: str | None, recipe_json: str | None) -> bool:
+def _recipe_look(recipe_json: str | None) -> list | None:
+    """The part of a saved recipe that decides the finished picture.
+
+    An ordered ``[[op id, sorted (key, value) params], …]`` over the recipe's
+    **enabled** ops — i.e. everything the render depends on and nothing else. The
+    fields deliberately left out are the ones two recipes describing the same
+    picture can legitimately disagree on: each op's random ``uid``, and the
+    recipe-level ``base_run_id`` / ``updated_utc`` (``put_recipe`` re-stamps the
+    timestamp on every Save, so a byte comparison would call an unchanged edit
+    changed).
+
+    ``None`` when there is no recipe or it can't be read; ``[]`` when every op is
+    disabled — a recipe that changes nothing. Both are "no look", which is why
+    :func:`_unexported_edit` can test them together.
+    """
+    if not recipe_json:
+        return None
+    try:
+        parsed = json.loads(recipe_json)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    ops = parsed.get("ops")
+    if not isinstance(ops, list):
+        return None
+    look: list = []
+    for op in ops:
+        if not isinstance(op, dict) or not op.get("enabled", True):
+            continue
+        params = op.get("params")
+        # Sorted by key so two recipes that differ only in JSON key order match.
+        # Keys are unique, so no value is ever compared during the sort.
+        items = sorted(params.items()) if isinstance(params, dict) else []
+        look.append([op.get("id"), items])
+    return look
+
+
+def _unexported_edit(options_json: str | None, recipe_json: str | None,
+                     exported_recipe_json: str | None = None) -> bool:
     """True when this run carries a **saved editor recipe that its stored preview
     does not show** — the user edited the picture, pressed Save, and never
     exported.
@@ -502,22 +545,27 @@ def _unexported_edit(options_json: str | None, recipe_json: str | None) -> bool:
     no recipe on it — so a recipe on such a run can only have come from the user
     re-opening that export, editing it further and saving, which is exactly the
     unfinished edit this flags. Excluding it would silently miss every
-    second-round edit."""
-    if not recipe_json:
+    second-round edit.
+
+    ``exported_recipe_json`` is the recipe an export of *this* run actually
+    rendered (``editor_exported:<run_id>``, stamped by
+    ``pipeline._apply_editor_to_run``). Without it — every install from before the
+    marker existed, and every run that has never been exported — the answer is
+    exactly what it always was. With it, a saved recipe describing the same
+    picture as the one already exported is **finished**, not unfinished: doing the
+    thing the app asked for has to be able to stop it asking. Compared by
+    :func:`_recipe_look`, so re-saving an unchanged edit (which re-stamps
+    ``updated_utc``) stays quiet, while changing a parameter and saving speaks up
+    again — that second-round edit is as invisible as the first one was."""
+    look = _recipe_look(recipe_json)
+    if not look:
+        # No recipe, unreadable, or every op disabled — nothing unfinished.
         return False
     opts = _parse_options(options_json)
     if opts.get("preview_display_space"):
         return False
-    try:
-        parsed = json.loads(recipe_json)
-    except json.JSONDecodeError:
-        return False
-    if not isinstance(parsed, dict):
-        return False
-    ops = parsed.get("ops")
-    if not isinstance(ops, list):
-        return False
-    return any(isinstance(op, dict) and op.get("enabled", True) for op in ops)
+    # Already exported *this* look ⇒ finished. Anything else ⇒ still unfinished.
+    return not (exported_recipe_json and _recipe_look(exported_recipe_json) == look)
 
 
 def _run_is_reusable(options_json: str | None) -> bool:
