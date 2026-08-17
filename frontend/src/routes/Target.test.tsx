@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TargetView, countNewSubsSinceStack, countQcUncheckable, describeObject, rejectReasonLabel } from "./Target";
 import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
+import { formatStampDate } from "../format";
+import { sharePictureText } from "../share";
 
 function mkFrame(id: number, overrides: Partial<Frame> = {}): Frame {
   return {
@@ -1532,5 +1534,50 @@ describe("TargetView content order (IA slice (c))", () => {
 
     await screen.findByRole("button", { name: "Process this target" });
     expect(screen.queryByTestId("latest-picture")).not.toBeInTheDocument();
+  });
+});
+
+describe("TargetView share text", () => {
+  // Both share paths for the *same* picture — the header's Share button and the
+  // hero card's — have to name the same date, in the app's own unambiguous
+  // "17 Aug 2026" form. The header used a bare `toLocaleDateString()`, whose
+  // numeric form ("8/16/2026") half the world reads the other way round, and
+  // this text is what the owner posts publicly.
+  function stubShare(share: (data?: ShareData) => Promise<void>) {
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    nav.share = share;
+    return () => { delete nav.canShare; delete nav.share; };
+  }
+
+  it("names the picture's month in the text it hands the OS share sheet", async () => {
+    const stamp = "2026-08-17T03:30:00Z";
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget({ name: "M42" }));
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ id: 9, timestamp_utc: stamp })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    const share = vi.fn(async (_d?: ShareData) => {});
+    const restore = stubShare(share);
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" }),
+    })));
+
+    renderTarget();
+    // The header's own Share control (the hero card's is an icon button).
+    const btn = await screen.findByRole("button", { name: "Share picture" });
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    const data = share.mock.calls[0][0] as ShareData;
+    const expected = sharePictureText("M42", formatStampDate(stamp));
+    expect(data.text).toBe(expected.text);
+    expect(data.title).toBe(expected.title);
+    // …and specifically not the ambiguous numeric form it used to send.
+    expect(data.text).not.toMatch(/\d+\/\d+\/\d{4}/);
+
+    restore();
+    vi.unstubAllGlobals();
   });
 });

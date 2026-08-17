@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { formatDiskSize, formatIntegration } from "../format";
+import { formatDiskSize, formatIntegration, formatStampDate } from "../format";
 import { loadDismissedSig, saveDismissedSig } from "../dismissal";
 import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
@@ -303,7 +303,13 @@ export function Dashboard() {
               <Text fw={600} mt="xs" lineClamp={1}>{s.target_name}</Text>
               <Group justify="space-between" mt={4}>
                 <FrameCountBadge nFramesUsed={s.n_frames_used} color="violet" />
-                <Text size="xs" c="dimmed">{s.timestamp_utc.slice(0, 10)}</Text>
+                {/* The same "when was this picture made" caption the Gallery,
+                    History and the Target hero print — so the newest stack is
+                    dated identically wherever you meet it. A raw `slice(0, 10)`
+                    used to print the *UTC* calendar day, which for an evening
+                    stack west of UTC is tomorrow's date, disagreeing with every
+                    surface that converts to local time. */}
+                <Text size="xs" c="dimmed">{formatStampDate(s.timestamp_utc)}</Text>
               </Group>
             </Card>
           ))}

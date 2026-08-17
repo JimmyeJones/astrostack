@@ -10022,10 +10022,66 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **FOUND BY DOGFOODING, FILED NOT FIXED (Builder 2026-08-16, seen in the 1440 px Library screenshot; the run had
+- ~~**FOUND BY THE DOGFOOD PROBE'S NEW SQUEEZE CHECK (Builder 2026-08-17, on its very first run against a real
+  running build; REPRODUCED and re-measured after the fix) — the Logs page sets a long message ONE CHARACTER PER
+  LINE on a phone, so a single entry is 211 lines tall and the page is unusable.**~~ — **FIXED v0.264.8** (Builder
+  2026-08-17, branch `claude/serene-goldberg-x7wijx`). *(Friendliness — PRIORITY 3; the owner reads this app on a
+  phone, and Logs is the screen you open when something has gone wrong.)*
+  **Measured, not eyeballed:** the probe read the message span's own box — **10 px of a 394 px row, 211 lines** for
+  one watchdog line, and 66 px / 24 lines and 95 px / 18 lines for two more. The phone screenshot is a single
+  vertical column of individual characters.
+  **The cause, and it is the same family as v0.264.4:** the row is `<Group wrap="nowrap">` whose three prefix
+  chips — timestamp, level badge (`width: 64`), logger name — are each `flexShrink: 0` and together take ~220 px
+  of a 420 px screen. The row may not wrap, so the message absorbs the whole shortfall; `wordBreak: break-word`
+  then does exactly what it is told to an unbroken filesystem path and breaks it per character. **The overflow
+  probe could never see it** — nothing overflows, the text wraps obediently — which is precisely why the squeeze
+  check was added in the commit before this one.
+  **The fix:** the three prefix chips move into their own `flexShrink: 0` `nowrap` group (they are one unit and
+  should never be split), the outer row is allowed to wrap, and the message is based on its own content
+  (`flex: "1 1 260px"`) so it fills a wide row but takes a line of its own before it can be crushed. On a desktop
+  row (prefix + 260 ≪ 1100) nothing wraps, so the page is byte-identical where it already worked — confirmed on
+  the re-probed desktop screenshot. Frontend-only: no API, schema, config, on-disk or default change; no control,
+  filter or column added or removed.
+  **Verified end to end in the browser, not only in jsdom:** rebuilt, re-probed, and the phone Logs page now shows
+  eight readable entries where it showed one; the probe's squeeze findings went 5 → 0.
+  **Tests (+2, both fail-before, `Logs.test.tsx`):** jsdom has no layout, so they pin the two causes — the message
+  is based on its own content and its row may wrap, and the stamp/level/logger stay together in one unshrinkable
+  `nowrap` group that does *not* contain the message.
+
+
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, seen in the phone Editor screenshot of a real running build;
+  REPRODUCED) — the editor, the app's priority-1 screen, titled itself with the raw filesystem-safe name.**~~ —
+  **FIXED v0.264.7** (Builder 2026-08-17, branch `claude/serene-goldberg-x7wijx`). *(Friendliness — PRIORITY 1/3;
+  cosmetic severity, but it is the heading of the screen where a beginner turns a stack into a picture, and it
+  reads like a path rather than their target.)*
+  **The symptom, screenshotted:** the editor opened on **"Editor — Sample_Orion_Nebula_M42"** while the Library
+  card, the Target page, the Stack form and the Gallery all call the same target **"Sample: Orion Nebula (M42)"**.
+  On a phone the underscored name also wraps the title onto two lines.
+  **The cause, and why it was two screens not one:** `Editor.tsx` and `History.tsx` work entirely off the `safe`
+  route param and never fetched the target at all, so `safe` was the only name they had. `Stack.tsx` — the third
+  screen under the same target — already did it right (`target.data?.name ?? safe`), which is exactly the shape
+  used here, so this is the established pattern applied to the two screens that missed it.
+  **The fix:** both pages now run the same `["target", safe]` query every other target screen uses, so arriving
+  from the Target page is a **cache hit rather than a fetch**, and each falls back to `safe` if it fails — the
+  name is a nicety, never a dependency, and neither page blocks or errors on it. The editor's lightbox caption
+  (`"<name> — edited"`) was the third raw-`safe` render and goes through the same value. Frontend-only: no API,
+  schema, config, on-disk or default change; no route, control or card added or removed.
+  **Tests (+4, `Editor.test.tsx` +2 and `History.test.tsx` +2, one fail-before in each file):** the real page
+  titles itself with the target's name and *not* with `M_42`, and a target that can't be loaded still opens the
+  page under its safe name.
+
+
+- ~~**FOUND BY DOGFOODING, FILED NOT FIXED (Builder 2026-08-16, seen in the 1440 px Library screenshot; the run had
   already shipped five items and stopped rather than churn) — the Library card's "go to target" chevron falls onto
-  its own line under any name long enough to fill the card.** *(Friendliness — PRIORITY 3; size XS; frontend-only;
-  cosmetic.)* `routes/Library.tsx:95-98` puts the name and an `IconChevronRight` in a
+  its own line under any name long enough to fill the card.**~~ — **FIXED v0.264.5** (Builder 2026-08-17, branch
+  `claude/serene-goldberg-x7wijx`), exactly as the slice below specced it: `wrap="nowrap"` on the row,
+  `flexShrink: 0` on the chevron, and the name `truncate` with its full text carried as a `title` — so the icon
+  can never be pushed down *or* squashed, and a long name is still readable on hover rather than silently cut.
+  Frontend-only: no API, schema, config, on-disk or default change, and nothing was added to or removed from the
+  card. **Tests (+2, both fail-before, `Library.test.tsx`):** jsdom has no layout, so they pin the two causes —
+  the row's `--group-wrap` really is `nowrap` and the chevron really is `flexShrink: 0` (the pairing the *"Care"*
+  note below insists on), and the long name carries its full text as a `title`.
+  *(Original spec kept below for provenance.)* `routes/Library.tsx:95-98` puts the name and an `IconChevronRight` in a
   `<Group justify="space-between">`, which **wraps by default** — so "Sample: Orion Nebula (M42)" pushes the
   chevron down and the card shows a stray "›" hanging alone on the line below the title. **Slice:** the same shape
   the Gallery card fix (v0.263.4) landed on — `wrap="nowrap"` on that Group, `flexShrink: 0` on the icon, and the
@@ -10079,6 +10135,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   `free_gb`, and the byte counts agree with each other), `format.test.ts` (+1 — binary, with the exact
   23.4e9 → "22 GB" case) and `Storage.test.tsx` (+2, **one fails before** — the header and the headroom note quote
   the same figure and 23.4 appears nowhere; an older backend still falls back).
+
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, second `scripts/agent-dogfood.sh` run, on a real running build with
+  the sample stacked; REPRODUCED) — the v0.264.2 picture-date sweep missed three surfaces, and one of them names a
+  different calendar *day* from the rest of the app.**~~ — **FIXED v0.264.6** (Builder 2026-08-17, branch
+  `claude/serene-goldberg-x7wijx`). *(Friendliness / trust — PRIORITY 3; cosmetic on two surfaces, a genuine
+  cross-screen disagreement on the third.)*
+  **How it was found:** the phone Dashboard screenshot. The **Recent stacks** card — the first picture a beginner
+  meets, on the screen the app opens on — dated the sample **"2026-08-17"**, while the Gallery, History and the
+  Target hero dated the very same run **"17 Aug 2026"**. Grepping out from there turned up two more.
+  **The three, and why the third is not merely cosmetic:**
+  1. `Dashboard.tsx:306` and 2. `Sky.tsx` (the selected-footprint card, *"RA … · Dec … · 2026-08-17"*) both
+     printed `timestamp_utc.slice(0, 10)`. That is not just the wrong *shape* — it is the **UTC** calendar day,
+     while `formatStampDate` converts to local time. For an evening stack anywhere west of UTC (23:30 local =
+     03:30 UTC next day) the Dashboard therefore names **tomorrow** for a run the Gallery, one click away, names
+     today. Same picture, same session, two different dates.
+  3. `Target.tsx:1212` — the header's **Share** button built its share text from a bare `toLocaleDateString()`,
+     the ambiguous numeric form ("8/16/2026") v0.264.2 existed to remove, while `LatestPictureCard`'s share button
+     for the *same picture on the same page* already used `formatStampDate`. This is the one that leaves the app:
+     it is the caption the owner posts publicly.
+  **The fix is the one v0.264.2 landed, applied to the three call sites it missed** — every one now goes through
+  `format.ts::formatStampDate`. The Sky card's line became a pure exported `skyFootprintLine(image)` so it is
+  testable without booting three.js/aladin, and so the "no date" case drops its `·` separator instead of trailing
+  a bare one. An unreadable stamp now yields nothing rather than the raw garbage (`slice`) or "Invalid Date"
+  (`new Date`). Frontend-only: no API, schema, config, on-disk or default change; no copy other than the date form.
+  **Deliberately left alone, and why:** the `basename · 2026-08-17 00:24 · 480×320` provenance lines (Gallery ×2,
+  History, the frames table under its own explicit **"Time (UTC)"** header) are precise, sortable technical
+  stamps that carry a *time* as well as a date — v0.264.2 scoped itself to standalone human-facing picture dates,
+  and this follow-up keeps that scope.
+  **Tests (+6, all fail-before):** `Sky.test.tsx` (**new**, +3 — the local-vs-UTC 03:30 case, a null/empty stamp
+  keeping the coordinates without a dangling separator, and no "Invalid Date"), `Dashboard.test.tsx` (+2 — the
+  same 03:30 case on the real card, and an unreadable stamp printing nothing rather than the raw string) and
+  `Target.test.tsx` (+1 — the text handed to the OS share sheet matches `LatestPictureCard`'s exactly and
+  contains no `d/d/yyyy` form).
 
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-16, first run of the new `scripts/agent-dogfood.sh` — seen in a
   screenshot, not read out of the code) — every surface that dates a *picture* printed an ambiguous numeric
@@ -10509,6 +10598,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   primitives, the hard constraint and the acceptance measurement); the natural next candidates, *if the owner
   reacts and wants more*, are the Library and Editor screens — but neither has been measured as "busy" the way
   Target and Dashboard were, so **don't start one speculatively**.
+
+  **📏 SLICE (f) IS NOW MEASURED AND READY — Settings is the app's tallest page by a factor of two, and no slice
+  has ever touched it (Builder 2026-08-17, measured on a real running build via `scripts/agent-dogfood.sh`).**
+  The entry above says the next candidates are "the Library and Editor screens — but neither has been measured as
+  'busy' the way Target and Dashboard were, so don't start one speculatively". **Measured now, on the full-page
+  screenshots, they are both the wrong answer — Settings is the offender:**
+  - **Settings: 5827 px tall on a 420 px phone (≈6.8 phone screens) and 4606 px on a 1440 px desktop (≈5 screens).**
+  - Target (post-slice-(c)): 2981 px phone / 1988 px desktop. Editor: 2575 / 1614. Dashboard (post-slice-(e)):
+    1757 / 1253. Stack: 1544 / 1249. **Settings is ~2× the next-tallest page on both widths.**
+  **The shape, read off `routes/Settings.tsx` (891 lines):** one system alert plus **7 always-on full-width blocks**
+  stacked one below another — *Watched folders · Ambient sound · Telescope (Seestar) · Automated stacking defaults ·
+  Reprocess everything (`Maintenance`) · Backup & restore · Access control* — and the first of those is itself a
+  monster carrying **six `Divider`-labelled sub-sections** (folders · Watcher · Automatic pipeline · Plate solving
+  & compute · Observing site · Stacking). That last point is a finding in its own right: a card titled **"Watched
+  folders" currently contains the observing site, the ASTAP path, the stack memory budget and the job-history
+  depth**, none of which a beginner would look for under that name — the entry's own test ("could a beginner
+  *predict* which page a given thing lives on, from its name alone?") fails here today.
+  **Suggested slice, reusing what already exists — no new primitive needed:** group the seven blocks with the same
+  `InsightTabs` slices (b)/(e) built, or split them across nested routes (`/settings/…`), keeping the first-run
+  essentials (the system alert, folders, plate solving) on the landing view and grouping the rest — e.g.
+  *Capture & pipeline* · *Stacking defaults* · *This device* (ambient sound, telescope) · *Maintenance & access*
+  (reprocess, backup, access control). Re-home the mis-filed sub-sections of "Watched folders" into the group whose
+  name predicts them while you are there. **The hard constraint still governs: nothing may be removed**, and every
+  setting must stay reachable — a setting you cannot find is worse than one you have to scroll to. **Care:**
+  `Settings.test.tsx` is large and several settings are cross-linked from elsewhere in the app ("Fix in Settings",
+  "Settings → Observing site", the `OutdatedTargetsBadge` on the nav link) — those deep links must still land on a
+  *visible* control, which is the one thing a tab strip can break. Prefer nested routes, or open the right tab from
+  the link's hash/param, and pin it with a test per inbound link. (M; PRIORITY 3.)
 
   **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
   count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
@@ -11748,6 +11865,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   file for owner sign-off if it must change the bare default. **Tests:** a synthetic 3-frame stack with a bright
   trail/hot pixel in one sub → assert the trail is gone from the result and `STACKER`/`REJMODE` reflect min-max (pairs
   cleanly with the STACKER-label fix shipped v0.179.2). Confidence: traced.
+  **▶ LARGELY OVERTAKEN BY EVENTS — re-check before spending a run on it (Builder 2026-08-17, verified in the
+  code, not assumed).** This was filed in July, and the two paths a beginner actually reaches have both been
+  given `auto_reject` since: **(1)** the *manual* Stack form seeds `auto_reject=True` for a never-configured
+  target (`webapp/routers/stack.py::get_stack_defaults`, v0.149.0), and **(2)** the *walk-away* auto-stack injects
+  `auto_reject=True` whenever the merged options carry no explicit rejection key
+  (`webapp/pipeline.py::_stack_target`, ~L2101). `_resolve_auto_reject` then picks order-statistic min/max below
+  `kappa_min_frames`, which is exactly the protection this entry asks for. **What is genuinely left is only the
+  case the entry's own caveat says needs care:** a user who has *explicitly saved* `sigma_clip` defaults and then
+  stacks 3 frames — i.e. someone who took control of the setting. Changing the pixels for them would be a default
+  flip on a live install (§9) to override a choice they made, which is the wrong trade. **So: don't re-pick this
+  as filed.** If anything is worth building here it is *advisory* — say on the Stack form that κ-σ can't remove a
+  lone trail at this sub count and offer the one-click switch, the same shape as the shipped photometric-
+  normalization nudge — not a silent change to their combine.
 - **VALIDATION FOLLOW-UP (Scout 2026-07-23) — confirm on real nebula data that the now-live SExtractor skew
   guard (`abs(mean − median) > 0.3·σ → revert to median`) doesn't over-revert on heavy diffuse nebulosity.**
   *(Image-quality / correctness; PRIORITY 4; size S — one real-data check, no blind code change.)* The

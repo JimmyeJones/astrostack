@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "./Dashboard";
 import * as client from "../api/client";
 import type { DashboardStats, SystemInfo } from "../api/client";
+import { formatStampDate } from "../format";
 
 function mkStats(): DashboardStats {
   return {
@@ -345,5 +346,50 @@ describe("Dashboard integration stat", () => {
 
     // 2.3 h, spaced like formatIntegration everywhere else (not "2.3h").
     await waitFor(() => expect(screen.getByText("2.3 h")).toBeInTheDocument());
+  });
+});
+
+describe("Dashboard recent-stack date", () => {
+  function statsWithEveningStack(): DashboardStats {
+    return {
+      ...mkStats(),
+      n_stack_runs: 1, n_targets_with_stacks: 1,
+      recent_stacks: [{
+        safe: "m31", target_name: "M31", run_id: 7, output_basename: "m31_stack",
+        // 03:30 UTC — the evening of the 16th anywhere west of UTC, which is
+        // exactly the case a raw `slice(0, 10)` used to date as the 17th.
+        timestamp_utc: "2026-08-17T03:30:00Z", n_frames_used: 100,
+        has_preview: true, has_fits: true, preview_url: "/api/targets/m31/stack-runs/7/preview",
+      }],
+    };
+  }
+
+  it("dates the newest picture the way every other picture surface does", async () => {
+    // Found by dogfooding: the card printed the raw ISO `2026-08-17` while the
+    // Gallery, History and the Target hero print "17 Aug 2026" for the same run
+    // — and the raw slice is the *UTC* day, so it can name a different calendar
+    // day from the surfaces that convert to local time.
+    vi.spyOn(client.api, "getStats").mockResolvedValue(statsWithEveningStack());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
+
+    const expected = formatStampDate("2026-08-17T03:30:00Z");
+    expect(screen.getByText(expected)).toBeInTheDocument();
+    expect(screen.queryByText("2026-08-17")).not.toBeInTheDocument();
+  });
+
+  it("prints nothing rather than 'Invalid Date' for an unreadable stamp", async () => {
+    const stats = statsWithEveningStack();
+    stats.recent_stacks[0].timestamp_utc = "not-a-date";
+    vi.spyOn(client.api, "getStats").mockResolvedValue(stats);
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
+    expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
+    // The raw slice used to print the garbage straight onto the card.
+    expect(screen.queryByText("not-a-date")).not.toBeInTheDocument();
   });
 });

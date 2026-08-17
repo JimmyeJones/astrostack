@@ -88,17 +88,32 @@ export function LogsView() {
           <ScrollArea h="100%" type="auto">
             <Box p="xs" style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }}>
               {filtered.map((e: LogEntry) => (
-                <Group key={e.seq} gap={8} wrap="nowrap" align="flex-start"
+                // The row may wrap, so on a phone the message drops to its own
+                // line under the stamp instead of being squeezed beside it. The
+                // three prefix chips are all `flexShrink: 0` and together take
+                // ~220 px of a 420 px screen; with the row pinned `nowrap` the
+                // message was left ~10 px and `wordBreak: break-word` then set a
+                // long path one *character* per line — a single log entry 211
+                // lines tall. On a desktop row (prefix + 260 ≪ 1100) nothing
+                // wraps, so this is unchanged where it was already fine.
+                <Group key={e.seq} gap={8} align="flex-start"
                   style={{ padding: "2px 4px", borderBottom: "1px solid var(--mantine-color-dark-6)" }}>
-                  <Text span c="dimmed" style={{ flexShrink: 0 }}>{e.ts.slice(11, 19)}</Text>
-                  <Badge size="xs" color={LEVEL_COLOR[e.level] ?? "gray"} variant="light"
-                    style={{ flexShrink: 0, width: 64 }}>
-                    {e.level}
-                  </Badge>
-                  <Text span c="dimmed" style={{ flexShrink: 0, maxWidth: 220 }} truncate>
-                    {e.logger}
-                  </Text>
-                  <Text span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  <Group gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
+                    <Text span c="dimmed">{e.ts.slice(11, 19)}</Text>
+                    <Badge size="xs" color={LEVEL_COLOR[e.level] ?? "gray"} variant="light"
+                      style={{ flexShrink: 0, width: 64 }}>
+                      {e.level}
+                    </Badge>
+                    <Text span c="dimmed" style={{ maxWidth: 220 }} truncate>
+                      {e.logger}
+                    </Text>
+                  </Group>
+                  <Text span style={{
+                    // Based on its own content rather than zero, so it fills a
+                    // wide row but takes a line of its own before it is crushed.
+                    flex: "1 1 260px", minWidth: 0,
+                    whiteSpace: "pre-wrap", wordBreak: "break-word",
+                  }}>
                     {e.message}
                   </Text>
                 </Group>

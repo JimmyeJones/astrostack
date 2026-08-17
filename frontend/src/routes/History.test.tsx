@@ -1338,3 +1338,31 @@ describe("HistoryView — an edit saved but never exported", () => {
     expect(screen.queryByText("edit not exported")).not.toBeInTheDocument();
   });
 });
+
+describe("HistoryView heading", () => {
+  // Same gap the editor had: the two screens you reach *from* the Target page
+  // titled themselves with the raw filesystem-safe name while the Target and
+  // Stack screens named the target properly.
+  it("names the target the way every other screen does", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "getTarget").mockResolvedValue({
+      safe_name: "M_42", name: "Sample: Orion Nebula (M42)",
+      ra_deg: null, dec_deg: null, n_frames: 6, n_frames_accepted: 6,
+      total_exposure_s: 60, last_activity_utc: null, has_preview: true,
+      notes: null, tags: [],
+    });
+
+    renderHistory();
+    expect(await screen.findByText("Stack history — Sample: Orion Nebula (M42)"))
+      .toBeInTheDocument();
+    expect(screen.queryByText("Stack history — M_42")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the safe name when the target can't be loaded", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "getTarget").mockRejectedValue(new Error("gone"));
+
+    renderHistory();
+    expect(await screen.findByText("Stack history — M_42")).toBeInTheDocument();
+  });
+});

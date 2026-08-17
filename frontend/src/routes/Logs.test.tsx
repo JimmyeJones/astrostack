@@ -54,3 +54,47 @@ describe("LogsView", () => {
     expect(capturedText).not.toContain("ingest started");
   });
 });
+
+describe("LogsView row layout", () => {
+  it("lets a long message take its own line instead of being crushed", async () => {
+    // Found by the dogfood probe's squeeze check, on the phone screenshot: the
+    // row was `wrap="nowrap"` with three `flexShrink: 0` prefix chips taking
+    // ~220 px of a 420 px screen, which left the message ~10 px — and
+    // `wordBreak: break-word` then set a long path one *character* per line,
+    // making a single entry 211 lines tall and the page unusable on a phone.
+    // jsdom has no layout, so pin the two causes.
+    const path = "/tmp/claude/a-very-long-unbroken-path/with/no/spaces/in/it/at/all";
+    vi.spyOn(client.api, "getLogs").mockResolvedValue({
+      logs: [mkEntry(1, `watchdog observing ${path}`, "webapp.watcher")],
+      last_seq: 1,
+    } as never);
+
+    renderLogs();
+
+    const msg = await screen.findByText(`watchdog observing ${path}`);
+    // Based on its own content, so it fills a wide row but drops to a line of
+    // its own before it can be squeezed under its words.
+    expect(msg).toHaveStyle({ flex: "1 1 260px" });
+    // …and the row it sits in may wrap, which is what gives it that line.
+    const row = msg.parentElement as HTMLElement;
+    expect(row.style.getPropertyValue("--group-wrap")).not.toBe("nowrap");
+  });
+
+  it("keeps the stamp, level and logger together on one line", async () => {
+    vi.spyOn(client.api, "getLogs").mockResolvedValue({
+      logs: [mkEntry(1, "ingest started", "webapp.watcher")],
+      last_seq: 1,
+    } as never);
+
+    renderLogs();
+
+    const logger = await screen.findByText("webapp.watcher");
+    const prefix = logger.parentElement as HTMLElement;
+    expect(prefix.style.getPropertyValue("--group-wrap")).toBe("nowrap");
+    expect(prefix).toHaveStyle({ flexShrink: "0" });
+    // The stamp and the level badge are its siblings, not the message's.
+    expect(prefix.textContent).toContain("00:00:00");
+    expect(prefix.textContent).toContain("INFO");
+    expect(prefix.textContent).not.toContain("ingest started");
+  });
+});

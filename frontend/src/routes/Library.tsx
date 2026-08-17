@@ -92,9 +92,14 @@ function TargetCard({ t }: { t: Target }) {
           </Center>
         )}
       </Card.Section>
-      <Group justify="space-between" mt="md">
-        <Text fw={600}>{t.name}</Text>
-        <IconChevronRight size={16} />
+      {/* `justify="space-between"` wraps by default, so a name long enough to
+          fill the card pushed the chevron onto a line of its own — a stray "›"
+          hanging under the title. Same shape as the Gallery card's name row:
+          the row may not wrap, the icon may not shrink, and the name truncates
+          with its full text on hover so nothing is silently cut. */}
+      <Group justify="space-between" mt="md" wrap="nowrap">
+        <Text fw={600} truncate title={t.name}>{t.name}</Text>
+        <IconChevronRight size={16} style={{ flexShrink: 0 }} />
       </Group>
       <Group gap="xs" mt="xs">
         <Badge variant="light" color="violet">
