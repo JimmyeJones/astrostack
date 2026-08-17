@@ -164,7 +164,7 @@ def test_gallery_reuses_the_run_listings_predicate(client, solved_library, monke
     assert next(x for x in client.get("/api/gallery").json()["items"]
                 if x["run_id"] == rid)["unexported_edit"] is False
 
-    monkeypatch.setattr(stack_mod, "_unexported_edit", lambda options, recipe: True)
+    monkeypatch.setattr(stack_mod, "_unexported_edit", lambda options, recipe, exported=None: True)
     assert next(x for x in client.get("/api/gallery").json()["items"]
                 if x["run_id"] == rid)["unexported_edit"] is True
     # …and no second copy has crept into the gallery module itself.
@@ -241,7 +241,7 @@ def test_unexported_edits_reuses_the_one_predicate(client, solved_library, monke
     _make_run(solved_library, safe, basename="count_one_definition")
     assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
 
-    monkeypatch.setattr(stack_mod, "_unexported_edit", lambda options, recipe: True)
+    monkeypatch.setattr(stack_mod, "_unexported_edit", lambda options, recipe, exported=None: True)
     # Still 0: a run with no recipe at all is never even looked up, which is the
     # cheapness the endpoint is built around.
     assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
@@ -282,3 +282,158 @@ def test_unexported_edits_survives_a_broken_project(client, solved_library, monk
 
     monkeypatch.setattr(Project, "open", real_open)
     assert client.get("/api/gallery/unexported-edits").json()["count"] == 1
+
+
+# ---- finishing the edit actually finishes it -------------------------------
+#
+# The half that was missing: nothing recorded that an export had happened, so a
+# saved recipe stayed "unfinished" forever. Pressing the app's own **Finish my
+# edit** button left the Dashboard note naming the same picture, offering to
+# finish it again — which would have written a second duplicate run and more
+# files every time.
+
+SATURATE = {"ops": [{"id": "tone.saturation", "params": {"amount": 1.4}}]}
+
+
+def test_unexported_edit_predicate_knows_what_was_already_exported():
+    """The rule, in isolation: an edit that matches the one already exported is
+    finished; a different one is not; no marker means what it always meant."""
+    saved = json.dumps(STRETCH)
+    assert _unexported_edit("{}", saved) is True            # never exported
+    assert _unexported_edit("{}", saved, None) is True      # marker absent
+    assert _unexported_edit("{}", saved, "") is True        # marker empty
+    assert _unexported_edit("{}", saved, saved) is False    # this is that edit
+    # Exported one look, then saved a different one — invisible again.
+    assert _unexported_edit("{}", saved, json.dumps(SATURATE)) is True
+    # An unreadable marker can only fail open (still flagged), never wrongly quiet.
+    assert _unexported_edit("{}", saved, "not json") is True
+
+
+def test_recipe_look_ignores_what_does_not_change_the_picture():
+    """Re-saving an unchanged edit re-stamps ``updated_utc`` and can re-order JSON
+    keys; neither makes it a new edit. Only the enabled ops and their params do."""
+    from webapp.routers.stack import _recipe_look
+
+    a = json.dumps({"version": 1, "base_run_id": 3, "updated_utc": "2026-01-01T00:00:00Z",
+                    "ops": [{"uid": "aaaa1111", "id": "tone.stretch", "enabled": True,
+                             "params": {"stretch": 0.6, "amount": 2.0}}]})
+    b = json.dumps({"version": 1, "base_run_id": 9, "updated_utc": "2026-08-17T12:00:00Z",
+                    "ops": [{"uid": "bbbb2222", "id": "tone.stretch", "enabled": True,
+                             "params": {"amount": 2.0, "stretch": 0.6}}]})
+    assert _recipe_look(a) == _recipe_look(b)
+    # A changed parameter is a different picture.
+    c = json.dumps({"ops": [{"id": "tone.stretch", "params": {"stretch": 0.9}}]})
+    assert _recipe_look(a) != _recipe_look(c)
+    # Disabled ops don't count, so "no look" is [] rather than a list of them.
+    assert _recipe_look(json.dumps(
+        {"ops": [{"id": "tone.stretch", "enabled": False, "params": {}}]})) == []
+    # …and nothing readable at all is None, which the predicate treats the same.
+    assert _recipe_look(None) is None
+    assert _recipe_look("not json") is None
+    assert _recipe_look(json.dumps({"ops": "nope"})) is None
+
+
+def test_finishing_the_edit_clears_the_library_wide_note(client, solved_library):
+    """The bug this whole section exists for: the Target page's one-click finish
+    exports the saved edit, and the Dashboard must stop saying it never happened."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="finish_note_src")
+    client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", json=STRETCH)
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 1
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"output_name": "finish_note_done"})
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+    assert client.get("/api/gallery/unexported-edits").json() == {"count": 0, "items": []}
+    # The user's recipe is untouched — it is their document, and re-opening the
+    # editor on that run must still find it.
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    assert any(x["id"] == rid for x in runs)
+    saved = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe").json()
+    assert [o["id"] for o in saved["ops"]] == ["tone.stretch"]
+
+
+def test_finishing_the_edit_clears_the_per_run_badges(client, solved_library):
+    """The same answer on the two surfaces that label a thumbnail — the run listing
+    behind History and the Target hero, and the library-wide Gallery."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="finish_badge_src")
+    client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", json=STRETCH)
+
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    assert next(x for x in runs if x["id"] == rid)["unexported_edit"] is True
+    items = client.get("/api/gallery").json()["items"]
+    assert next(x for x in items if x["run_id"] == rid)["unexported_edit"] is True
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"output_name": "finish_badge_done"})
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    assert next(x for x in runs if x["id"] == rid)["unexported_edit"] is False
+    items = client.get("/api/gallery").json()["items"]
+    assert next(x for x in items if x["run_id"] == rid)["unexported_edit"] is False
+
+
+def test_editing_further_after_an_export_speaks_up_again(client, solved_library):
+    """The other half: an export must silence *that* edit, not the run forever.
+    Change one thing and save, and the picture on screen is once again not the
+    one the user made."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="further_src")
+    client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", json=STRETCH)
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"output_name": "further_done"})
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
+
+    # Re-saving the *same* edit is not a new edit — no nag.
+    client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", json=STRETCH)
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
+
+    # Changing it is.
+    client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe",
+               json={"ops": [{"id": "tone.stretch", "params": {"stretch": 0.9}}]})
+    r = client.get("/api/gallery/unexported-edits").json()
+    assert r["count"] == 1 and r["items"][0]["run_id"] == rid
+
+
+def test_exporting_a_different_recipe_leaves_the_saved_one_flagged(client, solved_library):
+    """The editor exports the recipe on screen, which need not be the one on disk.
+    Exporting an unsaved look must not mark the *saved* edit as done — it is still
+    a picture the app isn't showing."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="divergent_src")
+    client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", json=STRETCH)
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"recipe": SATURATE, "output_name": "divergent_done"})
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 1
+
+
+def test_an_upgrading_install_reads_exactly_as_before(client, solved_library):
+    """Upgrade safety: no install has the marker yet, so every already-saved edit
+    must still be flagged after the upgrade — the count only ever *becomes*
+    accurate as exports happen, it never silently forgets existing work."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="upgrade_src")
+    client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", json=STRETCH)
+
+    from seestack.io.library import Library
+    from webapp.routers.editor import EXPORTED_RECIPE_META_PREFIX
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            assert proj.get_meta(f"{EXPORTED_RECIPE_META_PREFIX}{rid}") is None
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 1
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    assert next(x for x in runs if x["id"] == rid)["unexported_edit"] is True

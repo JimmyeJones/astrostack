@@ -49,6 +49,48 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND WHILE SCOPING "Finish them all" (Builder 2026-08-17, branch `claude/serene-goldberg-03783o`;
+  REPRODUCED) — finishing an edit does not stop the app asking you to finish it. Pressing **Finish my edit**
+  exports the picture and then every surface — the Dashboard's library-wide note included — goes on saying you
+  "never finished" it, offering a button that would export it all over again.**~~ — **FIXED v0.264.9**
+  (Builder 2026-08-17, branch `claude/serene-goldberg-03783o`). *(Friendliness / trust — PRIORITY 3, and a real
+  disk risk: the offered fix was to do the same export again, writing another duplicate run and another six files
+  each time. Doing what the app asks has to be able to stop it asking.)*
+  **Reproduced** as the fail-before test: save a recipe → `/api/gallery/unexported-edits` says `count: 1` → POST
+  the export, job `done` → the count is **still 1**, naming the same picture.
+  **The cause is that nothing on disk recorded that an export had happened.** `_apply_editor_to_run` writes a
+  **new** run and deliberately leaves the source run's `editor_recipe:<id>` where it is (it is the user's
+  document, and re-opening the editor there must still find it) — so `_unexported_edit` could only ever see "this
+  run has a saved recipe its own baked preview doesn't show", which stays true forever. That reading is right for
+  the *thumbnail* question it was written for and wrong for the *unfinished-work* question all three surfaces
+  actually ask, and the drift was invisible because the existing coverage asserted the flag on the **new** run and
+  never on the source.
+  **The fix, one new per-run annotation:** `editor_exported:<run_id>` records the recipe an export of that run
+  actually rendered, stamped on the source run in the same open project (best-effort — a picture that was written
+  must not report as failed because an annotation couldn't be). `_unexported_edit` takes it as an optional third
+  argument and answers **False** when the saved recipe describes the same picture. Compared by a new pure
+  `_recipe_look` — the ordered enabled ops and their params — deliberately *not* by bytes, because `put_recipe`
+  re-stamps `updated_utc` on every Save and each op carries a random `uid`, so a byte comparison would call an
+  unchanged edit changed. So re-saving the same look stays quiet, and changing one parameter and saving speaks up
+  again: that second-round edit is as invisible as the first was. The batch "apply this look to N pictures" path
+  shares `_apply_editor_to_run`, so it stamps too — and a run whose *own* saved recipe differs from the applied
+  one stays flagged, correctly.
+  **Upgrade-safe:** the marker is absent on every existing install, and absent reads as "not exported" — i.e.
+  byte-for-byte today's answer — so nothing already saved is silently forgotten; the count only ever *becomes*
+  accurate as exports happen. No schema, config, on-disk-layout, API-shape or default change (`project_meta` is a
+  KV table and `unexported_edit` keeps its type). The prefix is registered in `webapp/run_meta.py`, so deleting a
+  run takes it along with the rest of that run's annotations.
+  **Tests (+7, six fail-before):** `tests/webapp/test_unexported_edit.py` — the predicate's new rule in isolation
+  (including an unreadable marker failing *open*, never wrongly quiet), `_recipe_look` ignoring `uid` /
+  `updated_utc` / key order but not a changed parameter, the library-wide note clearing after the one-click finish
+  (with the user's recipe asserted still readable), both per-run badges clearing, editing further after an export
+  speaking up again, exporting a recipe that differs from the saved one leaving the saved one flagged, and the
+  upgrade case where no marker exists. `tests/webapp/test_run_purge.py`'s kept-run assertion now reads its
+  expected annotation count off `per_run_meta_prefixes()` instead of hard-coding 6, so registering a new per-run
+  prefix — which is exactly what this fix should do — can't fail it for the wrong reason.
+  **Follow-on unblocked:** the "Finish them all" batch-export idea in the Ideas list was unbuildable on top of
+  this — it would have re-exported the same runs on every run of the job.
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run, same running build; MEASURED in the browser) — every
   Gallery card clips its own primary button mid-word: "Edit image" renders as **"Edit imag"**.**~~ —
   **FIXED v0.263.4** (Builder 2026-08-16, branch `claude/serene-goldberg-ldc6ih`). *(Friendliness / polish —

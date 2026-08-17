@@ -1307,6 +1307,17 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int, recipe_dict: dict
             notes="edited",
             engine_version=APP_VERSION,
         ))
+        # Remember, on the *source* run, which edit this export rendered. Its
+        # saved recipe is deliberately left alone — it is the user's document —
+        # so this marker is the only thing that can tell "saved and never
+        # exported" from "saved, and now exported", and without it every surface
+        # that offers to finish the edit kept offering after it was finished
+        # (see ``webapp.routers.stack._unexported_edit``). Best-effort: a picture
+        # that was written must not be reported as failed because an annotation
+        # couldn't be.
+        from webapp.routers.editor import EXPORTED_RECIPE_META_PREFIX
+        with contextlib.suppress(Exception):
+            proj.set_meta(f"{EXPORTED_RECIPE_META_PREFIX}{run_id}", recipe.to_json())
     finally:
         proj.close()
     lib.refresh_target_stats(safe)
