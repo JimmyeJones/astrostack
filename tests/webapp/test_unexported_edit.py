@@ -437,3 +437,134 @@ def test_an_upgrading_install_reads_exactly_as_before(client, solved_library):
     assert client.get("/api/gallery/unexported-edits").json()["count"] == 1
     runs = client.get(f"/api/targets/{safe}/stack-runs").json()
     assert next(x for x in runs if x["id"] == rid)["unexported_edit"] is True
+
+
+# ---- "finish them all" ------------------------------------------------------
+#
+# Naming the pictures is right for one or two. Someone who edits across several
+# nights and never exports accumulates a dozen, and clicking through a dozen
+# editors to press Export a dozen times is the manual chain the app exists to
+# remove — the saved recipe *is* the instruction, so the server can do it
+# unattended. It is only buildable at all because an export now leaves a marker:
+# without one the job would re-export the same pictures on every run.
+
+def test_finish_them_all_exports_every_saved_edit(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    a = _make_run(solved_library, safe, basename="all_a", ts="2026-05-01T00:00:00Z")
+    b = _make_run(solved_library, safe, basename="all_b", ts="2026-05-02T00:00:00Z")
+    # A third run with no edit at all must be left completely alone.
+    c = _make_run(solved_library, safe, basename="all_c", ts="2026-05-03T00:00:00Z")
+    for rid, recipe in ((a, STRETCH), (b, SATURATE)):
+        client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", json=recipe)
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 2
+
+    r = client.post("/api/gallery/unexported-edits/export")
+    assert r.status_code == 200 and r.json()["count"] == 2
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+    # Nothing left to finish, and the note has gone quiet.
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    by_base = {x["output_basename"]: x for x in runs}
+    # One new picture per edit, each derived from its own source run.
+    assert by_base["all_a_edit"]["notes"] == "edited"
+    assert by_base["all_b_edit"]["notes"] == "edited"
+    assert by_base["all_a_edit"]["options"]["derived_from"] == a
+    assert by_base["all_b_edit"]["options"]["derived_from"] == b
+    # …and each carries its *own* saved look, not one shared recipe.
+    assert [o["id"] for o in by_base["all_a_edit"]["options"]["editor_recipe"]["ops"]] \
+        == ["tone.stretch"]
+    assert [o["id"] for o in by_base["all_b_edit"]["options"]["editor_recipe"]["ops"]] \
+        == ["tone.saturation"]
+    # Non-destructive: every source run is still there, and the un-edited one
+    # never grew a sibling.
+    assert {a, b, c} <= {x["id"] for x in runs}
+    assert "all_c_edit" not in by_base
+
+
+def test_finish_them_all_is_idempotent(client, solved_library):
+    """Pressing it twice must not write the same picture twice — the marker is
+    what stops the second run finding anything to do."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="twice_a")
+    rid2 = _make_run(solved_library, safe, basename="twice_b", ts="2026-05-04T00:00:00Z")
+    for r_ in (rid, rid2):
+        client.put(f"/api/targets/{safe}/stack-runs/{r_}/editor/recipe", json=STRETCH)
+
+    r = client.post("/api/gallery/unexported-edits/export")
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+    before = len(client.get(f"/api/targets/{safe}/stack-runs").json())
+
+    again = client.post("/api/gallery/unexported-edits/export")
+    assert again.status_code == 400
+    assert "no saved edits" in again.json()["detail"]
+    assert len(client.get(f"/api/targets/{safe}/stack-runs").json()) == before
+
+
+def test_finish_them_all_with_nothing_to_do_is_a_clean_400(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _make_run(solved_library, safe, basename="nothing_to_finish")
+    r = client.post("/api/gallery/unexported-edits/export")
+    assert r.status_code == 400
+    assert "no saved edits" in r.json()["detail"]
+
+
+def test_one_broken_picture_does_not_sink_the_batch(client, solved_library):
+    """A run whose source FITS has gone missing is skipped with a reason; the
+    others still get finished. Aborting the batch on the first casualty would
+    leave the user worse off than doing them by hand."""
+    from pathlib import Path
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    good = _make_run(solved_library, safe, basename="batch_good")
+    gone = _make_run(solved_library, safe, basename="batch_gone",
+                     ts="2026-05-05T00:00:00Z")
+    for r_ in (good, gone):
+        client.put(f"/api/targets/{safe}/stack-runs/{r_}/editor/recipe", json=STRETCH)
+
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    assert next(x for x in runs if x["id"] == gone)["has_fits"]
+    for p in (solved_library / "library").rglob("batch_gone.fits"):
+        Path(p).unlink()
+
+    r = client.post("/api/gallery/unexported-edits/export")
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done"
+    result = job["result"]
+    assert [x["run_id"] for x in result["exported"]]           # the good one landed
+    assert f"{safe}:{gone}" in result["errors"]
+
+    bases = {x["output_basename"] for x in
+             client.get(f"/api/targets/{safe}/stack-runs").json()}
+    assert "batch_good_edit" in bases
+    # The casualty is still counted, so the note keeps telling the truth about it.
+    left = client.get("/api/gallery/unexported-edits").json()
+    assert [x["run_id"] for x in left["items"]] == [gone]
+
+
+def test_finish_them_all_exports_only_what_the_note_counted(client, solved_library):
+    """The button and the sentence above it must never describe different sets:
+    a run that was already finished is not in the count and must not be
+    re-exported by the batch either."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    done_already = _make_run(solved_library, safe, basename="counted_done")
+    waiting = _make_run(solved_library, safe, basename="counted_waiting",
+                        ts="2026-05-06T00:00:00Z")
+    for r_ in (done_already, waiting):
+        client.put(f"/api/targets/{safe}/stack-runs/{r_}/editor/recipe", json=STRETCH)
+
+    one = client.post(
+        f"/api/targets/{safe}/stack-runs/{done_already}/editor/export",
+        json={"output_name": "counted_done_edit"})
+    assert _wait_job(client, one.json()["job_id"])["state"] == "done"
+    assert client.get("/api/gallery/unexported-edits").json()["count"] == 1
+
+    r = client.post("/api/gallery/unexported-edits/export")
+    assert r.json()["count"] == 1
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+    bases = [x["output_basename"] for x in
+             client.get(f"/api/targets/{safe}/stack-runs").json()]
+    # Exactly one "counted_done_edit" — the batch did not make a second copy.
+    assert bases.count("counted_done_edit") == 1
+    assert "counted_waiting_edit" in bases

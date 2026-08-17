@@ -2022,6 +2022,12 @@ export const api = {
   // `/api/gallery` lists every run of every target.
   getUnexportedEdits: () =>
     req<{ count: number; items: UnexportedEditItem[] }>("/api/gallery/unexported-edits"),
+  // Finish all of them in one cancellable job. The server re-scans and exports
+  // exactly what the count above describes, so the browser never sends a list
+  // that could have gone stale between the note rendering and the click.
+  exportUnexportedEdits: () =>
+    req<{ job_id: string; count: number }>("/api/gallery/unexported-edits/export",
+      { method: "POST" }),
 
   // logs
   getLogs: (level?: string, limit = 1000) =>
