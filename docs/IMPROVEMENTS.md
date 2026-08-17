@@ -10022,6 +10022,33 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- ~~**FOUND BY THE DOGFOOD PROBE'S NEW SQUEEZE CHECK (Builder 2026-08-17, on its very first run against a real
+  running build; REPRODUCED and re-measured after the fix) — the Logs page sets a long message ONE CHARACTER PER
+  LINE on a phone, so a single entry is 211 lines tall and the page is unusable.**~~ — **FIXED v0.264.8** (Builder
+  2026-08-17, branch `claude/serene-goldberg-x7wijx`). *(Friendliness — PRIORITY 3; the owner reads this app on a
+  phone, and Logs is the screen you open when something has gone wrong.)*
+  **Measured, not eyeballed:** the probe read the message span's own box — **10 px of a 394 px row, 211 lines** for
+  one watchdog line, and 66 px / 24 lines and 95 px / 18 lines for two more. The phone screenshot is a single
+  vertical column of individual characters.
+  **The cause, and it is the same family as v0.264.4:** the row is `<Group wrap="nowrap">` whose three prefix
+  chips — timestamp, level badge (`width: 64`), logger name — are each `flexShrink: 0` and together take ~220 px
+  of a 420 px screen. The row may not wrap, so the message absorbs the whole shortfall; `wordBreak: break-word`
+  then does exactly what it is told to an unbroken filesystem path and breaks it per character. **The overflow
+  probe could never see it** — nothing overflows, the text wraps obediently — which is precisely why the squeeze
+  check was added in the commit before this one.
+  **The fix:** the three prefix chips move into their own `flexShrink: 0` `nowrap` group (they are one unit and
+  should never be split), the outer row is allowed to wrap, and the message is based on its own content
+  (`flex: "1 1 260px"`) so it fills a wide row but takes a line of its own before it can be crushed. On a desktop
+  row (prefix + 260 ≪ 1100) nothing wraps, so the page is byte-identical where it already worked — confirmed on
+  the re-probed desktop screenshot. Frontend-only: no API, schema, config, on-disk or default change; no control,
+  filter or column added or removed.
+  **Verified end to end in the browser, not only in jsdom:** rebuilt, re-probed, and the phone Logs page now shows
+  eight readable entries where it showed one; the probe's squeeze findings went 5 → 0.
+  **Tests (+2, both fail-before, `Logs.test.tsx`):** jsdom has no layout, so they pin the two causes — the message
+  is based on its own content and its row may wrap, and the stamp/level/logger stay together in one unshrinkable
+  `nowrap` group that does *not* contain the message.
+
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-17, seen in the phone Editor screenshot of a real running build;
   REPRODUCED) — the editor, the app's priority-1 screen, titled itself with the raw filesystem-safe name.**~~ —
   **FIXED v0.264.7** (Builder 2026-08-17, branch `claude/serene-goldberg-x7wijx`). *(Friendliness — PRIORITY 1/3;
