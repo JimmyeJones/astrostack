@@ -10087,6 +10087,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   23.4e9 → "22 GB" case) and `Storage.test.tsx` (+2, **one fails before** — the header and the headroom note quote
   the same figure and 23.4 appears nowhere; an older backend still falls back).
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, second `scripts/agent-dogfood.sh` run, on a real running build with
+  the sample stacked; REPRODUCED) — the v0.264.2 picture-date sweep missed three surfaces, and one of them names a
+  different calendar *day* from the rest of the app.**~~ — **FIXED v0.264.6** (Builder 2026-08-17, branch
+  `claude/serene-goldberg-x7wijx`). *(Friendliness / trust — PRIORITY 3; cosmetic on two surfaces, a genuine
+  cross-screen disagreement on the third.)*
+  **How it was found:** the phone Dashboard screenshot. The **Recent stacks** card — the first picture a beginner
+  meets, on the screen the app opens on — dated the sample **"2026-08-17"**, while the Gallery, History and the
+  Target hero dated the very same run **"17 Aug 2026"**. Grepping out from there turned up two more.
+  **The three, and why the third is not merely cosmetic:**
+  1. `Dashboard.tsx:306` and 2. `Sky.tsx` (the selected-footprint card, *"RA … · Dec … · 2026-08-17"*) both
+     printed `timestamp_utc.slice(0, 10)`. That is not just the wrong *shape* — it is the **UTC** calendar day,
+     while `formatStampDate` converts to local time. For an evening stack anywhere west of UTC (23:30 local =
+     03:30 UTC next day) the Dashboard therefore names **tomorrow** for a run the Gallery, one click away, names
+     today. Same picture, same session, two different dates.
+  3. `Target.tsx:1212` — the header's **Share** button built its share text from a bare `toLocaleDateString()`,
+     the ambiguous numeric form ("8/16/2026") v0.264.2 existed to remove, while `LatestPictureCard`'s share button
+     for the *same picture on the same page* already used `formatStampDate`. This is the one that leaves the app:
+     it is the caption the owner posts publicly.
+  **The fix is the one v0.264.2 landed, applied to the three call sites it missed** — every one now goes through
+  `format.ts::formatStampDate`. The Sky card's line became a pure exported `skyFootprintLine(image)` so it is
+  testable without booting three.js/aladin, and so the "no date" case drops its `·` separator instead of trailing
+  a bare one. An unreadable stamp now yields nothing rather than the raw garbage (`slice`) or "Invalid Date"
+  (`new Date`). Frontend-only: no API, schema, config, on-disk or default change; no copy other than the date form.
+  **Deliberately left alone, and why:** the `basename · 2026-08-17 00:24 · 480×320` provenance lines (Gallery ×2,
+  History, the frames table under its own explicit **"Time (UTC)"** header) are precise, sortable technical
+  stamps that carry a *time* as well as a date — v0.264.2 scoped itself to standalone human-facing picture dates,
+  and this follow-up keeps that scope.
+  **Tests (+6, all fail-before):** `Sky.test.tsx` (**new**, +3 — the local-vs-UTC 03:30 case, a null/empty stamp
+  keeping the coordinates without a dangling separator, and no "Invalid Date"), `Dashboard.test.tsx` (+2 — the
+  same 03:30 case on the real card, and an unreadable stamp printing nothing rather than the raw string) and
+  `Target.test.tsx` (+1 — the text handed to the OS share sheet matches `LatestPictureCard`'s exactly and
+  contains no `d/d/yyyy` form).
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-16, first run of the new `scripts/agent-dogfood.sh` — seen in a
   screenshot, not read out of the code) — every surface that dates a *picture* printed an ambiguous numeric
   date, on the same screen as the night surfaces' unambiguous one.**~~ — **FIXED v0.264.2** (Builder 2026-08-16,
