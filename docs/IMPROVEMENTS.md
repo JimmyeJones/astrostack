@@ -10152,6 +10152,33 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-17, the loose end left by the Settings-section work v0.266.0–v0.266.2) — the app
+  still names Settings in prose in five more places, and now that every section has an address, most of them
+  could be one tap instead.** *(Friendliness — PRIORITY 3; size S; **check each one's shape before starting** —
+  they are not all the same problem.)* v0.266.2 linked the Telescope page's three; these remain, and they split
+  into two kinds. **(1) Rendered JSX, straightforward:** `routes/Target.tsx:793` ("Install ASTAP and set its path
+  in Settings, then re-run solving" — though that alert already carries an **Open Settings** button beside it, so
+  this one is arguably fine as prose) and `routes/Editor.tsx:1261` (the auto-crop tooltip's "The default for every
+  target is in Settings" → `stacking`… actually `automation`, which is worth checking before linking — a link that
+  lands on the wrong section is worse than none). **(2) Plain strings, needs a shape decision:**
+  `routes/Jobs.tsx:72` (the out-of-memory guidance, "raise the memory limit in Settings" → `stacking`),
+  `Jobs.tsx:358` (the faint-field hint naming "Rescue faint fields with a deep-image solve" → `plate-solving`) and
+  `components/target/nextBestMove.ts:105` ("Installing ASTAP's star database (in Settings)" → `plate-solving`).
+  These are `string` constants consumed as text, so linking them means either splitting the copy into
+  segments-plus-link (verbose, and each has tests pinning the wording) or giving the surrounding card an optional
+  `action: {label, href}` the way `StackHealthCard`'s `noteAction` already does — **the latter is the better
+  pattern and is already in the codebase**, so prefer it over inlining anchors into prose. Worth doing as one
+  small pass; not worth contorting a tested string constant for.
+
+- **RECORDED SO IT ISN'T RE-INVESTIGATED (Builder 2026-08-17, seen on the phone screenshot of `/tonight`) — the
+  Night picker prints `mm/dd/2026`, which looks like the US date order the rest of the app deliberately avoids,
+  but it is NOT ours to fix.** The Tonight page's Night field is a native `<input type="date">`; its placeholder
+  and displayed order come from the *browser's* locale, not from the app (the probe's Chromium runs `en-US`). The
+  value it submits is always ISO `YYYY-MM-DD`, and every date the app *renders* already goes through
+  `formatStampDate` (fixed in v0.264.2). Changing the visible order would mean replacing the native picker with a
+  custom one — losing the phone's own date wheel, which is the better control on the device the owner uses. So:
+  **not a bug, don't "fix" it**; if it ever matters, the honest change is a `lang`/locale hint, not a new widget.
+
 - ~~**FOUND BY THE DOGFOOD PROBE'S NEW SQUEEZE CHECK (Builder 2026-08-17, on its very first run against a real
   running build; REPRODUCED and re-measured after the fix) — the Logs page sets a long message ONE CHARACTER PER
   LINE on a phone, so a single entry is 211 lines tall and the page is unusable.**~~ — **FIXED v0.264.8** (Builder
