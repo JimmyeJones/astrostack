@@ -133,8 +133,19 @@ for (const { name, width, height } of WIDTHS) {
   const errors = [];
   // A container with no outbound network makes the Sky Map's remote sky survey
   // fail loudly; that says nothing about this app, so it isn't a finding.
+  //
+  // Two of Aladin's complaints name no URL, so the test above cannot tell they are
+  // about a remote tile: a bare "TypeError: Failed to fetch", and "Image HDU not
+  // found in the FITS" (Aladin parsing a tile it never really received). Both were
+  // reported as findings on /sky by the 2026-08-17 run against a build where
+  // nothing was wrong. They are excused **only on the Sky Map route**, on purpose:
+  // "Failed to fetch" anywhere else means one of *our* API calls died, which is a
+  // real finding and must keep surfacing.
+  const ALADIN_NOISE = /^TypeError: Failed to fetch$|Image HDU not found in the FITS/;
+  let currentRoute = "";
   const ours = (t) => !/https?:\/\/(?!127\.0\.0\.1|localhost)/.test(t)
-    && !/ERR_TUNNEL_CONNECTION_FAILED|ERR_NAME_NOT_RESOLVED|HiPS/.test(t);
+    && !/ERR_TUNNEL_CONNECTION_FAILED|ERR_NAME_NOT_RESOLVED|HiPS/.test(t)
+    && !(currentRoute === "/sky" && ALADIN_NOISE.test(t.trim()));
   page.on("pageerror", (e) => { if (ours(String(e))) errors.push(String(e)); });
   page.on("console", (m) => {
     if (m.type() === "error" && ours(m.text())) errors.push(m.text());
@@ -142,6 +153,7 @@ for (const { name, width, height } of WIDTHS) {
 
   for (const route of ROUTES) {
     errors.length = 0;
+    currentRoute = route;   // the console/pageerror handlers filter by route
     try {
       await page.goto(BASE + route, { waitUntil: "networkidle", timeout: 20000 });
     } catch {

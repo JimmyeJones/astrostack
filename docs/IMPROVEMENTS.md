@@ -49,6 +49,48 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND WHILE SCOPING "Finish them all" (Builder 2026-08-17, branch `claude/serene-goldberg-03783o`;
+  REPRODUCED) — finishing an edit does not stop the app asking you to finish it. Pressing **Finish my edit**
+  exports the picture and then every surface — the Dashboard's library-wide note included — goes on saying you
+  "never finished" it, offering a button that would export it all over again.**~~ — **FIXED v0.264.9**
+  (Builder 2026-08-17, branch `claude/serene-goldberg-03783o`). *(Friendliness / trust — PRIORITY 3, and a real
+  disk risk: the offered fix was to do the same export again, writing another duplicate run and another six files
+  each time. Doing what the app asks has to be able to stop it asking.)*
+  **Reproduced** as the fail-before test: save a recipe → `/api/gallery/unexported-edits` says `count: 1` → POST
+  the export, job `done` → the count is **still 1**, naming the same picture.
+  **The cause is that nothing on disk recorded that an export had happened.** `_apply_editor_to_run` writes a
+  **new** run and deliberately leaves the source run's `editor_recipe:<id>` where it is (it is the user's
+  document, and re-opening the editor there must still find it) — so `_unexported_edit` could only ever see "this
+  run has a saved recipe its own baked preview doesn't show", which stays true forever. That reading is right for
+  the *thumbnail* question it was written for and wrong for the *unfinished-work* question all three surfaces
+  actually ask, and the drift was invisible because the existing coverage asserted the flag on the **new** run and
+  never on the source.
+  **The fix, one new per-run annotation:** `editor_exported:<run_id>` records the recipe an export of that run
+  actually rendered, stamped on the source run in the same open project (best-effort — a picture that was written
+  must not report as failed because an annotation couldn't be). `_unexported_edit` takes it as an optional third
+  argument and answers **False** when the saved recipe describes the same picture. Compared by a new pure
+  `_recipe_look` — the ordered enabled ops and their params — deliberately *not* by bytes, because `put_recipe`
+  re-stamps `updated_utc` on every Save and each op carries a random `uid`, so a byte comparison would call an
+  unchanged edit changed. So re-saving the same look stays quiet, and changing one parameter and saving speaks up
+  again: that second-round edit is as invisible as the first was. The batch "apply this look to N pictures" path
+  shares `_apply_editor_to_run`, so it stamps too — and a run whose *own* saved recipe differs from the applied
+  one stays flagged, correctly.
+  **Upgrade-safe:** the marker is absent on every existing install, and absent reads as "not exported" — i.e.
+  byte-for-byte today's answer — so nothing already saved is silently forgotten; the count only ever *becomes*
+  accurate as exports happen. No schema, config, on-disk-layout, API-shape or default change (`project_meta` is a
+  KV table and `unexported_edit` keeps its type). The prefix is registered in `webapp/run_meta.py`, so deleting a
+  run takes it along with the rest of that run's annotations.
+  **Tests (+7, six fail-before):** `tests/webapp/test_unexported_edit.py` — the predicate's new rule in isolation
+  (including an unreadable marker failing *open*, never wrongly quiet), `_recipe_look` ignoring `uid` /
+  `updated_utc` / key order but not a changed parameter, the library-wide note clearing after the one-click finish
+  (with the user's recipe asserted still readable), both per-run badges clearing, editing further after an export
+  speaking up again, exporting a recipe that differs from the saved one leaving the saved one flagged, and the
+  upgrade case where no marker exists. `tests/webapp/test_run_purge.py`'s kept-run assertion now reads its
+  expected annotation count off `per_run_meta_prefixes()` instead of hard-coding 6, so registering a new per-run
+  prefix — which is exactly what this fix should do — can't fail it for the wrong reason.
+  **Follow-on unblocked:** the "Finish them all" batch-export idea in the Ideas list was unbuildable on top of
+  this — it would have re-exported the same runs on every run of the job.
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-16, same run, same running build; MEASURED in the browser) — every
   Gallery card clips its own primary button mid-word: "Edit image" renders as **"Edit imag"**.**~~ —
   **FIXED v0.263.4** (Builder 2026-08-16, branch `claude/serene-goldberg-ldc6ih`). *(Friendliness / polish —
@@ -6634,8 +6676,43 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-16, the obvious next step after the library-wide un-exported-edit note v0.263.0) —
-  "Finish them all": one job that exports every edit the user saved and never exported.** *(Pillar: autonomy —
+- ~~**NEW IDEA (Builder 2026-08-16, the obvious next step after the library-wide un-exported-edit note v0.263.0) —
+  "Finish them all": one job that exports every edit the user saved and never exported.**~~ — **SHIPPED v0.265.0**
+  (Builder 2026-08-17, branch `claude/serene-goldberg-03783o`), in the same run that fixed the bug that made it
+  unbuildable. **Read that first: without the `editor_exported:<id>` marker shipped in v0.264.9 this job would
+  have re-exported the same pictures every single time it ran** — the entry's own "skip what's done" assumption
+  was simply not true of the code. Built to the filed slice, and every caution is honoured and pinned by a test.
+  **The slice:** `POST /api/gallery/unexported-edits/export` runs the same scan the count reads — now one shared
+  `_scan_unexported_edits(lib)`, so the button can never act on a different set from the sentence describing it —
+  and submits **one** job. There is **no second export path**: `submit_editor_batch` (the existing "apply this
+  look to N pictures" job) grew a `recipe_dict=None` meaning *give every picture its own saved recipe*, and
+  `_apply_editor_to_run` resolves that recipe inside the project it already opens. So the batch keeps the loop
+  that already isolates a per-item failure, honours cancel between pictures, and reports progress per picture —
+  and one export is still one definition.
+  **The cautions, in order.** (1) It writes files, so it **asks first**: the offer is a plain secondary link
+  *after* the per-picture buttons, never the note's default action, and it opens a confirmation that says how many
+  pictures, that each finished picture is written **alongside** the original with nothing replaced or deleted,
+  and that this means N new sets of files "each about the size of the stack it came from", linking to Storage.
+  (2) It is one ordinary single-worker job — cancellable and watchable from the Jobs page, which the success
+  notice points at. (3) Non-destructive by construction (it is the same `_apply_editor_to_run` the single export
+  uses), so the worst case of pressing it twice is duplicate pictures, never a lost one — and it can't even do
+  that, because the second press finds nothing and answers a clean 400. (4) Dismissal is untouched: closing the
+  Alert has no connection to the button, pinned by a test.
+  **Deliberately not in this slice, filed below:** an *exact* byte figure in the confirmation. The note endpoint's
+  stated design is that it does no file stats at all (it is read on every Dashboard visit), and stat-ing each
+  flagged run's outputs would break that — so an exact number needs its own on-demand endpoint, which is not worth
+  it until someone asks. The wording above is true without one.
+  **Upgrade-safe:** one new endpoint, one new optional value for an existing job's parameter; no schema, config,
+  on-disk, response-shape or default change, and the note is unchanged for anyone with fewer than two unfinished
+  edits. **Tests (+5+3):** `tests/webapp/test_unexported_edit.py` (+5 — every saved edit exported with **its own**
+  look and the un-edited run left alone; idempotent, with the second press a clean 400 and no new run; the
+  nothing-to-do 400; one picture whose source FITS vanished skipped-with-a-reason while the rest finish, and still
+  counted afterwards; and the batch exporting exactly what the note counted, never re-doing an already-finished
+  one) and `UnexportedEditsNote.test.tsx` (+3 — the offer asks before exporting and the confirmation carries the
+  count, the nothing-is-replaced promise and the Storage link; no batch offer for a single edit; and dismissing
+  the note exports nothing). All five pre-existing note assertions pass unchanged.
+  *(Original spec kept below for provenance.)*
+  *(Pillar: autonomy —
   PRIORITY 2; size M; **read the cautions — this one is easy to get wrong**.)* The note now *names* the pictures
   and links each into the editor, which is right for one or two. Someone who edits over several nights and never
   exports can accumulate a dozen, and clicking through twelve editors to press Export twelve times is exactly the
@@ -6653,6 +6730,20 @@ to **Shipped**.)_
   dismissal — dismissing is "not now", not "do it". Worth building only once the note has been live long enough
   to know a beginner actually accumulates several; if it turns out people finish edits one at a time, this is
   surface nobody needs.
+
+- **NEW IDEA (Builder 2026-08-17, the one thing deliberately left out of "Finish them all" v0.265.0) — put a real
+  byte figure in the batch-export confirmation, without making the Dashboard's note expensive.** *(Pillar:
+  friendliness / trust — PRIORITY 3; size S; **only worth doing if someone actually wants the number**.)* The
+  confirmation currently says "N new sets of files, each about the size of the stack it came from" and points at
+  Storage. That is true and enough to decide with, but it is a description rather than a measurement. **Why it
+  wasn't just added:** `GET /api/gallery/unexported-edits` is read on every Dashboard visit and its stated design
+  is that it does **no file stats at all** (`test_unexported_edits_never_lists_a_never_edited_targets_runs` pins
+  the harder half of that), so summing each flagged run's existing outputs there would trade a cheap poll for a
+  disk walk on every visit — the wrong side of the trade for a number nobody has asked for. **Slice, if it is ever
+  wanted:** a separate `GET /api/gallery/unexported-edits/estimate` that the confirmation fetches **when the
+  dialog opens**, summing the flagged runs' recorded `fits`/`tiff`/`preview` sizes (an editor export writes about
+  the same set), so the cost is paid exactly when the user is deciding and never on the poll. **Care:** it is an
+  estimate, not a promise — say "about", and don't block the button on it if the read fails.
 
 - ~~**NEW IDEA (Builder 2026-08-16, found while writing the un-exported-edit count's stale-key guard) — deleting a
   stack run leaves its saved editor recipe behind in `project_meta` forever.**~~ — **SHIPPED v0.264.0**

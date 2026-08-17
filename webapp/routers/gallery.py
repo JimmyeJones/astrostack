@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from seestack.stackhealth import seam_verdict
@@ -173,7 +173,10 @@ def get_gallery(request: Request) -> GalleryResponse:
     lib = deps.open_library(request)
     try:
         from seestack.io.project import Project
-        from webapp.routers.editor import RECIPE_META_PREFIX
+        from webapp.routers.editor import (
+            EXPORTED_RECIPE_META_PREFIX,
+            RECIPE_META_PREFIX,
+        )
         from webapp.routers.stack import _unexported_edit
 
         for t in lib.list_targets():
@@ -216,13 +219,14 @@ def get_gallery(request: Request) -> GalleryResponse:
                         noise_sigma=run.noise_sigma,
                         calstat=run.calstat,
                         seam_verdict=seam_verdict(run.seam_residual),
-                        # One extra keyed read on the project DB this loop
-                        # already has open — the same near-free lookup the run
+                        # Two extra keyed reads on the project DB this loop
+                        # already has open — the same near-free lookups the run
                         # listing does, which is what made this affordable
                         # library-wide.
                         unexported_edit=_unexported_edit(
                             run.options_json,
                             proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}"),
+                            proj.get_meta(f"{EXPORTED_RECIPE_META_PREFIX}{run.id}"),
                         ),
                     ))
             finally:
@@ -466,6 +470,70 @@ class UnexportedEditsResponse(BaseModel):
 UNEXPORTED_EDITS_MAX = 12
 
 
+def _scan_unexported_edits(lib) -> list[UnexportedEditItem]:
+    """Every saved-but-never-exported edit in the Library, newest first.
+
+    One definition, two callers: the note's count reads it, and "finish them all"
+    exports exactly what it returns — so the button can never act on a different
+    list from the one the sentence above it described.
+
+    **This is the cheap path, and that is the whole design.** Per target it reads
+    the ``project_meta`` rows whose key starts with the editor-recipe prefix
+    (:meth:`Project.iter_meta_prefix`) and stops there when there are none — which
+    is every target that has never been edited. Only when a target *does* carry
+    recipes does it take a second prefix scan for the already-exported markers and
+    look up those specific runs' two columns (:meth:`Project.stack_run_options`);
+    no run listing, no file stats, no preview checks. A broken project DB is
+    skipped exactly as the other cross-target reads skip it, so one corrupt target
+    can't cost the whole answer.
+    """
+    from seestack.io.project import Project
+    from webapp.routers.editor import EXPORTED_RECIPE_META_PREFIX, RECIPE_META_PREFIX
+    from webapp.routers.stack import _unexported_edit
+
+    def _by_run_id(proj: Project, prefix: str) -> dict[int, str]:
+        """``{run_id: value}`` for one per-run meta prefix, in one prefix scan."""
+        out: dict[int, str] = {}
+        for key, value in proj.iter_meta_prefix(prefix):
+            try:
+                out[int(key[len(prefix):])] = value
+            except ValueError:  # a meta key we don't own — ignore it
+                continue
+        return out
+
+    found: list[UnexportedEditItem] = []
+    for t in lib.list_targets():
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(t))
+            # The common case: this target has never been edited, so the one
+            # prefix scan comes back empty and nothing else is read from its
+            # DB at all — neither the already-exported markers nor any run.
+            recipes = _by_run_id(proj, RECIPE_META_PREFIX)
+            exported = (
+                _by_run_id(proj, EXPORTED_RECIPE_META_PREFIX) if recipes else {}
+            )
+            summaries = (
+                proj.stack_run_options(recipes) if recipes else {}
+            )
+        except Exception:  # noqa: BLE001 — one broken project must not 500 the count
+            continue
+        finally:
+            if proj is not None:
+                proj.close()
+        for run_id, (timestamp_utc, options_json) in summaries.items():
+            if _unexported_edit(options_json, recipes.get(run_id),
+                                exported.get(run_id)):
+                found.append(UnexportedEditItem(
+                    safe=t.safe_name,
+                    target_name=t.name,
+                    run_id=run_id,
+                    timestamp_utc=timestamp_utc,
+                ))
+    found.sort(key=lambda it: it.timestamp_utc, reverse=True)
+    return found
+
+
 @router.get("/api/gallery/unexported-edits", response_model=UnexportedEditsResponse)
 def get_unexported_edits(request: Request) -> UnexportedEditsResponse:
     """How many pictures in the whole Library carry an edit the user saved and
@@ -478,52 +546,62 @@ def get_unexported_edits(request: Request) -> UnexportedEditsResponse:
     cross-target read — but ``/api/gallery`` lists every run of every target, and
     ``/api/stats`` is polled every 10 s, so neither is an honest place to put it.
 
-    **This is the cheap path, and that is the whole design.** Per target it reads
-    the ``project_meta`` rows whose key starts with the editor-recipe prefix
-    (:meth:`Project.iter_meta_prefix`) and stops there when there are none — which
-    is every target that has never been edited. Only when a target *does* carry
-    recipes does it look up those specific runs' two columns
-    (:meth:`Project.stack_run_options`); no run listing, no file stats, no preview
-    checks. A broken project DB is skipped exactly as the other cross-target reads
-    skip it, so one corrupt target can't cost the whole count.
+    The scan itself, and why it is affordable, is in
+    :func:`_scan_unexported_edits`.
     """
-    from seestack.io.project import Project
-    from webapp.routers.editor import RECIPE_META_PREFIX
-    from webapp.routers.stack import _unexported_edit
-
-    found: list[UnexportedEditItem] = []
     lib = deps.open_library(request)
     try:
-        for t in lib.list_targets():
-            proj = None
-            try:
-                proj = Project.open(lib.target_dir(t))
-                recipes: dict[int, str] = {}
-                for key, value in proj.iter_meta_prefix(RECIPE_META_PREFIX):
-                    try:
-                        recipes[int(key[len(RECIPE_META_PREFIX):])] = value
-                    except ValueError:  # a meta key we don't own — ignore it
-                        continue
-                # The common case: this target has never been edited, so nothing
-                # else is read from its DB at all.
-                summaries = (
-                    proj.stack_run_options(recipes) if recipes else {}
-                )
-            except Exception:  # noqa: BLE001 — one broken project must not 500 the count
-                continue
-            finally:
-                if proj is not None:
-                    proj.close()
-            for run_id, (timestamp_utc, options_json) in summaries.items():
-                if _unexported_edit(options_json, recipes.get(run_id)):
-                    found.append(UnexportedEditItem(
-                        safe=t.safe_name,
-                        target_name=t.name,
-                        run_id=run_id,
-                        timestamp_utc=timestamp_utc,
-                    ))
+        found = _scan_unexported_edits(lib)
     finally:
         lib.close()
-
-    found.sort(key=lambda it: it.timestamp_utc, reverse=True)
     return UnexportedEditsResponse(count=len(found), items=found[:UNEXPORTED_EDITS_MAX])
+
+
+@router.post("/api/gallery/unexported-edits/export")
+def export_unexported_edits(request: Request) -> dict:
+    """Finish **every** edit the user saved and never exported, in one job.
+
+    The note above this button names up to three pictures and links each into the
+    editor, which is the right shape for one or two. Someone who edits across
+    several nights and never exports accumulates a dozen, and clicking through a
+    dozen editors to press Export a dozen times is exactly the manual chain this
+    app exists to remove — every input is already stored, because the saved recipe
+    *is* the instruction, so the app can do it unattended.
+
+    **It exports what the note counted, and nothing else:** the list comes from
+    :func:`_scan_unexported_edits`, the same function the count reads, so the
+    button can't act on a different set from the sentence describing it. A run
+    whose edit was already exported is not in that list — the marker
+    (``editor_exported:<id>``) is what makes this feature possible at all, since
+    without it the job would re-export the same pictures every time it ran.
+
+    **Nothing is overwritten.** Each item goes through the one export path
+    (``pipeline._apply_editor_to_run``), which writes a *new* stack run beside the
+    original and leaves the source untouched — so the worst case of pressing this
+    twice is duplicate pictures, never a lost one. It is a single job on the
+    normal single-worker queue: cancellable from the Jobs page, reporting progress
+    per picture, and skipping-with-a-reason rather than aborting the batch when
+    one run's source FITS has gone missing.
+    """
+    from webapp import pipeline
+
+    lib = deps.open_library(request)
+    try:
+        found = _scan_unexported_edits(lib)
+    finally:
+        lib.close()
+    if not found:
+        raise HTTPException(
+            status_code=400,
+            detail="There are no saved edits waiting to be exported.")
+
+    settings = deps.get_settings(request)
+    jm = deps.get_job_manager(request)
+    job = pipeline.submit_editor_batch(
+        settings, jm,
+        [{"safe": it.safe, "run_id": it.run_id} for it in found],
+        # None = give every picture its own saved recipe, rather than one shared
+        # look. This is the whole difference from "apply this look to N pictures".
+        recipe_dict=None,
+    )
+    return {"job_id": job.id, "count": len(found)}
