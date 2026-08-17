@@ -8,14 +8,16 @@ import {
   IconTelescope, IconTrash, IconUpload,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState, type ReactNode } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type AutoCastSummary, type ReprocessStatus } from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { compassPoint } from "../tonight";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
 import { AmbientSettings } from "../components/AmbientSettings";
+import { SectionTabs, type PageSection } from "../components/SectionTabs";
+import type { SettingsSection } from "../settingsSections";
 import { minMaxIgnoresWeightingHint } from "../weightingHint";
 import { formatDiskSize } from "../format";
 
@@ -110,6 +112,24 @@ export function dropEmptyFields(
   }
   return out;
 }
+
+/**
+ * The Settings page's sections, in the order a beginner meets them.
+ *
+ * Each is named for what it holds, so "which page is that setting on?" is
+ * answerable from the tab label alone — the test the information-architecture
+ * overhaul sets. Exported so a test can read the page's shape (and check every
+ * section the app links to really exists) without rendering it.
+ */
+export const SETTINGS_PAGE_SECTIONS: { key: SettingsSection; label: string }[] = [
+  { key: "folders", label: "Folders" },
+  { key: "automation", label: "Automation" },
+  { key: "plate-solving", label: "Plate solving" },
+  { key: "observing-site", label: "Observing site" },
+  { key: "stacking", label: "Stacking" },
+  { key: "telescope", label: "This device" },
+  { key: "maintenance", label: "Maintenance" },
+];
 
 type HorizonPoint = [number, number];
 
@@ -489,6 +509,9 @@ function AccessControl() {
 
 export function SettingsView() {
   const qc = useQueryClient();
+  // Which section the URL asks for (`/settings/<section>`); undefined on a bare
+  // `/settings`, which lands on the first one.
+  const { section } = useParams<{ section?: string }>();
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const system = useQuery({ queryKey: ["system"], queryFn: api.getSystem });
   const stackSchema = useQuery({ queryKey: ["schema"], queryFn: api.optionsSchema });
@@ -546,56 +569,24 @@ export function SettingsView() {
     frames: null,
   });
 
-  return (
-    <Stack maw={680}>
-      <Title order={2}>Settings</Title>
+  // Every section that edits server settings ends with the same button, and each
+  // one saves the *whole* form — the sections share one edit buffer and stay
+  // mounted, so an edit made in one section is never lost by saving from another.
+  const saveRow = (variant?: string) => (
+    <Group justify="flex-end">
+      <Button variant={variant} leftSection={<IconDeviceFloppy size={16} />}
+        onClick={() => save.mutate(form)} loading={save.isPending}>
+        Save settings
+      </Button>
+    </Group>
+  );
 
-      {system.data ? (() => {
-        const astap = system.data.astap;
-        const solveReady = astap.found && astap.star_db_found !== false;
-        return (
-          <Alert icon={<IconInfoCircle size={16} />} color={solveReady ? "teal" : "yellow"}>
-            <Stack gap={6}>
-              <Group gap="lg">
-                <Text size="sm">Data root: <b>{system.data.data_root}</b></Text>
-                <Text size="sm">CPUs: <b>{system.data.cpu_count}</b></Text>
-                <Badge color={astap.found ? "teal" : "red"}>
-                  ASTAP {astap.found ? "found" : "missing"}
-                </Badge>
-                {astap.found ? (
-                  <Badge color={astap.star_db_found ? "teal" : "red"}>
-                    star DB {astap.star_db_found ? `${astap.star_db_count} files` : "missing"}
-                  </Badge>
-                ) : null}
-                {system.data.gpu_available ? <Badge color="violet">GPU</Badge> : null}
-                {system.data.disk.free_bytes != null ? (
-                  <Text size="sm">
-                    Free: <b>{formatDiskSize(system.data.disk.free_bytes)}</b>
-                  </Text>
-                ) : system.data.disk.free_gb ? (
-                  <Text size="sm">Free: <b>{system.data.disk.free_gb} GB</b></Text>
-                ) : null}
-              </Group>
-              {astap.version ? <Text size="xs" c="dimmed">{astap.version}</Text> : null}
-              {astap.hint ? <Text size="sm" c="yellow">{astap.hint}</Text> : null}
-              <Group gap="xs" align="center">
-                <Button size="xs" variant="light" loading={astapTest.isPending}
-                  disabled={!astap.found} onClick={() => astapTest.mutate()}>
-                  Test solve on a real frame
-                </Button>
-                {astapTest.data ? (
-                  <Text size="xs" c={astapTest.data.ok ? "teal" : "red"}>
-                    {astapTest.data.ok
-                      ? `Solved ${astapTest.data.frame} in ${astapTest.data.elapsed_s}s`
-                      : `Failed: ${astapTest.data.detail}`}
-                  </Text>
-                ) : null}
-              </Group>
-            </Stack>
-          </Alert>
-        );
-      })() : null}
-
+  // What each section holds. The order and the labels live in
+  // `SETTINGS_PAGE_SECTIONS` above; keys are typed against
+  // `settingsSections.ts`, which is also what the app's "Fix in Settings" links
+  // point at, so a renamed section can't quietly strand one of them.
+  const nodes: Record<SettingsSection, ReactNode> = {
+    folders: (
       <Paper withBorder p="lg">
         <Stack>
           <Text fw={600}>Watched folders</Text>
@@ -624,8 +615,14 @@ export function SettingsView() {
               value={num("watch_poll_interval_s")} min={2}
               onChange={(v) => set("watch_poll_interval_s", v === "" ? "" : Number(v))} />
           </SimpleGrid>
-
-          <Divider label="Automatic pipeline" />
+          {saveRow()}
+        </Stack>
+      </Paper>
+    ),
+    automation: (
+      <Paper withBorder p="lg">
+        <Stack>
+          <Text fw={600}>Automatic pipeline</Text>
           <Switch
             size="md"
             checked={walkAway}
@@ -686,8 +683,20 @@ export function SettingsView() {
               value={(form.auto_grade_sensitivity as string) ?? "balanced"}
               onChange={(v) => set("auto_grade_sensitivity", v ?? "balanced")} />
           </Group>
-
-          <Divider label="Plate solving & compute" />
+          {saveRow()}
+        </Stack>
+      </Paper>
+    ),
+    "plate-solving": (
+      <Paper withBorder p="lg">
+        <Stack>
+          <Text fw={600}>Plate solving &amp; compute</Text>
+          <Text size="sm" c="dimmed">
+            Plate solving (ASTAP) is how AstroStack works out which patch of sky
+            each sub shows, so it can line them all up. It needs the ASTAP
+            program and a star database; the panel at the top of this page says
+            whether both were found.
+          </Text>
           <TextInput label={lbl("astap_path", "ASTAP path")}
             value={(form.astap_path as string) ?? ""}
             placeholder="auto-detect"
@@ -706,8 +715,14 @@ export function SettingsView() {
           <Switch label={lbl("astap_bootstrap_solve", "Rescue faint fields with a deep-image solve")}
             checked={bool("astap_bootstrap_solve")}
             onChange={(e) => set("astap_bootstrap_solve", e.currentTarget.checked)} />
-
-          <Divider label="Observing site (Tonight planner)" />
+          {saveRow()}
+        </Stack>
+      </Paper>
+    ),
+    "observing-site": (
+      <Paper withBorder p="lg">
+        <Stack>
+          <Text fw={600}>Observing site (Tonight planner)</Text>
           <Text size="xs" c="dimmed">
             Leave blank to read your location automatically from a plate-solved
             Seestar frame. Only needed if you want to override it.
@@ -739,153 +754,214 @@ export function SettingsView() {
               value={(form.horizon_profile as HorizonPoint[]) ?? []}
               onChange={(v) => set("horizon_profile", v)} />
           </div>
-
-          <Divider label="Stacking" />
-          <NumberInput label={lbl("max_stack_memory_gb", "Stack memory budget (GB)")}
-            value={num("max_stack_memory_gb")} min={0.5} max={1024} step={0.5}
-            decimalScale={1} placeholder="auto (~70% of RAM)" w={{ base: "100%", xs: 260 }}
-            onChange={(v) => set("max_stack_memory_gb", v === "" ? null : Number(v))} />
-          {(() => {
-            // Advisory only: a budget higher than the box's available RAM re-opens
-            // the OOM door the guard exists to close.
-            const budget = form.max_stack_memory_gb;
-            const avail = system.data?.memory?.available_gb;
-            if (typeof budget !== "number" || typeof avail !== "number") return null;
-            if (budget <= avail) return null;
-            return (
-              <Alert color="orange" icon={<IconInfoCircle size={16} />}
-                title="Budget is higher than this machine's available RAM">
-                You set {budget} GB, but only about {avail} GB is currently
-                available on this box. A stack that actually uses this much could
-                still run out of memory. Consider lowering it, or leave it blank
-                for the automatic ~70%-of-RAM cap.
+          {saveRow()}
+        </Stack>
+      </Paper>
+    ),
+    stacking: (
+      <Stack>
+        <Paper withBorder p="lg">
+          <Stack>
+            <Group gap={6}>
+              <Text fw={600}>Automated stacking defaults</Text>
+              <Badge variant="light" color={bool("auto_stack") ? "teal" : "gray"}>
+                {bool("auto_stack") ? "active" : "auto-stack off"}
+              </Badge>
+            </Group>
+            <Text size="sm" c="dimmed">
+              Options used when <b>Auto-stack</b> stacks a target automatically. A target's own
+              “Save as defaults” (from its Stack page) takes precedence over these.
+            </Text>
+            {stackSchema.isLoading ? <Loader size="sm" /> : (
+              <>
+                {simple.map((f) => (
+                  <StackOptionControl
+                    key={f.key} field={f} value={optVal(f.key)}
+                    disabled={!dependencyMet(f.depends_on, optVal)}
+                    onChange={(v) => setStackOpt(f.key, v)}
+                  />
+                ))}
+                <Accordion variant="separated" mt="xs">
+                  <Accordion.Item value="adv">
+                    <Accordion.Control>Advanced options</Accordion.Control>
+                    <Accordion.Panel>
+                      <Stack>
+                        {advanced.map((f) => (
+                          <StackOptionControl
+                            key={f.key} field={f} value={optVal(f.key)}
+                            disabled={!dependencyMet(f.depends_on, optVal)}
+                            onChange={(v) => setStackOpt(f.key, v)}
+                          />
+                        ))}
+                      </Stack>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                </Accordion>
+              </>
+            )}
+            {stackDefaultsWeightingHint ? (
+              <Alert color="yellow" variant="light" py={6} px="sm">
+                <Text size="xs">{stackDefaultsWeightingHint}</Text>
+                <Button size="compact-xs" variant="light" mt={6}
+                  onClick={() => setStackOpt("quality_weighted", false)}>
+                  Turn off quality weighting
+                </Button>
               </Alert>
-            );
-          })()}
-          <NumberInput label={lbl("job_history_limit", "Job history to keep")}
-            value={num("job_history_limit")} min={10} max={100000} step={50}
-            allowDecimal={false} w={{ base: "100%", xs: 260 }}
-            onChange={(v) => set("job_history_limit", v === "" ? 200 : Number(v))} />
+            ) : null}
+            {saveRow("default")}
+          </Stack>
+        </Paper>
 
-          <Group justify="flex-end">
-            <Button leftSection={<IconDeviceFloppy size={16} />}
-              onClick={() => save.mutate(form)} loading={save.isPending}>
-              Save settings
-            </Button>
-          </Group>
-        </Stack>
-      </Paper>
+        <Paper withBorder p="lg">
+          <Stack>
+            <Text fw={600}>Memory</Text>
+            <NumberInput label={lbl("max_stack_memory_gb", "Stack memory budget (GB)")}
+              value={num("max_stack_memory_gb")} min={0.5} max={1024} step={0.5}
+              decimalScale={1} placeholder="auto (~70% of RAM)" w={{ base: "100%", xs: 260 }}
+              onChange={(v) => set("max_stack_memory_gb", v === "" ? null : Number(v))} />
+            {(() => {
+              // Advisory only: a budget higher than the box's available RAM re-opens
+              // the OOM door the guard exists to close.
+              const budget = form.max_stack_memory_gb;
+              const avail = system.data?.memory?.available_gb;
+              if (typeof budget !== "number" || typeof avail !== "number") return null;
+              if (budget <= avail) return null;
+              return (
+                <Alert color="orange" icon={<IconInfoCircle size={16} />}
+                  title="Budget is higher than this machine's available RAM">
+                  You set {budget} GB, but only about {avail} GB is currently
+                  available on this box. A stack that actually uses this much could
+                  still run out of memory. Consider lowering it, or leave it blank
+                  for the automatic ~70%-of-RAM cap.
+                </Alert>
+              );
+            })()}
+            {saveRow()}
+          </Stack>
+        </Paper>
+      </Stack>
+    ),
+    telescope: (
+      <Stack>
+        <Paper withBorder p="lg">
+          <Stack>
+            <Group gap={6}>
+              <IconTelescope size={18} />
+              <Text fw={600}>Telescope (Seestar)</Text>
+              <Badge variant="light" color={bool("seestar_enabled") ? "teal" : "gray"}>
+                {bool("seestar_enabled") ? "on" : "off"}
+              </Badge>
+            </Group>
+            <Text size="sm" c="dimmed">
+              Monitor Seestar scopes over the LAN (battery, temperature, stacking progress) and
+              optionally control them. This uses an unofficial, firmware-dependent API — see the
+              Telescope page for caveats.
+            </Text>
+            <Group>
+              <Switch label={lbl("seestar_enabled", "Enable Seestar integration")}
+                checked={bool("seestar_enabled")}
+                onChange={(e) => set("seestar_enabled", e.currentTarget.checked)} />
+              <Switch label={lbl("seestar_control_enabled", "Allow control commands")}
+                checked={bool("seestar_control_enabled")} disabled={!bool("seestar_enabled")}
+                onChange={(e) => set("seestar_control_enabled", e.currentTarget.checked)} />
+            </Group>
+            <TextInput label={lbl("seestar_scan_subnet", "Scan subnet (CIDR)")}
+              value={(form.seestar_scan_subnet as string) ?? ""} placeholder="auto-detect"
+              onChange={(e) => set("seestar_scan_subnet", e.currentTarget.value)} />
+            <TagsInput label={lbl("seestar_known_ips", "Known device IPs")}
+              placeholder="e.g. 192.168.1.50"
+              value={(form.seestar_known_ips as string[]) ?? []}
+              onChange={(v) => set("seestar_known_ips", v)} />
+            <SimpleGrid cols={{ base: 1, xs: 2 }}>
+              <NumberInput label={lbl("seestar_scan_interval_s", "Scan interval (s)")}
+                value={num("seestar_scan_interval_s")} min={30}
+                onChange={(v) => set("seestar_scan_interval_s", v === "" ? "" : Number(v))} />
+              <NumberInput label={lbl("seestar_poll_interval_s", "Poll interval (s)")}
+                value={num("seestar_poll_interval_s")} min={2}
+                onChange={(v) => set("seestar_poll_interval_s", v === "" ? "" : Number(v))} />
+            </SimpleGrid>
+            {saveRow()}
+          </Stack>
+        </Paper>
 
-      <AmbientSettings />
+        <AmbientSettings />
+      </Stack>
+    ),
+    maintenance: (
+      <Stack>
+        <Maintenance />
+        <Paper withBorder p="lg">
+          <Stack>
+            <Text fw={600}>Job history</Text>
+            <NumberInput label={lbl("job_history_limit", "Job history to keep")}
+              value={num("job_history_limit")} min={10} max={100000} step={50}
+              allowDecimal={false} w={{ base: "100%", xs: 260 }}
+              onChange={(v) => set("job_history_limit", v === "" ? 200 : Number(v))} />
+            {saveRow()}
+          </Stack>
+        </Paper>
+        <BackupRestore />
+        <AccessControl />
+      </Stack>
+    ),
+  };
 
-      <Paper withBorder p="lg">
-        <Stack>
-          <Group gap={6}>
-            <IconTelescope size={18} />
-            <Text fw={600}>Telescope (Seestar)</Text>
-            <Badge variant="light" color={bool("seestar_enabled") ? "teal" : "gray"}>
-              {bool("seestar_enabled") ? "on" : "off"}
-            </Badge>
-          </Group>
-          <Text size="sm" c="dimmed">
-            Monitor Seestar scopes over the LAN (battery, temperature, stacking progress) and
-            optionally control them. This uses an unofficial, firmware-dependent API — see the
-            Telescope page for caveats.
-          </Text>
-          <Group>
-            <Switch label={lbl("seestar_enabled", "Enable Seestar integration")}
-              checked={bool("seestar_enabled")}
-              onChange={(e) => set("seestar_enabled", e.currentTarget.checked)} />
-            <Switch label={lbl("seestar_control_enabled", "Allow control commands")}
-              checked={bool("seestar_control_enabled")} disabled={!bool("seestar_enabled")}
-              onChange={(e) => set("seestar_control_enabled", e.currentTarget.checked)} />
-          </Group>
-          <TextInput label={lbl("seestar_scan_subnet", "Scan subnet (CIDR)")}
-            value={(form.seestar_scan_subnet as string) ?? ""} placeholder="auto-detect"
-            onChange={(e) => set("seestar_scan_subnet", e.currentTarget.value)} />
-          <TagsInput label={lbl("seestar_known_ips", "Known device IPs")}
-            placeholder="e.g. 192.168.1.50"
-            value={(form.seestar_known_ips as string[]) ?? []}
-            onChange={(v) => set("seestar_known_ips", v)} />
-          <SimpleGrid cols={{ base: 1, xs: 2 }}>
-            <NumberInput label={lbl("seestar_scan_interval_s", "Scan interval (s)")}
-              value={num("seestar_scan_interval_s")} min={30}
-              onChange={(v) => set("seestar_scan_interval_s", v === "" ? "" : Number(v))} />
-            <NumberInput label={lbl("seestar_poll_interval_s", "Poll interval (s)")}
-              value={num("seestar_poll_interval_s")} min={2}
-              onChange={(v) => set("seestar_poll_interval_s", v === "" ? "" : Number(v))} />
-          </SimpleGrid>
-          <Group justify="flex-end">
-            <Button leftSection={<IconDeviceFloppy size={16} />}
-              onClick={() => save.mutate(form)} loading={save.isPending}>
-              Save settings
-            </Button>
-          </Group>
-        </Stack>
-      </Paper>
+  const sections: PageSection[] = SETTINGS_PAGE_SECTIONS.map(
+    (s) => ({ ...s, node: nodes[s.key] }),
+  );
 
-      <Paper withBorder p="lg">
-        <Stack>
-          <Group gap={6}>
-            <Text fw={600}>Automated stacking defaults</Text>
-            <Badge variant="light" color={bool("auto_stack") ? "teal" : "gray"}>
-              {bool("auto_stack") ? "active" : "auto-stack off"}
-            </Badge>
-          </Group>
-          <Text size="sm" c="dimmed">
-            Options used when <b>Auto-stack</b> stacks a target automatically. A target's own
-            “Save as defaults” (from its Stack page) takes precedence over these.
-          </Text>
-          {stackSchema.isLoading ? <Loader size="sm" /> : (
-            <>
-              {simple.map((f) => (
-                <StackOptionControl
-                  key={f.key} field={f} value={optVal(f.key)}
-                  disabled={!dependencyMet(f.depends_on, optVal)}
-                  onChange={(v) => setStackOpt(f.key, v)}
-                />
-              ))}
-              <Accordion variant="separated" mt="xs">
-                <Accordion.Item value="adv">
-                  <Accordion.Control>Advanced options</Accordion.Control>
-                  <Accordion.Panel>
-                    <Stack>
-                      {advanced.map((f) => (
-                        <StackOptionControl
-                          key={f.key} field={f} value={optVal(f.key)}
-                          disabled={!dependencyMet(f.depends_on, optVal)}
-                          onChange={(v) => setStackOpt(f.key, v)}
-                        />
-                      ))}
-                    </Stack>
-                  </Accordion.Panel>
-                </Accordion.Item>
-              </Accordion>
-            </>
-          )}
-          {stackDefaultsWeightingHint ? (
-            <Alert color="yellow" variant="light" py={6} px="sm">
-              <Text size="xs">{stackDefaultsWeightingHint}</Text>
-              <Button size="compact-xs" variant="light" mt={6}
-                onClick={() => setStackOpt("quality_weighted", false)}>
-                Turn off quality weighting
-              </Button>
-            </Alert>
-          ) : null}
-          <Group justify="flex-end">
-            <Button variant="default" leftSection={<IconDeviceFloppy size={16} />}
-              onClick={() => save.mutate(form)} loading={save.isPending}>
-              Save settings
-            </Button>
-          </Group>
-        </Stack>
-      </Paper>
+  return (
+    <Stack maw={680}>
+      <Title order={2}>Settings</Title>
 
-      <Maintenance />
+      {system.data ? (() => {
+        const astap = system.data.astap;
+        const solveReady = astap.found && astap.star_db_found !== false;
+        return (
+          <Alert icon={<IconInfoCircle size={16} />} color={solveReady ? "teal" : "yellow"}>
+            <Stack gap={6}>
+              <Group gap="lg">
+                <Text size="sm">Data root: <b>{system.data.data_root}</b></Text>
+                <Text size="sm">CPUs: <b>{system.data.cpu_count}</b></Text>
+                <Badge color={astap.found ? "teal" : "red"}>
+                  ASTAP {astap.found ? "found" : "missing"}
+                </Badge>
+                {astap.found ? (
+                  <Badge color={astap.star_db_found ? "teal" : "red"}>
+                    star DB {astap.star_db_found ? `${astap.star_db_count} files` : "missing"}
+                  </Badge>
+                ) : null}
+                {system.data.gpu_available ? <Badge color="violet">GPU</Badge> : null}
+                {system.data.disk.free_bytes != null ? (
+                  <Text size="sm">
+                    Free: <b>{formatDiskSize(system.data.disk.free_bytes)}</b>
+                  </Text>
+                ) : system.data.disk.free_gb ? (
+                  <Text size="sm">Free: <b>{system.data.disk.free_gb} GB</b></Text>
+                ) : null}
+              </Group>
+              {astap.version ? <Text size="xs" c="dimmed">{astap.version}</Text> : null}
+              {astap.hint ? <Text size="sm" c="yellow">{astap.hint}</Text> : null}
+              <Group gap="xs" align="center">
+                <Button size="xs" variant="light" loading={astapTest.isPending}
+                  disabled={!astap.found} onClick={() => astapTest.mutate()}>
+                  Test solve on a real frame
+                </Button>
+                {astapTest.data ? (
+                  <Text size="xs" c={astapTest.data.ok ? "teal" : "red"}>
+                    {astapTest.data.ok
+                      ? `Solved ${astapTest.data.frame} in ${astapTest.data.elapsed_s}s`
+                      : `Failed: ${astapTest.data.detail}`}
+                  </Text>
+                ) : null}
+              </Group>
+            </Stack>
+          </Alert>
+        );
+      })() : null}
 
-      <BackupRestore />
-
-      <AccessControl />
+      <SectionTabs basePath="/settings" active={section} sections={sections}
+        data-testid="settings-sections" />
     </Stack>
   );
 }

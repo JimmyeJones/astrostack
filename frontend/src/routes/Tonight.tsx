@@ -10,6 +10,7 @@ import { api, type PlannedTarget } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { formatIntegration } from "../format";
 import { readinessRowBadge } from "../readiness";
+import { settingsLink } from "../settingsSections";
 import {
   difficultyRowBadge, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge, minAltOptions,
   moonCueForTarget, moonPhaseLabel, moonWindowNote, notUpTonightNote,
@@ -146,7 +147,7 @@ function SaveLocationNudge({ lat, lon }: { lat: number; lon: number }) {
         {save.isError ? (
           <Text size="xs" c="red">
             Couldn't save — set it under{" "}
-            <Anchor component={Link} to="/settings">Settings</Anchor> instead.
+            <Anchor component={Link} to={settingsLink("observing-site")}>Settings</Anchor> instead.
           </Text>
         ) : null}
       </Group>
@@ -277,7 +278,7 @@ export function TonightView() {
             location automatically from a plate-solved Seestar frame
             (SITELAT/SITELONG) — so once you've solved some subs it'll just work.
             You can also set it manually under{" "}
-            <Anchor component={Link} to="/settings">Settings → Observing site</Anchor>.
+            <Anchor component={Link} to={settingsLink("observing-site")}>Settings → Observing site</Anchor>.
           </Text>
         </Alert>
       </Stack>

@@ -29,6 +29,28 @@ describe("SeestarView", () => {
     await waitFor(() => expect(screen.getByText(/Settings → Telescope/)).toBeInTheDocument());
   });
 
+  it("makes the 'turn it on in Settings' instruction a link to the section that holds it", async () => {
+    // The page is blocked and tells the user exactly what to do; now that each
+    // Settings section has its own address, being told is one tap from doing.
+    vi.spyOn(client.api, "getSeestarDevices").mockResolvedValue({
+      enabled: false, control_enabled: false, devices: [],
+    } as SeestarDevices);
+    renderSeestar();
+    const link = await screen.findByRole("link", { name: /Settings → Telescope/ });
+    expect(link).toHaveAttribute("href", "/settings/telescope");
+  });
+
+  it("links the monitoring-only note and the no-devices hint to the same section", async () => {
+    vi.spyOn(client.api, "getSeestarDevices").mockResolvedValue({
+      enabled: true, control_enabled: false, devices: [],
+    } as SeestarDevices);
+    renderSeestar();
+    const enable = await screen.findByRole("link", { name: "Enable it in Settings" });
+    expect(enable).toHaveAttribute("href", "/settings/telescope");
+    expect(screen.getByRole("link", { name: /Settings → Telescope/ }))
+      .toHaveAttribute("href", "/settings/telescope");
+  });
+
   it("renders live telemetry for a connected device", async () => {
     vi.spyOn(client.api, "getSeestarDevices").mockResolvedValue({
       enabled: true, control_enabled: false,

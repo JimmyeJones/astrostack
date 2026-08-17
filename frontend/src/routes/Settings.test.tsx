@@ -1,13 +1,15 @@
 import { MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   autoCastSummaryText, dropEmptyFields, HINTS, Maintenance, reprocessNudgeText,
-  SettingsView, WALK_AWAY_KEYS, walkAwayEnabled, withWalkAway,
+  SETTINGS_PAGE_SECTIONS, SettingsView, WALK_AWAY_KEYS, walkAwayEnabled,
+  withWalkAway,
 } from "./Settings";
+import { SETTINGS_SECTIONS, settingsLink, type SettingsSection } from "../settingsSections";
 import * as client from "../api/client";
 import { stackPlacementMismatches } from "../test/stackOptionPlacement";
 
@@ -353,7 +355,12 @@ it("places its stack-option fixtures where the engine does", () => {
   expect(stackPlacementMismatches(STACK_FIELDS)).toEqual([]);
 });
 
-function renderSettingsWith(stackDefaults: Record<string, unknown>) {
+function renderSettingsWith(
+  stackDefaults: Record<string, unknown>,
+  // Settings is split into sections at `/settings/<section>`; the stacking
+  // defaults live on this one. `null` renders the bare `/settings` landing.
+  section: SettingsSection | null = "stacking",
+) {
   vi.spyOn(client.api, "getSettings").mockResolvedValue({
     default_stack_options: stackDefaults,
   } as never);
@@ -370,13 +377,117 @@ function renderSettingsWith(stackDefaults: Record<string, unknown>) {
     <MantineProvider>
       <Notifications />
       <QueryClientProvider client={qc}>
-        <MemoryRouter>
-          <SettingsView />
+        {/* Rendered through the real routes so `useParams` sees the section,
+            exactly as the app does. */}
+        <MemoryRouter initialEntries={[section ? `/settings/${section}` : "/settings"]}>
+          <Routes>
+            <Route path="/settings" element={<SettingsView />} />
+            <Route path="/settings/:section" element={<SettingsView />} />
+          </Routes>
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
 }
+
+// --- The page's sections ----------------------------------------------------
+// Settings was the app's tallest page by a factor of two (5827 px on a phone),
+// with seven full-width blocks stacked one below another and half the app's
+// settings filed under a card called "Watched folders". It is now one section
+// per URL. The risk that buys is a *deep link that lands on a hidden control* —
+// several screens send the user here to fix one specific thing — so each of
+// those is pinned below.
+
+describe("Settings sections", () => {
+  it("renders exactly the sections the rest of the app links to", () => {
+    // `settingsSections.ts` is what "Fix in Settings" and friends point at; if a
+    // section is renamed on one side only, those links land on a fallback.
+    expect(SETTINGS_PAGE_SECTIONS.map((s) => s.key)).toEqual([...SETTINGS_SECTIONS]);
+  });
+
+  it("shows one section at a time, with the others still mounted", async () => {
+    renderSettingsWith({}, "folders");
+
+    await waitFor(() =>
+      expect(screen.getByText("Watched folders")).toBeVisible());
+    // Nothing was removed — every other section is in the DOM, one click away.
+    expect(screen.getByText("Automatic pipeline")).toBeInTheDocument();
+    expect(screen.getByText("Automatic pipeline")).not.toBeVisible();
+    expect(screen.getByText("Reprocess everything")).toBeInTheDocument();
+    expect(screen.getByText("Reprocess everything")).not.toBeVisible();
+  });
+
+  it("opens the first section for a bare /settings", async () => {
+    renderSettingsWith({}, null);
+    await waitFor(() => expect(screen.getByText("Watched folders")).toBeVisible());
+  });
+
+  it("lands the app's star-database link on a VISIBLE ASTAP control", async () => {
+    // The Dashboard's "Plate-solving isn't set up yet" alert, the Target page's
+    // solve-failure note and a stack's health card all send the user to
+    // `settingsLink("plate-solving")` — landing them on a tab where the control
+    // is hidden would be worse than the long page was.
+    expect(settingsLink("plate-solving")).toBe("/settings/plate-solving");
+    renderSettingsWith({}, "plate-solving");
+
+    await waitFor(() => expect(screen.getByLabelText(/ASTAP path/)).toBeVisible());
+    expect(screen.getByLabelText(/ASTAP FOV/)).toBeVisible();
+  });
+
+  it("lands the Tonight planner's location link on a VISIBLE latitude field", async () => {
+    expect(settingsLink("observing-site")).toBe("/settings/observing-site");
+    renderSettingsWith({}, "observing-site");
+
+    await waitFor(() => expect(screen.getByLabelText(/Latitude/)).toBeVisible());
+    expect(screen.getByLabelText(/Minimum target altitude/)).toBeVisible();
+  });
+
+  it("lands the Dashboard's folder warning on a VISIBLE data-root field", async () => {
+    expect(settingsLink("folders")).toBe("/settings/folders");
+    renderSettingsWith({}, "folders");
+
+    await waitFor(() => expect(screen.getByLabelText(/Data root/)).toBeVisible());
+  });
+
+  it("files the mis-homed settings where their section name predicts", async () => {
+    // These three used to live inside a card titled "Watched folders", which is
+    // the one place a beginner would never look for them.
+    renderSettingsWith({}, "observing-site");
+    await waitFor(() => expect(screen.getByLabelText(/Latitude/)).toBeVisible());
+    expect(screen.getByLabelText(/Data root/)).not.toBeVisible();
+
+    cleanup();
+    renderSettingsWith({}, "stacking");
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Stack memory budget/)).toBeVisible());
+
+    cleanup();
+    renderSettingsWith({}, "maintenance");
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Job history to keep/)).toBeVisible());
+  });
+
+  it("keeps an unsaved edit when you move to another section and save from there", async () => {
+    // The sections share one edit buffer; a save from any of them sends the lot,
+    // so a value typed on one tab is not lost by pressing Save on another.
+    const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
+    renderSettingsWith({}, "folders");
+
+    await waitFor(() => expect(screen.getByLabelText(/Data root/)).toBeVisible());
+    fireEvent.change(screen.getByLabelText(/Data root/), { target: { value: "/mnt/new" } });
+
+    fireEvent.click(screen.getByRole("tab", { name: "This device" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Enable Seestar integration/)).toBeVisible());
+    fireEvent.click(screen.getByLabelText(/Enable Seestar integration/));
+    fireEvent.click(screen.getAllByRole("button", { name: "Save settings" })[0]);
+
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const patch = put.mock.calls[0][0] as Record<string, unknown>;
+    expect(patch.data_root).toBe("/mnt/new");
+    expect(patch.seestar_enabled).toBe(true);
+  });
+});
 
 describe("Automated stacking defaults — min/max vs quality weighting", () => {
   it("warns when both defaults are on, worded for an unknown frame count", async () => {

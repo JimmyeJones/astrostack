@@ -52,7 +52,7 @@ describe("Dashboard plate-solving readiness banner", () => {
     await waitFor(() =>
       expect(screen.getByText("Plate-solving isn't set up yet")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Fix in Settings" }))
-      .toHaveAttribute("href", "/settings");
+      .toHaveAttribute("href", "/settings/plate-solving");
   });
 
   it("warns about a missing star database when ASTAP is found", async () => {

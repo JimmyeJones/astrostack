@@ -3,6 +3,7 @@ import { IconStethoscope, IconCircleCheck, IconBulb } from "@tabler/icons-react"
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type HealthNote } from "../api/client";
+import { settingsLink } from "../settingsSections";
 import { DarksGuide } from "./target/DarksGuide";
 
 // The card never dumps a wall of warnings — it shows only the top one or two
@@ -68,7 +69,7 @@ export function noteAction(
     case "solve_help":
       // Most subs failed to plate-solve; Settings shows the ASTAP star-database
       // status and how to install it, which is what lets far more subs locate.
-      return { label: "Check your star database in Settings →", href: "/settings" };
+      return { label: "Check your star database in Settings →", href: settingsLink("plate-solving") };
     case "restack":
       // The stack's outlier removal couldn't bite at this frame count; the fix
       // is one switch on the Stack form ("Auto outlier removal"), so send them
