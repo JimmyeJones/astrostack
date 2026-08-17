@@ -49,6 +49,18 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, same run) — the Telescope page tells a blocked user exactly what to
+  go and do — "Enable it under **Settings → Telescope**" — in plain text they cannot tap.**~~ — **FIXED v0.266.2**
+  (Builder 2026-08-17, branch `claude/serene-goldberg-qhoaat`). *(Friendliness — PRIORITY 3; size S.)* All three of
+  the page's "go to Settings" instructions were bold prose: the blocking empty state with the integration off, the
+  monitoring-only note ("Enable it in Settings to send commands"), and the no-devices hint ("You can also pin its IP
+  under Settings → Telescope"). Being told what to do and then having to go find it yourself is the friction the
+  Dashboard's "Fix in Settings" button has always avoided — and until v0.266.0 there was no *section* to point at,
+  so the prose was the honest option. Now there is: each is an `Anchor` to `settingsLink("telescope")`, wording
+  unchanged. **Tests (+2, `Seestar.test.tsx`, both fail-before):** the blocked empty state's instruction is a link
+  to `/settings/telescope`, and so are the monitoring-only note and the no-devices hint. Frontend-only: no API,
+  schema, config, on-disk or default change, and no copy reworded.
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-17, measured in a real running build at 420 px) — on a phone the Target
   page's own actions are unlabelled icons, while the *secondary* buttons beside them keep their words. The two
   things a beginner opens this page to do — **Process target** and **Stack** — are two of the wordless squares.**~~
