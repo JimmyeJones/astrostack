@@ -1358,6 +1358,12 @@ class TonightNow:
     dark_minutes_left: float
     min_altitude_deg: float
     picks: list[TonightPick] = field(default_factory=list)
+    # Why the picks carry no placement, said **once** for the whole answer, or
+    # None on the ordinary placed path. It used to be appended to every pick's
+    # ``reason`` instead, so a three-pick card printed "Set your location in
+    # Settings…" three times under a subtitle that had already said it. The
+    # sentence is per-*answer*, not per-target, so it belongs here.
+    note: str | None = None
 
 
 def _altitudes_at(ras_deg, decs_deg, observer: Observer, when_utc: datetime):  # noqa: ANN001, ANN202
@@ -1430,14 +1436,12 @@ def rank_targets_now(
         # Two different "we can't place these" cases, and the copy must say which:
         # no site configured (fixable in Settings) vs no astronomical darkness at
         # all tonight (high-latitude summer — nothing the user can do about it).
-        plan.picks = _depth_only_picks(
-            usable, limit,
-            hint=("Set your location in Settings and this can also tell you "
-                  "whether it's up right now."
-                  if observer is None else
-                  "There's no astronomical darkness where you are tonight, so "
-                  "this can't say what's well-placed."),
-        )
+        plan.note = ("Set your location in Settings and this can also tell you "
+                     "whether it's up right now."
+                     if observer is None else
+                     "There's no astronomical darkness where you are tonight, so "
+                     "this can't say what's well-placed.")
+        plan.picks = _depth_only_picks(usable, limit)
         return plan
 
     # The part of tonight's darkness that is still ahead. Before dusk this is the
@@ -1492,13 +1496,13 @@ def rank_targets_now(
     return plan
 
 
-def _depth_only_picks(targets: list[LibraryTarget], limit: int, *,
-                      hint: str) -> list[TonightPick]:
+def _depth_only_picks(targets: list[LibraryTarget], limit: int) -> list[TonightPick]:
     """Rank on "would more subs help?" alone — the no-location / no-darkness path.
 
-    Honest about what it doesn't know: ``altitude_now_deg`` stays ``None`` and
-    ``hint`` (appended to every reason) says *why* the placement is unknown,
-    rather than implying the target is up.
+    Honest about what it doesn't know: ``altitude_now_deg`` stays ``None`` rather
+    than implying the target is up. *Why* it can't be placed is one sentence about
+    the whole answer, so it lives on :attr:`TonightNow.note` and is said once —
+    each pick's ``reason`` stays about that pick.
     """
     picks: list[TonightPick] = []
     for t in targets:
@@ -1515,7 +1519,7 @@ def _depth_only_picks(targets: list[LibraryTarget], limit: int, *,
             frames_accepted=int(t.frames_accepted or 0),
             noise_gain=round(gain, 3),
             score=round(100.0 * depth, 1),
-            reason=f"{_depth_sentence(hours, t.name, gain)} {hint}",
+            reason=_depth_sentence(hours, t.name, gain),
         ))
     picks.sort(key=lambda p: (-p.score, -p.hours_captured))
     return picks[:max(0, int(limit))]

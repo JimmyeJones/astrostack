@@ -49,6 +49,34 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, second run of the day, read off the same running build's Dashboard)
+  — "Set your location in Settings…" is printed once by the *card* and then again by **every pick inside it**, so
+  the "Worth more time" card says the same instruction up to four times in eight lines.**~~ —
+  **FIXED v0.266.5** (Builder 2026-08-17, branch `claude/serene-goldberg-v585n3`). *(Friendliness / the standing
+  "extremely busy" priority — PRIORITY 3.)*
+  **What the screenshot showed:** subtitle *"Ranked by how much another hour would help. Set your location in
+  Settings to also see what's up right now."*, then immediately below it the one pick's reason ending *"…Set your
+  location in Settings and this can also tell you whether it's up right now."* With the card's full three picks
+  that is the same instruction four times.
+  **The cause:** `nightplan._depth_only_picks` took a `hint` kwarg and appended it to **every** pick's `reason`.
+  The sentence is about the *answer* ("I can't place anything, and here's why"), not about any one target, so
+  per-pick was the wrong home for it — and the frontend, having no other way to say it, had hard-coded its own
+  copy of the same sentence into the subtitle.
+  **The fix:** `TonightNow` gains an optional `note` carrying that sentence **once**; `_depth_only_picks` drops
+  the kwarg and each `reason` goes back to being about its own target. `pointHereSubtitle` prefers the backend's
+  note when present and falls back to the exact wording it has always used otherwise, so an older backend is
+  unaffected. **A second thing this fixes:** the high-latitude-summer case had *no* explanation in the subtitle
+  at all (just "Ranked by how much another hour would help.") — the sentence existed but was buried in the picks.
+  It now reads "…There's no astronomical darkness where you are tonight, so this can't say what's well-placed."
+  The Tonight page's new depth-only list deliberately renders **no** note: the alert directly above it already
+  says why, and the list's own intro points at it.
+  **Upgrade-safe:** additive dataclass field with a default (so `asdict` just carries it), optional on the TS
+  side; no endpoint, response shape, config, DB, on-disk or default change. **Tests (+2 changed, +3 new, all
+  fail-before):** `test_nightplan.py` (the note carries the sentence and no pick repeats it; the placed path has
+  no note at all), `tests/webapp/test_plan.py` (same through the endpoint), `PointHereTonightCard.test.tsx` (the
+  subtitle carries the backend's reason — the polar-summer case that previously had none — and a two-pick
+  no-location card says it exactly once), `WorthMoreTimeList.test.tsx` (the list doesn't repeat it).
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-17, second run of the day, in the same running build, visible at both
   1440 px and 420 px) — the Target page tells you "it's bigger than one frame" **twice**: once as a top-of-page
   alert measured from your own picture, and again in the object card at the bottom as a catalogue prediction of
@@ -10205,6 +10233,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEXT SLICE OF THE STANDING IA ITEM — FOUND BY DOGFOODING (Builder 2026-08-17, counted in a real running build
+  at 1440 px) — one History run card renders **15 buttons in four rows** plus a delete icon, for a single
+  picture.** *(Friendliness / the owner's "extremely busy" priority — PRIORITY 3; size M; frontend-only.)*
+  **Measured, not eyeballed:** the sample's one finished stack shows, in order — *Edit · Reuse settings · Adjust ·
+  Info · Identify · Scale · Set as cover · PNG · Full-res PNG · JPEG · To phone · Wallpaper · Copy caption · FITS ·
+  TIFF*, then a bin icon. With two or more runs there is a **Compare** button too, and the whole block repeats
+  **per run** — a target with eight stacks is a wall of ~120 buttons. `routes/History.tsx` has ~19 button
+  call-sites in the card (L906–L1087) and the row is the card, visually: the picture, four lines of name/date/
+  label, and then four lines of chrome.
+  **Why this is the right next slice:** it is the same complaint the owner filed about the Target page, on the
+  page a beginner opens *per picture*, and the grouping is obvious because the buttons already fall into families.
+  **The shape (nothing removed — the owner's hard constraint):** keep the two or three that are actually the job
+  inline (**Edit**, **Reuse settings**, and **Compare** when it exists), and collapse the rest into two Menus that
+  already have names in the UI: **"Save / share ▾"** (PNG, Full-res PNG, JPEG, FITS, TIFF, Copy caption, To phone,
+  Wallpaper — note `SharePictureButton` / `ScanToPhoneButton` / `WallpaperMenu` are separate components, so they
+  go in as items, not as re-implementations) and **"About this stack ▾"** (Info, Identify, Scale, Adjust, Set as
+  cover). 15 controls → 4-5. **Care:** every one of those buttons has tests asserting it by name; a Menu hides its
+  items until opened, so the tests need an explicit open (or `Menu` with `keepMounted`) — budget for that, and do
+  not weaken an assertion to make it pass. Keep the delete icon exactly where and as it is. State the before/after
+  button count in the commit, as the standing item asks.
 
 - **NEW IDEA (Builder 2026-08-17, the loose end left by the Settings-section work v0.266.0–v0.266.2) — the app
   still names Settings in prose in five more places, and now that every section has an address, most of them
