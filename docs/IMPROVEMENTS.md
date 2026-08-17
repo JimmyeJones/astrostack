@@ -49,6 +49,34 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, second run of the day, seen in a real running build with the sample
+  library loaded) — the Dashboard offers a ranked "Worth more time" answer with no observing location set, and its
+  own **See the whole night** button links to `/tonight`, which shows strictly *less*: a "set your location" prompt
+  and nothing else. The page dedicated to planning is the emptier of the two.**~~ — **FIXED v0.266.3**
+  (Builder 2026-08-17, branch `claude/serene-goldberg-v585n3`). *(Friendliness — PRIORITY 3; it is the whole of the
+  Tonight page for anyone who hasn't solved a sub yet, i.e. the beginner's first week, and for a high-latitude
+  summer where there is no dark window for months.)*
+  **What the screenshot showed:** a fresh install with the sample loaded renders `/tonight` as a header, a date
+  picker and one blue alert — 908 px of empty page — while the Dashboard, from the *same* planner and the *same*
+  library, ranked Sample: Orion Nebula and explained why.
+  **The cause is two endpoints with different fallbacks.** `/api/plan` returns `targets: []` outright when
+  `_resolve_observer` finds no site (`routers/plan.py:242`), and `Tonight.tsx` hard-returns on
+  `location_source === "none"`. `/api/plan/best-tonight` — the Dashboard's — instead falls back to
+  `nightplan._depth_only_picks`: rank on "would another hour help?" alone, leave `altitude_now_deg` **null** rather
+  than fabricate one, and append a hint saying *why* the placement is unknown. The honest half of the answer
+  already existed; only the planning page didn't ask for it. The same is true of the **no darkness tonight**
+  branch, which `_depth_only_picks` also serves (with its own hint) and which returned equally empty.
+  **The fix:** a new self-hiding `WorthMoreTimeList` renders below *both* alerts — nothing removed, the location
+  prompt is untouched and still first — listing up to 8 picks (the page is "the whole night"; the Dashboard card
+  shows 3), each linked to its target with the planner's own `reason` sentence verbatim. It mounts only on those
+  two branches, so the placed path costs no extra request; it renders nothing when there are no picks (an empty
+  library) and swallows a 404 from an older backend, so both branches fall back to exactly today's page.
+  Frontend-only: no API, schema, config, on-disk or default change, and no new copy invented — the reasons are
+  the strings the backend already writes. **Tests (+5, two fail-before):** `Tonight.test.tsx` (+2, both
+  fail-before — the ranking appears alongside the location prompt, and alongside "No darkness tonight") and a new
+  `WorthMoreTimeList.test.tsx` (+3 — picks linked with their reasons, silent on an empty list, silent on a
+  404).
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-17, same run) — the Telescope page tells a blocked user exactly what to
   go and do — "Enable it under **Settings → Telescope**" — in plain text they cannot tap.**~~ — **FIXED v0.266.2**
   (Builder 2026-08-17, branch `claude/serene-goldberg-qhoaat`). *(Friendliness — PRIORITY 3; size S.)* All three of
