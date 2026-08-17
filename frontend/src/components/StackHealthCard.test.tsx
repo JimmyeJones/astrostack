@@ -53,9 +53,11 @@ describe("noteAction", () => {
     expect(noteAction("calibration", "M_42", 7)?.href).toBe("/calibration");
   });
   it("wires solve_help to the Settings page (star-database status)", () => {
-    expect(noteAction("solve_help", "M_42", 7)?.href).toBe("/settings");
+    // The Settings page is split into sections, so this lands on the one that
+    // holds the ASTAP controls rather than on a page where they are a tab away.
+    expect(noteAction("solve_help", "M_42", 7)?.href).toBe("/settings/plate-solving");
     // Still linked inside the editor — it's an off-page action.
-    expect(noteAction("solve_help", "M_42", 7, true)?.href).toBe("/settings");
+    expect(noteAction("solve_help", "M_42", 7, true)?.href).toBe("/settings/plate-solving");
   });
   it("wires restack to this target's Stack form (where the switch lives)", () => {
     expect(noteAction("restack", "M_42", 7)).toEqual({

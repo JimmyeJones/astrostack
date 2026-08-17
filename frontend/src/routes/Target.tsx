@@ -16,6 +16,7 @@ import { api, type Frame } from "../api/client";
 import { formatIntegration, formatStampDate } from "../format";
 import { integrationReadiness, readinessColor, noiseReductionHint } from "../readiness";
 import { QueryError } from "../components/QueryError";
+import { settingsLink } from "../settingsSections";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { InsightTabs } from "../components/InsightTabs";
@@ -801,7 +802,7 @@ export function TargetView() {
                   Re-run QC + Solve
                 </Button>
                 <Button size="xs" variant="light" color="orange"
-                  component={Link} to="/settings">
+                  component={Link} to={settingsLink("plate-solving")}>
                   Open Settings
                 </Button>
               </Group>
