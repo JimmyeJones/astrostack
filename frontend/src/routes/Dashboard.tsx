@@ -11,6 +11,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { formatDiskSize, formatIntegration, formatStampDate } from "../format";
 import { loadDismissedSig, saveDismissedSig } from "../dismissal";
+import { settingsLink } from "../settingsSections";
 import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
 import { ContinueTonightCard } from "../components/ContinueTonightCard";
@@ -165,7 +166,7 @@ export function Dashboard() {
                         + "processing can't save its results. Check the folder's permissions or "
                         + "the path.")}
                 </Text>
-                <Button component={Link} to="/settings" size="xs" variant="light" color="yellow" mt="xs">
+                <Button component={Link} to={settingsLink("folders")} size="xs" variant="light" color="yellow" mt="xs">
                   Fix in Settings
                 </Button>
               </Alert>
@@ -189,7 +190,7 @@ export function Dashboard() {
                       + "needs one, and solving is required before you can stack. Add a star "
                       + "database before you drop in frames."}
                 </Text>
-                <Button component={Link} to="/settings" size="xs" variant="light" color="yellow" mt="xs">
+                <Button component={Link} to={settingsLink("plate-solving")} size="xs" variant="light" color="yellow" mt="xs">
                   Fix in Settings
                 </Button>
               </Alert>

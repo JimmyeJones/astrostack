@@ -1,4 +1,5 @@
 import type { DashboardStats, SystemInfo } from "../../api/client";
+import { settingsLink } from "../../settingsSections";
 
 /**
  * "Your first image" — the ordered map of the journey a brand-new user has to
@@ -61,7 +62,7 @@ export function firstImageSteps(
       label: "Let it work out where each frame points",
       hint: "Plate solving (ASTAP) is how AstroStack recognises the patch of sky "
         + "in each sub, so it can line them all up. Set it up once and forget it.",
-      href: "/settings",
+      href: settingsLink("plate-solving"),
       action: "Check the setup",
       done: solveReady,
     },

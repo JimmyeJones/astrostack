@@ -10690,7 +10690,55 @@ problems. Dogfood it every big-picture run and fix root causes.
   reacts and wants more*, are the Library and Editor screens — but neither has been measured as "busy" the way
   Target and Dashboard were, so **don't start one speculatively**.
 
-  **📏 SLICE (f) IS NOW MEASURED AND READY — Settings is the app's tallest page by a factor of two, and no slice
+  **✅ SLICE (f) SHIPPED — v0.266.0** (Builder 2026-08-17, branch `claude/serene-goldberg-qhoaat`). Settings is now
+  one section per URL, and it is no longer the app's tallest page — it is one of its shortest.
+  **Measured on the same running build, with the same probe that found it** (`scripts/agent-dogfood.sh`, full-page
+  scroll height): **phone 5827 px → 1026 px** (≈6.8 phone screens → 1.6), **desktop 4606 px → 900 px** — i.e. the
+  whole page now fits inside a 1440×900 window with **no scroll at all**, and Settings has dropped out of the
+  probe's eight-tallest list entirely. Always-on full-width blocks below the system banner went **7 → 1**
+  (`Watched folders`); `Card`/`Paper`/`Alert` blocks rendered *visible* on first paint went **8 → 2** (the system
+  banner and the open section). Destinations, cards and controls **unchanged — nothing removed** (the hard
+  constraint): every setting is still mounted and now at most one click away, and each has its own address.
+  `Settings.tsx` is 891 → 967 lines (+76; as with every slice the win is vertical space, not line count), plus the
+  new `components/SectionTabs.tsx` (69) and `settingsSections.ts` (32).
+  **Nested routes, as the entry preferred — the deep links were the whole reason.** `/settings/<section>` is a real
+  route (`main.tsx`), so a section is bookmarkable, back-button-friendly and, crucially, *linkable*: the five inbound
+  "Fix in Settings" links now land on the section that holds the control they were sent for — the Dashboard's
+  folder warning on **Folders**, its ASTAP warning, the Target page's solve-failure note and a stack's health card
+  on **Plate solving**, and both of the Tonight planner's location prompts on **Observing site**. The entry warned
+  that a tab strip's one failure mode is landing a deep link on a hidden control; each of those is pinned by a test
+  that asserts the control is **visible**, not merely present. A bare `/settings` and an unknown section both fall
+  through to the first section, so an old bookmark still lands somewhere useful.
+  **The sections, named so a beginner can predict which one a thing is on:** *Folders* (data root, incoming,
+  library, watcher) · *Automation* (walk-away mode and the whole hands-off pipeline) · *Plate solving* (ASTAP, CPU
+  workers) · *Observing site* (lat/lon/elevation, minimum altitude, horizon mask) · *Stacking* (the automated
+  stacking defaults, memory budget) · *This device* (Seestar, ambient sound) · *Maintenance* (reprocess, job
+  history, backup & restore, access control). **The mis-filing the entry called out is fixed with it:** the
+  observing site, the ASTAP path, the stack memory budget and the job-history depth are no longer inside a card
+  called "Watched folders" — each is now under the name that predicts it.
+  **The judgement call worth knowing:** the system banner (data root · CPUs · ASTAP/star-DB badges · "Test solve on
+  a real frame") stays **outside** the tabs, always visible. It is status, not a setting — it is what the ASTAP
+  deep links exist to show — and hiding it behind one tab would make the page's own health answer conditional on
+  which section you happened to be reading.
+  **`SectionTabs` is the reusable primitive**, the URL-addressable sibling of `InsightTabs`: that one measures the
+  DOM because analysis cards self-hide, this one adds an address because settings never do. Panels stay
+  `keepMounted`, which matters more here than it did there — the sections share one edit buffer, so a half-typed
+  value survives a tab switch and any section's Save still sends the lot (pinned by a test that edits on *Folders*,
+  switches to *This device*, and asserts both fields in one PUT).
+  **Tests (+13):** `SectionTabs.test.tsx` (**new, +5** — one section visible with the rest mounted-but-hidden, every
+  section gets a tab, a click navigates to that section's URL, a bare base path and an unknown section both fall
+  back to the first) and `Settings.test.tsx` (+8 — the page's sections are exactly the ones the link module
+  exposes, one at a time with the others still in the DOM, the bare landing, the three deep links each landing on a
+  **visible** control, the four re-homed settings each under their new section, and the shared-buffer save). The
+  four pre-existing stacking-defaults tests now render through the real `/settings/:section` route instead of a
+  bare `<SettingsView/>`; every assertion in them is unchanged. All 176 frontend files / 2036 tests green, plus
+  `tsc --noEmit` and `vite build`. Frontend-only: no API, schema, config, on-disk or default change, and no route
+  removed — `/settings` still works exactly as it did.
+  **Next, only if the owner reacts and wants more:** the Library and Editor screens, which the measurement below
+  still says are *not* the wall — don't start one speculatively.
+
+  *(Original slice-(f) measurement and spec kept below for provenance.)*
+  **📏 SLICE (f) MEASURED — Settings is the app's tallest page by a factor of two, and no slice
   has ever touched it (Builder 2026-08-17, measured on a real running build via `scripts/agent-dogfood.sh`).**
   The entry above says the next candidates are "the Library and Editor screens — but neither has been measured as
   'busy' the way Target and Dashboard were, so don't start one speculatively". **Measured now, on the full-page

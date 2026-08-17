@@ -75,6 +75,9 @@ const router = createBrowserRouter([
       { path: "jobs", element: <JobsView /> },
       { path: "logs", element: <LogsView /> },
       { path: "settings", element: <SettingsView /> },
+      // Each Settings section has its own address, so "Fix in Settings" can land
+      // on the section that holds the control (see `settingsSections.ts`).
+      { path: "settings/:section", element: <SettingsView /> },
     ],
   },
 ]);
