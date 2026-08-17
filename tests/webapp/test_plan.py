@@ -706,7 +706,9 @@ def test_best_tonight_without_location_still_answers_the_depth_half(client, solv
     assert body["dark_now"] is False
     assert body["picks"], "the depth-only half is still worth answering"
     assert all(p["altitude_now_deg"] is None for p in body["picks"])
-    assert "Set your location in Settings" in body["picks"][0]["reason"]
+    # Said once on the answer, not repeated inside every pick's own sentence.
+    assert "Set your location in Settings" in body["note"]
+    assert all("Set your location" not in p["reason"] for p in body["picks"])
 
 
 def test_best_tonight_honours_the_limit_and_rejects_a_bad_when(client, solved_library):
