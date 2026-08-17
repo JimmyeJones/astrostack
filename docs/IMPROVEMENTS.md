@@ -49,6 +49,45 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, same run) — the Telescope page tells a blocked user exactly what to
+  go and do — "Enable it under **Settings → Telescope**" — in plain text they cannot tap.**~~ — **FIXED v0.266.2**
+  (Builder 2026-08-17, branch `claude/serene-goldberg-qhoaat`). *(Friendliness — PRIORITY 3; size S.)* All three of
+  the page's "go to Settings" instructions were bold prose: the blocking empty state with the integration off, the
+  monitoring-only note ("Enable it in Settings to send commands"), and the no-devices hint ("You can also pin its IP
+  under Settings → Telescope"). Being told what to do and then having to go find it yourself is the friction the
+  Dashboard's "Fix in Settings" button has always avoided — and until v0.266.0 there was no *section* to point at,
+  so the prose was the honest option. Now there is: each is an `Anchor` to `settingsLink("telescope")`, wording
+  unchanged. **Tests (+2, `Seestar.test.tsx`, both fail-before):** the blocked empty state's instruction is a link
+  to `/settings/telescope`, and so are the monitoring-only note and the no-devices hint. Frontend-only: no API,
+  schema, config, on-disk or default change, and no copy reworded.
+
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, measured in a real running build at 420 px) — on a phone the Target
+  page's own actions are unlabelled icons, while the *secondary* buttons beside them keep their words. The two
+  things a beginner opens this page to do — **Process target** and **Stack** — are two of the wordless squares.**~~
+  — **FIXED v0.266.1** (Builder 2026-08-17, branch `claude/serene-goldberg-qhoaat`). *(Friendliness — PRIORITY 3;
+  the owner reads this app on a phone, and this is the page where the work happens.)*
+  **What the screenshot showed:** with a finished stack, the action row at 420 px rendered **six bare icon squares**
+  and then, beside them, **"To phone"** and **"Wallpaper"** spelled out in full. Every one of the page's own actions
+  had hidden its label and every borrowed component had kept one — so the row read as "five mystery buttons, then
+  two clear ones, then another mystery button".
+  **The cause is one prop, used six times:** `Target.tsx` wrapped each action's label in
+  `<Box visibleFrom="sm">`, which is a CSS media query — below Mantine's `sm` the words are simply not painted, and
+  a phone has no hover to recover the `title` with. `SharePictureButton` / `ScanToPhoneButton` / `WallpaperMenu`
+  are separate components that render `{label}` unconditionally, which is why the *secondary* actions were the
+  legible ones. The `aria-label`s were all correct throughout, so a screen-reader user was fine and a sighted phone
+  user was not — which is why no test caught it.
+  **The fix:** the four short labels (History, Edit, Picture, Stack — all ≤7 characters) simply stop hiding, and
+  the two long ones keep their full wording on a wide screen and gain a short phone form: *Process target →
+  **Process***, *Re-run QC + Solve → **Re-check***. Nothing was removed, reordered or renamed on the desktop.
+  **Measured, before and after, on the same running build:** icon-only actions in the row at 420 px **6 → 0**;
+  the page is **2981 px → 3027 px** (+46 px, +1.5 % — the row wraps the same three lines, just taller), which is
+  the honest cost of the words and a good trade against a beginner guessing which square stacks their picture.
+  **Tests (+2, `Target.test.tsx`, both fail-before):** a `phoneLabel()` helper strips the `visible-from-*` wrappers
+  Mantine emits — jsdom has no layout, so this is what "the label a phone shows" means in a test — and asserts all
+  six actions have one (`Process`, `Re-check`, `History`, `Edit`, `Picture`, `Stack`); a second test asserts the two
+  long labels are still rendered in full, so the short forms were an addition, not a trade. Frontend-only: no API,
+  schema, config, on-disk or default change.
+
 - ~~**FOUND WHILE SCOPING "Finish them all" (Builder 2026-08-17, branch `claude/serene-goldberg-03783o`;
   REPRODUCED) — finishing an edit does not stop the app asking you to finish it. Pressing **Finish my edit**
   exports the picture and then every surface — the Dashboard's library-wide note included — goes on saying you
@@ -10113,6 +10152,33 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-17, the loose end left by the Settings-section work v0.266.0–v0.266.2) — the app
+  still names Settings in prose in five more places, and now that every section has an address, most of them
+  could be one tap instead.** *(Friendliness — PRIORITY 3; size S; **check each one's shape before starting** —
+  they are not all the same problem.)* v0.266.2 linked the Telescope page's three; these remain, and they split
+  into two kinds. **(1) Rendered JSX, straightforward:** `routes/Target.tsx:793` ("Install ASTAP and set its path
+  in Settings, then re-run solving" — though that alert already carries an **Open Settings** button beside it, so
+  this one is arguably fine as prose) and `routes/Editor.tsx:1261` (the auto-crop tooltip's "The default for every
+  target is in Settings" → `stacking`… actually `automation`, which is worth checking before linking — a link that
+  lands on the wrong section is worse than none). **(2) Plain strings, needs a shape decision:**
+  `routes/Jobs.tsx:72` (the out-of-memory guidance, "raise the memory limit in Settings" → `stacking`),
+  `Jobs.tsx:358` (the faint-field hint naming "Rescue faint fields with a deep-image solve" → `plate-solving`) and
+  `components/target/nextBestMove.ts:105` ("Installing ASTAP's star database (in Settings)" → `plate-solving`).
+  These are `string` constants consumed as text, so linking them means either splitting the copy into
+  segments-plus-link (verbose, and each has tests pinning the wording) or giving the surrounding card an optional
+  `action: {label, href}` the way `StackHealthCard`'s `noteAction` already does — **the latter is the better
+  pattern and is already in the codebase**, so prefer it over inlining anchors into prose. Worth doing as one
+  small pass; not worth contorting a tested string constant for.
+
+- **RECORDED SO IT ISN'T RE-INVESTIGATED (Builder 2026-08-17, seen on the phone screenshot of `/tonight`) — the
+  Night picker prints `mm/dd/2026`, which looks like the US date order the rest of the app deliberately avoids,
+  but it is NOT ours to fix.** The Tonight page's Night field is a native `<input type="date">`; its placeholder
+  and displayed order come from the *browser's* locale, not from the app (the probe's Chromium runs `en-US`). The
+  value it submits is always ISO `YYYY-MM-DD`, and every date the app *renders* already goes through
+  `formatStampDate` (fixed in v0.264.2). Changing the visible order would mean replacing the native picker with a
+  custom one — losing the phone's own date wheel, which is the better control on the device the owner uses. So:
+  **not a bug, don't "fix" it**; if it ever matters, the honest change is a `lang`/locale hint, not a new widget.
+
 - ~~**FOUND BY THE DOGFOOD PROBE'S NEW SQUEEZE CHECK (Builder 2026-08-17, on its very first run against a real
   running build; REPRODUCED and re-measured after the fix) — the Logs page sets a long message ONE CHARACTER PER
   LINE on a phone, so a single entry is 211 lines tall and the page is unusable.**~~ — **FIXED v0.264.8** (Builder
@@ -10690,7 +10756,55 @@ problems. Dogfood it every big-picture run and fix root causes.
   reacts and wants more*, are the Library and Editor screens — but neither has been measured as "busy" the way
   Target and Dashboard were, so **don't start one speculatively**.
 
-  **📏 SLICE (f) IS NOW MEASURED AND READY — Settings is the app's tallest page by a factor of two, and no slice
+  **✅ SLICE (f) SHIPPED — v0.266.0** (Builder 2026-08-17, branch `claude/serene-goldberg-qhoaat`). Settings is now
+  one section per URL, and it is no longer the app's tallest page — it is one of its shortest.
+  **Measured on the same running build, with the same probe that found it** (`scripts/agent-dogfood.sh`, full-page
+  scroll height): **phone 5827 px → 1026 px** (≈6.8 phone screens → 1.6), **desktop 4606 px → 900 px** — i.e. the
+  whole page now fits inside a 1440×900 window with **no scroll at all**, and Settings has dropped out of the
+  probe's eight-tallest list entirely. Always-on full-width blocks below the system banner went **7 → 1**
+  (`Watched folders`); `Card`/`Paper`/`Alert` blocks rendered *visible* on first paint went **8 → 2** (the system
+  banner and the open section). Destinations, cards and controls **unchanged — nothing removed** (the hard
+  constraint): every setting is still mounted and now at most one click away, and each has its own address.
+  `Settings.tsx` is 891 → 967 lines (+76; as with every slice the win is vertical space, not line count), plus the
+  new `components/SectionTabs.tsx` (69) and `settingsSections.ts` (32).
+  **Nested routes, as the entry preferred — the deep links were the whole reason.** `/settings/<section>` is a real
+  route (`main.tsx`), so a section is bookmarkable, back-button-friendly and, crucially, *linkable*: the five inbound
+  "Fix in Settings" links now land on the section that holds the control they were sent for — the Dashboard's
+  folder warning on **Folders**, its ASTAP warning, the Target page's solve-failure note and a stack's health card
+  on **Plate solving**, and both of the Tonight planner's location prompts on **Observing site**. The entry warned
+  that a tab strip's one failure mode is landing a deep link on a hidden control; each of those is pinned by a test
+  that asserts the control is **visible**, not merely present. A bare `/settings` and an unknown section both fall
+  through to the first section, so an old bookmark still lands somewhere useful.
+  **The sections, named so a beginner can predict which one a thing is on:** *Folders* (data root, incoming,
+  library, watcher) · *Automation* (walk-away mode and the whole hands-off pipeline) · *Plate solving* (ASTAP, CPU
+  workers) · *Observing site* (lat/lon/elevation, minimum altitude, horizon mask) · *Stacking* (the automated
+  stacking defaults, memory budget) · *This device* (Seestar, ambient sound) · *Maintenance* (reprocess, job
+  history, backup & restore, access control). **The mis-filing the entry called out is fixed with it:** the
+  observing site, the ASTAP path, the stack memory budget and the job-history depth are no longer inside a card
+  called "Watched folders" — each is now under the name that predicts it.
+  **The judgement call worth knowing:** the system banner (data root · CPUs · ASTAP/star-DB badges · "Test solve on
+  a real frame") stays **outside** the tabs, always visible. It is status, not a setting — it is what the ASTAP
+  deep links exist to show — and hiding it behind one tab would make the page's own health answer conditional on
+  which section you happened to be reading.
+  **`SectionTabs` is the reusable primitive**, the URL-addressable sibling of `InsightTabs`: that one measures the
+  DOM because analysis cards self-hide, this one adds an address because settings never do. Panels stay
+  `keepMounted`, which matters more here than it did there — the sections share one edit buffer, so a half-typed
+  value survives a tab switch and any section's Save still sends the lot (pinned by a test that edits on *Folders*,
+  switches to *This device*, and asserts both fields in one PUT).
+  **Tests (+13):** `SectionTabs.test.tsx` (**new, +5** — one section visible with the rest mounted-but-hidden, every
+  section gets a tab, a click navigates to that section's URL, a bare base path and an unknown section both fall
+  back to the first) and `Settings.test.tsx` (+8 — the page's sections are exactly the ones the link module
+  exposes, one at a time with the others still in the DOM, the bare landing, the three deep links each landing on a
+  **visible** control, the four re-homed settings each under their new section, and the shared-buffer save). The
+  four pre-existing stacking-defaults tests now render through the real `/settings/:section` route instead of a
+  bare `<SettingsView/>`; every assertion in them is unchanged. All 176 frontend files / 2036 tests green, plus
+  `tsc --noEmit` and `vite build`. Frontend-only: no API, schema, config, on-disk or default change, and no route
+  removed — `/settings` still works exactly as it did.
+  **Next, only if the owner reacts and wants more:** the Library and Editor screens, which the measurement below
+  still says are *not* the wall — don't start one speculatively.
+
+  *(Original slice-(f) measurement and spec kept below for provenance.)*
+  **📏 SLICE (f) MEASURED — Settings is the app's tallest page by a factor of two, and no slice
   has ever touched it (Builder 2026-08-17, measured on a real running build via `scripts/agent-dogfood.sh`).**
   The entry above says the next candidates are "the Library and Editor screens — but neither has been measured as
   'busy' the way Target and Dashboard were, so don't start one speculatively". **Measured now, on the full-page

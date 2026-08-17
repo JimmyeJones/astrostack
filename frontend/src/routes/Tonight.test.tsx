@@ -62,7 +62,7 @@ describe("TonightView", () => {
     await waitFor(() =>
       expect(screen.getByText("Set your observing location")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: /Settings/i }))
-      .toHaveAttribute("href", "/settings");
+      .toHaveAttribute("href", "/settings/observing-site");
   });
 
   it("offers to save a FITS-detected location and PATCHes Settings on click", async () => {
