@@ -688,6 +688,60 @@ describe("TargetView framing verdict", () => {
       await screen.findByText(/^Orion Nebula runs off the edge of the frame/),
     ).toBeInTheDocument();
   });
+
+  it("says 'it's bigger than one frame' once, not twice", async () => {
+    // The page carried both the *measured* verdict (top) and the object card's
+    // *catalogue prediction* of the same thing (bottom), so a beginner read the
+    // same mosaic-mode advice twice on one screen.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 7 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue({
+      level: "partial",
+      text: "is bigger than your frame — only about 15% of it is in this picture. "
+        + "Shoot it in mosaic mode to capture all of it.",
+      coverage: 0.15, off_centre: 0.1,
+      object_name: "Orion Nebula", size_arcmin: 85,
+    });
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M42", name: "Orion Nebula", type: "nebula",
+      constellation: "Orion", constellation_abbr: "Ori",
+      ra_deg: 83.8, dec_deg: -5.4, matched_by: "name", size_arcmin: 85,
+      framing: { level: "mosaic", text: "is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of it." },
+    });
+
+    const { container } = renderTarget();
+
+    expect(
+      await screen.findByText(/^Orion Nebula is bigger than your frame/),
+    ).toBeInTheDocument();
+    // The object card is still there in full — only its duplicate line is gone.
+    await waitFor(() =>
+      expect(screen.getByText("A nebula in the constellation Orion."))
+        .toBeInTheDocument());
+    expect(container.textContent)
+      .not.toContain("bigger than the Seestar's single frame");
+  });
+
+  it("keeps the catalogue framing line when no picture has measured it", async () => {
+    // No stack yet → no measured verdict → the prediction is the only thing that
+    // can answer "will it fit?", so it must still be shown.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M42", name: "Orion Nebula", type: "nebula",
+      constellation: "Orion", constellation_abbr: "Ori",
+      ra_deg: 83.8, dec_deg: -5.4, matched_by: "name", size_arcmin: 85,
+      framing: { level: "mosaic", text: "is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of it." },
+    });
+
+    renderTarget();
+
+    expect(
+      await screen.findByText(/Orion Nebula is bigger than the Seestar's single frame/),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("TargetView note board", () => {

@@ -15,6 +15,27 @@ const TONE: Record<StackFraming["level"], { color: string; icon: string }> = {
   partial: { color: "yellow", icon: "🧩" },
 };
 
+/**
+ * The measured framing verdict for one run, or `undefined` when there isn't one.
+ *
+ * Exported because the *Target* page needs the same answer the note itself
+ * reaches: it also renders `ObjectInfoCard`, whose catalog "will it fit?" line
+ * predicts the very thing this measures, and two sentences saying "it's bigger
+ * than one frame" on one page is one too many. Sharing the query key means
+ * react-query serves both from a single request, and asking the same source
+ * means the generic line can only ever step aside when the measured one is
+ * genuinely on screen — a run with no usable WCS keeps it.
+ *
+ * `runId` may be `null` (no finished picture yet); the fetch is then skipped.
+ */
+export function useStackFraming(safe: string, runId: number | null) {
+  return useQuery({
+    queryKey: ["stack-framing", safe, runId],
+    queryFn: () => api.stackFraming(safe, runId as number),
+    enabled: runId != null,
+  }).data;
+}
+
 const TITLE: Record<StackFraming["level"], string> = {
   centred: "Nicely framed",
   off_centre: "It landed off to one side",
@@ -38,11 +59,7 @@ const TITLE: Record<StackFraming["level"], string> = {
  * to drop in unconditionally.
  */
 export function FramingVerdictNote({ safe, runId }: { safe: string; runId: number }) {
-  const q = useQuery({
-    queryKey: ["stack-framing", safe, runId],
-    queryFn: () => api.stackFraming(safe, runId),
-  });
-  const v = q.data;
+  const v = useStackFraming(safe, runId);
   // The picture they have *now* can often be improved too: when the target landed
   // off to one side and a crop can put it back in the middle without gutting the
   // frame, offer that as a one-click trip into the editor. An offer, never an
