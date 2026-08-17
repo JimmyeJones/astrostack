@@ -163,3 +163,37 @@ describe("Library", () => {
     expect(screen.queryByTestId("first-image-card")).not.toBeInTheDocument();
   });
 });
+
+describe("Library card layout", () => {
+  it("keeps the 'go to target' chevron on the title's own line", async () => {
+    // Seen in a 1440 px screenshot: `<Group justify="space-between">` wraps by
+    // default, so a name long enough to fill the card pushed the chevron down
+    // and the card showed a stray "›" hanging alone below the title. jsdom has
+    // no layout, so pin the cause — the row may not wrap, and the icon may not
+    // shrink (which is what stops "nowrap" turning the wrap into a squeeze).
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([
+      mk("Sample: Orion Nebula (M42)", []),
+    ]);
+    renderLibrary();
+
+    const name = await screen.findByText("Sample: Orion Nebula (M42)");
+    const row = name.parentElement as HTMLElement;
+    // Mantine's `Group` drives its wrapping through a CSS variable, and jsdom
+    // loads no stylesheet — so read the variable the component actually sets.
+    expect(row.style.getPropertyValue("--group-wrap")).toBe("nowrap");
+    const chevron = row.querySelector("svg") as SVGElement;
+    expect(chevron).toHaveStyle({ flexShrink: "0" });
+  });
+
+  it("keeps a long target name readable even when the card truncates it", async () => {
+    // The name truncates so the chevron always fits; the full text has to stay
+    // recoverable on hover, exactly as the Gallery card's name already is.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([
+      mk("Sample: Orion Nebula (M42)", []),
+    ]);
+    renderLibrary();
+
+    const name = await screen.findByText("Sample: Orion Nebula (M42)");
+    expect(name).toHaveAttribute("title", "Sample: Orion Nebula (M42)");
+  });
+});

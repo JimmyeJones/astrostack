@@ -10022,10 +10022,17 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **FOUND BY DOGFOODING, FILED NOT FIXED (Builder 2026-08-16, seen in the 1440 px Library screenshot; the run had
+- ~~**FOUND BY DOGFOODING, FILED NOT FIXED (Builder 2026-08-16, seen in the 1440 px Library screenshot; the run had
   already shipped five items and stopped rather than churn) — the Library card's "go to target" chevron falls onto
-  its own line under any name long enough to fill the card.** *(Friendliness — PRIORITY 3; size XS; frontend-only;
-  cosmetic.)* `routes/Library.tsx:95-98` puts the name and an `IconChevronRight` in a
+  its own line under any name long enough to fill the card.**~~ — **FIXED v0.264.5** (Builder 2026-08-17, branch
+  `claude/serene-goldberg-x7wijx`), exactly as the slice below specced it: `wrap="nowrap"` on the row,
+  `flexShrink: 0` on the chevron, and the name `truncate` with its full text carried as a `title` — so the icon
+  can never be pushed down *or* squashed, and a long name is still readable on hover rather than silently cut.
+  Frontend-only: no API, schema, config, on-disk or default change, and nothing was added to or removed from the
+  card. **Tests (+2, both fail-before, `Library.test.tsx`):** jsdom has no layout, so they pin the two causes —
+  the row's `--group-wrap` really is `nowrap` and the chevron really is `flexShrink: 0` (the pairing the *"Care"*
+  note below insists on), and the long name carries its full text as a `title`.
+  *(Original spec kept below for provenance.)* `routes/Library.tsx:95-98` puts the name and an `IconChevronRight` in a
   `<Group justify="space-between">`, which **wraps by default** — so "Sample: Orion Nebula (M42)" pushes the
   chevron down and the card shows a stray "›" hanging alone on the line below the title. **Slice:** the same shape
   the Gallery card fix (v0.263.4) landed on — `wrap="nowrap"` on that Group, `flexShrink: 0` on the icon, and the
