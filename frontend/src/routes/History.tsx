@@ -1155,6 +1155,10 @@ export function HistoryView() {
   const qc = useQueryClient();
   const [sort, setSort] = useState<RunSort>("newest");
   const runs = useQuery({ queryKey: ["runs", safe], queryFn: () => api.listStackRuns(safe) });
+  // Only for the heading — the page works off `safe`, but the title has to say
+  // the target's *name*. Shares the query key every other target screen uses, so
+  // arriving from the Target page is a cache hit, and a failure leaves `safe`.
+  const target = useQuery({ queryKey: ["target", safe], queryFn: () => api.getTarget(safe) });
   // The target's catalog identity (name/type), fetched once for the page so the
   // per-run "Copy caption" can name the object; null when nothing matches (the
   // caption then degrades to the target's own name). Never blocks the page.
@@ -1201,7 +1205,7 @@ export function HistoryView() {
   return (
     <Stack>
       <Group justify="space-between">
-        <Title order={2}>Stack history — {safe}</Title>
+        <Title order={2}>Stack history — {target.data?.name ?? safe}</Title>
         <Group gap="sm">
           {list.length > 1 && anyNoise ? (
             <SegmentedControl

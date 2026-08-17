@@ -10022,6 +10022,28 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, seen in the phone Editor screenshot of a real running build;
+  REPRODUCED) — the editor, the app's priority-1 screen, titled itself with the raw filesystem-safe name.**~~ —
+  **FIXED v0.264.7** (Builder 2026-08-17, branch `claude/serene-goldberg-x7wijx`). *(Friendliness — PRIORITY 1/3;
+  cosmetic severity, but it is the heading of the screen where a beginner turns a stack into a picture, and it
+  reads like a path rather than their target.)*
+  **The symptom, screenshotted:** the editor opened on **"Editor — Sample_Orion_Nebula_M42"** while the Library
+  card, the Target page, the Stack form and the Gallery all call the same target **"Sample: Orion Nebula (M42)"**.
+  On a phone the underscored name also wraps the title onto two lines.
+  **The cause, and why it was two screens not one:** `Editor.tsx` and `History.tsx` work entirely off the `safe`
+  route param and never fetched the target at all, so `safe` was the only name they had. `Stack.tsx` — the third
+  screen under the same target — already did it right (`target.data?.name ?? safe`), which is exactly the shape
+  used here, so this is the established pattern applied to the two screens that missed it.
+  **The fix:** both pages now run the same `["target", safe]` query every other target screen uses, so arriving
+  from the Target page is a **cache hit rather than a fetch**, and each falls back to `safe` if it fails — the
+  name is a nicety, never a dependency, and neither page blocks or errors on it. The editor's lightbox caption
+  (`"<name> — edited"`) was the third raw-`safe` render and goes through the same value. Frontend-only: no API,
+  schema, config, on-disk or default change; no route, control or card added or removed.
+  **Tests (+4, `Editor.test.tsx` +2 and `History.test.tsx` +2, one fail-before in each file):** the real page
+  titles itself with the target's name and *not* with `M_42`, and a target that can't be loaded still opens the
+  page under its safe name.
+
+
 - ~~**FOUND BY DOGFOODING, FILED NOT FIXED (Builder 2026-08-16, seen in the 1440 px Library screenshot; the run had
   already shipped five items and stopped rather than churn) — the Library card's "go to target" chevron falls onto
   its own line under any name long enough to fill the card.**~~ — **FIXED v0.264.5** (Builder 2026-08-17, branch

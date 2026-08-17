@@ -2575,3 +2575,39 @@ describe("editPreviewUrl", () => {
     expect(decoded.ops[0].params.stretch).toBe(0.7);
   });
 });
+
+describe("EditorView heading", () => {
+  // Found by dogfooding: the editor — the app's priority-1 screen — was the one
+  // target page that titled itself with the raw filesystem-safe name. The
+  // Sample target read "Editor — Sample_Orion_Nebula_M42" while the Target,
+  // Stack and Library screens all said "Sample: Orion Nebula (M42)".
+  it("names the target the way every other screen does", async () => {
+    mockEditorQueries();
+    vi.spyOn(client.api, "getTarget").mockResolvedValue({
+      safe_name: "M_42", name: "Sample: Orion Nebula (M42)",
+      ra_deg: null, dec_deg: null, n_frames: 6, n_frames_accepted: 6,
+      total_exposure_s: 60, last_activity_utc: null, has_preview: true,
+      notes: null, tags: [],
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+    expect(await screen.findByText("Editor — Sample: Orion Nebula (M42)"))
+      .toBeInTheDocument();
+    expect(screen.queryByText("Editor — M_42")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the safe name when the target can't be loaded", async () => {
+    mockEditorQueries();
+    vi.spyOn(client.api, "getTarget").mockRejectedValue(new Error("gone"));
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+    // The editor still opens — the name is a nicety, not a dependency.
+    expect(await screen.findByText("Editor — M_42")).toBeInTheDocument();
+  });
+});
