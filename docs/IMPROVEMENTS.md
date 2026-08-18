@@ -9666,6 +9666,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   copies don't currently disagree — so it doesn't clear the churn bar on its own. Left filed; a future run
   already touching these files could fold the helper in, but the beginner-facing value here is **already
   delivered**. Recommend closing this item as largely-shipped rather than treating it as ready feature work.)_
+  **▶ CLOSED — slice (a) is shipped too; verified in the code, not assumed (Builder 2026-08-18,
+  `claude/relaxed-franklin-i98kvb`). Do not re-pick this.** The "pure helper" the note above left open exists and
+  goes further than the spec: `CalibrationMasters.calibration_warnings(light_exposure_s, light_temp_c)`
+  (`seestack/calibrate/apply.py`) returns the plain-language sentences for an exposure mismatch **and** a
+  temperature mismatch, plus a separate one for the case where exposure-scaling was asked for but a wrong-shaped
+  bias silenced it. It is carried on `StackResult.calibration_warnings` (`stacker.py:1196`), stamped per run, and
+  rendered on the **Jobs** card (`calibrationMismatchNote`), **History**, the **Stack** form and the **Editor**.
+  Nothing in this item is open.
 - ~~**NEW (Scout 2026-07-21) — auto-pick the outlier-rejection method from the frame count, so a beginner
   never has to know κ-σ vs min/max.**~~ — **SHIPPED v0.143.0** (Builder 2026-07-21, branch
   `claude/pensive-faraday-q5qgdb`). Added an opt-in `StackOptions.auto_reject` (default **False** →
@@ -16352,10 +16360,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   fail-before/pass-after): `test_noise_ratio_reads_only_the_central_crop_of_the_master` (monkeypatches
   `fits.getdata` to raise, so the endpoint can only answer by slicing the memmap) and
   `test_noise_ratio_is_unchanged_by_the_windowed_read`. No API/schema/config/default change.
-  **Still open:** the caching half above — but note it is now **markedly more marginal** than when it was filed. A
-  view costs a ~12 MB crop read plus one sub, not a whole canvas, so persisting the ratio would buy a small
-  constant rather than rescuing a page load. Worth doing only if a future run is already adding a `stack_runs`
-  column for something else.
+  ~~**Still open:** the caching half above~~ — **the caching half SHIPPED v0.268.1** (Builder 2026-08-18, branch
+  `claude/relaxed-franklin-i98kvb`), and the "worth doing only if a future run is already adding a `stack_runs`
+  column" caveat is answered by **not adding one**: the stamp is a `project_meta` row under a new
+  `NOISE_RATIO_META_PREFIX` (`webapp/routers/stack.py`), registered in `webapp/run_meta.py` so deleting the run
+  takes it with it — no schema change at all, so there is nothing to migrate and nothing to roll back.
+  **What a repeat view now costs: nothing.** The residual cost the note above measured was "a ~12 MB crop read
+  plus one sub" — and *the sub is the bigger half*: `load_seestar_raw` + `bilinear_debayer` at native
+  1080×1920 on every Target-page load and every finished Jobs card, off the NAS. Both are now skipped on a hit.
+  **The stamp is a cache, never a source of truth.** It carries a fingerprint of what it was measured *from* —
+  the master's `(mtime_ns, size)` and the id of the representative sub — so it can never be served stale. That
+  second half matters more than it looks: `_pick_reference_sub` picks the **sharpest accepted** frame, so
+  accepting or rejecting one changes which sub the comparison is against, and a run-id-only cache would keep
+  answering with the old sub's number. A `null` (a display-space export) is cached too — it is exactly as stable
+  as a number and costs the same FITS open to re-derive. Any mismatch, unparsable stamp, or unwritable project
+  simply measures, as today. **Upgrade-safe:** additive meta key with a live-measure fallback, so every existing
+  run keeps working unchanged; no config, DB-schema, on-disk, API-shape or default change (the endpoint's
+  `{ratio}` contract is untouched). **Tests (+5 in `tests/webapp/test_one_sub_vs_stack.py`, three fail-before):**
+  measured once and remembered (a second view never reopens the master or the sub), a `null` remembered too,
+  re-measured when the master is rewritten at the same path, re-measured when the representative sub is
+  rejected, and the stamp purged with the run.
 - ~~**NEW (Scout 2026-07-21, follow-on to the v0.148.1 sub-preview fix) — put a number on the "one frame vs your
   stack" reveal: "stacking cut your noise ~N×" — original spec kept for provenance.**~~ *(Beginner feature /
   trust; PRIORITY 3; size S–M.)* Now that
@@ -17752,6 +17776,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   **"Share this summary"** button that composes the tallies + hero grid into one social-ready PNG, reusing the
   existing share-card/PNG export path (`seestack/sharecard.py`) so the whole "year in review" can go out as one
   image. Both additive/read-only. *(S–M each, friendliness/enjoy-share — PRIORITY 3.)*
+  **▶ SLICE (b) IS ALREADY SHIPPED — only (a) is open (Builder 2026-08-18, `claude/relaxed-franklin-i98kvb`;
+  verified in the code, not assumed).** `GET /api/recap.jpg` (`webapp/routers/stats.py`) renders exactly that:
+  the recap's own figures drawn over the user's best picture by `seestack.recap.draw_recap_poster`, downloaded as
+  `my-sky-so-far.jpg`, with `GET /api/recap` serving the same numbers plus a copy-paste caption; nothing is
+  written to the library. So the remaining work here is **(a) the "your clearest night" tally only** — and its
+  own caution stands: it needs a per-target frame read, so it must be a separately-cached enrichment that never
+  opens every project on a hot render.
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)

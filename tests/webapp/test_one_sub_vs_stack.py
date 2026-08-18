@@ -416,3 +416,161 @@ def test_noise_ratio_is_unchanged_by_the_windowed_read(client, solved_library):
 
     got = _measure_noise_ratio(str(master), str(sub_path), info.bayer_pattern or "RGGB")
     assert got == want
+
+
+# ---- the measurement is remembered, per run ------------------------------
+#
+# This endpoint is fetched eagerly — once per Target-page load, and on every
+# finished "Process target" card — and each miss reloads the master's crop and
+# debayers a full native-resolution sub for a number that is a pure function of
+# two immutable things. The first measurement is stamped on the run; the tests
+# below pin both halves: that a repeat view doesn't measure again, and that a
+# stamp is never served once the thing it was measured from has changed.
+
+
+def _count_measurements(monkeypatch):
+    """Wrap ``_measure_noise_ratio`` with a call counter, keeping its behaviour."""
+    from webapp.routers import stack as stack_router
+
+    real = stack_router._measure_noise_ratio
+    calls: list[int] = []
+
+    def counted(*a, **kw):
+        calls.append(1)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(stack_router, "_measure_noise_ratio", counted)
+    return calls
+
+
+def _master_for(solved_library, safe, name, **kw) -> Path:
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / name
+    finally:
+        lib.close()
+    _write_linear_master(master, **kw)
+    return master
+
+
+def test_noise_ratio_is_measured_once_and_remembered(
+    client, solved_library, monkeypatch,
+):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_for(solved_library, safe, "master_cached.fits", sigma=2.0)
+    run_id = _register_run_with_master(solved_library, safe, master)
+    calls = _count_measurements(monkeypatch)
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise"
+    first = client.get(url)
+    second = client.get(url)
+
+    assert first.status_code == second.status_code == 200
+    assert first.json()["ratio"] is not None
+    # Same number, and the second view never reopened the master or the sub.
+    assert second.json()["ratio"] == first.json()["ratio"]
+    assert len(calls) == 1
+
+
+def test_noise_ratio_remembers_a_null_too(client, solved_library, monkeypatch):
+    # A display-space export has no meaningful linear sigma. That "no number"
+    # answer is as stable as a number is, and re-deriving it costs the same FITS
+    # open — so it is cached as well.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_for(
+        solved_library, safe, "edited_cached.fits", sigma=2.0, display_space=True)
+    run_id = _register_run_with_master(solved_library, safe, master)
+    calls = _count_measurements(monkeypatch)
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise"
+    assert client.get(url).json()["ratio"] is None
+    assert client.get(url).json()["ratio"] is None
+    assert len(calls) == 1
+
+
+def test_noise_ratio_is_re_measured_when_the_master_changes(
+    client, solved_library, monkeypatch,
+):
+    # The run row is immutable, but the master is addressed by path. A stamp
+    # must never outlive the pixels it was measured from.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_for(solved_library, safe, "master_rewritten.fits", sigma=2.0)
+    run_id = _register_run_with_master(solved_library, safe, master)
+    calls = _count_measurements(monkeypatch)
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise"
+    before = client.get(url).json()["ratio"]
+    # A different master at the same path: noisier, so a genuinely different
+    # ratio — which a stale stamp would hide.
+    _write_linear_master(master, sigma=20.0, seed=3)
+    after = client.get(url).json()["ratio"]
+
+    assert len(calls) == 2
+    assert before is not None and after is not None
+    assert after != before
+
+
+def test_noise_ratio_is_re_measured_when_the_representative_sub_changes(
+    client, solved_library, monkeypatch,
+):
+    # `_pick_reference_sub` picks the *sharpest accepted* frame, so rejecting it
+    # changes which sub the comparison is against — and therefore the answer.
+    from seestack.io.project import Project
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_for(solved_library, safe, "master_refswap.fits", sigma=2.0)
+    run_id = _register_run_with_master(solved_library, safe, master)
+    calls = _count_measurements(monkeypatch)
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise"
+    assert client.get(url).json()["ratio"] is not None
+    assert len(calls) == 1
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        tdir = Path(lib.target_dir(lib.find_target(safe)))
+    finally:
+        lib.close()
+    proj = Project.open(tdir)
+    try:
+        from webapp.routers.stack import _pick_reference_sub
+
+        chosen = _pick_reference_sub(proj)
+        assert chosen is not None
+        proj.update_frame(chosen.id, accept=0, reject_reason="test")
+    finally:
+        proj.close()
+
+    assert client.get(url).json()["ratio"] is not None
+    assert len(calls) == 2
+
+
+def test_deleting_a_run_takes_its_noise_stamp_with_it(client, solved_library):
+    # The stamp is per-run; an orphan row nothing will ever read is exactly what
+    # `webapp.run_meta` exists to prevent.
+    from seestack.io.project import Project
+    from webapp.routers.stack import NOISE_RATIO_META_PREFIX
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_for(solved_library, safe, "master_purged.fits", sigma=2.0)
+    run_id = _register_run_with_master(solved_library, safe, master)
+    client.get(f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise")
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        tdir = Path(lib.target_dir(lib.find_target(safe)))
+    finally:
+        lib.close()
+    proj = Project.open(tdir)
+    try:
+        assert proj.get_meta(f"{NOISE_RATIO_META_PREFIX}{run_id}") is not None
+    finally:
+        proj.close()
+
+    assert client.delete(f"/api/targets/{safe}/stack-runs/{run_id}").status_code == 200
+
+    proj = Project.open(tdir)
+    try:
+        assert proj.get_meta(f"{NOISE_RATIO_META_PREFIX}{run_id}") is None
+    finally:
+        proj.close()
