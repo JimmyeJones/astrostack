@@ -977,7 +977,12 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                   Save / share
                 </Button>
               </Menu.Target>
-              <Menu.Dropdown>
+              {/* Twelve items with a line of help each is taller than the space
+                  under a card halfway down a laptop screen — measured in a real
+                  browser, where the dropdown flipped upwards and lost its first
+                  item off the top. Capping it scrolls instead of clipping, the
+                  same way the Gallery's preset menu does. */}
+              <Menu.Dropdown mah={420} style={{ overflowY: "auto" }}>
                 <Menu.Label>Download</Menu.Label>
                 {run.has_preview && (
                   <Menu.Item

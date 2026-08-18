@@ -549,6 +549,23 @@ describe("HistoryView", () => {
     expect(await menuItem("Square")).toBeInTheDocument();
   });
 
+  it("caps the save/share menu's height instead of letting it clip", async () => {
+    // Measured in a real browser: twelve items with a line of help each is
+    // taller than the space under a card halfway down a 900 px screen, and the
+    // dropdown flipped upwards and lost its first item off the top. jsdom has no
+    // layout, so pin the cause — the dropdown scrolls rather than growing.
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ has_preview: true, has_fits: true, has_tiff: true })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+
+    openSaveShare();
+    const dropdown = (await menuItem("PNG")).closest(".mantine-Menu-dropdown");
+    expect(dropdown).not.toBeNull();
+    expect((dropdown as HTMLElement).style.overflowY).toBe("auto");
+    expect((dropdown as HTMLElement).style.maxHeight).not.toBe("");
+  });
+
   it("ticks an About-menu toggle that is currently on", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
