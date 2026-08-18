@@ -17776,13 +17776,44 @@ problems. Dogfood it every big-picture run and fix root causes.
   **"Share this summary"** button that composes the tallies + hero grid into one social-ready PNG, reusing the
   existing share-card/PNG export path (`seestack/sharecard.py`) so the whole "year in review" can go out as one
   image. Both additive/read-only. *(S–M each, friendliness/enjoy-share — PRIORITY 3.)*
-  **▶ SLICE (b) IS ALREADY SHIPPED — only (a) is open (Builder 2026-08-18, `claude/relaxed-franklin-i98kvb`;
-  verified in the code, not assumed).** `GET /api/recap.jpg` (`webapp/routers/stats.py`) renders exactly that:
-  the recap's own figures drawn over the user's best picture by `seestack.recap.draw_recap_poster`, downloaded as
-  `my-sky-so-far.jpg`, with `GET /api/recap` serving the same numbers plus a copy-paste caption; nothing is
-  written to the library. So the remaining work here is **(a) the "your clearest night" tally only** — and its
-  own caution stands: it needs a per-target frame read, so it must be a separately-cached enrichment that never
-  opens every project on a hot render.
+  **▶ BOTH SLICES ARE NOW DONE — (b) was already shipped, (a) SHIPPED v0.268.2** (Builder 2026-08-18, branch
+  `claude/relaxed-franklin-i98kvb`).
+  **(b), verified in the code rather than assumed:** `GET /api/recap.jpg` (`webapp/routers/stats.py`) already
+  rendered exactly the filed idea — the recap's own figures drawn over the user's best picture by
+  `seestack.recap.draw_recap_poster`, downloaded as `my-sky-so-far.jpg`, with `GET /api/recap` serving the same
+  numbers plus a copy-paste caption, and nothing written to the library.
+  **(a) "your best night", shipped — and the entry's own caution ("needs a per-target frame read… guard it so it
+  never opens every project on a hot render") is answered by not adding a walk at all.** The trick is that
+  `/api/activity-calendar` **already** opens every project and reads every accepted frame row for the Dashboard
+  heatmap, behind an app-level cache. So the star size rides along as an **optional 4th element** of the tuples
+  the webapp already streams into `accumulate_nights` — same walk, same cache, no second pass and no new
+  endpoint. Every existing 3-tuple caller folds byte-for-byte as before.
+  **What it says.** A new self-hiding card on "Your sky, so far": *"Your best night · 12 Jan 2026 — 2.4 px
+  stars — Your steadiest sky yet on M 42 — 1.5 h captured, 180 subs measured."* It is the first thing on that
+  page that **ranks** a night rather than adding it up, which is the question a beginner actually asks after a
+  few sessions. It ranks by **median star size in pixels** — the same measure the session recap's sharp/soft
+  verdict and the Target page's Nights card already use, so the app speaks in one voice rather than inventing a
+  second definition of "a good night". (Sky background, the entry's other suggestion, was deliberately left out:
+  it tracks the Moon and light pollution as much as the night, so "lowest sky" would rank a new-Moon night above
+  a genuinely steadier one.)
+  **Honest by construction, silent rather than wrong** (`seestack/activity_calendar.py::sharpest_night`): a night
+  needs `SHARPEST_MIN_MEASURED` (5) measured subs to qualify — a one-frame median describes the frame, not the
+  night — and at least `SHARPEST_MIN_NIGHTS` (2) nights must qualify, because naming the best of one is not a
+  fact about the sky. A failed measurement stored as 0, a negative or a NaN is not counted as a measurement (a
+  fabricated 0 px would win every comparison). Ties break on the earlier date. Only nights inside the window are
+  considered, so a brilliant night two years ago isn't "your best night" on a 12-month page.
+  **Upgrade-safe:** additive optional response fields (`median_fwhm_px`, `n_measured`, `sharpest_night`) on an
+  existing endpoint; the frontend types them optional and the card renders **nothing** against a backend that
+  doesn't send them, so old/new mix in either direction. No config, DB-schema, on-disk or default change, and no
+  new endpoint. **Verified in a real browser as well as jsdom** (`scripts/agent-dogfood.sh` + a probe that serves
+  the card a sharpest night): it renders inside the viewport at 1440 px **and** 420 px with no console errors.
+  **Tests (+21):** `tests/test_activity_calendar.py` (+8 — the sharpest night is the smallest-star one, a thinly
+  measured night can't win, silence on one qualifying night, silence with nothing measured, unmeasurable values
+  aren't counted, 3-tuple callers fold exactly as before, ties break earlier, and the window is respected),
+  `tests/webapp/test_activity_calendar.py` (+3 — per-night medians on the wire, silence without measurements,
+  and the sharpest night serialised whole), `bestNight.test.ts` (+5) and `BestNightCard.test.tsx` (+4 — named,
+  silent on null, silent against an older backend, silent on a failed fetch), plus `SkySoFar.test.tsx` (+1 —
+  the card is on the page).
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)

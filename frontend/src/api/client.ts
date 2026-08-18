@@ -488,6 +488,10 @@ export interface NightActivity {
   exposure_s: number;
   n_frames: number;
   targets: string[];
+  // Typical star size that night (median of the subs QC measured), in pixels.
+  // Optional: an older backend doesn't send it.
+  median_fwhm_px?: number | null;
+  n_measured?: number;
 }
 
 export interface ActivityCalendar {
@@ -499,6 +503,9 @@ export interface ActivityCalendar {
   total_exposure_s: number;
   nights_this_month: number;
   best_streak_nights: number;
+  // "Your best night" — the window's sharpest night, or null/absent when too
+  // little was measured to name one honestly (or on an older backend).
+  sharpest_night?: NightActivity | null;
 }
 
 export interface SummaryTarget {
