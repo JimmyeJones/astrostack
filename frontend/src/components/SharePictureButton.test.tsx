@@ -1,4 +1,4 @@
-import { MantineProvider } from "@mantine/core";
+import { MantineProvider, Menu } from "@mantine/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { notifications } from "@mantine/notifications";
@@ -89,6 +89,50 @@ describe("SharePictureButton", () => {
     // Give the async share a tick to settle, then assert no notification fired.
     await waitFor(() => expect(btn).not.toBeDisabled());
     expect(showSpy).not.toHaveBeenCalled();
+    restore();
+  });
+
+  it("can render as a menu item, for a card that groups its actions", async () => {
+    const share = vi.fn(async (_d?: ShareData) => {});
+    const restore = stubShare({ canShare: () => true, share });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" }),
+    })));
+
+    render(
+      <MantineProvider>
+        <Menu opened>
+          <Menu.Dropdown>
+            <SharePictureButton
+              asMenuItem url="/api/run/1/jpeg" filename="m31.jpg" title="M31"
+            />
+          </Menu.Dropdown>
+        </Menu>
+      </MantineProvider>,
+    );
+
+    // It is a menu item, not a button, and it still shares.
+    expect(screen.queryByRole("button", { name: "Share picture" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Share picture" }));
+    await waitFor(() => expect(share).toHaveBeenCalled());
+    restore();
+  });
+
+  it("renders no menu item either when this browser can't share files", () => {
+    const restore = stubShare({ canShare: () => false, share: async () => {} });
+    render(
+      <MantineProvider>
+        <Menu opened>
+          <Menu.Dropdown>
+            <SharePictureButton
+              asMenuItem url="/api/run/1/jpeg" filename="m31.jpg" title="M31"
+            />
+          </Menu.Dropdown>
+        </Menu>
+      </MantineProvider>,
+    );
+    expect(screen.queryByRole("menuitem", { name: "Share picture" })).not.toBeInTheDocument();
     restore();
   });
 });

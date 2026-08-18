@@ -29,6 +29,62 @@ const ASPECTS: {
   { aspect: "square", label: "Square", hint: "1:1 — socials", icon: IconSquare },
 ];
 
+/**
+ * The wallpaper aspect items themselves, without a menu around them — so a
+ * parent menu that already exists (e.g. the History card's "Save / share")
+ * can offer the same three downloads as a section of its own dropdown rather
+ * than nesting a second menu button inside it. Must be rendered inside a
+ * `Menu.Dropdown`.
+ */
+export function WallpaperMenuItems({
+  safe,
+  runId,
+  canNorthUp = false,
+  withLabel = true,
+}: {
+  safe: string;
+  runId: number;
+  /** Offer the "North up" toggle — only when the run has a real field rotation
+   * to correct (e.g. `render-suggestion`'s `north_up_deg` is non-null). */
+  canNorthUp?: boolean;
+  /** Show the "Make it your wallpaper" heading above the items. */
+  withLabel?: boolean;
+}) {
+  const [northUp, setNorthUp] = useState(false);
+  return (
+    <>
+      {withLabel ? <Menu.Label>Make it your wallpaper</Menu.Label> : null}
+      {ASPECTS.map(({ aspect, label, hint, icon: Icon }) => (
+        <Menu.Item
+          key={aspect}
+          leftSection={<Icon size={16} />}
+          component="a"
+          href={api.stackWallpaperUrl(safe, runId, aspect, northUp)}
+          // `download` hints the browser to save rather than navigate.
+          download
+        >
+          {label}
+          <span style={{ display: "block", fontSize: "0.72rem", opacity: 0.6 }}>{hint}</span>
+        </Menu.Item>
+      ))}
+      {canNorthUp ? (
+        <>
+          <Menu.Divider />
+          <div style={{ padding: "6px 12px" }}>
+            <Switch
+              size="xs"
+              label="North up"
+              checked={northUp}
+              onChange={(e) => setNorthUp(e.currentTarget.checked)}
+              aria-label="Orient wallpaper North up"
+            />
+          </div>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 export function WallpaperMenu({
   safe,
   runId,
@@ -44,7 +100,6 @@ export function WallpaperMenu({
    * to correct (e.g. `render-suggestion`'s `north_up_deg` is non-null). */
   canNorthUp?: boolean;
 }) {
-  const [northUp, setNorthUp] = useState(false);
   return (
     <Menu shadow="md" width={220} position="bottom-start" closeOnItemClick={false}>
       <Menu.Target>
@@ -57,34 +112,7 @@ export function WallpaperMenu({
         </Button>
       </Menu.Target>
       <Menu.Dropdown>
-        <Menu.Label>Make it your wallpaper</Menu.Label>
-        {ASPECTS.map(({ aspect, label, hint, icon: Icon }) => (
-          <Menu.Item
-            key={aspect}
-            leftSection={<Icon size={16} />}
-            component="a"
-            href={api.stackWallpaperUrl(safe, runId, aspect, northUp)}
-            // `download` hints the browser to save rather than navigate.
-            download
-          >
-            {label}
-            <span style={{ display: "block", fontSize: "0.72rem", opacity: 0.6 }}>{hint}</span>
-          </Menu.Item>
-        ))}
-        {canNorthUp ? (
-          <>
-            <Menu.Divider />
-            <div style={{ padding: "6px 12px" }}>
-              <Switch
-                size="xs"
-                label="North up"
-                checked={northUp}
-                onChange={(e) => setNorthUp(e.currentTarget.checked)}
-                aria-label="Orient wallpaper North up"
-              />
-            </div>
-          </>
-        ) : null}
+        <WallpaperMenuItems safe={safe} runId={runId} canNorthUp={canNorthUp} />
       </Menu.Dropdown>
     </Menu>
   );

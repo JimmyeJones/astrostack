@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
-  ActionIcon, Alert, Badge, Button, Card, Center, Group, Loader, SegmentedControl,
+  ActionIcon, Alert, Badge, Button, Card, Center, Group, Loader, Menu, SegmentedControl,
   SimpleGrid, Slider, Stack, Switch, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconCheck, IconClipboardText, IconCopy, IconDeviceFloppy, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
+import { IconAdjustments, IconCheck, IconChevronDown, IconClipboardText, IconCopy, IconDeviceFloppy, IconDeviceMobile, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting } from "../api/client";
@@ -31,13 +32,20 @@ import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
 import { OneFrameVsStackCard } from "../components/OneFrameVsStackCard";
 import { SharePictureButton } from "../components/SharePictureButton";
-import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
+import { ScanToPhoneModal } from "../components/ScanToPhoneButton";
 import { SampleTourNote } from "../components/SampleTourNote";
-import { WallpaperMenu } from "../components/WallpaperMenu";
+import { WallpaperMenuItems } from "../components/WallpaperMenu";
 import { sharePictureText } from "../share";
 import { Sparkline } from "../components/Sparkline";
 
 export type RunSort = "newest" | "cleanest";
+
+// The one-line "what this does" under a menu item's name — the wording that used
+// to live in each button's hover tooltip, now readable without hovering (which a
+// phone can't do anyway).
+const MENU_HINT: CSSProperties = {
+  display: "block", fontSize: "0.72rem", opacity: 0.6, whiteSpace: "normal",
+};
 
 // Order runs for display. "newest" preserves the API's timestamp-DESC order;
 // "cleanest" puts the lowest-noise runs first, with runs that carry no measured
@@ -624,6 +632,10 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const [cacheBust, setCacheBust] = useState(0);
   const [light, setLight] = useState(false);
   const [copyingCaption, setCopyingCaption] = useState(false);
+  // The "To phone" QR. It lives on the card rather than inside the Save / share
+  // menu item that opens it, because the menu closes on click — a popover owned
+  // by the item would be unmounted with the dropdown before it could be read.
+  const [toPhone, setToPhone] = useState(false);
   // "What's in this picture?" (Identify) and "How big is this in the sky?"
   // (Scale) both come from the run's WCS via the same annotations endpoint —
   // lazily fetched once the user asks either (needs the FITS-header WCS, so gated
@@ -949,142 +961,183 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               </Button>
             </Tooltip>
           )}
-          {run.has_fits && (
-            <Tooltip label="Adjust stretch / black point from the full-range FITS">
-              <Button
-                size="xs" variant={adjust ? "filled" : "light"}
-                leftSection={<IconAdjustments size={14} />}
-                onClick={() => setAdjust((a) => !a)}
-              >
-                Adjust
-              </Button>
-            </Tooltip>
+          {/* Everything you can *do with the file* lives behind one menu. The
+              card used to lay all fifteen of these out as buttons, four rows
+              deep, per run — so a target with eight stacks was a wall of
+              chrome. Nothing was removed: every item below is the control that
+              used to be a button, with its own wording and behaviour. */}
+          {(run.has_preview || run.has_fits || run.has_tiff) && (
+            <Menu shadow="md" width={260} position="bottom-start">
+              <Menu.Target>
+                <Button
+                  size="xs" variant="light"
+                  leftSection={<IconDownload size={14} />}
+                  rightSection={<IconChevronDown size={14} />}
+                >
+                  Save / share
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Label>Download</Menu.Label>
+                {run.has_preview && (
+                  <Menu.Item
+                    leftSection={<IconPhotoDown size={16} />}
+                    component="a" href={api.stackArtifactUrl(safe, run.id, "preview")}
+                  >
+                    PNG
+                    <span style={MENU_HINT}>Quick preview, up to 1024 px wide</span>
+                  </Menu.Item>
+                )}
+                {run.has_fits && (
+                  <Menu.Item
+                    leftSection={<IconPhotoDown size={16} />}
+                    component="a" href={api.stackFullResPngUrl(safe, run.id, applyNorthUp)}
+                  >
+                    Full-res PNG
+                    <span style={MENU_HINT}>
+                      Same look, full size ({run.canvas_w}×{run.canvas_h} px)
+                    </span>
+                  </Menu.Item>
+                )}
+                {run.has_preview && (
+                  <Menu.Item
+                    leftSection={<IconPhotoDown size={16} />}
+                    component="a"
+                    href={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
+                  >
+                    JPEG
+                    <span style={MENU_HINT}>
+                      {applyNorthUp ? "North up — smaller, best for sharing" : "Smaller — best for sharing"}
+                    </span>
+                  </Menu.Item>
+                )}
+                {run.has_fits && (
+                  <Menu.Item
+                    leftSection={<IconDownload size={16} />}
+                    component="a" href={api.stackArtifactUrl(safe, run.id, "fits")}
+                  >
+                    FITS
+                    <span style={MENU_HINT}>Raw data — for re-processing, not sharing</span>
+                  </Menu.Item>
+                )}
+                {run.has_tiff && (
+                  <Menu.Item
+                    leftSection={<IconDownload size={16} />}
+                    component="a" href={api.stackArtifactUrl(safe, run.id, "tiff")}
+                  >
+                    TIFF
+                  </Menu.Item>
+                )}
+                {run.has_preview && (
+                  <>
+                    <Menu.Divider />
+                    <Menu.Label>Share</Menu.Label>
+                    <SharePictureButton
+                      asMenuItem
+                      url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
+                      {...sharePictureText(
+                        run.output_basename,
+                        formatStampDate(run.timestamp_utc),
+                      )}
+                      text={shareCaption}
+                    />
+                    {/* The QR opens in a modal owned by the card, not a popover
+                        owned by this item — a menu closes on click, which would
+                        unmount its own popover with it. */}
+                    <Menu.Item
+                      leftSection={<IconDeviceMobile size={16} />}
+                      onClick={() => setToPhone(true)}
+                    >
+                      To phone
+                      <span style={MENU_HINT}>Scan a QR to open it on your phone</span>
+                    </Menu.Item>
+                    <Menu.Item
+                      leftSection={copyingCaption
+                        ? <Loader size={14} />
+                        : <IconClipboardText size={16} />}
+                      onClick={copyCaption}
+                    >
+                      Copy caption
+                      <span style={MENU_HINT}>A ready-to-post sentence about this picture</span>
+                    </Menu.Item>
+                    <Menu.Divider />
+                    <WallpaperMenuItems safe={safe} runId={run.id} />
+                  </>
+                )}
+              </Menu.Dropdown>
+            </Menu>
           )}
-          {run.has_fits && (
-            <Tooltip label="Show how this stack was made (from the FITS header)">
-              <Button
-                size="xs" variant={showInfo ? "filled" : "light"}
-                leftSection={<IconInfoCircle size={14} />}
-                onClick={() => setShowInfo((s) => !s)}
-              >
-                Info
-              </Button>
-            </Tooltip>
-          )}
-          {run.has_fits && (
-            <Tooltip label="Label the catalog objects that fall inside this picture (Messier / NGC / IC)">
-              <Button
-                size="xs" variant={identify ? "filled" : "light"} color="cyan"
-                leftSection={<IconTags size={14} />}
-                onClick={() => setIdentify((v) => !v)}
-                loading={identify && annotations.isLoading}
-              >
-                Identify
-              </Button>
-            </Tooltip>
-          )}
-          {run.has_fits && (
-            <Tooltip label="Show how big this picture is in the sky — a scale bar and a full-Moon comparison">
-              <Button
-                size="xs" variant={scale ? "filled" : "light"} color="grape"
-                leftSection={<IconRuler2 size={14} />}
-                onClick={() => setScale((v) => !v)}
-                loading={scale && annotations.isLoading}
-              >
-                Scale
-              </Button>
-            </Tooltip>
-          )}
-          {run.has_preview && (
-            <Tooltip label={run.is_cover
-              ? "This is the target's cover — show the newest stack instead"
-              : "Make this picture the target's cover — the one shown on the Library tile, and the one that represents this target on My best pictures (pinned, so the ranking can't hide it)"}
-              multiline w={300}>
-              <Button
-                size="xs" variant={run.is_cover ? "filled" : "light"} color="yellow"
-                leftSection={run.is_cover ? <IconStarFilled size={14} /> : <IconStar size={14} />}
-                loading={cover.isPending}
-                onClick={() => cover.mutate(!run.is_cover)}
-              >
-                {run.is_cover ? "Cover" : "Set as cover"}
-              </Button>
-            </Tooltip>
-          )}
-          {run.has_preview && (
-            <Tooltip label="Download a quick preview PNG (up to 1024px wide) — small and fast, good for a glance">
-              <Button
-                size="xs" variant="light" leftSection={<IconPhotoDown size={14} />}
-                component="a" href={api.stackArtifactUrl(safe, run.id, "preview")}
-              >
-                PNG
-              </Button>
-            </Tooltip>
-          )}
-          {run.has_fits && (
-            <Tooltip label={`Download the picture at full output resolution (${run.canvas_w}×${run.canvas_h} px) — the same look as shown here, just full-size`}>
-              <Button
-                size="xs" variant="light" color="grape" leftSection={<IconPhotoDown size={14} />}
-                component="a" href={api.stackFullResPngUrl(safe, run.id, applyNorthUp)}
-              >
-                Full-res PNG
-              </Button>
-            </Tooltip>
-          )}
-          {run.has_preview && (
-            <Tooltip label={applyNorthUp
-              ? "Download a JPEG oriented so North is up (smaller — best for sharing)"
-              : "Download the finished picture as a JPEG (smaller — best for sharing)"}>
-              <Button
-                size="xs" variant="light" leftSection={<IconPhotoDown size={14} />}
-                component="a" href={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
-              >
-                JPEG
-              </Button>
-            </Tooltip>
-          )}
-          {run.has_preview && (
-            <SharePictureButton
-              url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
-              {...sharePictureText(
-                run.output_basename,
-                formatStampDate(run.timestamp_utc),
-              )}
-              text={shareCaption}
-            />
-          )}
-          {run.has_preview && (
-            <ScanToPhoneButton
-              url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
-            />
-          )}
-          {run.has_preview && <WallpaperMenu safe={safe} runId={run.id} />}
-          {run.has_preview && (
-            <Tooltip label="Copy a ready-to-post caption — a correct, plain-language sentence about this picture to paste wherever you're sharing">
-              <Button
-                size="xs" variant="light" color="teal" leftSection={<IconClipboardText size={14} />}
-                loading={copyingCaption} onClick={copyCaption}
-              >
-                Copy caption
-              </Button>
-            </Tooltip>
-          )}
-          {run.has_fits && (
-            <Tooltip label="Download the raw scientific data (FITS) — for re-processing, not sharing">
-              <Button
-                size="xs" variant="light" leftSection={<IconDownload size={14} />}
-                component="a" href={api.stackArtifactUrl(safe, run.id, "fits")}
-              >
-                FITS
-              </Button>
-            </Tooltip>
-          )}
-          {run.has_tiff && (
-            <Button
-              size="xs" variant="light" leftSection={<IconDownload size={14} />}
-              component="a" href={api.stackArtifactUrl(safe, run.id, "tiff")}
-            >
-              TIFF
-            </Button>
+          {/* And everything that tells you *about* the picture — or changes how
+              this card shows it — lives behind the second. */}
+          {(run.has_fits || run.has_preview) && (
+            <Menu shadow="md" width={260} position="bottom-start">
+              <Menu.Target>
+                <Button
+                  size="xs" variant="light"
+                  leftSection={<IconInfoCircle size={14} />}
+                  rightSection={<IconChevronDown size={14} />}
+                >
+                  About this stack
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                {run.has_fits && (
+                  <Menu.Item
+                    leftSection={<IconInfoCircle size={16} />}
+                    rightSection={showInfo ? <IconCheck size={14} /> : null}
+                    onClick={() => setShowInfo((s) => !s)}
+                  >
+                    Info
+                    <span style={MENU_HINT}>How this stack was made</span>
+                  </Menu.Item>
+                )}
+                {run.has_fits && (
+                  <Menu.Item
+                    leftSection={<IconTags size={16} />}
+                    rightSection={identify ? <IconCheck size={14} /> : null}
+                    onClick={() => setIdentify((v) => !v)}
+                  >
+                    Identify
+                    <span style={MENU_HINT}>Label the catalog objects in the field</span>
+                  </Menu.Item>
+                )}
+                {run.has_fits && (
+                  <Menu.Item
+                    leftSection={<IconRuler2 size={16} />}
+                    rightSection={scale ? <IconCheck size={14} /> : null}
+                    onClick={() => setScale((v) => !v)}
+                  >
+                    Scale
+                    <span style={MENU_HINT}>How big this is in the sky, vs the Moon</span>
+                  </Menu.Item>
+                )}
+                {run.has_fits && (
+                  <Menu.Item
+                    leftSection={<IconAdjustments size={16} />}
+                    rightSection={adjust ? <IconCheck size={14} /> : null}
+                    onClick={() => setAdjust((a) => !a)}
+                  >
+                    Adjust
+                    <span style={MENU_HINT}>Stretch / black point, from the full-range FITS</span>
+                  </Menu.Item>
+                )}
+                {run.has_preview && (
+                  <Menu.Item
+                    leftSection={cover.isPending
+                      ? <Loader size={14} />
+                      : run.is_cover ? <IconStarFilled size={16} /> : <IconStar size={16} />}
+                    onClick={() => cover.mutate(!run.is_cover)}
+                  >
+                    {run.is_cover ? "Cover" : "Set as cover"}
+                    <span style={MENU_HINT}>
+                      {run.is_cover
+                        ? "This is the target's cover — show the newest stack instead"
+                        : "Use this picture on the Library tile and My best pictures"}
+                    </span>
+                  </Menu.Item>
+                )}
+              </Menu.Dropdown>
+            </Menu>
           )}
         </Group>
         <Tooltip label="Delete this stack run">
@@ -1146,6 +1199,14 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           : {})}
         onClose={() => setLight(false)}
       />
+
+      {run.has_preview ? (
+        <ScanToPhoneModal
+          url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
+          opened={toPhone}
+          onClose={() => setToPhone(false)}
+        />
+      ) : null}
     </Card>
   );
 }
