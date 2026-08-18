@@ -4,12 +4,13 @@ import {
   Table, TagsInput, Text, Textarea, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconAlertTriangle, IconArrowBackUp, IconCheck, IconClock, IconDeviceFloppy, IconHistory,
+  IconAlertTriangle, IconArrowBackUp, IconCheck, IconChevronDown, IconClock,
+  IconDeviceFloppy, IconDeviceMobile, IconDownload, IconHistory,
   IconNotes, IconPhoto, IconPhotoDown, IconSparkles, IconStack2, IconTelescope,
   IconTargetArrow, IconWand, IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
@@ -34,9 +35,9 @@ import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
 import { StackNoiseBadge } from "../components/StackNoiseBadge";
 import { FirstLookCard } from "../components/FirstLookCard";
 import { SampleTourNote } from "../components/SampleTourNote";
-import { WallpaperMenu } from "../components/WallpaperMenu";
+import { WallpaperMenuItems } from "../components/WallpaperMenu";
 import { SharePictureButton } from "../components/SharePictureButton";
-import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
+import { ScanToPhoneModal } from "../components/ScanToPhoneButton";
 import { sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
@@ -58,6 +59,13 @@ export { describeObject };
 
 const NUM = (v: number | null, digits = 2) =>
   v === null || v === undefined ? "—" : v.toFixed(digits);
+
+// One line of plain-language help under a menu item's label — the wording that
+// used to live in each button's hover tooltip, now readable without hovering
+// (which a phone can't do anyway). Matches the History card's menus.
+const MENU_HINT: CSSProperties = {
+  display: "block", fontSize: "0.72rem", opacity: 0.6, whiteSpace: "normal",
+};
 
 type SortKey = "id" | "timestamp_utc" | "fwhm_px" | "star_count" | "eccentricity_median" | "sky_adu_median" | "transparency_score";
 
@@ -336,6 +344,10 @@ export function TargetView() {
   // over-aggressive cut (a 30% reject_worst, or reject_streaked that went too far).
   const [lastReject, setLastReject] = useState<{ ids: number[]; label: string } | null>(null);
   const [gradeOpen, setGradeOpen] = useState(false);
+  // The "To phone" QR. It lives on the page rather than inside the Save / share
+  // menu item that opens it, because the menu closes on click — a popover owned
+  // by the item would be unmounted with the dropdown before it could be read.
+  const [toPhone, setToPhone] = useState(false);
 
   const target = useQuery({ queryKey: ["target", safe], queryFn: () => api.getTarget(safe) });
   // "What am I looking at?" — an offline catalog lookup that turns a bare folder
@@ -1188,54 +1200,68 @@ export function TargetView() {
               Edit
             </Button>
           ) : null}
+          {/* Everything you can *do with the finished picture* lives behind one
+              menu. This row used to lay nine controls out side by side — with
+              two dropdowns ("Picture" and "Wallpaper") that were both "save this
+              picture" — on the page the owner named as the busiest in the app.
+              Nothing was removed: every item below is the control that used to
+              be a button, with its own wording and behaviour. */}
           {latestRun?.has_preview ? (
-            <Menu shadow="md" position="bottom-end" withinPortal>
+            <Menu shadow="md" width={260} position="bottom-end" withinPortal>
               <Menu.Target>
-                <Tooltip label="Download the latest finished picture (PNG or JPEG)">
-                  <Button variant="default" leftSection={<IconPhotoDown size={16} />}
-                    aria-label="Download latest picture">
-                    Picture
-                  </Button>
-                </Tooltip>
+                <Button variant="default" leftSection={<IconDownload size={16} />}
+                  rightSection={<IconChevronDown size={16} />}
+                  aria-label="Save or share the latest picture">
+                  <Box visibleFrom="sm">Save / share</Box>
+                  <Box hiddenFrom="sm">Save</Box>
+                </Button>
               </Menu.Target>
-              <Menu.Dropdown>
+              {/* Same cap the History card needed (v0.267.2): a dropdown this
+                  tall flips upwards under a card halfway down the screen and
+                  loses its first item off the top — scroll instead of clip. */}
+              <Menu.Dropdown mah={420} style={{ overflowY: "auto" }}>
+                <Menu.Label>Download</Menu.Label>
                 {latestRun.has_fits ? (
-                  <Menu.Item component="a" href={api.stackFullResPngUrl(safe, latestRun.id)}>
+                  <Menu.Item leftSection={<IconPhotoDown size={16} />}
+                    component="a" href={api.stackFullResPngUrl(safe, latestRun.id)}>
                     Full-res PNG (native size)
                   </Menu.Item>
                 ) : null}
-                <Menu.Item component="a" href={api.stackArtifactUrl(safe, latestRun.id, "preview")}>
+                <Menu.Item leftSection={<IconPhotoDown size={16} />}
+                  component="a" href={api.stackArtifactUrl(safe, latestRun.id, "preview")}>
                   {latestRun.has_fits ? "Quick preview PNG (up to 1024px)" : "PNG (best quality)"}
                 </Menu.Item>
-                <Menu.Item component="a" href={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}>
+                <Menu.Item leftSection={<IconPhotoDown size={16} />}
+                  component="a" href={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}>
                   JPEG (smaller — best for sharing)
                 </Menu.Item>
+                <Menu.Divider />
+                <Menu.Label>Share</Menu.Label>
+                <SharePictureButton
+                  asMenuItem
+                  url={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}
+                  {...sharePictureText(
+                    target.data?.name,
+                    // The same date `LatestPictureCard`'s share text uses for the
+                    // same picture: a bare `toLocaleDateString()` prints the numeric
+                    // form half the world reads the other way round ("8/16/2026"),
+                    // and this text is what the owner posts publicly.
+                    formatStampDate(latestRun.timestamp_utc),
+                  )}
+                />
+                {/* The QR opens in a modal owned by the page, not a popover owned
+                    by this item — a menu closes on click, which would unmount its
+                    own popover with it. */}
+                <Menu.Item leftSection={<IconDeviceMobile size={16} />}
+                  onClick={() => setToPhone(true)}>
+                  To phone
+                  <span style={MENU_HINT}>Scan a QR to open it on your phone</span>
+                </Menu.Item>
+                <Menu.Divider />
+                <WallpaperMenuItems safe={safe} runId={latestRun.id}
+                  canNorthUp={wallpaperCanNorthUp} />
               </Menu.Dropdown>
             </Menu>
-          ) : null}
-          {latestRun?.has_preview ? (
-            <SharePictureButton
-              url={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}
-              variant="default"
-              {...sharePictureText(
-                target.data?.name,
-                // The same date `LatestPictureCard`'s share text uses for the
-                // same picture: a bare `toLocaleDateString()` prints the numeric
-                // form half the world reads the other way round ("8/16/2026"),
-                // and this text is what the owner posts publicly.
-                formatStampDate(latestRun.timestamp_utc),
-              )}
-            />
-          ) : null}
-          {latestRun?.has_preview ? (
-            <ScanToPhoneButton
-              url={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}
-              variant="default"
-            />
-          ) : null}
-          {latestRun?.has_preview ? (
-            <WallpaperMenu safe={safe} runId={latestRun.id} size="sm" variant="default"
-              canNorthUp={wallpaperCanNorthUp} />
           ) : null}
           <Button component={Link} to={`/targets/${safe}/stack`}
             leftSection={<IconStack2 size={16} />} aria-label="Stack">
@@ -1578,6 +1604,14 @@ export function TargetView() {
           ) },
         ]}
       />
+
+      {latestRun?.has_preview ? (
+        <ScanToPhoneModal
+          url={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}
+          opened={toPhone}
+          onClose={() => setToPhone(false)}
+        />
+      ) : null}
 
     </Stack>
   );

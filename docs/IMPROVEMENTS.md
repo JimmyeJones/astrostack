@@ -10234,9 +10234,32 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEXT SLICE OF THE STANDING IA ITEM (Builder 2026-08-18, counted in `routes/Target.tsx` while shipping the
+- ~~**NEXT SLICE OF THE STANDING IA ITEM (Builder 2026-08-18, counted in `routes/Target.tsx` while shipping the
   History-card grouping v0.267.0) — the Target page's hero action row is **nine controls wide**, and four of them
-  are the same "do something with the finished picture" family the History card just folded into one menu.**
+  are the same "do something with the finished picture" family the History card just folded into one menu.**~~ —
+  **SHIPPED v0.268.0** (Builder 2026-08-18, branch `claude/relaxed-franklin-i98kvb`), built to the filed shape
+  exactly. *(Friendliness / the owner's "extremely busy" priority — PRIORITY 3.)*
+  **Before → after, counted from the code the row renders:** **9 → 6**, and **one** dropdown where there were two.
+  The row is now *Process target · Re-run QC + Solve · History · Edit · Save / share ▾ · Stack*; **nothing was
+  removed** — Picture's three downloads, Share, To phone and the three wallpaper aspects are all inside the one
+  menu, each with its old tooltip wording as a visible one-line hint.
+  **Re-use, not re-implementation**, as the entry insisted: `WallpaperMenuItems`, `SharePictureButton asMenuItem`
+  and `ScanToPhoneModal` are the pieces the History card extracted in v0.267.0, rendered here unchanged — so the
+  two surfaces can't drift. `wallpaperCanNorthUp` is still threaded through (the Target page has it; the History
+  card does not), so the North-up switch still appears exactly when the run has a rotation to correct. The
+  dropdown carries the same `mah={420}` + `overflowY: "auto"` cap v0.267.2 needed, so it scrolls instead of
+  clipping. The phone labels v0.266.1 un-hid are kept: the trigger reads **Save / share** on a wide screen and
+  **Save** below `sm`, in words, not an icon.
+  Frontend-only: no API, schema, config, on-disk or default change; no control added or removed.
+  **Verified in a real browser, not only in jsdom** (`scripts/agent-dogfood.sh` + a menu probe, sample stacked):
+  the row is one line of six at 1440 px and two lines of three at 420 px (it used to wrap to four), and with the
+  menu open the dropdown **fits the viewport at both widths** (measured box, not eyeballed) with no console
+  errors — the exact failure that bit the History card's twelve-item menu.
+  **Tests (+3, and 6 existing call-sites updated rather than weakened):** `Target.test.tsx` — the row keeps its
+  five inline controls with all four picture controls absent as buttons *and* as links; every folded action is
+  reachable inside the one menu; and the phone QR survives the menu closing behind it. The existing download,
+  wallpaper, North-up and share-text assertions were kept verbatim and given an explicit `openSaveShare()` first.
+  *(Original spec kept below for provenance.)*
   *(Friendliness / the owner's "extremely busy" priority — PRIORITY 3; size S now, because the machinery exists;
   frontend-only.)* **Counted, at `Target.tsx:1158-1243`:** *Process target · Re-run QC + Solve · History · Edit ·
   Picture ▾ · Share · To phone · Wallpaper ▾ · Stack* — on the page the owner complained about by name, and with
