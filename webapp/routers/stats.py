@@ -507,6 +507,11 @@ class NightActivityOut(BaseModel):
     exposure_s: float
     n_frames: int
     targets: list[str]
+    # Typical star size that night (median of the subs QC measured), in pixels,
+    # or null when nothing that night was measured. Additive — an older
+    # frontend simply ignores it.
+    median_fwhm_px: float | None = None
+    n_measured: int = 0
 
 
 class ActivityCalendarOut(BaseModel):
@@ -521,6 +526,9 @@ class ActivityCalendarOut(BaseModel):
     total_exposure_s: float
     nights_this_month: int
     best_streak_nights: int
+    # "Your best night" — the window's sharpest night, or null when too little
+    # was measured to name one honestly. Additive.
+    sharpest_night: NightActivityOut | None = None
 
 
 def _collect_activity_calendar(lib, targets, *, today, months, lon_deg):
@@ -541,8 +549,14 @@ def _collect_activity_calendar(lib, targets, *, today, months, lon_deg):
             # rejected/set-aside subs here painted a clouded-out, fully-rejected
             # night as a deep "long night" cell and over-reported total exposure
             # versus the tile beside it.
+            # The optional 4th element is the frame's measured star size, which
+            # feeds the per-night median behind "your best night". It costs
+            # nothing extra: this walk already opens every project and reads
+            # every accepted frame row, so the sharpest-night answer rides along
+            # on the pass (and the cache) the heatmap already pays for, instead
+            # of opening the library a second time.
             accumulate_nights(
-                ((f.timestamp_utc, f.exposure_s, t.name)
+                ((f.timestamp_utc, f.exposure_s, t.name, f.fwhm_px)
                  for f in proj.iter_frames(accepted_only=True)),
                 acc, lon_deg=lon_deg,
             )
@@ -590,6 +604,17 @@ def _cached_activity_calendar(request: Request, months: int):
         lib.close()
 
 
+def _night_out(n) -> NightActivityOut:
+    """One engine :class:`NightActivity` as the wire shape. One place, so the
+    calendar's cells and the sharpest-night summary can't describe the same
+    night differently."""
+    return NightActivityOut(
+        date=n.date, exposure_s=n.exposure_s,
+        n_frames=n.n_frames, targets=n.targets,
+        median_fwhm_px=n.median_fwhm_px, n_measured=n.n_measured,
+    )
+
+
 @router.get("/api/activity-calendar", response_model=ActivityCalendarOut)
 def get_activity_calendar(request: Request, months: int = 12) -> ActivityCalendarOut:
     """The library's imaging activity as a calendar heatmap — one cell per
@@ -605,17 +630,14 @@ def get_activity_calendar(request: Request, months: int = 12) -> ActivityCalenda
         start_date=cal.start_date,
         end_date=cal.end_date,
         months=cal.months,
-        nights=[
-            NightActivityOut(
-                date=n.date, exposure_s=n.exposure_s,
-                n_frames=n.n_frames, targets=n.targets,
-            )
-            for n in cal.nights
-        ],
+        nights=[_night_out(n) for n in cal.nights],
         n_nights=cal.n_nights,
         total_exposure_s=cal.total_exposure_s,
         nights_this_month=cal.nights_this_month,
         best_streak_nights=cal.best_streak_nights,
+        sharpest_night=(
+            _night_out(cal.sharpest) if cal.sharpest is not None else None
+        ),
     )
 
 

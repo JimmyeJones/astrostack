@@ -94,11 +94,19 @@ function phoneLabel(button: HTMLElement): string {
   return (clone.textContent ?? "").trim();
 }
 
+// The hero row groups everything you can do *with the finished picture* behind
+// one "Save / share" menu, so the assertions below open it first.
+async function openSaveShare() {
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Save or share the latest picture" }),
+  );
+}
+
 describe("TargetView action row on a phone", () => {
   // Found by dogfooding the running build at 420 px: every one of the page's own
-  // actions — Process target, Re-run QC + Solve, History, Edit, Picture, Stack —
-  // hid its label below `sm` and rendered as a bare icon, while the *secondary*
-  // Share / Scan to phone / Wallpaper buttons beside them kept their words. So on
+  // actions — Process target, Re-run QC + Solve, History, Edit, the picture menu,
+  // Stack — hid its label below `sm` and rendered as a bare icon, while the
+  // *secondary* Share / Scan to phone / Wallpaper buttons kept their words. So on
   // the screen the owner reads, the two things a beginner comes to this page to
   // do were the two unlabelled squares.
   it("names every action, not just the secondary ones", async () => {
@@ -114,7 +122,7 @@ describe("TargetView action row on a phone", () => {
       ["Re-run QC and Solve", "button", "Re-check"],
       ["History", "link", "History"],
       ["Edit latest stack", "link", "Edit"],
-      ["Download latest picture", "button", "Picture"],
+      ["Save or share the latest picture", "button", "Save"],
       ["Stack", "link", "Stack"],
     ];
     for (const [aria, role, label] of named) {
@@ -217,10 +225,9 @@ describe("TargetView latest-picture download", () => {
 
     renderTarget();
 
-    // The "Picture" control is a menu trigger; opening it offers full-res,
+    // The "Save / share" control is a menu trigger; opening it offers full-res,
     // preview, and JPEG (mkRun has a FITS, so a full-res PNG is offered).
-    const trigger = await screen.findByRole("button", { name: "Download latest picture" });
-    fireEvent.click(trigger);
+    await openSaveShare();
     const full = await screen.findByText("Full-res PNG (native size)");
     const png = screen.getByText("Quick preview PNG (up to 1024px)");
     const jpeg = screen.getByText("JPEG (smaller — best for sharing)");
@@ -239,10 +246,9 @@ describe("TargetView latest-picture download", () => {
 
     renderTarget();
 
-    // The "Wallpaper" control is a menu trigger; opening it offers the three
-    // aspect presets, each linking the server-side wallpaper endpoint.
-    const trigger = await screen.findByRole("button", { name: /Wallpaper/ });
-    fireEvent.click(trigger);
+    // The three aspect presets live in the same "Save / share" menu, each
+    // linking the server-side wallpaper endpoint.
+    await openSaveShare();
     const phone = await screen.findByText("Phone");
     expect(phone.closest("a")).toHaveAttribute(
       "href", client.api.stackWallpaperUrl("M_42", 9, "phone"));
@@ -261,7 +267,7 @@ describe("TargetView latest-picture download", () => {
 
     renderTarget();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Wallpaper/ }));
+    await openSaveShare();
     const toggle = await screen.findByLabelText(/orient wallpaper north up/i);
     fireEvent.click(toggle);
     expect(screen.getByText("Phone").closest("a")).toHaveAttribute(
@@ -277,7 +283,7 @@ describe("TargetView latest-picture download", () => {
 
     renderTarget();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Wallpaper/ }));
+    await openSaveShare();
     await screen.findByText("Phone");
     expect(screen.queryByLabelText(/orient wallpaper north up/i)).toBeNull();
   });
@@ -292,10 +298,82 @@ describe("TargetView latest-picture download", () => {
 
     await waitFor(() =>
       expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "Download latest picture" }))
+    expect(screen.queryByRole("button", { name: "Save or share the latest picture" }))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Wallpaper/ }))
       .not.toBeInTheDocument();
+  });
+});
+
+describe("TargetView hero action row grouping", () => {
+  // The standing "the pages are extremely busy" item (the owner named this page):
+  // the row used to be nine controls wide, four of them the same "do something
+  // with the finished picture" family, with *two* dropdowns side by side
+  // ("Picture" and "Wallpaper") that were both "save this picture".
+  it("leaves five controls inline and folds the picture actions into one menu", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    // The job and the two navigations stay where they were…
+    await screen.findByRole("button", { name: "Process this target" });
+    expect(screen.getByRole("button", { name: "Re-run QC and Solve" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit latest stack" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Stack" })).toBeInTheDocument();
+    // …and the four picture controls are gone from the row itself — not as
+    // buttons and not as links — leaving exactly one dropdown in their place.
+    for (const gone of [/^Picture$/, /^Wallpaper$/, "Share picture", "Scan to phone"]) {
+      expect(screen.queryByRole("button", { name: gone })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: gone })).not.toBeInTheDocument();
+    }
+    expect(
+      screen.getByRole("button", { name: "Save or share the latest picture" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps every folded action reachable inside the one menu", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    // Sharing files is feature-detected at mount, so the menu item only exists
+    // on a browser that can do it.
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    nav.share = async () => {};
+
+    renderTarget();
+    await openSaveShare();
+
+    expect(await screen.findByText("Full-res PNG (native size)")).toBeInTheDocument();
+    expect(screen.getByText("Quick preview PNG (up to 1024px)")).toBeInTheDocument();
+    expect(screen.getByText("JPEG (smaller — best for sharing)")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Share picture" })).toBeInTheDocument();
+    expect(screen.getByText("To phone")).toBeInTheDocument();
+    for (const aspect of ["Phone", "Desktop", "Square"]) {
+      expect(screen.getByText(aspect)).toBeInTheDocument();
+    }
+
+    delete nav.canShare;
+    delete nav.share;
+  });
+
+  it("shows the phone QR after the menu that opened it has closed", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+    await openSaveShare();
+    fireEvent.click(await screen.findByText("To phone"));
+
+    // A popover owned by the menu item would have been unmounted with the
+    // dropdown; the modal is owned by the page, so it survives.
+    expect(
+      await screen.findByText("Scan to get it on your phone"),
+    ).toBeInTheDocument();
   });
 });
 
@@ -1674,8 +1752,10 @@ describe("TargetView share text", () => {
     })));
 
     renderTarget();
-    // The header's own Share control (the hero card's is an icon button).
-    const btn = await screen.findByRole("button", { name: "Share picture" });
+    // The header's own Share control — now an item inside the "Save / share"
+    // menu the hero row collapses its picture actions into.
+    await openSaveShare();
+    const btn = await screen.findByRole("menuitem", { name: "Share picture" });
     fireEvent.click(btn);
 
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
