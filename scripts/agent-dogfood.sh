@@ -104,8 +104,11 @@ if [ "$DO_STACK" = 1 ] && [ -n "$SAFE" ]; then
     for _ in $(seq 1 180); do
       STATE="$(curl -sf "$BASE/api/jobs/$JOB" \
                | python -c 'import json,sys; print(json.load(sys.stdin).get("state",""))' 2>/dev/null || true)"
+      # The engine's own terminal set (`webapp/jobs.py::_TERMINAL`). A success is
+      # "done", never "finished" — waiting on the wrong word costs the whole
+      # 180×2s budget on every run, long after the picture is on disk.
       case "$STATE" in
-        finished|error|cancelled|interrupted) echo "-- process job: $STATE"; break ;;
+        done|error|cancelled|interrupted) echo "-- process job: $STATE"; break ;;
       esac
       sleep 2
     done

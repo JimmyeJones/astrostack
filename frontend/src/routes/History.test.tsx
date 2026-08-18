@@ -53,6 +53,21 @@ function mkIdentity(overrides: Partial<client.ObjectInfo> = {}): client.ObjectIn
   };
 }
 
+// The run card groups its file actions behind a "Save / share" menu and its
+// "what is this?" actions behind an "About this stack" one, so a test that wants
+// one of them has to open its menu first. `menuItem` then matches on the item's
+// *name* — a menu item's accessible name also carries its one-line hint, so the
+// match is anchored at the start rather than exact.
+function openSaveShare(i = 0) {
+  fireEvent.click(screen.getAllByRole("button", { name: "Save / share" })[i]);
+}
+function openAbout(i = 0) {
+  fireEvent.click(screen.getAllByRole("button", { name: "About this stack" })[i]);
+}
+function menuItem(name: string) {
+  return screen.findByRole("menuitem", { name: new RegExp(`^${name}`) });
+}
+
 describe("HistoryView", () => {
   it("does not delete a stack when the confirmation is declined", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
@@ -98,7 +113,8 @@ describe("HistoryView", () => {
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
 
     await waitFor(() => expect(info).toHaveBeenCalledWith("M_42", 1));
     await waitFor(() => expect(screen.getByText(/Integration: 42 min/)).toBeInTheDocument());
@@ -127,7 +143,8 @@ describe("HistoryView", () => {
     // Not fetched (and nothing shown) until the Info panel is actually opened.
     expect(framing).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
 
     await waitFor(() => expect(framing).toHaveBeenCalledWith("M_42", 1));
     expect(await screen.findByText("Part of it is outside the frame")).toBeInTheDocument();
@@ -143,7 +160,8 @@ describe("HistoryView", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
 
     await waitFor(() => expect(framing).toHaveBeenCalled());
     expect(screen.queryByTestId("framing-verdict")).not.toBeInTheDocument();
@@ -160,7 +178,8 @@ describe("HistoryView", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
     await waitFor(() =>
       expect(screen.getByText(/Auto-edited: flattened the background/)).toBeInTheDocument());
   });
@@ -176,7 +195,8 @@ describe("HistoryView", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
     await waitFor(() =>
       expect(
         screen.getByText("Auto's background came out with a slight green cast"),
@@ -194,7 +214,8 @@ describe("HistoryView", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
     await waitFor(() =>
       expect(
         screen.getByText("Auto white-balanced from 240 stars ✓"),
@@ -211,7 +232,8 @@ describe("HistoryView", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
     await waitFor(() =>
       expect(screen.getByText(/Quality weighting was on, but this stack with 6 subs/))
         .toBeInTheDocument());
@@ -230,7 +252,8 @@ describe("HistoryView", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
 
     await waitFor(() =>
       expect(
@@ -257,7 +280,8 @@ describe("HistoryView", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
 
     await waitFor(() =>
       expect(screen.getByText(/Master dark is 30s but your subs are 10s/))
@@ -276,7 +300,8 @@ describe("HistoryView", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
 
     await waitFor(() =>
       expect(
@@ -312,7 +337,8 @@ describe("HistoryView", () => {
 
     // Not fetched until the user asks.
     expect(annot).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Identify" }));
+    openAbout();
+    fireEvent.click(await menuItem("Identify"));
 
     await waitFor(() => expect(annot).toHaveBeenCalledWith("M_42", 1));
     // The plain-language "what else is in this picture?" list names the object,
@@ -332,7 +358,8 @@ describe("HistoryView", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Identify" }));
+    openAbout();
+    fireEvent.click(await menuItem("Identify"));
     await waitFor(() =>
       expect(screen.getByText(/No catalog objects fall inside this field/)).toBeInTheDocument());
   });
@@ -351,7 +378,8 @@ describe("HistoryView", () => {
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
     // Not fetched until the user asks.
     expect(annot).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Scale" }));
+    openAbout();
+    fireEvent.click(await menuItem("Scale"));
 
     await waitFor(() => expect(annot).toHaveBeenCalledWith("M_42", 1));
     await waitFor(() =>
@@ -378,7 +406,8 @@ describe("HistoryView", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
+    openSaveShare();
+    fireEvent.click(await menuItem("Copy caption"));
 
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(writeText).toHaveBeenCalledWith(
@@ -400,7 +429,8 @@ describe("HistoryView", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
+    openSaveShare();
+    fireEvent.click(await menuItem("Copy caption"));
 
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(writeText).toHaveBeenCalledWith(
@@ -416,7 +446,8 @@ describe("HistoryView", () => {
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "Set as cover" }));
+    openAbout();
+    fireEvent.click(await menuItem("Set as cover"));
     await waitFor(() => expect(setCover).toHaveBeenCalledWith("M_42", 1));
   });
 
@@ -427,11 +458,13 @@ describe("HistoryView", () => {
       .mockResolvedValue({} as never);
 
     renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
     // The pinned run shows the filled "Cover" affordance, not "Set as cover".
-    await waitFor(() => expect(screen.getByRole("button", { name: "Cover" })).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "Set as cover" })).not.toBeInTheDocument();
+    const pinned = await menuItem("Cover");
+    expect(screen.queryByRole("menuitem", { name: /^Set as cover/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cover" }));
+    fireEvent.click(pinned);
     await waitFor(() => expect(setCover).toHaveBeenCalledWith("M_42", null));
   });
 
@@ -439,16 +472,19 @@ describe("HistoryView", () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: false })]);
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "Set as cover" })).not.toBeInTheDocument();
+    openAbout();
+    await menuItem("Info");
+    expect(screen.queryByRole("menuitem", { name: /cover/i })).not.toBeInTheDocument();
   });
 
   it("offers PNG and JPEG downloads of the finished image when a preview exists", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    const png = screen.getByRole("link", { name: "PNG" });
+    openSaveShare();
+    const png = await menuItem("PNG");
     expect(png).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview");
-    const jpeg = screen.getByRole("link", { name: "JPEG" });
+    const jpeg = await menuItem("JPEG");
     expect(jpeg).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/jpeg");
   });
 
@@ -456,10 +492,11 @@ describe("HistoryView", () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true, has_fits: true })]);
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    const full = screen.getByRole("link", { name: "Full-res PNG" });
+    openSaveShare();
+    const full = await menuItem("Full-res PNG");
     expect(full).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/full-res-png");
     // Distinct from the small quick-preview PNG.
-    const png = screen.getByRole("link", { name: "PNG" });
+    const png = await menuItem("PNG");
     expect(png).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview");
   });
 
@@ -467,10 +504,99 @@ describe("HistoryView", () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: false })]);
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    expect(screen.queryByRole("link", { name: "PNG" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "JPEG" })).not.toBeInTheDocument();
+    openSaveShare();
     // The FITS (raw-data) download is still offered.
-    expect(screen.getByRole("link", { name: "FITS" })).toBeInTheDocument();
+    expect(await menuItem("FITS")).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^PNG/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^JPEG/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the run card to a handful of buttons, with the rest behind two menus", async () => {
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ has_preview: true, has_fits: true, has_tiff: true, reusable: true })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+
+    // The job itself stays inline; every file/insight action is one tap away.
+    expect(screen.getByRole("link", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Reuse settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save / share" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "About this stack" })).toBeInTheDocument();
+    // The fifteen that used to sit here as buttons no longer do.
+    for (const collapsed of [
+      "Info", "Identify", "Scale", "Adjust", "Set as cover", "PNG", "Full-res PNG",
+      "JPEG", "Copy caption", "FITS", "TIFF", "Wallpaper", "To phone",
+    ]) {
+      expect(screen.queryByRole("button", { name: collapsed })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: collapsed })).not.toBeInTheDocument();
+    }
+  });
+
+  it("keeps every save/share action, wallpapers included, inside the one menu", async () => {
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ has_preview: true, has_fits: true, has_tiff: true })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+
+    openSaveShare();
+    for (const item of ["PNG", "Full-res PNG", "JPEG", "FITS", "TIFF", "To phone", "Copy caption"]) {
+      expect(await menuItem(item)).toBeInTheDocument();
+    }
+    // The wallpaper aspects come from WallpaperMenu's own items, not a copy.
+    expect((await menuItem("Phone")).getAttribute("href"))
+      .toBe(client.api.stackWallpaperUrl("M_42", 1, "phone"));
+    expect(await menuItem("Desktop")).toBeInTheDocument();
+    expect(await menuItem("Square")).toBeInTheDocument();
+  });
+
+  it("caps the save/share menu's height instead of letting it clip", async () => {
+    // Measured in a real browser: twelve items with a line of help each is
+    // taller than the space under a card halfway down a 900 px screen, and the
+    // dropdown flipped upwards and lost its first item off the top. jsdom has no
+    // layout, so pin the cause — the dropdown scrolls rather than growing.
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ has_preview: true, has_fits: true, has_tiff: true })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+
+    openSaveShare();
+    const dropdown = (await menuItem("PNG")).closest(".mantine-Menu-dropdown");
+    expect(dropdown).not.toBeNull();
+    expect((dropdown as HTMLElement).style.overflowY).toBe("auto");
+    expect((dropdown as HTMLElement).style.maxHeight).not.toBe("");
+  });
+
+  it("ticks an About-menu toggle that is currently on", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: null, n_frames: 42, weighting: null, cards: [],
+    });
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+
+    // A menu hides the "filled button" affordance the old row used to show state
+    // with, so an item that's on carries a tick instead.
+    openAbout();
+    expect((await menuItem("Info")).querySelector(".tabler-icon-check")).toBeNull();
+    fireEvent.click(await menuItem("Info"));
+
+    openAbout();
+    expect((await menuItem("Info")).querySelector(".tabler-icon-check")).not.toBeNull();
+  });
+
+  it("opens the phone QR in a modal, so closing the menu doesn't take it away", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+
+    openSaveShare();
+    fireEvent.click(await menuItem("To phone"));
+
+    // The menu has closed behind it and the QR is still on screen.
+    expect(await screen.findByRole("img", { name: /QR code/i })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("menuitem", { name: /^To phone/ })).not.toBeInTheDocument());
+    expect(screen.getByRole("img", { name: /QR code/i })).toBeInTheDocument();
   });
 
   it("offers Compare linking to the previous run on all but the oldest card", async () => {
@@ -1172,7 +1298,8 @@ describe("HistoryView frame accounting", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
 
     await waitFor(() =>
       expect(screen.getByText(/1,160 of 2,000 subs combined/)).toBeInTheDocument());
@@ -1189,7 +1316,8 @@ describe("HistoryView frame accounting", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
 
     await waitFor(() =>
       expect(screen.getByText(/90 of 2,000 subs were only roughly aligned/))
@@ -1228,7 +1356,8 @@ describe("HistoryView adjustable render", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Adjust" }));
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
 
     await waitFor(() => expect(sug).toHaveBeenCalledWith("M_42", 1));
     // The sliders show the data-driven values, not the fixed 0.50 / 0.35 defaults.
@@ -1246,7 +1375,8 @@ describe("HistoryView adjustable render", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Adjust" }));
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
 
     await waitFor(() => expect(screen.getByText("0.50")).toBeInTheDocument());
     expect(screen.getByText("0.35")).toBeInTheDocument();
@@ -1262,7 +1392,8 @@ describe("HistoryView adjustable render", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Adjust" }));
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
 
     // The toggle appears; ticking it threads north_up into the render image.
     const toggle = await screen.findByText("Rotate so North is up");
@@ -1275,11 +1406,8 @@ describe("HistoryView adjustable render", () => {
 
     // ...and the shared/downloaded JPEG link now carries north_up too, so the
     // picture the beginner posts is oriented like reference photos.
-    await waitFor(() => {
-      const jpeg = Array.from(document.querySelectorAll("a")).find(
-        (a) => (a.getAttribute("href") || "").includes("/jpeg"));
-      expect(jpeg?.getAttribute("href")).toContain("north_up=true");
-    });
+    openSaveShare();
+    expect((await menuItem("JPEG")).getAttribute("href")).toContain("north_up=true");
   });
 
   it("hides the North-up toggle when the run has no orientation correction", async () => {
@@ -1292,7 +1420,8 @@ describe("HistoryView adjustable render", () => {
 
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Adjust" }));
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
     await waitFor(() => expect(screen.getByText("0.50")).toBeInTheDocument());
     expect(screen.queryByLabelText("Rotate so North is up")).not.toBeInTheDocument();
   });

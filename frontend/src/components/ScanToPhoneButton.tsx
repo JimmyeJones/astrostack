@@ -3,6 +3,7 @@ import {
   ActionIcon,
   Box,
   Button,
+  Modal,
   Popover,
   Stack,
   Text,
@@ -25,6 +26,65 @@ function darkModulesPath(url: string): { path: string; extent: number } {
     }
   }
   return { path: parts.join(""), extent: m.size + MARGIN * 2 };
+}
+
+/**
+ * The QR itself plus its one-line explanation — the body shared by the popover
+ * form below and the modal form used when the control lives inside a menu
+ * (a menu closes on click, so its own popover would be unmounted with it).
+ */
+export function ScanToPhoneQr({
+  url,
+  caption = "Point your phone camera at this code to open the picture and save it.",
+}: {
+  url: string;
+  caption?: string;
+}) {
+  const absolute = useMemo(() => absoluteLanUrl(url), [url]);
+  const qr = useMemo(() => darkModulesPath(absolute), [absolute]);
+  return (
+    <Stack gap="xs" align="center" maw={220} mx="auto">
+      <Box p="xs" style={{ background: "#fff", borderRadius: 8, lineHeight: 0 }}>
+        <svg
+          viewBox={`0 0 ${qr.extent} ${qr.extent}`}
+          width={176}
+          height={176}
+          role="img"
+          aria-label="QR code linking to this picture"
+          shapeRendering="crispEdges"
+        >
+          <path d={qr.path} fill="#000" />
+        </svg>
+      </Box>
+      <Text size="xs" c="dimmed" ta="center">
+        {caption}
+      </Text>
+    </Stack>
+  );
+}
+
+/**
+ * The same QR in a modal, for callers that open it from a menu item. The QR is
+ * built only while the modal is open, so an unopened one costs nothing.
+ */
+export function ScanToPhoneModal({
+  url,
+  caption,
+  opened,
+  onClose,
+  title = "Scan to get it on your phone",
+}: {
+  url: string;
+  caption?: string;
+  opened: boolean;
+  onClose: () => void;
+  title?: string;
+}) {
+  return (
+    <Modal opened={opened} onClose={onClose} title={title} centered size="sm">
+      {opened ? <ScanToPhoneQr url={url} caption={caption} /> : null}
+    </Modal>
+  );
 }
 
 /**
@@ -66,13 +126,6 @@ export function ScanToPhoneButton({
   ariaLabel?: string;
 }) {
   const [opened, setOpened] = useState(false);
-  const absolute = useMemo(() => absoluteLanUrl(url), [url]);
-  // Build the QR only when the popover is first opened (and memoise per URL) so
-  // an off-screen button costs nothing.
-  const qr = useMemo(
-    () => (opened ? darkModulesPath(absolute) : null),
-    [opened, absolute],
-  );
 
   const trigger = iconOnly ? (
     <Tooltip label={tooltip}>
@@ -109,28 +162,9 @@ export function ScanToPhoneButton({
     >
       <Popover.Target>{trigger}</Popover.Target>
       <Popover.Dropdown>
-        <Stack gap="xs" align="center" maw={220}>
-          {qr ? (
-            <Box
-              p="xs"
-              style={{ background: "#fff", borderRadius: 8, lineHeight: 0 }}
-            >
-              <svg
-                viewBox={`0 0 ${qr.extent} ${qr.extent}`}
-                width={176}
-                height={176}
-                role="img"
-                aria-label="QR code linking to this picture"
-                shapeRendering="crispEdges"
-              >
-                <path d={qr.path} fill="#000" />
-              </svg>
-            </Box>
-          ) : null}
-          <Text size="xs" c="dimmed" ta="center">
-            {caption}
-          </Text>
-        </Stack>
+        {/* Built only once the popover is open, so an off-screen button costs
+            nothing. */}
+        {opened ? <ScanToPhoneQr url={url} caption={caption} /> : null}
       </Popover.Dropdown>
     </Popover>
   );
