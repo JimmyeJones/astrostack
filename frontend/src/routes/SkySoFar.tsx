@@ -10,6 +10,7 @@ import { api, type SummaryTarget } from "../api/client";
 import { formatIntegration, formatMonthYear } from "../format";
 import { QueryError } from "../components/QueryError";
 import { ShareYourSkyCard } from "../components/ShareYourSkyCard";
+import { BestNightCard } from "../components/BestNightCard";
 
 function StatCard({ icon, label, value, sub }: {
   icon: React.ReactNode; label: string; value: string; sub?: string;
@@ -114,6 +115,11 @@ export function SkySoFarView() {
               label="First light"
               value={formatMonthYear(data.first_light_utc)} />
           </SimpleGrid>
+
+          {/* The one night that was better than the others — the first thing on
+              this page that ranks a night rather than adding it up. Self-hides
+              until enough nights carry enough measured subs to say so. */}
+          <BestNightCard />
 
           {/* The "now show someone" step, right under the headline numbers it
               turns into a poster. Self-hides on a library with no light yet. */}

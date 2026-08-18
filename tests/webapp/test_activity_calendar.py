@@ -164,3 +164,107 @@ def test_configured_site_lon_wins_and_skips_header_probe(
     client.put("/api/settings", json={"site_lon": 150.0})
     day, night = _night_of_the_session(client, built_library)
     assert night == day.isoformat()  # +150° → same-day night, same as the fallback
+
+
+def _set_night_with_fwhm(lib, safe: str, day, hour_start: int,
+                         exposure_s: float, fwhm_px: float) -> None:
+    """Like :func:`_set_night`, but also stamps each sub's measured star size —
+    the figure "your best night" ranks nights by."""
+    proj = lib.open_target(safe)
+    try:
+        for i, f in enumerate(proj.iter_frames()):
+            ts = datetime(day.year, day.month, day.day, hour_start, i * 5,
+                          tzinfo=timezone.utc)
+            proj.update_frame(
+                f.id,
+                timestamp_utc=ts.isoformat().replace("+00:00", "Z"),
+                exposure_s=exposure_s,
+                fwhm_px=fwhm_px,
+            )
+    finally:
+        proj.close()
+
+
+def test_activity_calendar_names_the_sharpest_night(client, built_library):
+    """"Your best night" rides on the walk the heatmap already does.
+
+    The endpoint opens every project and reads every accepted frame row anyway,
+    so the per-night median star size — and the sharpest night it picks out —
+    costs no extra library walk and shares the same cache.
+    """
+    from seestack.io.library import Library
+    from seestack.activity_calendar import SHARPEST_MIN_MEASURED
+
+    now = datetime.now(timezone.utc)
+    day_a = (now - timedelta(days=9)).date()
+    day_b = (now - timedelta(days=6)).date()
+
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _set_night_with_fwhm(lib, "M_42", day_a, 22, 60.0, fwhm_px=3.6)
+        _set_night_with_fwhm(lib, "NGC_7000", day_b, 21, 30.0, fwhm_px=2.2)
+    finally:
+        lib.close()
+
+    data = client.get("/api/activity-calendar").json()
+    nights = {n["date"]: n for n in data["nights"]}
+    assert nights[day_a.isoformat()]["median_fwhm_px"] == 3.6
+    assert nights[day_b.isoformat()]["median_fwhm_px"] == 2.2
+
+    # The fixture's three subs per night are below the qualifying floor, so the
+    # honest answer here is "not enough measured to say".
+    assert SHARPEST_MIN_MEASURED > 3
+    assert data["sharpest_night"] is None
+
+
+def test_activity_calendar_stays_silent_without_measured_subs(client, built_library):
+    # No QC measurements anywhere → no median, no best night, and the rest of
+    # the calendar is exactly what it always was.
+    from seestack.io.library import Library
+
+    now = datetime.now(timezone.utc)
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _set_night(lib, "M_42", (now - timedelta(days=4)).date(), 22, 60.0)
+    finally:
+        lib.close()
+
+    data = client.get("/api/activity-calendar").json()
+    assert data["sharpest_night"] is None
+    assert all(n["median_fwhm_px"] is None for n in data["nights"])
+    assert all(n["n_measured"] == 0 for n in data["nights"])
+    assert data["n_nights"] >= 1
+
+
+def test_activity_calendar_serialises_the_sharpest_night_it_finds(
+    client, built_library, monkeypatch,
+):
+    """The plumbing: when a sharpest night exists, it reaches the wire whole.
+
+    The fixture library has three subs per target — deliberately below the
+    qualifying floor, which the engine tests cover directly — so this lowers the
+    floor to exercise the serialisation rather than the threshold.
+    """
+    import seestack.activity_calendar as ac
+    from seestack.io.library import Library
+
+    monkeypatch.setattr(ac, "SHARPEST_MIN_MEASURED", 3)
+
+    now = datetime.now(timezone.utc)
+    day_a = (now - timedelta(days=9)).date()
+    day_b = (now - timedelta(days=6)).date()
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _set_night_with_fwhm(lib, "M_42", day_a, 22, 60.0, fwhm_px=3.6)
+        _set_night_with_fwhm(lib, "NGC_7000", day_b, 21, 30.0, fwhm_px=2.2)
+    finally:
+        lib.close()
+
+    best = client.get("/api/activity-calendar").json()["sharpest_night"]
+    assert best is not None
+    assert best["date"] == day_b.isoformat()
+    assert best["median_fwhm_px"] == 2.2
+    assert best["n_measured"] == 3
+    assert best["n_frames"] == 3
+    assert best["targets"] == ["NGC_7000"]
+    assert best["exposure_s"] == 90.0
