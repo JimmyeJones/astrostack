@@ -1258,7 +1258,7 @@ export function EditorView() {
               crops, so the switch would be a decision about nothing. */}
           {trimCrop ? (
             <Tooltip multiline w={260} withArrow
-              label="Auto normally trims the ragged, uneven edge off a mosaic so the picture is cleanly framed. Turn this off to keep the full frame, edges and all — you can still crop by hand with 'Trim border'. The default for every target is in Settings.">
+              label="Auto normally trims the ragged, uneven edge off a mosaic so the picture is cleanly framed. Turn this off to keep the full frame, edges and all — you can still crop by hand with 'Trim border'. The default for every target is in Settings → Automation.">
               <Switch size="xs" label="Auto-crop edges" checked={autoCrop}
                 onChange={(e) => setAutoCropOverride(e.currentTarget.checked)} />
             </Tooltip>

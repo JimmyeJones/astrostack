@@ -1,5 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { NextBestMoveBadge } from "./NextBestMoveBadge";
 
@@ -12,13 +13,15 @@ function renderBadge(props: {
 }) {
   return render(
     <MantineProvider>
-      <NextBestMoveBadge
-        name={props.name ?? "M31"}
-        nFramesUsed={props.nFramesUsed ?? null}
-        integrationS={props.integrationS ?? null}
-        nUnsolved={props.nUnsolved ?? null}
-        runs={props.runs ?? null}
-      />
+      <MemoryRouter>
+        <NextBestMoveBadge
+          name={props.name ?? "M31"}
+          nFramesUsed={props.nFramesUsed ?? null}
+          integrationS={props.integrationS ?? null}
+          nUnsolved={props.nUnsolved ?? null}
+          runs={props.runs ?? null}
+        />
+      </MemoryRouter>
     </MantineProvider>,
   );
 }
@@ -67,5 +70,16 @@ describe("NextBestMoveBadge", () => {
   it("renders nothing when nothing has been stacked", () => {
     renderBadge({ nFramesUsed: null });
     expect(screen.queryByText(/better|Nice work/)).toBeNull();
+  });
+
+  it("makes \"in Settings\" a link to the section that holds the star database", () => {
+    renderBadge({ nFramesUsed: 30, nUnsolved: 30, integrationS: 5 * 3600 });
+    expect(screen.getByRole("link", { name: /star database in Settings/ }))
+      .toHaveAttribute("href", "/settings/plate-solving");
+  });
+
+  it("adds no link to a tip that doesn't send you anywhere", () => {
+    renderBadge({ nFramesUsed: 3, nUnsolved: 0, integrationS: 120 });
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 });

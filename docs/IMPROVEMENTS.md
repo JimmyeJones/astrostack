@@ -10283,10 +10283,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   not weaken an assertion to make it pass. Keep the delete icon exactly where and as it is. State the before/after
   button count in the commit, as the standing item asks.
 
-- **NEW IDEA (Builder 2026-08-17, the loose end left by the Settings-section work v0.266.0–v0.266.2) — the app
+- ~~**NEW IDEA (Builder 2026-08-17, the loose end left by the Settings-section work v0.266.0–v0.266.2) — the app
   still names Settings in prose in five more places, and now that every section has an address, most of them
-  could be one tap instead.** *(Friendliness — PRIORITY 3; size S; **check each one's shape before starting** —
-  they are not all the same problem.)* v0.266.2 linked the Telescope page's three; these remain, and they split
+  could be one tap instead.**~~ — **SHIPPED v0.267.1** (Builder 2026-08-18, branch
+  `claude/relaxed-franklin-gto2kn`), the whole pass, with each of the five checked for its own shape as the entry
+  asked. *(Friendliness — PRIORITY 3.)*
+  **Three became a tap**, all via the `action: {label, href}` sibling the entry recommended — the copy each test
+  pins is untouched, the link sits beside it: **(1)** the out-of-memory job failure now carries *"Open Settings →
+  Stacking →"* (a new exported `JobErrorHelp` type on `JOB_ERROR_KIND`/`friendlyJobError`, rendered by `JobError`);
+  **(2)** the faint-field nudge on a Check & locate job carries *"Turn it on in Settings → Plate solving →"*;
+  **(3)** the "To make this even better" plate-solve tip gains an optional `action` on `NextBestMove`, rendered by
+  `NextBestMoveBadge`, pointing at `plate-solving` — deliberately the *only* tip that gets one, since it is the
+  only one that sends you to Settings at all.
+  **Two stay prose, and here is why** (checked, not skipped): `routes/Target.tsx` already renders an **Open
+  Settings** button, correctly pointed at `plate-solving`, right under that sentence — a second link would be the
+  same tap twice. `routes/Editor.tsx`'s auto-crop line lives inside a Mantine **`Tooltip` label**, which takes a
+  string and vanishes the moment the pointer leaves the switch — a link in there could never be clicked. The
+  entry's own question about that one is answered instead: `auto_crop_border` sits in the **automation** section
+  (confirmed against `Settings.tsx`'s section map, not guessed), so the tooltip now names it — *"The default for
+  every target is in Settings → Automation."* — which is the useful half of a link without the broken half.
+  Frontend-only: no API, schema, config, on-disk or default change; no wording changed except that one added
+  section name. **Tests (+4, plus two assertions on existing cases):** `Jobs.test.tsx` (+2 — an error that needs
+  no setting carries no action, and a healthy Check & locate job renders no Settings link; plus the memory-budget
+  unit case and its rendered card now assert `/settings/stacking`), `NextBestMoveBadge.test.tsx` (+2 — the
+  plate-solve tip links to `/settings/plate-solving`, and a tip that sends you nowhere renders no link at all;
+  its harness gains a `MemoryRouter`).
+  *(Original spec kept below for provenance.)*
+  v0.266.2 linked the Telescope page's three; these remain, and they split
   into two kinds. **(1) Rendered JSX, straightforward:** `routes/Target.tsx:793` ("Install ASTAP and set its path
   in Settings, then re-run solving" — though that alert already carries an **Open Settings** button beside it, so
   this one is arguably fine as prose) and `routes/Editor.tsx:1261` (the auto-crop tooltip's "The default for every
