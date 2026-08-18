@@ -113,6 +113,9 @@ describe("JobsView", () => {
     // The raw Python "MemoryError:" prefix is never surfaced to the user.
     expect(screen.queryByText(/MemoryError:/)).not.toBeInTheDocument();
     expect(screen.getByText(/Lower the drizzle scale/)).toBeInTheDocument();
+    // The setting the advice names is reachable from the failure itself.
+    expect(screen.getByRole("link", { name: /Settings/ }))
+      .toHaveAttribute("href", "/settings/stacking");
   });
 
   it("uses the backend's error_kind even when the raw text is unrecognisable", async () => {
@@ -629,6 +632,23 @@ describe("JobsView pipeline result actions", () => {
     )).toBeInTheDocument();
     expect(screen.getByText(/Rescue faint fields with a deep-image solve/))
       .toBeInTheDocument();
+    // ...and the switch it names is a tap away, not a hunt.
+    expect(screen.getByRole("link", { name: /Plate solving/ }))
+      .toHaveAttribute("href", "/settings/plate-solving");
+  });
+
+  it("adds no Settings link to a job that needs no setting changed", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "qs-5", kind: "qc_solve", target: "M 42", state: "done",
+        result: {
+          qc_total: 42, qc_done: 42, solve_total: 42, solve_done: 42, solve_ok: 40,
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    await screen.findByText(/Checked 42 subs/);
+    expect(screen.queryByRole("link", { name: /Plate solving/ })).not.toBeInTheDocument();
   });
 });
 
@@ -717,6 +737,14 @@ describe("friendlyJobError", () => {
     const r = friendlyJobError("MemoryError: stack output canvas needs ~7 GB of working memory");
     expect(r.message).toMatch(/more memory than the budget allows/);
     expect(r.next).toMatch(/drizzle scale/);
+    // "raise the memory limit in Settings" names one of seven sections; carry
+    // the way there rather than leaving the reader to find it.
+    expect(r.action?.href).toBe("/settings/stacking");
+  });
+
+  it("offers no Settings link for an error that doesn't send you there", () => {
+    expect(friendlyJobError("OSError: disk is full").action).toBeUndefined();
+    expect(friendlyJobError("ValueError: no frames could be aligned").action).toBeUndefined();
   });
   it("translates 'nothing plate-solved to stack'", () => {
     expect(friendlyJobError("ValueError: no accepted, plate-solved frames to stack").message)

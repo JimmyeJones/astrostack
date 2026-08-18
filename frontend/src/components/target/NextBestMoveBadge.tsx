@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { Alert, Text } from "@mantine/core";
+import { Alert, Anchor, Text } from "@mantine/core";
+import { Link } from "react-router-dom";
 import { IconBulb } from "@tabler/icons-react";
 import { nextBestMove } from "./nextBestMove";
 import { softerThanUsual } from "./softStars";
@@ -60,6 +61,11 @@ export function NextBestMoveBadge(
   return (
     <Alert color={color} variant="light" icon={<IconBulb size={18} />} title={title}>
       <Text size="sm">{tip.phrase}</Text>
+      {tip.action ? (
+        <Anchor component={Link} to={tip.action.href} size="xs" fw={500}>
+          {tip.action.label}
+        </Anchor>
+      ) : null}
     </Alert>
   );
 }

@@ -25,6 +25,7 @@
  */
 
 import { THIN_STACK_MAX_FRAMES } from "./thinStack";
+import { settingsLink } from "../../settingsSections";
 import type { SoftStars } from "./softStars";
 
 // A plate-solve shortfall is worth flagging as the top lever only when it's both
@@ -48,6 +49,10 @@ export type NextBestMoveKind = "locate" | "thin" | "soft" | "integration" | "goo
 export interface NextBestMove {
   kind: NextBestMoveKind;
   phrase: string;
+  /** Where to go and do it, when the phrase names something that lives on
+   * another screen — so "in Settings" is a tap rather than a hunt through seven
+   * sections. Same shape as `StackHealthCard`'s `noteAction`. */
+  action?: { label: string; href: string };
 }
 
 export interface NextBestMoveInput {
@@ -105,6 +110,10 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
         `out. Installing ASTAP's star database (in Settings) usually lets far ` +
         `more of them stack, which is the biggest thing that would improve ` +
         `this picture.`,
+      action: {
+        label: "Check your star database in Settings \u2192",
+        href: settingsLink("plate-solving"),
+      },
     };
   }
 
