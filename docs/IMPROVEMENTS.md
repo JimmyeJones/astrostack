@@ -10234,9 +10234,37 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEXT SLICE OF THE STANDING IA ITEM — FOUND BY DOGFOODING (Builder 2026-08-17, counted in a real running build
+- ~~**NEXT SLICE OF THE STANDING IA ITEM — FOUND BY DOGFOODING (Builder 2026-08-17, counted in a real running build
   at 1440 px) — one History run card renders **15 buttons in four rows** plus a delete icon, for a single
-  picture.** *(Friendliness / the owner's "extremely busy" priority — PRIORITY 3; size M; frontend-only.)*
+  picture.**~~ — **SHIPPED v0.267.0** (Builder 2026-08-18, branch `claude/relaxed-franklin-gto2kn`), built to the
+  filed shape exactly. *(Friendliness / the owner's "extremely busy" priority — PRIORITY 3.)*
+  **Before → after, counted from the code the card renders:** the sample's single finished stack went from
+  **15 buttons in four rows + a bin icon → 4 + a bin icon** (*Edit · Reuse settings · Save / share ▾ · About this
+  stack ▾*); a target with two or more stacks goes **16 → 5** (Compare stays inline, because comparing is the job).
+  A target with eight stacks was ~120 buttons and is now ~40. **Nothing was removed**, per the owner's hard
+  constraint: every one of the fifteen is still there, one tap away, and the bin icon is untouched.
+  **What's in each menu.** *Save / share ▾* — PNG, Full-res PNG, JPEG, FITS, TIFF, then Share, To phone, Copy
+  caption, then the three wallpaper aspects. *About this stack ▾* — Info, Identify, Scale, Adjust, Set as cover.
+  **Reuse, not re-implementation**, as the entry insisted: `WallpaperMenu`'s dropdown body is extracted as an
+  exported `WallpaperMenuItems` that both the standalone menu and the History card render, so the aspects can't
+  drift; `SharePictureButton` gains an `asMenuItem` mode (and still renders **nothing** on a browser that can't
+  share files, in either form). `ScanToPhoneButton` is the one that couldn't go in as-is — it is a *Popover*, and
+  a menu closes on click, which would unmount the popover with the dropdown before the QR could be read — so its
+  QR body is extracted as `ScanToPhoneQr` and offered as a `ScanToPhoneModal` the card owns; the popover form is
+  unchanged for its other callers (the lightbox, the Target page) and now shares that one body.
+  **A small gain on the way:** each item carries its old hover-tooltip wording as a visible one-line hint, so the
+  explanations a phone could never hover for are now simply readable; and a toggle that is on carries a tick,
+  which replaces the "filled button" state the row used to show.
+  Frontend-only: no API, schema, config, on-disk or default change; no control added or removed.
+  **Tests (+10, and 33 existing call-sites updated rather than weakened):** `History.test.tsx` (+4 — the row is
+  down to its four inline controls with all thirteen collapsed ones absent as buttons *and* as links; every
+  save/share action including the wallpaper aspects is present inside the one menu; a toggle that is on is
+  ticked; and "To phone" survives the menu closing behind it), `SharePictureButton.test.tsx` (+2 — the menu-item
+  form shares, and renders nothing when the browser can't), `ScanToPhoneButton.test.tsx` (+2 — the modal builds
+  no QR while closed and shows the same one when open), `WallpaperMenu.test.tsx` (+2 — the items render inside
+  someone else's menu with the same URLs, with or without their heading). The 33 existing assertions were kept
+  verbatim and given an explicit menu-open first, via three small helpers.
+  *(Original spec kept below for provenance.)*
   **Measured, not eyeballed:** the sample's one finished stack shows, in order — *Edit · Reuse settings · Adjust ·
   Info · Identify · Scale · Set as cover · PNG · Full-res PNG · JPEG · To phone · Wallpaper · Copy caption · FITS ·
   TIFF*, then a bin icon. With two or more runs there is a **Compare** button too, and the whole block repeats

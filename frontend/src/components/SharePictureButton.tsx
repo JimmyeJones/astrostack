@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ActionIcon, Button, Tooltip } from "@mantine/core";
+import { ActionIcon, Button, Menu, Tooltip } from "@mantine/core";
 import type { ButtonProps, MantineSize } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconShare } from "@tabler/icons-react";
@@ -23,6 +23,7 @@ export function SharePictureButton({
   size = "xs",
   variant = "light",
   iconOnly = false,
+  asMenuItem = false,
   label = "Share",
   tooltip = "Share this picture to another app",
   ariaLabel = "Share picture",
@@ -40,6 +41,9 @@ export function SharePictureButton({
   variant?: ButtonProps["variant"];
   /** Render a compact icon button (for the lightbox toolbar) instead of a labelled button. */
   iconOnly?: boolean;
+  /** Render as a `Menu.Item` — for a card that already collapses its actions into
+   * one menu. Must be rendered inside a `Menu.Dropdown`. */
+  asMenuItem?: boolean;
   label?: string;
   /** Tooltip copy — override for non-picture shares (e.g. a clip). */
   tooltip?: string;
@@ -63,6 +67,18 @@ export function SharePictureButton({
     }
     // "shared" / "cancelled" / "unsupported" → stay quiet (success or user cancel).
   };
+
+  if (asMenuItem) {
+    return (
+      <Menu.Item
+        leftSection={<IconShare size={16} />}
+        onClick={doShare}
+        aria-label={ariaLabel}
+      >
+        {label}
+      </Menu.Item>
+    );
+  }
 
   if (iconOnly) {
     return (
