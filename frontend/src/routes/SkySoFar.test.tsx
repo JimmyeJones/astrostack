@@ -37,6 +37,28 @@ function renderPage() {
 afterEach(() => vi.restoreAllMocks());
 
 describe("SkySoFarView", () => {
+  it("names your best night above the standouts", async () => {
+    // The one thing on this page that ranks a night rather than adding it up.
+    // It rides on the activity calendar the Dashboard already fetches.
+    vi.spyOn(client.api, "getLibrarySummary").mockResolvedValue(summary({
+      n_targets_imaged: 1, n_subs_kept: 60, total_integration_s: 3600,
+      integration_hours: 1, first_light_utc: "2026-01-15T00:00:00Z",
+    }));
+    vi.spyOn(client.api, "getActivityCalendar").mockResolvedValue({
+      start_date: "2025-08-18", end_date: "2026-08-18", months: 12,
+      nights: [], n_nights: 12, total_exposure_s: 30000,
+      nights_this_month: 2, best_streak_nights: 3,
+      sharpest_night: {
+        date: "2026-01-12", exposure_s: 5400, n_frames: 180,
+        targets: ["M 42"], median_fwhm_px: 2.44, n_measured: 180,
+      },
+    });
+    renderPage();
+    expect(await screen.findByText(/Your best night · 12 Jan 2026/))
+      .toBeInTheDocument();
+    expect(screen.getByText("2.4 px stars")).toBeInTheDocument();
+  });
+
   it("shows a friendly empty state when nothing has been imaged", async () => {
     vi.spyOn(client.api, "getLibrarySummary").mockResolvedValue(summary({}));
     renderPage();

@@ -1416,6 +1416,75 @@ def _measure_noise_ratio(fits_path: str, sub_path: str, pattern: str) -> float |
     return noise_ratio(sub_rgb, stack_rgb)
 
 
+# Where the measured noise-reduction ratio is remembered, per stack run. The
+# number is a pure function of two immutable things — the finished master and
+# the representative sub it is measured against — but the endpoint that serves
+# it is fetched **eagerly** on every Target-page load and on every finished
+# "Process target" card, and each miss reloads the master's crop *and* debayers
+# a full native-resolution sub. On the RAM-capped NAS that is real disk churn
+# for a number that never changes, so the first measurement is stamped here and
+# every later view reads it. Registered in ``webapp.run_meta`` so deleting the
+# run takes its stamp with it. See :func:`_cached_noise_ratio`.
+NOISE_RATIO_META_PREFIX = "noise_ratio:"
+
+# Bump when the *meaning* of the stored payload changes, so an old stamp is
+# re-measured rather than misread.
+_NOISE_RATIO_CACHE_VERSION = 1
+
+
+def _noise_ratio_fingerprint(fits_path: str, ref_id: int | None) -> dict[str, Any] | None:
+    """What the stored ratio was measured *from*, so a stale stamp can't be served.
+
+    The run row is immutable, but the two inputs are addressed by path: the
+    master could be rewritten in place by some future flow, and
+    :func:`_pick_reference_sub` picks the *sharpest accepted* sub, which changes
+    the moment the user accepts or rejects a frame. Both are cheap to
+    fingerprint (one ``stat`` and an id), so the cache is exact rather than
+    merely probable. ``None`` when the master can't be stat-ed — then nothing is
+    cached and the measurement runs as before.
+    """
+    try:
+        st = os.stat(fits_path)
+    except OSError:
+        return None
+    return {
+        "v": _NOISE_RATIO_CACHE_VERSION,
+        "ref": int(ref_id) if ref_id is not None else None,
+        "mtime_ns": int(st.st_mtime_ns),
+        "size": int(st.st_size),
+    }
+
+
+def _cached_noise_ratio(proj: Any, run_id: int,
+                        fingerprint: dict[str, Any]) -> tuple[bool, float | None]:
+    """``(hit, ratio)`` for a stamped measurement matching ``fingerprint``.
+
+    ``hit`` is False on a missing, unparsable or stale stamp — including one
+    written against a different master or a different representative sub — so a
+    miss always falls through to a fresh measurement. A stamped ``null`` (an
+    edited/display-space export, or an unmeasurable image) is a real hit: it is
+    just as stable as a number, and re-deriving it costs the same FITS open.
+    """
+    raw = proj.get_meta(f"{NOISE_RATIO_META_PREFIX}{run_id}")
+    if not raw:
+        return False, None
+    try:
+        stamp = json.loads(raw)
+    except (ValueError, TypeError):
+        return False, None
+    if not isinstance(stamp, dict):
+        return False, None
+    if any(stamp.get(k) != v for k, v in fingerprint.items()):
+        return False, None
+    ratio = stamp.get("ratio")
+    if ratio is None:
+        return True, None
+    try:
+        return True, float(ratio)
+    except (TypeError, ValueError):
+        return False, None
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise")
 async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     """The concrete "stacking cut your noise ~N×" number for the reveal card.
@@ -1426,6 +1495,12 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
     best-effort endpoint so the info card stays cheap: any missing datum, an
     edited/display-space export, or an unmeasurable image returns ``null`` and the
     badge simply omits the number.
+
+    The first measurement for a run is **remembered** (``NOISE_RATIO_META_PREFIX``,
+    fingerprinted on the master and the representative sub) so the repeat views
+    this endpoint actually gets don't reload the master and re-debayer a sub for
+    a number that cannot have changed. The stamp is a cache, never a source of
+    truth: any mismatch, or a project that can't be written, simply measures.
     """
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -1434,10 +1509,18 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
             raise HTTPException(status_code=404, detail="No such run")
         fits_path = run.fits_path
         ref = _pick_reference_sub(proj)
+        ref_id = getattr(ref, "id", None) if ref is not None else None
         src = readable_frame_path(ref) if ref is not None else None
         pattern = (ref.bayer_pattern or "RGGB").upper() if ref is not None else "RGGB"
         if pattern not in _BAYER_PATTERNS:
             pattern = "RGGB"
+        fingerprint = (
+            _noise_ratio_fingerprint(fits_path, ref_id) if fits_path else None
+        )
+        if fingerprint is not None:
+            hit, cached = _cached_noise_ratio(proj, run_id, fingerprint)
+            if hit:
+                return {"ratio": cached}
     finally:
         proj.close()
         lib.close()
@@ -1447,6 +1530,19 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
         return {"ratio": None}
 
     ratio = await run_in_threadpool(_measure_noise_ratio, str(fits_path), str(src), pattern)
+    if fingerprint is not None:
+        # Best-effort stamp — a read-only or busy project must still serve the
+        # number it just measured.
+        with contextlib.suppress(Exception):
+            wlib, wproj = deps.open_target_project(request, safe)
+            try:
+                wproj.set_meta(
+                    f"{NOISE_RATIO_META_PREFIX}{run_id}",
+                    json.dumps({**fingerprint, "ratio": ratio}),
+                )
+            finally:
+                wproj.close()
+                wlib.close()
     return {"ratio": ratio}
 
 

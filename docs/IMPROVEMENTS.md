@@ -9666,6 +9666,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   copies don't currently disagree — so it doesn't clear the churn bar on its own. Left filed; a future run
   already touching these files could fold the helper in, but the beginner-facing value here is **already
   delivered**. Recommend closing this item as largely-shipped rather than treating it as ready feature work.)_
+  **▶ CLOSED — slice (a) is shipped too; verified in the code, not assumed (Builder 2026-08-18,
+  `claude/relaxed-franklin-i98kvb`). Do not re-pick this.** The "pure helper" the note above left open exists and
+  goes further than the spec: `CalibrationMasters.calibration_warnings(light_exposure_s, light_temp_c)`
+  (`seestack/calibrate/apply.py`) returns the plain-language sentences for an exposure mismatch **and** a
+  temperature mismatch, plus a separate one for the case where exposure-scaling was asked for but a wrong-shaped
+  bias silenced it. It is carried on `StackResult.calibration_warnings` (`stacker.py:1196`), stamped per run, and
+  rendered on the **Jobs** card (`calibrationMismatchNote`), **History**, the **Stack** form and the **Editor**.
+  Nothing in this item is open.
 - ~~**NEW (Scout 2026-07-21) — auto-pick the outlier-rejection method from the frame count, so a beginner
   never has to know κ-σ vs min/max.**~~ — **SHIPPED v0.143.0** (Builder 2026-07-21, branch
   `claude/pensive-faraday-q5qgdb`). Added an opt-in `StackOptions.auto_reject` (default **False** →
@@ -10234,9 +10242,32 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEXT SLICE OF THE STANDING IA ITEM (Builder 2026-08-18, counted in `routes/Target.tsx` while shipping the
+- ~~**NEXT SLICE OF THE STANDING IA ITEM (Builder 2026-08-18, counted in `routes/Target.tsx` while shipping the
   History-card grouping v0.267.0) — the Target page's hero action row is **nine controls wide**, and four of them
-  are the same "do something with the finished picture" family the History card just folded into one menu.**
+  are the same "do something with the finished picture" family the History card just folded into one menu.**~~ —
+  **SHIPPED v0.268.0** (Builder 2026-08-18, branch `claude/relaxed-franklin-i98kvb`), built to the filed shape
+  exactly. *(Friendliness / the owner's "extremely busy" priority — PRIORITY 3.)*
+  **Before → after, counted from the code the row renders:** **9 → 6**, and **one** dropdown where there were two.
+  The row is now *Process target · Re-run QC + Solve · History · Edit · Save / share ▾ · Stack*; **nothing was
+  removed** — Picture's three downloads, Share, To phone and the three wallpaper aspects are all inside the one
+  menu, each with its old tooltip wording as a visible one-line hint.
+  **Re-use, not re-implementation**, as the entry insisted: `WallpaperMenuItems`, `SharePictureButton asMenuItem`
+  and `ScanToPhoneModal` are the pieces the History card extracted in v0.267.0, rendered here unchanged — so the
+  two surfaces can't drift. `wallpaperCanNorthUp` is still threaded through (the Target page has it; the History
+  card does not), so the North-up switch still appears exactly when the run has a rotation to correct. The
+  dropdown carries the same `mah={420}` + `overflowY: "auto"` cap v0.267.2 needed, so it scrolls instead of
+  clipping. The phone labels v0.266.1 un-hid are kept: the trigger reads **Save / share** on a wide screen and
+  **Save** below `sm`, in words, not an icon.
+  Frontend-only: no API, schema, config, on-disk or default change; no control added or removed.
+  **Verified in a real browser, not only in jsdom** (`scripts/agent-dogfood.sh` + a menu probe, sample stacked):
+  the row is one line of six at 1440 px and two lines of three at 420 px (it used to wrap to four), and with the
+  menu open the dropdown **fits the viewport at both widths** (measured box, not eyeballed) with no console
+  errors — the exact failure that bit the History card's twelve-item menu.
+  **Tests (+3, and 6 existing call-sites updated rather than weakened):** `Target.test.tsx` — the row keeps its
+  five inline controls with all four picture controls absent as buttons *and* as links; every folded action is
+  reachable inside the one menu; and the phone QR survives the menu closing behind it. The existing download,
+  wallpaper, North-up and share-text assertions were kept verbatim and given an explicit `openSaveShare()` first.
+  *(Original spec kept below for provenance.)*
   *(Friendliness / the owner's "extremely busy" priority — PRIORITY 3; size S now, because the machinery exists;
   frontend-only.)* **Counted, at `Target.tsx:1158-1243`:** *Process target · Re-run QC + Solve · History · Edit ·
   Picture ▾ · Share · To phone · Wallpaper ▾ · Stack* — on the page the owner complained about by name, and with
@@ -16329,10 +16360,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   fail-before/pass-after): `test_noise_ratio_reads_only_the_central_crop_of_the_master` (monkeypatches
   `fits.getdata` to raise, so the endpoint can only answer by slicing the memmap) and
   `test_noise_ratio_is_unchanged_by_the_windowed_read`. No API/schema/config/default change.
-  **Still open:** the caching half above — but note it is now **markedly more marginal** than when it was filed. A
-  view costs a ~12 MB crop read plus one sub, not a whole canvas, so persisting the ratio would buy a small
-  constant rather than rescuing a page load. Worth doing only if a future run is already adding a `stack_runs`
-  column for something else.
+  ~~**Still open:** the caching half above~~ — **the caching half SHIPPED v0.268.1** (Builder 2026-08-18, branch
+  `claude/relaxed-franklin-i98kvb`), and the "worth doing only if a future run is already adding a `stack_runs`
+  column" caveat is answered by **not adding one**: the stamp is a `project_meta` row under a new
+  `NOISE_RATIO_META_PREFIX` (`webapp/routers/stack.py`), registered in `webapp/run_meta.py` so deleting the run
+  takes it with it — no schema change at all, so there is nothing to migrate and nothing to roll back.
+  **What a repeat view now costs: nothing.** The residual cost the note above measured was "a ~12 MB crop read
+  plus one sub" — and *the sub is the bigger half*: `load_seestar_raw` + `bilinear_debayer` at native
+  1080×1920 on every Target-page load and every finished Jobs card, off the NAS. Both are now skipped on a hit.
+  **The stamp is a cache, never a source of truth.** It carries a fingerprint of what it was measured *from* —
+  the master's `(mtime_ns, size)` and the id of the representative sub — so it can never be served stale. That
+  second half matters more than it looks: `_pick_reference_sub` picks the **sharpest accepted** frame, so
+  accepting or rejecting one changes which sub the comparison is against, and a run-id-only cache would keep
+  answering with the old sub's number. A `null` (a display-space export) is cached too — it is exactly as stable
+  as a number and costs the same FITS open to re-derive. Any mismatch, unparsable stamp, or unwritable project
+  simply measures, as today. **Upgrade-safe:** additive meta key with a live-measure fallback, so every existing
+  run keeps working unchanged; no config, DB-schema, on-disk, API-shape or default change (the endpoint's
+  `{ratio}` contract is untouched). **Tests (+5 in `tests/webapp/test_one_sub_vs_stack.py`, three fail-before):**
+  measured once and remembered (a second view never reopens the master or the sub), a `null` remembered too,
+  re-measured when the master is rewritten at the same path, re-measured when the representative sub is
+  rejected, and the stamp purged with the run.
 - ~~**NEW (Scout 2026-07-21, follow-on to the v0.148.1 sub-preview fix) — put a number on the "one frame vs your
   stack" reveal: "stacking cut your noise ~N×" — original spec kept for provenance.**~~ *(Beginner feature /
   trust; PRIORITY 3; size S–M.)* Now that
@@ -17729,6 +17776,44 @@ problems. Dogfood it every big-picture run and fix root causes.
   **"Share this summary"** button that composes the tallies + hero grid into one social-ready PNG, reusing the
   existing share-card/PNG export path (`seestack/sharecard.py`) so the whole "year in review" can go out as one
   image. Both additive/read-only. *(S–M each, friendliness/enjoy-share — PRIORITY 3.)*
+  **▶ BOTH SLICES ARE NOW DONE — (b) was already shipped, (a) SHIPPED v0.268.2** (Builder 2026-08-18, branch
+  `claude/relaxed-franklin-i98kvb`).
+  **(b), verified in the code rather than assumed:** `GET /api/recap.jpg` (`webapp/routers/stats.py`) already
+  rendered exactly the filed idea — the recap's own figures drawn over the user's best picture by
+  `seestack.recap.draw_recap_poster`, downloaded as `my-sky-so-far.jpg`, with `GET /api/recap` serving the same
+  numbers plus a copy-paste caption, and nothing written to the library.
+  **(a) "your best night", shipped — and the entry's own caution ("needs a per-target frame read… guard it so it
+  never opens every project on a hot render") is answered by not adding a walk at all.** The trick is that
+  `/api/activity-calendar` **already** opens every project and reads every accepted frame row for the Dashboard
+  heatmap, behind an app-level cache. So the star size rides along as an **optional 4th element** of the tuples
+  the webapp already streams into `accumulate_nights` — same walk, same cache, no second pass and no new
+  endpoint. Every existing 3-tuple caller folds byte-for-byte as before.
+  **What it says.** A new self-hiding card on "Your sky, so far": *"Your best night · 12 Jan 2026 — 2.4 px
+  stars — Your steadiest sky yet on M 42 — 1.5 h captured, 180 subs measured."* It is the first thing on that
+  page that **ranks** a night rather than adding it up, which is the question a beginner actually asks after a
+  few sessions. It ranks by **median star size in pixels** — the same measure the session recap's sharp/soft
+  verdict and the Target page's Nights card already use, so the app speaks in one voice rather than inventing a
+  second definition of "a good night". (Sky background, the entry's other suggestion, was deliberately left out:
+  it tracks the Moon and light pollution as much as the night, so "lowest sky" would rank a new-Moon night above
+  a genuinely steadier one.)
+  **Honest by construction, silent rather than wrong** (`seestack/activity_calendar.py::sharpest_night`): a night
+  needs `SHARPEST_MIN_MEASURED` (5) measured subs to qualify — a one-frame median describes the frame, not the
+  night — and at least `SHARPEST_MIN_NIGHTS` (2) nights must qualify, because naming the best of one is not a
+  fact about the sky. A failed measurement stored as 0, a negative or a NaN is not counted as a measurement (a
+  fabricated 0 px would win every comparison). Ties break on the earlier date. Only nights inside the window are
+  considered, so a brilliant night two years ago isn't "your best night" on a 12-month page.
+  **Upgrade-safe:** additive optional response fields (`median_fwhm_px`, `n_measured`, `sharpest_night`) on an
+  existing endpoint; the frontend types them optional and the card renders **nothing** against a backend that
+  doesn't send them, so old/new mix in either direction. No config, DB-schema, on-disk or default change, and no
+  new endpoint. **Verified in a real browser as well as jsdom** (`scripts/agent-dogfood.sh` + a probe that serves
+  the card a sharpest night): it renders inside the viewport at 1440 px **and** 420 px with no console errors.
+  **Tests (+21):** `tests/test_activity_calendar.py` (+8 — the sharpest night is the smallest-star one, a thinly
+  measured night can't win, silence on one qualifying night, silence with nothing measured, unmeasurable values
+  aren't counted, 3-tuple callers fold exactly as before, ties break earlier, and the window is respected),
+  `tests/webapp/test_activity_calendar.py` (+3 — per-night medians on the wire, silence without measurements,
+  and the sharpest night serialised whole), `bestNight.test.ts` (+5) and `BestNightCard.test.tsx` (+4 — named,
+  silent on null, silent against an older backend, silent on a failed fetch), plus `SkySoFar.test.tsx` (+1 —
+  the card is on the page).
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
