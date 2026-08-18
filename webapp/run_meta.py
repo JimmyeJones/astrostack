@@ -4,7 +4,8 @@ A stack run is a row in ``stack_runs``, but several features annotate one out of
 band, as a ``project_meta`` key of the form ``<prefix><run_id>``: the editor's
 saved recipe and the recipe an export of that run rendered, the plain-language
 "what Auto did" note, the two colour measurements an unattended auto-edit
-records, and the calibration skipped/warnings notes a stack job stamps.
+records, the calibration skipped/warnings notes a stack job stamps, and the
+remembered "stacking cut your noise ~N×" measurement.
 
 Each prefix stays owned by the module that writes it — this module only
 *collects* them, so that deleting a run can take its annotations with it instead
@@ -36,6 +37,7 @@ def per_run_meta_prefixes() -> tuple[str, ...]:
         EXPORTED_RECIPE_META_PREFIX,
         RECIPE_META_PREFIX,
     )
+    from webapp.routers.stack import NOISE_RATIO_META_PREFIX
 
     return (
         RECIPE_META_PREFIX,
@@ -45,6 +47,7 @@ def per_run_meta_prefixes() -> tuple[str, ...]:
         AUTO_EDIT_COLORCAL_PREFIX,
         CALIBRATION_SKIPPED_META_PREFIX,
         CALIBRATION_WARNINGS_META_PREFIX,
+        NOISE_RATIO_META_PREFIX,
     )
 
 
