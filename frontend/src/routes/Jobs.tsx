@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type Job } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { settingsLink } from "../settingsSections";
 import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
 import { StackNoiseBadge } from "../components/StackNoiseBadge";
 import { thinStackWarning, type ThinStackWarning } from "../components/target/thinStack";
@@ -60,7 +61,17 @@ export function jobKindLabel(kind: string): string {
 // so a beginner sees a sentence + next step instead of a bare Python exception like
 // `MemoryError: stack output canvas 8000×6000 …` or `ValueError: no accepted,
 // plate-solved frames to stack`.
-const JOB_ERROR_KIND: Record<string, { message: string; next?: string }> = {
+/** A failed job's plain-language explanation, its next step, and — when the next
+ * step is "change a setting" — a link straight to the section that holds it.
+ * `next` stays a plain string (it is pinned by tests and read as prose); the
+ * link is a sibling, the same shape `StackHealthCard`'s `noteAction` uses. */
+export interface JobErrorHelp {
+  message: string;
+  next?: string;
+  action?: { label: string; href: string };
+}
+
+const JOB_ERROR_KIND: Record<string, JobErrorHelp> = {
   // Stack refused *before running* because the output canvas would exceed the
   // memory budget (the OOM guard in stacker.py, raised as MemoryError).
   memory_budget: {
@@ -70,6 +81,8 @@ const JOB_ERROR_KIND: Record<string, { message: string; next?: string }> = {
     next:
       "Lower the drizzle scale, set Canvas mode to “reference”, reject off-target "
       + "frames, or raise the memory limit in Settings, then stack again.",
+    // "…in Settings" is one of seven pages; the memory budget lives on Stacking.
+    action: { label: "Open Settings → Stacking →", href: settingsLink("stacking") },
   },
   // Nothing accepted + plate-solved to stack.
   no_solved_frames: {
@@ -106,7 +119,7 @@ const JOB_ERROR_KIND: Record<string, { message: string; next?: string }> = {
 // raw text verbatim so no information is ever hidden.
 export function friendlyJobError(
   raw: string, kind?: string | null,
-): { message: string; next?: string } {
+): JobErrorHelp {
   if (kind && JOB_ERROR_KIND[kind]) return JOB_ERROR_KIND[kind];
   const s = raw.toLowerCase();
   if (s.includes("memoryerror") || s.includes("working memory")) {
@@ -613,7 +626,16 @@ function JobResultActions({ job }: { job: Job }) {
         {summary ? <Text size="sm">{summary}</Text> : null}
         {rescue ? <Text size="sm">{rescue}</Text> : null}
         {putBack ? <Text size="sm">{putBack}</Text> : null}
-        {nudge ? <Text size="xs" c="dimmed">{nudge}</Text> : null}
+        {nudge ? (
+          <>
+            <Text size="xs" c="dimmed">{nudge}</Text>
+            {/* The nudge names a switch; this is the way to it, rather than
+                leaving the reader to find which Settings page holds it. */}
+            <Anchor component={Link} to={settingsLink("plate-solving")} size="xs" fw={500}>
+              Turn it on in Settings &rarr; Plate solving &rarr;
+            </Anchor>
+          </>
+        ) : null}
       </Stack>
     );
   }
@@ -662,11 +684,14 @@ function JobResultActions({ job }: { job: Job }) {
 
 /** A failed job's error, translated to plain language where we recognise it. */
 function JobError({ raw, kind }: { raw: string; kind?: string | null }) {
-  const { message, next } = friendlyJobError(raw, kind);
+  const { message, next, action } = friendlyJobError(raw, kind);
   return (
     <>
       <Text c="red" size="sm" mt="xs">{message}</Text>
       {next ? <Text c="dimmed" size="xs" mt={2}>{next}</Text> : null}
+      {action ? (
+        <Anchor component={Link} to={action.href} size="xs" fw={500}>{action.label}</Anchor>
+      ) : null}
     </>
   );
 }

@@ -1,7 +1,8 @@
 import { MantineProvider } from "@mantine/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { WallpaperMenu } from "./WallpaperMenu";
+import { Menu } from "@mantine/core";
+import { WallpaperMenu, WallpaperMenuItems } from "./WallpaperMenu";
 import { api } from "../api/client";
 
 function renderMenu(props: { canNorthUp?: boolean } = {}) {
@@ -59,5 +60,42 @@ describe("WallpaperMenu", () => {
     expect(phone).toHaveAttribute(
       "href", api.stackWallpaperUrl("m31", 7, "phone", true),
     );
+  });
+});
+
+describe("WallpaperMenuItems", () => {
+  it("offers the same three downloads inside someone else's menu", async () => {
+    // The History card folds the wallpapers into its own "Save / share" menu
+    // rather than keeping a second menu button beside it — same items, one
+    // implementation.
+    render(
+      <MantineProvider>
+        <Menu opened>
+          <Menu.Dropdown>
+            <WallpaperMenuItems safe="m31" runId={7} />
+          </Menu.Dropdown>
+        </Menu>
+      </MantineProvider>,
+    );
+    expect((await screen.findByText("Phone")).closest("a"))
+      .toHaveAttribute("href", api.stackWallpaperUrl("m31", 7, "phone"));
+    expect(screen.getByText("Desktop").closest("a"))
+      .toHaveAttribute("href", api.stackWallpaperUrl("m31", 7, "desktop"));
+    expect(screen.getByText("Square").closest("a"))
+      .toHaveAttribute("href", api.stackWallpaperUrl("m31", 7, "square"));
+  });
+
+  it("can be rendered without its own heading", async () => {
+    render(
+      <MantineProvider>
+        <Menu opened>
+          <Menu.Dropdown>
+            <WallpaperMenuItems safe="m31" runId={7} withLabel={false} />
+          </Menu.Dropdown>
+        </Menu>
+      </MantineProvider>,
+    );
+    await screen.findByText("Phone");
+    expect(screen.queryByText("Make it your wallpaper")).not.toBeInTheDocument();
   });
 });

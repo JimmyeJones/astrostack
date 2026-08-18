@@ -10234,9 +10234,76 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEXT SLICE OF THE STANDING IA ITEM — FOUND BY DOGFOODING (Builder 2026-08-17, counted in a real running build
+- **NEXT SLICE OF THE STANDING IA ITEM (Builder 2026-08-18, counted in `routes/Target.tsx` while shipping the
+  History-card grouping v0.267.0) — the Target page's hero action row is **nine controls wide**, and four of them
+  are the same "do something with the finished picture" family the History card just folded into one menu.**
+  *(Friendliness / the owner's "extremely busy" priority — PRIORITY 3; size S now, because the machinery exists;
+  frontend-only.)* **Counted, at `Target.tsx:1158-1243`:** *Process target · Re-run QC + Solve · History · Edit ·
+  Picture ▾ · Share · To phone · Wallpaper ▾ · Stack* — on the page the owner complained about by name, and with
+  **two** dropdown buttons sitting side by side (Picture and Wallpaper) that are both "save this picture".
+  **Shape:** the same one v0.267.0 landed — keep the job inline (*Process target · Re-check · Stack*) plus the two
+  navigations (*History · Edit*), and fold Picture's three download items, Share, To phone and the wallpaper
+  aspects into one **"Save / share ▾"**. **9 → 6, and one dropdown instead of two.** Nothing removed.
+  **The groundwork is already in:** `WallpaperMenuItems` (the aspect items without a menu around them),
+  `SharePictureButton asMenuItem`, and `ScanToPhoneModal` (the QR as a modal, because a menu closes on click and
+  would unmount a popover with it) were all extracted for the History card and are exactly what this needs — so
+  this is a re-use, not a second implementation. **Care:** v0.266.1 deliberately un-hid the phone labels on this
+  row; a menu keeps that win (its trigger has words), but check the 420 px screenshot again after, and keep
+  `wallpaperCanNorthUp` threaded through — the Target page passes it and the History card does not.
+
+- **NEW IDEA (Builder 2026-08-18, the pattern behind both v0.266.1 and the hints added in v0.267.0) — a Tooltip is
+  invisible on the device the owner actually reads this app on, so every explanation that exists *only* as a
+  tooltip is, on a phone, not written at all.** *(Friendliness — PRIORITY 3; size M; **measure first**.)* A phone
+  has no hover: Mantine's `Tooltip` opens on hover or focus, and a tap on a button runs the button. v0.266.1 fixed
+  the extreme case (the label itself was hidden behind a tooltip); v0.267.0's menu items each show their old
+  tooltip sentence as a visible one-line hint, which is the same fix applied to a different surface — and both
+  times the wording already existed and was simply unreachable. **Slice:** count the `<Tooltip label="…">` uses
+  across the beginner-critical routes (Target, History, Stack, Editor, Dashboard) and split them into (a) the
+  tooltip *is* the only explanation — promote it to visible text or a hint line; (b) it repeats what the control
+  already says — leave it. **Care:** don't turn every tooltip into visible prose, or the pages get *taller*, which
+  is the complaint this whole IA effort exists to fix; prefer the v0.267.0 shape, where the words become visible
+  because the control moved somewhere that has room for them. Worth doing as a measured pass, not a sweep.
+
+- ~~**NEXT SLICE OF THE STANDING IA ITEM — FOUND BY DOGFOODING (Builder 2026-08-17, counted in a real running build
   at 1440 px) — one History run card renders **15 buttons in four rows** plus a delete icon, for a single
-  picture.** *(Friendliness / the owner's "extremely busy" priority — PRIORITY 3; size M; frontend-only.)*
+  picture.**~~ — **SHIPPED v0.267.0** (Builder 2026-08-18, branch `claude/relaxed-franklin-gto2kn`), built to the
+  filed shape exactly. *(Friendliness / the owner's "extremely busy" priority — PRIORITY 3.)*
+  **Before → after, counted from the code the card renders:** the sample's single finished stack went from
+  **15 buttons in four rows + a bin icon → 4 + a bin icon** (*Edit · Reuse settings · Save / share ▾ · About this
+  stack ▾*); a target with two or more stacks goes **16 → 5** (Compare stays inline, because comparing is the job).
+  A target with eight stacks was ~120 buttons and is now ~40. **Nothing was removed**, per the owner's hard
+  constraint: every one of the fifteen is still there, one tap away, and the bin icon is untouched.
+  **What's in each menu.** *Save / share ▾* — PNG, Full-res PNG, JPEG, FITS, TIFF, then Share, To phone, Copy
+  caption, then the three wallpaper aspects. *About this stack ▾* — Info, Identify, Scale, Adjust, Set as cover.
+  **Reuse, not re-implementation**, as the entry insisted: `WallpaperMenu`'s dropdown body is extracted as an
+  exported `WallpaperMenuItems` that both the standalone menu and the History card render, so the aspects can't
+  drift; `SharePictureButton` gains an `asMenuItem` mode (and still renders **nothing** on a browser that can't
+  share files, in either form). `ScanToPhoneButton` is the one that couldn't go in as-is — it is a *Popover*, and
+  a menu closes on click, which would unmount the popover with the dropdown before the QR could be read — so its
+  QR body is extracted as `ScanToPhoneQr` and offered as a `ScanToPhoneModal` the card owns; the popover form is
+  unchanged for its other callers (the lightbox, the Target page) and now shares that one body.
+  **A small gain on the way:** each item carries its old hover-tooltip wording as a visible one-line hint, so the
+  explanations a phone could never hover for are now simply readable; and a toggle that is on carries a tick,
+  which replaces the "filled button" state the row used to show.
+  Frontend-only: no API, schema, config, on-disk or default change; no control added or removed.
+  **Tests (+10, and 33 existing call-sites updated rather than weakened):** `History.test.tsx` (+4 — the row is
+  down to its four inline controls with all thirteen collapsed ones absent as buttons *and* as links; every
+  save/share action including the wallpaper aspects is present inside the one menu; a toggle that is on is
+  ticked; and "To phone" survives the menu closing behind it), `SharePictureButton.test.tsx` (+2 — the menu-item
+  form shares, and renders nothing when the browser can't), `ScanToPhoneButton.test.tsx` (+2 — the modal builds
+  no QR while closed and shows the same one when open), `WallpaperMenu.test.tsx` (+2 — the items render inside
+  someone else's menu with the same URLs, with or without their heading). The 33 existing assertions were kept
+  verbatim and given an explicit menu-open first, via three small helpers.
+  **Verified in a real browser, not only in jsdom** (`scripts/agent-dogfood.sh`, sample stacked, 1440 px and
+  420 px): the card renders *Edit · Reuse settings · Save / share ▾ · About this stack ▾* on two rows where it
+  used to take four, at both widths, and the probe reports **nothing overflowing and no console errors**. That
+  pass also caught the one thing jsdom could not — **the Save / share dropdown, twelve items with a line of help
+  each, is taller than the space under a card halfway down a 900 px screen, so it flipped upwards and lost its
+  first item off the top of the viewport**. Fixed in **v0.267.2** by capping it (`mah={420}` +
+  `overflowY: "auto"`), which is what the Gallery's preset menu already does, so it scrolls instead of clipping;
+  pinned by a `History.test.tsx` test (+1) that asserts the cause rather than the pixels, and re-screenshotted to
+  confirm.
+  *(Original spec kept below for provenance.)*
   **Measured, not eyeballed:** the sample's one finished stack shows, in order — *Edit · Reuse settings · Adjust ·
   Info · Identify · Scale · Set as cover · PNG · Full-res PNG · JPEG · To phone · Wallpaper · Copy caption · FITS ·
   TIFF*, then a bin icon. With two or more runs there is a **Compare** button too, and the whole block repeats
@@ -10255,10 +10322,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   not weaken an assertion to make it pass. Keep the delete icon exactly where and as it is. State the before/after
   button count in the commit, as the standing item asks.
 
-- **NEW IDEA (Builder 2026-08-17, the loose end left by the Settings-section work v0.266.0–v0.266.2) — the app
+- ~~**NEW IDEA (Builder 2026-08-17, the loose end left by the Settings-section work v0.266.0–v0.266.2) — the app
   still names Settings in prose in five more places, and now that every section has an address, most of them
-  could be one tap instead.** *(Friendliness — PRIORITY 3; size S; **check each one's shape before starting** —
-  they are not all the same problem.)* v0.266.2 linked the Telescope page's three; these remain, and they split
+  could be one tap instead.**~~ — **SHIPPED v0.267.1** (Builder 2026-08-18, branch
+  `claude/relaxed-franklin-gto2kn`), the whole pass, with each of the five checked for its own shape as the entry
+  asked. *(Friendliness — PRIORITY 3.)*
+  **Three became a tap**, all via the `action: {label, href}` sibling the entry recommended — the copy each test
+  pins is untouched, the link sits beside it: **(1)** the out-of-memory job failure now carries *"Open Settings →
+  Stacking →"* (a new exported `JobErrorHelp` type on `JOB_ERROR_KIND`/`friendlyJobError`, rendered by `JobError`);
+  **(2)** the faint-field nudge on a Check & locate job carries *"Turn it on in Settings → Plate solving →"*;
+  **(3)** the "To make this even better" plate-solve tip gains an optional `action` on `NextBestMove`, rendered by
+  `NextBestMoveBadge`, pointing at `plate-solving` — deliberately the *only* tip that gets one, since it is the
+  only one that sends you to Settings at all.
+  **Two stay prose, and here is why** (checked, not skipped): `routes/Target.tsx` already renders an **Open
+  Settings** button, correctly pointed at `plate-solving`, right under that sentence — a second link would be the
+  same tap twice. `routes/Editor.tsx`'s auto-crop line lives inside a Mantine **`Tooltip` label**, which takes a
+  string and vanishes the moment the pointer leaves the switch — a link in there could never be clicked. The
+  entry's own question about that one is answered instead: `auto_crop_border` sits in the **automation** section
+  (confirmed against `Settings.tsx`'s section map, not guessed), so the tooltip now names it — *"The default for
+  every target is in Settings → Automation."* — which is the useful half of a link without the broken half.
+  Frontend-only: no API, schema, config, on-disk or default change; no wording changed except that one added
+  section name. **Tests (+4, plus two assertions on existing cases):** `Jobs.test.tsx` (+2 — an error that needs
+  no setting carries no action, and a healthy Check & locate job renders no Settings link; plus the memory-budget
+  unit case and its rendered card now assert `/settings/stacking`), `NextBestMoveBadge.test.tsx` (+2 — the
+  plate-solve tip links to `/settings/plate-solving`, and a tip that sends you nowhere renders no link at all;
+  its harness gains a `MemoryRouter`).
+  *(Original spec kept below for provenance.)*
+  v0.266.2 linked the Telescope page's three; these remain, and they split
   into two kinds. **(1) Rendered JSX, straightforward:** `routes/Target.tsx:793` ("Install ASTAP and set its path
   in Settings, then re-run solving" — though that alert already carries an **Open Settings** button beside it, so
   this one is arguably fine as prose) and `routes/Editor.tsx:1261` (the auto-crop tooltip's "The default for every
