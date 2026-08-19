@@ -10318,6 +10318,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   already says — leave it. **Care:** don't turn every tooltip into visible prose, or the pages get *taller*, which
   is the complaint this whole IA effort exists to fix; prefer the v0.267.0 shape, where the words become visible
   because the control moved somewhere that has room for them. Worth doing as a measured pass, not a sweep.
+  **▶ FIRST SLICE SHIPPED — v0.270.0** (Builder 2026-08-19, branch `claude/relaxed-franklin-m1crsw`), taken as the
+  entry asks: one surface, measured, not a sweep. **The frames table's column headings** were the clearest case in
+  the app — `FWHM`, `Ecc.`, `Sky` and `Transp.` are four of the table's five numeric columns, each already carrying
+  a good plain-language sentence, and each carrying it **only** as a `Tooltip`. A phone has no hover, and a tap on
+  one of those headings *sorts the table*, so on the device the owner reads this app on there was no way at all to
+  find out what they mean — on the page a beginner spends the most time on.
+  **The shape is v0.267.0's, not a sweep's:** the tooltips are untouched for anyone with a mouse, and a
+  `FrameColumnGuide` disclosure — *"What do these numbers mean? →"* — spells the same sentences out as text.
+  **Same words, one array:** the columns moved out of `Target.tsx` into `components/target/frameColumns.ts`
+  (`FRAME_COLUMNS`), which now feeds both the header tooltips and the guide, so the two cannot drift and a column
+  added later gets an entry in both surfaces or in neither — pinned by a test that walks `FRAME_COLUMNS` rather
+  than a hand-written list.
+  **Measured, as the entry's "don't make the pages taller" caution demands:** the Target page at 420 px goes
+  **2 939 px → 2 953 px (+14 px, +0.5 %)** closed, and **1 966 px → 1 966 px on desktop — no cost at all** (the
+  guide sits in the left column beside a taller right one). Opening it adds 269 px, and only when asked. The body
+  is mounted **only while open** (it is static text with nothing to refetch), which also keeps words like
+  "trailed" off a page that is careful about when it says them — an existing `Target.test.tsx` assertion caught
+  exactly that and passes unchanged.
+  **Tests (+6):** `FrameColumnGuide.test.tsx` (**new, +5** — nothing on the page until asked for, every hinted
+  column explained in one tap driven off `FRAME_COLUMNS` itself, the wording being the tooltips' own, open/close
+  with its `aria-expanded`, and the toggle hugging its text rather than stretching) and `Target.test.tsx` (+1 —
+  the real page's hints are readable without hover). The existing "gives the metric column headers plain-language
+  hint tooltips" test passes unchanged, so the hover path was added to, not traded away.
+  **Still open:** the same question for History, Stack, the editor and the Dashboard — but each needs its own
+  measurement, and this slice deliberately doesn't guess at them.
 
 - ~~**NEXT SLICE OF THE STANDING IA ITEM — FOUND BY DOGFOODING (Builder 2026-08-17, counted in a real running build
   at 1440 px) — one History run card renders **15 buttons in four rows** plus a delete icon, for a single
