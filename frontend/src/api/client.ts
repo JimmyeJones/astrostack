@@ -528,6 +528,26 @@ export interface LibrarySummary {
   heroes: SummaryTarget[];
 }
 
+/** One target whose accepted subs the library still lists but disk no longer
+ * has. Part of `LibraryMissingFiles`; the list is capped worst-first, so it is
+ * for *naming* a single-target outage, never for counting. */
+export interface MissingFilesTarget {
+  safe: string;
+  name: string;
+  n_missing: number;
+}
+
+/** Library-wide storage preflight: are the subs this library lists actually on
+ * disk right now? An unmounted drive or an offline share takes out every target
+ * at once, and the per-target note on the Target page can only speak for the
+ * target you happen to be looking at. */
+export interface LibraryMissingFiles {
+  n_missing: number;
+  n_accepted: number;
+  n_targets_missing: number;
+  targets: MissingFilesTarget[];
+}
+
 /** The shareable "your sky, so far" recap — the poster's own figures plus the
  * copy-paste caption to post beside it. `has_anything` is false until some light
  * has been collected, which is the card's cue to hide. */
@@ -2053,6 +2073,7 @@ export const api = {
     req<ActivityCalendar>(`/api/activity-calendar?months=${months}`),
   getLibraryProgress: () => req<TargetProgress[]>("/api/library-progress"),
   getLibrarySummary: () => req<LibrarySummary>("/api/library/summary"),
+  getLibraryMissingFiles: () => req<LibraryMissingFiles>("/api/library/missing-files"),
   getLibraryRecap: () => req<LibraryRecap>("/api/recap"),
   // Download URL for the recap poster — a square, social-ready JPEG rendered
   // from the same figures over the user's own best picture. A href/download,
