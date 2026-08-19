@@ -1122,6 +1122,24 @@ describe("TargetView streaked badge", () => {
       expect(header, `${label} header should carry a hint`).toBeTruthy();
     }
   });
+
+  it("also spells those hints out for a reader with no hover", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    // A tooltip opens on hover or focus, and a tap on one of these headings
+    // sorts the table — so on a phone the hints above were, in practice, not
+    // written at all. The disclosure carries the same words as text, and costs
+    // one line until it is asked for.
+    const toggle = await screen.findByTestId("frame-column-guide-toggle");
+    expect(screen.queryByText(/Full-width-half-maximum/)).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.getByText(/Full-width-half-maximum/)).toBeVisible();
+    expect(screen.getByText(/Median star eccentricity/)).toBeVisible();
+  });
 });
 
 describe("TargetView trailed badge", () => {
