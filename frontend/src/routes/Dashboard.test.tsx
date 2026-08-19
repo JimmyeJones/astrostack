@@ -287,6 +287,26 @@ describe("Dashboard information architecture (IA slice (e))", () => {
       .toHaveAttribute("href", "/targets/M_31/edit/4");
   });
 
+  it("tells you once that the library's subs aren't on disk", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    // The folders themselves are fine — this is the fault that hides behind a
+    // healthy-looking install, which is why it needs its own note.
+    vi.spyOn(client.api, "getLibraryMissingFiles").mockResolvedValue({
+      n_missing: 3200, n_accepted: 8000, n_targets_missing: 11,
+      targets: [{ safe: "m42", name: "M 42", n_missing: 900 }],
+    });
+
+    renderDashboard();
+
+    const notes = await screen.findByTestId("dashboard-notes");
+    await waitFor(() =>
+      expect(notes).toHaveTextContent("3,200 subs across 11 targets aren't on disk"));
+    // It joins the board rather than becoming one more always-on banner.
+    expect(notes.compareDocumentPosition(screen.getByText("Dashboard")))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("makes the stat tiles with an obvious destination clickable", async () => {
     vi.spyOn(client.api, "getStats").mockResolvedValue({
       ...mkStats(), n_targets: 7, n_stack_runs: 23, active_jobs: 2,

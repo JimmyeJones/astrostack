@@ -291,6 +291,116 @@ def get_library_summary(request: Request) -> LibrarySummaryResponse:
     )
 
 
+# --- library-wide storage preflight -------------------------------------------
+#
+# The Target page already warns when *that* target's accepted subs have no file
+# behind them any more (``/frames/reject-summary``'s ``n_missing_files``). But
+# the cause is almost never per-target: an unmounted drive or an offline NAS
+# share takes out every target at once, and the owner would have to open each
+# one in turn to discover the scale of it. This answers it once for the whole
+# library so the Dashboard can say so while the drive is still there to be
+# reconnected.
+#
+# Cost: one ``stat()`` per accepted frame (two when the frame really is gone),
+# plus opening each project's SQLite — the same shape as the roll-ups above, so
+# it gets the same signature-keyed cache. Targets the registry already says have
+# no accepted frames are skipped without opening anything. **Measured** on a
+# synthetic 40-target library of 1 500 frames each: **1.28 s for 60 000 frames**
+# (≈21 µs a frame, warm cache), and the same whether every file is present or
+# every file is gone. That is fine once a minute and far too expensive on a
+# render, which is why it is its own endpoint rather than another field on
+# ``/api/stats`` — the Dashboard polls that one every 10 s — and why the client
+# asks for it once a visit.
+#
+# The TTL matters more here than for the other roll-ups: reconnecting a share
+# changes nothing the registry signature can see, so the TTL is the *only* thing
+# that clears the note once the drive is back.
+_MISSING_FILES_CACHE_TTL_S = 60.0
+
+# The affected list is only there so a single-target outage can be named and
+# linked; a library-wide one affects everything, and shipping 300 rows to say so
+# helps nobody. ``n_targets_missing`` carries the real count.
+_MISSING_FILES_MAX_LISTED = 5
+
+
+class MissingFilesTargetOut(BaseModel):
+    """One target with subs the library lists but disk no longer has."""
+
+    safe: str
+    name: str
+    n_missing: int
+
+
+class LibraryMissingFilesOut(BaseModel):
+    n_missing: int
+    n_accepted: int
+    n_targets_missing: int
+    #: Worst-first, capped at ``_MISSING_FILES_MAX_LISTED``.
+    targets: list[MissingFilesTargetOut] = []
+
+
+def _collect_missing_files(lib, targets) -> LibraryMissingFilesOut:
+    """Count, across the whole library, accepted frames with neither their cache
+    nor their source on disk right now. A broken project is skipped, never 500s
+    the dashboard — the same rule the other roll-ups follow."""
+    from seestack.io.project import Project, count_unreadable_frames
+
+    rows: list[MissingFilesTargetOut] = []
+    n_missing = 0
+    n_accepted = 0
+    for t in targets:
+        # The registry already knows a target has collected nothing; there is
+        # no file to be missing, so don't pay for the open.
+        if not (t.n_frames_accepted or 0):
+            continue
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(t))
+            missing = count_unreadable_frames(proj.iter_frames(accepted_only=True))
+            accepted = proj.count(accepted_only=True)
+        except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
+            continue
+        finally:
+            if proj is not None:
+                proj.close()
+        n_accepted += accepted
+        if missing > 0:
+            n_missing += missing
+            rows.append(MissingFilesTargetOut(
+                safe=t.safe_name, name=t.name, n_missing=missing,
+            ))
+    rows.sort(key=lambda r: -r.n_missing)
+    return LibraryMissingFilesOut(
+        n_missing=n_missing,
+        n_accepted=n_accepted,
+        n_targets_missing=len(rows),
+        targets=rows[:_MISSING_FILES_MAX_LISTED],
+    )
+
+
+@router.get("/api/library/missing-files", response_model=LibraryMissingFilesOut)
+def get_library_missing_files(request: Request) -> LibraryMissingFilesOut:
+    """Are the subs this library lists actually on disk right now?
+
+    Read-only storage preflight over every target, so an offline share is said
+    once at the library level instead of once per target (or, as today, not at
+    all until a walk-away stack comes out thin). Cached on the app between
+    scans; the TTL is what makes a reconnected drive clear the note, since the
+    registry signature can't see a mount coming or going.
+    """
+    lib = deps.open_library(request)
+    try:
+        targets = lib.list_targets()
+        out = cached_for_registry(
+            request.app, "library_missing_files", registry_signature(targets),
+            lambda: _collect_missing_files(lib, targets),
+            ttl_s=_MISSING_FILES_CACHE_TTL_S,
+        )
+    finally:
+        lib.close()
+    return out
+
+
 def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
     """Open each target's project and collect its stack runs. Expensive — this
     is what the cache below is protecting."""

@@ -18021,8 +18021,45 @@ problems. Dogfood it every big-picture run and fix root causes.
   comparison, not a bit-parity claim). **Gate:** measure peak anonymous RSS on a large synthetic master first
   (the 1 ms `/proc/self/status` `RssAnon` sampler used for v0.232.1 is the right harness); take it only if the
   win is real. The existing behaviour is correct — this is purely about the ceiling.
-- **NEW IDEA (Builder 2026-08-04, follow-on to the missing-files preflight v0.232.0) — say it once at the
-  *library* level, not once per target.** *(Autonomy / trust — PRIORITY 2; size S; additive, read-only.)* The new
+- ~~**NEW IDEA (Builder 2026-08-04, follow-on to the missing-files preflight v0.232.0) — say it once at the
+  *library* level, not once per target.**~~ — **SHIPPED v0.269.0** (Builder 2026-08-19, branch
+  `claude/relaxed-franklin-m1crsw`), built to the filed shape with the measurement the entry demanded taken first.
+  *(Autonomy / trust — PRIORITY 2.)*
+  **The new endpoint:** `GET /api/library/missing-files` → `{n_missing, n_accepted, n_targets_missing, targets}`,
+  where `targets` is a **worst-first list capped at 5** — a library-wide outage affects everything, and shipping
+  300 rows to say so helps nobody, so the count lives in `n_targets_missing` and the list exists only so a
+  *single*-target outage can be named and linked. Targets the registry already says have no accepted frames are
+  skipped without opening anything, and a project that won't open costs its own row, never the answer.
+  **Measured, because the entry made it the gate:** a synthetic 40-target library of 1 500 frames each scans in
+  **1.28 s for 60 000 frames** (≈21 µs a frame, warm cache) — identical whether every file is present or every
+  file is gone. That is fine once a minute and far too expensive on a render, so it is **its own endpoint** rather
+  than another field on `/api/stats` (which the Dashboard polls every 10 s), it reuses the existing
+  signature-keyed `cached_for_registry` roll-up cache at a 60 s TTL, and the client asks once a visit
+  (`staleTime` 5 min). The TTL matters more here than for the other roll-ups: reconnecting a share changes nothing
+  the registry signature can see, so the TTL is the *only* thing that clears the note once the drive is back —
+  pinned by a test that asserts a second call inside the TTL is the cached answer and that dropping the entry
+  reports the outage.
+  **The entry's "also worth checking" is why this note is a *fallback*, not a replacement:** the Dashboard already
+  raises the cheap watched-folder check (`folderReadiness` off `/api/system`) as a **blocking** notice, and that
+  catches the whole-share-gone case for free. This new note is ranked **below** it as a `warning`, for the fault
+  that hides behind a healthy-looking install — folders fine, every frame still listed, and the first real symptom
+  is a walk-away stack coming out thin hours later.
+  **Frontend:** a self-hiding `MissingFilesNote` joins the Dashboard's `NoticeBoard` (nothing added as a new
+  always-on banner), with the pure `libraryMissingFilesNote()` doing the wording — *"3,200 subs across 11 targets
+  aren't on disk"*, or the one target named outright when only one is affected, and then the same
+  cause-and-fix sentence the per-target note and the Jobs-page note already use. Deliberately **not** dismissable
+  (it isn't deferred work, it's a live fault that clears itself) and it swallows a failed read, so an older
+  backend shows nothing rather than an error — a missing answer is not a missing drive.
+  **Upgrade-safe:** one new read-only endpoint and one new frontend component; no existing response shape, config,
+  DB, on-disk layout or default touched. **Tests (+19):** `tests/webapp/test_library_missing_files.py` (**new,
+  +9** — silence on a healthy library, totals across every target, only affected targets listed, rejected subs
+  don't count, the cache and its invalidation, a broken project not 500ing the dashboard, and the response shape),
+  `libraryMissingFiles.test.ts` (**new, +6** — the library-wide wording, the single-target wording and link,
+  singular/plural, silence at zero and on an absent payload, and that the target count comes from the total rather
+  than the capped list), `MissingFilesNote.test.tsx` (**new, +3** — silent when healthy, both link destinations,
+  silent on a 404) and `Dashboard.test.tsx` (+1 — it joins the board above the title).
+  *(Original spec kept below for provenance.)*
+  - _(orig)_ *(Autonomy / trust — PRIORITY 2; size S; additive, read-only.)* The new
   Target-page callout tells you when *this* target's subs aren't on disk — but the cause is almost never
   per-target: an unmounted drive or an offline NAS share takes out **every** target at once, and the owner would
   have to open each one to discover the scale of it. The Dashboard is where that belongs: one line — *"3 200 subs
