@@ -47,6 +47,12 @@ export function DarksGuide({ spec }: { spec?: DarkSpec | null }) {
         type="button"
         size="xs"
         fw={500}
+        // A `component="button"` anchor is a real <button>, and a Stack stretches
+        // its children — so this one filled the column and took the browser's
+        // centred button text with it, leaving the only centred line in an
+        // otherwise left-aligned note (measured 707 px wide, `text-align: center`).
+        // Hugging its own text puts it back in the column with its siblings.
+        style={{ alignSelf: "flex-start" }}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >

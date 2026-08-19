@@ -10282,6 +10282,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   row; a menu keeps that win (its trigger has words), but check the 420 px screenshot again after, and keep
   `wallpaperCanNorthUp` threaded through — the Target page passes it and the History card does not.
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-19, measured in a real running build at 420 px) — the object card's
+  difficulty sentence is squeezed into a ribbon beside a badge that never shrinks, and the "How to add darks"
+  toggle is the one centred line in an otherwise left-aligned note.**~~ — **FIXED v0.269.1** (Builder 2026-08-19,
+  branch `claude/relaxed-franklin-m1crsw`). *(Friendliness — PRIORITY 3; both are on the Target page **and** the
+  editor, i.e. the two pages priority 1 and 3 care about most, and the first is worst on the phone the owner
+  reads this app on.)*
+  **Measured, before → after, on the same running build** (`scripts/agent-dogfood.sh`, then a Playwright box
+  measurement on `/targets/<t>` and `/targets/<t>/edit/1`):
+  * *"Bright and rewarding — a great target to start with…"* at 420 px: **194 px of a 336 px row (58 %), 4 lines
+    → 336 px (100 %), 2 lines**. `ObjectInfoCard`'s difficulty row was `wrap="nowrap"` with a `flexShrink: 0`
+    badge, so the sentence got whatever the badge left it — the exact squeeze `dogfood_probe.mjs` documents and,
+    at 4 lines, just under its 6-line reporting threshold, which is why no probe had caught it. It now wraps,
+    with a `flex: 1 1 240px` basis so a wide screen keeps it beside the badge exactly as before (desktop: 1 line,
+    581 → 710 px) and a narrow one drops it to its own full-width line.
+  * *"How to add darks →"*: **707 px wide and `text-align: center` → 109 px, left-aligned with its siblings.**
+    `DarksGuide`'s toggle is an `Anchor component="button"` — a real `<button>` — inside a `Stack`, which
+    stretches its children; a stretched button then takes the browser's centred button text, so the only centred
+    line in the note was the one link that was actually a control. `alignSelf: flex-start` makes it hug its text.
+  Frontend-only, two style properties; no copy, API, schema, config, on-disk or default change, and nothing
+  removed. The editor page also gets 11 px shorter at 420 px (2 575 → 2 564 px). **Tests (+2, both fail-before):**
+  `ObjectInfoCard.test.tsx` (the sentence can take a line of its own — the row wraps, the sentence asks for a
+  240 px basis, and the badge still refuses to shrink) and `DarksGuide.test.tsx` (the toggle hugs its own text).
+  jsdom has no layout, so both hold the *mechanism* rather than the pixels; the pixels are the measurement above.
+
 - **NEW IDEA (Builder 2026-08-18, the pattern behind both v0.266.1 and the hints added in v0.267.0) — a Tooltip is
   invisible on the device the owner actually reads this app on, so every explanation that exists *only* as a
   tooltip is, on a phone, not written at all.** *(Friendliness — PRIORITY 3; size M; **measure first**.)* A phone

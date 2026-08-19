@@ -86,12 +86,20 @@ export function ObjectInfoCard(
             <Text size="sm">{d.blurb}</Text>
           ) : null}
           {d.difficulty ? (
-            <Group gap="xs" wrap="nowrap" align="flex-start">
+            // The badge never shrinks, so on a phone a `nowrap` row squeezed this
+            // sentence into a ribbon: measured 194 px of a 336 px row (58 %) and
+            // four lines for a sentence that needs two. Wrapping, with a
+            // flex-basis wide enough to be worth keeping on one line, means the
+            // sentence sits beside the badge on a wide screen exactly as before
+            // and drops to its own full-width line when it can't.
+            <Group gap="xs" wrap="wrap" align="flex-start">
               <Badge variant="light" color={difficultyColor(d.difficulty.level)}
                 size="sm" style={{ flexShrink: 0, marginTop: 2 }}>
                 {d.difficulty.label} for a Seestar
               </Badge>
-              <Text size="sm" c="dimmed">{d.difficulty.text}</Text>
+              <Text size="sm" c="dimmed" style={{ flex: "1 1 240px" }}>
+                {d.difficulty.text}
+              </Text>
             </Group>
           ) : null}
           {d.framing && !hideFraming ? (

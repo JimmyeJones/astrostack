@@ -42,6 +42,17 @@ describe("DarksGuide", () => {
     expect(screen.getByText(/AstroStack builds the master dark/)).toBeInTheDocument();
   });
 
+  it("keeps its toggle hugging its own text, not stretched across the column", () => {
+    // It is a real <button>, and a Stack stretches its children — so it filled
+    // the note's whole width and took the browser's centred button text with it,
+    // leaving one centred line in an otherwise left-aligned note (measured 707 px
+    // wide on a desktop; 109 px after). jsdom has no layout, so the test holds the
+    // mechanism that stops it.
+    renderGuide({ exposure_s: 10, gain: 80 });
+    expect(screen.getByRole("button", { name: "How to add darks →" }))
+      .toHaveStyle({ alignSelf: "flex-start" });
+  });
+
   it("falls back to generic wording when exposure/gain are unknown", () => {
     renderGuide({ exposure_s: null, gain: null });
     fireEvent.click(screen.getByText("How to add darks →"));
