@@ -10282,6 +10282,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   row; a menu keeps that win (its trigger has words), but check the 420 px screenshot again after, and keep
   `wallpaperCanNorthUp` threaded through — the Target page passes it and the History card does not.
 
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-19, measured in a real running build at 420 px) — the object card's
+  difficulty sentence is squeezed into a ribbon beside a badge that never shrinks, and the "How to add darks"
+  toggle is the one centred line in an otherwise left-aligned note.**~~ — **FIXED v0.269.1** (Builder 2026-08-19,
+  branch `claude/relaxed-franklin-m1crsw`). *(Friendliness — PRIORITY 3; both are on the Target page **and** the
+  editor, i.e. the two pages priority 1 and 3 care about most, and the first is worst on the phone the owner
+  reads this app on.)*
+  **Measured, before → after, on the same running build** (`scripts/agent-dogfood.sh`, then a Playwright box
+  measurement on `/targets/<t>` and `/targets/<t>/edit/1`):
+  * *"Bright and rewarding — a great target to start with…"* at 420 px: **194 px of a 336 px row (58 %), 4 lines
+    → 336 px (100 %), 2 lines**. `ObjectInfoCard`'s difficulty row was `wrap="nowrap"` with a `flexShrink: 0`
+    badge, so the sentence got whatever the badge left it — the exact squeeze `dogfood_probe.mjs` documents and,
+    at 4 lines, just under its 6-line reporting threshold, which is why no probe had caught it. It now wraps,
+    with a `flex: 1 1 240px` basis so a wide screen keeps it beside the badge exactly as before (desktop: 1 line,
+    581 → 710 px) and a narrow one drops it to its own full-width line.
+  * *"How to add darks →"*: **707 px wide and `text-align: center` → 109 px, left-aligned with its siblings.**
+    `DarksGuide`'s toggle is an `Anchor component="button"` — a real `<button>` — inside a `Stack`, which
+    stretches its children; a stretched button then takes the browser's centred button text, so the only centred
+    line in the note was the one link that was actually a control. `alignSelf: flex-start` makes it hug its text.
+  Frontend-only, two style properties; no copy, API, schema, config, on-disk or default change, and nothing
+  removed. The editor page also gets 11 px shorter at 420 px (2 575 → 2 564 px). **Tests (+2, both fail-before):**
+  `ObjectInfoCard.test.tsx` (the sentence can take a line of its own — the row wraps, the sentence asks for a
+  240 px basis, and the badge still refuses to shrink) and `DarksGuide.test.tsx` (the toggle hugs its own text).
+  jsdom has no layout, so both hold the *mechanism* rather than the pixels; the pixels are the measurement above.
+
 - **NEW IDEA (Builder 2026-08-18, the pattern behind both v0.266.1 and the hints added in v0.267.0) — a Tooltip is
   invisible on the device the owner actually reads this app on, so every explanation that exists *only* as a
   tooltip is, on a phone, not written at all.** *(Friendliness — PRIORITY 3; size M; **measure first**.)* A phone
@@ -10294,6 +10318,54 @@ problems. Dogfood it every big-picture run and fix root causes.
   already says — leave it. **Care:** don't turn every tooltip into visible prose, or the pages get *taller*, which
   is the complaint this whole IA effort exists to fix; prefer the v0.267.0 shape, where the words become visible
   because the control moved somewhere that has room for them. Worth doing as a measured pass, not a sweep.
+  **▶ FIRST SLICE SHIPPED — v0.270.0** (Builder 2026-08-19, branch `claude/relaxed-franklin-m1crsw`), taken as the
+  entry asks: one surface, measured, not a sweep. **The frames table's column headings** were the clearest case in
+  the app — `FWHM`, `Ecc.`, `Sky` and `Transp.` are four of the table's five numeric columns, each already carrying
+  a good plain-language sentence, and each carrying it **only** as a `Tooltip`. A phone has no hover, and a tap on
+  one of those headings *sorts the table*, so on the device the owner reads this app on there was no way at all to
+  find out what they mean — on the page a beginner spends the most time on.
+  **The shape is v0.267.0's, not a sweep's:** the tooltips are untouched for anyone with a mouse, and a
+  `FrameColumnGuide` disclosure — *"What do these numbers mean? →"* — spells the same sentences out as text.
+  **Same words, one array:** the columns moved out of `Target.tsx` into `components/target/frameColumns.ts`
+  (`FRAME_COLUMNS`), which now feeds both the header tooltips and the guide, so the two cannot drift and a column
+  added later gets an entry in both surfaces or in neither — pinned by a test that walks `FRAME_COLUMNS` rather
+  than a hand-written list.
+  **Measured, as the entry's "don't make the pages taller" caution demands:** the Target page at 420 px goes
+  **2 939 px → 2 953 px (+14 px, +0.5 %)** closed, and **1 966 px → 1 966 px on desktop — no cost at all** (the
+  guide sits in the left column beside a taller right one). Opening it adds 269 px, and only when asked. The body
+  is mounted **only while open** (it is static text with nothing to refetch), which also keeps words like
+  "trailed" off a page that is careful about when it says them — an existing `Target.test.tsx` assertion caught
+  exactly that and passes unchanged.
+  **Tests (+6):** `FrameColumnGuide.test.tsx` (**new, +5** — nothing on the page until asked for, every hinted
+  column explained in one tap driven off `FRAME_COLUMNS` itself, the wording being the tooltips' own, open/close
+  with its `aria-expanded`, and the toggle hugging its text rather than stretching) and `Target.test.tsx` (+1 —
+  the real page's hints are readable without hover). The existing "gives the metric column headers plain-language
+  hint tooltips" test passes unchanged, so the hover path was added to, not traded away.
+  **Still open:** the same question for History, Stack, the editor and the Dashboard — but each needs its own
+  measurement, and this slice deliberately doesn't guess at them.
+
+- **NEW IDEA (Builder 2026-08-19, seen on the phone screenshot while shipping the column guide above) — the Target
+  page prints keyboard shortcuts on a device with no keyboard.** *(Friendliness — PRIORITY 3; size S; **decide,
+  don't sweep**.)* Directly above the frames table, at every width, sits *"Keys: **j**/**k** move · **a** accept ·
+  **r** reject"*. On a phone that is a line of instructions nobody there can follow, on the page the owner reads
+  most. **Why it is filed rather than fixed:** the obvious move — `visibleFrom="sm"` — is exactly the mechanism
+  v0.266.1 had to *undo*, because a CSS media query doesn't hide a thing from a phone user so much as delete it,
+  and the app has been bitten by that reading once already. The distinction that makes this case different is that
+  a keyboard shortcut is not a *feature* on a touch device, it is an instruction for hardware that isn't there —
+  but that is a judgement the owner may not share, and the hard constraint on the standing IA item is that nothing
+  is removed. **Slice, if taken:** either hide it below `sm` (and say so in the commit as a deliberate exception),
+  or fold it into the new "What do these numbers mean?" disclosure, which already ends with the sort/dimmed-row
+  explanation and is the natural home for "and here is how to do it from a keyboard" — that removes nothing from
+  anybody and costs no height. The second is almost certainly the right answer.
+
+- **NEW IDEA (Builder 2026-08-19, same dogfood pass) — the Tonight page explains itself with a FITS keyword.**
+  *(Friendliness — PRIORITY 3; size S; copy only.)* The "Set your observing location" alert reads *"It reads your
+  location automatically from a plate-solved Seestar frame (SITELAT/SITELONG) — so once you've solved some subs
+  it'll just work."* Everything about that sentence is right for a beginner except the parenthesis, which is a pair
+  of FITS header keywords and means nothing to the person the sentence is written for. Dropping the four words
+  costs no information a beginner can use (nobody is going to go and read their headers), and the sentence is
+  already doing the reassuring work. **Care:** check the same parenthesis isn't load-bearing somewhere it *is* the
+  answer — e.g. a Settings hint aimed at someone debugging why their location didn't come through.
 
 - ~~**NEXT SLICE OF THE STANDING IA ITEM — FOUND BY DOGFOODING (Builder 2026-08-17, counted in a real running build
   at 1440 px) — one History run card renders **15 buttons in four rows** plus a delete icon, for a single
@@ -18021,8 +18093,45 @@ problems. Dogfood it every big-picture run and fix root causes.
   comparison, not a bit-parity claim). **Gate:** measure peak anonymous RSS on a large synthetic master first
   (the 1 ms `/proc/self/status` `RssAnon` sampler used for v0.232.1 is the right harness); take it only if the
   win is real. The existing behaviour is correct — this is purely about the ceiling.
-- **NEW IDEA (Builder 2026-08-04, follow-on to the missing-files preflight v0.232.0) — say it once at the
-  *library* level, not once per target.** *(Autonomy / trust — PRIORITY 2; size S; additive, read-only.)* The new
+- ~~**NEW IDEA (Builder 2026-08-04, follow-on to the missing-files preflight v0.232.0) — say it once at the
+  *library* level, not once per target.**~~ — **SHIPPED v0.269.0** (Builder 2026-08-19, branch
+  `claude/relaxed-franklin-m1crsw`), built to the filed shape with the measurement the entry demanded taken first.
+  *(Autonomy / trust — PRIORITY 2.)*
+  **The new endpoint:** `GET /api/library/missing-files` → `{n_missing, n_accepted, n_targets_missing, targets}`,
+  where `targets` is a **worst-first list capped at 5** — a library-wide outage affects everything, and shipping
+  300 rows to say so helps nobody, so the count lives in `n_targets_missing` and the list exists only so a
+  *single*-target outage can be named and linked. Targets the registry already says have no accepted frames are
+  skipped without opening anything, and a project that won't open costs its own row, never the answer.
+  **Measured, because the entry made it the gate:** a synthetic 40-target library of 1 500 frames each scans in
+  **1.28 s for 60 000 frames** (≈21 µs a frame, warm cache) — identical whether every file is present or every
+  file is gone. That is fine once a minute and far too expensive on a render, so it is **its own endpoint** rather
+  than another field on `/api/stats` (which the Dashboard polls every 10 s), it reuses the existing
+  signature-keyed `cached_for_registry` roll-up cache at a 60 s TTL, and the client asks once a visit
+  (`staleTime` 5 min). The TTL matters more here than for the other roll-ups: reconnecting a share changes nothing
+  the registry signature can see, so the TTL is the *only* thing that clears the note once the drive is back —
+  pinned by a test that asserts a second call inside the TTL is the cached answer and that dropping the entry
+  reports the outage.
+  **The entry's "also worth checking" is why this note is a *fallback*, not a replacement:** the Dashboard already
+  raises the cheap watched-folder check (`folderReadiness` off `/api/system`) as a **blocking** notice, and that
+  catches the whole-share-gone case for free. This new note is ranked **below** it as a `warning`, for the fault
+  that hides behind a healthy-looking install — folders fine, every frame still listed, and the first real symptom
+  is a walk-away stack coming out thin hours later.
+  **Frontend:** a self-hiding `MissingFilesNote` joins the Dashboard's `NoticeBoard` (nothing added as a new
+  always-on banner), with the pure `libraryMissingFilesNote()` doing the wording — *"3,200 subs across 11 targets
+  aren't on disk"*, or the one target named outright when only one is affected, and then the same
+  cause-and-fix sentence the per-target note and the Jobs-page note already use. Deliberately **not** dismissable
+  (it isn't deferred work, it's a live fault that clears itself) and it swallows a failed read, so an older
+  backend shows nothing rather than an error — a missing answer is not a missing drive.
+  **Upgrade-safe:** one new read-only endpoint and one new frontend component; no existing response shape, config,
+  DB, on-disk layout or default touched. **Tests (+19):** `tests/webapp/test_library_missing_files.py` (**new,
+  +9** — silence on a healthy library, totals across every target, only affected targets listed, rejected subs
+  don't count, the cache and its invalidation, a broken project not 500ing the dashboard, and the response shape),
+  `libraryMissingFiles.test.ts` (**new, +6** — the library-wide wording, the single-target wording and link,
+  singular/plural, silence at zero and on an absent payload, and that the target count comes from the total rather
+  than the capped list), `MissingFilesNote.test.tsx` (**new, +3** — silent when healthy, both link destinations,
+  silent on a 404) and `Dashboard.test.tsx` (+1 — it joins the board above the title).
+  *(Original spec kept below for provenance.)*
+  - _(orig)_ *(Autonomy / trust — PRIORITY 2; size S; additive, read-only.)* The new
   Target-page callout tells you when *this* target's subs aren't on disk — but the cause is almost never
   per-target: an unmounted drive or an offline NAS share takes out **every** target at once, and the owner would
   have to open each one to discover the scale of it. The Dashboard is where that belongs: one line — *"3 200 subs

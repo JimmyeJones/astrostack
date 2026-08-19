@@ -49,6 +49,8 @@ import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
 import { NextBestMoveBadge } from "../components/target/NextBestMoveBadge";
 import { FramingVerdictNote, useStackFraming } from "../components/target/FramingVerdictNote";
 import { LatestPictureCard } from "../components/target/LatestPictureCard";
+import { FrameColumnGuide } from "../components/target/FrameColumnGuide";
+import { FRAME_COLUMNS, type SortKey } from "../components/target/frameColumns";
 import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
 import { nextBestMove } from "../components/target/nextBestMove";
 import { softerThanUsual } from "../components/target/softStars";
@@ -66,8 +68,6 @@ const NUM = (v: number | null, digits = 2) =>
 const MENU_HINT: CSSProperties = {
   display: "block", fontSize: "0.72rem", opacity: 0.6, whiteSpace: "normal",
 };
-
-type SortKey = "id" | "timestamp_utc" | "fwhm_px" | "star_count" | "eccentricity_median" | "sky_adu_median" | "transparency_score";
 
 const REJECT_METRICS = [
   { value: "fwhm_px", label: "FWHM" },
@@ -756,36 +756,10 @@ export function TargetView() {
     return <QueryError error={target.error} onRetry={() => target.refetch()} />;
   }
 
-  const cols: { key: SortKey; label: string; hint?: string }[] = [
-    { key: "timestamp_utc", label: "Time (UTC)" },
-    {
-      key: "fwhm_px", label: "FWHM",
-      hint: "Full-width-half-maximum: how many pixels wide the stars are. "
-        + "Lower = sharper. Rises with poor seeing, focus drift or clouds.",
-    },
-    {
-      key: "star_count", label: "Stars",
-      hint: "Number of stars detected in the frame. Drops on hazy or "
-        + "cloud-affected subs. Higher is generally better.",
-    },
-    {
-      key: "eccentricity_median", label: "Ecc.",
-      hint: "Median star eccentricity (elongation): 0 = perfectly round, "
-        + "closer to 1 = trailed. High values flag tracking error, wind or a "
-        + "mount bump on that whole sub. Lower is better.",
-    },
-    {
-      key: "sky_adu_median", label: "Sky",
-      hint: "Median sky-background level of the frame. Rises with moonlight, "
-        + "light pollution or thin cloud. Lower is darker (better).",
-    },
-    {
-      key: "transparency_score", label: "Transp.",
-      hint: "Transparency: median brightness of the frame's brightest stars. "
-        + "Higher = clearer sky; low values flag haze or thin cloud. Relative, "
-        + "comparable across this target's frames.",
-    },
-  ];
+  // The columns and their explanations live in one shared array, so the header
+  // tooltips and the "What do these numbers mean?" disclosure below the table
+  // can't drift into two different answers (see `frameColumns.ts`).
+  const cols = FRAME_COLUMNS;
 
   return (
     <Stack>
@@ -1399,6 +1373,9 @@ export function TargetView() {
           <Text size="xs" c="dimmed" mb={4}>
             Keys: <b>j</b>/<b>k</b> move · <b>a</b> accept · <b>r</b> reject
           </Text>
+          {/* The column headings explain themselves on hover — which is to say,
+              not at all on a phone. One line until it's asked for. */}
+          <FrameColumnGuide />
           <Paper withBorder>
             <Table.ScrollContainer minWidth={620} mah="65vh">
               <Table stickyHeader highlightOnHover>

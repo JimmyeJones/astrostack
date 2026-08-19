@@ -130,6 +130,37 @@ describe("ObjectInfoCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("lets the difficulty sentence take a line of its own on a narrow screen", async () => {
+    // Measured on a real phone-width browser before this: the sentence rendered
+    // 194 px of a 336 px row (58 %) and four lines, because the badge beside it
+    // never shrinks and the row was `nowrap`. jsdom has no layout, so what a test
+    // can hold is the mechanism that stops it — the row wraps, and the sentence
+    // asks for a width worth keeping on one line before it gives up and drops
+    // below the badge (measured after: 336 px, two lines; a desktop row is still
+    // one line).
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M33", name: "Triangulum Galaxy", type: "galaxy",
+      constellation: "Triangulum", constellation_abbr: "Tri",
+      ra_deg: 23, dec_deg: 30, matched_by: "name",
+      difficulty: {
+        level: "challenging", label: "Challenging",
+        text: "Faint and low-contrast — it rewards a darker sky and several hours.",
+      },
+    });
+    renderCard("M_33");
+    const sentence = await screen.findByText(/Faint and low-contrast/);
+    expect(sentence).toHaveStyle({ flex: "1 1 240px" });
+    // Mantine drives a Group's wrapping through its own custom property rather
+    // than a plain `flex-wrap`, so that is what there is to assert.
+    const row = sentence.parentElement as HTMLElement;
+    expect(row.style.getPropertyValue("--group-wrap")).toBe("wrap");
+    // The badge still refuses to shrink — that is what makes the wrap necessary
+    // rather than optional.
+    const badge = screen.getByText("Challenging for a Seestar")
+      .closest(".mantine-Badge-root") as HTMLElement;
+    expect(badge).toHaveStyle({ flexShrink: "0" });
+  });
+
   it("omits the difficulty badge when the object isn't vetted", async () => {
     vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
       id: "NGC 4449", name: "", type: "galaxy",

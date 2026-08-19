@@ -16,6 +16,7 @@ import { astapReadiness, astapReadinessSignature } from "../components/dashboard
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
 import { ContinueTonightCard } from "../components/ContinueTonightCard";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
+import { MissingFilesNote } from "../components/dashboard/MissingFilesNote";
 import { PointHereTonightCard } from "../components/dashboard/PointHereTonightCard";
 import { UnexportedEditsNote } from "../components/dashboard/UnexportedEditsNote";
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
@@ -195,6 +196,13 @@ export function Dashboard() {
                 </Button>
               </Alert>
             ) : null },
+          // A live storage fault, and one the app is otherwise silent about:
+          // the frames are all still listed, so nothing looks wrong until a
+          // walk-away stack comes out thin. Ranked with the other warnings and
+          // below the blocking folder problem, which is the same fault's
+          // louder cousin. Self-hiding at zero.
+          { key: "missing-files", priority: NOTICE_PRIORITY.warning,
+            node: <MissingFilesNote /> },
           // Advisory, and the reason this board exists: work of the user's that
           // the app isn't showing anywhere. Self-hiding at zero, so on an
           // ordinary install it costs nothing and the board folds nothing.
