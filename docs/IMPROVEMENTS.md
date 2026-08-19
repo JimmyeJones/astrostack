@@ -10344,6 +10344,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Still open:** the same question for History, Stack, the editor and the Dashboard — but each needs its own
   measurement, and this slice deliberately doesn't guess at them.
 
+- **NEW IDEA (Builder 2026-08-19, seen on the phone screenshot while shipping the column guide above) — the Target
+  page prints keyboard shortcuts on a device with no keyboard.** *(Friendliness — PRIORITY 3; size S; **decide,
+  don't sweep**.)* Directly above the frames table, at every width, sits *"Keys: **j**/**k** move · **a** accept ·
+  **r** reject"*. On a phone that is a line of instructions nobody there can follow, on the page the owner reads
+  most. **Why it is filed rather than fixed:** the obvious move — `visibleFrom="sm"` — is exactly the mechanism
+  v0.266.1 had to *undo*, because a CSS media query doesn't hide a thing from a phone user so much as delete it,
+  and the app has been bitten by that reading once already. The distinction that makes this case different is that
+  a keyboard shortcut is not a *feature* on a touch device, it is an instruction for hardware that isn't there —
+  but that is a judgement the owner may not share, and the hard constraint on the standing IA item is that nothing
+  is removed. **Slice, if taken:** either hide it below `sm` (and say so in the commit as a deliberate exception),
+  or fold it into the new "What do these numbers mean?" disclosure, which already ends with the sort/dimmed-row
+  explanation and is the natural home for "and here is how to do it from a keyboard" — that removes nothing from
+  anybody and costs no height. The second is almost certainly the right answer.
+
+- **NEW IDEA (Builder 2026-08-19, same dogfood pass) — the Tonight page explains itself with a FITS keyword.**
+  *(Friendliness — PRIORITY 3; size S; copy only.)* The "Set your observing location" alert reads *"It reads your
+  location automatically from a plate-solved Seestar frame (SITELAT/SITELONG) — so once you've solved some subs
+  it'll just work."* Everything about that sentence is right for a beginner except the parenthesis, which is a pair
+  of FITS header keywords and means nothing to the person the sentence is written for. Dropping the four words
+  costs no information a beginner can use (nobody is going to go and read their headers), and the sentence is
+  already doing the reassuring work. **Care:** check the same parenthesis isn't load-bearing somewhere it *is* the
+  answer — e.g. a Settings hint aimed at someone debugging why their location didn't come through.
+
 - ~~**NEXT SLICE OF THE STANDING IA ITEM — FOUND BY DOGFOODING (Builder 2026-08-17, counted in a real running build
   at 1440 px) — one History run card renders **15 buttons in four rows** plus a delete icon, for a single
   picture.**~~ — **SHIPPED v0.267.0** (Builder 2026-08-18, branch `claude/relaxed-franklin-gto2kn`), built to the
