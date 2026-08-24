@@ -80,6 +80,26 @@ higher on this list wins — always:
 4. **Best-possible image quality** for the OSC Seestar workflow (clean, detailed
    final images).
 
+**🔴 CRITICAL — FRONT OF QUEUE, ABOVE EVEN THE UI PRIORITY BELOW (2026-08-17) — a walk-away auto-stack can
+silently publish a materially DEGRADED image and then never retry.** An advanced-AI audit root-caused and
+repro-verified the owner's "my images turned out worse" report: `_auto_stack_frame_count`
+(`webapp/pipeline.py:1663`) decides whether to fire purely from a DB-level accepted+solved count, never
+checking whether those frames' files are actually readable right now. When a chunk of subs briefly went
+unreadable mid-session (storage-side on the owner's box, NOT a code bug — `incoming/` deletion is already
+guarded, see §10), the stack fired anyway, silently dropped the unreadable frames inside `run_stack`, and
+published the thinner, noisier result as the target's newest picture. Worse: the attempt marker written
+after every stack stamps the same DB-level count, blind to readability — so once stamped, the trigger never
+fires again even after the files come back, and the degraded picture can stand indefinitely. Real numbers:
+787→575→271 frames / noise 0.015→0.015→0.020 across one growing night. **Full root cause, verified repro, and
+fix direction (a readability preflight held-back state, mirroring the existing `held_thin` guard, that
+doesn't stamp the marker) at the top of `docs/IMPROVEMENTS.md` → "Bugs (fix these first)".** This silently
+degrades the final image on autopilot — the worst class of bug this app can ship — so it outranks every
+other item in this file, including the standing UI priority immediately below. Two smaller, lower-severity
+findings from the same audit are filed directly beneath it (a latent mosaic auto-grade population bug, gated
+off by default; and a design gap where `photometric_normalize` never gets enabled on the walk-away mosaic
+path even though `level_by_coverage` alone can't fix a hazy panel's multiplicative dimming) — worth a run
+each once the critical item ships.
+
 **🎨 STANDING OWNER PRIORITY (2026-08-08) — the UI is "extremely busy"; fix the information
 architecture, page by page.** The owner's top complaint about the live build: *"there are like 30
 different things on the top of some of the pages and I have to scroll a fair bit to get to the actual

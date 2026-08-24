@@ -49,6 +49,130 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🔴🔴🔴 OWNER-REPORTED REGRESSION, ROOT-CAUSED BY ADVANCED-AI AUDIT (2026-08-17) — a walk-away auto-stack
+  never checks whether it can actually READ its subs before it fires, and once it fires on a bad night it can
+  NEVER TRY AGAIN. This is the "my images turned out worse" bug, verified with a real repro against the live
+  engine.** *(Severity CRITICAL — this silently degrades the final image on autopilot, the single worst thing
+  this app can do, and the owner has already been hit by it on real data. Confidence: HIGH — repro-verified,
+  not inferred. Fix this before anything else, including the standing UI/IA priorities.)*
+
+  **The owner's evidence:** three walk-away auto-stacks of the same mosaic target ("gray_star"), same night
+  (2026-08-16), same settings (drizzle ×1.5). In time order: 787 frames / 4.4 h / noise 0.015 →
+  575 frames / 3.2 h / noise 0.015 → 271 frames / 1.5 h / noise 0.020. Frame count and integration time fell
+  by nearly 3× and noise got measurably worse, across ONE growing night — the opposite of what should ever
+  happen as a Seestar drips in more subs.
+
+  **Root cause (audit's repro: synthetic growing 3-panel mosaic through the real pipeline; baseline healthy
+  24→42→60 frames monotone; then hid 28 of 42 source files mid-night):**
+  1. `_auto_stack_frame_count` (`webapp/pipeline.py:1663`) decides whether to fire a fresh auto-stack purely
+     from the DB's `solved_accepted` count (`_solved_accepted_count`) — it never asks whether those frames'
+     *files* are actually readable right now.
+  2. The real stack (`run_stack` → `prepare`, `seestack/stack/stacker.py` ~2115) silently drops any frame
+     whose `readable_frame_path()` comes back `None` — correct behaviour for a *single* stack, but nothing
+     upstream treats "offered vs. actually used" as a signal.
+  3. The stack still completes, still gets recorded, and **still gets published as the target's newest
+     auto-edited picture** — a materially thinner, noisier image than a night ago, with no warning.
+  4. The attempt marker written after every stack (`AUTO_STACK_ATTEMPT_META_KEY`, `webapp/pipeline.py:2197`)
+     stamps `_solved_accepted_count(proj)` — the same DB-level count from step 1, **blind to what was
+     actually readable**. Since that DB count doesn't change just because files came back on disk, the
+     trigger in step 1 (`if int(attempted) >= solved_accepted: return None`) never re-fires. **If the bad
+     stack happened to be the last one that night, the degraded picture is the target's final image
+     indefinitely**, until brand-new subs eventually push `solved_accepted` past the stale marker.
+  - **Repro (verified):** hide 28/42 source files mid-night → auto-stack still fires, stacks
+    `used=14 offered=42 unreadable=28`, publishes it as newest. Restore the files → `trigger=None` forever
+    (bug 2, confirmed separately).
+  - **What made the owner's files briefly unreadable is NOT a code bug** — `incoming/` is read-only and the
+    app has no delete/move path into it (guardrail + CI-enforced spy test, `AGENTS.md` §10). This is
+    storage-side on the owner's box: a moved/archived folder, a flaky NAS share, etc. **The bug is that the
+    app has no defence against a transient version of this at all** — it should notice and hold back, not
+    publish silently.
+
+  **Fix direction (verify with the mosaic AND a single-field growing target — do not disturb the legit
+  align-drop guard, i.e. a stack that genuinely dropped subs at alignment must still be recognised as
+  "new work covered"):**
+  1. Run a readability preflight (`count_unreadable_frames()` — reuse, don't reinvent; the audit found this
+     already exists) inside `_auto_stack_frame_count`, and when a material fraction of the offered frames are
+     currently unreadable, **hold back** — same shape as the existing `held_thin` guard — and do **not** stamp
+     the attempt marker, so the retry keeps trying on the next scan.
+  2. When the marker *is* withheld for this reason, stamp the unreadable count too, so the trigger can tell
+     "still unreadable, don't loop" from "readable again, please retry" without re-stacking every single scan
+     during a real, ongoing outage.
+  3. Regression test: growing mosaic + growing single-field target, each with a mid-session readability dip
+     that later clears — assert no thin/degraded run gets published during the dip, and a full-frame stack
+     fires once files are readable again.
+
+  **Data worth pulling from the owner's live install to confirm this instance precisely (not required to fix
+  the bug, but confirms the mechanism and points at what happened storage-side):** the three runs' FITS
+  header cards `NOFFERED` / `NALIGNFL` / `NUNREAD` / `REJMODE` (predicted: `NOFFERED`≈790–900 on all three,
+  `NUNREAD`≈215/≈520 on runs 2–3); `GET /api/library/missing-files` right now; the target's `reject_reason`
+  histogram; whether `auto_grade_frames` / `copy_to_cache` are on; whether any `incoming/` folders were
+  moved/archived that evening.
+
+- **🟠 LATENT (found incidentally by the same 2026-08-17 audit, repro-verified, NOT the owner's current
+  regression) — auto-grade compares quality metrics across a mosaic TARGET-WIDE, when its panels are
+  different patches of sky. A legitimately star-poor panel can have its entire sub population rejected as
+  "cloud".** *(Severity high for any mosaic owner with grading on — real, permanent data loss, not a false
+  alarm the user can waved away, since `auto_grade_frames` acts automatically. Gated behind
+  `auto_grade_frames`, which defaults OFF, and bounded by the existing 25% rejection rail — so it did not
+  cause the regression above, which fires regardless of this setting. Same class of bug as the v0.221.0
+  time-population fix (`846eb74`), just across sky position instead of time.)*
+
+  `grade_frames` (`seestack/qc/grading.py` ~304–356) builds its metric population from every accepted frame
+  of the *whole target* (`pop = [... for f in accepted if ...]`), with no split by pointing. **Repro:**
+  synthetic 6-panel mosaic, one deliberately star-poor panel → **all 40/40 of that panel's subs** flagged for
+  rejection (z≈26.8, "far fewer stars than typical — likely cloud"). The schema already carries
+  `mosaic_panel_id` (`seestack/io/project.py:112`, indexed) but nothing in grading groups by it —
+  `seestack/stack/pointings.py` exists and is the natural place to derive the clustering.
+
+  **Fix direction:** grade star-count/sky/transparency-family metrics **per pointing cluster**
+  (`mosaic_panel_id`) rather than target-wide, so a panel's own population is judged against itself. Keep
+  the existing 25%-per-population rail; verify it now applies per cluster too, not just globally, or a small
+  cluster could still lose disproportionately.
+
+- **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit, repro-verified) — the "Panels: check" badge is
+  HONEST (does not false-fire), but the machinery that could actually FIX what it detects is built and
+  wired up everywhere except the one path that needs it most.** *(Not a correctness bug — a real improvement
+  with existing machinery, not a new feature.)*
+
+  Reproduced through the real stack path: haze arriving mid-mosaic (transparency 1.0→0.45) walks the seam
+  residual 0.97→1.78 (crosses the "check" bar at 1.5) and correctly lights both "Panels: check" and "Hazy
+  night" together — not a bug, a true positive. The metric doesn't false-fire on flat-noise canvases either
+  (0.03–0.36 measured vs. the 1.5 bar, even at 64 coverage levels). **The gap:** `level_by_coverage`
+  (automatic, on the mosaic path) only removes *additive* sky offsets between panels — a hazy panel's
+  *multiplicative* dimming survives it untouched. `photometric_normalize` is the op that corrects exactly
+  that, but unlike `auto_reject`/`quality_weighted` (which the walk-away chain turns on automatically per
+  `_stack_target`'s `auto` flag — see `webapp/pipeline.py` docstring), **nothing ever enables
+  `photometric_normalize` on the walk-away path**; it is off by default and stays off.
+
+  **Fix direction:** extend the same "auto turns this on when the user made no explicit choice" pattern
+  already used for `auto_reject`/`quality_weighted` to `photometric_normalize`, gated on `is_mosaic` (mirror
+  the existing `if is_mosaic:` branch in `auto_recipe`/`_stack_target`). **Measure a real before/after** (seam
+  residual with vs. without, on a synthetic hazy-mid-session mosaic) before flipping any default, per
+  `AGENTS.md` §9 — do not blind-flip.
+
+- **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit — needs confirmation from a live header, not yet
+  fully verified) — the drizzle path may be running with NO outlier rejection at all on walk-away stacks.**
+  `auto_reject` is documented as a no-op under drizzle (drizzle has its own `drizzle_reject`, which defaults
+  **off** and is never turned on by the walk-away `auto` chain the way `auto_reject`/`quality_weighted` are).
+  If confirmed, every drizzled walk-away stack — satellites, plane trails, cosmic rays, the works — goes
+  straight into the combine unfiltered. **Confirm first:** check the `REJMODE` FITS header card on a real
+  drizzled walk-away run (its absence would confirm no rejection ran). If confirmed, extend the same
+  `_stack_target` "`auto` turns this on when nothing explicit was set" pattern to `drizzle_reject`, with a
+  measured before/after (this is also the leading, though unconfirmed, explanation for the bright
+  saturated-looking blob the owner's screenshot showed near a mosaic seam — most likely a real star with a
+  debayer/SCNR chroma ring, amplified by drizzle ×1.5 and possibly by the missing rejection pass; ruled out as
+  a NaN/coverage hole (renders black, not white) and as seam ghosting (would double every star along the
+  join, not produce one blob) — confirm with the same RA/Dec appearing in a raw sub and linear FITS values at
+  its core).
+
+- **⚪ HARDENING NOTE (found incidentally, 2026-08-17 audit — not currently firing for the owner, no fix
+  needed yet, just a landmine to know about) — the mosaic-canvas outlier-exclusion pass's rejections are
+  PERMANENT with no reconcile path**, unlike auto-grade's post-v0.221.0 behaviour. Verified not to have fired
+  for the owner's data (3° floor + median-separation term; the owner's ~3.6°-apart panels excluded nothing).
+  If a future mosaic legitimately trips this exclusion, there is currently no path back for those frames the
+  way `apply_grade_reaccepts` provides for auto-grade. Worth a reconcile pass eventually, same shape as the
+  auto-grade fix, but not urgent — file only, don't build until it's someone's actual problem.
+
 - ~~**FOUND BY DOGFOODING (Builder 2026-08-17, second run of the day, read off the same running build's Dashboard)
   — "Set your location in Settings…" is printed once by the *card* and then again by **every pick inside it**, so
   the "Worth more time" card says the same instruction up to four times in eight lines.**~~ —
