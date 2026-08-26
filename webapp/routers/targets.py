@@ -11,6 +11,7 @@ from webapp import deps
 from webapp.goals import GOAL_META_KEY, MAX_GOAL_S, MIN_GOAL_S, read_goal_s
 from webapp.registry_cache import invalidate_registry_cache
 from webapp.schemas import (
+    AutoStackHoldOut,
     BackgroundModeHintOut,
     BestFrameOut,
     CleanupSuggestionOut,
@@ -277,6 +278,45 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
     return out
 
 
+def _read_auto_stack_hold(lib, safe: str) -> AutoStackHoldOut | None:  # noqa: ANN001
+    """This target's active "some of your subs aren't on disk" hold, or ``None``.
+
+    Read from the per-target meta the scan writes and clears (see
+    ``pipeline.AUTO_STACK_HOLD_META_KEY``) rather than recomputed here: deciding
+    it costs one ``stat()`` per sub, which has no business on a page load. Every
+    failure mode — no key, an unreadable project, a blob from a future version —
+    reads as "nothing to say", because a note that can't be trusted is worse than
+    no note.
+    """
+    import json
+
+    from webapp.pipeline import AUTO_STACK_HOLD_META_KEY
+
+    try:
+        proj = lib.open_target(safe)
+    except Exception:  # noqa: BLE001 — a note must never 500 the Target page
+        return None
+    try:
+        raw = proj.get_meta(AUTO_STACK_HOLD_META_KEY)
+    except Exception:  # noqa: BLE001
+        return None
+    finally:
+        proj.close()
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        return AutoStackHoldOut(
+            offered=int(data["offered"]), readable=int(data["readable"]),
+            unreadable=int(data["unreadable"]),
+            prior_best=(None if data.get("prior_best") is None
+                        else int(data["prior_best"])),
+            reason=str(data.get("reason") or ""),
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @router.get("/{safe}", response_model=TargetOut)
 def get_target(safe: str, request: Request) -> TargetOut:
     lib = deps.open_library(request)
@@ -284,7 +324,10 @@ def get_target(safe: str, request: Request) -> TargetOut:
         entry = lib.find_target(safe)
         if entry is None:
             raise HTTPException(status_code=404, detail=f"No target '{safe}'")
-        return _to_out(entry)
+        out = _to_out(entry)
+        # Detail only — the list endpoint would have to open every project.
+        out.auto_stack_hold = _read_auto_stack_hold(lib, safe)
+        return out
     finally:
         lib.close()
 

@@ -20,6 +20,24 @@ from seestack.stack.stacker import StackOptions
 # ---------------------------------------------------------------------------
 
 
+class AutoStackHoldOut(BaseModel):
+    """The active "some of your subs aren't on disk" hold on one target.
+
+    The walk-away path already refuses to publish a thinner picture than the one
+    a target has, and already explains itself — but only in the scan job's
+    summary on the Jobs page. A beginner whose picture stops updating looks at
+    the *Target* page, so this carries the same numbers there. Fields mirror the
+    job summary's entry exactly, so the two screens can never drift into
+    different stories.
+    """
+
+    offered: int      # solved+accepted subs the stack would have covered
+    readable: int     # …of which had a file on disk at the time
+    unreadable: int   # …and which did not
+    prior_best: int | None = None  # frames in the best stack this target has
+    reason: str       # short phrase: which of the two guards held it back
+
+
 class TargetOut(BaseModel):
     safe_name: str
     name: str
@@ -36,6 +54,11 @@ class TargetOut(BaseModel):
     # image, or None to show the newest stack (the default). Lets the UI mark
     # which History run is the current cover.
     cover_stack_run_id: int | None = None
+    # Why the walk-away auto-stack is currently holding this target back because
+    # some of its subs have no file on disk, or None (the healthy case, and every
+    # target in the *list* response — this is populated on the detail endpoint
+    # only, which is the one screen that renders it).
+    auto_stack_hold: AutoStackHoldOut | None = None
 
 
 class TargetPatch(BaseModel):

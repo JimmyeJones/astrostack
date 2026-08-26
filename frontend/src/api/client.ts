@@ -264,6 +264,19 @@ export interface RejectionSummary {
   buckets: RejectionBucket[];
 }
 
+/** Why the hands-off auto-stack is currently holding a target back because some
+ * of its subs have no file on disk right now. Populated on the target *detail*
+ * response only (the list response would have to open every project), and absent
+ * on every healthy target and every older backend — so `undefined` means
+ * "nothing to say", which is the overwhelmingly common case. */
+export interface AutoStackHold {
+  offered: number;
+  readable: number;
+  unreadable: number;
+  prior_best?: number | null;
+  reason: string;
+}
+
 export interface Target {
   safe_name: string;
   name: string;
@@ -277,6 +290,7 @@ export interface Target {
   notes: string | null;
   tags: string[];
   cover_stack_run_id?: number | null;
+  auto_stack_hold?: AutoStackHold | null;
 }
 
 export interface MergeSuggestionTarget {

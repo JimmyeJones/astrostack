@@ -13,7 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
-import { api, type Frame } from "../api/client";
+import { api, type AutoStackHold, type Frame } from "../api/client";
 import { formatIntegration, formatStampDate } from "../format";
 import { integrationReadiness, readinessColor, noiseReductionHint } from "../readiness";
 import { QueryError } from "../components/QueryError";
@@ -184,6 +184,27 @@ export function mosaicGradingNote(groups: number | undefined): string | null {
     `This looks like a ${groups}-panel mosaic, so each panel is compared `
     + "against itself — a panel pointed at emptier sky genuinely has fewer "
     + "stars, and that isn't cloud."
+  );
+}
+
+/** Why this target's picture has stopped updating, in the same voice the Jobs
+ * page already uses — or `null` when nothing is being held back.
+ *
+ * The walk-away path holds a target back rather than publish a thinner, noisier
+ * picture than the one it already has, and says so in the scan job's summary.
+ * That's the Jobs page: the one screen a beginner whose picture stopped changing
+ * has no reason to visit. They look *here*, at their picture. Pure so the wording
+ * (and the "say nothing" cases) can be pinned by tests. */
+export function autoStackHoldNote(hold: AutoStackHold | null | undefined): string | null {
+  if (!hold || hold.unreadable <= 0) return null;
+  const subs = (n: number) => `${n} sub${n === 1 ? "" : "s"}`;
+  return (
+    `The last hands-off stack was held back: ${subs(hold.unreadable)} of `
+    + `${hold.offered} couldn't be read (${hold.readable} still can). `
+    + "Stacking without them would have made a thinner, noisier picture than "
+    + "the one you already have, so it was left alone. This usually means a "
+    + "drive or network share went off-line, or a folder was moved. Put it back "
+    + "and the next scan stacks the full set automatically — nothing has been lost."
   );
 }
 
@@ -612,6 +633,10 @@ export function TargetView() {
     [rejectSummary.data],
   );
 
+  // "Why did my picture stop updating?" — the walk-away readability hold, which
+  // until now was explained only in the scan job's summary on the Jobs page.
+  const holdNote = autoStackHoldNote(target.data?.auto_stack_hold);
+
   const list = frames.data ?? [];
   // Accepted frames still carrying a streak flag (satellite/plane trail). With
   // "keep streaked frames" on, QC flags rather than rejects these, so per-pixel
@@ -797,6 +822,13 @@ export function TargetView() {
         inlineCount={2}
         data-testid="target-notes"
         items={[
+          { key: "auto-stack-hold", priority: NOTICE_PRIORITY.blocking,
+            node: holdNote ? (
+              <Alert color="yellow" icon={<IconAlertTriangle size={18} />}
+                title="Some of your subs aren't on disk right now">
+                <Text size="sm">{holdNote}</Text>
+              </Alert>
+            ) : null },
           { key: "solve-setup", priority: NOTICE_PRIORITY.blocking, node: solveSetup ? (
             <Alert color="orange" icon={<IconAlertTriangle size={18} />}
               title={solveSetup.kind === "astap"

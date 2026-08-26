@@ -7320,22 +7320,76 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
-  readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.** *(Pillar:
-  autonomy + friendliness — PRIORITY 2–3. Size: S.)* v0.270.1 correctly holds a walk-away stack back when a
-  storage hiccup would publish a thinner picture, and renders the plain-language reason — but **only in
-  `frontend/src/routes/Jobs.tsx`** (`auto_stack_held_unreadable`; grepped this run — it appears nowhere else in
-  the frontend). A beginner whose picture silently stops updating looks at the **Target page**, where their
-  picture lives, sees a stale image with no explanation, and has no reason to go hunting on the Jobs page — so
-  the one place the hold *is* explained is the one place they won't think to look. **Shape:** the hold is
-  already recorded per-target in the scan-job summary; expose the most-recent active hold for a target (a small
-  additive field on the target-detail endpoint, or a filter over the recent jobs the Target page already
-  fetches) and render the same sentence as a dismissible note on the Target page / Dashboard target card —
-  *"Last night's stack was held back: 516 of 787 subs couldn't be read. Nothing was lost — put them back and
-  the next scan stacks the full set."* **Guardrails:** additive/read-only, reuses the exact wording already
-  shipped (one voice, no new copy to drift), self-hides when there is no active hold, and clears the moment the
-  next scan stacks successfully. Testable against a target whose job history carries a held scan. Closes the
-  "why did my picture stop updating?" gap at the surface the user actually stares at.
+- ~~**NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
+  readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.**~~ —
+  **SHIPPED v0.273.1** (Builder 2026-08-26, branch `claude/compassionate-galileo-nc1b98`). *(Autonomy +
+  friendliness, priority 2–3 — the surfacing half of the same story v0.273.0 fixed.)*
+
+  **The Target page now answers "why did my picture stop updating?".** The scan persists its readability
+  verdict on the target it belongs to (`AUTO_STACK_HOLD_META_KEY`, a JSON blob) whenever the walk-away path
+  holds it back, and **clears it on the first scan that doesn't** — or on any successful stack, including a
+  manual one the user ran to get past it. So the note is always about the *current* state, never an outage
+  that ended weeks ago, and an absent key is what "nothing to say" means.
+
+  **Read, not recomputed.** Deciding the hold costs one `stat()` per sub, which has no business on a page
+  load — hence the meta key rather than a live check. `GET /api/targets/{safe}` grows an additive nullable
+  `auto_stack_hold` carrying the *same* fields the job summary already has (`offered` / `readable` /
+  `unreadable` / `prior_best` / `reason`), so the Jobs page and the Target page can't drift into different
+  stories. Deliberately **detail-only**: populating it on the *list* endpoint would mean opening every
+  target's project on every Dashboard poll, so the Dashboard-card half of the filed idea is not in this
+  slice (re-filed below). Every failure mode — no key, an unreadable project, a blob from a future version —
+  reads as "nothing to say" rather than a 500 on the page that shows the picture.
+
+  **The note itself** is a `blocking`-priority entry in the Target page's existing `NoticeBoard` (so it
+  lands in the prioritised notes area, not as one more always-on banner above it), rendering the same voice
+  the Jobs page uses via a pure `autoStackHoldNote()`: *"The last hands-off stack was held back: 516 subs of
+  787 couldn't be read (271 still can). Stacking without them would have made a thinner, noisier picture
+  than the one you already have… Put it back and the next scan stacks the full set automatically — nothing
+  has been lost."* No action button on purpose: the only honest fix is putting the files back, and a "stack
+  it anyway" button would publish exactly the thin picture the guard exists to prevent.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk-layout or default change; one additive response field an
+  older frontend ignores, and one per-target meta key written only during an actual outage.
+
+  **Tests (+2 python pipeline / +4 webapp API / +4 frontend):**
+  `tests/webapp/test_auto_stack_pipeline.py` (the hold recorded on the held target with the right numbers
+  and self-clearing once the files come back; nothing recorded anywhere on a healthy scan),
+  `tests/webapp/test_target_auto_stack_hold.py` (null on a healthy target; the numbers on a held one; the
+  list endpoint left cheap; a garbled/half-written blob ignored rather than 500-ing),
+  `frontend/src/routes/Target.test.tsx` (the pure helper's silence cases, its wording, its singular, and the
+  note actually rendering on the page).
+
+  Original spec, for the record:
+
+    **NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
+    readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.** *(Pillar:
+    autonomy + friendliness — PRIORITY 2–3. Size: S.)* v0.270.1 correctly holds a walk-away stack back when a
+    storage hiccup would publish a thinner picture, and renders the plain-language reason — but **only in
+    `frontend/src/routes/Jobs.tsx`** (`auto_stack_held_unreadable`; grepped this run — it appears nowhere else in
+    the frontend). A beginner whose picture silently stops updating looks at the **Target page**, where their
+    picture lives, sees a stale image with no explanation, and has no reason to go hunting on the Jobs page — so
+    the one place the hold *is* explained is the one place they won't think to look. **Shape:** the hold is
+    already recorded per-target in the scan-job summary; expose the most-recent active hold for a target (a small
+    additive field on the target-detail endpoint, or a filter over the recent jobs the Target page already
+    fetches) and render the same sentence as a dismissible note on the Target page / Dashboard target card —
+    *"Last night's stack was held back: 516 of 787 subs couldn't be read. Nothing was lost — put them back and
+    the next scan stacks the full set."* **Guardrails:** additive/read-only, reuses the exact wording already
+    shipped (one voice, no new copy to drift), self-hides when there is no active hold, and clears the moment the
+    next scan stacks successfully. Testable against a target whose job history carries a held scan. Closes the
+    "why did my picture stop updating?" gap at the surface the user actually stares at.
+
+- **NEW IDEA (Builder 2026-08-26, the half deliberately left out of the Target-page hold note v0.273.1) — say
+  it on the Dashboard target card too, without opening every project on every poll.** *(Pillar: autonomy +
+  friendliness — PRIORITY 2–3. Size: S–M.)* The Target page now explains a stalled picture
+  (`TargetOut.auto_stack_hold`), but a beginner scanning the Dashboard still sees a stale thumbnail with no
+  hint. The blocker is cost, not shape: the hold lives in each target's own project meta, so populating it on
+  the *list* endpoint would open N sqlite files per Dashboard render. **Two viable shapes:** (a) mirror the
+  hold count into the library registry when the scan writes it (one extra column, read for free by
+  `list_targets`) — additive and cheap, but a second copy of the truth to keep in sync; or (b) a single
+  library-wide `GET /api/library/auto-stack-holds` the Dashboard fetches once and joins client-side, cached
+  like `/library/missing-files` already is (which solves the *same* per-target-cost problem, and is the
+  precedent to copy). (b) is the safer first slice. **Care:** it must stay silent on a healthy library — the
+  common case is zero holds, and the endpoint should answer `[]` without opening anything it doesn't have to.
 
 - ~~**NEW IDEA (Builder 2026-08-26, the deliberate follow-on to the v0.270.1 readability fix) — heal a target
   that is ALREADY sitting on a degraded newest picture, instead of only preventing the next one.**~~ —

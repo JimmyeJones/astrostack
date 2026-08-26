@@ -77,6 +77,16 @@ AUTO_STACK_UNREADABLE_META_KEY = "web_auto_stack_unreadable"
 # every subsequent scan.
 AUTO_STACK_DEGRADED_META_KEY = "web_auto_stack_degraded"
 
+# Per-target meta holding the JSON blob of the *currently active* readability
+# hold (:func:`_auto_stack_readability_hold`), so the Target page — where the
+# user's picture lives, and the only place they'll look when it stops updating —
+# can say why. The hold is otherwise recorded only in the scan job's summary, on
+# the Jobs page, which is the one screen a beginner has no reason to visit.
+# Written whenever the walk-away path holds a target back and cleared the moment
+# it doesn't (or a stack of any kind succeeds), so it can never outlive its
+# outage; absent on every healthy target, which is what "no note" means.
+AUTO_STACK_HOLD_META_KEY = "web_auto_stack_hold"
+
 # How thin the newest genuine stack must be, as a fraction of the best one this
 # target ever produced, before the heal considers it *degraded* rather than
 # ordinary alignment attrition. A normal stack drops a few percent of its subs at
@@ -289,6 +299,12 @@ def _pipeline_body(
                         continue
                     unread_hold = _auto_stack_readability_hold(
                         lib, safe, attempt_n, settings.auto_stack_min_frames)
+                    # Persist the verdict either way, so the Target page can
+                    # explain a stalled picture and stops explaining it the
+                    # moment the files come back. Best-effort: a meta write must
+                    # never be the thing that stops a target stacking.
+                    with contextlib.suppress(Exception):
+                        _record_auto_stack_hold(lib, safe, unread_hold)
                     if unread_hold is not None:
                         # Some of this target's subs have no file on disk right
                         # now, and stacking without them would publish a worse
@@ -1882,6 +1898,26 @@ def _auto_stack_readability_hold(
     }
 
 
+def _record_auto_stack_hold(
+        lib: Library, safe: str, hold: dict[str, Any] | None) -> None:
+    """Persist (or clear) this target's active readability hold.
+
+    Best-effort and self-clearing: it is written on every scan that holds the
+    target back and deleted on the first scan that doesn't, so the note the
+    Target page renders from it is always about the *current* state rather than
+    an outage that ended weeks ago. Deleting only when a key is actually there
+    keeps a healthy target's meta table byte-for-byte what it is today.
+    """
+    proj = lib.open_target(safe)
+    try:
+        if hold is not None:
+            proj.set_meta(AUTO_STACK_HOLD_META_KEY, json.dumps(hold))
+        elif proj.get_meta(AUTO_STACK_HOLD_META_KEY) is not None:
+            proj.delete_meta(AUTO_STACK_HOLD_META_KEY)
+    finally:
+        proj.close()
+
+
 def _mark_auto_stack_attempt(lib: Library, safe: str, frame_count: int) -> None:
     proj = lib.open_target(safe)
     try:
@@ -2526,6 +2562,11 @@ def _stack_target(
                                   str(_n_unreadable))
                 else:
                     proj.delete_meta(AUTO_STACK_UNREADABLE_META_KEY)
+                # A finished stack — by any route, including a manual one the
+                # user ran to get past the hold — means the Target page has
+                # nothing left to explain.
+                if proj.get_meta(AUTO_STACK_HOLD_META_KEY) is not None:
+                    proj.delete_meta(AUTO_STACK_HOLD_META_KEY)
             # Stamp any saved calibration picks this run had to skip, so History
             # can say *why* the picture came out less calibrated than the user
             # asked for. Best-effort and additive: a run that skipped nothing

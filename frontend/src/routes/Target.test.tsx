@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TargetView, countNewSubsSinceStack, countQcUncheckable, describeObject, mosaicGradingNote, rejectReasonLabel } from "./Target";
+import { TargetView, autoStackHoldNote, countNewSubsSinceStack, countQcUncheckable, describeObject, mosaicGradingNote, rejectReasonLabel } from "./Target";
 import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
 import { formatStampDate } from "../format";
@@ -1556,6 +1556,31 @@ describe("TargetView reject breakdown + undo", () => {
     expect(screen.getByText(/at least 3 subs are located/)).toBeInTheDocument();
   });
 
+  it("explains on the Target page why a picture stopped updating", async () => {
+    // The readability hold used to be visible only in the scan job's summary on
+    // the Jobs page — the one screen a beginner whose picture went stale has no
+    // reason to open. They look at their picture, so the reason belongs here.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({
+        n_frames: 787, n_frames_accepted: 787,
+        auto_stack_hold: {
+          offered: 787, readable: 271, unreadable: 516, prior_best: 787,
+          reason: "that would be a thinner stack than this target already has",
+        },
+      }),
+    );
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Some of your subs aren't on disk right now"),
+      ).toBeInTheDocument());
+    expect(screen.getByText(/516 subs of 787 couldn't be read/)).toBeInTheDocument();
+    expect(screen.getByText(/nothing has been lost/)).toBeInTheDocument();
+  });
+
   it("does not show the auto-stack waiting note when Auto-stack is off", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(
       mkTarget({ n_frames: 202, n_frames_accepted: 202 }),
@@ -1803,5 +1828,34 @@ describe("mosaicGradingNote", () => {
     expect(note).toContain("6-panel mosaic");
     expect(note).toContain("compared against itself");
     expect(note).toContain("isn't cloud");
+  });
+});
+
+describe("autoStackHoldNote", () => {
+  it("says nothing for a healthy target or an older backend", () => {
+    // Absent is what "nothing is being held back" means, and it is the
+    // overwhelmingly common case — a stale note here would be worse than none.
+    expect(autoStackHoldNote(undefined)).toBeNull();
+    expect(autoStackHoldNote(null)).toBeNull();
+    expect(autoStackHoldNote({
+      offered: 787, readable: 787, unreadable: 0, prior_best: 787, reason: "x",
+    })).toBeNull();
+  });
+
+  it("explains a stalled picture in the same voice the Jobs page uses", () => {
+    const note = autoStackHoldNote({
+      offered: 787, readable: 271, unreadable: 516, prior_best: 787,
+      reason: "that would be a thinner stack than this target already has",
+    });
+    expect(note).toContain("516 subs of 787 couldn't be read");
+    expect(note).toContain("271 still can");
+    expect(note).toContain("thinner, noisier picture");
+    expect(note).toContain("nothing has been lost");
+  });
+
+  it("keeps the count singular when exactly one sub is missing", () => {
+    expect(autoStackHoldNote({
+      offered: 12, readable: 11, unreadable: 1, prior_best: 12, reason: "x",
+    })).toContain("1 sub of 12 couldn't be read");
   });
 });

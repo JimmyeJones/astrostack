@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -998,5 +999,79 @@ def test_stack_records_how_many_subs_were_unreadable(solved_library, monkeypatch
             assert proj.get_meta(pipeline.AUTO_STACK_UNREADABLE_META_KEY) is None
         finally:
             proj.close()
+    finally:
+        lib.close()
+
+
+def test_the_hold_is_recorded_on_the_target_and_clears_itself(
+    solved_library, monkeypatch,
+):
+    """A held-back target says so on the *Target* page, not only in the scan
+    job's summary on the Jobs page.
+
+    The hold is the reason a beginner's picture stops updating, and the Jobs page
+    is the one screen they have no reason to visit. The scan therefore persists
+    the verdict per target — and clears it the moment the files come back, so the
+    note can never outlive its outage.
+    """
+    _patch_run_stack(monkeypatch)
+    settings = _settings(solved_library).model_copy(
+        update={"auto_stack_min_frames": 1})
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            assert len(ids) >= 3
+            assert proj.get_meta(pipeline.AUTO_STACK_HOLD_META_KEY) is None
+            _record_run(proj, n_frames_used=len(ids) - 1)
+            _unread(proj, ids[:-1])
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+
+        pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        proj = lib.open_target(safe)
+        try:
+            raw = proj.get_meta(pipeline.AUTO_STACK_HOLD_META_KEY)
+            assert raw, "the hold must be recorded on the target that has it"
+            blob = json.loads(raw)
+            assert blob["unreadable"] == len(ids) - 1
+            assert blob["readable"] == 1
+            assert blob["offered"] == len(ids)
+            assert blob["reason"]
+            _reread(proj, ids)  # the share comes back
+        finally:
+            proj.close()
+
+        pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        proj = lib.open_target(safe)
+        try:
+            assert proj.get_meta(pipeline.AUTO_STACK_HOLD_META_KEY) is None, (
+                "the note must not outlive the outage")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_a_healthy_target_never_gets_a_hold_note(solved_library, monkeypatch):
+    """Every target on a healthy install must come out of a scan with no hold
+    recorded at all — an absent key is what "nothing to say" means."""
+    _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                assert proj.get_meta(pipeline.AUTO_STACK_HOLD_META_KEY) is None
+            finally:
+                proj.close()
     finally:
         lib.close()
