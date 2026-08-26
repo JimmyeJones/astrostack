@@ -239,7 +239,15 @@ class ASTAPSolver:
         if last_error is not None:
             # Every rung raised (e.g. all timed out) — surface only after the
             # whole ladder is exhausted, preserving the raise-on-timeout contract.
-            raise ASTAPError("\n".join(attempts_log)[-2000:]) from last_error
+            # Lead with the canonical :data:`SOLVE_FAILED_TIMEOUT` token when the
+            # cause really was the clock, so the runner can store one stable,
+            # tally-able reason instead of a raw log tail: "ran out of time" is
+            # the one solve failure with an obvious fix (raise the timeout), and
+            # the Target page can only offer that advice if it can count them.
+            timed_out = all("timed out" in a.lower() for a in attempts_log)
+            prefix = (f"{SOLVE_FAILED_TIMEOUT} after {self.timeout_s:g}s on every "
+                      f"attempt\n") if timed_out else ""
+            raise ASTAPError(prefix + "\n".join(attempts_log)[-2000:]) from last_error
         # Defensive: ladder was empty (shouldn't happen).
         raise ASTAPError("no solve attempts were configured")
 
@@ -339,6 +347,14 @@ def _is_fatal_solve_error(log_tail: str) -> bool:
 SOLVE_SETUP_ASTAP_MISSING = "astap not found"
 SOLVE_SETUP_NO_DATABASE = "no star database"
 
+#: Canonical short reason for the *other* fixable plate-solve failure: every rung
+#: of the ladder ran out of time. Unlike a setup problem this is per-frame (a
+#: star-poor or hazy sub, or a wide blind search), and unlike an ordinary "no
+#: catalog match" it has an obvious next step — give the solver longer. Stored
+#: verbatim in ``reject_reason`` (as ``solve_failed:solve timed out``) so it
+#: survives the 120-char truncation and the Target page can tally it reliably.
+SOLVE_FAILED_TIMEOUT = "solve timed out"
+
 
 def classify_solve_setup_error(error_text: str | None) -> str | None:
     """Classify a plate-solve failure message as a *setup* problem, or ``None``.
@@ -364,6 +380,19 @@ def classify_solve_setup_error(error_text: str | None) -> str | None:
     if "no star database" in low or "star database not found" in low:
         return SOLVE_SETUP_NO_DATABASE
     return None
+
+
+def is_solve_timeout_error(error_text: str | None) -> bool:
+    """True when a plate-solve failed because **every** attempt ran out of time.
+
+    :meth:`ASTAPSolver.solve` stamps :data:`SOLVE_FAILED_TIMEOUT` on the error it
+    raises when the whole ladder timed out — the one failure shape where "give it
+    longer" is genuinely the fix. Deliberately narrow: a frame where some rung
+    *finished* and reported no catalog match is an ordinary per-frame failure and
+    must not be reported as "ran out of time", because raising the timeout
+    wouldn't rescue it.
+    """
+    return bool(error_text) and SOLVE_FAILED_TIMEOUT in error_text.lower()
 
 
 def _parse_astap_ini(ini_path: Path) -> tuple[float, float, float, float]:
