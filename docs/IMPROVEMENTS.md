@@ -49,6 +49,28 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **⚪ QA AUDIT RESULT (Scout 2026-08-26, branch `claude/vigilant-knuth-7slpid`) — the stacking engine was
+  deeply re-audited this run and came back CLEAN: no new verified bug found.** Adversarially traced the whole
+  `seestack/stack/*` + `seestack/calibrate/*` hot path, trying to break each edge: `accumulator.py`
+  (WeightedSum divide-by-weight NaN semantics, MinMaxReject k-set insertion + the ≥2k+1 / 3..2k / 1..2 degrade
+  bands + tie-safety, Welford unbiased-variance NaN-for-n<2 contract), `align.py` (windowed reproject
+  `FRAME_EDGE_INSET_PX` valid-mask inset, order-1 sub-pixel-shift NaN-ring propagation with `cval=1.0` mask,
+  GPU/CPU `cval` parity), `stacker.py` (κ-σ two-pass keep-mask's σ-unknown/mean-unknown widenings,
+  `_resolve_auto_reject` n<4 dispatch — the v0.270.3 fix holds, per-pass in-place photometric-scale multiply,
+  `frame_cov` persistence + pass-2 empty-guard), `drizzle_path.py` (neff-gated clip tolerance, float64
+  variance-resolution floor, unweighted frame-count coverage, half-open pixel bounds), `mosaic.py` (wrap-safe
+  circular-mean outlier rejection, px/megapixel canvas caps), `photometric.py` / `weighting.py` (neutral
+  fallbacks everywhere, inverse-variance 1/s² folding), `coverage_leveling.py` (per-level detrend → object
+  mask → rescue → gapped-fit-clamp → interpolated fill) and `calibrate/apply.py` (pedestal `nan_to_num`
+  sanitisation, exposure-scaling no-data-mask restores, fresh-array contract). Every NaN/coverage edge,
+  rejection-math band, memory-bound and preview↔export parity path I could construct a breaking case for was
+  already handled and commented. **This mirrors the editor's drained state: the stacking engine is now
+  well-hardened.** Future Scout runs can rotate the lead QA subsystem to the webapp routers / watcher /
+  ingest-QC / plate-solve / render and re-audit the engine only occasionally. The two trigger-gated hardening
+  notes just below (flat Bayer-pattern guard; non-windowed `reproject_rgb` inset) stay open — neither fires on
+  the normal Seestar path — plus the still-open mosaic auto-grade / `photometric_normalize` items AGENTS.md §1
+  points at.
+
 - ~~**🟠 FOUND AND FIXED IN THE SAME RUN (Builder 2026-08-26, while measuring the `photometric_normalize`
   item below) — the editor levelled a mosaic's sky by a sum of WEIGHTS, while the stack that produced it
   levelled the same image by FRAME COUNT. One real panel was split in half along a weight boundary and each
@@ -7248,6 +7270,23 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
+  readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.** *(Pillar:
+  autonomy + friendliness — PRIORITY 2–3. Size: S.)* v0.270.1 correctly holds a walk-away stack back when a
+  storage hiccup would publish a thinner picture, and renders the plain-language reason — but **only in
+  `frontend/src/routes/Jobs.tsx`** (`auto_stack_held_unreadable`; grepped this run — it appears nowhere else in
+  the frontend). A beginner whose picture silently stops updating looks at the **Target page**, where their
+  picture lives, sees a stale image with no explanation, and has no reason to go hunting on the Jobs page — so
+  the one place the hold *is* explained is the one place they won't think to look. **Shape:** the hold is
+  already recorded per-target in the scan-job summary; expose the most-recent active hold for a target (a small
+  additive field on the target-detail endpoint, or a filter over the recent jobs the Target page already
+  fetches) and render the same sentence as a dismissible note on the Target page / Dashboard target card —
+  *"Last night's stack was held back: 516 of 787 subs couldn't be read. Nothing was lost — put them back and
+  the next scan stacks the full set."* **Guardrails:** additive/read-only, reuses the exact wording already
+  shipped (one voice, no new copy to drift), self-hides when there is no active hold, and clears the moment the
+  next scan stacks successfully. Testable against a target whose job history carries a held scan. Closes the
+  "why did my picture stop updating?" gap at the surface the user actually stares at.
+
 - **NEW IDEA (Builder 2026-08-26, the deliberate follow-on to the v0.270.1 readability fix) — heal a target
   that is ALREADY sitting on a degraded newest picture, instead of only preventing the next one.** *(Priority 2
   autonomy / priority 4 image quality. Size M. Serves the owner's live install directly.)*
@@ -13622,6 +13661,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   which has no pace). **Care:** a mosaic's per-panel integration is a fraction of a single-field target's, so
   don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
   already thinks in.
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-26) — "When will I finish this?": an observability-aware completion
+  forecast for a target that has an integration goal.** *(Pillar: autonomy + friendliness — PRIORITY 2–3.
+  Size: M.)* The app already holds every piece separately: a target's integration **goal** (`goal_s`), its
+  recent **pace** (`recent_pace_s` — median kept integration per clear night), and, via
+  `nightplan.next_observing_windows`, the next nights *this exact target* is genuinely well-placed (clears the
+  altitude floor, Moon-weighted). Nothing yet **joins** them into the one thing a beginner actually wonders:
+  *"how many more nights, and roughly when, until this is done?"* The existing readiness hint says "~1 more
+  night finishes this" (a bare count) but never says *which* upcoming nights are observable — so a target that
+  needs 2 more nights yet is Moon-washed / too low for the next week reads as "nearly there" when it is really a
+  fortnight away. **Verified new:** grepped this run — no finish-date / completion-date / "done by" forecast
+  exists in code or backlog; the closest, `recent_pace_s`, only yields a night *count*.
+  **Shape:** a pure helper `finish_forecast(goal_s, current_integration_s, recent_pace_s, windows) ->
+  FinishForecast | None` that (a) computes `nights_needed = ceil((goal − current) / pace)`, then (b) walks the
+  already-computed `next_observing_windows` list and returns the calendar date of the *n-th* qualifying night —
+  e.g. *"About 2 more good nights — if the next clear ones cooperate, you could finish around Sept 2."* Returns
+  `None` (render nothing) when no goal is set, there's no pace history, or the target is already at goal — never
+  a guess. **Surface:** one extra sentence on the existing Target progress/readiness card and the planner's
+  already-shot rows — no new banner, it rides a notice that exists. **Beginner bar:** clears it cleanly — plain
+  language, directly actionable ("point here on the next 2 clear nights"), sane default, no expert knob; it
+  *removes* the "when am I done?" uncertainty rather than adding surface (Method D — remove work/uncertainty).
+  **Caution — honesty about weather:** phrase it as conditional on clear skies (*"if the next clear nights
+  cooperate"*), never a hard promise — the planner knows observability (altitude + Moon) but not cloud cover.
+  **Feasibility:** offline, composes existing pieces, additive nullable payload, trivially unit-testable
+  (at-goal→None, no-pace→None, a 2-night case landing on the 2nd observable date, a Moon-washed week pushing
+  the date out). **Slices —** (a) the pure helper + tests; (b) render the sentence (frontend, gated on
+  presence). Slice (a) alone is a shippable Builder run.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26) — "How far did you see?": a light-travel-time wow-badge on the
   finished picture.** *(Pillar: friendliness / enjoy + understand — PRIORITY 3. Size: S–M.)* A beginner who
