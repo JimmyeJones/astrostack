@@ -158,6 +158,49 @@ _(none — claim an item here with your branch name)_
       histogram; whether `auto_grade_frames` / `copy_to_cache` are on; whether any `incoming/` folders were
       moved/archived that evening.
 
+- ~~**🟠 WRONG-RESULT (Scout QA audit 2026-08-26, traced + regression-tested) — `auto_reject` silently runs
+  NO outlier rejection on an exactly-3-frame stack at small κ.**~~ — **FIXED v0.270.3** (Scout 2026-08-26,
+  branch `claude/vigilant-knuth-moetr6`). *(Severity: wrong-result but narrow — webapp-only, `sigma_kappa`
+  ≲ 1.155, exactly 3 frames. Confidence: traced + verified end-to-end.)* `kappa_min_frames` floors at 3 (the
+  min/max side's need), but the κ-σ dispatch gates on `n >= 4`; so at κ ≲ 1.155 (reachable via the webapp's
+  `sigma_kappa` min of 1.0) `kappa_min_frames` returned 3 and a 3-frame `auto_reject` stack *picked* κ-σ, which
+  then never ran — falling through to a plain mean with **no rejection at all**, so a lone satellite/plane
+  trail survived despite the user asking for automatic rejection (the STACKER header honestly recorded "mean",
+  but the intent was silently unmet). Fix: `_resolve_auto_reject` (`seestack/stack/stacker.py`) now drops to
+  the order-statistic min/max drop (which rejects a lone extreme at n≥3) whenever the resolved method would be
+  κ-σ but `n < 4`. Byte-identical for `n ≥ 4` and for any run that doesn't opt into `auto_reject`. Test:
+  `test_auto_reject_small_kappa_3_frames_still_rejects` (`tests/test_stack_pipeline.py`).
+
+- **⚪ HARDENING NOTE (Scout QA audit 2026-08-26, traced — not firing on the production path, file-only) —
+  the master calibration `apply` validates only the master's *shape*, never its Bayer pattern.** `validate`
+  (`seestack/calibrate/apply.py` ~261) compares `tuple(arr.shape)` only; `load` reads `dark_meta`/`bias_meta`
+  but never reads or compares `bayer_pattern` (populated by `load_master`, `masters.py` ~342). A dark/flat with
+  the same dimensions but a different CFA phase (e.g. a sub-frame readout offset shifting the Bayer phase by
+  one pixel) would be applied per-pixel with no guard — for a **flat** this swaps channels and wrecks colour.
+  Harmless for darks (dark current is per physical pixel) and for the common single-camera case where the
+  phase always matches, so this is an **unguarded gap, not a live bug** on normal Seestar inputs. *(Severity:
+  wrong-result-if-triggered / colour; confidence traced, trigger requires unusual or mixed-source masters.)*
+  **Fix direction:** carry `bayer_pattern` onto `CalibrationMasters` and, when both the master and the light
+  declare one, refuse (or warn + skip) the master on a mismatch — the same fail-closed shape as the existing
+  dimension guard. Small, additive, testable; do it only alongside a real trigger.
+
+- **⚪ MINOR / TEST-ONLY (Scout QA audit 2026-08-26, traced) — the non-windowed `reproject_rgb` omits the
+  `FRAME_EDGE_INSET_PX` border trim that the production windowed path applies, so the outer 3-px
+  debayer-artifact ring would leak in as valid pixels.** `reproject_rgb` (`seestack/stack/align.py` ~325)
+  validates with `0 <= src <= size-1` and **no** inset, unlike `reproject_rgb_windowed` (~276) which excludes
+  the intentional inset ring. **The production stacker only calls the windowed path** (`align_one`); the
+  non-windowed `reproject_rgb`'s sole caller is `tests/test_windowed_stack.py`, so this is *not* a live
+  wrong-result. *(Severity: cosmetic/latent; confidence traced.)* **Fix direction:** either apply the same
+  `FRAME_EDGE_INSET_PX` inset in `reproject_rgb` for parity, or add a one-line docstring noting it's the
+  no-inset test variant, so a future caller doesn't adopt it on the hot path expecting the border trim.
+
+  *(Scout QA note 2026-08-26: also investigated the master-flat global-vs-per-channel normalization
+  (`apply.py` ~205, `flat / np.nanmean(flat)`) and did **not** file it — the per-channel QE tint it leaves is
+  a single per-channel scale that the downstream `post/color_cal.calibrate_color` white-balance fully absorbs,
+  so it is not a real image-quality bug. The spatial (vignetting/dust) correction, the part that matters, is
+  applied correctly. And the drizzle `_count`-as-`neff` per-channel over-count is negligible for normal RGB
+  (needs per-channel NaNs, which co-debayered channels don't have).)*
+
   - ~~**🟠 LATENT (found incidentally by the same 2026-08-17 audit, repro-verified, NOT the owner's current
     regression) — auto-grade compares quality metrics across a mosaic TARGET-WIDE, when its panels are
     different patches of sky. A legitimately star-poor panel can have its entire sub population rejected as
@@ -13451,6 +13494,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   the catalog field is asserted present-and-numeric for a couple of anchor objects. **Slices —** (a) add
   `distance_ly` to the catalog + the pure blurb helper + unit tests; (b) render the line on the existing
   object-info card (frontend, gated on presence). Slice (a) alone is a shippable Builder run.
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-26) — "How big a mosaic?": when the app tells a beginner an object is
+  bigger than one frame and to "shoot it in mosaic mode", also say **how many panels** (and roughly how long)
+  it takes to capture the whole thing.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size S–M.)*
+  **The gap (verified in code):** `seestack/framing.py` (`framing_hint`, and the post-stack `partial` verdict)
+  already tells a beginner *"M 31 is bigger than the Seestar's single frame — shoot it in mosaic mode to
+  capture all of it"*, but it stops exactly where the beginner's next question begins — *how big a mosaic?* A
+  non-expert has no idea whether that means a 2×2 or a 4×5, or whether it's a one-night or a five-night job, so
+  they either don't start or under-shoot. Nothing in the backlog or the planner fills this (grepped: no
+  "how many panels" / panel-count / mosaic-size feature exists).
+  **Shape:** a pure engine helper `mosaic_plan(size_arcmin_major, size_arcmin_minor|None) -> MosaicPlan | None`
+  that divides the object's angular extent by the Seestar's single-frame FOV (already encoded in
+  `framing.py` — ~1.29°×0.73° with the overlap the Seestar app uses) and rounds up to a panel grid, returning
+  e.g. `cols=2, rows=2, panels=4` plus a plain sentence *"M 31's ~3°×1° span needs about a 2×2 mosaic (4
+  panels)."* Returns `None` (never a guess) for an object that fits in one frame or has no vetted size.
+  Optionally fold in a rough time budget from the planner's existing per-target pace (`recent_night_pace_s`) —
+  *"at your usual pace, budget about N hours for a clean result"* — but keep that half self-hiding so a
+  first-timer with no pace history still gets the panel count.
+  **Surface:** extend the existing pre-shoot framing hint (Tonight rows / Target `ObjectInfoCard`) and the
+  post-stack `partial` framing verdict with the one extra sentence — no new banner; it rides the notice that
+  already exists. **Beginner bar:** a non-expert immediately understands "shoot a 2×2 mosaic" and it's directly
+  actionable on their next clear night; it's a sane default with plain language and no expert knob (not
+  pro/niche — it *removes* the mosaic-planning guesswork rather than exposing panel-overlap sliders).
+  **Feasibility:** pure/offline, composes pieces that already exist (single-frame FOV + catalog `size_arcmin`),
+  additive, trivially unit-testable (fits-in-one-frame→None, a 2×2 case, an elongated 1×3 case, unknown
+  size→None). Upgrade-safe: additive nullable payload field + one sentence of copy.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — "Did I frame it well?": a
   post-stack, plain-language centring / edge-cutoff verdict on the *finished* picture.**~~ — **SHIPPED v0.256.0**
