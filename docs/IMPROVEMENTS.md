@@ -13750,6 +13750,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW IDEA (Builder 2026-08-26, the obvious next step after shipping "My deep-sky wall" v0.275.0) — let the
+  wall use each target's **pinned cover**, not just its newest stack's preview.** *(Pillar: friendliness /
+  enjoy + share — PRIORITY 3. Size: S.)* The montage draws one picture per target from the library's
+  `last_stack_preview`, which is whatever that target stacked *most recently*. But the app already has a
+  feature for exactly this question — **"Set as cover"** (v0.145.0) — where the user has said, in as many
+  words, *which picture of this target is the good one*. On a target whose newest run is a linear master or a
+  quick restack, the wall currently shows that instead of the finished picture the owner chose, which is the
+  one thing the wall exists to show. **Shape:** in `_montage_tiles` (`webapp/routers/gallery.py`), prefer the
+  target's cover run's preview when one is pinned and readable, falling back to `last_stack_preview` exactly as
+  today — a few lines, no new endpoint, no engine change (`build_montage` neither knows nor cares where a tile
+  came from). **Care:** the library registry stamps `last_stack_preview` but the cover is a per-target
+  `cover_run_id`, so this costs one project open per hero — acceptable on a deliberate one-tap download, not on
+  a page render, which is the same trade `/api/imaging-log` already makes. Testable: a target with a pinned
+  cover puts *that* picture on the wall; one without is unchanged.
+
 - **NEW IDEA (Builder 2026-08-26, the half deliberately left out of "How big a mosaic?" v0.272.0) — tell a
   beginner roughly how LONG that mosaic will take, not only how many panels.** *(Pillar: autonomy +
   friendliness — PRIORITY 2–3; size S.)* The panel count now lands where the question is asked ("Needs 3×2
@@ -13765,8 +13780,51 @@ problems. Dogfood it every big-picture run and fix root causes.
   don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
   already thinks in.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26 #2) — "My deep-sky wall": one-click, share-ready montage of a
-  beginner's best finished pictures.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: M.)*
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #2) — "My deep-sky wall": one-click, share-ready montage of a
+  beginner's best finished pictures.**~~ — **SHIPPED v0.275.0** (Builder 2026-08-26, branch
+  `claude/compassionate-galileo-q9q6fs`) — **all three filed slices, (a) (b) and (c).** *(Pillar:
+  friendliness / enjoy + share — PRIORITY 3.)*
+  **(a) The pure helper.** `seestack/montage.py` — `montage_grid(n, columns=None)` (≤3 tiles read better as one
+  row than as a square with a hole; above that `ceil(sqrt(n))` wide, so 4→2×2, 6→3×2, 9→3×3 and never more
+  than one short row), `montage_caption(name, exposure_s)` → *"M 42 · 3h 12m"*, `montage_title(n, total_s)`,
+  and `build_montage(tiles, …)`. Each picture is letterboxed into its cell with the deepening reel's own
+  `_fit_onto`, and captioned with its own `_draw_corner_label`, so a portrait single-field and a landscape
+  mosaic sit together undistorted and the two shareables speak in one visual voice. `None` below two tiles —
+  a wall of one is just the picture the gallery already shows.
+  **Two things a render-and-look pass caught that no unit test would have.** (1) The title strip is drawn with
+  Pillow's built-in font, which has **no glyph for an em dash** — *"My deep-sky wall ☐ 7 targets"*, a tofu box
+  across the top of the one image the user is about to post. It uses `·` now, and a test pins that the title
+  stays inside the font's coverage. (2) A short last row was left-aligned, so seven pictures in a 3-wide grid
+  left a conspicuous hole in the bottom-right corner that reads as "something failed to load"; short rows are
+  centred now. Both are pinned by tests.
+  **The cell shape follows the pictures** (the median tile aspect, clamped), so a library of ordinary landscape
+  stacks letterboxes hardly at all and one of tall mosaics doesn't sit in a sea of bars.
+  **(b) The endpoint.** `GET /api/gallery/montage.jpg?limit=9` renders **on demand** from the previews the
+  library already keeps — one picture per *target* (the exposure-ranked `summarize_library` heroes, so the wall
+  answers "what have I captured?" rather than showing one busy target five times) — and writes **nothing**,
+  exactly like `/api/recap.jpg`. Chose the display-time render over the filed "cache it beside the library
+  outputs": the recap poster's precedent, no cache to invalidate when a target restacks, and no new bytes in
+  anyone's library. A preview deleted since its stack is dropped and the next hero takes its place; fewer than
+  two readable pictures 404s so the offer self-hides.
+  **(c) The offer.** `MyDeepSkyWallCard` on the "Your sky, so far" page, directly under "Share your sky" —
+  the two halves of sharing together (that page's numbers-over-one-picture poster, and now the pictures
+  themselves). Self-hides below two heroes, and says so when the library holds more than fit
+  (*"You have 14 finished, so this shows the 9 you've given the most time to."*). Deliberately **not** another
+  button on the already-busy Gallery page.
+  **Upgrade-safe (§9):** one new additive read-only endpoint and one new engine module; no config, schema,
+  on-disk, default or existing-response-shape change; nothing written anywhere, and nothing under `incoming/`
+  is touched or even read.
+  **Tests (+22 python engine, +6 python webapp, +4 frontend):** `tests/test_montage.py` (grid shapes and the
+  one-short-row invariant, column clamp, caption/title wording and their empty cases, the two-tile floor, a
+  landscape+portrait pair both undistorted, the cap keeping exactly the leading N, the centred short row, the
+  no-em-dash guard, the title strip, captions burned on their own tiles, cell shape following the data),
+  `tests/webapp/test_gallery_montage.py` (renders a JPEG, the one-picture 404, the empty-library 404, a
+  deleted preview skipped rather than a 500, the limit clamp, and that nothing is written to the library) and
+  `MyDeepSkyWallCard.test.tsx` (the offer and its link, the "showing 9 of 14" line, hidden at one picture,
+  hidden while loading and on a failed fetch).
+
+  Original spec, for the record:
+
   A Seestar owner accumulates dozens of finished targets over a season, but the app can only ever show them
   **one at a time** — there is no single image that says *"look at everything I've captured."* That montage
   is the thing a beginner actually posts to friends/socials at the end of a good run of nights, and nothing
@@ -18938,6 +18996,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **NEW IDEA (Builder 2026-08-26, found the hard way while rendering the first montage) — one shared guard
+  that burned-in text stays inside Pillow's built-in font's glyph coverage.** *(Pillar: friendliness / trust —
+  PRIORITY 3. Size: S.)* Every server-rendered shareable — the recap poster, the deepening reel's frame
+  labels, the nameplate, and now the montage — draws text with `ImageFont.load_default`, which has **no glyph
+  for an em dash** (and none for a great many other characters we write freely in prose). It renders as a tofu
+  box, on an image the user is about to post, and no test catches it: the string is correct, the *pixels* are
+  wrong. The montage's title hit this on its first render and now avoids `—` by hand, with a local test —
+  but `recap.py`'s lines, `deepening_frame_label`, and the nameplate all build strings from user data
+  (target names!) with no such guard, and a target the owner named with a typographic dash would print a box
+  today. **Shape:** a tiny `seestack/render/glyphs.py` with `safe_for_default_font(text) -> str` that
+  transliterates the handful of characters this app actually produces (— – ‘ ’ “ ” … ×) to ASCII-safe
+  equivalents, called at the one place each renderer draws text; plus a shared test that asserts every
+  rendered-string helper's output survives it unchanged. **Care:** transliterate, never strip — a target
+  named in a non-Latin script must still draw *something*, and dropping characters silently would be worse
+  than a box. Small, additive, no behaviour change on any string that is already safe.
 
 - ~~**NEW IDEA (Builder 2026-08-16, filed because it is what made this run productive) — check in the dogfood
   harness, so "§2 big-picture pass" means running the app rather than re-reading it.**~~ — **SHIPPED v0.264.1**
