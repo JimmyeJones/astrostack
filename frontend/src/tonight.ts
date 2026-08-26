@@ -1,7 +1,7 @@
 // Pure helpers for the 'Tonight' night-planner page — kept out of the component
 // so they're easy to unit-test without rendering.
 
-import type { DifficultyHint, FramingHint, NightPlan, PlannedTarget } from "./api/client";
+import type { DifficultyHint, FramingHint, MosaicPlan, NightPlan, PlannedTarget } from "./api/client";
 
 // A compact "will it fit in one frame?" table badge for a catalog planner row —
 // a pre-capture nudge so a beginner picks mosaic mode *before* pointing at an
@@ -9,13 +9,21 @@ import type { DifficultyHint, FramingHint, NightPlan, PlannedTarget } from "./ap
 // fit at all) and `tight` (about as wide as a frame); the reassuring `fits` case
 // returns null so it never clutters a dense plan table. `tooltip` carries the
 // full sentence for hover. Null when there's no framing hint at all.
+// When the catalog knows the object's span well enough to plan a grid, the badge
+// says *how big* a mosaic ("Needs 3×2 mosaic") rather than only that one is
+// needed — that is the beginner's very next question, and a panel count is what
+// they actually set in the Seestar app. Falls back to the plain label when there
+// is no plan (no vetted size, or an older backend that doesn't send one).
 export function framingRowBadge(
   framing: FramingHint | null | undefined,
+  mosaic?: MosaicPlan | null,
 ): { label: string; color: string; tooltip: string } | null {
   if (!framing || framing.level === "fits") return null;
-  const label = framing.level === "mosaic" ? "Needs mosaic" : "Mosaic for margin";
+  const grid = mosaic ? `${mosaic.cols}×${mosaic.rows} ` : "";
+  const label = framing.level === "mosaic" ? `Needs ${grid}mosaic` : "Mosaic for margin";
   const color = framing.level === "mosaic" ? "orange" : "yellow";
-  return { label, color, tooltip: `This target ${framing.text}` };
+  const plan = mosaic?.text ? ` ${mosaic.text}` : "";
+  return { label, color, tooltip: `This target ${framing.text}${plan}` };
 }
 
 // A compact "how hard for a Seestar?" table badge for a catalog planner row, so a

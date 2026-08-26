@@ -48,6 +48,10 @@ export interface PlannedTarget {
   // on library rows and older backends. See FramingHint.
   size_arcmin?: number | null;
   framing?: FramingHint | null;
+  // The panel grid this object needs, for one bigger than a single frame;
+  // absent/null when it fits or has no vetted size (older backends omit it —
+  // treat as "nothing to say").
+  mosaic?: MosaicPlan | null;
   // "How hard is this target for a Seestar?" — easy/moderate/challenging, for
   // catalog candidates the vetted table/type-rule has a verdict for; absent on
   // library rows, un-vetted objects, and older backends (treat as "no verdict").
@@ -167,6 +171,9 @@ export interface SuggestedTarget {
   score: number;
   size_arcmin?: number | null;
   framing?: FramingHint | null;
+  // The panel grid this object needs, when it's bigger than a single frame;
+  // absent/null when it fits or has no vetted size (older backends omit it).
+  mosaic?: MosaicPlan | null;
   // "How hard is this target for a Seestar?" — shown next to the framing hint on a
   // discovery suggestion; absent for un-vetted objects / older backends.
   difficulty?: DifficultyHint | null;
@@ -303,6 +310,16 @@ export interface FramingHint {
   text: string;
 }
 
+/** "How big a mosaic?" — the panel grid a too-big target's span needs. */
+export interface MosaicPlan {
+  // Panels along the frame's long edge, and along its short edge.
+  cols: number;
+  rows: number;
+  panels: number;
+  // A complete sentence: "About a 3×2 mosaic (6 panels) covers all of it."
+  text: string;
+}
+
 export interface DifficultyHint {
   level: "easy" | "moderate" | "challenging";
   // One-word badge text, e.g. "Easy".
@@ -324,6 +341,10 @@ export interface ObjectInfo {
   // omit both — treat as "no framing hint").
   size_arcmin?: number | null;
   framing?: FramingHint | null;
+  // The panel grid this object needs, for one bigger than a single frame;
+  // absent/null when it fits or has no vetted size (older backends omit it —
+  // treat as "nothing to say").
+  mosaic?: MosaicPlan | null;
   // A plain-language, beginner-friendly one-liner about the object ("what am I
   // looking at?"), for the popular targets; absent/"" when the catalog has none
   // (older backends omit it — the card reads fine from type + constellation).
@@ -818,6 +839,9 @@ export interface StackPhotometricSummary {
   min?: number;
   max?: number;
   median?: number;
+  // True when the mosaic path turned normalization on itself rather than the
+  // user ticking the box. Absent on masters written before v0.271.0.
+  auto?: boolean;
 }
 
 export interface StackDarkScalingSummary {

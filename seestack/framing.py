@@ -81,6 +81,83 @@ def framing_hint(
     )
 
 
+# Panels have to overlap or there is nothing for the stitch to align on, so a
+# panel *steps* by less than its own width. A tenth of a frame is the usual
+# margin (and what the Seestar's own mosaic mode leaves), which is why the grid
+# below tiles by ``fov - overlap`` after the first panel rather than by ``fov``.
+MOSAIC_PANEL_OVERLAP = 0.10
+
+
+@dataclass(frozen=True)
+class MosaicPlan:
+    """"How big a mosaic?" — the panel grid an object's span actually needs.
+
+    ``framing_hint`` tells a beginner to "shoot it in mosaic mode" and stops
+    exactly where their next question starts: *how big a mosaic?* A non-expert
+    has no idea whether that means a 2×2 or a 4×5, so they either don't start or
+    under-shoot. ``text`` is a complete, ready-to-render sentence (unlike the
+    hint's verb phrase, it needs no name prefix), and ``cols``/``rows`` are along
+    the frame's long and short edges respectively.
+    """
+
+    cols: int
+    rows: int
+    panels: int
+    text: str
+
+
+def _panels_across(extent_arcmin: float, fov_arcmin: float, step_arcmin: float) -> int:
+    """How many overlapping panels of ``fov`` span ``extent`` along one axis.
+
+    The *first* panel covers a full field; each one after it adds only its step
+    (the rest is the overlap the stitch needs). One panel whenever the extent
+    fits a single field — the overlap is between panels, so it can't eat into a
+    one-panel field.
+    """
+    if extent_arcmin <= fov_arcmin:
+        return 1
+    return int(math.ceil((extent_arcmin - fov_arcmin) / step_arcmin)) + 1
+
+
+def mosaic_plan(
+    size_arcmin: float | None,
+    size_minor_arcmin: float | None = None,
+    *,
+    fov_long_arcmin: float = SEESTAR_FOV_LONG_ARCMIN,
+    fov_short_arcmin: float = SEESTAR_FOV_SHORT_ARCMIN,
+    overlap: float = MOSAIC_PANEL_OVERLAP,
+) -> MosaicPlan | None:
+    """The panel grid needed to capture an object of this angular size.
+
+    ``size_arcmin`` is the major axis and ``size_minor_arcmin`` the minor one;
+    when the catalog records no minor axis the object is treated as **square**
+    (its major axis both ways), which errs toward a bigger mosaic rather than
+    promising a beginner that a too-small one will do. The object is assumed to
+    be laid along the frame's long edge — the arrangement anyone would choose.
+
+    Returns ``None`` when the size is unknown or the object fits in a single
+    frame, so the caller says nothing rather than planning a one-panel "mosaic".
+    """
+    if size_arcmin is None or size_arcmin <= 0:
+        return None
+    major = float(size_arcmin)
+    minor = major
+    if size_minor_arcmin is not None and size_minor_arcmin > 0:
+        minor = min(float(size_minor_arcmin), major)
+
+    keep = max(0.0, min(0.9, float(overlap)))
+    cols = _panels_across(major, fov_long_arcmin, fov_long_arcmin * (1.0 - keep))
+    rows = _panels_across(minor, fov_short_arcmin, fov_short_arcmin * (1.0 - keep))
+    if cols <= 1 and rows <= 1:
+        return None
+
+    panels = cols * rows
+    return MosaicPlan(
+        cols=cols, rows=rows, panels=panels,
+        text=(f"About a {cols}×{rows} mosaic ({panels} panels) covers all of it."),
+    )
+
+
 @dataclass(frozen=True)
 class FramingResult:
     """A plain-language "did I frame it well?" verdict for a *finished* stack.

@@ -25,6 +25,7 @@ from webapp.schemas import (
     MergeRequest,
     MergeSuggestionOut,
     MergeSuggestionTarget,
+    MosaicPlanOut,
     NightSummaryOut,
     ObjectInfoOut,
     SessionQualityDriftOut,
@@ -314,6 +315,9 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
         size_arcmin=info.size_arcmin,
         framing=(FramingHintOut(level=info.framing.level, text=info.framing.text)
                  if info.framing is not None else None),
+        mosaic=(MosaicPlanOut(cols=info.mosaic.cols, rows=info.mosaic.rows,
+                              panels=info.mosaic.panels, text=info.mosaic.text)
+                if info.mosaic is not None else None),
         blurb=info.blurb,
         difficulty=(DifficultyHintOut(level=info.difficulty.level,
                                       label=info.difficulty.label,

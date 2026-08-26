@@ -345,6 +345,103 @@ def test_walk_away_still_weights_a_drizzle_stack_that_names_min_max(
     assert captured["opts"].quality_weighted is True
 
 
+def test_walk_away_drizzle_stack_turns_on_drizzle_rejection(
+    solved_library, monkeypatch,
+):
+    # Drizzle accumulates in one shot, so ``auto_reject`` — and every method it
+    # resolves to — is a no-op there; drizzle has its own two-pass rejection
+    # instead, and nothing ever turned it on. A drizzled walk-away stack therefore
+    # combined completely unfiltered, keeping every satellite and plane trail that
+    # slipped past frame-level QC.
+    import json
+
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(
+                pipeline.STACK_DEFAULTS_META_KEY, json.dumps({"drizzle": True}))
+        finally:
+            proj.close()
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            auto=True)
+    finally:
+        lib.close()
+    assert captured["opts"].drizzle is True
+    assert captured["opts"].drizzle_reject is True
+
+
+def test_walk_away_respects_an_explicit_drizzle_rejection_choice(
+    solved_library, monkeypatch,
+):
+    # A user who saved "drizzle, no rejection" as this target's default meant it —
+    # the two-pass rejection costs a second pass over every frame, so choosing to
+    # skip it is a legitimate choice the walk-away path must not overrule.
+    import json
+
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(
+                pipeline.STACK_DEFAULTS_META_KEY,
+                json.dumps({"drizzle": True, "drizzle_reject": False}))
+        finally:
+            proj.close()
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            auto=True)
+    finally:
+        lib.close()
+    assert captured["opts"].drizzle_reject is False
+
+
+def test_walk_away_without_drizzle_leaves_drizzle_rejection_alone(
+    solved_library, monkeypatch,
+):
+    # The flag means nothing off the drizzle path, and a run record that carries a
+    # setting the run never used is a small lie. The ordinary walk-away stack's
+    # options must come out exactly as they always have.
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            auto=True)
+    finally:
+        lib.close()
+    assert captured["opts"].drizzle is False
+    assert captured["opts"].drizzle_reject is False
+
+
+def test_manual_drizzle_stack_leaves_drizzle_rejection_off(
+    solved_library, monkeypatch,
+):
+    # The manual Stack form is honoured verbatim, drizzle included: the user sees
+    # the "Drizzle outlier rejection" checkbox and its answer is theirs.
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        pipeline._stack_target(
+            _settings(solved_library), _FakeJM(), Job(kind="stack"), lib, safe,
+            options={"drizzle": True})
+    finally:
+        lib.close()
+    assert captured["opts"].drizzle is True
+    assert captured["opts"].drizzle_reject is False
+
+
 def test_manual_stack_leaves_auto_reject_off(solved_library, monkeypatch):
     # The manual Stack form (auto=False, explicit options) must be honoured verbatim:
     # no auto_reject is injected, so the engine runs the default κ-σ path unchanged.

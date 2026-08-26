@@ -1638,14 +1638,17 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
 
     # Photometric-normalization summary (present only on normalized stacks), parsed
     # the same way so the panel can show a single "N frames gain-matched · scales
-    # lo–hi" line and the user can trust the (off-by-default) normalization did
-    # something.
+    # lo–hi" line and the user can trust the normalization did something. ``auto``
+    # says the mosaic path enabled it rather than the user — a run nobody ticked a
+    # box for should still be able to explain itself.
     photometric: dict[str, Any] | None = None
     if "PHOTNORM" in header:
         photometric = {"mode": str(header["PHOTNORM"])}
         for hk, k in (("PHOTNADJ", "n_adjusted"),):
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 photometric[k] = int(header[hk])
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            photometric["auto"] = bool(header["PHOTAUTO"])
         for hk, k in (("PHOTMIN", "min"), ("PHOTMAX", "max"), ("PHOTMED", "median")):
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 photometric[k] = float(header[hk])

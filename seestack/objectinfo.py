@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass
 
 from seestack.bg_advice import BackgroundModeHint, background_mode_hint
-from seestack.framing import FramingHint, framing_hint
+from seestack.framing import FramingHint, MosaicPlan, framing_hint, mosaic_plan
 from seestack.nightplan import CatalogObject, _angular_sep_deg, load_catalog
 from seestack.target_difficulty import DifficultyHint, target_difficulty
 
@@ -76,6 +76,10 @@ class ObjectInfo:
     matched_by: str         # "name" or "coords" — how we identified it
     size_arcmin: float | None = None   # major-axis size, when the catalog has one
     framing: FramingHint | None = None  # "will it fit in one frame?" verdict
+    # "How big a mosaic?" — the panel grid this object's span needs, for the ones
+    # too big for a single frame. ``None`` when it fits (or has no vetted size),
+    # so the card says nothing rather than planning a one-panel mosaic.
+    mosaic: MosaicPlan | None = None
     blurb: str = ""         # plain-language "what am I looking at?" one-liner, "" if none
     difficulty: DifficultyHint | None = None  # "how hard for a Seestar?" verdict, if vetted
     # Which per-frame background-flatten mode suits this target, when its catalog
@@ -155,6 +159,7 @@ def _to_info(obj: CatalogObject, matched_by: str) -> ObjectInfo:
         matched_by=matched_by,
         size_arcmin=obj.size_arcmin,
         framing=framing_hint(obj.size_arcmin),
+        mosaic=mosaic_plan(obj.size_arcmin, obj.size_minor_arcmin),
         blurb=obj.blurb,
         difficulty=target_difficulty(obj.id, obj.type),
         background_mode_hint=background_mode_hint(obj.type, obj.size_arcmin),

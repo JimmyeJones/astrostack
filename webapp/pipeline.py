@@ -2231,6 +2231,14 @@ def _stack_target(
     The engine default stays **False** — a manual stack, a stored config and every
     existing run record are untouched; this only picks a better default for a user
     who clicked "just do it".
+
+    ``auto`` finally turns on ``StackOptions.drizzle_reject`` when the run drizzles
+    and the merged options express no preference. Drizzle accumulates in one shot,
+    so ``auto_reject`` — and every method it resolves to — is a **no-op** there;
+    without this a drizzled walk-away stack combined with no outlier rejection at
+    all, keeping every satellite, plane trail and cosmic ray that slipped past
+    frame-level QC. Drizzle's own two-pass rejection is the equivalent, and this is
+    the same "the user chose nothing" guard the two above use.
     """
     from seestack.stack.stacker import run_stack
 
@@ -2293,6 +2301,24 @@ def _stack_target(
             # counting once there are more subs.) Drizzle is exempt — it honours
             # per-frame weights and runs its own rejection.
             opts_dict["quality_weighted"] = True
+        if (auto and opts_dict.get("drizzle")
+                and "drizzle_reject" not in opts_dict):
+            # …and the third leg of the same "the user chose nothing" chain, for
+            # the one path the other two can't reach. ``auto_reject`` (and every
+            # method it resolves to) is a **no-op under drizzle** — the drizzle
+            # accumulation is one-shot, so it has its own two-pass rejection
+            # instead — and nothing ever turned that on. A drizzled walk-away
+            # stack therefore combined completely unfiltered: satellites, plane
+            # trails and cosmic rays that slipped past frame-level QC went
+            # straight into the picture. Same guard as above (only when the merged
+            # options express no preference, so a saved per-target default and the
+            # manual Stack form are honoured verbatim), and only when drizzle is
+            # actually on, so a non-drizzle run's recorded options are unchanged.
+            # The engine still gates it on having enough frames for the statistics
+            # to mean anything (``and n >= 4``). It costs a second pass over the
+            # frames — the same trade the non-drizzle walk-away path already makes
+            # by auto-picking a rejecting combine.
+            opts_dict["drizzle_reject"] = True
         calibration_skipped: list[str] = []
         if saved_master_ids:
             # The user's own "Save as defaults" calibration picks win over the
