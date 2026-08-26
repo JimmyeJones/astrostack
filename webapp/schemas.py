@@ -348,6 +348,12 @@ class GradeReportOut(BaseModel):
     metrics_used: list[str]
     metrics_skipped: dict[str, str]
     capped: bool
+    # How many mosaic panels the star-count / sky / transparency metrics were
+    # graded against separately (each panel judged against itself, since panels
+    # are different patches of sky). 0 for an ordinary single-pointing target,
+    # where grading is target-wide as it always has been. Additive: an older
+    # frontend simply ignores it.
+    pointing_groups: int = 0
     # POST …/apply only: the frame ids actually rejected (for one-click undo).
     changed_ids: list[int] | None = None
 
