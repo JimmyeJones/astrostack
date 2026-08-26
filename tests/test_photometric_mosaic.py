@@ -273,3 +273,117 @@ def test_a_single_field_stack_still_never_auto_normalizes(tmp_path):
 
     with fits.open(result.fits_path) as hdul:
         assert "PHOTNORM" not in hdul[0].header
+
+
+# ------------------------------------- quality weighting, the same class of bug
+
+
+def _qc_row(fid: int, ra: float, *, stars: int, sky: float, transparency: float,
+            fwhm: float = 3.0, ecc: float = 0.2) -> FrameRow:
+    """A fully-QC'd solved FrameRow for the weighting tests."""
+    return FrameRow(id=fid, source_path=f"w{fid}", ra_center_deg=ra,
+                    dec_center_deg=PANEL_DEC, star_count=stars,
+                    sky_adu_median=sky, transparency_score=transparency,
+                    fwhm_px=fwhm, eccentricity_median=ecc)
+
+
+def test_quality_weighting_does_not_penalise_a_panel_for_its_sky():
+    """The third instance of the same bug: ``stars_factor`` and
+    ``transparency_factor`` clip at 1.0, so a target-wide median across a mosaic
+    can only *penalise* the panel aimed at an emptier patch — permanently, on
+    every walk-away mosaic (the auto chain turns quality weighting on)."""
+    from seestack.stack.weighting import compute_frame_weights
+
+    rich = [_qc_row(i, PANEL_A_RA, stars=400, sky=1000.0, transparency=5000.0)
+            for i in range(1, 9)]
+    sparse = [_qc_row(i + 8, PANEL_B_RA, stars=120, sky=1000.0, transparency=2200.0)
+              for i in range(1, 9)]
+    frames = rich + sparse
+
+    wide, _ = compute_frame_weights(frames)
+    assert _mean_scale(wide, sparse) / _mean_scale(wide, rich) == pytest.approx(0.78, abs=0.02)
+
+    per_panel, _ = compute_frame_weights(frames, group_by_pointing=True)
+    assert _mean_scale(per_panel, sparse) == pytest.approx(1.0, abs=0.01)
+    assert _mean_scale(per_panel, rich) == pytest.approx(1.0, abs=0.01)
+
+
+def test_quality_weighting_still_catches_a_bad_sub_inside_its_own_panel():
+    """The point of weighting survives the split: a genuinely clouded sub is an
+    outlier against *its own* panel, which is the right comparison."""
+    from seestack.stack.weighting import compute_frame_weights
+
+    rich = [_qc_row(i, PANEL_A_RA, stars=400, sky=1000.0, transparency=5000.0)
+            for i in range(1, 6)]
+    sparse = [_qc_row(i + 8, PANEL_B_RA, stars=120, sky=1000.0, transparency=2200.0)
+              for i in range(1, 6)]
+    clouded = _qc_row(99, PANEL_B_RA, stars=30, sky=4000.0, transparency=600.0)
+    weights, _ = compute_frame_weights(rich + sparse + [clouded],
+                                       group_by_pointing=True)
+    assert weights[99] < 0.6
+    assert all(weights[f.id] == pytest.approx(1.0, abs=0.01) for f in rich + sparse)
+
+
+def test_quality_weighting_seeing_metrics_stay_target_wide():
+    """FWHM and eccentricity are properties of the *night*, not of where you
+    pointed, so they must keep comparing across the whole target — a panel shot
+    in bad seeing should still be down-weighted against a sharper one."""
+    from seestack.stack.weighting import compute_frame_weights
+
+    sharp = [_qc_row(i, PANEL_A_RA, stars=400, sky=1000.0, transparency=5000.0,
+                     fwhm=2.0) for i in range(1, 6)]
+    soft = [_qc_row(i + 8, PANEL_B_RA, stars=120, sky=1000.0, transparency=2200.0,
+                    fwhm=4.0) for i in range(1, 6)]
+    weights, _ = compute_frame_weights(sharp + soft, group_by_pointing=True)
+    assert _mean_scale(weights, sharp) == pytest.approx(1.0, abs=0.01)
+    # 2× the FWHM → (2/4)² = 0.25 on that factor alone; the geometric mean over
+    # the five factors lands well below neutral. The panel split didn't hide it.
+    assert _mean_scale(weights, soft) < 0.8
+
+
+def test_quality_weighting_is_unchanged_on_a_single_pointing_target():
+    """A dithered single-field target is one group, so there is no sound split
+    and the weights are byte-for-byte what they have always been."""
+    from seestack.stack.weighting import compute_frame_weights
+
+    rows = [_qc_row(i, PANEL_A_RA + i * 0.002, stars=300 + i * 40, sky=1000.0 + i * 50,
+                    transparency=4000.0 + i * 300, fwhm=3.0 + i * 0.1)
+            for i in range(1, 9)]
+    wide, wide_stats = compute_frame_weights(rows)
+    grouped, grouped_stats = compute_frame_weights(rows, group_by_pointing=True)
+    assert grouped == wide
+    assert grouped_stats == wide_stats
+
+
+def _quarter_coverage(fits_path) -> tuple[float, float]:
+    """Peak coverage (Σ combine weights) in the left and right quarters."""
+    from pathlib import Path
+
+    cov_path = Path(fits_path).with_name(Path(fits_path).stem + "_coverage.fits")
+    with fits.open(cov_path) as hdul:
+        cov = np.asarray(hdul[0].data, dtype=np.float64)
+    q = cov.shape[1] // 4
+    return float(np.nanmax(cov[:, :q])), float(np.nanmax(cov[:, -q:]))
+
+
+def test_a_mosaic_stack_weighs_both_panels_by_their_own_subs(tmp_path):
+    """End-to-end wiring: the stacker must pass the panel split through to
+    quality weighting. Both panels carry four subs, so a correctly-weighted
+    mosaic peaks at exactly 4.0 coverage in *both* pure regions — pre-fix the
+    star-poor panel's subs were weighted ~0.77 and its region peaked at ~3.1,
+    a quarter of that panel's depth thrown away for pointing at emptier sky."""
+    proj = _mosaic_project(tmp_path)
+    try:
+        for f in proj.iter_frames():
+            stars = 400 if f.ra_center_deg == PANEL_A_RA else 120
+            proj.update_frame(f.id, star_count=stars, sky_adu_median=1000.0,
+                              transparency_score=5000.0)
+        result = run_stack(proj, StackOptions(
+            sigma_clip=False, max_workers=2, output_name="wmosaic",
+            quality_weighted=True))
+    finally:
+        proj.close()
+
+    left, right = _quarter_coverage(result.fits_path)
+    assert left == pytest.approx(4.0, abs=0.05)
+    assert right == pytest.approx(4.0, abs=0.05)

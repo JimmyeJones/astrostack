@@ -49,6 +49,42 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**🟠 FOUND AND FIXED (Builder 2026-08-26, branch `agent/mosaic-photometric-per-panel`) — quality
+  weighting systematically PENALISES a mosaic panel for pointing at emptier sky. Measured 0.78× on a panel
+  whose only difference from its neighbour was its star field — about a quarter of that panel's depth thrown
+  away, on every walk-away mosaic.**~~ — **FIXED v0.272.1.** *(Image quality, priority 4, on the
+  on-by-default path — the walk-away `auto` chain turns `quality_weighted` on itself.)*
+
+  **This is the THIRD instance of one class of bug, found by looking for it after fixing the second.** QC
+  grading had it (fixed v0.270.2), photometric normalization had it (fixed v0.271.0), and
+  `compute_frame_weights` has it too: it takes **target-wide medians** of `star_count`, `sky_adu_median` and
+  `transparency_score` — the three *position-dependent* metrics grading already tags `per_pointing=True`.
+  A mosaic's panels are different patches of sky, so a panel aimed at an emptier field genuinely has fewer,
+  fainter stars. And because `stars_factor`/`transparency_factor` **clip at 1.0**, a target-wide comparison
+  can only ever *penalise* that panel: it can never be boosted back. **Measured** on two identically-exposed
+  8-sub panels (400 vs 120 stars, same sky, same seeing): mean weight **1.00 vs 0.78**; end-to-end through
+  `run_stack`, the star-poor panel's region of the coverage map peaked at **3.09 of its 4 subs → 4.00** after
+  the fix.
+
+  **What shipped.** `compute_frame_weights` grows `group_by_pointing` (set by the stacker on a mosaic canvas)
+  and takes those three medians **per panel**, while FWHM and eccentricity stay target-wide — seeing and
+  tracking are properties of the *night*, not of where you pointed. Exactly the split grading makes. A panel
+  too thin to carry `_MIN_PANEL_FRAMES` of a metric falls back to the target-wide median **for that metric
+  only**, so a sparse panel is still weighted rather than left unjudged, and a genuinely clouded sub is still
+  caught — it is an outlier against its own panel, which is the right comparison.
+
+  **The three copies are now one.** `pointing_groups` moved into `seestack/stack/pointings.py` beside
+  `cluster_pointings`, and grading, photometric normalization and weighting all delegate to it, so the
+  soundness gate ("≥2 groups each carrying `min_members`, else behave exactly as before") has a single
+  definition. **If a fourth pass ever compares a flux-like metric across a target, use it** — and check first
+  whether the metric is position-dependent.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API or default change; every single-field target and
+  every non-mosaic run is byte-for-byte unchanged (the split self-disables when the pointings don't separate).
+  **Tests (+5, all fail before):** the 0.78 penalty and its 1.00 fix, a clouded sub still caught inside its
+  own panel, the seeing metrics staying target-wide, a dithered single-field target's weights *identical*
+  with and without grouping, and the end-to-end 3.09 → 4.00 coverage through `run_stack`.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26, branch `claude/vigilant-knuth-7slpid`) — the stacking engine was
   deeply re-audited this run and came back CLEAN: no new verified bug found.** Adversarially traced the whole
   `seestack/stack/*` + `seestack/calibrate/*` hot path, trying to break each edge: `accumulator.py`
@@ -12417,6 +12453,23 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **IDEA / QA LEAD (Builder 2026-08-26, generalised from three fixes of the same bug) — sweep the rest of the
+  engine for "compares a POSITION-DEPENDENT metric across a whole target".** *(Pillar: image quality /
+  correctness — PRIORITY 4; size S to audit, unknown to fix; a good Scout run.)*
+  Three separate passes shipped the identical mistake and each one was found only after the previous fix made
+  it obvious: QC grading (v0.270.2), photometric normalization (v0.271.0) and quality weighting (v0.272.1)
+  all compared `star_count` / `sky_adu_median` / `transparency_score` against a **target-wide** median, which
+  on a mosaic reads "this panel points at emptier sky" as "this sub is bad". The shared gate now exists
+  (`pointing_groups`, `seestack/stack/pointings.py`), so a fourth site would be a one-line fix — the work is
+  *finding* it. **Method:** grep every `np.median(` / `np.percentile(` / `mean(` taken over a whole frame
+  list, and for each ask "is this metric a property of the night, or of where the scope pointed?" Night-wide
+  (FWHM, eccentricity, and anything derived from the *time* of capture) is correct target-wide; anything
+  flux-like or sky-brightness-like is not. Candidate sites worth checking first: the auto-grade reconsider /
+  reaccept path, `stackhealth`'s trend and drift verdicts, the session-quality drift and transparency-trend
+  endpoints, and any "best frame" / reference-frame picker that ranks on star count. **Note the asymmetry
+  that makes this quietly harmful:** several of these factors *clip at 1.0*, so a wrongly-compared panel can
+  only ever be penalised, never compensated — the loss is one-way and silent.
+
 - **IDEA (Builder 2026-08-26, left open by the v0.271.0 per-panel photometric fix) — match a hazy mosaic
   panel's *brightness* to its neighbours using the panel OVERLAPS, not `transparency_score`.**
   *(Pillar: image quality — PRIORITY 4; size M; **read the warning below before starting — the obvious
@@ -13766,6 +13819,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   the catalog field is asserted present-and-numeric for a couple of anchor objects. **Slices —** (a) add
   `distance_ly` to the catalog + the pure blurb helper + unit tests; (b) render the line on the existing
   object-info card (frontend, gated on presence). Slice (a) alone is a shippable Builder run.
+
+- **⚠ NOTE BEFORE STARTING THE "How big a mosaic?" ITEM BELOW (Builder 2026-08-26 — scoped it, found a data
+  gap, and deliberately did not build it).** The shape is right and the value is real, but the bundled
+  catalogs carry **only `size_arcmin` (the major axis)** — there is no minor axis. Modelling the object as a
+  square of its major axis, which is the conservative choice everywhere else in `framing.py`, over-states the
+  panel count badly: M 31 (178'×63') comes out as **3 cols × 5 rows = 15 panels** against a real answer near
+  2×3, and telling a beginner to shoot 15 panels when 6 will do is worse advice than saying nothing. Two
+  honest ways forward: (a) curate a `size_minor_arcmin` for the ~20 catalog objects that actually exceed one
+  frame (small, bounded data work — the same discipline the v0.272.0 `distance_ly` curation used, including
+  its "no field ⇒ no line" rule), then compute a real `cols × rows`; or (b) ship only the objects that have
+  both axes and return `None` for the rest. **Also unverified: the Seestar mosaic mode's own panel overlap**,
+  which the panel count divides by — pick a documented, conservative figure and *say* it is approximate,
+  rather than implying a precision the app doesn't have.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26) — "How big a mosaic?": when the app tells a beginner an object is
   bigger than one frame and to "shoot it in mosaic mode", also say **how many panels** (and roughly how long)

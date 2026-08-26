@@ -44,7 +44,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from seestack.io.project import FrameRow
-from seestack.stack.pointings import PANEL_LINK_DIST_DEG, cluster_pointings
+from seestack.stack.pointings import pointing_groups
 
 log = logging.getLogger(__name__)
 
@@ -97,24 +97,21 @@ def _pointing_references(
     stays neutral rather than being scaled against a yardstick from another
     patch of sky.
     """
-    labels = cluster_pointings(
+    usable = [
+        f.transparency_score is not None and f.transparency_score > 0
+        for f in frames
+    ]
+    labels = pointing_groups(
         [(f.ra_center_deg, f.dec_center_deg) for f in frames],
-        link_dist_deg=PANEL_LINK_DIST_DEG,
+        min_members=min_frames, eligible=usable,
     )
-    measured: dict[int, list[float]] = {}
-    for f, label in zip(frames, labels, strict=True):
-        if label < 0 or f.id is None:
-            continue
-        score = f.transparency_score
-        if score is not None and score > 0:
-            measured.setdefault(label, []).append(float(score))
-    refs = {
-        label: float(np.median(scores))
-        for label, scores in measured.items()
-        if len(scores) >= min_frames
-    }
-    if len(refs) < 2:
+    if labels is None:
         return None
+    measured: dict[int, list[float]] = {}
+    for f, label, ok in zip(frames, labels, usable, strict=True):
+        if label >= 0 and ok:
+            measured.setdefault(label, []).append(float(f.transparency_score))
+    refs = {label: float(np.median(scores)) for label, scores in measured.items()}
     return {
         f.id: refs[label]
         for f, label in zip(frames, labels, strict=True)
