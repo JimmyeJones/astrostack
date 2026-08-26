@@ -1007,6 +1007,19 @@ describe("photometricSummaryText", () => {
       "Photometrically normalized · 1 frame gain-matched",
     );
   });
+  it("says when the mosaic path turned it on rather than the user", () => {
+    expect(
+      photometricSummaryText({ mode: "transparency", n_adjusted: 8, auto: true }),
+    ).toBe("Photometrically normalized · 8 frames gain-matched · automatic for a mosaic");
+    // The user's own choice reads exactly as it always has…
+    expect(
+      photometricSummaryText({ mode: "transparency", n_adjusted: 8, auto: false }),
+    ).toBe("Photometrically normalized · 8 frames gain-matched");
+    // …as does a master written before the flag existed.
+    expect(photometricSummaryText({ mode: "transparency", n_adjusted: 8 })).toBe(
+      "Photometrically normalized · 8 frames gain-matched",
+    );
+  });
 });
 
 describe("darkScalingSummaryText", () => {

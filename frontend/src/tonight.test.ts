@@ -233,6 +233,26 @@ describe("framingRowBadge", () => {
     expect(tight!.label).toBe("Mosaic for margin");
     expect(tight!.color).toBe("yellow");
   });
+
+  it("says how big a mosaic when the row carries a plan", () => {
+    const b = framingRowBadge(
+      { level: "mosaic", text: "is bigger than one frame." },
+      { cols: 3, rows: 2, panels: 6, text: "About a 3×2 mosaic (6 panels) covers all of it." },
+    );
+    // The panel count is the beginner's next question, and what they set in the
+    // Seestar app — so it goes in the label, not only the hover.
+    expect(b!.label).toBe("Needs 3×2 mosaic");
+    expect(b!.tooltip).toBe(
+      "This target is bigger than one frame. About a 3×2 mosaic (6 panels) covers all of it.",
+    );
+  });
+
+  it("falls back to the plain label when the backend sends no plan", () => {
+    // An older backend, or an object with no vetted size: unchanged behaviour.
+    const b = framingRowBadge({ level: "mosaic", text: "is bigger than one frame." }, null);
+    expect(b!.label).toBe("Needs mosaic");
+    expect(b!.tooltip).toBe("This target is bigger than one frame.");
+  });
 });
 
 describe("difficultyRowBadge", () => {
