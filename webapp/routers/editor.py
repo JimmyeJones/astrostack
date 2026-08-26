@@ -24,7 +24,12 @@ from seestack.edit.histogram import compute_histogram, measure_sky_cast
 from seestack.edit.ops.detail import deconv_understates_on_proxy
 from seestack.edit.ops.stars import star_reduce_overstates_on_proxy
 from seestack.edit.pipeline import apply_recipe
-from seestack.edit.proxy import coverage_path_for, get_proxy, load_coverage
+from seestack.edit.proxy import (
+    coverage_path_for,
+    get_proxy,
+    load_coverage,
+    load_frame_coverage,
+)
 from seestack.edit.recipe import Recipe, recipe_from_dict
 from seestack.edit.registry import EditContext
 from seestack.edit import auto_prefs as auto_prefs_mod
@@ -144,6 +149,16 @@ def _proxy_coverage(fits_path: str, scale: float) -> np.ndarray | None:
     ``build_proxy``), so we decimate the coverage the same way. None when the run
     has no coverage sibling (a single-field image)."""
     return load_coverage(fits_path, step=max(1, int(round(scale))))
+
+
+def _proxy_frame_coverage(fits_path: str, scale: float) -> np.ndarray | None:
+    """The run's honest per-pixel *frame count*, strided to the same proxy grid.
+
+    What the sky-leveling op should bin a mosaic's panels by — a sum of weights
+    splits one panel across several bins once quality weighting is on. ``None``
+    for a run recorded before the sibling file existed, which falls back to the
+    weighted map exactly as it always has."""
+    return load_frame_coverage(fits_path, step=max(1, int(round(scale))))
 
 
 def _load_run_coverage_strided(run):
@@ -266,6 +281,7 @@ def render_run_display_array(
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
                       coverage=_proxy_coverage(run.fits_path, scale),
+                      frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
                       already_display=_run_display_space(run))
     out = apply_recipe(rgb, recipe, ctx, for_preview=True)
     if return_ctx:
@@ -345,6 +361,7 @@ def _render_star_mask_png(project_dir: Path, run, size_px: float, grow: float,
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
                       coverage=_proxy_coverage(run.fits_path, scale),
+                      frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
                       already_display=_run_display_space(run))
     if recipe is not None:
         sub = _recipe_before_uid(recipe, uid,
@@ -859,6 +876,7 @@ async def denoise_suggestion(safe: str, run_id: int, request: Request,
         if sub is not None:
             ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
                               coverage=_proxy_coverage(run.fits_path, scale),
+                              frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
                               already_display=_run_display_space(run))
             measured = apply_recipe(rgb, sub, ctx, for_preview=True, auto_stretch=False)
         sigma, strength = suggest_denoise_strength(measured)
@@ -919,6 +937,7 @@ async def levels_suggestion(safe: str, run_id: int, request: Request,
         rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
         ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
                           coverage=_proxy_coverage(run.fits_path, scale),
+                          frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
                           already_display=_run_display_space(run))
         out = apply_recipe(rgb, sub, ctx, for_preview=True)
         pts = suggest_levels_points(out)
@@ -969,6 +988,7 @@ async def stretch_suggestion(safe: str, run_id: int, request: Request,
         rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
         ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
                           coverage=_proxy_coverage(run.fits_path, scale),
+                          frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
                           already_display=_run_display_space(run))
         # Measure the *linear* image the stretch op will receive: apply the prior
         # (linear) ops but suppress the default-stretch fallback, so we never
@@ -1043,6 +1063,7 @@ async def highlight_suggestion(safe: str, run_id: int, request: Request,
         rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
         ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
                           coverage=_proxy_coverage(run.fits_path, scale),
+                          frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
                           already_display=_run_display_space(run))
         linear = apply_recipe(rgb, sub, ctx, for_preview=True, auto_stretch=False)
 
@@ -1092,6 +1113,7 @@ async def curve_suggestion(safe: str, run_id: int, request: Request,
         rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
         ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
                           coverage=_proxy_coverage(run.fits_path, scale),
+                          frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
                           already_display=_run_display_space(run))
         out = apply_recipe(rgb, sub, ctx, for_preview=True)
         pts = suggest_tone_curve(out)
@@ -1192,6 +1214,7 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         empty = not bool(np.isfinite(rgb).any())
         ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
                           coverage=_proxy_coverage(run.fits_path, scale),
+                          frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
                           already_display=_run_display_space(run))
         errors: list[str] = []
         out = apply_recipe(rgb, rec, ctx, for_preview=True, errors=errors)

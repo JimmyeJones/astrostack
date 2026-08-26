@@ -1178,7 +1178,7 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
     from seestack.edit.recipe import recipe_from_dict
     from seestack.edit.registry import EditContext, as_rgb, get_op
 
-    from seestack.edit.proxy import load_coverage
+    from seestack.edit.proxy import load_coverage, load_frame_coverage
     from seestack.stack.output import fits_is_display_space
 
     display_space = fits_is_display_space(fits_path)
@@ -1188,7 +1188,11 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
     # Load the run's per-pixel coverage map (if any) so the "Coverage leveling" op
     # can equalise the sky across mosaic panels; None for a single-field image.
     coverage = load_coverage(fits_path)
-    ctx = EditContext(wcs=wcs, is_proxy=False, proxy_scale=1.0, coverage=coverage)
+    # …and the honest per-pixel frame count beside it, so the leveling op bins
+    # this mosaic's panels by subs rather than by a sum of weights. None on a run
+    # recorded before that sibling existed — same behaviour as before.
+    ctx = EditContext(wcs=wcs, is_proxy=False, proxy_scale=1.0, coverage=coverage,
+                      frame_coverage=load_frame_coverage(fits_path))
     ctx.stage = "linear"
     out = as_rgb(np.asarray(rgb, dtype=np.float32))
     stretched = False
