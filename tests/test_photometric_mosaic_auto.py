@@ -63,13 +63,21 @@ def _dim_signal(path, factor: float) -> None:
 
 
 def _hazy_mosaic_project(tmp_path, n_per_panel: int = 4, *, haze: float = HAZE,
-                         score: bool = True) -> Project:
-    """Two panels of identical synthetic sky — the second one shot through haze.
+                         score: bool = True, within_panel: bool = False) -> Project:
+    """Two panels of identical synthetic sky, with haze in one of two places.
 
     Both panels use the *same* per-sub star seeds, so the two halves of the
     canvas carry the same star field and their brightness can be compared
     directly: any step between them is photometric mismatch, not a different
-    patch of sky.
+    patch of sky. (Real panels never look like this — see
+    ``test_a_wholly_hazy_panel_is_deliberately_left_alone`` for why that
+    matters.)
+
+    ``within_panel=False`` (the default) hazes the **whole** second panel.
+    ``within_panel=True`` hazes the second half of **each** panel's subs, which
+    is what a night of drifting transparency actually does to a mosaic that is
+    revisited panel by panel — and the case the per-panel normalization of
+    v0.276.0 corrects.
     """
     proj = Project.create(tmp_path / "p", name="hazy-mosaic")
     raws = tmp_path / "raws"
@@ -82,7 +90,8 @@ def _hazy_mosaic_project(tmp_path, n_per_panel: int = 4, *, haze: float = HAZE,
                 n_stars=40, ra_center_deg=ra, dec_center_deg=-5.4,
                 pixscale_arcsec=PIXSCALE,
             )
-            if panel == 1:
+            hazy = (j >= n_per_panel // 2) if within_panel else (panel == 1)
+            if hazy:
                 _dim_signal(path, haze)
             fid = proj.add_frame(FrameRow(
                 source_path=str(path), cached_path=str(path),
@@ -96,7 +105,7 @@ def _hazy_mosaic_project(tmp_path, n_per_panel: int = 4, *, haze: float = HAZE,
                 # What QC measures: the median flux of the frame's brightest
                 # stars, so the hazy panel's subs score proportionally lower.
                 proj.update_frame(
-                    fid, transparency_score=5000.0 * (haze if panel == 1 else 1.0))
+                    fid, transparency_score=5000.0 * (haze if hazy else 1.0))
     return proj
 
 
@@ -150,14 +159,26 @@ def _neutral_scales(monkeypatch) -> None:
         "seestack.stack.stacker.compute_photometric_scales", _none)
 
 
-def test_a_hazy_mosaic_panel_is_gain_matched_to_its_neighbour(tmp_path, monkeypatch):
-    """The measurement. One panel shot at half transparency comes out roughly as
-    bright as the clear one — where before it stayed visibly fainter.
+def _mean_star_flux(fits_path) -> float:
+    """Mean star-core brightness of the whole finished canvas, above its sky."""
+    data = np.asarray(fits.getdata(fits_path), dtype=np.float64)
+    lum = np.nanmean(data, axis=0) if data.ndim == 3 else data
+    finite = np.isfinite(lum)
+    return _star_flux(data, finite)
 
-    Fail-before: ``photometric_normalize`` defaulted off and nothing turned it on
-    for a mosaic, so the hazy panel kept its ~50% deficit.
+
+def test_haze_within_a_panel_is_gain_matched_out(tmp_path, monkeypatch):
+    """The measurement, as it stands after v0.276.0: transparency that drifts
+    *while a panel is being shot* is gain-matched away, against that panel's own
+    subs.
+
+    This is what a real night does to a mosaic — the Seestar revisits panels as
+    the sky changes — and it is the half of the correction that can be made
+    soundly, because every sub being compared is looking at the same patch of
+    sky. Half of each panel's subs are shot at 50% transparency here; boosting
+    them back lifts the combined star flux measurably.
     """
-    proj = _hazy_mosaic_project(tmp_path)
+    proj = _hazy_mosaic_project(tmp_path, within_panel=True)
     try:
         after = run_stack(proj, StackOptions(
             output_name="after", max_workers=1, sigma_clip=False))
@@ -167,20 +188,51 @@ def test_a_hazy_mosaic_panel_is_gain_matched_to_its_neighbour(tmp_path, monkeypa
     finally:
         proj.close()
 
-    step_before = _panel_step(before.fits_path)
-    step_after = _panel_step(after.fits_path)
-    assert step_before > 0.25, (
-        f"the fixture must actually have a hazy panel (step {step_before:.1%})")
-    assert step_after < 0.10, (
-        f"the hazy panel should be gain-matched to within a few percent, "
-        f"got {step_after:.1%} (was {step_before:.1%})")
-    assert step_after < step_before / 3
+    lifted = _mean_star_flux(after.fits_path) / _mean_star_flux(before.fits_path)
+    assert lifted > 1.1, (
+        f"the hazy subs should be gain-matched back up, got {lifted:.2f}×")
+    # …and the two panels still match each other, because nothing reached across
+    # the join to make them.
+    assert _panel_step(after.fits_path) < 0.10
+
+
+def test_a_wholly_hazy_panel_is_deliberately_left_alone(tmp_path):
+    """The half that is NOT corrected, and must not be — read this before
+    "fixing" it.
+
+    When an *entire* panel was shot through haze, the only evidence
+    ``transparency_score`` offers is "this panel's brightest stars are fainter
+    than that panel's". That is exactly what a panel aimed at an **emptier patch
+    of sky** looks like, and the two are indistinguishable from the metric. The
+    original v0.271.0 behaviour treated every such difference as haze and
+    corrected it — which fixed this fixture (whose panels deliberately share
+    star seeds) but gain-matched *real* panels apart by a measured **2.23×**,
+    manufacturing the panel grid the pass exists to prevent. So v0.276.0
+    normalises each panel against itself only, and this step stays.
+
+    Doing it properly needs the panel **overlaps**, where both panels image the
+    same stars and the ratio is honest evidence — filed in
+    ``docs/IMPROVEMENTS.md`` → Ideas → "Image quality". Until then, leaving a
+    hazy panel dim is the safe error: it is what the data actually recorded.
+    """
+    proj = _hazy_mosaic_project(tmp_path)
+    try:
+        res = run_stack(proj, StackOptions(
+            output_name="whole", max_workers=1, sigma_clip=False))
+    finally:
+        proj.close()
+
+    step = _panel_step(res.fits_path)
+    assert step > 0.25, (
+        f"the fixture must actually have a hazy panel (step {step:.1%})")
 
 
 def test_a_mosaic_records_that_it_normalized_itself(tmp_path):
     """Provenance: the run says it gain-matched, and that *it* chose to — the
     user never ticked a box, so the History panel must be able to say why."""
-    proj = _hazy_mosaic_project(tmp_path)
+    # Haze inside each panel, so there is something for a per-panel median to
+    # actually correct (a wholly-hazy panel is left alone by design — see above).
+    proj = _hazy_mosaic_project(tmp_path, within_panel=True)
     try:
         res = run_stack(proj, StackOptions(
             output_name="auto", max_workers=1, sigma_clip=False))
@@ -258,7 +310,7 @@ def test_the_panel_bins_do_not_move_when_the_scaling_is_on(tmp_path, monkeypatch
     pixel's *weighted* coverage Σ(w/s²), which would scramble the sky-leveling
     pass's panel bins if it still binned on that map. It bins on the honest
     frame count instead, so the bins must be identical either way."""
-    proj = _hazy_mosaic_project(tmp_path)
+    proj = _hazy_mosaic_project(tmp_path, within_panel=True)
     try:
         after = run_stack(proj, StackOptions(
             output_name="after", max_workers=1, sigma_clip=False,

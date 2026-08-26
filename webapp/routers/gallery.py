@@ -605,3 +605,92 @@ def export_unexported_edits(request: Request) -> dict:
         recipe_dict=None,
     )
     return {"job_id": job.id, "count": len(found)}
+
+
+# How many pictures the montage puts on the wall by default, and the ceiling a
+# caller may raise it to. Mirrors the engine's own caps so the query parameter
+# can't ask for a contact sheet of thumbnails.
+MONTAGE_DEFAULT_TILES = 9
+MONTAGE_MAX_TILES = 16
+
+
+def _montage_tiles(request: Request, limit: int) -> tuple[list, float]:
+    """``(tiles, integration_s)`` for the wall — the integration of the pictures
+    actually on it, not the library's total.
+
+    One picture per **target** — the library's own exposure-ranked heroes, which
+    is already "targets whose finished preview still exists on disk" — so the
+    wall answers *"what have I captured?"* rather than showing one busy target
+    five times. Best-effort per tile: a preview that has since been deleted or
+    can't be decoded is dropped and the next hero takes its place, exactly like
+    the recap poster's backdrop search.
+    """
+    from PIL import Image
+
+    from seestack.library_summary import summarize_library
+    from seestack.montage import MontageTile, montage_caption
+
+    lib = deps.open_library(request)
+    try:
+        targets = list(lib.list_targets())
+        summary = summarize_library(
+            targets, preview_exists=lambda p: bool(p) and Path(p).exists())
+        by_safe = {t.safe_name: t for t in targets}
+        tiles: list[MontageTile] = []
+        shown_s = 0.0
+        for hero in summary.heroes:
+            if len(tiles) >= limit:
+                break
+            entry = by_safe.get(hero.safe)
+            path = getattr(entry, "last_stack_preview", None) if entry else None
+            if not path:
+                continue
+            try:
+                with Image.open(path) as img:
+                    loaded = img.convert("RGB")
+            except Exception:  # noqa: BLE001 — a bad preview must not sink the wall
+                continue
+            tiles.append(MontageTile(
+                image=loaded,
+                caption=montage_caption(hero.name, hero.total_exposure_s)))
+            shown_s += float(hero.total_exposure_s or 0.0)
+    finally:
+        lib.close()
+    return tiles, shown_s
+
+
+@router.get("/api/gallery/montage.jpg")
+def get_gallery_montage(request: Request, limit: int = MONTAGE_DEFAULT_TILES):
+    """Download "My deep-sky wall" — the library's best pictures as one JPEG.
+
+    The gallery can only ever show one picture at a time, so there is no single
+    image that says *"look at everything I've captured"* — which is the thing a
+    beginner actually posts after a good run of clear nights. This renders it on
+    demand from the previews the app already keeps: nothing is written to the
+    library, exactly like the recap poster (``/api/recap.jpg``).
+
+    404s (rather than serving a one-picture "wall") when fewer than two targets
+    have a readable finished picture, so the offer can self-hide on a young
+    library.
+    """
+    import io
+
+    from fastapi.responses import Response
+
+    from seestack.montage import build_montage, montage_title
+
+    limit = max(2, min(int(limit), MONTAGE_MAX_TILES))
+    tiles, shown_s = _montage_tiles(request, limit)
+    image = build_montage(
+        tiles, title=montage_title(len(tiles), shown_s), max_tiles=limit)
+    if image is None:
+        raise HTTPException(
+            status_code=404,
+            detail="You need finished pictures of at least two targets to make a wall.")
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=92)
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/jpeg",
+        headers={"Content-Disposition": 'attachment; filename="my-deep-sky-wall.jpg"'},
+    )

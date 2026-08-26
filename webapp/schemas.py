@@ -55,6 +55,14 @@ class FramingHintOut(BaseModel):
     text: str
 
 
+class LightTravelOut(BaseModel):
+    """"How far did you see?" — the light-travel line for a matched target."""
+
+    distance_ly: float
+    years: str   # the friendly duration alone, e.g. "2.5 million years"
+    text: str    # the ready-to-render sentence
+
+
 class MosaicPlanOut(BaseModel):
     """"How big a mosaic?" — the panel grid a too-big target's span needs."""
 
@@ -131,6 +139,10 @@ class ObjectInfoOut(BaseModel):
     # overwhelming majority (old backends omit it — the UI treats absent as "no
     # advice" and shows nothing).
     background_mode_hint: BackgroundModeHintOut | None = None
+    # "How far did you see?" — the light in this picture left N years ago, from
+    # the catalog's vetted distance. ``null`` for an object with no vetted
+    # distance (old backends omit it — the UI shows nothing either way).
+    light_travel: LightTravelOut | None = None
 
 
 class IntegrationGoalOut(BaseModel):
@@ -156,6 +168,24 @@ class SessionQualityDriftOut(BaseModel):
     baseline_fwhm_px: float
     n_latest: int
     n_baseline: int
+
+
+class AutoStackHoldOut(BaseModel):
+    """Why the last hands-off scan held *this* target's stack back.
+
+    The walk-away readability preflight (v0.270.1) refuses to publish a picture
+    made thin by subs it couldn't read, and says so on the Jobs page — but a
+    beginner whose picture stops updating looks at the **Target** page, where
+    their picture lives. Same numbers, same wording, at the surface they
+    actually stare at. Read-only, and derived from the most recent finished scan
+    only, so it disappears by itself the moment a scan stacks the target.
+    """
+
+    offered: int
+    readable: int
+    unreadable: int
+    reason: str | None = None
+    when_utc: str | None = None
 
 
 class SessionRecapOut(BaseModel):

@@ -310,6 +310,14 @@ export interface FramingHint {
   text: string;
 }
 
+export interface LightTravel {
+  distance_ly: number;
+  // The friendly duration alone, e.g. "2.5 million years".
+  years: string;
+  // The ready-to-render sentence.
+  text: string;
+}
+
 /** "How big a mosaic?" — the panel grid a too-big target's span needs. */
 export interface MosaicPlan {
   // Panels along the frame's long edge, and along its short edge.
@@ -357,6 +365,10 @@ export interface ObjectInfo {
   // type/size say the default per-channel fit would bend into it; absent/null
   // for everything else (older backends omit it — treat as "no advice").
   background_mode_hint?: BackgroundModeHint | null;
+  // "How far did you see?" — the light in this picture left N years ago, from
+  // the catalog's vetted distance; absent/null for an object without one (older
+  // backends omit it — the card shows nothing either way).
+  light_travel?: LightTravel | null;
 }
 
 export interface BackgroundModeHint {
@@ -372,6 +384,17 @@ export interface SessionQualityDrift {
   baseline_fwhm_px: number;
   n_latest: number;
   n_baseline: number;
+}
+
+/** Why the last hands-off scan held this target's stack back because some of
+ * its subs had no file on disk right now (`GET /api/targets/{safe}/autostack-hold`;
+ * `null` when the newest scan didn't hold it). */
+export interface AutoStackHold {
+  offered: number;
+  readable: number;
+  unreadable: number;
+  reason?: string | null;
+  when_utc?: string | null;
 }
 
 export interface SessionRecap {
@@ -842,6 +865,9 @@ export interface StackPhotometricSummary {
   // True when the mosaic path turned normalization on itself rather than the
   // user ticking the box. Absent on masters written before v0.271.0.
   auto?: boolean;
+  // How many mosaic panels were matched against their own subs rather than
+  // against each other. Absent on single-field runs and older masters.
+  n_panels?: number;
 }
 
 export interface StackDarkScalingSummary {
@@ -1687,6 +1713,8 @@ export const api = {
     req<ObjectInfo | null>(`/api/targets/${safe}/identify`),
   sessionRecap: (safe: string) =>
     req<SessionRecap | null>(`/api/targets/${safe}/session-recap`),
+  autoStackHold: (safe: string) =>
+    req<AutoStackHold | null>(`/api/targets/${safe}/autostack-hold`),
   stackHealth: (safe: string, runId?: number) =>
     req<StackHealth | null>(
       `/api/targets/${safe}/stack-health` +
@@ -2108,6 +2136,8 @@ export const api = {
   // from the same figures over the user's own best picture. A href/download,
   // not a fetch: the browser saves the image.
   recapPosterUrl: () => `/api/recap.jpg`,
+  galleryMontageUrl: (limit?: number) =>
+    `/api/gallery/montage.jpg${limit ? `?limit=${limit}` : ""}`,
 
   // "Try it with a sample image" onboarding demo
   getSampleStatus: () => req<SampleStatus>("/api/sample"),

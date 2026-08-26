@@ -393,6 +393,30 @@ describe("pipelineSummary", () => {
       { target: "X", offered: 0, readable: 0, unreadable: 0 },
     ]);
   });
+
+  it("says when a thin picture was re-made from the full set", () => {
+    // The heal only fires when the same target already made a better picture
+    // and every sub is readable again, so the scan re-stacked it once. Saying
+    // so is what stops "why did it stack again with no new subs?".
+    const { line, healed } = pipelineSummary({
+      scanned: 0, auto_stacked: ["M 42"],
+      auto_stack_healed: [{ target: "M 42", frames: 787, newest: 271, best: 787 }],
+    });
+    expect(line).toBe(
+      "No new frames · auto-stacked 1 target · re-made 1 picture that came out thin.",
+    );
+    expect(healed).toEqual([
+      { target: "M 42", frames: 787, newest: 271, best: 787 },
+    ]);
+  });
+
+  it("tolerates malformed heal entries and says nothing when there are none", () => {
+    expect(pipelineSummary({ auto_stack_healed: [null, "junk", { target: "X" }] }).healed)
+      .toEqual([{ target: "X", frames: 0, newest: 0, best: 0 }]);
+    const { line, healed } = pipelineSummary({ scanned: 3, auto_stacked: [] });
+    expect(healed).toEqual([]);
+    expect(line).not.toMatch(/came out thin/);
+  });
 });
 
 describe("bootstrapRescueNote", () => {
@@ -593,6 +617,29 @@ describe("JobsView pipeline result actions", () => {
     )).toBeInTheDocument();
     expect(screen.getByText(
       /516 of 787 subs couldn't be read \(271 still readable\)\./,
+    )).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "M 42" }))
+      .toHaveAttribute("href", "/targets/M 42");
+  });
+
+  it("renders the re-made-a-thin-picture alert with the real numbers", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-1h", kind: "pipeline", target: null, state: "done",
+        result: {
+          scanned: 0, auto_stacked: ["M 42"],
+          auto_stack_healed: [
+            { target: "M 42", frames: 787, newest: 271, best: 787 },
+          ],
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "Re-made a picture that had come out thin",
+    )).toBeInTheDocument();
+    expect(screen.getByText(
+      /last picture used 271 subs, this one used all 787 \(its best before was 787\)\./,
     )).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "M 42" }))
       .toHaveAttribute("href", "/targets/M 42");

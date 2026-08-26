@@ -30,6 +30,19 @@ Formula (geometric mean of up to five sub-weights, each in [0.1, 1.0]):
 Frames missing any metric get the neutral weight 1.0 for that factor (they
 aren't penalised for things we couldn't measure). Frames with all metrics
 missing get weight 1.0 (i.e. behave like the unweighted stack).
+
+**Mosaics compare a panel against itself.** Three of those medians — stars,
+sky and transparency — are over *position-dependent* metrics: a mosaic panel
+aimed at an emptier patch of sky genuinely has fewer, fainter stars, and one
+low over a light dome genuinely has a brighter sky. Taken target-wide across a
+mosaic, ``stars_factor``/``transparency_factor`` clip at 1.0 and so can only
+*penalise* that panel — measured at a **0.73× systematic weight** on a panel
+whose only difference from its neighbour was its star field, which quietly
+makes that panel a quarter shallower than the data it was given. So on a mosaic
+those three medians are taken **per panel** (``group_by_pointing``, gated by
+:func:`~seestack.stack.pointings.pointing_groups`), while FWHM and eccentricity
+stay target-wide — seeing and tracking are properties of the *night*, not of
+where you pointed. Exactly the split QC grading makes (``per_pointing``).
 """
 
 from __future__ import annotations
@@ -40,6 +53,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from seestack.io.project import FrameRow
+from seestack.stack.pointings import pointing_groups
 
 log = logging.getLogger(__name__)
 
@@ -58,32 +72,101 @@ class WeightingStats:
     n_downweighted: int = 0
 
 
+# A panel needs at least this many subs carrying a metric before its own median
+# is a trustworthy yardstick; below that the panel falls back to the target-wide
+# one, the same shape the photometric pass uses.
+_MIN_PANEL_FRAMES = 3
+
+# Per-frame (stars, sky, transparency) medians — the position-dependent trio.
+_PositionalMedians = dict[int, tuple[float | None, float | None, float | None]]
+
+
+def _median_of(values: list[float]) -> float | None:
+    return float(np.median(values)) if values else None
+
+
+def _positional_medians(
+    frames: list[FrameRow], *, group_by_pointing: bool,
+) -> _PositionalMedians:
+    """Each frame's yardstick for star count / sky level / transparency.
+
+    Target-wide for a single-field target (and for a mosaic whose pointings
+    don't split soundly) — identical to the medians this function replaced. Per
+    **panel** on a mosaic that does split, because those three metrics are
+    properties of where the scope pointed as much as of the sky; see the module
+    docstring. A panel too thin to carry ``_MIN_PANEL_FRAMES`` of a metric falls
+    back to the target-wide median for *that metric only*, so a sparse panel is
+    still weighted rather than left unjudged.
+    """
+    wide = (
+        _median_of([f.star_count for f in frames
+                    if f.star_count is not None and f.star_count > 0]),
+        _median_of([f.sky_adu_median for f in frames
+                    if f.sky_adu_median is not None and f.sky_adu_median > 0]),
+        _median_of([f.transparency_score for f in frames
+                    if f.transparency_score is not None and f.transparency_score > 0]),
+    )
+    labels = pointing_groups(
+        [(f.ra_center_deg, f.dec_center_deg) for f in frames],
+        min_members=_MIN_PANEL_FRAMES,
+    ) if group_by_pointing else None
+    if labels is None:
+        return {f.id: wide for f in frames if f.id is not None}
+
+    buckets: dict[int, tuple[list[float], list[float], list[float]]] = {}
+    for f, label in zip(frames, labels, strict=True):
+        if label < 0:
+            continue
+        stars, skies, transps = buckets.setdefault(label, ([], [], []))
+        if f.star_count is not None and f.star_count > 0:
+            stars.append(float(f.star_count))
+        if f.sky_adu_median is not None and f.sky_adu_median > 0:
+            skies.append(float(f.sky_adu_median))
+        if f.transparency_score is not None and f.transparency_score > 0:
+            transps.append(float(f.transparency_score))
+    per_label = {
+        label: tuple(
+            _median_of(vals) if len(vals) >= _MIN_PANEL_FRAMES else fallback
+            for vals, fallback in zip(cols, wide, strict=True)
+        )
+        for label, cols in buckets.items()
+    }
+    return {
+        f.id: per_label.get(label, wide)  # type: ignore[misc]
+        for f, label in zip(frames, labels, strict=True)
+        if f.id is not None
+    }
+
+
 def compute_frame_weights(
     frames: list[FrameRow],
     *,
     min_weight: float = 0.1,
+    group_by_pointing: bool = False,
 ) -> tuple[dict[int, float], WeightingStats]:
     """
     Build a ``{frame_id: weight}`` map.
 
     ``min_weight`` is the floor — even very bad frames keep at least this much
     influence so a single bad metric doesn't completely zero out a frame.
+
+    ``group_by_pointing`` (set by the stacker on a **mosaic** canvas) takes the
+    star-count / sky / transparency medians per panel rather than target-wide —
+    see the module docstring. It self-disables when the pointings don't split
+    soundly, so a single-field target is unaffected either way.
     """
     fwhms = [f.fwhm_px for f in frames if f.fwhm_px is not None and f.fwhm_px > 0]
-    stars = [f.star_count for f in frames if f.star_count is not None and f.star_count > 0]
-    skies = [f.sky_adu_median for f in frames if f.sky_adu_median is not None and f.sky_adu_median > 0]
-    transps = [f.transparency_score for f in frames
-               if f.transparency_score is not None and f.transparency_score > 0]
     # Eccentricity 0 (perfectly round) is a valid, best-case measurement, so the
     # median includes it; the factor guards a 0 divisor per-frame instead.
     eccs = [f.eccentricity_median for f in frames
             if f.eccentricity_median is not None and f.eccentricity_median >= 0]
 
     best_fwhm = float(np.percentile(fwhms, 10)) if fwhms else None
-    median_stars = float(np.median(stars)) if stars else None
-    median_sky = float(np.median(skies)) if skies else None
-    median_transp = float(np.median(transps)) if transps else None
     median_ecc = float(np.median(eccs)) if eccs else None
+    # The three position-dependent medians, per mosaic panel where the pointings
+    # split soundly and target-wide otherwise (which is every single-field
+    # target, and therefore byte-for-byte today's behaviour there).
+    panel_medians = _positional_medians(frames, group_by_pointing=group_by_pointing)
 
     weights: dict[int, float] = {}
     weighted_list: list[float] = []
@@ -95,6 +178,7 @@ def compute_frame_weights(
 
         if f.fwhm_px is not None and f.fwhm_px > 0 and best_fwhm is not None:
             factors.append(float(np.clip((best_fwhm / f.fwhm_px) ** 2, min_weight, 1.0)))
+        median_stars, median_sky, median_transp = panel_medians[f.id]
         if f.star_count is not None and median_stars is not None and median_stars > 0:
             factors.append(float(np.clip(f.star_count / median_stars, min_weight, 1.0)))
         if (f.sky_adu_median is not None and f.sky_adu_median > 0

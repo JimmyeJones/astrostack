@@ -1000,3 +1000,197 @@ def test_stack_records_how_many_subs_were_unreadable(solved_library, monkeypatch
             proj.close()
     finally:
         lib.close()
+
+
+def _record_genuine_run(proj, n_frames_used: int, when: str,
+                        *, options_json: str | None = None) -> None:
+    """A stack run that reads as a *genuine* integration (its ``options_json``
+    parses as real ``StackOptions``), unlike ``_record_run``'s bare ``{}``.
+    ``when`` orders it — ``iter_stack_runs`` is newest-first by timestamp."""
+    proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc=when,
+        output_basename=f"master_{when}", fits_path=None, tiff_path=None,
+        preview_path=None, n_frames_used=n_frames_used,
+        canvas_h=10, canvas_w=10, coverage_min=1, coverage_max=n_frames_used,
+        options_json=options_json or '{"sigma_clip": true, "sigma_kappa": 3.0}',
+    ))
+
+
+def test_auto_stack_heals_a_target_left_on_a_degraded_picture(
+    solved_library, monkeypatch,
+):
+    """The owner's live install: a walk-away stack made thin by a storage hiccup
+    was published *before* the readability preflight existed, so the target's
+    newest picture is much worse than one it already made (787 → 271 frames on
+    the real data) and the frame-count trigger correctly answers "already
+    covered" forever after.
+
+    Once every sub is readable again, the scan must re-stack it **once** —
+    and then stay quiet, however many scans follow.
+
+    Fail-before: no heal path at all, so the degraded run stood and the target
+    was reported as skipped.
+    """
+    calls = _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            n = len(ids)
+            assert n >= 3
+            _record_genuine_run(proj, n, "2026-05-01T00:00:00Z")       # the good one
+            _record_genuine_run(proj, 1, "2026-05-02T00:00:00Z")       # the thin one
+            # The state that stack left behind: "covered n" and nothing missing.
+            proj.set_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY, str(n))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+
+        summary = pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe in summary["auto_stacked"], (
+            "the degraded picture must be re-stacked from the full set")
+        healed = summary.get("auto_stack_healed") or []
+        entry = next((h for h in healed if h["target"] == safe), None)
+        assert entry is not None, "the heal should be reported, not silent"
+        assert entry["newest"] == 1
+        assert entry["best"] == n
+        assert entry["frames"] == n
+
+        # …and it fires exactly once: the marker holds even though the stubbed
+        # stacker recorded no new run, so the situation still looks degraded.
+        calls.clear()
+        summary2 = pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe not in summary2["auto_stacked"]
+        assert not summary2.get("auto_stack_healed")
+        assert safe in summary2["auto_stack_skipped"]
+    finally:
+        lib.close()
+
+
+def test_heal_leaves_a_deliberately_thinner_newest_stack_alone(
+    solved_library, monkeypatch,
+):
+    """A user who rejected most of a target's subs and re-stacked has a
+    legitimately thinner newest picture — that's their decision, not damage.
+    The discriminator is the accepted+solved population: if it's still as big as
+    the best run's, the frames went missing; if it shrank, the user shrank it."""
+    _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            n = len(ids)
+            _record_genuine_run(proj, n, "2026-05-01T00:00:00Z")
+            _record_genuine_run(proj, 1, "2026-05-02T00:00:00Z")
+            # The user rejected all but one sub, then re-stacked.
+            for fid in ids[1:]:
+                proj.update_frame(fid, accept=False, reject_reason="user",
+                                  user_override=True)
+            proj.set_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY, "1")
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+
+        assert pipeline._auto_stack_degraded_recheck(lib, safe) is None
+        summary = pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe not in summary["auto_stacked"]
+        assert not summary.get("auto_stack_healed")
+    finally:
+        lib.close()
+
+
+def test_heal_waits_until_the_missing_subs_are_actually_back(
+    solved_library, monkeypatch,
+):
+    """Mid-outage the heal must stand down: re-stacking now would just reproduce
+    the thin picture, and the readability preflight already owns that case."""
+    _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            n = len(ids)
+            _record_genuine_run(proj, n, "2026-05-01T00:00:00Z")
+            _record_genuine_run(proj, 1, "2026-05-02T00:00:00Z")
+            proj.set_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY, str(n))
+            _unread(proj, ids[:1])          # still off-line
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        assert pipeline._auto_stack_degraded_recheck(lib, safe) is None
+
+        proj = lib.open_target(safe)
+        try:
+            _reread(proj, ids)              # the share comes back
+        finally:
+            proj.close()
+        heal = pipeline._auto_stack_degraded_recheck(lib, safe)
+        assert heal is not None and heal[0] == n
+    finally:
+        lib.close()
+
+
+def test_heal_never_reads_an_editor_export_as_a_collapse(solved_library, monkeypatch):
+    """Editor-export and channel-combine runs live in ``stack_runs`` too, with a
+    tiny ``n_frames_used``. Counting one as "the newest stack" would make every
+    edited target look catastrophically degraded and re-stack it."""
+    _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            n = len(_solved_ids(proj))
+            _record_genuine_run(proj, n, "2026-05-01T00:00:00Z")
+            _record_genuine_run(
+                proj, 1, "2026-05-02T00:00:00Z",
+                options_json='{"editor_recipe": {"ops": []}, "derived_from": 1}')
+            _record_genuine_run(
+                proj, 1, "2026-05-03T00:00:00Z",
+                options_json='{"channel_combine": [], "weights": {}}')
+            proj.set_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY, str(n))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        assert pipeline._auto_stack_degraded_recheck(lib, safe) is None
+        summary = pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+        assert not summary.get("auto_stack_healed")
+    finally:
+        lib.close()
+
+
+def test_heal_ignores_an_ordinary_handful_of_align_drops(solved_library, monkeypatch):
+    """A stack that loses a sub or two at alignment is normal and run-to-run
+    consistent — both the ratio and the absolute-loss rail must be cleared before
+    the app spends a whole re-stack on it."""
+    _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            n = len(_solved_ids(proj))
+            _record_genuine_run(proj, n, "2026-05-01T00:00:00Z")
+            _record_genuine_run(proj, n - 1, "2026-05-02T00:00:00Z")
+            proj.set_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY, str(n))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        assert pipeline._auto_stack_degraded_recheck(lib, safe) is None
+    finally:
+        lib.close()

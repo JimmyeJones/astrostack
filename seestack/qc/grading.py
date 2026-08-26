@@ -73,7 +73,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from seestack.io.project import FrameRow
-from seestack.stack.pointings import PANEL_LINK_DIST_DEG, cluster_pointings
+from seestack.stack.pointings import pointing_groups
 
 log = logging.getLogger(__name__)
 
@@ -313,22 +313,16 @@ def _pointing_groups(
     too tightly packed to separate therefore all behave exactly as they do
     today; only a target that genuinely splits gets the per-panel treatment.
     """
-    ids = [f.id for f in frames]
-    labels = cluster_pointings(
+    labels = pointing_groups(
         [(f.ra_center_deg, f.dec_center_deg) for f in frames],
-        link_dist_deg=PANEL_LINK_DIST_DEG,
+        min_members=min_frames,
     )
-    sizes: dict[int, int] = {}
-    for label in labels:
-        if label >= 0:
-            sizes[label] = sizes.get(label, 0) + 1
-    substantial = {label for label, n in sizes.items() if n >= min_frames}
-    if len(substantial) < 2:
+    if labels is None:
         return None
     return {
-        fid: label
-        for fid, label in zip(ids, labels, strict=True)
-        if fid is not None and label in substantial
+        f.id: label
+        for f, label in zip(frames, labels, strict=True)
+        if f.id is not None and label >= 0
     }
 
 
