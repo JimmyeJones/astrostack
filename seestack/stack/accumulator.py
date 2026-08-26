@@ -161,9 +161,12 @@ class WeightedSumAccumulator:
         """Per-pixel weight. Read-only view.
 
         This is Σ of per-frame weights, which equals the contributing-frame
-        count only when every weight is 1.0 (no quality weighting). Sky
-        leveling wants this weight sum (it rounds it into coverage bins); the
-        *frame-count* diagnostics should use :attr:`frame_coverage` instead."""
+        count only when every weight is 1.0 (no quality weighting). It is what
+        the *combine* divides by; anything that wants to know how many subs are
+        under a pixel — the ``coverage_min``/``coverage_max`` diagnostics, and
+        the sky-leveling pass, which must bin by panel geometry rather than by
+        how good a panel's subs happened to be — should use
+        :attr:`frame_coverage` instead."""
         return self._weight
 
     @property

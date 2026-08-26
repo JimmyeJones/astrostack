@@ -89,8 +89,18 @@ def _level_coverage(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarr
     # full-res-equivalent pixels: the live-preview proxy is strided, so without
     # this a mosaic panel would be leveled in the full-res export yet skipped in
     # the preview (a visible preview↔export panel-step mismatch).
+    # Bin the panels by how many subs actually cover each pixel when the run
+    # recorded that, rather than by the weighted coverage map: with quality
+    # weighting on (the walk-away default) a Σ-weights bin splits one real panel
+    # across several levels along weight boundaries, and each half then gets its
+    # sky pushed to zero separately — a step-generating mechanism inside the very
+    # pass meant to remove steps. Shape-guarded like `ctx.coverage` above, and
+    # `None` on every pre-existing run falls back to exactly today's binning.
+    frame_cov = ctx.frame_coverage
+    if frame_cov is not None and frame_cov.shape[:2] != rgb.shape[:2]:
+        frame_cov = None
     return level_by_coverage(
-        rgb, ctx.coverage,
+        rgb, ctx.coverage, frame_coverage=frame_cov,
         object_sigma=float(params.get("object_sigma", 2.0)),
         # The object-mask dilation is a full-res pixel measure too — scale it by
         # proxy_scale (floor 0 so a small dilation can vanish on a heavy proxy)

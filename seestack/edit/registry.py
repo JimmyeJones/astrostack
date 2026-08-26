@@ -58,6 +58,13 @@ class EditContext:
 
     wcs: Any | None = None
     coverage: np.ndarray | None = None
+    # The honest per-pixel *frame count* for the same canvas, when the run wrote
+    # one. `coverage` above is a sum of per-frame weights, which splits one real
+    # mosaic panel across several sky-leveling bins once quality weighting is on;
+    # binning on the frame count follows the panel geometry instead. ``None`` —
+    # every run recorded before the sibling file existed — falls back to
+    # `coverage`, which is exactly what those runs have always been leveled by.
+    frame_coverage: np.ndarray | None = None
     proxy_scale: float = 1.0          # full_width / proxy_width (>=1)
     is_proxy: bool = False            # True for the live preview proxy
     use_gpu: bool | None = None
