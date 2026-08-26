@@ -512,3 +512,147 @@ def test_best_frame_is_deterministic_on_full_ties():
     frames = [make_frame(3, fwhm=2.5, stars=400), make_frame(1, fwhm=2.5, stars=400)]
     best = best_frame(frames)
     assert best is not None and best.id == 1
+
+
+# --- Mosaic panels are different patches of sky ------------------------------
+# Grading flux-like metrics against the whole target reads a legitimately
+# star-poor panel as cloud and can flag every one of its subs (2026-08-17 audit).
+
+
+def mosaic_population(
+    n_per_panel: int = 40,
+    panel_seps_deg: tuple[float, ...] = (0.0, 1.0, 2.0, 3.0, 4.0, 5.0),
+    poor_panel: int | None = None,
+    poor_star_ratio: float = 0.25,
+    seed: int = 11,
+) -> list[FrameRow]:
+    """A mosaic: several panels, each a *different* patch of sky.
+
+    Every panel is shot in identical conditions (same seeing, same sky, same
+    transparency); they differ only in how rich the star field happens to be,
+    which is a property of where the telescope is pointed, not of the night.
+    ``poor_panel`` is star-poor by ``poor_star_ratio`` — a real, healthy panel
+    that simply looks at emptier sky.
+    """
+    import random
+
+    rng = random.Random(seed)
+    frames: list[FrameRow] = []
+    fid = 0
+    for panel, sep in enumerate(panel_seps_deg):
+        base_stars = 400 * (poor_star_ratio if panel == poor_panel else 1.0)
+        for _ in range(n_per_panel):
+            f = make_frame(
+                fid,
+                fwhm=3.0 + rng.uniform(-0.1, 0.1),
+                stars=int(base_stars * rng.uniform(0.95, 1.05)),
+                sky=1200.0 * rng.uniform(0.98, 1.02),
+                ecc=0.40 + rng.uniform(-0.01, 0.01),
+                transp=5000.0 * rng.uniform(0.98, 1.02),
+            )
+            # Panels stepped along declination; a few arc-seconds of dither
+            # inside each one, exactly as a Seestar does.
+            frames.append(make_frame_like(
+                f, ra_center_deg=83.6, dec_center_deg=-5.4 + sep,
+            ))
+            frames[-1] = make_frame_like(
+                frames[-1],
+                dec_center_deg=frames[-1].dec_center_deg + rng.uniform(-0.01, 0.01),
+            )
+            fid += 1
+    return frames
+
+
+def test_a_star_poor_mosaic_panel_is_not_rejected_as_cloud():
+    """The regression: a mosaic panel pointed at emptier sky must be judged
+    against *itself*, not against the richer panels beside it.
+
+    Fail-before: the whole target's star-count population made the poor panel's
+    every sub a z≈27 outlier ("far fewer stars than typical — likely cloud")
+    and 25% of the target — every one the rail would allow — was recommended for
+    rejection. All of it is good data, and ``auto_grade_frames`` acts on its own.
+    """
+    frames = mosaic_population(poor_panel=2)
+    poor_ids = {f.id for f in frames if f.star_count is not None and f.star_count < 200}
+    assert len(poor_ids) == 40, "fixture should have one clearly star-poor panel"
+
+    report = grade_frames(frames)
+    assert report.pointing_groups == 6, "each panel is its own population"
+    assert "star_count" in report.metrics_per_pointing
+    flagged = {g.frame_id for g in report.recommendations}
+    assert not (flagged & poor_ids), (
+        "a star-poor panel is a patch of sky, not cloud: "
+        f"{len(flagged & poor_ids)} of its subs were recommended for rejection"
+    )
+    assert not report.recommendations, "nothing here is actually a bad sub"
+
+
+def test_real_cloud_inside_one_mosaic_panel_is_still_caught():
+    """Per-panel populations must not blind auto-grade: a genuinely clouded sub
+    is still an outlier against its *own* panel, which is the right comparison."""
+    frames = mosaic_population(poor_panel=2)
+    clouded = [f for f in frames if f.id in (0, 1)]
+    rest = [f for f in frames if f.id not in (0, 1)]
+    frames = [
+        make_frame_like(f, star_count=30, sky_adu_median=4000.0) for f in clouded
+    ] + rest
+
+    report = grade_frames(frames)
+    flagged = {g.frame_id for g in report.recommendations}
+    assert flagged == {0, 1}, f"expected only the clouded subs, got {sorted(flagged)}"
+    reasons = {r.metric for g in report.recommendations for r in g.reasons}
+    assert "star_count" in reasons
+
+
+def test_single_pointing_targets_grade_exactly_as_before():
+    """The split only applies when a target genuinely has multiple panels; an
+    ordinary dithered single-field target must be graded target-wide, as it
+    always has been — no behaviour change for the common case."""
+    frames = mosaic_population(panel_seps_deg=(0.0,), n_per_panel=40)
+    report = grade_frames(frames)
+    assert report.pointing_groups == 0
+    assert report.metrics_per_pointing == []
+
+    # …and an unsolved target (no pointing at all) likewise.
+    unsolved = clean_population(40)
+    assert grade_frames(unsolved).pointing_groups == 0
+
+
+def test_a_panel_cannot_lose_more_than_the_rail_allows():
+    """The target-wide 25% rail is measured against the whole target, so on a
+    six-panel mosaic one small panel could still lose every sub without ever
+    reaching it. The same fraction now applies within each panel."""
+    frames = mosaic_population(n_per_panel=40)
+    # Wreck one entire panel for real (heavy cloud on every sub of panel 0).
+    wrecked = {f.id for f in frames[:40]}
+    frames = [
+        make_frame_like(f, star_count=5, sky_adu_median=9000.0, fwhm_px=9.0)
+        if f.id in wrecked else f
+        for f in frames
+    ]
+    report = grade_frames(frames)
+    flagged = {g.frame_id for g in report.recommendations}
+    hit = len(flagged & wrecked)
+    assert 0 < hit <= int(40 * MAX_REJECT_FRACTION), (
+        f"the per-panel rail should keep this to <= 10 subs, got {hit}")
+    assert report.capped
+
+
+def test_a_panel_too_thin_to_grade_falls_back_to_the_whole_target():
+    """A panel with too few subs to carry a robust population must not be left
+    ungraded — it falls back to the target-wide yardstick, i.e. exactly today's
+    behaviour for those frames."""
+    frames = mosaic_population(n_per_panel=40, panel_seps_deg=(0.0, 1.0, 2.0))
+    # A fourth, barely-started panel: below MIN_FRAMES_FOR_GRADING.
+    tail = [
+        make_frame_like(
+            make_frame(1000 + i, stars=8, sky=9000.0),
+            ra_center_deg=83.6, dec_center_deg=-5.4 + 9.0,
+        )
+        for i in range(MIN_FRAMES_FOR_GRADING - 5)
+    ]
+    report = grade_frames(frames + tail)
+    assert report.pointing_groups == 3, "the thin panel isn't a population"
+    flagged = {g.frame_id for g in report.recommendations}
+    assert flagged & {f.id for f in tail}, (
+        "clouded subs in a thin panel must still be graded, target-wide")
