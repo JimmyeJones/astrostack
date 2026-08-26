@@ -49,6 +49,33 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **⚪ QA AUDIT RESULT (Scout 2026-08-26 #3, branch `claude/vigilant-knuth-r0qxeh`) — re-audited the stacking
+  engine + plate-solve + render adversarially (came back CLEAN), and dogfooded the running app end to end,
+  where I found and FIXED one real friendliness bug (the mislabelled Lucky-imaging knob — see Shipped).**
+  Baseline green before touching anything (2789 passed, 2 skipped). Adversarially re-traced the engine hot path
+  and its neighbours, building breaking cases where I could: `accumulator.py` (WeightedSum any-channel
+  frame-count vs Σ-weight `coverage`, MinMaxReject k-set tie-safety + the ≥2k+1 / 3..2k / 1..2 degrade bands,
+  Welford unbiased-variance NaN-for-n<2), `drizzle_path.py` (the `neff`=true-frame-count gate that stops
+  `pixfrac<1`/`scale>1` weight deflation from silently disabling rejection on low-coverage edges; the float64
+  `E[x²]−E[x]²` variance with its ULP(m²) resolution floor; half-open `[-0.5, N-0.5]` pixel bounds;
+  `intersects` vs deposited-footprint counting), `solve/runner.py` + `solve/astap.py` (the `_store_solve_failed_reason`
+  preserve-guard that keeps a `qc_error`/`auto:grade:` prior reason from being clobbered into `solve_failed:`
+  and re-QC'd forever; WCS-centre recovery when the `.ini` is unparseable; the adaptive ladder's per-rung
+  timeout fall-through vs fatal-error break; `_parse_astap_ini` KeyError → caught → None), `qc/grading.py`
+  (modified-z direction-awareness, the practical-significance floors, the per-panel `_pointing_groups` split +
+  its per-panel cap, and the `reconsider` fixed-point over the invariant combined set), `stack/pointings.py`
+  (union-find single-linkage, `-1` for unsolved, wrap/pole-safety), and `render/deepening.py` (one shared STF
+  solved from the deepest *linear* master, `_fit_onto` letterboxing so a portrait night-1 and a landscape
+  mosaic night-5 don't squash). Every NaN/coverage edge, rejection band, memory bound and preview↔export path I
+  could construct a breaking case for was already handled and commented. **This confirms the engine remains
+  drained** (matching the two prior 2026-08-26 audits). The dogfood pass (`scripts/agent-dogfood.sh`: real app,
+  bundled sample stacked, Playwright 1440px + 420px) showed a clean Target-page IA (3 notes + a "1 more note"
+  disclosure, picture + actions + frames table above the fold), a clean beginner-friendly Stack form, and an
+  excellent well-hardened editor — no overflow, no console errors. The one real snag was the Lucky-imaging
+  label (below). Front-of-queue for the Builder is unchanged: the two `photometric_normalize`/mosaic
+  auto-grade items AGENTS.md §1 points at. Future Scout runs can lead with the webapp routers (`stack.py`,
+  `editor.py`, `frames.py`) or ingest/watcher and re-audit the engine only occasionally.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26 #2, branch `claude/vigilant-knuth-xh4b6y`) — rotated the lead QA off
   the (already-drained) stacking engine and adversarially re-audited the subsystems the engine feeds and is
   fed by: QC (`qc/grading.py`, `metrics.py`, `streaks.py`, `noise_ratio.py`), ingest (`io/ingest.py`),
@@ -10508,6 +10535,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   careful classifier: **lucky_fraction** from FWHM spread (contentious — it drops signal, so
   weigh against quality-weighting); a background/gradient flatten nudge from a measured sky
   gradient.)_
+- **IMPROVEMENT IDEA (Scout 2026-08-26 #3, follow-up to the v0.272.1 label fix) — make the Lucky-imaging input
+  a *real* percent, not a raw fraction.** *(Pillar: friendliness — PRIORITY 3. Size: S, but frontend.)* v0.272.1
+  fixed the misleading "%" label by renaming the knob to "keep sharpest **fraction**", which is honest but still
+  asks a beginner to think in 0.05–1.0 while everywhere *else* in the app the same number is a percent (the
+  Gallery badge is "Lucky 50%"). The genuinely friendly end state is a **percent input** (5–100, step 5, default
+  100) that the control converts to/from the engine's `lucky_fraction` (0.05–1.0) at the boundary — the beginner
+  types "50" and it means 50%, matching the Gallery. **Why it wasn't done in v0.272.1:** the descriptor-driven
+  form (`StackOptionControl`) sends the raw number straight through, so a percent input needs either a per-field
+  `unit: "percent"`/scale hint the control honours on display *and* on submit (cleanest — generalises to any
+  future fraction knob) or a special-case, and a matching round-trip so a saved "50%" still persists
+  `lucky_fraction=0.5`. Keep the engine field and its (0, 1] contract untouched (upgrade-safe); this is purely a
+  presentation/units layer. Test the round-trip (UI 50 → stored 0.5 → UI 50) and that an old saved
+  `lucky_fraction` still renders as the right percent.
 - **Pre-flight "this batch looks like two targets" guard — catch mixed pointings *before* the
   walk-away stack wastes itself.** (S–M, autonomy/friendliness/trust) *(Scout-filed 2026-07-09, traced.)*
   **Interactive slice SHIPPED v0.101.0 (Target page) + v0.102.0 (Stack form):** the pre-flight detection +
@@ -13764,6 +13804,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   `cover_run_id`, so this costs one project open per hero — acceptable on a deliberate one-tap download, not on
   a page render, which is the same trade `/api/imaging-log` already makes. Testable: a target with a pinned
   cover puts *that* picture on the wall; one without is unchanged.
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-26 #3) — "Print it": a print-ready export sized and DPI-tagged for a
+  frame on the wall.** *(Pillar: enjoy + share — PRIORITY 3. Size: M.)* A beginner who finally gets a
+  picture they love wants to **print and hang it** — but every export today (PNG / full-res PNG / JPEG / TIFF)
+  is native-resolution with **no print sizing and no DPI metadata**, so it lands in a photo-print service at
+  whatever size the pixel count implies and often prints soft or tiny with no warning. Nothing bridges
+  "great picture on screen" → "nice print in my hands." **Verified genuinely new (grepped this run):** no
+  `print` / DPI / print-size feature exists in code or backlog; the closest neighbours are all *screen/share*
+  outputs (wallpaper, QR-to-phone, JPEG share, the montage/poster ideas) — none targets a physical print.
+  **Shape:** reuse the share-render pipeline. A pure helper `build_print_export(rgb, *, size_name, min_dpi=150)
+  -> (PIL.Image, dpi)` that (a) picks the **largest standard size** the picture's native resolution supports at
+  ≥ `min_dpi` (so the beginner is never asked to reason about DPI — the sane default just works), (b) fits the
+  picture onto that size's pixel canvas letterboxed on the app's dark NaN=black ground (reuse
+  `deepening._fit_onto`, which already preserves aspect without squashing), and (c) returns the image plus the
+  DPI to stamp into the file's metadata (`img.save(..., dpi=(d, d))`). A small **"Print"** entry in the editor's
+  "Save / share ▾" menu offers a couple of common sizes (e.g. 8×10 in / A4 / A3) with a one-line plain-language
+  note (*"Best print size for this picture: up to A4 at 200 DPI"*), self-hiding a size the resolution can't hit
+  at `min_dpi`. Optionally include the existing nameplate. **Beginner bar:** clears it cleanly — a non-expert
+  instantly understands "print it", the size is chosen for them, plain language, no expert knob; it removes work
+  (no guessing DPI in another app) — Method A/D. **Guardrails/feasibility:** offline, additive, read-only
+  (renders from the run/edit the app already produces, writes only the downloaded file — never `incoming/`);
+  pure helper → trivially unit-testable (native res → chosen size + DPI; a too-small picture self-hides the
+  bigger sizes; aspect preserved undistorted). **Slices —** (a) the pure `build_print_export` helper + size
+  table + tests (a shippable Builder run on its own); (b) wire it into the editor/History share menu (frontend).
 
 - **NEW IDEA (Builder 2026-08-26, the half deliberately left out of "How big a mosaic?" v0.272.0) — tell a
   beginner roughly how LONG that mosaic will take, not only how many panels.** *(Pillar: autonomy +
@@ -19829,6 +19893,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.272.1** — Friendliness: the Stack form's **Lucky imaging** knob was labelled "keep best **%**" but its
+  value is a *fraction* (0.05–1.0, default 1.0 = keep all) — so a beginner reads the default "1" as "keep best
+  1%", or types "50" for 50% and is silently clamped to the 1.0 max (keep-all, the opposite of a cut). The
+  Gallery already renders the same value honestly as "Lucky 50%" (`Gallery.tsx:322` → `round(f*100)%`), so the
+  input label was the lone inconsistency. Relabelled to "keep sharpest fraction" with an explicit help
+  ("1.0 = keep all, 0.75 = the sharpest three-quarters, 0.5 = the sharpest half; shown as a percentage on the
+  finished picture"). Display-only string change in `webapp/schemas.py` — no key/bounds/default/API/schema
+  change, upgrade-safe. New drift guard in `tests/webapp/test_schema_drift.py`
+  (`test_fractional_fields_do_not_label_themselves_as_percentages`) fails on the old label, passes on the new,
+  and blocks any future fraction (max ≤ 1.0) field from labelling itself a percentage. (Scout, branch
+  `claude/vigilant-knuth-r0qxeh`; found by dogfooding the running Stack page.)
 - **v0.270.4** — 🟠 The editor levels a mosaic's sky by **frame count**, the way the stack that produced it
   always has. `level_by_coverage` has always accepted `frame_coverage` and the in-stack pass has always
   passed it, but nothing wrote that map to disk — so the editor fell back to the weighted coverage map, which
