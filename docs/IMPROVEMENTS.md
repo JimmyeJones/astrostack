@@ -52,7 +52,7 @@ _(none — claim an item here with your branch name)_
 - ~~**🟠 FOUND AND FIXED (Builder 2026-08-26, branch `agent/mosaic-photometric-per-panel`) — quality
   weighting systematically PENALISES a mosaic panel for pointing at emptier sky. Measured 0.78× on a panel
   whose only difference from its neighbour was its star field — about a quarter of that panel's depth thrown
-  away, on every walk-away mosaic.**~~ — **FIXED v0.273.0.** *(Image quality, priority 4, on the
+  away, on every walk-away mosaic.**~~ — **FIXED v0.276.0.** *(Image quality, priority 4, on the
   on-by-default path — the walk-away `auto` chain turns `quality_weighted` on itself.)*
 
   **This is the THIRD instance of one class of bug, found by looking for it after fixing the second.** QC
@@ -394,7 +394,7 @@ _(none — claim an item here with your branch name)_
 - ~~**🟠 FOUND WHILE MERGING, MEASURED AND FIXED (Builder 2026-08-26, branch
   `agent/mosaic-photometric-per-panel`) — the v0.271.0 auto-enable directly below made a REAL bug in
   `photometric_normalize` on-by-default for every mosaic: it gain-matched whole PANELS apart, measured at
-  2.23×.**~~ — **FIXED v0.273.0.** *(Image quality, priority 4. Not a criticism of that change — it is the
+  2.23×.**~~ — **FIXED v0.276.0.** *(Image quality, priority 4. Not a criticism of that change — it is the
   right correction and its own tests are sound; the flaw was already there in the opt-in path, and its
   synthetic mosaic gave both panels the **same star seed**, which is exactly the case that cannot expose it.)*
 
@@ -7434,9 +7434,36 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
-  readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.** *(Pillar:
-  autonomy + friendliness — PRIORITY 2–3. Size: S.)* v0.270.1 correctly holds a walk-away stack back when a
+- ~~**NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
+  readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.**~~ —
+  **SHIPPED v0.274.0** (Builder 2026-08-26, branch `claude/compassionate-galileo-q9q6fs`). *(Pillar:
+  autonomy + friendliness — PRIORITY 2–3.)*
+  **What shipped:** `GET /api/targets/{safe}/autostack-hold` returns the hold the **newest finished scan**
+  recorded for that target (`auto_stack_held_unreadable`), or `null`; `AutoStackHoldNote` renders it as a
+  self-hiding note inside the Target page's `NoticeBoard` at `NOTICE_PRIORITY.warning` — so it lands in the
+  page's existing prioritised notes area rather than becoming one more always-on banner (the standing
+  "extremely busy" constraint). The wording is the Jobs page's, verbatim, with the same per-target numbers:
+  *"516 of 787 subs couldn't be read on the last scan (271 still readable)… Put it back and the next scan
+  will stack the full set automatically — nothing has been lost."*
+  **Read-only, and deliberately not dismissible.** Only the newest finished `pipeline` job is consulted, so a
+  hold the next scan resolved simply stops being reported — the note has no state of its own to go stale, and
+  a dismissal would have let a beginner hide a live storage problem and go back to wondering why the picture
+  is stale. A still-running scan (no verdict yet) and other job kinds are ignored, and a malformed entry from
+  an older build renders nothing rather than 500-ing the page.
+  **Not in this slice:** the Dashboard target card. The Target page is where someone whose picture stopped
+  updating actually goes, the Dashboard tile has no room for a paragraph, and one voice in one place beats
+  the same sentence in two. File it again if the owner ever misses it there.
+  **Upgrade-safe (§9):** one new additive endpoint, no change to `TargetOut` or any existing response shape,
+  no config/schema/on-disk/default change; an older frontend never calls it and the note fails soft (a 404 or
+  a network error renders nothing).
+  **Tests (+5 python, +4 frontend):** `tests/webapp/test_autostack_hold.py` (the scan's own numbers, only for
+  the held target; self-clearing once a later scan stacks it; running/other-kind jobs ignored; silent with no
+  scans and 404 for an unknown target; a malformed entry tolerated) and `AutoStackHoldNote.test.tsx` +
+  a `Target.test.tsx` case pinning that it reaches the page's notes area.
+
+  Original spec, for the record:
+
+  v0.270.1 correctly holds a walk-away stack back when a
   storage hiccup would publish a thinner picture, and renders the plain-language reason — but **only in
   `frontend/src/routes/Jobs.tsx`** (`auto_stack_held_unreadable`; grepped this run — it appears nowhere else in
   the frontend). A beginner whose picture silently stops updating looks at the **Target page**, where their
@@ -7451,9 +7478,44 @@ to **Shipped**.)_
   next scan stacks successfully. Testable against a target whose job history carries a held scan. Closes the
   "why did my picture stop updating?" gap at the surface the user actually stares at.
 
-- **NEW IDEA (Builder 2026-08-26, the deliberate follow-on to the v0.270.1 readability fix) — heal a target
-  that is ALREADY sitting on a degraded newest picture, instead of only preventing the next one.** *(Priority 2
-  autonomy / priority 4 image quality. Size M. Serves the owner's live install directly.)*
+- ~~**NEW IDEA (Builder 2026-08-26, the deliberate follow-on to the v0.270.1 readability fix) — heal a target
+  that is ALREADY sitting on a degraded newest picture, instead of only preventing the next one.**~~ —
+  **SHIPPED v0.276.0** (Builder 2026-08-26, branch `claude/compassionate-galileo-q9q6fs`). *(Priority 2
+  autonomy / priority 4 image quality — the owner's live install is the acceptance case.)*
+  **What shipped:** `_auto_stack_degraded_recheck` (`webapp/pipeline.py`), a third trigger tried only after the
+  frame-count and calibration triggers both decline. It re-stacks a target **once** when all of these hold: it
+  has ≥2 *genuine* stack runs (editor-export / channel-combine runs are excluded via the existing
+  `_stack_options_from_run_json` definition, so their tiny `n_frames_used` can never read as a collapse); its
+  newest genuine run is materially thinner than its best (**both** rails — `< 0.8 ×` best *and* ≥2 frames
+  fewer — so an ordinary handful of align drops never spends a re-stack); **every** solved+accepted sub is
+  readable right now (the `stat()` pass is the *last* check, so a healthy, up-to-date target pays only two DB
+  reads); the accepted+solved population is still at least as large as that best run; and the
+  `best:solved` fingerprint marker (`AUTO_STACK_DEGRADED_META_KEY`) says this situation hasn't been healed
+  already. Stamped **before** stacking, like the calibration recheck, and cleared on a survivable error or a
+  cancel — so it can neither crash-loop nor strand a transient failure.
+  **The population check is the answer to the entry's own caution.** Gating on
+  `AUTO_STACK_UNREADABLE_META_KEY` would have been useless for the case this exists to fix: that marker only
+  started being written in v0.270.1, so the owner's already-degraded target has none. Comparing the *current*
+  accepted+solved count against the best run's separates the two cases exactly — a storage hiccup leaves the DB
+  population intact (787 rows, 271 used), whereas a user who deliberately rejected half the subs and re-stacked
+  has shrunk it, and is never second-guessed.
+  **Surfaced, not silent:** the scan records `auto_stack_healed` and the Jobs page renders a green alert —
+  *"All of these subs are readable again… It was stacked again from the full set, so the better picture is
+  back. Your earlier pictures are all still in History"* — with the real numbers per target. Reported only
+  after the stack actually happened, so a target the thin-floor or mixed-pointing guard stops later isn't
+  claimed as healed.
+  **Upgrade-safe (§9):** one new *additive* project-meta key (absent ⇒ never healed ⇒ today's behaviour), no
+  schema, config, on-disk, endpoint or response-shape change, nothing removed or overwritten (a heal is a new
+  run alongside the old ones, exactly like any other stack), and the whole path lives inside the already
+  off-by-default `auto_stack` pass.
+  **Tests (+5 python, all fail-before; +3 frontend):** `tests/webapp/test_auto_stack_pipeline.py` — the owner's
+  own sequence healing in one scan and then staying quiet on every subsequent scan; a deliberately-rejected
+  thinner newest stack left alone; the heal standing down mid-outage and firing once the files return; an
+  editor-export / channel-combine run never read as a collapse; and an ordinary one-frame align drop ignored.
+  `frontend/src/routes/Jobs.test.tsx` — the summary clause, malformed-entry tolerance, and the alert.
+
+  Original spec, for the record:
+
   v0.270.1 stops a walk-away stack publishing a picture made thin by unreadable subs, and re-fires once the
   files come back — but only for outages **from now on**. An install already hit by this (the owner's, per the
   fixed bug above: runs of 787 → 575 → **271** frames) keeps the 271-frame result as its newest picture,
@@ -13885,6 +13947,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW IDEA (Builder 2026-08-26, the obvious next step after shipping "My deep-sky wall" v0.275.0) — let the
+  wall use each target's **pinned cover**, not just its newest stack's preview.** *(Pillar: friendliness /
+  enjoy + share — PRIORITY 3. Size: S.)* The montage draws one picture per target from the library's
+  `last_stack_preview`, which is whatever that target stacked *most recently*. But the app already has a
+  feature for exactly this question — **"Set as cover"** (v0.145.0) — where the user has said, in as many
+  words, *which picture of this target is the good one*. On a target whose newest run is a linear master or a
+  quick restack, the wall currently shows that instead of the finished picture the owner chose, which is the
+  one thing the wall exists to show. **Shape:** in `_montage_tiles` (`webapp/routers/gallery.py`), prefer the
+  target's cover run's preview when one is pinned and readable, falling back to `last_stack_preview` exactly as
+  today — a few lines, no new endpoint, no engine change (`build_montage` neither knows nor cares where a tile
+  came from). **Care:** the library registry stamps `last_stack_preview` but the cover is a per-target
+  `cover_run_id`, so this costs one project open per hero — acceptable on a deliberate one-tap download, not on
+  a page render, which is the same trade `/api/imaging-log` already makes. Testable: a target with a pinned
+  cover puts *that* picture on the wall; one without is unchanged.
+
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #3) — "Print it": a print-ready export sized and DPI-tagged for a
   frame on the wall.** *(Pillar: enjoy + share — PRIORITY 3. Size: M.)* A beginner who finally gets a
   picture they love wants to **print and hang it** — but every export today (PNG / full-res PNG / JPEG / TIFF)
@@ -13924,8 +14001,51 @@ problems. Dogfood it every big-picture run and fix root causes.
   don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
   already thinks in.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26 #2) — "My deep-sky wall": one-click, share-ready montage of a
-  beginner's best finished pictures.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: M.)*
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #2) — "My deep-sky wall": one-click, share-ready montage of a
+  beginner's best finished pictures.**~~ — **SHIPPED v0.275.0** (Builder 2026-08-26, branch
+  `claude/compassionate-galileo-q9q6fs`) — **all three filed slices, (a) (b) and (c).** *(Pillar:
+  friendliness / enjoy + share — PRIORITY 3.)*
+  **(a) The pure helper.** `seestack/montage.py` — `montage_grid(n, columns=None)` (≤3 tiles read better as one
+  row than as a square with a hole; above that `ceil(sqrt(n))` wide, so 4→2×2, 6→3×2, 9→3×3 and never more
+  than one short row), `montage_caption(name, exposure_s)` → *"M 42 · 3h 12m"*, `montage_title(n, total_s)`,
+  and `build_montage(tiles, …)`. Each picture is letterboxed into its cell with the deepening reel's own
+  `_fit_onto`, and captioned with its own `_draw_corner_label`, so a portrait single-field and a landscape
+  mosaic sit together undistorted and the two shareables speak in one visual voice. `None` below two tiles —
+  a wall of one is just the picture the gallery already shows.
+  **Two things a render-and-look pass caught that no unit test would have.** (1) The title strip is drawn with
+  Pillow's built-in font, which has **no glyph for an em dash** — *"My deep-sky wall ☐ 7 targets"*, a tofu box
+  across the top of the one image the user is about to post. It uses `·` now, and a test pins that the title
+  stays inside the font's coverage. (2) A short last row was left-aligned, so seven pictures in a 3-wide grid
+  left a conspicuous hole in the bottom-right corner that reads as "something failed to load"; short rows are
+  centred now. Both are pinned by tests.
+  **The cell shape follows the pictures** (the median tile aspect, clamped), so a library of ordinary landscape
+  stacks letterboxes hardly at all and one of tall mosaics doesn't sit in a sea of bars.
+  **(b) The endpoint.** `GET /api/gallery/montage.jpg?limit=9` renders **on demand** from the previews the
+  library already keeps — one picture per *target* (the exposure-ranked `summarize_library` heroes, so the wall
+  answers "what have I captured?" rather than showing one busy target five times) — and writes **nothing**,
+  exactly like `/api/recap.jpg`. Chose the display-time render over the filed "cache it beside the library
+  outputs": the recap poster's precedent, no cache to invalidate when a target restacks, and no new bytes in
+  anyone's library. A preview deleted since its stack is dropped and the next hero takes its place; fewer than
+  two readable pictures 404s so the offer self-hides.
+  **(c) The offer.** `MyDeepSkyWallCard` on the "Your sky, so far" page, directly under "Share your sky" —
+  the two halves of sharing together (that page's numbers-over-one-picture poster, and now the pictures
+  themselves). Self-hides below two heroes, and says so when the library holds more than fit
+  (*"You have 14 finished, so this shows the 9 you've given the most time to."*). Deliberately **not** another
+  button on the already-busy Gallery page.
+  **Upgrade-safe (§9):** one new additive read-only endpoint and one new engine module; no config, schema,
+  on-disk, default or existing-response-shape change; nothing written anywhere, and nothing under `incoming/`
+  is touched or even read.
+  **Tests (+22 python engine, +6 python webapp, +4 frontend):** `tests/test_montage.py` (grid shapes and the
+  one-short-row invariant, column clamp, caption/title wording and their empty cases, the two-tile floor, a
+  landscape+portrait pair both undistorted, the cap keeping exactly the leading N, the centred short row, the
+  no-em-dash guard, the title strip, captions burned on their own tiles, cell shape following the data),
+  `tests/webapp/test_gallery_montage.py` (renders a JPEG, the one-picture 404, the empty-library 404, a
+  deleted preview skipped rather than a 500, the limit clamp, and that nothing is written to the library) and
+  `MyDeepSkyWallCard.test.tsx` (the offer and its link, the "showing 9 of 14" line, hidden at one picture,
+  hidden while loading and on a failed fetch).
+
+  Original spec, for the record:
+
   A Seestar owner accumulates dozens of finished targets over a season, but the app can only ever show them
   **one at a time** — there is no single image that says *"look at everything I've captured."* That montage
   is the thing a beginner actually posts to friends/socials at the end of a good run of nights, and nothing
@@ -13987,7 +14107,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   presence). Slice (a) alone is a shippable Builder run.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-26) — "How far did you see?": a light-travel-time wow-badge on the
-  finished picture.**~~ — **SHIPPED v0.273.0** (Builder 2026-08-26, branch
+  finished picture.**~~ — **SHIPPED v0.276.0** (Builder 2026-08-26, branch
   `agent/mosaic-photometric-per-panel`), **both slices, built to the spec.**
   *(Friendliness / enjoy + understand — PRIORITY 3.)*
   `seestack/lighttravel.py` — a pure, offline `light_travel(distance_ly) -> LightTravel | None` returning the
@@ -19127,6 +19247,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **NEW IDEA (Builder 2026-08-26, found the hard way while rendering the first montage) — one shared guard
+  that burned-in text stays inside Pillow's built-in font's glyph coverage.** *(Pillar: friendliness / trust —
+  PRIORITY 3. Size: S.)* Every server-rendered shareable — the recap poster, the deepening reel's frame
+  labels, the nameplate, and now the montage — draws text with `ImageFont.load_default`, which has **no glyph
+  for an em dash** (and none for a great many other characters we write freely in prose). It renders as a tofu
+  box, on an image the user is about to post, and no test catches it: the string is correct, the *pixels* are
+  wrong. The montage's title hit this on its first render and now avoids `—` by hand, with a local test —
+  but `recap.py`'s lines, `deepening_frame_label`, and the nameplate all build strings from user data
+  (target names!) with no such guard, and a target the owner named with a typographic dash would print a box
+  today. **Shape:** a tiny `seestack/render/glyphs.py` with `safe_for_default_font(text) -> str` that
+  transliterates the handful of characters this app actually produces (— – ‘ ’ “ ” … ×) to ASCII-safe
+  equivalents, called at the one place each renderer draws text; plus a shared test that asserts every
+  rendered-string helper's output survives it unchanged. **Care:** transliterate, never strip — a target
+  named in a non-Latin script must still draw *something*, and dropping characters silently would be worse
+  than a box. Small, additive, no behaviour change on any string that is already safe.
 
 - ~~**NEW IDEA (Builder 2026-08-16, filed because it is what made this run productive) — check in the dogfood
   harness, so "§2 big-picture pass" means running the app rather than re-reading it.**~~ — **SHIPPED v0.264.1**

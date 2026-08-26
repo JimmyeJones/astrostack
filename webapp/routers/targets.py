@@ -11,6 +11,7 @@ from webapp import deps
 from webapp.goals import GOAL_META_KEY, MAX_GOAL_S, MIN_GOAL_S, read_goal_s
 from webapp.registry_cache import invalidate_registry_cache
 from webapp.schemas import (
+    AutoStackHoldOut,
     BackgroundModeHintOut,
     BestFrameOut,
     CleanupSuggestionOut,
@@ -333,6 +334,46 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
                                      text=info.light_travel.text)
                       if info.light_travel is not None else None),
     )
+
+
+@router.get("/{safe}/autostack-hold", response_model=AutoStackHoldOut | None)
+def target_autostack_hold(safe: str, request: Request) -> AutoStackHoldOut | None:
+    """Whether the most recent hands-off scan held *this* target's stack back
+    because some of its subs had no file on disk, or ``null``.
+
+    The hold is already recorded per-target in the scan job's summary
+    (``auto_stack_held_unreadable``) and explained on the Jobs page; this is the
+    same fact at the surface a beginner actually looks at when their picture
+    stops updating. Deliberately reads **only the newest finished scan**: a hold
+    the next scan resolved is history, not news, so the note self-clears with no
+    state of its own to go stale. Read-only — it re-reads a job record and never
+    touches the frames or their files.
+    """
+    lib = deps.open_library(request)
+    try:
+        if lib.find_target(safe) is None:
+            raise HTTPException(status_code=404, detail=f"No target '{safe}'")
+    finally:
+        lib.close()
+    jm = deps.get_job_manager(request)
+    for job in jm.list(limit=200):  # newest first
+        if job.kind != "pipeline" or job.state != "done":
+            continue
+        held = (job.result or {}).get("auto_stack_held_unreadable")
+        if not isinstance(held, list):
+            return None  # the newest scan reported no hold — nothing to say
+        for entry in held:
+            if isinstance(entry, dict) and entry.get("target") == safe:
+                return AutoStackHoldOut(
+                    offered=int(entry.get("offered") or 0),
+                    readable=int(entry.get("readable") or 0),
+                    unreadable=int(entry.get("unreadable") or 0),
+                    reason=(entry.get("reason") if isinstance(
+                        entry.get("reason"), str) else None),
+                    when_utc=job.finished_utc,
+                )
+        return None
+    return None
 
 
 @router.get("/{safe}/session-recap", response_model=SessionRecapOut | None)
