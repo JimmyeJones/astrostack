@@ -55,6 +55,15 @@ class FramingHintOut(BaseModel):
     text: str
 
 
+class MosaicPlanOut(BaseModel):
+    """"How big a mosaic?" — the panel grid a too-big target's span needs."""
+
+    cols: int   # panels along the frame's long edge
+    rows: int   # panels along its short edge
+    panels: int
+    text: str   # a complete sentence, e.g. "About a 3×2 mosaic (6 panels) covers all of it."
+
+
 class DifficultyHintOut(BaseModel):
     """A "how hard is this for a Seestar?" verdict for a matched target."""
 
@@ -104,6 +113,10 @@ class ObjectInfoOut(BaseModel):
     # backends omit both, so the UI treats absent as "no framing hint".
     size_arcmin: float | None = None
     framing: FramingHintOut | None = None
+    # "How big a mosaic?" — the panel grid for a target bigger than one frame;
+    # ``null`` when it fits or has no vetted size. Old backends omit it, so the
+    # UI treats absent as "nothing to say".
+    mosaic: MosaicPlanOut | None = None
     # A plain-language, beginner-friendly one-liner about the object ("what am I
     # looking at?"), for the popular targets; ``""`` when the catalog has none.
     # Old backends omit it, so the UI treats absent/empty as "no blurb".

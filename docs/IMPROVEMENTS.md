@@ -13608,6 +13608,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW IDEA (Builder 2026-08-26, the half deliberately left out of "How big a mosaic?" v0.272.0) — tell a
+  beginner roughly how LONG that mosaic will take, not only how many panels.** *(Pillar: autonomy +
+  friendliness — PRIORITY 2–3; size S.)* The panel count now lands where the question is asked ("Needs 3×2
+  mosaic"), but the decision a beginner is actually making is *"can I do that tonight?"* — and 6 panels is a
+  very different evening from 12. The planner already knows this owner's real pace (`recent_pace_s`, the
+  median kept integration per clear night, used by the "how many more clear nights" row), so the row could
+  add *"at your usual pace, about two clear nights"* — never a guess: the sentence must **self-hide** for a
+  first-timer with no pace history, which is exactly why it wasn't bolted onto `mosaic_plan` (a pure catalog
+  helper with no access to the library's history, and no business acquiring one). **Slice:** a pure helper
+  next to the readiness maths that takes `panels` + `recent_pace_s` + the target's own integration goal and
+  returns a sentence or `None`; render it on the Tonight row's mosaic tooltip only (not the object-info card,
+  which has no pace). **Care:** a mosaic's per-panel integration is a fraction of a single-field target's, so
+  don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
+  already thinks in.
+
 - **NEW BEGINNER FEATURE (Scout 2026-08-26) — "How far did you see?": a light-travel-time wow-badge on the
   finished picture.** *(Pillar: friendliness / enjoy + understand — PRIORITY 3. Size: S–M.)* A beginner who
   stacks a galaxy has no intuitive sense of what they just did. We already identify the object
@@ -13631,31 +13646,78 @@ problems. Dogfood it every big-picture run and fix root causes.
   `distance_ly` to the catalog + the pure blurb helper + unit tests; (b) render the line on the existing
   object-info card (frontend, gated on presence). Slice (a) alone is a shippable Builder run.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26) — "How big a mosaic?": when the app tells a beginner an object is
-  bigger than one frame and to "shoot it in mosaic mode", also say **how many panels** (and roughly how long)
-  it takes to capture the whole thing.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size S–M.)*
-  **The gap (verified in code):** `seestack/framing.py` (`framing_hint`, and the post-stack `partial` verdict)
-  already tells a beginner *"M 31 is bigger than the Seestar's single frame — shoot it in mosaic mode to
-  capture all of it"*, but it stops exactly where the beginner's next question begins — *how big a mosaic?* A
-  non-expert has no idea whether that means a 2×2 or a 4×5, or whether it's a one-night or a five-night job, so
-  they either don't start or under-shoot. Nothing in the backlog or the planner fills this (grepped: no
-  "how many panels" / panel-count / mosaic-size feature exists).
-  **Shape:** a pure engine helper `mosaic_plan(size_arcmin_major, size_arcmin_minor|None) -> MosaicPlan | None`
-  that divides the object's angular extent by the Seestar's single-frame FOV (already encoded in
-  `framing.py` — ~1.29°×0.73° with the overlap the Seestar app uses) and rounds up to a panel grid, returning
-  e.g. `cols=2, rows=2, panels=4` plus a plain sentence *"M 31's ~3°×1° span needs about a 2×2 mosaic (4
-  panels)."* Returns `None` (never a guess) for an object that fits in one frame or has no vetted size.
-  Optionally fold in a rough time budget from the planner's existing per-target pace (`recent_night_pace_s`) —
-  *"at your usual pace, budget about N hours for a clean result"* — but keep that half self-hiding so a
-  first-timer with no pace history still gets the panel count.
-  **Surface:** extend the existing pre-shoot framing hint (Tonight rows / Target `ObjectInfoCard`) and the
-  post-stack `partial` framing verdict with the one extra sentence — no new banner; it rides the notice that
-  already exists. **Beginner bar:** a non-expert immediately understands "shoot a 2×2 mosaic" and it's directly
-  actionable on their next clear night; it's a sane default with plain language and no expert knob (not
-  pro/niche — it *removes* the mosaic-planning guesswork rather than exposing panel-overlap sliders).
-  **Feasibility:** pure/offline, composes pieces that already exist (single-frame FOV + catalog `size_arcmin`),
-  additive, trivially unit-testable (fits-in-one-frame→None, a 2×2 case, an elongated 1×3 case, unknown
-  size→None). Upgrade-safe: additive nullable payload field + one sentence of copy.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26) — "How big a mosaic?": when the app tells a beginner an object is
+  bigger than one frame and to "shoot it in mosaic mode", also say **how many panels** it takes to capture the
+  whole thing.**~~ — **SHIPPED v0.272.0** (Builder 2026-08-26, branch `claude/compassionate-galileo-yhrbne`).
+  *(Autonomy + friendliness, priority 2–3.)*
+
+  **Built to the filed shape.** `seestack/framing.py` grows a pure `mosaic_plan(size_arcmin,
+  size_minor_arcmin=None)` returning a `MosaicPlan(cols, rows, panels, text)` — cols along the frame's long
+  edge, rows along its short one — and `None` (never a guess) for an unknown size or anything that fits a
+  single frame, so nothing ever proposes a one-panel "mosaic". It tiles honestly: the **first** panel covers a
+  whole field and each one after it adds only its step, because the 10% overlap the stitch needs sits
+  *between* panels and can't eat into a single panel's own field. M 31 → 3×2 (6 panels), M 42 → 2×2 (4),
+  the California Nebula → 2×1 (2).
+
+  **The data half is what makes it honest for the objects that matter.** The bundled catalogs carried only a
+  major axis, so a long thin object (the Veil, California, Seagull) would have been planned as a square and
+  over-called by 2–3×. All **23** bundled objects bigger than the short frame edge now carry a vetted
+  `size_minor_arcmin`; anything without one still falls back to the square (worst-case) box, which errs toward
+  a bigger mosaic rather than promising a beginner that a too-small grid will do. A drift test fails if a
+  future catalog entry is added big enough to plan but without a minor axis, and a sanity test pins
+  `0 < minor <= major` across the whole catalog.
+
+  **Surfaced where the question is actually asked** — no new banner, no new card:
+  - The "What am I looking at?" card appends it to the sentence it already shows: *"M 31 is bigger than the
+    Seestar's single frame — shoot it in mosaic mode to capture all of it. About a 3×2 mosaic (6 panels)
+    covers all of it."*
+  - The Tonight planner row and the discovery suggestion badge now say **"Needs 3×2 mosaic"** instead of
+    "Needs mosaic", with the full sentence on hover — the panel count is what a beginner actually sets in the
+    Seestar app, and it is the difference between "I can do that tonight" and "that is a project".
+
+  **Deliberately not in this slice:** the optional time-budget half (*"at your usual pace, budget about N
+  hours"*). It needs the planner's per-target pace, which the object-info card has no access to; filed as its
+  own idea below rather than half-built here.
+
+  **Upgrade-safe (§9):** one additive optional catalog field (an old file without it still loads), one
+  additive nullable API field on three payloads that an older frontend ignores, and a badge label that falls
+  back to its previous wording when the backend sends no plan. No config, DB, on-disk or default change.
+
+  **Tests (+13):** `tests/test_framing.py` (+8 — the never-guess/fits cases, the M 31 grid, the elongated
+  object taking fewer panels than a square box, the square fallback and its clamp, the first-panel-is-a-whole-
+  field boundary, overlap costing panels, plus the two catalog-data guards), `tests/test_objectinfo.py` (+2),
+  `tests/webapp/test_target_identify.py` (+2 incl. a fits-in-one-frame null), `tests/test_nightplan.py` (+1
+  and an extended suggestion invariant), `tests/webapp/test_plan.py` (extended), and on the frontend
+  `ObjectInfoCard.test.tsx` (+2 incl. a render assertion that it is one sentence, not a second banner) and
+  `tonight.test.ts` (+2 incl. the older-backend fallback).
+
+  Original spec, for the record:
+
+  - **NEW BEGINNER FEATURE (Scout 2026-08-26) — "How big a mosaic?": when the app tells a beginner an object is
+    bigger than one frame and to "shoot it in mosaic mode", also say **how many panels** (and roughly how long)
+    it takes to capture the whole thing.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size S–M.)*
+    **The gap (verified in code):** `seestack/framing.py` (`framing_hint`, and the post-stack `partial` verdict)
+    already tells a beginner *"M 31 is bigger than the Seestar's single frame — shoot it in mosaic mode to
+    capture all of it"*, but it stops exactly where the beginner's next question begins — *how big a mosaic?* A
+    non-expert has no idea whether that means a 2×2 or a 4×5, or whether it's a one-night or a five-night job, so
+    they either don't start or under-shoot. Nothing in the backlog or the planner fills this (grepped: no
+    "how many panels" / panel-count / mosaic-size feature exists).
+    **Shape:** a pure engine helper `mosaic_plan(size_arcmin_major, size_arcmin_minor|None) -> MosaicPlan | None`
+    that divides the object's angular extent by the Seestar's single-frame FOV (already encoded in
+    `framing.py` — ~1.29°×0.73° with the overlap the Seestar app uses) and rounds up to a panel grid, returning
+    e.g. `cols=2, rows=2, panels=4` plus a plain sentence *"M 31's ~3°×1° span needs about a 2×2 mosaic (4
+    panels)."* Returns `None` (never a guess) for an object that fits in one frame or has no vetted size.
+    Optionally fold in a rough time budget from the planner's existing per-target pace (`recent_night_pace_s`) —
+    *"at your usual pace, budget about N hours for a clean result"* — but keep that half self-hiding so a
+    first-timer with no pace history still gets the panel count.
+    **Surface:** extend the existing pre-shoot framing hint (Tonight rows / Target `ObjectInfoCard`) and the
+    post-stack `partial` framing verdict with the one extra sentence — no new banner; it rides the notice that
+    already exists. **Beginner bar:** a non-expert immediately understands "shoot a 2×2 mosaic" and it's directly
+    actionable on their next clear night; it's a sane default with plain language and no expert knob (not
+    pro/niche — it *removes* the mosaic-planning guesswork rather than exposing panel-overlap sliders).
+    **Feasibility:** pure/offline, composes pieces that already exist (single-frame FOV + catalog `size_arcmin`),
+    additive, trivially unit-testable (fits-in-one-frame→None, a 2×2 case, an elongated 1×3 case, unknown
+    size→None). Upgrade-safe: additive nullable payload field + one sentence of copy.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — "Did I frame it well?": a
   post-stack, plain-language centring / edge-cutoff verdict on the *finished* picture.**~~ — **SHIPPED v0.256.0**

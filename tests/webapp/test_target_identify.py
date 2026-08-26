@@ -22,6 +22,13 @@ def test_identify_known_target_by_name(client, solved_library):
     assert info["framing"] is not None
     assert info["framing"]["level"] == "mosaic"
     assert "mosaic" in info["framing"]["text"]
+    # …and how big a mosaic: M42 (85' x 60') is a 2x2, which is the number the
+    # beginner actually sets in the Seestar app.
+    assert info["mosaic"] is not None
+    assert info["mosaic"]["cols"] == 2
+    assert info["mosaic"]["rows"] == 2
+    assert info["mosaic"]["panels"] == 4
+    assert "2×2 mosaic (4 panels)" in info["mosaic"]["text"]
     # M42 is a curated popular target, so it carries a beginner blurb too.
     assert info["blurb"]
     assert "nebula" in info["blurb"].lower()
@@ -73,3 +80,14 @@ def test_identify_returns_null_for_an_unmatched_target(client, solved_library):
 def test_identify_unknown_target_404(client):
     r = client.get("/api/targets/does_not_exist/identify")
     assert r.status_code == 404
+
+
+def test_identify_plans_no_mosaic_for_a_target_that_fits(client, solved_library):
+    # A compact target needs no mosaic, so the field stays null and the card
+    # says nothing about panels (never a one-panel "mosaic").
+    client.post("/api/targets", json={"name": "M 13"})
+    targets = client.get("/api/targets").json()
+    safe = next(t["safe_name"] for t in targets if t["name"] == "M 13")
+    info = client.get(f"/api/targets/{safe}/identify").json()
+    assert info is not None and info["framing"]["level"] == "fits"
+    assert info["mosaic"] is None

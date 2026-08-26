@@ -89,6 +89,24 @@ def test_identify_carries_size_and_framing_when_the_catalog_has_a_size():
     assert info.framing.level == "mosaic"
 
 
+def test_identify_carries_the_panel_count_for_a_target_bigger_than_one_frame():
+    # "Shoot it in mosaic mode" stops exactly where the beginner's next question
+    # starts, so identify carries the grid too: M 31 (178' x 63') is a 3x2.
+    info = identify_object("M31")
+    assert info is not None and info.mosaic is not None
+    assert (info.mosaic.cols, info.mosaic.rows, info.mosaic.panels) == (3, 2, 6)
+    assert "3×2 mosaic (6 panels)" in info.mosaic.text
+
+
+def test_identify_plans_no_mosaic_for_a_target_that_fits_one_frame():
+    # M 13 (~20') fits comfortably — no plan, so the card says nothing about
+    # mosaics rather than proposing a one-panel one.
+    info = identify_object("M13")
+    assert info is not None and info.framing is not None
+    assert info.framing.level == "fits"
+    assert info.mosaic is None
+
+
 def test_identify_omits_framing_when_the_catalog_has_no_size():
     # An object we haven't vetted a size for identifies fine but carries no
     # framing hint (we never guess a size). The bundled catalog is now fully
@@ -103,6 +121,7 @@ def test_identify_omits_framing_when_the_catalog_has_no_size():
     assert info is not None
     assert info.size_arcmin is None
     assert info.framing is None
+    assert info.mosaic is None
 
 
 def test_identify_carries_the_beginner_blurb_when_the_catalog_has_one():
