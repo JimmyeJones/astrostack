@@ -77,7 +77,7 @@ def _hazy_mosaic_project(tmp_path, n_per_panel: int = 4, *, haze: float = HAZE,
     ``within_panel=True`` hazes the second half of **each** panel's subs, which
     is what a night of drifting transparency actually does to a mosaic that is
     revisited panel by panel — and the case the per-panel normalization of
-    v0.273.0 corrects.
+    v0.276.0 corrects.
     """
     proj = Project.create(tmp_path / "p", name="hazy-mosaic")
     raws = tmp_path / "raws"
@@ -168,7 +168,7 @@ def _mean_star_flux(fits_path) -> float:
 
 
 def test_haze_within_a_panel_is_gain_matched_out(tmp_path, monkeypatch):
-    """The measurement, as it stands after v0.273.0: transparency that drifts
+    """The measurement, as it stands after v0.276.0: transparency that drifts
     *while a panel is being shot* is gain-matched away, against that panel's own
     subs.
 
@@ -207,7 +207,7 @@ def test_a_wholly_hazy_panel_is_deliberately_left_alone(tmp_path):
     original v0.271.0 behaviour treated every such difference as haze and
     corrected it — which fixed this fixture (whose panels deliberately share
     star seeds) but gain-matched *real* panels apart by a measured **2.23×**,
-    manufacturing the panel grid the pass exists to prevent. So v0.273.0
+    manufacturing the panel grid the pass exists to prevent. So v0.276.0
     normalises each panel against itself only, and this step stays.
 
     Doing it properly needs the panel **overlaps**, where both panels image the

@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import { api, type SummaryTarget } from "../api/client";
 import { formatIntegration, formatMonthYear } from "../format";
 import { QueryError } from "../components/QueryError";
+import { MyDeepSkyWallCard } from "../components/MyDeepSkyWallCard";
 import { ShareYourSkyCard } from "../components/ShareYourSkyCard";
 import { BestNightCard } from "../components/BestNightCard";
 
@@ -124,6 +125,10 @@ export function SkySoFarView() {
           {/* The "now show someone" step, right under the headline numbers it
               turns into a poster. Self-hides on a library with no light yet. */}
           <ShareYourSkyCard />
+
+          {/* …and the other half of sharing: the pictures themselves, as one
+              wall. Self-hides until two targets have a finished picture. */}
+          <MyDeepSkyWallCard />
 
           {(data.longest_target || data.most_imaged_target) ? (
             <SimpleGrid cols={{ base: 1, sm: 2 }}>
