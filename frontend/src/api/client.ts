@@ -818,6 +818,10 @@ export interface StackPhotometricSummary {
   min?: number;
   max?: number;
   median?: number;
+  // Mosaic runs turn normalization on themselves (the user never ticked it),
+  // and match each panel against its own subs — n_panels says how many.
+  auto?: boolean;
+  n_panels?: number;
 }
 
 export interface StackDarkScalingSummary {

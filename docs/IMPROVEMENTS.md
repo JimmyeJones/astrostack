@@ -305,10 +305,63 @@ _(none — claim an item here with your branch name)_
     the existing 25%-per-population rail; verify it now applies per cluster too, not just globally, or a small
     cluster could still lose disproportionately.
 
-- **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit, repro-verified) — the "Panels: check" badge is
+- ~~**🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit, repro-verified) — the "Panels: check" badge is
   HONEST (does not false-fire), but the machinery that could actually FIX what it detects is built and
-  wired up everywhere except the one path that needs it most.** *(Not a correctness bug — a real improvement
-  with existing machinery, not a new feature.)*
+  wired up everywhere except the one path that needs it most.**~~ — **SHIPPED v0.271.0**
+  (Builder 2026-08-26, branch `agent/mosaic-photometric-per-panel`), **but NOT the way this entry and the
+  Scout's trace directed — following them literally would have shipped a much worse bug than the one they
+  described. Read this before touching photometric normalization again.**
+
+  **The blocker nobody spotted: `photometric_normalize` was ALREADY BROKEN ON MOSAICS, and auto-enabling it
+  as filed would have turned an opt-in bug into an on-by-default one.** `transparency_score` is *the median
+  flux of a frame's brightest stars* — a property of **where the scope pointed** as much as of the sky. A
+  mosaic panel aimed at an emptier patch genuinely has fainter "brightest" stars, so normalising a mosaic
+  against one **target-wide** median reads that intrinsic difference as haze and gain-matches whole panels
+  apart. **Measured: a 2.23× relative panel gain error** on two identically-exposed panels whose only
+  difference was their star fields (panel A scaled 0.73×, panel B 1.67×) — i.e. the pass meant to prevent a
+  panel grid *manufactures* one, the owner's exact long-standing complaint. This is the same class of bug
+  as the target-wide QC grading fixed in v0.270.2 — which is precisely why `transparency_score` is already
+  tagged `per_pointing=True` in `seestack/qc/grading.py`. The filed 30.6%→6.8% "signal continuity" win was
+  measured on a synthetic mosaic whose panels had *identical* star fields, so it never exercised this.
+
+  **What shipped, in order:**
+  1. **The fix.** `compute_photometric_scales` grows `group_by_pointing`; `_pointing_references`
+     (`seestack/stack/photometric.py`) single-linkage-clusters the frames' solved pointings at the existing
+     `PANEL_LINK_DIST_DEG` (0.25°) and gives **each panel its own median reference**. Within-panel haze is
+     still corrected (a real transparency change on one patch of sky); panel-to-panel brightness is left
+     exactly where the data put it. **Measured end-to-end: the panel step across the join goes 1.64× → 1.00×.**
+     Mirrors the v0.270.2 grading fix's soundness gate exactly — it needs ≥2 pointing groups each carrying
+     `min_frames` scored subs, so a single-pointing target, an unsolved target and a too-tightly-packed
+     mosaic all fall through to today's single target-wide median, byte for byte. A frame in no substantial
+     group (a thin panel, an unsolved sub) stays **neutral** rather than borrowing a yardstick measured
+     somewhere else on the sky.
+  2. **Then the auto-enable this entry asked for**, at the site the Scout correctly traced —
+     `stacker.py` ~1321, `if options.photometric_normalize or is_mosaic_canvas:`, mirroring the
+     `final_gradient_removal` precedent 400 lines below. Only reachable *because* of (1). It
+     self-neutralises on a mosaic whose subs carry no `transparency_score` (`n_scaled == 0` → no scale map),
+     so an un-QC'd mosaic is byte-for-byte unchanged, and single-field stacks never auto-enable at all.
+  3. **Surfaced, not silent:** `PHOTAUTO` / `PHOTPANL` provenance cards → `photometric.auto` /
+     `photometric.n_panels` on the run-info endpoint → *"…· each of 4 panels matched against its own subs
+     (automatic for mosaics)"* in the History panel, so nobody wonders where a setting they never ticked
+     came from, or whether panels were brightened to match each other (they aren't).
+
+  **Upgrade-safe (§9):** no config, schema, on-disk or API-shape change (two additive optional fields an
+  older frontend ignores); `StackOptions.photometric_normalize` still defaults **off**. The one behaviour
+  change is mosaic-only and matches the `final_gradient_removal` precedent. Its coverage-map prerequisite
+  (v0.270.4's `{base}_framecov.fits`) is what makes it safe: the sky-leveling pass bins panels by the honest
+  frame count, so the 1/s² weighted coverage moving no longer moves the panel bins.
+
+  **Tests (+9 python in the new `tests/test_photometric_mosaic.py`, 7 of which fail before; +1 webapp,
+  +2 frontend):** the 2.23×-apart panels and their 1.00× fix; within-panel haze still corrected; a
+  single-pointing target's scales *identical* with and without grouping; a thin panel and an unsolved sub
+  staying neutral; the end-to-end 1.64×→1.00× panel step through `run_stack`; the mosaic auto-enable and its
+  provenance; an un-QC'd mosaic untouched; a single-field stack never auto-normalizing.
+
+  **Still open, filed under Ideas → "Image quality":** genuine *cross-panel* gain matching (a hazy whole
+  panel is still dim, since per-panel normalization can't see it). It needs the panel **overlaps**, not
+  `transparency_score` — see the new entry for why, so nobody re-derives the target-wide version.
+
+  Original spec, for the record:
 
   Reproduced through the real stack path: haze arriving mid-mosaic (transparency 1.0→0.45) walks the seam
   residual 0.97→1.78 (crosses the "check" bar at 1.5) and correctly lights both "Panels: check" and "Hazy
@@ -12318,6 +12371,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **IDEA (Builder 2026-08-26, left open by the v0.271.0 per-panel photometric fix) — match a hazy mosaic
+  panel's *brightness* to its neighbours using the panel OVERLAPS, not `transparency_score`.**
+  *(Pillar: image quality — PRIORITY 4; size M; **read the warning below before starting — the obvious
+  implementation is a bug we have already measured and removed once**.)*
+  v0.271.0 made photometric normalization per-panel, so a mosaic no longer gain-matches its panels apart.
+  What that deliberately does **not** fix is the case the "Panels: check" badge was filed against: a panel
+  shot *entirely* through haze is uniformly dim, and normalising it against its own subs (all equally hazy)
+  leaves it exactly where it was. `level_by_coverage` can't help either — it removes *additive* sky offsets,
+  and haze is *multiplicative* on the signal.
+  **⚠ Do NOT "fix" this by going back to a target-wide `transparency_score` median.** That is precisely what
+  v0.271.0 removed, with a measured **2.23× relative panel gain error** on two identically-exposed panels
+  whose only difference was their star fields: `transparency_score` is the median flux of a frame's
+  *brightest stars*, so it is a property of where the scope pointed, not only of the sky. It cannot tell
+  "hazy panel" from "emptier patch of sky", and it never will.
+  **The signal that CAN tell them apart is the overlap.** Adjacent Seestar mosaic panels overlap, and in the
+  overlap region both panels image *the same stars* — so the ratio of the same star's flux in panel A's
+  contribution vs panel B's is an honest, sky-independent gain ratio. Fit one scale per panel from the
+  pairwise overlap ratios (a small least-squares over the panel adjacency graph, normalised so the median
+  panel scale is 1.0 to keep overall brightness stable), then fold those into the existing per-frame
+  `pscales` map — the plumbing from `compute_photometric_scales` down through every accumulator already
+  exists and needs no change. **Gate it hard:** only where the overlap carries enough shared stars to
+  measure, bounded by the same `max_ratio` clamp, and neutral (scale 1.0) wherever it can't measure — a
+  wrong cross-panel gain is the panel-grid failure mode the owner has complained about for months, so
+  fail-neutral, never fail-guessy. Measure the before/after with the **seam residual on signal**, not
+  `SEAMRES` (which measures *sky* steps and reads 0.0 either way — see the shipped entry above).
 
 - **IDEA (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — the 16-bit *linear* export TIFF clips the
   brightest 0.1% (star / galaxy / nebula cores) to pure white, which its own docstring calls "the full data

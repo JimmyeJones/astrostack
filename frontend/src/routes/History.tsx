@@ -163,6 +163,13 @@ export function photometricSummaryText(
   if (typeof photometric.median === "number") {
     s += ` (median ${photometric.median.toFixed(2)})`;
   }
+  // A mosaic switches this on for itself, and matches each panel against its own
+  // subs — say both, so nobody wonders where a setting they never ticked came
+  // from, or whether panels were brightened to match each other (they aren't).
+  if (typeof photometric.n_panels === "number" && photometric.n_panels > 1) {
+    s += ` · each of ${photometric.n_panels} panels matched against its own subs`;
+  }
+  if (photometric.auto) s += " (automatic for mosaics)";
   return s;
 }
 
