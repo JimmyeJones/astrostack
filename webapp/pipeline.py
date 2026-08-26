@@ -2179,6 +2179,45 @@ def _auto_bind_calibration(settings: Settings, proj: Any, opts_dict: dict[str, A
         opts_dict.pop("scale_dark_to_light", None)
 
 
+def _enable_auto_drizzle_reject(
+    settings: Settings, proj: Any, opts_dict: dict[str, Any],
+) -> None:
+    """Turn on drizzle's two-pass outlier rejection for a walk-away stack — but
+    only if the run still fits in the memory budget with it on.
+
+    Drizzle rejection holds extra full-size canvas planes (the pass-1 value/value²
+    statistics), which ``_estimate_peak_bytes`` charges for. Flipping it on blind
+    could therefore turn a walk-away stack that has been completing happily for
+    months into a hard ``MemoryError`` refusal on the next scan — the exact
+    "don't change a running install's behaviour" failure §9 exists to prevent. So
+    we price the run first with the flag on (the same dry-run sizing the Stack
+    form uses pre-submit) and only enable it when the answer fits. When it
+    doesn't, the stack runs exactly as it does today, and says why in the log.
+
+    Best-effort throughout: any sizing failure leaves the options untouched.
+    """
+    try:
+        from seestack.stack.stacker import estimate_stack
+
+        priced = coerce_stack_options({**opts_dict, "drizzle_reject": True})
+        est = estimate_stack(proj, priced,
+                             memory_budget_gb=settings.max_stack_memory_gb)
+    except Exception as exc:  # noqa: BLE001 — sizing is advisory; never break the stack
+        log.info("Auto drizzle rejection not enabled (could not size the run: %s)", exc)
+        return
+    if est.would_exceed:
+        log.info(
+            "Auto drizzle rejection not enabled: it would need ~%.1f GB, over the "
+            "~%.1f GB budget — stacking without it",
+            est.peak_bytes / 1e9, est.budget_bytes / 1e9,
+        )
+        return
+    opts_dict["drizzle_reject"] = True
+    log.info("Auto drizzle rejection enabled for this walk-away stack "
+             "(~%.1f GB peak, budget ~%.1f GB)",
+             est.peak_bytes / 1e9, est.budget_bytes / 1e9)
+
+
 def _stack_target(
     settings: Settings,
     jm: JobManager,
@@ -2227,6 +2266,18 @@ def _stack_target(
     The engine default stays **False** — a manual stack, a stored config and every
     existing run record are untouched; this only picks a better default for a user
     who clicked "just do it".
+
+    ``auto`` finally turns on ``StackOptions.drizzle_reject`` when the run is a
+    **drizzled** one and the merged options carry no explicit preference. Without
+    it a drizzled walk-away stack had *no* outlier rejection whatsoever:
+    ``auto_reject`` above is a deliberate no-op under drizzle (drizzle runs its
+    own two-pass rejection instead), and that two-pass rejection defaults off, so
+    the two branches above left drizzle uncovered — satellites, plane trails and
+    cosmic rays went straight into the picture, on the one path where the user
+    isn't there to notice. Gated on the run still fitting the memory budget with
+    the extra pass-1 planes (see :func:`_enable_auto_drizzle_reject`), so it can
+    never turn a stack that completes today into an out-of-memory refusal, and
+    the engine's own ``n >= 4`` gate still applies below four subs.
     """
     from seestack.stack.stacker import run_stack
 
@@ -2289,6 +2340,19 @@ def _stack_target(
             # counting once there are more subs.) Drizzle is exempt — it honours
             # per-frame weights and runs its own rejection.
             opts_dict["quality_weighted"] = True
+        if auto and opts_dict.get("drizzle") and "drizzle_reject" not in opts_dict:
+            # …and the gap the two branches above leave open: ``auto_reject`` is a
+            # documented **no-op under drizzle** (``_resolve_auto_reject`` returns
+            # early), and drizzle's own two-pass rejection is a *separate*,
+            # off-by-default option that nothing ever turned on. So a drizzled
+            # walk-away stack went into the combine with **no outlier rejection at
+            # all** — every satellite, plane trail and cosmic ray straight into
+            # the picture — while the same target stacked without drizzle got
+            # rejection automatically. Same discipline as the two branches above:
+            # only when the user expressed no choice (a saved per-target default
+            # or the Stack form is honoured verbatim), so nothing an existing
+            # install explicitly set is overridden.
+            _enable_auto_drizzle_reject(settings, proj, opts_dict)
         calibration_skipped: list[str] = []
         if saved_master_ids:
             # The user's own "Save as defaults" calibration picks win over the

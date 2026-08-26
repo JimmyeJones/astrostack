@@ -307,20 +307,62 @@ _(none — claim an item here with your branch name)_
   residual with vs. without, on a synthetic hazy-mid-session mosaic) before flipping any default, per
   `AGENTS.md` §9 — do not blind-flip.
 
-- **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit — needs confirmation from a live header, not yet
-  fully verified) — the drizzle path may be running with NO outlier rejection at all on walk-away stacks.**
-  `auto_reject` is documented as a no-op under drizzle (drizzle has its own `drizzle_reject`, which defaults
-  **off** and is never turned on by the walk-away `auto` chain the way `auto_reject`/`quality_weighted` are).
-  If confirmed, every drizzled walk-away stack — satellites, plane trails, cosmic rays, the works — goes
-  straight into the combine unfiltered. **Confirm first:** check the `REJMODE` FITS header card on a real
-  drizzled walk-away run (its absence would confirm no rejection ran). If confirmed, extend the same
-  `_stack_target` "`auto` turns this on when nothing explicit was set" pattern to `drizzle_reject`, with a
-  measured before/after (this is also the leading, though unconfirmed, explanation for the bright
-  saturated-looking blob the owner's screenshot showed near a mosaic seam — most likely a real star with a
-  debayer/SCNR chroma ring, amplified by drizzle ×1.5 and possibly by the missing rejection pass; ruled out as
-  a NaN/coverage hole (renders black, not white) and as seam ghosting (would double every star along the
-  join, not produce one blob) — confirm with the same RA/Dec appearing in a raw sub and linear FITS values at
-  its core).
+- ~~**🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit — needs confirmation from a live header, not yet
+  fully verified) — the drizzle path may be running with NO outlier rejection at all on walk-away stacks.**~~
+  — **CONFIRMED FROM THE CODE AND FIXED, v0.270.4** (Builder 2026-08-26, branch
+  `claude/compassionate-galileo-il93a9`). *(Priority 1 by AGENTS.md §1 "Current focus" — stacking-engine
+  correctness. The owner's own walk-away stacks drizzle at ×1.5, so this was firing for them.)*
+
+  **No live header was needed to confirm it** — the chain is closed in the repo. `_resolve_auto_reject`
+  returns `options` unchanged the moment `options.drizzle` is set (so `auto_reject`, which the walk-away
+  chain *does* turn on, is a no-op there by construction); `StackOptions.drizzle_reject` defaults `False`;
+  and nothing in `_stack_target`'s `auto` chain — nor anywhere else on the unattended path — ever set it.
+  A drizzled walk-away stack therefore ran **single-pass drizzle with no rejection whatsoever**, which is
+  also why `REJMODE` is absent from those runs (it is only stamped from `rej_stats`, and the drizzle branch
+  only builds one when `clip is not None`).
+
+  **What shipped.** `_stack_target`'s `auto` chain gains a third branch, with the same
+  "only when the user expressed no choice" discipline as `auto_reject` / `quality_weighted`: when the run
+  drizzles and the merged options carry no `drizzle_reject` key, turn it on. **Gated on memory:** the
+  pass-1 value/value² statistics hold extra full-size canvas planes that `_estimate_peak_bytes` charges
+  for, so `_enable_auto_drizzle_reject` prices the run first with the flag on (via `estimate_stack`, the
+  same dry-run sizing the Stack form uses pre-submit) and enables it **only when the run still fits the
+  budget** — a blind flip could have turned a walk-away stack that has completed happily for months into a
+  hard `MemoryError` refusal on the next scan. Any sizing failure leaves the options untouched, and the
+  engine's own `n >= 4` gate still applies below four subs.
+
+  **The cost, stated plainly:** two-pass drizzle rejection is roughly 2–3× the stacking time. That is the
+  right trade on an unattended overnight stack — the alternative is satellites and plane trails baked into
+  the picture with nobody watching — but it does mean a walk-away drizzle run occupies the single job
+  worker for longer.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API or engine-default change; a manual stack, the
+  Stack form, a saved per-target default (either way) and reprocess-all are all honoured verbatim.
+
+  **Tests (+6, the positive one fail-before):** `tests/webapp/test_auto_stack_pipeline.py` — a drizzled
+  walk-away stack gets rejection; a non-drizzled one doesn't (it has `auto_reject`); an explicit saved
+  choice wins in **both** directions; the manual form is untouched; and the memory back-off leaves the flag
+  off when the priced run busts the budget.
+
+  Original spec, for the record:
+
+      `auto_reject` is documented as a no-op under drizzle (drizzle has its own `drizzle_reject`, which defaults
+      **off** and is never turned on by the walk-away `auto` chain the way `auto_reject`/`quality_weighted` are).
+      If confirmed, every drizzled walk-away stack — satellites, plane trails, cosmic rays, the works — goes
+      straight into the combine unfiltered. **Confirm first:** check the `REJMODE` FITS header card on a real
+      drizzled walk-away run (its absence would confirm no rejection ran). If confirmed, extend the same
+      `_stack_target` "`auto` turns this on when nothing explicit was set" pattern to `drizzle_reject`, with a
+      measured before/after (this is also the leading, though unconfirmed, explanation for the bright
+      saturated-looking blob the owner's screenshot showed near a mosaic seam — most likely a real star with a
+      debayer/SCNR chroma ring, amplified by drizzle ×1.5 and possibly by the missing rejection pass; ruled out as
+      a NaN/coverage hole (renders black, not white) and as seam ghosting (would double every star along the
+      join, not produce one blob) — confirm with the same RA/Dec appearing in a raw sub and linear FITS values at
+      its core).
+
+  **Still open from that spec:** the *blob* half. The missing rejection pass was only ever the leading
+  guess for it, and it is now fixed — so if the owner still sees a bright saturated blob near a seam on a
+  post-v0.270.4 drizzled stack, the remaining candidates are the debayer/SCNR chroma ring and drizzle's own
+  ×1.5 amplification. Confirm with the same RA/Dec in a raw sub and the linear FITS values at its core.
 
 - **⚪ HARDENING NOTE (found incidentally, 2026-08-17 audit — not currently firing for the owner, no fix
   needed yet, just a landmine to know about) — the mosaic-canvas outlier-exclusion pass's rejections are
