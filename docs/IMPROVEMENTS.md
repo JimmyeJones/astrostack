@@ -106,78 +106,115 @@ _(none — claim an item here with your branch name)_
   Original spec, for the record:
 
 
-    **The owner's evidence:** three walk-away auto-stacks of the same mosaic target ("gray_star"), same night
-    (2026-08-16), same settings (drizzle ×1.5). In time order: 787 frames / 4.4 h / noise 0.015 →
-    575 frames / 3.2 h / noise 0.015 → 271 frames / 1.5 h / noise 0.020. Frame count and integration time fell
-    by nearly 3× and noise got measurably worse, across ONE growing night — the opposite of what should ever
-    happen as a Seestar drips in more subs.
+      **The owner's evidence:** three walk-away auto-stacks of the same mosaic target ("gray_star"), same night
+      (2026-08-16), same settings (drizzle ×1.5). In time order: 787 frames / 4.4 h / noise 0.015 →
+      575 frames / 3.2 h / noise 0.015 → 271 frames / 1.5 h / noise 0.020. Frame count and integration time fell
+      by nearly 3× and noise got measurably worse, across ONE growing night — the opposite of what should ever
+      happen as a Seestar drips in more subs.
 
-    **Root cause (audit's repro: synthetic growing 3-panel mosaic through the real pipeline; baseline healthy
-    24→42→60 frames monotone; then hid 28 of 42 source files mid-night):**
-    1. `_auto_stack_frame_count` (`webapp/pipeline.py:1663`) decides whether to fire a fresh auto-stack purely
-       from the DB's `solved_accepted` count (`_solved_accepted_count`) — it never asks whether those frames'
-       *files* are actually readable right now.
-    2. The real stack (`run_stack` → `prepare`, `seestack/stack/stacker.py` ~2115) silently drops any frame
-       whose `readable_frame_path()` comes back `None` — correct behaviour for a *single* stack, but nothing
-       upstream treats "offered vs. actually used" as a signal.
-    3. The stack still completes, still gets recorded, and **still gets published as the target's newest
-       auto-edited picture** — a materially thinner, noisier image than a night ago, with no warning.
-    4. The attempt marker written after every stack (`AUTO_STACK_ATTEMPT_META_KEY`, `webapp/pipeline.py:2197`)
-       stamps `_solved_accepted_count(proj)` — the same DB-level count from step 1, **blind to what was
-       actually readable**. Since that DB count doesn't change just because files came back on disk, the
-       trigger in step 1 (`if int(attempted) >= solved_accepted: return None`) never re-fires. **If the bad
-       stack happened to be the last one that night, the degraded picture is the target's final image
-       indefinitely**, until brand-new subs eventually push `solved_accepted` past the stale marker.
-    - **Repro (verified):** hide 28/42 source files mid-night → auto-stack still fires, stacks
-      `used=14 offered=42 unreadable=28`, publishes it as newest. Restore the files → `trigger=None` forever
-      (bug 2, confirmed separately).
-    - **What made the owner's files briefly unreadable is NOT a code bug** — `incoming/` is read-only and the
-      app has no delete/move path into it (guardrail + CI-enforced spy test, `AGENTS.md` §10). This is
-      storage-side on the owner's box: a moved/archived folder, a flaky NAS share, etc. **The bug is that the
-      app has no defence against a transient version of this at all** — it should notice and hold back, not
-      publish silently.
+      **Root cause (audit's repro: synthetic growing 3-panel mosaic through the real pipeline; baseline healthy
+      24→42→60 frames monotone; then hid 28 of 42 source files mid-night):**
+      1. `_auto_stack_frame_count` (`webapp/pipeline.py:1663`) decides whether to fire a fresh auto-stack purely
+         from the DB's `solved_accepted` count (`_solved_accepted_count`) — it never asks whether those frames'
+         *files* are actually readable right now.
+      2. The real stack (`run_stack` → `prepare`, `seestack/stack/stacker.py` ~2115) silently drops any frame
+         whose `readable_frame_path()` comes back `None` — correct behaviour for a *single* stack, but nothing
+         upstream treats "offered vs. actually used" as a signal.
+      3. The stack still completes, still gets recorded, and **still gets published as the target's newest
+         auto-edited picture** — a materially thinner, noisier image than a night ago, with no warning.
+      4. The attempt marker written after every stack (`AUTO_STACK_ATTEMPT_META_KEY`, `webapp/pipeline.py:2197`)
+         stamps `_solved_accepted_count(proj)` — the same DB-level count from step 1, **blind to what was
+         actually readable**. Since that DB count doesn't change just because files came back on disk, the
+         trigger in step 1 (`if int(attempted) >= solved_accepted: return None`) never re-fires. **If the bad
+         stack happened to be the last one that night, the degraded picture is the target's final image
+         indefinitely**, until brand-new subs eventually push `solved_accepted` past the stale marker.
+      - **Repro (verified):** hide 28/42 source files mid-night → auto-stack still fires, stacks
+        `used=14 offered=42 unreadable=28`, publishes it as newest. Restore the files → `trigger=None` forever
+        (bug 2, confirmed separately).
+      - **What made the owner's files briefly unreadable is NOT a code bug** — `incoming/` is read-only and the
+        app has no delete/move path into it (guardrail + CI-enforced spy test, `AGENTS.md` §10). This is
+        storage-side on the owner's box: a moved/archived folder, a flaky NAS share, etc. **The bug is that the
+        app has no defence against a transient version of this at all** — it should notice and hold back, not
+        publish silently.
 
-    **Fix direction (verify with the mosaic AND a single-field growing target — do not disturb the legit
-    align-drop guard, i.e. a stack that genuinely dropped subs at alignment must still be recognised as
-    "new work covered"):**
-    1. Run a readability preflight (`count_unreadable_frames()` — reuse, don't reinvent; the audit found this
-       already exists) inside `_auto_stack_frame_count`, and when a material fraction of the offered frames are
-       currently unreadable, **hold back** — same shape as the existing `held_thin` guard — and do **not** stamp
-       the attempt marker, so the retry keeps trying on the next scan.
-    2. When the marker *is* withheld for this reason, stamp the unreadable count too, so the trigger can tell
-       "still unreadable, don't loop" from "readable again, please retry" without re-stacking every single scan
-       during a real, ongoing outage.
-    3. Regression test: growing mosaic + growing single-field target, each with a mid-session readability dip
-       that later clears — assert no thin/degraded run gets published during the dip, and a full-frame stack
-       fires once files are readable again.
+      **Fix direction (verify with the mosaic AND a single-field growing target — do not disturb the legit
+      align-drop guard, i.e. a stack that genuinely dropped subs at alignment must still be recognised as
+      "new work covered"):**
+      1. Run a readability preflight (`count_unreadable_frames()` — reuse, don't reinvent; the audit found this
+         already exists) inside `_auto_stack_frame_count`, and when a material fraction of the offered frames are
+         currently unreadable, **hold back** — same shape as the existing `held_thin` guard — and do **not** stamp
+         the attempt marker, so the retry keeps trying on the next scan.
+      2. When the marker *is* withheld for this reason, stamp the unreadable count too, so the trigger can tell
+         "still unreadable, don't loop" from "readable again, please retry" without re-stacking every single scan
+         during a real, ongoing outage.
+      3. Regression test: growing mosaic + growing single-field target, each with a mid-session readability dip
+         that later clears — assert no thin/degraded run gets published during the dip, and a full-frame stack
+         fires once files are readable again.
 
-    **Data worth pulling from the owner's live install to confirm this instance precisely (not required to fix
-    the bug, but confirms the mechanism and points at what happened storage-side):** the three runs' FITS
-    header cards `NOFFERED` / `NALIGNFL` / `NUNREAD` / `REJMODE` (predicted: `NOFFERED`≈790–900 on all three,
-    `NUNREAD`≈215/≈520 on runs 2–3); `GET /api/library/missing-files` right now; the target's `reject_reason`
-    histogram; whether `auto_grade_frames` / `copy_to_cache` are on; whether any `incoming/` folders were
-    moved/archived that evening.
+      **Data worth pulling from the owner's live install to confirm this instance precisely (not required to fix
+      the bug, but confirms the mechanism and points at what happened storage-side):** the three runs' FITS
+      header cards `NOFFERED` / `NALIGNFL` / `NUNREAD` / `REJMODE` (predicted: `NOFFERED`≈790–900 on all three,
+      `NUNREAD`≈215/≈520 on runs 2–3); `GET /api/library/missing-files` right now; the target's `reject_reason`
+      histogram; whether `auto_grade_frames` / `copy_to_cache` are on; whether any `incoming/` folders were
+      moved/archived that evening.
 
-- **🟠 LATENT (found incidentally by the same 2026-08-17 audit, repro-verified, NOT the owner's current
-  regression) — auto-grade compares quality metrics across a mosaic TARGET-WIDE, when its panels are
-  different patches of sky. A legitimately star-poor panel can have its entire sub population rejected as
-  "cloud".** *(Severity high for any mosaic owner with grading on — real, permanent data loss, not a false
-  alarm the user can waved away, since `auto_grade_frames` acts automatically. Gated behind
-  `auto_grade_frames`, which defaults OFF, and bounded by the existing 25% rejection rail — so it did not
-  cause the regression above, which fires regardless of this setting. Same class of bug as the v0.221.0
-  time-population fix (`846eb74`), just across sky position instead of time.)*
+  - ~~**🟠 LATENT (found incidentally by the same 2026-08-17 audit, repro-verified, NOT the owner's current
+    regression) — auto-grade compares quality metrics across a mosaic TARGET-WIDE, when its panels are
+    different patches of sky. A legitimately star-poor panel can have its entire sub population rejected as
+    "cloud".**~~ — **FIXED v0.270.2** (Builder 2026-08-26, branch `agent/mosaic-grade-per-panel`).
+    **Measured before/after on the audit's own repro** (6 panels × 40 subs, one panel at 25% star density,
+    identical seeing/sky/transparency throughout): **before — 40 of 40 of that panel's subs recommended for
+    rejection**, worst z = 31.6, *"far fewer stars than typical (95 vs 395) — likely cloud"*; **after — 0
+    recommendations**, because each panel is now graded against itself. A genuinely clouded sub *inside* a
+    panel is still caught (it is an outlier against its own panel, which is the right comparison) — pinned by
+    its own test.
+    **What shipped:** `_MetricSpec` gains `per_pointing`, set on exactly the three position-dependent
+    (flux-like) metrics — star count, sky level, transparency; FWHM and eccentricity stay target-wide, since
+    seeing and tracking are properties of the *night*, not of where you point. `_pointing_groups` clusters the
+    accepted frames with a new `cluster_pointings` (extracted from `detect_mixed_pointings`, which now reuses
+    it) at a new `PANEL_LINK_DIST_DEG = 0.25°` — a dither is ≲0.1°, the tightest mosaic step ~0.5°, so there
+    is a ~2× margin either side. **The split only applies when it is sound** (≥2 clusters each carrying a full
+    `min_frames` population); a single-pointing target, an unsolved target, and a mosaic too tightly packed to
+    separate all fall through to today's exact behaviour, and a panel too thin or too flat to grade falls back
+    to the target-wide yardstick rather than being left ungraded.
+    **The 25% rail now applies per panel too**, as the entry asked: the target-wide cap is measured against
+    the *whole* target, so 40 of one panel's 40 subs is only 17% of a six-panel target and never reached it.
+    Both rails are deterministic over the same invariant combined set the `reconsider` fixed point relies on.
+    **Surfaced:** `GradeReport.pointing_groups` / `metrics_per_pointing`, carried through `GradeReportOut` as
+    an additive field, and the Auto-grade dialog now says *"This looks like a 6-panel mosaic, so each panel is
+    compared against itself — a panel pointed at emptier sky genuinely has fewer stars, and that isn't
+    cloud."* (nothing at all on a single-pointing target).
+    **Upgrade-safe (§9):** no config, schema, on-disk or default change; one additive API field an older
+    frontend ignores; behaviour identical for every non-mosaic target.
+    **Tests (+7, all fail-before):** `tests/test_qc_grading.py` (star-poor panel not called cloud; real cloud
+    inside a panel still caught; single-pointing/unsolved unchanged; the per-panel rail; the thin-panel
+    fallback), `tests/webapp/test_auto_grade.py` (the same through the endpoint, plus `pointing_groups == 0`
+    on an ordinary target), `frontend/src/routes/Target.test.tsx` (+2 for the dialog copy).
 
-  `grade_frames` (`seestack/qc/grading.py` ~304–356) builds its metric population from every accepted frame
-  of the *whole target* (`pop = [... for f in accepted if ...]`), with no split by pointing. **Repro:**
-  synthetic 6-panel mosaic, one deliberately star-poor panel → **all 40/40 of that panel's subs** flagged for
-  rejection (z≈26.8, "far fewer stars than typical — likely cloud"). The schema already carries
-  `mosaic_panel_id` (`seestack/io/project.py:112`, indexed) but nothing in grading groups by it —
-  `seestack/stack/pointings.py` exists and is the natural place to derive the clustering.
+    **Note for future agents:** the entry pointed at the `mosaic_panel_id` column as the grouping key —
+    it is in the schema and indexed, but **nothing ever populates it** (only `io/merge.py` copies it
+    through), so it is `None` on every real frame. The panels are derived from the frames' own solved
+    pointings instead.
 
-  **Fix direction:** grade star-count/sky/transparency-family metrics **per pointing cluster**
-  (`mosaic_panel_id`) rather than target-wide, so a panel's own population is judged against itself. Keep
-  the existing 25%-per-population rail; verify it now applies per cluster too, not just globally, or a small
-  cluster could still lose disproportionately.
+    Original spec, for the record:
+
+    *(Severity high for any mosaic owner with grading on — real, permanent data loss, not a false
+    alarm the user can waved away, since `auto_grade_frames` acts automatically. Gated behind
+    `auto_grade_frames`, which defaults OFF, and bounded by the existing 25% rejection rail — so it did not
+    cause the regression above, which fires regardless of this setting. Same class of bug as the v0.221.0
+    time-population fix (`846eb74`), just across sky position instead of time.)*
+
+    `grade_frames` (`seestack/qc/grading.py` ~304–356) builds its metric population from every accepted frame
+    of the *whole target* (`pop = [... for f in accepted if ...]`), with no split by pointing. **Repro:**
+    synthetic 6-panel mosaic, one deliberately star-poor panel → **all 40/40 of that panel's subs** flagged for
+    rejection (z≈26.8, "far fewer stars than typical — likely cloud"). The schema already carries
+    `mosaic_panel_id` (`seestack/io/project.py:112`, indexed) but nothing in grading groups by it —
+    `seestack/stack/pointings.py` exists and is the natural place to derive the clustering.
+
+    **Fix direction:** grade star-count/sky/transparency-family metrics **per pointing cluster**
+    (`mosaic_panel_id`) rather than target-wide, so a panel's own population is judged against itself. Keep
+    the existing 25%-per-population rail; verify it now applies per cluster too, not just globally, or a small
+    cluster could still lose disproportionately.
 
 - **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit, repro-verified) — the "Panels: check" badge is
   HONEST (does not false-fire), but the machinery that could actually FIX what it detects is built and
@@ -19163,6 +19200,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.270.2** — 🟠 A star-poor mosaic panel is no longer auto-rejected as "cloud". `grade_frames` built its
+  star-count / sky-level / transparency populations across the **whole target**, but a mosaic's panels are
+  different patches of sky — so on the audit's repro **40 of 40** of a legitimately star-poor panel's subs
+  were recommended for rejection (z = 31.6, *"far fewer stars than typical — likely cloud"*), real permanent
+  data loss since `auto_grade_frames` acts unattended. Those three position-dependent metrics are now graded
+  per pointing cluster (`PANEL_LINK_DIST_DEG = 0.25°`, via a `cluster_pointings` extracted from
+  `detect_mixed_pointings`), the 25% rejection rail applies per panel as well as target-wide, and the split
+  only engages when it's sound — single-pointing, unsolved and tightly-packed targets behave exactly as
+  before. **0 recommendations after**; a real clouded sub inside a panel is still caught. The Auto-grade
+  dialog explains it. Tests: `tests/test_qc_grading.py` (+5), `tests/webapp/test_auto_grade.py` (+2),
+  `frontend/src/routes/Target.test.tsx` (+2), all fail-before.
 - **v0.270.1** — 🔴 The walk-away auto-stack can no longer publish a picture made worse by subs whose files
   aren't on disk — the owner's "my images turned out worse" regression (787 → 575 → 271 frames across one
   growing night). A readability preflight (`_auto_stack_readability_hold`) now holds a target back, without

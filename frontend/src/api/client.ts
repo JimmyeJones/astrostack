@@ -724,6 +724,11 @@ export interface GradeReport {
   metrics_used: string[];
   metrics_skipped: Record<string, string>;
   capped: boolean;
+  /** Mosaic panels graded against themselves rather than against the whole
+   * target (panels are different patches of sky, so a star-poor one is not
+   * cloud). 0 — or absent, on an older backend — means ordinary target-wide
+   * grading. */
+  pointing_groups?: number;
   changed_ids: number[] | null;
 }
 
