@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from seestack.bg_advice import BackgroundModeHint, background_mode_hint
 from seestack.framing import FramingHint, MosaicPlan, framing_hint, mosaic_plan
+from seestack.lighttravel import LightTravel, light_travel
 from seestack.nightplan import CatalogObject, _angular_sep_deg, load_catalog
 from seestack.target_difficulty import DifficultyHint, target_difficulty
 
@@ -86,6 +87,10 @@ class ObjectInfo:
     # type/size say the default per-channel fit would bend into it; None
     # otherwise (the default is fine, so there is nothing to say).
     background_mode_hint: BackgroundModeHint | None = None
+    # "How far did you see?" — the light-travel line built from the catalog
+    # distance. None when the catalog has no vetted distance, so the card simply
+    # says nothing rather than guessing.
+    light_travel: LightTravel | None = None
 
 
 def _norm_name(s: str) -> str:
@@ -163,4 +168,5 @@ def _to_info(obj: CatalogObject, matched_by: str) -> ObjectInfo:
         blurb=obj.blurb,
         difficulty=target_difficulty(obj.id, obj.type),
         background_mode_hint=background_mode_hint(obj.type, obj.size_arcmin),
+        light_travel=light_travel(obj.distance_ly),
     )

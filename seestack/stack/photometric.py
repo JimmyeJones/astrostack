@@ -44,6 +44,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from seestack.io.project import FrameRow
+from seestack.stack.pointings import pointing_groups
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +63,60 @@ class PhotometricStats:
     min_scale: float
     max_scale: float
     median_scale: float
+    # How many mosaic panels the run normalised against separately (0 = one
+    # target-wide reference, the single-field case).
+    n_pointing_groups: int = 0
+
+
+def _pointing_references(
+    frames: list[FrameRow], min_frames: int,
+) -> tuple[dict[int, float], int] | None:
+    """(Frame id → *its own panel's* median transparency, panel count), or ``None``.
+
+    ``transparency_score`` is the median flux of a frame's brightest stars, so
+    it is a property of **where the scope was pointed** as much as of the sky:
+    a mosaic panel aimed at an emptier patch genuinely has fainter "brightest"
+    stars. Normalising a mosaic against one target-wide median therefore reads
+    that intrinsic difference as haze and gain-matches whole panels apart —
+    measured at a **2.2× relative panel gain error** on two identically-exposed
+    panels whose only difference was their star fields. That is the panel-grid
+    failure mode this app exists to avoid, manufactured by the pass meant to
+    prevent it. (Same class of bug as the target-wide QC grading fixed in
+    v0.270.2, which is why ``transparency_score`` is ``per_pointing`` there.)
+
+    So on a mosaic each panel is normalised against **itself**: within-panel
+    haze is still corrected (that is a real transparency change on one patch of
+    sky), while panel-to-panel brightness is left exactly where the data put it.
+
+    Returns ``None`` — meaning "use one target-wide reference, exactly as
+    before" — unless the split is *sound*: at least two pointing groups each
+    carrying ``min_frames`` frames with a usable transparency score. A
+    single-pointing target, an unsolved target and a mosaic too tightly packed
+    to separate therefore all behave exactly as they do today. A frame in no
+    substantial group (a thin panel, an unsolved sub) gets no reference and
+    stays neutral rather than being scaled against a yardstick from another
+    patch of sky.
+    """
+    usable = [
+        f.transparency_score is not None and f.transparency_score > 0
+        for f in frames
+    ]
+    labels = pointing_groups(
+        [(f.ra_center_deg, f.dec_center_deg) for f in frames],
+        min_members=min_frames, eligible=usable,
+    )
+    if labels is None:
+        return None
+    measured: dict[int, list[float]] = {}
+    for f, label, ok in zip(frames, labels, usable, strict=True):
+        if label >= 0 and ok:
+            measured.setdefault(label, []).append(float(f.transparency_score))
+    refs = {label: float(np.median(scores)) for label, scores in measured.items()}
+    return {
+        f.id: refs[label]
+        for f, label in zip(frames, labels, strict=True)
+        if f.id is not None and label in refs
+    }, len(refs)
 
 
 def compute_photometric_scales(
@@ -69,6 +124,7 @@ def compute_photometric_scales(
     *,
     max_ratio: float = 2.0,
     min_frames: int = _MIN_MEASURED_FRAMES,
+    group_by_pointing: bool = False,
 ) -> tuple[dict[int, float], PhotometricStats]:
     """
     Build a ``{frame_id: scale}`` map that gain-matches every frame's signal to
@@ -77,19 +133,33 @@ def compute_photometric_scales(
     ``max_ratio`` bounds each scale to ``[1/max_ratio, max_ratio]``. A frame with
     no usable ``transparency_score`` (or when too few frames carry one) gets the
     neutral scale ``1.0``.
+
+    ``group_by_pointing`` (set by the stacker on a **mosaic** canvas) normalises
+    each panel against its own median instead of one target-wide median — see
+    :func:`_pointing_references` for why comparing panels is wrong. It falls
+    back to the single target-wide reference whenever the pointings don't split
+    soundly, so a single-field target is unaffected either way.
     """
     max_ratio = max(1.0, float(max_ratio))
-    measured = [
-        f.transparency_score for f in frames
-        if f.transparency_score is not None and f.transparency_score > 0
-    ]
-    # Not enough signal to establish a robust reference → everything neutral.
-    if len(measured) < max(1, int(min_frames)):
-        scales = {f.id: 1.0 for f in frames if f.id is not None}
-        n = len(scales)
-        return scales, PhotometricStats(0, n, 0, 1.0, 1.0, 1.0)
+    min_frames = max(1, int(min_frames))
 
-    ref = float(np.median(measured))
+    # Per-panel references on a mosaic; ``None`` means "one target-wide median",
+    # which is both the single-field case and the mosaic that didn't split.
+    grouped = _pointing_references(frames, min_frames) if group_by_pointing else None
+    refs, n_groups = grouped if grouped is not None else (None, 0)
+    if refs is None:
+        measured = [
+            f.transparency_score for f in frames
+            if f.transparency_score is not None and f.transparency_score > 0
+        ]
+        # Not enough signal to establish a robust reference → everything neutral.
+        if len(measured) < min_frames:
+            scales = {f.id: 1.0 for f in frames if f.id is not None}
+            n = len(scales)
+            return scales, PhotometricStats(0, n, 0, 1.0, 1.0, 1.0)
+        ref = float(np.median(measured))
+        refs = {f.id: ref for f in frames if f.id is not None}
+
     lo, hi = 1.0 / max_ratio, max_ratio
 
     scales: dict[int, float] = {}
@@ -99,7 +169,9 @@ def compute_photometric_scales(
     for f in frames:
         if f.id is None:
             continue
-        if f.transparency_score is not None and f.transparency_score > 0 and ref > 0:
+        ref = refs.get(f.id)
+        if (ref is not None and ref > 0
+                and f.transparency_score is not None and f.transparency_score > 0):
             s = float(np.clip(ref / f.transparency_score, lo, hi))
             scales[f.id] = s
             measured_scales.append(s)
@@ -117,6 +189,7 @@ def compute_photometric_scales(
             min_scale=float(min(measured_scales)),
             max_scale=float(max(measured_scales)),
             median_scale=float(np.median(measured_scales)),
+            n_pointing_groups=n_groups,
         )
     else:
         stats = PhotometricStats(0, n_neutral, 0, 1.0, 1.0, 1.0)

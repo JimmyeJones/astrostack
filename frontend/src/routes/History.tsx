@@ -163,6 +163,12 @@ export function photometricSummaryText(
   if (typeof photometric.median === "number") {
     s += ` (median ${photometric.median.toFixed(2)})`;
   }
+  // Each panel is matched against its own subs, never against the others — say
+  // so, since "gain-matched" on a mosaic otherwise sounds like the panels were
+  // brightened to match each other, which is exactly what it must not do.
+  if (typeof photometric.n_panels === "number" && photometric.n_panels > 1) {
+    s += ` · each of ${photometric.n_panels} panels matched against its own subs`;
+  }
   // Say who asked for it. A mosaic gets gain-matching automatically (panels are
   // shot through different air), so on those runs the user never chose it and
   // would otherwise wonder where the line came from.

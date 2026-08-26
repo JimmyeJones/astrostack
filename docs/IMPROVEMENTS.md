@@ -126,6 +126,42 @@ _(none — claim an item here with your branch name)_
   on the normal path. Future Scout runs can keep the lead on the routers (`stack.py`, `editor.py` are still
   un-swept in depth) / video / storage and re-audit the engine only occasionally.
 
+- ~~**🟠 FOUND AND FIXED (Builder 2026-08-26, branch `agent/mosaic-photometric-per-panel`) — quality
+  weighting systematically PENALISES a mosaic panel for pointing at emptier sky. Measured 0.78× on a panel
+  whose only difference from its neighbour was its star field — about a quarter of that panel's depth thrown
+  away, on every walk-away mosaic.**~~ — **FIXED v0.276.0.** *(Image quality, priority 4, on the
+  on-by-default path — the walk-away `auto` chain turns `quality_weighted` on itself.)*
+
+  **This is the THIRD instance of one class of bug, found by looking for it after fixing the second.** QC
+  grading had it (fixed v0.270.2), photometric normalization had it (fixed v0.271.0), and
+  `compute_frame_weights` has it too: it takes **target-wide medians** of `star_count`, `sky_adu_median` and
+  `transparency_score` — the three *position-dependent* metrics grading already tags `per_pointing=True`.
+  A mosaic's panels are different patches of sky, so a panel aimed at an emptier field genuinely has fewer,
+  fainter stars. And because `stars_factor`/`transparency_factor` **clip at 1.0**, a target-wide comparison
+  can only ever *penalise* that panel: it can never be boosted back. **Measured** on two identically-exposed
+  8-sub panels (400 vs 120 stars, same sky, same seeing): mean weight **1.00 vs 0.78**; end-to-end through
+  `run_stack`, the star-poor panel's region of the coverage map peaked at **3.09 of its 4 subs → 4.00** after
+  the fix.
+
+  **What shipped.** `compute_frame_weights` grows `group_by_pointing` (set by the stacker on a mosaic canvas)
+  and takes those three medians **per panel**, while FWHM and eccentricity stay target-wide — seeing and
+  tracking are properties of the *night*, not of where you pointed. Exactly the split grading makes. A panel
+  too thin to carry `_MIN_PANEL_FRAMES` of a metric falls back to the target-wide median **for that metric
+  only**, so a sparse panel is still weighted rather than left unjudged, and a genuinely clouded sub is still
+  caught — it is an outlier against its own panel, which is the right comparison.
+
+  **The three copies are now one.** `pointing_groups` moved into `seestack/stack/pointings.py` beside
+  `cluster_pointings`, and grading, photometric normalization and weighting all delegate to it, so the
+  soundness gate ("≥2 groups each carrying `min_members`, else behave exactly as before") has a single
+  definition. **If a fourth pass ever compares a flux-like metric across a target, use it** — and check first
+  whether the metric is position-dependent.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API or default change; every single-field target and
+  every non-mosaic run is byte-for-byte unchanged (the split self-disables when the pointings don't separate).
+  **Tests (+5, all fail before):** the 0.78 penalty and its 1.00 fix, a clouded sub still caught inside its
+  own panel, the seeing metrics staying target-wide, a dithered single-field target's weights *identical*
+  with and without grouping, and the end-to-end 3.09 → 4.00 coverage through `run_stack`.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26 #3, branch `claude/vigilant-knuth-r0qxeh`) — re-audited the stacking
   engine + plate-solve + render adversarially (came back CLEAN), and dogfooded the running app end to end,
   where I found and FIXED one real friendliness bug (the mislabelled Lucky-imaging knob — see Shipped).**
@@ -432,6 +468,56 @@ _(none — claim an item here with your branch name)_
     the existing 25%-per-population rail; verify it now applies per cluster too, not just globally, or a small
     cluster could still lose disproportionately.
 
+- ~~**🟠 FOUND WHILE MERGING, MEASURED AND FIXED (Builder 2026-08-26, branch
+  `agent/mosaic-photometric-per-panel`) — the v0.271.0 auto-enable directly below made a REAL bug in
+  `photometric_normalize` on-by-default for every mosaic: it gain-matched whole PANELS apart, measured at
+  2.23×.**~~ — **FIXED v0.276.0.** *(Image quality, priority 4. Not a criticism of that change — it is the
+  right correction and its own tests are sound; the flaw was already there in the opt-in path, and its
+  synthetic mosaic gave both panels the **same star seed**, which is exactly the case that cannot expose it.)*
+
+  `transparency_score` is the median flux of a frame's **brightest stars**, so it is a property of *where the
+  scope pointed* as much as of the sky: a panel aimed at an emptier patch genuinely has fainter brightest
+  stars. Normalising a mosaic against one **target-wide** median reads that intrinsic difference as haze.
+  **Measured** on two identically-exposed 8-sub panels whose only difference was their star fields: panel A
+  scaled 0.73×, panel B 1.67× — a **2.23× relative panel gain error**; end to end on the finished canvas a
+  **1.64× → 1.00×** step across the join. The pass meant to prevent a panel grid was manufacturing one.
+
+  **Same class of bug as the target-wide QC grading fixed in v0.270.2** — which is precisely why
+  `seestack/qc/grading.py` already tags this metric `per_pointing=True`. Third instance: see the
+  quality-weighting entry at the top of this section, found by going looking after this one.
+
+  **The fix:** `compute_photometric_scales` grows `group_by_pointing` (set by the stacker on a mosaic canvas)
+  and `_pointing_references` gives **each panel its own median**. Within-panel haze is still corrected — a
+  real transparency change on one patch of sky — while panel-to-panel brightness stays where the data put it,
+  so the v0.271.0 win is kept and the panel step is not. Same soundness gate as the grading fix (≥2 groups
+  each carrying `min_frames` scored subs, else the single target-wide median, so single-field targets are
+  byte-for-byte unchanged); a frame in no substantial group stays **neutral** rather than borrowing another
+  patch of sky's yardstick. Provenance: a `PHOTPANL` card → `photometric.n_panels` → *"each of 4 panels
+  matched against its own subs"* in History, so nobody reads "gain-matched" on a mosaic as "the panels were
+  brightened to match each other".
+
+  **Tests (+9, `tests/test_photometric_mosaic.py`, 7 fail before):** the 2.23×-apart panels and their 1.00×
+  fix; within-panel haze still corrected; a single-pointing target's scales *identical* with and without
+  grouping; a thin panel and an unsolved sub staying neutral; the end-to-end 1.64× → 1.00× panel step through
+  `run_stack`; an un-QC'd mosaic untouched; a single-field stack never auto-normalizing.
+
+  **⚠ THIS CHANGED TWO ASSERTIONS IN ANOTHER AGENT'S TESTS — flagged here deliberately, because "don't weaken
+  a test to go green" is a hard rule and this needs to be visibly *not* that.** `tests/test_photometric_
+  mosaic_auto.py` (shipped with v0.271.0) asserted that a **wholly hazy panel** is gain-matched to its
+  neighbour to within 10%. Its fixture gives both panels the **same star seed**, so the only difference
+  between them really is haze — and on that fixture the old behaviour is right. On a *real* mosaic the panels
+  never share a star field, and the metric cannot tell the two causes apart, so the same code corrects a
+  difference it has no evidence for. The assertion was pinning an estimator that is only correct on
+  synthetic data. It is now split into two honest tests, both measured, neither deleted: **haze *within* a
+  panel is still gain-matched out** (the half that can be done soundly, and what a real drifting night
+  actually produces, since the Seestar revisits panels), and **a wholly hazy panel is deliberately left
+  alone**, with the reason and the pointer to the overlap-based fix in its docstring. The fixture grew a
+  `within_panel` mode rather than losing its old one. Nothing was skipped, xfailed or deleted.
+
+  **Still open, filed under Ideas → "Image quality":** genuine *cross-panel* gain matching (a hazy **whole**
+  panel is still dim, because per-panel normalization can't see it). It needs the panel **overlaps**, not
+  `transparency_score` — read that entry before reaching for a target-wide median again.
+
 - ~~**🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit, repro-verified) — the "Panels: check" badge is
   HONEST (does not false-fire), but the machinery that could actually FIX what it detects is built and
   wired up everywhere except the one path that needs it most.**~~ — **FIXED v0.271.0** (Builder 2026-08-26,
@@ -548,6 +634,34 @@ _(none — claim an item here with your branch name)_
       (`n_scaled == 0 → pscales=None`) on a run with no usable transparency scores, so a mosaic whose subs lack
       `transparency_score` is byte-for-byte unchanged — the guard is safe on the no-data path. Size S (one guard
       + a provenance card + the measurement test).
+
+- **🟠 FOLLOW-ON TO THE v0.271.1 DRIZZLE AUTO-REJECT DIRECTLY BELOW — auto-enabling it at option-build time
+  can turn a large drizzled mosaic that produces a picture today into a hard MemoryError REFUSAL, and on the
+  walk-away path nobody is watching to act on the advice.** *(Severity: an unattended stack that silently
+  stops producing pictures — worse than the satellites it removes. Confidence: HIGH, traced + arithmetic, not
+  yet reproduced on a real canvas. Small fix.)*
+  *(Filed by the Builder who implemented the same feature concurrently, engine-side and budget-aware, and
+  reverted it in favour of the shipped pipeline version rather than stacking two implementations — branch
+  `agent/mosaic-photometric-per-panel`, commit "Revert the drizzle auto-reject fix". The version there is a
+  ready reference implementation.)*
+  **The arithmetic:** two-pass drizzle rejection holds `_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT = 7` full-canvas
+  RGB float32 arrays against the single pass's `_PEAK_CANVAS_ARRAYS = 4` (`seestack/stack/stacker.py` ~70) —
+  a **1.75× jump in the memory estimate**, charged by `_guard_stack_memory`, which *raises* rather than
+  degrading. `_stack_memory_budget_bytes` defaults to ~70% of available RAM, so whether an install crosses
+  the line depends entirely on its canvas and its box; the owner drizzles ×1.5 on a mosaic union canvas,
+  which is the largest canvas this app produces. Before v0.271.1 that guard was never charged on the
+  walk-away path, so this is a *new* way for an unattended run to fail.
+  **Why the pipeline can't fix it:** `_stack_target` builds the options **before** any canvas exists — the
+  union canvas is computed inside `run_stack` — so it cannot know whether the extra pass fits.
+  **Fix direction:** decide it in the engine, where the canvas is known, and make it **fail-safe**: when the
+  two-pass estimate exceeds the budget and the single pass fits, log it plainly and stack *without* the
+  rejection rather than refusing the run — the picture matters more than the pass. The reverted commit does
+  exactly this in `_auto_drizzle_reject`, with `run_stack`'s dispatch, memory guard and in-flight cap all
+  reading one resolved `eff.drizzle_reject` so the three can't disagree, plus `estimate_stack` mirroring it;
+  it also carries the test (a budget the single pass fits and the two-pass one doesn't → declines; room for
+  both → takes it). **Keep the distinction the revert had to give up:** an *explicitly* ticked
+  `drizzle_reject` on a manual stack should still refuse loudly with its actionable advice — the user is
+  watching and can drop the drizzle scale. Only the auto-enabled case should degrade quietly.
 
 - ~~**🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace, Scout
   2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**~~ —
@@ -7415,9 +7529,36 @@ to **Shipped**.)_
   (a tally of timeout reasons → the line; a tally without them → nothing). Pairs naturally with fixing the
   `astap_timeout_s` label so the number the user then raises actually means what they think.
 
-- **NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
-  readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.** *(Pillar:
-  autonomy + friendliness — PRIORITY 2–3. Size: S.)* v0.270.1 correctly holds a walk-away stack back when a
+- ~~**NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
+  readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.**~~ —
+  **SHIPPED v0.274.0** (Builder 2026-08-26, branch `claude/compassionate-galileo-q9q6fs`). *(Pillar:
+  autonomy + friendliness — PRIORITY 2–3.)*
+  **What shipped:** `GET /api/targets/{safe}/autostack-hold` returns the hold the **newest finished scan**
+  recorded for that target (`auto_stack_held_unreadable`), or `null`; `AutoStackHoldNote` renders it as a
+  self-hiding note inside the Target page's `NoticeBoard` at `NOTICE_PRIORITY.warning` — so it lands in the
+  page's existing prioritised notes area rather than becoming one more always-on banner (the standing
+  "extremely busy" constraint). The wording is the Jobs page's, verbatim, with the same per-target numbers:
+  *"516 of 787 subs couldn't be read on the last scan (271 still readable)… Put it back and the next scan
+  will stack the full set automatically — nothing has been lost."*
+  **Read-only, and deliberately not dismissible.** Only the newest finished `pipeline` job is consulted, so a
+  hold the next scan resolved simply stops being reported — the note has no state of its own to go stale, and
+  a dismissal would have let a beginner hide a live storage problem and go back to wondering why the picture
+  is stale. A still-running scan (no verdict yet) and other job kinds are ignored, and a malformed entry from
+  an older build renders nothing rather than 500-ing the page.
+  **Not in this slice:** the Dashboard target card. The Target page is where someone whose picture stopped
+  updating actually goes, the Dashboard tile has no room for a paragraph, and one voice in one place beats
+  the same sentence in two. File it again if the owner ever misses it there.
+  **Upgrade-safe (§9):** one new additive endpoint, no change to `TargetOut` or any existing response shape,
+  no config/schema/on-disk/default change; an older frontend never calls it and the note fails soft (a 404 or
+  a network error renders nothing).
+  **Tests (+5 python, +4 frontend):** `tests/webapp/test_autostack_hold.py` (the scan's own numbers, only for
+  the held target; self-clearing once a later scan stacks it; running/other-kind jobs ignored; silent with no
+  scans and 404 for an unknown target; a malformed entry tolerated) and `AutoStackHoldNote.test.tsx` +
+  a `Target.test.tsx` case pinning that it reaches the page's notes area.
+
+  Original spec, for the record:
+
+  v0.270.1 correctly holds a walk-away stack back when a
   storage hiccup would publish a thinner picture, and renders the plain-language reason — but **only in
   `frontend/src/routes/Jobs.tsx`** (`auto_stack_held_unreadable`; grepped this run — it appears nowhere else in
   the frontend). A beginner whose picture silently stops updating looks at the **Target page**, where their
@@ -7432,9 +7573,44 @@ to **Shipped**.)_
   next scan stacks successfully. Testable against a target whose job history carries a held scan. Closes the
   "why did my picture stop updating?" gap at the surface the user actually stares at.
 
-- **NEW IDEA (Builder 2026-08-26, the deliberate follow-on to the v0.270.1 readability fix) — heal a target
-  that is ALREADY sitting on a degraded newest picture, instead of only preventing the next one.** *(Priority 2
-  autonomy / priority 4 image quality. Size M. Serves the owner's live install directly.)*
+- ~~**NEW IDEA (Builder 2026-08-26, the deliberate follow-on to the v0.270.1 readability fix) — heal a target
+  that is ALREADY sitting on a degraded newest picture, instead of only preventing the next one.**~~ —
+  **SHIPPED v0.276.0** (Builder 2026-08-26, branch `claude/compassionate-galileo-q9q6fs`). *(Priority 2
+  autonomy / priority 4 image quality — the owner's live install is the acceptance case.)*
+  **What shipped:** `_auto_stack_degraded_recheck` (`webapp/pipeline.py`), a third trigger tried only after the
+  frame-count and calibration triggers both decline. It re-stacks a target **once** when all of these hold: it
+  has ≥2 *genuine* stack runs (editor-export / channel-combine runs are excluded via the existing
+  `_stack_options_from_run_json` definition, so their tiny `n_frames_used` can never read as a collapse); its
+  newest genuine run is materially thinner than its best (**both** rails — `< 0.8 ×` best *and* ≥2 frames
+  fewer — so an ordinary handful of align drops never spends a re-stack); **every** solved+accepted sub is
+  readable right now (the `stat()` pass is the *last* check, so a healthy, up-to-date target pays only two DB
+  reads); the accepted+solved population is still at least as large as that best run; and the
+  `best:solved` fingerprint marker (`AUTO_STACK_DEGRADED_META_KEY`) says this situation hasn't been healed
+  already. Stamped **before** stacking, like the calibration recheck, and cleared on a survivable error or a
+  cancel — so it can neither crash-loop nor strand a transient failure.
+  **The population check is the answer to the entry's own caution.** Gating on
+  `AUTO_STACK_UNREADABLE_META_KEY` would have been useless for the case this exists to fix: that marker only
+  started being written in v0.270.1, so the owner's already-degraded target has none. Comparing the *current*
+  accepted+solved count against the best run's separates the two cases exactly — a storage hiccup leaves the DB
+  population intact (787 rows, 271 used), whereas a user who deliberately rejected half the subs and re-stacked
+  has shrunk it, and is never second-guessed.
+  **Surfaced, not silent:** the scan records `auto_stack_healed` and the Jobs page renders a green alert —
+  *"All of these subs are readable again… It was stacked again from the full set, so the better picture is
+  back. Your earlier pictures are all still in History"* — with the real numbers per target. Reported only
+  after the stack actually happened, so a target the thin-floor or mixed-pointing guard stops later isn't
+  claimed as healed.
+  **Upgrade-safe (§9):** one new *additive* project-meta key (absent ⇒ never healed ⇒ today's behaviour), no
+  schema, config, on-disk, endpoint or response-shape change, nothing removed or overwritten (a heal is a new
+  run alongside the old ones, exactly like any other stack), and the whole path lives inside the already
+  off-by-default `auto_stack` pass.
+  **Tests (+5 python, all fail-before; +3 frontend):** `tests/webapp/test_auto_stack_pipeline.py` — the owner's
+  own sequence healing in one scan and then staying quiet on every subsequent scan; a deliberately-rejected
+  thinner newest stack left alone; the heal standing down mid-outage and firing once the files return; an
+  editor-export / channel-combine run never read as a collapse; and an ordinary one-frame align drop ignored.
+  `frontend/src/routes/Jobs.test.tsx` — the summary clause, malformed-entry tolerance, and the alert.
+
+  Original spec, for the record:
+
   v0.270.1 stops a walk-away stack publishing a picture made thin by unreadable subs, and re-fires once the
   files come back — but only for outages **from now on**. An install already hit by this (the owner's, per the
   fixed bug above: runs of 787 → 575 → **271** frames) keeps the 271-frame result as its newest picture,
@@ -12561,6 +12737,49 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **IDEA / QA LEAD (Builder 2026-08-26, generalised from three fixes of the same bug) — sweep the rest of the
+  engine for "compares a POSITION-DEPENDENT metric across a whole target".** *(Pillar: image quality /
+  correctness — PRIORITY 4; size S to audit, unknown to fix; a good Scout run.)*
+  Three separate passes shipped the identical mistake and each one was found only after the previous fix made
+  it obvious: QC grading (v0.270.2), photometric normalization (v0.271.0) and quality weighting (v0.272.1)
+  all compared `star_count` / `sky_adu_median` / `transparency_score` against a **target-wide** median, which
+  on a mosaic reads "this panel points at emptier sky" as "this sub is bad". The shared gate now exists
+  (`pointing_groups`, `seestack/stack/pointings.py`), so a fourth site would be a one-line fix — the work is
+  *finding* it. **Method:** grep every `np.median(` / `np.percentile(` / `mean(` taken over a whole frame
+  list, and for each ask "is this metric a property of the night, or of where the scope pointed?" Night-wide
+  (FWHM, eccentricity, and anything derived from the *time* of capture) is correct target-wide; anything
+  flux-like or sky-brightness-like is not. Candidate sites worth checking first: the auto-grade reconsider /
+  reaccept path, `stackhealth`'s trend and drift verdicts, the session-quality drift and transparency-trend
+  endpoints, and any "best frame" / reference-frame picker that ranks on star count. **Note the asymmetry
+  that makes this quietly harmful:** several of these factors *clip at 1.0*, so a wrongly-compared panel can
+  only ever be penalised, never compensated — the loss is one-way and silent.
+
+- **IDEA (Builder 2026-08-26, left open by the v0.271.0 per-panel photometric fix) — match a hazy mosaic
+  panel's *brightness* to its neighbours using the panel OVERLAPS, not `transparency_score`.**
+  *(Pillar: image quality — PRIORITY 4; size M; **read the warning below before starting — the obvious
+  implementation is a bug we have already measured and removed once**.)*
+  v0.271.0 made photometric normalization per-panel, so a mosaic no longer gain-matches its panels apart.
+  What that deliberately does **not** fix is the case the "Panels: check" badge was filed against: a panel
+  shot *entirely* through haze is uniformly dim, and normalising it against its own subs (all equally hazy)
+  leaves it exactly where it was. `level_by_coverage` can't help either — it removes *additive* sky offsets,
+  and haze is *multiplicative* on the signal.
+  **⚠ Do NOT "fix" this by going back to a target-wide `transparency_score` median.** That is precisely what
+  v0.271.0 removed, with a measured **2.23× relative panel gain error** on two identically-exposed panels
+  whose only difference was their star fields: `transparency_score` is the median flux of a frame's
+  *brightest stars*, so it is a property of where the scope pointed, not only of the sky. It cannot tell
+  "hazy panel" from "emptier patch of sky", and it never will.
+  **The signal that CAN tell them apart is the overlap.** Adjacent Seestar mosaic panels overlap, and in the
+  overlap region both panels image *the same stars* — so the ratio of the same star's flux in panel A's
+  contribution vs panel B's is an honest, sky-independent gain ratio. Fit one scale per panel from the
+  pairwise overlap ratios (a small least-squares over the panel adjacency graph, normalised so the median
+  panel scale is 1.0 to keep overall brightness stable), then fold those into the existing per-frame
+  `pscales` map — the plumbing from `compute_photometric_scales` down through every accumulator already
+  exists and needs no change. **Gate it hard:** only where the overlap carries enough shared stars to
+  measure, bounded by the same `max_ratio` clamp, and neutral (scale 1.0) wherever it can't measure — a
+  wrong cross-panel gain is the panel-grid failure mode the owner has complained about for months, so
+  fail-neutral, never fail-guessy. Measure the before/after with the **seam residual on signal**, not
+  `SEAMRES` (which measures *sky* steps and reads 0.0 either way — see the shipped entry above).
+
 - **IDEA (Scout 2026-08-26 #2, follow-on to the front-of-queue `photometric_normalize`-for-mosaic Builder item)
   — once photometric normalization auto-enables for mosaics, weigh doing the same measurement for a
   *single-field* target stacked across nights of **mixed transparency** (one hazy night + one clear night).**
@@ -13859,6 +14078,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   toward silence — a single wrong "your colour is off" on a genuinely fine picture is worse than ten correct
   reassurances are good.
 
+- **NEW IDEA (Builder 2026-08-26, the obvious next step after shipping "My deep-sky wall" v0.275.0) — let the
+  wall use each target's **pinned cover**, not just its newest stack's preview.** *(Pillar: friendliness /
+  enjoy + share — PRIORITY 3. Size: S.)* The montage draws one picture per target from the library's
+  `last_stack_preview`, which is whatever that target stacked *most recently*. But the app already has a
+  feature for exactly this question — **"Set as cover"** (v0.145.0) — where the user has said, in as many
+  words, *which picture of this target is the good one*. On a target whose newest run is a linear master or a
+  quick restack, the wall currently shows that instead of the finished picture the owner chose, which is the
+  one thing the wall exists to show. **Shape:** in `_montage_tiles` (`webapp/routers/gallery.py`), prefer the
+  target's cover run's preview when one is pinned and readable, falling back to `last_stack_preview` exactly as
+  today — a few lines, no new endpoint, no engine change (`build_montage` neither knows nor cares where a tile
+  came from). **Care:** the library registry stamps `last_stack_preview` but the cover is a per-target
+  `cover_run_id`, so this costs one project open per hero — acceptable on a deliberate one-tap download, not on
+  a page render, which is the same trade `/api/imaging-log` already makes. Testable: a target with a pinned
+  cover puts *that* picture on the wall; one without is unchanged.
+
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #3) — "Print it": a print-ready export sized and DPI-tagged for a
   frame on the wall.** *(Pillar: enjoy + share — PRIORITY 3. Size: M.)* A beginner who finally gets a
   picture they love wants to **print and hang it** — but every export today (PNG / full-res PNG / JPEG / TIFF)
@@ -13898,8 +14132,51 @@ problems. Dogfood it every big-picture run and fix root causes.
   don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
   already thinks in.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26 #2) — "My deep-sky wall": one-click, share-ready montage of a
-  beginner's best finished pictures.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: M.)*
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #2) — "My deep-sky wall": one-click, share-ready montage of a
+  beginner's best finished pictures.**~~ — **SHIPPED v0.275.0** (Builder 2026-08-26, branch
+  `claude/compassionate-galileo-q9q6fs`) — **all three filed slices, (a) (b) and (c).** *(Pillar:
+  friendliness / enjoy + share — PRIORITY 3.)*
+  **(a) The pure helper.** `seestack/montage.py` — `montage_grid(n, columns=None)` (≤3 tiles read better as one
+  row than as a square with a hole; above that `ceil(sqrt(n))` wide, so 4→2×2, 6→3×2, 9→3×3 and never more
+  than one short row), `montage_caption(name, exposure_s)` → *"M 42 · 3h 12m"*, `montage_title(n, total_s)`,
+  and `build_montage(tiles, …)`. Each picture is letterboxed into its cell with the deepening reel's own
+  `_fit_onto`, and captioned with its own `_draw_corner_label`, so a portrait single-field and a landscape
+  mosaic sit together undistorted and the two shareables speak in one visual voice. `None` below two tiles —
+  a wall of one is just the picture the gallery already shows.
+  **Two things a render-and-look pass caught that no unit test would have.** (1) The title strip is drawn with
+  Pillow's built-in font, which has **no glyph for an em dash** — *"My deep-sky wall ☐ 7 targets"*, a tofu box
+  across the top of the one image the user is about to post. It uses `·` now, and a test pins that the title
+  stays inside the font's coverage. (2) A short last row was left-aligned, so seven pictures in a 3-wide grid
+  left a conspicuous hole in the bottom-right corner that reads as "something failed to load"; short rows are
+  centred now. Both are pinned by tests.
+  **The cell shape follows the pictures** (the median tile aspect, clamped), so a library of ordinary landscape
+  stacks letterboxes hardly at all and one of tall mosaics doesn't sit in a sea of bars.
+  **(b) The endpoint.** `GET /api/gallery/montage.jpg?limit=9` renders **on demand** from the previews the
+  library already keeps — one picture per *target* (the exposure-ranked `summarize_library` heroes, so the wall
+  answers "what have I captured?" rather than showing one busy target five times) — and writes **nothing**,
+  exactly like `/api/recap.jpg`. Chose the display-time render over the filed "cache it beside the library
+  outputs": the recap poster's precedent, no cache to invalidate when a target restacks, and no new bytes in
+  anyone's library. A preview deleted since its stack is dropped and the next hero takes its place; fewer than
+  two readable pictures 404s so the offer self-hides.
+  **(c) The offer.** `MyDeepSkyWallCard` on the "Your sky, so far" page, directly under "Share your sky" —
+  the two halves of sharing together (that page's numbers-over-one-picture poster, and now the pictures
+  themselves). Self-hides below two heroes, and says so when the library holds more than fit
+  (*"You have 14 finished, so this shows the 9 you've given the most time to."*). Deliberately **not** another
+  button on the already-busy Gallery page.
+  **Upgrade-safe (§9):** one new additive read-only endpoint and one new engine module; no config, schema,
+  on-disk, default or existing-response-shape change; nothing written anywhere, and nothing under `incoming/`
+  is touched or even read.
+  **Tests (+22 python engine, +6 python webapp, +4 frontend):** `tests/test_montage.py` (grid shapes and the
+  one-short-row invariant, column clamp, caption/title wording and their empty cases, the two-tile floor, a
+  landscape+portrait pair both undistorted, the cap keeping exactly the leading N, the centred short row, the
+  no-em-dash guard, the title strip, captions burned on their own tiles, cell shape following the data),
+  `tests/webapp/test_gallery_montage.py` (renders a JPEG, the one-picture 404, the empty-library 404, a
+  deleted preview skipped rather than a 500, the limit clamp, and that nothing is written to the library) and
+  `MyDeepSkyWallCard.test.tsx` (the offer and its link, the "showing 9 of 14" line, hidden at one picture,
+  hidden while loading and on a failed fetch).
+
+  Original spec, for the record:
+
   A Seestar owner accumulates dozens of finished targets over a season, but the app can only ever show them
   **one at a time** — there is no single image that says *"look at everything I've captured."* That montage
   is the thing a beginner actually posts to friends/socials at the end of a good run of nights, and nothing
@@ -13960,8 +14237,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   the date out). **Slices —** (a) the pure helper + tests; (b) render the sentence (frontend, gated on
   presence). Slice (a) alone is a shippable Builder run.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26) — "How far did you see?": a light-travel-time wow-badge on the
-  finished picture.** *(Pillar: friendliness / enjoy + understand — PRIORITY 3. Size: S–M.)* A beginner who
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26) — "How far did you see?": a light-travel-time wow-badge on the
+  finished picture.**~~ — **SHIPPED v0.276.0** (Builder 2026-08-26, branch
+  `agent/mosaic-photometric-per-panel`), **both slices, built to the spec.**
+  *(Friendliness / enjoy + understand — PRIORITY 3.)*
+  `seestack/lighttravel.py` — a pure, offline `light_travel(distance_ly) -> LightTravel | None` returning the
+  finished sentence, so no client re-derives the wording — plus `distance_ly` on `CatalogObject` and on all
+  **157** bundled entries (110 Messier + 47 popular NGC/IC), through `ObjectInfo` →
+  `GET /api/targets/{safe}/identify` → one italic accent line at the bottom of the existing
+  `ObjectInfoCard`. *"The light in this picture left about 2.5 million years ago — before our species
+  existed."*
+  **The one thing worth knowing for future edits — the historical anchors are picked to be true across their
+  WHOLE band, not just at a nice example**, and a test (`test_the_anchors_never_overstate_at_their_own_floor`)
+  pins each floor against the age of the thing it points at: ≥1 Mly *"before our species existed"* (we are
+  ~300 ky old), ≥100 kly *"long before recorded history"*, ≥10 kly *"before the first cities were built"*
+  (~6 ky), ≥2 kly *"before the Roman Empire fell"* (~1,550 y), ≥500 ly *"before the telescope was invented"*
+  (1608). Below 500 ly **nothing is claimed** — the sentence is just the number, which is still striking
+  ("about 440 years ago" for the Pleiades). Durations are rounded hard on purpose (published distances carry
+  real uncertainty, and "about 2.5 million years" is right whether the catalog says 2.48 or 2.54 Mly), and
+  "thousand" only starts at ten thousand — "1.3 thousand years" is clumsier than "1,340 years".
+  **The data is hand-curated, so it ships with the one internal cross-check that exists:** six catalog blurbs
+  already state a distance in prose, and a test asserts the new field agrees with every one of them to 10%
+  (M33's field was moved 2.9 → 2.7 Mly to match its own blurb). Anything without a vetted distance simply has
+  no field and renders nothing — never a guess, same discipline as `size_arcmin`.
+  **Upgrade-safe (§9):** additive nullable catalog field, additive nullable API field an older frontend
+  ignores, no config/schema/on-disk/default change. **Tests (+26 python, +2 frontend):**
+  `tests/test_lighttravel.py` (the bands, the rounding ladder, the anchor-floor safety property, the
+  blurb cross-check, and end-to-end through `identify_object`), `tests/webapp/test_target_identify.py` (+2),
+  `frontend/src/components/ObjectInfoCard.test.tsx` (+2, including the no-distance silence).
+
+  Original spec, for the record:
+
+  *(Pillar: friendliness / enjoy + understand — PRIORITY 3. Size: S–M.)* A beginner who
   stacks a galaxy has no intuitive sense of what they just did. We already identify the object
   (`seestack/post/target_id.py` + the "What am I looking at?" card, v0.110.0) and ship the offline deep-sky
   catalog (`seestack/data/messier.json`, `deepsky_popular.json`), so once a run is solved we know *which*
@@ -19071,6 +19378,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **NEW IDEA (Builder 2026-08-26, found the hard way while rendering the first montage) — one shared guard
+  that burned-in text stays inside Pillow's built-in font's glyph coverage.** *(Pillar: friendliness / trust —
+  PRIORITY 3. Size: S.)* Every server-rendered shareable — the recap poster, the deepening reel's frame
+  labels, the nameplate, and now the montage — draws text with `ImageFont.load_default`, which has **no glyph
+  for an em dash** (and none for a great many other characters we write freely in prose). It renders as a tofu
+  box, on an image the user is about to post, and no test catches it: the string is correct, the *pixels* are
+  wrong. The montage's title hit this on its first render and now avoids `—` by hand, with a local test —
+  but `recap.py`'s lines, `deepening_frame_label`, and the nameplate all build strings from user data
+  (target names!) with no such guard, and a target the owner named with a typographic dash would print a box
+  today. **Shape:** a tiny `seestack/render/glyphs.py` with `safe_for_default_font(text) -> str` that
+  transliterates the handful of characters this app actually produces (— – ‘ ’ “ ” … ×) to ASCII-safe
+  equivalents, called at the one place each renderer draws text; plus a shared test that asserts every
+  rendered-string helper's output survives it unchanged. **Care:** transliterate, never strip — a target
+  named in a non-Latin script must still draw *something*, and dropping characters silently would be worse
+  than a box. Small, additive, no behaviour change on any string that is already safe.
 
 - ~~**NEW IDEA (Builder 2026-08-16, filed because it is what made this run productive) — check in the dogfood
   harness, so "§2 big-picture pass" means running the app rather than re-reading it.**~~ — **SHIPPED v0.264.1**

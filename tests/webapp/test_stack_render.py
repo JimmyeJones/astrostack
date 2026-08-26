@@ -724,6 +724,31 @@ def test_stack_info_says_when_a_mosaic_normalized_itself(client, solved_library)
     assert p["auto"] is True
 
 
+def test_stack_info_surfaces_the_mosaic_auto_and_panel_count(client, solved_library):
+    """A mosaic turns normalization on itself and matches each panel against its
+    own subs — both facts reach the info panel so nobody wonders where a setting
+    they never ticked came from."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["PHOTNORM"] = "transparency"
+                hdul[0].header["PHOTAUTO"] = True
+                hdul[0].header["PHOTPANL"] = 4
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    p = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["photometric"]
+    assert p["auto"] is True
+    assert p["n_panels"] == 4
+
+
 def test_stack_info_photometric_absent_for_unnormalized_stack(client, solved_library):
     """A plain stack has no PHOTNORM cards, so photometric is None."""
     safe = client.get("/api/targets").json()[0]["safe_name"]

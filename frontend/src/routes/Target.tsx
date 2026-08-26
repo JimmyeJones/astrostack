@@ -18,6 +18,7 @@ import { formatIntegration, formatStampDate } from "../format";
 import { integrationReadiness, readinessColor, noiseReductionHint } from "../readiness";
 import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
+import { AutoStackHoldNote } from "../components/AutoStackHoldNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { InsightTabs } from "../components/InsightTabs";
@@ -860,6 +861,8 @@ export function TargetView() {
               </Group>
             </Alert>
           ) : null },
+          { key: "autostack-hold", priority: NOTICE_PRIORITY.warning,
+            node: <AutoStackHoldNote safe={safe} /> },
           { key: "missing-files", priority: NOTICE_PRIORITY.warning, node: missingFiles !== null ? (
             <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
               title={missingFiles.title}>
