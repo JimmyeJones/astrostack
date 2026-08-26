@@ -2409,8 +2409,14 @@ def _stack_target(
             if raw:
                 with contextlib.suppress(json.JSONDecodeError):
                     saved = json.loads(raw)
-                    opts_dict.update(saved)
+                    # A valid-JSON *non-dict* (a legacy/hand-edited/foreign-version
+                    # meta row — the writer only ever stores a dict) survives
+                    # json.loads but would make opts_dict.update() raise TypeError,
+                    # crashing the whole walk-away auto-stack for this target. Gate
+                    # the update on it actually being a dict so a malformed row
+                    # falls back to the plain defaults rather than failing the job.
                     if isinstance(saved, dict):
+                        opts_dict.update(saved)
                         saved_master_ids = {
                             k: saved[k] for k, _, _ in _SAVED_MASTER_BINDINGS
                             if saved.get(k) is not None

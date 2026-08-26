@@ -83,7 +83,7 @@ _(none — claim an item here with your branch name)_
   the worst case falls 3× → 1.5×, at 50 % it falls to 2×, and in both cases a hard frame that rung 3 would have
   cracked in, say, 20 s is now abandoned. Which frames that loses is unmeasurable from the repo — it needs a real
   cloudy night's subs, which no agent has. Meanwhile the cost of leaving it is now *bounded and honest*: the
-  Settings hint says "up to about 3×" (v0.272.2), and as of **v0.276.3** a sub that burned the whole ladder is
+  Settings hint says "up to about 3×" (v0.272.2), and as of **v0.276.4** a sub that burned the whole ladder is
   no longer silent — it lands in its own "Ran out of time being located" bucket on the Target page telling the
   owner to raise the timeout. So the surprise and the invisibility are both gone; only the wasted minutes
   remain. **Leave this for the owner to ask for**, and if they do, ship it with the floor as a named constant and
@@ -92,7 +92,7 @@ _(none — claim an item here with your branch name)_
 - ~~**⚪ HARDENING NOTE (Scout QA audit 2026-08-26 #4, traced — narrow trigger, self-heals, does NOT fire on the
   normal Seestar path) — the folder watcher never re-arms a file that was already stable and is then overwritten
   IN PLACE, so ingest's deliberate in-place-swap recovery is unreachable via the watcher alone.**~~ —
-  **FIXED v0.276.4** (Builder 2026-08-26, branch `claude/compassionate-galileo-c8yo7r`). *(Autonomy /
+  **FIXED v0.276.5** (Builder 2026-08-26, branch `claude/compassionate-galileo-c8yo7r`). *(Autonomy /
   completeness — the fix makes already-shipped recovery code reachable.)*
 
   **What shipped, exactly as the fix direction below asked.** `StabilityTracker` now remembers the
@@ -179,6 +179,52 @@ _(none — claim an item here with your branch name)_
   behavioural half (item (b) at the top of this section), then the two trigger-gated hardening notes (watcher
   in-place re-arm; flat Bayer-pattern guard). Future Scout runs can lead with the still-un-swept-in-depth
   routers (`stack.py`, `editor.py`) / storage and re-audit the engine only occasionally.
+
+- ~~**⚪ HARDENING (Scout 2026-08-26 #6) — a valid-JSON *non-dict* `web_stack_defaults` meta row crashed both
+  the Stack-form load (500) and the walk-away auto-stack (TypeError, whole job fails) instead of degrading to
+  "no saved defaults".**~~ — **FIXED v0.276.2** (this run, branch `claude/vigilant-knuth-izen6g`). *(Severity:
+  robustness / upgrade-safety — the app's own writer only ever stores a dict, so it is not reachable through
+  the app today; a legacy / hand-edited / foreign-version row on a live in-place-upgraded install (§9) is the
+  trigger. Confidence: traced + regression-tested fail-before/pass-after.)*
+  `get_stack_defaults` (`webapp/routers/stack.py`) did `contextlib.suppress(json.JSONDecodeError): merged.update(json.loads(raw))`
+  and the auto-stack path (`webapp/pipeline.py` `_stack_target`) did `opts_dict.update(saved)` **before** its
+  `isinstance(saved, dict)` check — a JSON list/scalar survives `json.loads` and makes `dict.update()` raise
+  `TypeError`, which `suppress(json.JSONDecodeError)` does not catch. Both now guard with `isinstance(..., dict)`
+  before updating, exactly like the four sibling meta readers in the same file
+  (`_run_calibration_skipped/_warnings`, `_run_auto_edit_sky_cast/_color_cal`). Regression tests:
+  `test_api.py::test_stack_defaults_malformed_meta_row_degrades_not_500` (router) and
+  `test_auto_stack_defaults.py::test_malformed_saved_defaults_meta_falls_back_not_crash` (pipeline).
+
+- **⚪ QA AUDIT RESULT (Scout 2026-08-26 #6, branch `claude/vigilant-knuth-izen6g`) — took the lead onto the two
+  still-un-swept-in-depth routers the prior audits flagged (`stack.py` 2054 lines, `editor.py` 1579 lines),
+  swept both adversarially end-to-end (each via a focused sub-audit that traced into the helpers), plus the
+  storage / calibration routers by hand and re-ran the running-app dogfood. Result: essentially clean — the one
+  latent-robustness gap above (now fixed) was the only actionable finding; no wrong-result or data-integrity
+  bug.** Baseline green before touching anything (full headless suite). What was traced:
+  `webapp/routers/stack.py` — `_clamp` bounds order at every call site (stretch/black 0..1, crop size 128..4096);
+  the noise-crop `_crop_origin`/`_measure_noise_ratio` axis alignment (no transposed crop); the
+  trigger→`submit_stack`→`_stack_target` option build (client `dark_path`/etc. popped before use, only master
+  *ids* resolved server-side, `validate_stack_options` before submit, `coerce_stack_options` drops `None`/unknown
+  so a cleared numeric field can't reach the dataclass); the download/`FileResponse` endpoints (paths from the DB
+  row not the URL — no traversal via `kind`/`safe`; literal routes declared before the `/{kind}` catch-all;
+  missing→404, corrupt FITS→422); resource cleanup (`proj`+`lib` closed in `finally` on every early-raise path);
+  and the single-serial-worker JobManager making a double stack-trigger sequential, not concurrent.
+  `webapp/routers/editor.py` — preview↔export parity (both build `EditContext` from the same inputs and run the
+  identical op loop; the `already_display` suppression reads different *sources* — `run.options_json` vs the FITS
+  `SSDISPLY` card — but both are written together by `_apply_editor_to_run`, and only the fallback autostretch
+  reads it, mirrored on both paths; the only genuine preview≠export divergences — `gaia` colour-cal / deconv /
+  star-reduce on the proxy — are intrinsic, deliberate, and disclosed to the user in op help + histogram flags);
+  recipe coercion (`recipe_from_dict` drops unknown ops, coerces non-mapping params to `{}`, clamps every param —
+  malformed input degrades to `Recipe()`); the cache is only the raw *linear* proxy keyed on `run_id`+mtime+version
+  (no recipe-hash image cache to go stale; previews `no-store`); export `output_name` sanitised in
+  `write_stack_outputs` (no traversal); overwrite archives-and-repoints rather than destroying data. Two truly
+  unreachable latent nits noted and deliberately **not** filed (they need a hand-corrupted non-dict `options_json`
+  or a non-list presets row, neither of which the app ever writes): `_run_display_space` and `delete_preset`'s
+  missing `isinstance` guards. **The routers are now swept in depth and clean.** Front of the *actionable* bug
+  queue is unchanged: the ASTAP per-frame timeout-budget behavioural half (item (b) at the top), then the two
+  trigger-gated hardening notes (watcher in-place re-arm; flat Bayer-pattern guard). Future runs can lead with
+  the remaining routers (`gallery.py`, `plan.py`, `stats.py`, `targets.py`, `video.py`) / the watcher-ingest
+  storage layer, and re-audit the engine + editor only occasionally.
 
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26 #4, branch `claude/vigilant-knuth-243xct`) — rotated the lead QA off the
   (drained) stacking engine per the prior audits' advice and swept the webapp routers + plate-solve + watcher/
@@ -722,7 +768,7 @@ _(none — claim an item here with your branch name)_
 
 - ~~**🟠 FOLLOW-ON TO THE v0.271.1 DRIZZLE AUTO-REJECT DIRECTLY BELOW — auto-enabling it at option-build time
   can turn a large drizzled mosaic that produces a picture today into a hard MemoryError REFUSAL, and on the
-  walk-away path nobody is watching to act on the advice.**~~ — **FIXED v0.276.2** (Builder 2026-08-26, branch
+  walk-away path nobody is watching to act on the advice.**~~ — **FIXED v0.276.3** (Builder 2026-08-26, branch
   `claude/compassionate-galileo-c8yo7r`). *(Autonomy, priority 2 — an unattended stack that stops producing
   pictures at all.)*
 
@@ -7631,7 +7677,7 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-26, spotted while shipping the drizzle-rejection affordability fix v0.276.2) —
+- **NEW IDEA (Builder 2026-08-26, spotted while shipping the drizzle-rejection affordability fix v0.276.3) —
   a walk-away stack whose *canvas* busts the memory budget still hard-refuses, even though the engine already
   knows the exact one-line change that would make it fit.** *(Pillar: autonomy — PRIORITY 2. Size: M.)*
   `_best_memory_fix` (`seestack/stack/stacker.py`) already computes the single least-destructive lever and the
@@ -7639,7 +7685,7 @@ to **Shipped**.)_
   *"lower Extra outlier passes to 1"* — and both the pre-submit estimate and the run-time refusal quote it. That
   is exactly right for a **watching** user: they read the advice and click the button. On the **walk-away** path
   nobody reads it, so the target simply stops producing pictures until the owner next looks at the Jobs page.
-  v0.276.2 established the pattern for precisely this asymmetry on the rejection pass (auto-chosen ⇒ degrade
+  v0.276.3 established the pattern for precisely this asymmetry on the rejection pass (auto-chosen ⇒ degrade
   quietly; explicitly ticked ⇒ refuse loudly with the advice). **Shape:** on an unattended run only, when
   `_best_memory_fix` returns a `drizzle_scale` fix, apply it instead of raising — log it plainly, stamp it in
   provenance (a `DRZSCLAD`-style card beside `DRZREJSK`), and surface it once on the Target page's notes area
@@ -7653,7 +7699,7 @@ to **Shipped**.)_
   `_afford_drizzle_reject` does, so a manual stack is untouched. Testable purely against the estimator (a budget
   that fits ×1.3 but not ×1.5 → the unattended run produces a ×1.3 picture; the manual one still raises).
 
-- **NEW IDEA (Builder 2026-08-26, spotted while adding the "ran out of time being located" bucket v0.276.3) —
+- **NEW IDEA (Builder 2026-08-26, spotted while adding the "ran out of time being located" bucket v0.276.4) —
   the "why were some frames left out?" buckets give advice in prose but can't link to the thing they name, so
   every piece of advice ends in a hunt.** *(Pillar: friendliness — PRIORITY 3. Size: S.)* The buckets now say
   things like *"raise the ASTAP timeout in Settings and run Plate Solve again"* and *"Run Plate Solve to include
@@ -7668,7 +7714,7 @@ to **Shipped**.)_
 
 - ~~**NEW IDEA (Scout 2026-08-26 #4, grounded in the plate-solve audit) — when subs fail to plate-solve because
   ASTAP *timed out* (not because the database/ASTAP is missing), say so and offer the one obvious fix: raise the
-  timeout.**~~ — **SHIPPED v0.276.3** (Builder 2026-08-26, branch `claude/compassionate-galileo-c8yo7r`).
+  timeout.**~~ — **SHIPPED v0.276.4** (Builder 2026-08-26, branch `claude/compassionate-galileo-c8yo7r`).
   *(Pillar: autonomy + friendliness — PRIORITY 2–3.)*
 
   **What shipped, exactly as filed.** `ASTAPSolver.solve` now leads the error it raises when *every* rung of the
@@ -9569,6 +9615,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+
+- **NEW IDEA (Scout 2026-08-26 #6) — auto-detect the Seestar's calibration-frame folders sitting in `incoming/`
+  and offer a one-click "Build master darks" instead of making the beginner know what calibration is.**
+  *(Pillar: autonomy + image quality — PRIORITY 2/4. Size: M.)* The editor's "How's my stack?" panel already
+  tells the user *"No darks or flats were applied — adding master darks would cut the background speckle and hot
+  pixels"* and links to the Calibration page — but the beginner then has to know that darks exist, find the
+  folder, and drive a build. Meanwhile the Seestar *does* shoot darks, and if those subs are already in
+  `incoming/`, the app could notice them and offer to build the master with the right frames pre-filled — turning
+  a multi-step expert chore into one button on the target that already flagged the gap. **Sane default:** purely
+  *offer* it (a dismissible "we found ~40 dark frames from your Seestar — build a master dark? [Build]") — never
+  auto-build, never auto-apply (calibration stays opt-in per §9). **Hard gate / why it's an idea not a fix:** it
+  reads `incoming/` only (strictly read-only per §10 — the master build already *copies*, never moves), but it
+  needs the **confirmed folder/naming convention the Seestar uses for dark captures** (mirrors the existing
+  gated `S30/S50` mosaic-naming and `_video/` discovery notes). File it here and confirm the naming from a real
+  Seestar dark folder before building; do **not** blind-guess a glob that could misclassify light subs as darks.
+  **Grep before building:** `seestack/video/discover.py` already does capture-folder discovery under `incoming/`
+  and `calibration.py`/`masters.py` already build masters from a `source_dir` — this is wiring those two together
+  behind a detector, not new engine work.
 
 - ~~**NEW IDEA (Builder 2026-08-07, spotted while building the Quick look v0.246.0) — a `grade.json` can silently
   describe a capture that is no longer on disk, because it is keyed only by folder id.**~~ — **SHIPPED v0.246.2**
@@ -14255,6 +14319,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-26 #6) — "Finish what you started": a Dashboard nudge that ranks the
+  targets you *already have data on* by how much one more clear night would improve them, so the beginner's
+  scarce clear-sky time goes to the picture that will gain the most rather than to yet another new object.**
+  *(Pillar: autonomy + friendliness + planning — PRIORITY 2–3. Size: M.)* The existing "Tonight" planner ranks
+  what to shoot by sky position / difficulty; nothing ranks the targets you've *started* by marginal payoff.
+  A beginner with six half-done targets has no idea which one is closest to "great" — they just shoot whatever's
+  up. The signal is already computed per target: the √N noise-vs-integration curve (the "Is it enough yet?" goal
+  card and the `integrationTrend` verdict both use it), so "another hour cuts this target's noise ~N%" exists;
+  this feature simply *sorts targets by that number* and shows the top few as a "one more night here pays off
+  most" card — each row: target thumbnail, current integration, and the plain-language gain (**"~2 h more →
+  about 30% less noise"**, using the same wording the goal card already produces). **Sane default:** show the
+  3–4 targets on the *steep* part of their curve (biggest gain per hour) and hide targets already near their
+  goal (diminishing returns) — so it never nags you to over-shoot something that's already done. **Trust:** it's
+  a suggestion, not an auto-action; clicking a row opens the target. **Feasibility:** read-only roll-up over the
+  library's project DBs (the Dashboard already does several such roll-ups and caches them on `app.state`); no
+  new engine work, no networked dependency. **Grep before building:** confirm the noise-gain phrasing helper
+  (search `integrationTrend` / "less noise" / the goal-card copy) so this reuses the one source of truth rather
+  than re-deriving the curve — and that no existing Dashboard card already ranks targets this way.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #5) — "How big is it, really?": a full-Moons-wide scale line on the
   "what am I looking at?" object card.** *(Pillar: understand + enjoy — PRIORITY 3. Size: S.)* A beginner reads
