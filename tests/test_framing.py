@@ -9,6 +9,7 @@ from seestack.framing import (
     SEESTAR_FOV_SHORT_ARCMIN,
     framing_hint,
     framing_result_verdict,
+    mosaic_plan,
     recentre_crop,
     recentre_outcome,
 )
@@ -334,3 +335,88 @@ def test_the_two_views_of_the_same_answer_can_never_disagree():
         (250, 400, 10), (500, 600, 10), (500, 60, 30), (500, 400, 180),
     ):
         assert recentre(x, y, size) == outcome(x, y, size).crop, (x, y, size)
+
+
+# --- "How big a mosaic?" — the panel grid a too-big object needs -------------
+
+
+def test_mosaic_plan_never_guesses_and_says_nothing_for_a_target_that_fits():
+    # No vetted size → no plan (same discipline as the framing hint above).
+    assert mosaic_plan(None) is None
+    assert mosaic_plan(0) is None
+    assert mosaic_plan(-5) is None
+    # A compact object fits one frame, so there is no mosaic to plan — the card
+    # must not offer a one-panel "mosaic".
+    assert mosaic_plan(20) is None
+
+
+def test_mosaic_plan_counts_panels_for_a_big_object():
+    # M 31: 178' x 63'. Long edge: one 77' panel plus one more step of 69.3'
+    # covers 146', a third reaches 216' — three across. Short edge: 44' plus one
+    # 39.6' step covers 84' — two down.
+    plan = mosaic_plan(178, 63)
+    assert plan is not None
+    assert (plan.cols, plan.rows, plan.panels) == (3, 2, 6)
+    assert plan.text == "About a 3×2 mosaic (6 panels) covers all of it."
+
+
+def test_mosaic_plan_takes_an_elongated_object_the_narrow_way():
+    # The whole point of carrying a minor axis: the California Nebula is 145'
+    # long but only 40' wide, so it is a two-panel strip — not the 2x3 its major
+    # axis alone would imply if it were treated as square.
+    narrow = mosaic_plan(145, 40)
+    square = mosaic_plan(145)
+    assert narrow is not None and square is not None
+    assert (narrow.cols, narrow.rows, narrow.panels) == (2, 1, 2)
+    assert square.panels > narrow.panels
+
+
+def test_mosaic_plan_without_a_minor_axis_assumes_a_square_box():
+    # Unknown minor axis must err *toward* a bigger mosaic, never toward telling
+    # a beginner a too-small grid will do.
+    assert mosaic_plan(100) == mosaic_plan(100, 100)
+    # A nonsense minor axis (bigger than the major) is clamped, not trusted.
+    assert mosaic_plan(100, 400) == mosaic_plan(100, 100)
+
+
+def test_mosaic_plan_first_panel_is_a_whole_field_not_a_step():
+    # Panels overlap, but the overlap is *between* panels — it can't eat into a
+    # single panel's own field. An object exactly one frame long is one panel.
+    assert mosaic_plan(SEESTAR_FOV_LONG_ARCMIN, SEESTAR_FOV_SHORT_ARCMIN) is None
+    # A hair over needs a second panel along that edge.
+    plan = mosaic_plan(SEESTAR_FOV_LONG_ARCMIN + 1, SEESTAR_FOV_SHORT_ARCMIN)
+    assert plan is not None and (plan.cols, plan.rows) == (2, 1)
+
+
+def test_mosaic_plan_overlap_costs_panels_not_coverage():
+    # More overlap → the same span needs more panels (each one adds less new
+    # sky). The grid must never shrink as the overlap grows.
+    tight = mosaic_plan(300, 300, overlap=0.0)
+    loose = mosaic_plan(300, 300, overlap=0.4)
+    assert tight is not None and loose is not None
+    assert loose.cols >= tight.cols and loose.rows >= tight.rows
+    assert loose.panels > tight.panels
+
+
+def test_every_catalog_object_bigger_than_a_frame_has_a_vetted_minor_axis():
+    """The data half of the feature. Any bundled object big enough for the plan
+    to fire should carry a real minor axis — without one it falls back to a
+    square box, which over-calls the grid for exactly the long, thin objects
+    (the Veil, California, Seagull) a beginner is most likely to try."""
+    missing = [
+        o.id for o in load_catalog()
+        if o.size_arcmin is not None
+        and o.size_arcmin > SEESTAR_FOV_SHORT_ARCMIN
+        and o.size_minor_arcmin is None
+    ]
+    assert not missing, f"no vetted minor axis for: {missing}"
+
+
+def test_catalog_minor_axes_are_sane():
+    """A typo in the data would silently mis-plan a mosaic, so pin the shape:
+    every minor axis is positive and no bigger than its own major axis."""
+    for o in load_catalog():
+        if o.size_minor_arcmin is None:
+            continue
+        assert o.size_arcmin is not None, f"{o.id}: minor axis without a major one"
+        assert 0 < o.size_minor_arcmin <= o.size_arcmin, o.id

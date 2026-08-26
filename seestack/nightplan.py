@@ -37,7 +37,7 @@ from pathlib import Path
 
 import numpy as np
 
-from seestack.framing import FramingHint, framing_hint
+from seestack.framing import FramingHint, MosaicPlan, framing_hint, mosaic_plan
 from seestack.target_difficulty import DifficultyHint, target_difficulty
 
 log = logging.getLogger(__name__)
@@ -187,6 +187,12 @@ class CatalogObject:
     # the "will it fit in one frame?" framing hint (:mod:`seestack.framing`).
     # ``None`` for the many entries without a vetted size (we never guess a size).
     size_arcmin: float | None = None
+    # Minor-axis angular size in arcminutes, vetted for the objects that are
+    # bigger than one Seestar frame — the "how big a mosaic?" panel-count plan
+    # (:func:`seestack.framing.mosaic_plan`) needs it, because an elongated
+    # object needs far fewer panels than its major axis alone implies. ``None``
+    # everywhere else, where the plan falls back to a square (worst-case) box.
+    size_minor_arcmin: float | None = None
     # A plain-language, beginner-friendly one-liner about the object ("what am I
     # looking at?"), curated for the popular targets; ``""`` when the catalog has
     # none (the object-info card then reads fine from type + constellation alone).
@@ -299,6 +305,11 @@ class PlannedTarget:
     # single-frame catalog verdict). See :mod:`seestack.framing`.
     size_arcmin: float | None = None
     framing: FramingHint | None = None
+    # "How big a mosaic?" — the panel grid this object's span needs, so the row
+    # answers the question the framing hint provokes ("shoot it in mosaic mode"
+    # → *how big a mosaic?*) while the user is still choosing what to point at.
+    # ``None`` when it fits one frame or has no vetted size.
+    mosaic: MosaicPlan | None = None
     # "How hard is this target for a Seestar?" — easy/moderate/challenging, so a
     # beginner sees the difficulty *while choosing* what to point at, not only
     # after they've shot it. For catalog candidates the vetted table/type-rule has
@@ -340,6 +351,8 @@ def _load_catalog_file(path: Path) -> list[CatalogObject]:
             dec_deg=float(o["dec_deg"]), type=o.get("type", ""), con=o.get("con", ""),
             size_arcmin=(float(o["size_arcmin"]) if o.get("size_arcmin") is not None
                          else None),
+            size_minor_arcmin=(float(o["size_minor_arcmin"])
+                               if o.get("size_minor_arcmin") is not None else None),
             blurb=o.get("blurb", ""),
         )
         for o in raw["objects"]
@@ -933,6 +946,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 usable_end_utc=o.usable_end_utc.isoformat() if o.usable_end_utc else None,
                 size_arcmin=obj.size_arcmin,
                 framing=framing_hint(obj.size_arcmin),
+                mosaic=mosaic_plan(obj.size_arcmin, obj.size_minor_arcmin),
                 difficulty=target_difficulty(obj.id, obj.type),
             ))
 
@@ -1076,6 +1090,9 @@ class SuggestedTarget:
     score: float
     size_arcmin: float | None = None
     framing: FramingHint | None = None
+    # The panel grid this object's span needs, for the same reason the planner
+    # row carries one; ``None`` when it fits one frame or has no vetted size.
+    mosaic: MosaicPlan | None = None
     # "How hard is this target for a Seestar?" — so the discovery suggestion shows
     # difficulty next to the framing hint. ``None`` for un-vetted objects. See
     # :func:`seestack.target_difficulty.target_difficulty`.
@@ -1149,6 +1166,7 @@ def suggest_targets(
             score=o.score,
             size_arcmin=obj.size_arcmin,
             framing=framing_hint(obj.size_arcmin),
+            mosaic=mosaic_plan(obj.size_arcmin, obj.size_minor_arcmin),
             difficulty=target_difficulty(obj.id, obj.type),
         ))
     out.sort(key=lambda s: (-s.score, -s.max_altitude_deg))
