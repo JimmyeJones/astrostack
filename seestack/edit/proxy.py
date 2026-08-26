@@ -99,6 +99,34 @@ def coverage_path_for(fits_path: str | Path) -> Path:
     return p.with_name(f"{p.stem}_coverage.fits")
 
 
+def frame_coverage_path_for(fits_path: str | Path) -> Path:
+    """The sibling per-pixel **frame count** FITS a stack run writes next to its
+    output (``{basename}_framecov.fits`` — see :mod:`seestack.stack.output`).
+
+    Distinct from :func:`coverage_path_for`, whose map is a sum of per-frame
+    *weights*. Runs recorded before this file existed simply don't have it.
+    """
+    p = Path(fits_path)
+    return p.with_name(f"{p.stem}_framecov.fits")
+
+
+def _load_map(path: Path, *, step: int) -> np.ndarray | None:
+    """Load one 2-D float32 sibling map, strided like the proxy, or ``None``."""
+    if not path.exists():
+        return None
+    from astropy.io import fits as _fits
+
+    try:
+        cov = np.asarray(_fits.getdata(path), dtype=np.float32)
+    except OSError:
+        return None
+    if cov.ndim == 3:  # defensively collapse a stray per-channel map to 2D
+        cov = cov[..., 0] if cov.shape[-1] <= 3 else cov.mean(axis=-1)
+    if step > 1:
+        cov = cov[::step, ::step]
+    return np.ascontiguousarray(cov, dtype=np.float32)
+
+
 def load_coverage(fits_path: str | Path, *, step: int = 1) -> np.ndarray | None:
     """Load a stack's per-pixel coverage map as a 2D float32 array, or ``None``
     when no coverage sibling exists (a single-field image the leveling op can't and
@@ -109,20 +137,20 @@ def load_coverage(fits_path: str | Path, *, step: int = 1) -> np.ndarray | None:
     ``proxy_scale`` — essential for the live-preview coverage-leveling op to match
     the full-res export.
     """
-    cov_path = coverage_path_for(fits_path)
-    if not cov_path.exists():
-        return None
-    from astropy.io import fits as _fits
+    return _load_map(coverage_path_for(fits_path), step=step)
 
-    try:
-        cov = np.asarray(_fits.getdata(cov_path), dtype=np.float32)
-    except OSError:
-        return None
-    if cov.ndim == 3:  # defensively collapse a stray per-channel map to 2D
-        cov = cov[..., 0] if cov.shape[-1] <= 3 else cov.mean(axis=-1)
-    if step > 1:
-        cov = cov[::step, ::step]
-    return np.ascontiguousarray(cov, dtype=np.float32)
+
+def load_frame_coverage(fits_path: str | Path, *, step: int = 1) -> np.ndarray | None:
+    """Load a stack's honest per-pixel **frame count**, or ``None`` if absent.
+
+    This is what the sky-leveling pass should bin a mosaic's panels by: how many
+    subs cover a pixel, not the sum of their weights (which splits one real panel
+    across several bins once quality weighting is on). ``None`` — every run
+    recorded before the sibling existed, and any path that couldn't supply a
+    count — means "fall back to the weighted map", i.e. the behaviour those runs
+    have always had.
+    """
+    return _load_map(frame_coverage_path_for(fits_path), step=step)
 
 
 def clear_proxy(project_dir: Path, run_id: int) -> None:

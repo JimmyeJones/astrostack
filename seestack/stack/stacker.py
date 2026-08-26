@@ -608,6 +608,15 @@ def _resolve_auto_reject(options: StackOptions, n: int) -> StackOptions:
     if not options.auto_reject or options.drizzle:
         return options
     use_kappa = n >= kappa_min_frames(options.sigma_kappa)
+    # κ-σ's own dispatch needs ≥4 frames (its pass-2 clip branch gates on
+    # ``n >= 4``); ``kappa_min_frames`` floors at 3 for the min/max side, so at a
+    # small κ (``sigma_kappa`` ≲ 1.155, reachable via the webapp's min of 1.0)
+    # ``kappa_min_frames`` returns 3 and a 3-frame stack would pick κ-σ — which
+    # then never runs, silently falling through to a plain mean with NO rejection
+    # despite ``auto_reject``. Below 4 frames, use the order-statistic min/max drop
+    # (which rejects a lone extreme at n≥3) so the user's rejection intent is met.
+    if use_kappa and n < 4:
+        use_kappa = False
     return replace(options, sigma_clip=use_kappa, min_max_reject=not use_kappa)
 
 
@@ -1827,6 +1836,11 @@ def run_stack(
         out_basename=options.output_name,
         tiff_mode=options.tiff_mode,
         header_meta=header_meta,
+        # The honest per-pixel frame count, so the *editor* can bin this mosaic's
+        # panels by subs rather than by a sum of weights when it re-levels the
+        # sky. The in-stack leveling pass above already gets it directly; the
+        # editor reloads from disk and until now had nothing to reload.
+        frame_coverage=frame_cov,
     )
     # Assemble the "watch it appear" reel now that the previous run's reel (if
     # any) has been archived aside by write_stack_outputs — so this becomes the
