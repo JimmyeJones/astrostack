@@ -7310,9 +7310,44 @@ to **Shipped**.)_
   next scan stacks successfully. Testable against a target whose job history carries a held scan. Closes the
   "why did my picture stop updating?" gap at the surface the user actually stares at.
 
-- **NEW IDEA (Builder 2026-08-26, the deliberate follow-on to the v0.270.1 readability fix) — heal a target
-  that is ALREADY sitting on a degraded newest picture, instead of only preventing the next one.** *(Priority 2
-  autonomy / priority 4 image quality. Size M. Serves the owner's live install directly.)*
+- ~~**NEW IDEA (Builder 2026-08-26, the deliberate follow-on to the v0.270.1 readability fix) — heal a target
+  that is ALREADY sitting on a degraded newest picture, instead of only preventing the next one.**~~ —
+  **SHIPPED v0.273.0** (Builder 2026-08-26, branch `claude/compassionate-galileo-q9q6fs`). *(Priority 2
+  autonomy / priority 4 image quality — the owner's live install is the acceptance case.)*
+  **What shipped:** `_auto_stack_degraded_recheck` (`webapp/pipeline.py`), a third trigger tried only after the
+  frame-count and calibration triggers both decline. It re-stacks a target **once** when all of these hold: it
+  has ≥2 *genuine* stack runs (editor-export / channel-combine runs are excluded via the existing
+  `_stack_options_from_run_json` definition, so their tiny `n_frames_used` can never read as a collapse); its
+  newest genuine run is materially thinner than its best (**both** rails — `< 0.8 ×` best *and* ≥2 frames
+  fewer — so an ordinary handful of align drops never spends a re-stack); **every** solved+accepted sub is
+  readable right now (the `stat()` pass is the *last* check, so a healthy, up-to-date target pays only two DB
+  reads); the accepted+solved population is still at least as large as that best run; and the
+  `best:solved` fingerprint marker (`AUTO_STACK_DEGRADED_META_KEY`) says this situation hasn't been healed
+  already. Stamped **before** stacking, like the calibration recheck, and cleared on a survivable error or a
+  cancel — so it can neither crash-loop nor strand a transient failure.
+  **The population check is the answer to the entry's own caution.** Gating on
+  `AUTO_STACK_UNREADABLE_META_KEY` would have been useless for the case this exists to fix: that marker only
+  started being written in v0.270.1, so the owner's already-degraded target has none. Comparing the *current*
+  accepted+solved count against the best run's separates the two cases exactly — a storage hiccup leaves the DB
+  population intact (787 rows, 271 used), whereas a user who deliberately rejected half the subs and re-stacked
+  has shrunk it, and is never second-guessed.
+  **Surfaced, not silent:** the scan records `auto_stack_healed` and the Jobs page renders a green alert —
+  *"All of these subs are readable again… It was stacked again from the full set, so the better picture is
+  back. Your earlier pictures are all still in History"* — with the real numbers per target. Reported only
+  after the stack actually happened, so a target the thin-floor or mixed-pointing guard stops later isn't
+  claimed as healed.
+  **Upgrade-safe (§9):** one new *additive* project-meta key (absent ⇒ never healed ⇒ today's behaviour), no
+  schema, config, on-disk, endpoint or response-shape change, nothing removed or overwritten (a heal is a new
+  run alongside the old ones, exactly like any other stack), and the whole path lives inside the already
+  off-by-default `auto_stack` pass.
+  **Tests (+5 python, all fail-before; +3 frontend):** `tests/webapp/test_auto_stack_pipeline.py` — the owner's
+  own sequence healing in one scan and then staying quiet on every subsequent scan; a deliberately-rejected
+  thinner newest stack left alone; the heal standing down mid-outage and firing once the files return; an
+  editor-export / channel-combine run never read as a collapse; and an ordinary one-frame align drop ignored.
+  `frontend/src/routes/Jobs.test.tsx` — the summary clause, malformed-entry tolerance, and the alert.
+
+  Original spec, for the record:
+
   v0.270.1 stops a walk-away stack publishing a picture made thin by unreadable subs, and re-fires once the
   files come back — but only for outages **from now on**. An install already hit by this (the owner's, per the
   fixed bug above: runs of 787 → 575 → **271** frames) keeps the 271-frame result as its newest picture,
