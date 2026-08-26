@@ -89,24 +89,53 @@ _(none — claim an item here with your branch name)_
   remain. **Leave this for the owner to ask for**, and if they do, ship it with the floor as a named constant and
   the measured before/after on their own data — not on a synthetic frame.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-26 #4, traced — narrow trigger, self-heals, does NOT fire on the
+- ~~**⚪ HARDENING NOTE (Scout QA audit 2026-08-26 #4, traced — narrow trigger, self-heals, does NOT fire on the
   normal Seestar path) — the folder watcher never re-arms a file that was already stable and is then overwritten
-  IN PLACE, so ingest's deliberate in-place-swap recovery is unreachable via the watcher alone.** *(Severity:
-  low — completeness/latency, not data corruption; the Seestar never overwrites (it writes fresh `frame_NNNN`
-  names), so this only bites an unusual NAS-resync-in-place. Confidence: traced.)*
-  `StabilityTracker.update` (`webapp/watcher.py`): a path already in `self._stable` is `continue`d **before** any
-  size/mtime comparison (~line 62), and `self._stable &= seen` (~line 81) only drops a path from `_stable` when it
-  *disappears* from the snapshot. So a sub that already went stable, then is overwritten in place (same filename, new
-  content, without vanishing) with **no other new file arriving**, is never re-detected as newly-stable → `update()`
-  returns `{}` → `on_batch_ready` isn't called → no scan → ingest's `content_changed` swap path
-  (`seestack/io/ingest.py` ~326, which refreshes the stale WCS/QC so the frame isn't stacked at its old sky
-  position) never runs. It **self-heals**: any *other* new file anywhere in the dataset, a manual "Scan incoming",
-  or an app restart (fresh `StabilityTracker`) triggers a full re-glob that re-ingests the swap and picks it up. So
-  it's a latency gap on a dormant target, not silent corruption. **Fix direction (small, additive):** when a path in
-  `_stable` reappears in the snapshot with a *changed* `(size, mtime)`, drop it from `_stable` and restart its
-  quiet timer (re-arm), mirroring the disappear-then-return path that already re-arms. Pure, clock-injectable — add a
-  `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
-  once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
+  IN PLACE, so ingest's deliberate in-place-swap recovery is unreachable via the watcher alone.**~~ —
+  **FIXED v0.276.4** (Builder 2026-08-26, branch `claude/compassionate-galileo-c8yo7r`). *(Autonomy /
+  completeness — the fix makes already-shipped recovery code reachable.)*
+
+  **What shipped, exactly as the fix direction below asked.** `StabilityTracker` now remembers the
+  `(size, mtime)` a path had **when it went stable** (`_stable_stat`), and a path that reappears in the snapshot
+  with a *different* stat is dropped back to pending so its quiet timer restarts and it fires again once the
+  rewrite settles — the same re-arm the disappear-then-return path already had, for the case where the file
+  never disappears. Pruned alongside `_stable`, so a path that vanishes leaves no stale stat behind and a later
+  file of the same name starts from scratch.
+
+  **Cost of the one false-positive shape, stated plainly:** a benign `touch` that moves only the mtime now costs
+  one extra scan. That scan is idempotent — ingest recognises the identical capture (`_same_capture`) and does
+  nothing — so the trade is one wasted glob against a frame that would otherwise stack at a stale sky position
+  forever.
+
+  **Upgrade-safe (§9):** one private in-memory dict on a per-process object; no config, schema, on-disk, API or
+  default change, and nothing persisted. Still strictly read-only over `incoming/` (§10) — the tracker only ever
+  *stats*.
+
+  **Tests (+3 in `tests/webapp/test_watcher.py`, 1 fails before):** the in-place rewrite re-arming and firing
+  once (then settling rather than re-firing every poll); the no-regression half — an untouched stable file
+  reported exactly once however many polls and neighbours go by; and a rewritten-then-deleted path leaving no
+  stale state. The *ingest* half the note asked to validate alongside was already pinned
+  (`tests/test_ingest.py` — the different-capture in-place swap dropping its stale WCS/QC, and the
+  benign-touch no-op), so the two halves are now covered end to end.
+
+  Original spec, for the record:
+
+    *(Severity:
+    low — completeness/latency, not data corruption; the Seestar never overwrites (it writes fresh `frame_NNNN`
+    names), so this only bites an unusual NAS-resync-in-place. Confidence: traced.)*
+    `StabilityTracker.update` (`webapp/watcher.py`): a path already in `self._stable` is `continue`d **before** any
+    size/mtime comparison (~line 62), and `self._stable &= seen` (~line 81) only drops a path from `_stable` when it
+    *disappears* from the snapshot. So a sub that already went stable, then is overwritten in place (same filename, new
+    content, without vanishing) with **no other new file arriving**, is never re-detected as newly-stable → `update()`
+    returns `{}` → `on_batch_ready` isn't called → no scan → ingest's `content_changed` swap path
+    (`seestack/io/ingest.py` ~326, which refreshes the stale WCS/QC so the frame isn't stacked at its old sky
+    position) never runs. It **self-heals**: any *other* new file anywhere in the dataset, a manual "Scan incoming",
+    or an app restart (fresh `StabilityTracker`) triggers a full re-glob that re-ingests the swap and picks it up. So
+    it's a latency gap on a dormant target, not silent corruption. **Fix direction (small, additive):** when a path in
+    `_stable` reappears in the snapshot with a *changed* `(size, mtime)`, drop it from `_stable` and restart its
+    quiet timer (re-arm), mirroring the disappear-then-return path that already re-arms. Pure, clock-injectable — add a
+    `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
+    once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26 #5, branch `claude/vigilant-knuth-t39r9x`) — led the rotation back
   through the stacking engine's remaining un-swept surface (the accumulators, mosaic-canvas sizing, the
