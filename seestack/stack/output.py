@@ -90,12 +90,22 @@ def write_stack_outputs(
     tiff_mode: str = "linear",
     header_meta: dict[str, Any] | None = None,
     already_display: bool = False,
+    frame_coverage: np.ndarray | None = None,
 ) -> dict[str, Path]:
     """
     Write the FITS + TIFF + preview PNG. Returns a dict of ``{kind: path}``.
 
     Parameters
     ----------
+    frame_coverage
+        The honest per-pixel **frame count**, when the stack path can supply it
+        (the weighted-sum and drizzle accumulators both do). Written as a
+        sibling ``{base}_framecov.fits`` so the editor's sky-leveling pass can
+        bin panels by how many subs actually cover them rather than by a sum of
+        weights — see :func:`_write_frame_coverage_fits`. Omitted (or ``None``)
+        writes no sibling at all, which is exactly what every run recorded
+        before this existed looks like, and every consumer falls back to the
+        weighted ``coverage`` as it always has.
     header_meta
         Optional extra FITS header cards to record in ``master.fits`` — stack
         provenance such as target name, number of frames, integration time and
@@ -120,11 +130,21 @@ def write_stack_outputs(
     tiff_path = out_dir / f"{out_basename}.tif"
     preview_path = out_dir / f"{out_basename}_preview.png"
     cov_fits_path = out_dir / f"{out_basename}_coverage.fits"
+    framecov_fits_path = out_dir / f"{out_basename}_framecov.fits"
 
     archived = _archive_existing_outputs(out_dir, out_basename)
 
     _write_fits(fits_path, rgb, wcs_text, header_meta, already_display=already_display)
     _write_coverage_fits(cov_fits_path, coverage)
+    # Only worth a second canvas-sized file when it actually says something
+    # different: on an unweighted stack the coverage map *is* the frame count,
+    # and a consumer that finds no sibling correctly falls back to it. This
+    # keeps the ordinary output set exactly the size it has always been.
+    wrote_framecov = (
+        frame_coverage is not None
+        and not _same_map(coverage, frame_coverage))
+    if wrote_framecov:
+        _write_frame_coverage_fits(framecov_fits_path, frame_coverage)
     _write_tiff(tiff_path, rgb, mode=tiff_mode, already_display=already_display)
     # Preview PNG normally autostretches a linear stack. For an editor export the
     # data is already in display space (the recipe applied a stretch), so writing
@@ -137,6 +157,7 @@ def write_stack_outputs(
         "tiff": tiff_path,
         "preview": preview_path,
         "coverage": cov_fits_path,
+        **({"frame_coverage": framecov_fits_path} if wrote_framecov else {}),
         # {original_path: archived_path} for outputs that already existed and were
         # moved aside. The caller uses this to repoint the *previous* run's history
         # row at its archived files, so a re-stack keeps ``master`` as the newest
@@ -260,6 +281,62 @@ def _write_coverage_fits(path: Path, coverage: np.ndarray) -> None:
     # The comment has to fit the 80-column card beside the value, or astropy
     # truncates it mid-word — so it is kept short deliberately.
     hdu.header["BUNIT"] = ("weight", "sum of frame weights (=frames unweighted)")
+    hdu.writeto(path, overwrite=True)
+
+
+def _collapse_2d(cov: np.ndarray) -> np.ndarray:
+    """A coverage-style map as 2-D float32 (channel-mean for a per-channel one)."""
+    flat = cov.mean(axis=-1) if cov.ndim == 3 else cov
+    return np.asarray(flat, dtype=np.float32)
+
+
+def _same_map(coverage: np.ndarray, frame_coverage: np.ndarray) -> bool:
+    """Do these two maps carry identical numbers once collapsed to 2-D?
+
+    True on every unweighted stack, where Σ-of-weights *is* the frame count —
+    the case where writing the frame-count sibling would only duplicate a
+    canvas-sized file for nothing.
+    """
+    a, b = _collapse_2d(coverage), _collapse_2d(frame_coverage)
+    return a.shape == b.shape and bool(np.array_equal(a, b))
+
+
+def _write_frame_coverage_fits(path: Path, frame_coverage: np.ndarray) -> None:
+    """Write the honest per-pixel **frame count** beside the weighted map.
+
+    The sky-leveling pass bins a mosaic's canvas by coverage level — one bin per
+    panel / overlap region — and pushes each bin's sky to zero. Which bin a pixel
+    lands in must therefore follow the *panel geometry*, and nothing else.
+
+    Binning the weighted map instead does not: with quality weighting on (which
+    the walk-away chain enables by itself on every unattended stack), a pixel's
+    value is Σ of per-frame weights, so a four-sub panel reads anywhere from ~2.5
+    to 4 depending on how good those four subs happened to be. Rounded to
+    integers, one real region **splits into several bins along weight boundaries
+    that have nothing to do with the sky** — measured on a synthetic two-region
+    mosaic, a 4-sub panel and its 8-sub overlap binned as *four* levels
+    (3, 4, 6, 7) — and each half then gets its own sky pushed to zero
+    independently. That is a step-generating mechanism inside a panel, in the
+    very pass whose job is to remove steps.
+
+    ``level_by_coverage`` and ``measure_seam_residual`` have always accepted a
+    ``frame_coverage`` argument for exactly this reason, and the in-stack call
+    passes it; only the *editor*, which reloads the maps from disk, could not —
+    because this file didn't exist. It does now.
+
+    Deliberately a **new sibling** rather than a change to
+    ``{base}_coverage.fits``: those pixels are what every already-recorded run's
+    picture was leveled against, and rewriting their meaning would change
+    existing images. A run without this file falls back to the weighted map
+    exactly as before.
+    """
+    from astropy.io import fits
+
+    cov = frame_coverage
+    cov_2d = cov.mean(axis=-1).astype(np.float32) if cov.ndim == 3 else cov
+    hdu = fits.PrimaryHDU(data=np.asarray(cov_2d, dtype=np.float32))
+    hdu.header["CREATOR"] = "Seestack"
+    hdu.header["BUNIT"] = ("frames", "subs covering this pixel (unweighted)")
     hdu.writeto(path, overwrite=True)
 
 
@@ -462,6 +539,7 @@ RUN_ARTEFACT_SUFFIXES: dict[str, str] = {
     "tiff": ".tif",
     "preview": "_preview.png",
     "coverage": "_coverage.fits",
+    "frame_coverage": "_framecov.fits",
     "progress_webp": "_progress.webp",
     "progress_apng": "_progress.png",
 }

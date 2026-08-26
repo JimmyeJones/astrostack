@@ -49,6 +49,30 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**🟠 FOUND AND FIXED IN THE SAME RUN (Builder 2026-08-26, while measuring the `photometric_normalize`
+  item below) — the editor levelled a mosaic's sky by a sum of WEIGHTS, while the stack that produced it
+  levelled the same image by FRAME COUNT. One real panel was split in half along a weight boundary and each
+  half had its sky pushed to zero separately.**~~ — **FIXED v0.270.4**
+  (branch `agent/mosaic-photometric-auto`). *(Image quality, priority 4 — but on the owner's exact
+  workflow: every walk-away mosaic.)*
+  `level_by_coverage` and `measure_seam_residual` have always taken a `frame_coverage` argument, and the
+  in-stack pass has always passed it (`stacker.py` ~1727) — but **nothing wrote that map to disk**, so the
+  editor, which reloads a run's maps from its output files, had nothing to pass and fell back to the
+  weighted `{base}_coverage.fits`. Since the walk-away chain turns `quality_weighted` on by itself, that map
+  is Σ of per-frame weights on every unattended stack.
+  **Measured** on a synthetic two-region mosaic (4-sub panel + 8-sub overlap) with a realistic QC spread:
+  the weighted map binned it as **four** levels — `(3, 239132 px), (4, 239132 px), (6, 28483 px),
+  (7, 28483 px)` — an *exact 50/50 split of each real region* along a weight boundary that has nothing to
+  do with the sky; the frame count bins it as the **two** the canvas has, `(4, 478264 px), (8, 56966 px)`.
+  Each arbitrary half was then levelled to its own sky independently: a step-generating mechanism inside
+  the pass whose job is removing steps, and a preview/export parity break (the master was levelled by frame
+  count, the editor re-levelled it by weights).
+  **The fix:** the stacker persists the honest count as a sibling `{base}_framecov.fits`, `proxy.py` grows
+  `load_frame_coverage`, `EditContext` grows `frame_coverage`, and the leveling op prefers it.
+  Deliberately a *new sibling* rather than a change to `{base}_coverage.fits` — those pixels are what every
+  already-recorded run's picture was levelled against. Written only when it actually differs from the
+  coverage map, so an unweighted run's output set is exactly the size it has always been.
+
 - ~~**🔴🔴🔴 OWNER-REPORTED REGRESSION, ROOT-CAUSED BY ADVANCED-AI AUDIT (2026-08-17) — a walk-away auto-stack
   never checks whether it can actually READ its subs before it fires, and once it fires on a bad night it can
   NEVER TRY AGAIN. This is the "my images turned out worse" bug, verified with a real repro against the live
@@ -279,6 +303,34 @@ _(none — claim an item here with your branch name)_
   the existing `if is_mosaic:` branch in `auto_recipe`/`_stack_target`). **Measure a real before/after** (seam
   residual with vs. without, on a synthetic hazy-mid-session mosaic) before flipping any default, per
   `AGENTS.md` §9 — do not blind-flip.
+
+  **MEASURED, 2026-08-26 (Builder). The improvement is real and large — but do NOT use seam residual to
+  judge it, and read the blocker below before starting.**
+  - **Seam residual is the wrong metric here and will tell you the change does nothing.** Measured on a
+    synthetic 2×2 mosaic with one panel shot through haze (transparency 1.0 → 0.45, real files dimmed
+    multiplicatively, `transparency_score` set as QC would): `seam_residual` **0.0 with and without**
+    `photometric_normalize`. That is correct behaviour, not a null result — `background_flatten` already
+    removes the per-frame *sky* offset, and seam residual measures a **sky** step between coverage levels.
+    Multiplicative *signal* dimming leaves the sky alone, which is precisely why `level_by_coverage` can't
+    fix it and why this entry exists.
+  - **The right metric is signal continuity across the panel join**, and there the win is big: mean bright-
+    pixel (star) flux compared between a clear-panel region and the hazy-panel region gives a step of
+    **30.6% → 6.8%** with `photometric_normalize` on. Residual 6.8% is the 2× scale clamp (0.45 haze wants
+    2.22×). Reproduce with that measurement, not with `SEAMRES`.
+  - **The `is_mosaic` the fix direction assumes does not exist in `_stack_target`.** It is the *stacker's*
+    decision (`compute_mosaic_canvas(...).is_mosaic`, `seestack/stack/stacker.py` ~1250), made well after
+    `_stack_target` has already built its options. Deciding it outside means either re-running the canvas
+    computation pre-stack or clustering the pointings (`cluster_pointings` at `PANEL_LINK_DIST_DEG`, added
+    v0.270.2, is a cheap proxy); the tidier option is a new default-off `StackOption` the walk-away chain
+    sets, which the engine honours *after* it knows `is_mosaic_canvas`. Either way, keep manual stacks
+    unchanged.
+  - **⚠ Its coverage-map prerequisite is now SHIPPED (v0.270.4) — check it holds before flipping.** Turning
+    photometric normalization on makes a pixel's weighted coverage Σ(w/s²), which can be 4× off at the
+    clamp. That map is what the sky-leveling pass bins mosaic panels by, so before v0.270.4 this would have
+    scrambled the panel bins — the exact seam-grid failure mode the owner has complained about. v0.270.4
+    persists the honest frame count as `{base}_framecov.fits` and the leveling pass now prefers it, so the
+    binning no longer moves when photometric scaling is on. **Verify that on a fresh run** (the frame-count
+    bins must be identical with and without `photometric_normalize`) as the first step of this task.
 
   - **Scout 2026-08-26 — precise implementation site traced; the filed "mirror it in `_stack_target`"
     direction is WRONG and would send the Builder down a dead end.** `_stack_target` / `build_stack_options`
@@ -19353,6 +19405,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.270.4** — 🟠 The editor levels a mosaic's sky by **frame count**, the way the stack that produced it
+  always has. `level_by_coverage` has always accepted `frame_coverage` and the in-stack pass has always
+  passed it, but nothing wrote that map to disk — so the editor fell back to the weighted coverage map, which
+  is Σ of per-frame weights on every walk-away stack (`quality_weighted` is auto-on). Measured on a two-region
+  mosaic: the weighted map binned it as **four** levels, splitting each real region exactly 50/50 along a
+  weight boundary, and levelled each half's sky independently; the frame count gives the **two** the canvas
+  has. Now persisted as a sibling `{base}_framecov.fits` (only when it differs from the coverage map, so an
+  unweighted run's output set is unchanged), loaded by `load_frame_coverage`, carried on `EditContext`.
+  Also unblocks the `photometric_normalize`-on-mosaics item. Tests: `tests/test_frame_coverage_sibling.py`
+  (+6, new).
 - **v0.270.2** — 🟠 A star-poor mosaic panel is no longer auto-rejected as "cloud". `grade_frames` built its
   star-count / sky-level / transparency populations across the **whole target**, but a mosaic's panels are
   different patches of sky — so on the audit's repro **40 of 40** of a legitimately star-poor panel's subs

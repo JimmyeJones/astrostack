@@ -1,8 +1,9 @@
 """Deleting a stack run takes *everything* it left on disk and in the DB with it.
 
-A run is more than its ``stack_runs`` row: six output files (only three of which
-are recorded as columns), the editor's cached preview proxy, and up to six
-``project_meta`` annotations. Both delete paths — the single-run endpoint and
+A run is more than its ``stack_runs`` row: a whole set of output files (only
+three of which are recorded as columns — the rest are resolved from the
+basename, see ``RUN_ARTEFACT_SUFFIXES``), the editor's cached preview proxy,
+and a handful of ``project_meta`` annotations. Both delete paths — the single-run endpoint and
 "Prune old stacks" — go through one ``purge_stack_run``, because reclaiming
 space is the whole point of either button.
 """
@@ -117,10 +118,15 @@ def test_pruning_reclaims_as_much_as_deleting_one_run(client, solved_library):
     # Its annotation count is read off the registry rather than hard-coded, so
     # registering a new per-run prefix (as it should be) doesn't fail this for
     # the wrong reason — the assertion is "every one of them survived".
+    from seestack.stack.output import RUN_ARTEFACT_SUFFIXES
     from webapp.run_meta import per_run_meta_prefixes
 
     kept_files, kept_meta = _leftovers(solved_library, safe, "newest", keep)
-    assert len(kept_files) == 8   # six outputs + two proxy files
+    # Counted off the artefact registry for the same reason the annotations are:
+    # adding a new per-run output file (as this should be free to do) must not
+    # fail this for the wrong reason — the assertion is "every one of them
+    # survived", which is the whole output set plus the two proxy files.
+    assert len(kept_files) == len(RUN_ARTEFACT_SUFFIXES) + 2
     assert kept_meta == list(per_run_meta_prefixes())
 
 
