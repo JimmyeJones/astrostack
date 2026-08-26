@@ -191,6 +191,10 @@ class CatalogObject:
     # looking at?"), curated for the popular targets; ``""`` when the catalog has
     # none (the object-info card then reads fine from type + constellation alone).
     blurb: str = ""
+    # Distance in light-years — which *is* the light-travel time in years, so it
+    # drives the "how far did you see?" line (:mod:`seestack.lighttravel`).
+    # ``None`` for an entry without a vetted distance (we never guess one).
+    distance_ly: float | None = None
 
 
 @dataclass
@@ -341,6 +345,8 @@ def _load_catalog_file(path: Path) -> list[CatalogObject]:
             size_arcmin=(float(o["size_arcmin"]) if o.get("size_arcmin") is not None
                          else None),
             blurb=o.get("blurb", ""),
+            distance_ly=(float(o["distance_ly"]) if o.get("distance_ly") is not None
+                         else None),
         )
         for o in raw["objects"]
     ]

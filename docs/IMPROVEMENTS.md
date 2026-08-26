@@ -13714,8 +13714,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   the date out). **Slices —** (a) the pure helper + tests; (b) render the sentence (frontend, gated on
   presence). Slice (a) alone is a shippable Builder run.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26) — "How far did you see?": a light-travel-time wow-badge on the
-  finished picture.** *(Pillar: friendliness / enjoy + understand — PRIORITY 3. Size: S–M.)* A beginner who
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26) — "How far did you see?": a light-travel-time wow-badge on the
+  finished picture.**~~ — **SHIPPED v0.272.0** (Builder 2026-08-26, branch
+  `agent/mosaic-photometric-per-panel`), **both slices, built to the spec.**
+  *(Friendliness / enjoy + understand — PRIORITY 3.)*
+  `seestack/lighttravel.py` — a pure, offline `light_travel(distance_ly) -> LightTravel | None` returning the
+  finished sentence, so no client re-derives the wording — plus `distance_ly` on `CatalogObject` and on all
+  **157** bundled entries (110 Messier + 47 popular NGC/IC), through `ObjectInfo` →
+  `GET /api/targets/{safe}/identify` → one italic accent line at the bottom of the existing
+  `ObjectInfoCard`. *"The light in this picture left about 2.5 million years ago — before our species
+  existed."*
+  **The one thing worth knowing for future edits — the historical anchors are picked to be true across their
+  WHOLE band, not just at a nice example**, and a test (`test_the_anchors_never_overstate_at_their_own_floor`)
+  pins each floor against the age of the thing it points at: ≥1 Mly *"before our species existed"* (we are
+  ~300 ky old), ≥100 kly *"long before recorded history"*, ≥10 kly *"before the first cities were built"*
+  (~6 ky), ≥2 kly *"before the Roman Empire fell"* (~1,550 y), ≥500 ly *"before the telescope was invented"*
+  (1608). Below 500 ly **nothing is claimed** — the sentence is just the number, which is still striking
+  ("about 440 years ago" for the Pleiades). Durations are rounded hard on purpose (published distances carry
+  real uncertainty, and "about 2.5 million years" is right whether the catalog says 2.48 or 2.54 Mly), and
+  "thousand" only starts at ten thousand — "1.3 thousand years" is clumsier than "1,340 years".
+  **The data is hand-curated, so it ships with the one internal cross-check that exists:** six catalog blurbs
+  already state a distance in prose, and a test asserts the new field agrees with every one of them to 10%
+  (M33's field was moved 2.9 → 2.7 Mly to match its own blurb). Anything without a vetted distance simply has
+  no field and renders nothing — never a guess, same discipline as `size_arcmin`.
+  **Upgrade-safe (§9):** additive nullable catalog field, additive nullable API field an older frontend
+  ignores, no config/schema/on-disk/default change. **Tests (+26 python, +2 frontend):**
+  `tests/test_lighttravel.py` (the bands, the rounding ladder, the anchor-floor safety property, the
+  blurb cross-check, and end-to-end through `identify_object`), `tests/webapp/test_target_identify.py` (+2),
+  `frontend/src/components/ObjectInfoCard.test.tsx` (+2, including the no-distance silence).
+
+  Original spec, for the record:
+
+  *(Pillar: friendliness / enjoy + understand — PRIORITY 3. Size: S–M.)* A beginner who
   stacks a galaxy has no intuitive sense of what they just did. We already identify the object
   (`seestack/post/target_id.py` + the "What am I looking at?" card, v0.110.0) and ship the offline deep-sky
   catalog (`seestack/data/messier.json`, `deepsky_popular.json`), so once a run is solved we know *which*

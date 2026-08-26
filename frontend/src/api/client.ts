@@ -303,6 +303,14 @@ export interface FramingHint {
   text: string;
 }
 
+export interface LightTravel {
+  distance_ly: number;
+  // The friendly duration alone, e.g. "2.5 million years".
+  years: string;
+  // The ready-to-render sentence.
+  text: string;
+}
+
 export interface DifficultyHint {
   level: "easy" | "moderate" | "challenging";
   // One-word badge text, e.g. "Easy".
@@ -336,6 +344,10 @@ export interface ObjectInfo {
   // type/size say the default per-channel fit would bend into it; absent/null
   // for everything else (older backends omit it — treat as "no advice").
   background_mode_hint?: BackgroundModeHint | null;
+  // "How far did you see?" — the light in this picture left N years ago, from
+  // the catalog's vetted distance; absent/null for an object without one (older
+  // backends omit it — the card shows nothing either way).
+  light_travel?: LightTravel | null;
 }
 
 export interface BackgroundModeHint {

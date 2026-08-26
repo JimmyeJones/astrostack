@@ -107,6 +107,15 @@ export function ObjectInfoCard(
               {framingSentence(d.name || d.id, d.framing)}
             </Text>
           ) : null}
+          {/* "How far did you see?" — the one line on this card that is pure
+              wonder rather than advice, so it sits last and reads in the app's
+              accent colour. Self-hiding: an object with no vetted catalog
+              distance shows nothing at all. */}
+          {d.light_travel ? (
+            <Text size="sm" c="indigo.5" fs="italic">
+              {d.light_travel.text}
+            </Text>
+          ) : null}
         </Stack>
       </Group>
     </Paper>
