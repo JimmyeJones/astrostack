@@ -215,6 +215,36 @@ describe("ObjectInfoCard", () => {
       ).toBeInTheDocument());
   });
 
+  it("renders the light-travel line, and nothing when there's no vetted distance", async () => {
+    // The one line on the card that's pure wonder rather than advice. The
+    // backend hands over the finished sentence, so the card only decides
+    // whether to show it.
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+      light_travel: {
+        distance_ly: 2500000, years: "2.5 million years",
+        text: "The light in this picture left about 2.5 million years ago — before our species existed.",
+      },
+    });
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByText(/before our species existed/)).toBeInTheDocument());
+  });
+
+  it("shows no light-travel line for an object with no vetted distance", async () => {
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "NGC 663", name: "NGC 663", type: "open cluster",
+      constellation: "Cassiopeia", constellation_abbr: "Cas",
+      ra_deg: 26, dec_deg: 61, matched_by: "name",
+    });
+    const { container } = renderCard();
+    await waitFor(() =>
+      expect(screen.getAllByText("NGC 663").length).toBeGreaterThan(0));
+    expect(container.textContent).not.toContain("The light in this picture");
+  });
+
   it("renders nothing when the target isn't recognised", async () => {
     vi.spyOn(client.api, "identifyTarget").mockResolvedValue(null);
     const { container } = renderCard();

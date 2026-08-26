@@ -73,3 +73,29 @@ def test_identify_returns_null_for_an_unmatched_target(client, solved_library):
 def test_identify_unknown_target_404(client):
     r = client.get("/api/targets/does_not_exist/identify")
     assert r.status_code == 404
+
+
+def test_identify_carries_the_light_travel_line(client, solved_library):
+    # "How far did you see?" — the one line on the card that is pure wonder
+    # rather than advice. M42 is ~1,344 ly, so the light left before the
+    # telescope existed; the endpoint carries the whole ready-to-render
+    # sentence, so no client has to re-derive the wording.
+    info = client.get("/api/targets/M_42/identify").json()
+    lt = info["light_travel"]
+    assert lt is not None
+    assert lt["distance_ly"] == 1344
+    assert lt["years"] == "1,340 years"
+    assert lt["text"] == (
+        "The light in this picture left about 1,340 years ago — "
+        "before the telescope was invented."
+    )
+
+
+def test_identify_light_travel_reaches_a_megalight_year_galaxy(client, solved_library):
+    client.post("/api/targets", json={"name": "M 31"})
+    targets = client.get("/api/targets").json()
+    safe = next(t["safe_name"] for t in targets if t["name"] == "M 31")
+    lt = client.get(f"/api/targets/{safe}/identify").json()["light_travel"]
+    assert lt is not None
+    assert "2.5 million years ago" in lt["text"]
+    assert "before our species existed" in lt["text"]
