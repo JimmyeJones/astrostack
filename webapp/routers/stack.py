@@ -1652,6 +1652,13 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
         for hk, k in (("PHOTMIN", "min"), ("PHOTMAX", "max"), ("PHOTMED", "median")):
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 photometric[k] = float(header[hk])
+        # Why it ran, and over how many mosaic panels — a mosaic normalizes
+        # itself (the user never ticked a box), and each panel is gain-matched
+        # against its own subs rather than against the other panels.
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            photometric["auto"] = bool(header["PHOTAUTO"])
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            photometric["n_panels"] = int(header["PHOTPANL"])
 
     # Dark exposure-scaling summary (present only when a master dark was actually
     # scaled to the subs' exposure), parsed the same way so the panel can show a
