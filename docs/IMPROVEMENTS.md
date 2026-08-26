@@ -75,6 +75,19 @@ _(none — claim an item here with your branch name)_
   its name implies, without starving the coarse rescue rungs — needs a test that a hard frame still gets its rescue
   attempts and that total per-frame time is bounded. Only worth doing if the owner wants true per-frame bounding;
   the label fix above already removes the surprise.
+  **Builder 2026-08-26 — considered and deliberately DECLINED this run; read this before picking it up.** I sized
+  it against the real code and stopped, because every workable shape is a **blind threshold flip on the
+  on-by-default hot path**, which AGENTS.md §1 tells an agent not to do. The ladder cannot be given a true
+  per-frame bound without a per-rung floor (a shared deadline alone gives rungs 2–3 *nothing* on exactly the
+  frames a timeout means they exist to rescue), and the floor's size *is* the tradeoff: at 25 % of `timeout_s`
+  the worst case falls 3× → 1.5×, at 50 % it falls to 2×, and in both cases a hard frame that rung 3 would have
+  cracked in, say, 20 s is now abandoned. Which frames that loses is unmeasurable from the repo — it needs a real
+  cloudy night's subs, which no agent has. Meanwhile the cost of leaving it is now *bounded and honest*: the
+  Settings hint says "up to about 3×" (v0.272.2), and as of **v0.276.3** a sub that burned the whole ladder is
+  no longer silent — it lands in its own "Ran out of time being located" bucket on the Target page telling the
+  owner to raise the timeout. So the surprise and the invisibility are both gone; only the wasted minutes
+  remain. **Leave this for the owner to ask for**, and if they do, ship it with the floor as a named constant and
+  the measured before/after on their own data — not on a synthetic frame.
 
 - **⚪ HARDENING NOTE (Scout QA audit 2026-08-26 #4, traced — narrow trigger, self-heals, does NOT fire on the
   normal Seestar path) — the folder watcher never re-arms a file that was already stable and is then overwritten
@@ -7588,6 +7601,41 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **NEW IDEA (Builder 2026-08-26, spotted while shipping the drizzle-rejection affordability fix v0.276.2) —
+  a walk-away stack whose *canvas* busts the memory budget still hard-refuses, even though the engine already
+  knows the exact one-line change that would make it fit.** *(Pillar: autonomy — PRIORITY 2. Size: M.)*
+  `_best_memory_fix` (`seestack/stack/stacker.py`) already computes the single least-destructive lever and the
+  memory it lands at — *"lower the drizzle scale to ×1.3 (~4.2 GB)"*, *"switch Canvas mode to 'reference'"*,
+  *"lower Extra outlier passes to 1"* — and both the pre-submit estimate and the run-time refusal quote it. That
+  is exactly right for a **watching** user: they read the advice and click the button. On the **walk-away** path
+  nobody reads it, so the target simply stops producing pictures until the owner next looks at the Jobs page.
+  v0.276.2 established the pattern for precisely this asymmetry on the rejection pass (auto-chosen ⇒ degrade
+  quietly; explicitly ticked ⇒ refuse loudly with the advice). **Shape:** on an unattended run only, when
+  `_best_memory_fix` returns a `drizzle_scale` fix, apply it instead of raising — log it plainly, stamp it in
+  provenance (a `DRZSCLAD`-style card beside `DRZREJSK`), and surface it once on the Target page's notes area
+  in the shipped voice (*"Last night's stack used ×1.3 super-resolution instead of ×1.5 — the bigger canvas
+  didn't fit in memory. Your picture is slightly less zoomed-in but nothing was lost."*). **Cautions:** a
+  *smaller drizzle scale changes the output pixel grid*, so a target's runs would no longer all be the same
+  size — decide deliberately whether that is acceptable (it probably is: a picture at ×1.3 beats no picture, and
+  the editor/History already handle per-run shapes). Do **not** auto-apply `reference_canvas` on a mosaic
+  unattended — silently cropping the field a user spent five nights building is a different order of change and
+  belongs behind the owner's sign-off. Reuse `auto_reject` as the "the user expressed no preference" signal, as
+  `_afford_drizzle_reject` does, so a manual stack is untouched. Testable purely against the estimator (a budget
+  that fits ×1.3 but not ×1.5 → the unattended run produces a ×1.3 picture; the manual one still raises).
+
+- **NEW IDEA (Builder 2026-08-26, spotted while adding the "ran out of time being located" bucket v0.276.3) —
+  the "why were some frames left out?" buckets give advice in prose but can't link to the thing they name, so
+  every piece of advice ends in a hunt.** *(Pillar: friendliness — PRIORITY 3. Size: S.)* The buckets now say
+  things like *"raise the ASTAP timeout in Settings and run Plate Solve again"* and *"Run Plate Solve to include
+  them"* — correct, plain-language, and entirely un-clickable: `RejectionBreakdown.tsx` renders label + count +
+  note as text. A beginner then has to find which of the Settings pages holds "ASTAP timeout". **Shape:** let a
+  bucket carry an optional `action: {label, to}` (a route, e.g. `/settings/solving`, or a same-page anchor)
+  built server-side beside the note, and have `RejectionBreakdown` render it as one small `Anchor`/`Button`
+  under the note when present. Purely additive to an existing response field, generic (every future bucket gets
+  it for free), and self-hiding on older backends that omit it. **Beginner bar:** it removes a navigation step
+  from advice the app already decided to give — no new concept, no new knob. Pairs with the existing
+  `solve_setup_problem` banner, which *does* already link, so the two would finally behave the same way.
 
 - ~~**NEW IDEA (Scout 2026-08-26 #4, grounded in the plate-solve audit) — when subs fail to plate-solve because
   ASTAP *timed out* (not because the database/ASTAP is missing), say so and offer the one obvious fix: raise the
