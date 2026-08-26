@@ -95,6 +95,49 @@ _(none — claim an item here with your branch name)_
   `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
   once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
+- **⚪ QA AUDIT RESULT (Scout 2026-08-26 #5, branch `claude/vigilant-knuth-t39r9x`) — led the rotation back
+  through the stacking engine's remaining un-swept surface (the accumulators, mosaic-canvas sizing, the
+  drizzle path, the video/lucky-imaging stack) and the calibration apply path, all adversarially; came back
+  CLEAN — no new verified bug. Also re-ran the running-app dogfood end to end (clean).** Baseline green before
+  touching anything (**2872 passed, 2 skipped** — full headless suite). Read adversarially and, where cheap,
+  traced breaking cases against the real code:
+  `seestack/stack/accumulator.py` — `WeightedSumAccumulator`'s Σweights-vs-frame-count split (`coverage` vs
+  `frame_coverage`, the any-channel `valid.any(axis=2)` count that stops per-channel κ-σ from under-counting a
+  frame), the `_mask_bool` `(H,W)`→`(H,W,1)` broadcast, `MinMaxRejectAccumulator`'s ±inf k-set identities +
+  the ≥2k+1 / 3..2k / 1..2 degrade bands + its structural `rejection_counts`, and `WelfordAccumulator`'s
+  `n_safe` divide-guard and unbiased-variance-NaN-for-n<2 contract — all correct.
+  `seestack/stack/mosaic.py` — the wrap-safe `_circ_mean_ra_deg`/`unwrap_ra_deg` per-frame centres, the
+  robust median+MAD outlier pass with its "never drop >½ the frames" rail, the iterative dimension-cap drop
+  loop and the megapixel budget, the half-open CRPIX shift — every RA=0-straddle and bad-solve edge I could
+  build was already handled.
+  `seestack/stack/drizzle_path.py` — the float64 `E[x²]−E[x]²` variance with its ULP(m²) resolution floor,
+  the `neff`=true-frame-count gate (so pixfrac<1/scale>1 weight deflation can't silently disable rejection on
+  a low-coverage edge), the Bessel correction applied only to the tol (not the floor test), the `[-0.5,N-0.5]`
+  half-open pixel bounds, the any-channel `deposited` frame count, and `intersects` vs deposited-footprint —
+  all correct and commented.
+  `seestack/video/lucky.py` — the two-pass streaming grade→keep→align→average (flat memory bound), the
+  argsort-stable tie-to-earlier keeper that makes "the sharpest frame is always a keeper and is the align
+  reference" true by construction, the `_MAX_SHIFT_FRACTION` reject, `cval=np.nan` vacated-edge honesty, and
+  the disk-appropriate linear `normalize_for_display` (percentile anchors, not an STF) — correct.
+  `seestack/calibrate/apply.py` — the pedestal `nan_to_num` sanitisation with its no-data masks, the flat's
+  NaN-not-0 sentinel + `_FLAT_FLOOR`, the `_bias_applies` "never double-subtract the bias through a dark"
+  rule, `_effective_dark`'s exposure-scaling with both no-data-mask restorations, and the fresh-array
+  contract; **confirmed both `apply_raw` call sites (`align.py:137`, `stacker.py:2183`) pass
+  `light_exposure_s=info.exposure_s`, so dark exposure-scaling is never silently skipped for want of the
+  exposure.** The one still-open unguarded gap here is the already-filed Bayer-pattern note below (a flat with
+  a matching shape but a different CFA phase isn't refused) — trigger requires mixed-source masters, doesn't
+  fire on normal Seestar input.
+  The dogfood pass (`scripts/agent-dogfood.sh`: real app, bundled M42 sample stacked + auto-processed,
+  Playwright 1440 px + 420 px across Target / Stack / Editor / Sky-so-far) reported **nothing overflowing, no
+  console errors**; the sample stacks and auto-edits cleanly. **Also confirmed by grep that the walk-away
+  `auto` chain already auto-enables `auto_reject`, `quality_weighted`, `photometric_normalize` (mosaic) and
+  `drizzle_reject` (`webapp/pipeline.py` ~2417–2462) — so no "single-pass drizzle silently keeps trails"
+  autonomy gap exists.** **This is the fifth consecutive clean engine-side audit** — the engine and its
+  neighbours are drained. Front of the *actionable* bug queue is unchanged: the ASTAP per-frame timeout-budget
+  behavioural half (item (b) at the top of this section), then the two trigger-gated hardening notes (watcher
+  in-place re-arm; flat Bayer-pattern guard). Future Scout runs can lead with the still-un-swept-in-depth
+  routers (`stack.py`, `editor.py`) / storage and re-audit the engine only occasionally.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26 #4, branch `claude/vigilant-knuth-243xct`) — rotated the lead QA off the
   (drained) stacking engine per the prior audits' advice and swept the webapp routers + plate-solve + watcher/
   ingest/QC + the post-processing colour chain; the engine's neighbours hold up, with the two low-severity traced
@@ -11089,6 +11132,25 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **IMPROVEMENT IDEA (Scout 2026-08-26 #5, measured this run) — the shipped "what am I looking at?" object card
+  is SILENT for most real targets because the catalog `blurb` field is only half-populated.** *(Pillar:
+  understand + enjoy — PRIORITY 3. Size: S–M. Confidence: measured.)* The `blurb` (a beginner-friendly
+  one-liner about the object) drives a shipped card, but coverage is thin: **only 36 of 110 Messier objects
+  and 34 of 47 popular NGC/IC objects carry one** (measured directly from `seestack/data/messier.json` and
+  `deepsky_popular.json` this run). So a beginner who shoots M2, M3, M5, or well-known *named* nebulae like the
+  **Wizard (NGC 7380)**, **Flaming Star (IC 405)**, **Seagull (IC 2177)** or **Monkey Head (NGC 2174)** gets an
+  empty "what am I looking at?" — exactly the moment the card exists to serve. **Shape:** a pure data-curation
+  task — fill in the ~74 missing Messier blurbs and ~13 missing popular-NGC/IC blurbs with the same tone,
+  length and factual bar as the existing ones (one plain, warm sentence; standard published facts only; no
+  network, no per-object research beyond well-known catalog descriptions). **Feasibility:** offline, additive,
+  static-data only — no schema/config/API/on-disk change, and no engine change; the loader already reads
+  `blurb` and the card already renders it when present, so this is pure content. **Testable:** add a coverage
+  assertion pinning that every Messier id and every popular-catalog id now carries a non-empty `blurb` (so the
+  gap can't silently reopen), plus a bound on blurb length so a future addition stays a *one-liner*. **Care:**
+  keep each blurb genuinely beginner-friendly and factually conservative — the card's whole value is trust, so
+  a made-up or breathless line is worse than the current silence. Do it in one or two Builder passes (e.g.
+  Messier first, then the named popular nebulae), not one giant commit.
+
 - ~~**NEXT SLICE OF THE STANDING IA ITEM (Builder 2026-08-18, counted in `routes/Target.tsx` while shipping the
   History-card grouping v0.267.0) — the Target page's hero action row is **nine controls wide**, and four of them
   are the same "do something with the finished picture" family the History card just folded into one menu.**~~ —
@@ -14041,6 +14103,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-26 #5) — "How big is it, really?": a full-Moons-wide scale line on the
+  "what am I looking at?" object card.** *(Pillar: understand + enjoy — PRIORITY 3. Size: S.)* A beginner reads
+  "M31 · 178 arcmin" and it means nothing — arcminutes are an expert unit. But *"about as wide as 6 full
+  Moons"* lands instantly, and "M31 is six Moons across" is one of the classic wow-facts that make a newcomer
+  fall for this hobby. The app already stores the vetted `size_arcmin` (major axis) for every catalog object
+  and already renders an object-info card; nothing today translates that angular size into an intuitive
+  real-world unit. **Verified genuinely new (grepped this run):** `framing.py` only compares an object's size
+  to *a Seestar frame* ("about as wide as a single Seestar frame — shoot it in mosaic"), which answers "will it
+  fit?", not "how big is it in the sky?"; there is no full-Moon / naked-eye comparison anywhere in the engine,
+  webapp, or frontend. **Shape:** a pure helper `angular_size_phrase(size_arcmin) -> str | None` next to
+  `objectinfo`/`framing` that divides by the Moon's ~31 arcmin apparent diameter and phrases it for a beginner:
+  ≥ ~1.3 Moons → *"about as wide as N full Moons"* (round to a friendly integer/half, "1½", "6"); between ~0.4
+  and ~1.3 Moons → *"roughly the size of the full Moon"*; below that → *"a small target — well under the full
+  Moon's width"* (or simply return `None` and let the existing card stay quiet for a tiny planetary nebula
+  where the comparison isn't illuminating). Render it as one extra plain line on the existing object-info card,
+  right beside the distance/light-travel line it rhymes with. **Beginner bar:** clears it cleanly — instantly
+  understandable, plain language, no knob, a sane default (self-hides when `size_arcmin` is absent or the
+  object is far below Moon-scale), and it's pure *understand + enjoy*, not pro tooling. **Feasibility:**
+  offline, additive, read-only, uses data the app already has and already surfaces; the helper is trivially
+  unit-testable (178′ → "6 full Moons"; 31′ → "roughly the full Moon"; 4′ → `None`/"small"; missing size →
+  `None`). **Slices —** (a) the pure `angular_size_phrase` helper + tests (a shippable Builder run on its own);
+  (b) render the line on the object-info card (frontend, gated on presence). **Care:** round hard — a beginner
+  wants "6 Moons", never "5.74 Moons"; and the full Moon is the *only* comparison unit a non-astronomer already
+  has an intuition for, so don't reach for degrees or fists-at-arm's-length.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #4) — "Does my colour look right?": an object-aware colour sanity
   nudge on the finished picture.** *(Pillar: understand + trust / image quality — PRIORITY 3–4. Size: M.)*
