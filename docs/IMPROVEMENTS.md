@@ -7293,9 +7293,36 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
-  readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.** *(Pillar:
-  autonomy + friendliness — PRIORITY 2–3. Size: S.)* v0.270.1 correctly holds a walk-away stack back when a
+- ~~**NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
+  readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.**~~ —
+  **SHIPPED v0.274.0** (Builder 2026-08-26, branch `claude/compassionate-galileo-q9q6fs`). *(Pillar:
+  autonomy + friendliness — PRIORITY 2–3.)*
+  **What shipped:** `GET /api/targets/{safe}/autostack-hold` returns the hold the **newest finished scan**
+  recorded for that target (`auto_stack_held_unreadable`), or `null`; `AutoStackHoldNote` renders it as a
+  self-hiding note inside the Target page's `NoticeBoard` at `NOTICE_PRIORITY.warning` — so it lands in the
+  page's existing prioritised notes area rather than becoming one more always-on banner (the standing
+  "extremely busy" constraint). The wording is the Jobs page's, verbatim, with the same per-target numbers:
+  *"516 of 787 subs couldn't be read on the last scan (271 still readable)… Put it back and the next scan
+  will stack the full set automatically — nothing has been lost."*
+  **Read-only, and deliberately not dismissible.** Only the newest finished `pipeline` job is consulted, so a
+  hold the next scan resolved simply stops being reported — the note has no state of its own to go stale, and
+  a dismissal would have let a beginner hide a live storage problem and go back to wondering why the picture
+  is stale. A still-running scan (no verdict yet) and other job kinds are ignored, and a malformed entry from
+  an older build renders nothing rather than 500-ing the page.
+  **Not in this slice:** the Dashboard target card. The Target page is where someone whose picture stopped
+  updating actually goes, the Dashboard tile has no room for a paragraph, and one voice in one place beats
+  the same sentence in two. File it again if the owner ever misses it there.
+  **Upgrade-safe (§9):** one new additive endpoint, no change to `TargetOut` or any existing response shape,
+  no config/schema/on-disk/default change; an older frontend never calls it and the note fails soft (a 404 or
+  a network error renders nothing).
+  **Tests (+5 python, +4 frontend):** `tests/webapp/test_autostack_hold.py` (the scan's own numbers, only for
+  the held target; self-clearing once a later scan stacks it; running/other-kind jobs ignored; silent with no
+  scans and 404 for an unknown target; a malformed entry tolerated) and `AutoStackHoldNote.test.tsx` +
+  a `Target.test.tsx` case pinning that it reaches the page's notes area.
+
+  Original spec, for the record:
+
+  v0.270.1 correctly holds a walk-away stack back when a
   storage hiccup would publish a thinner picture, and renders the plain-language reason — but **only in
   `frontend/src/routes/Jobs.tsx`** (`auto_stack_held_unreadable`; grepped this run — it appears nowhere else in
   the frontend). A beginner whose picture silently stops updating looks at the **Target page**, where their

@@ -1556,6 +1556,27 @@ describe("TargetView reject breakdown + undo", () => {
     expect(screen.getByText(/at least 3 subs are located/)).toBeInTheDocument();
   });
 
+  it("says on the Target page when the last scan held the stack back for missing files",
+    async () => {
+    // The hold was explained only on the Jobs page, which is not where someone
+    // whose picture stopped updating goes looking — they come here.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 787, n_frames_accepted: 787 }),
+    );
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "autoStackHold").mockResolvedValue({
+      offered: 787, readable: 271, unreadable: 516,
+      reason: "that would be a thinner stack than this target already has",
+      when_utc: "2026-08-26T02:00:00Z",
+    });
+    renderTarget();
+    await waitFor(() =>
+      expect(screen.getByTestId("autostack-hold-note")).toBeInTheDocument());
+    expect(screen.getByText(
+      /516 of 787 subs couldn't be read on the last scan/,
+    )).toBeInTheDocument();
+  });
+
   it("does not show the auto-stack waiting note when Auto-stack is off", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(
       mkTarget({ n_frames: 202, n_frames_accepted: 202 }),

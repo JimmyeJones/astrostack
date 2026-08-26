@@ -374,6 +374,17 @@ export interface SessionQualityDrift {
   n_baseline: number;
 }
 
+/** Why the last hands-off scan held this target's stack back because some of
+ * its subs had no file on disk right now (`GET /api/targets/{safe}/autostack-hold`;
+ * `null` when the newest scan didn't hold it). */
+export interface AutoStackHold {
+  offered: number;
+  readable: number;
+  unreadable: number;
+  reason?: string | null;
+  when_utc?: string | null;
+}
+
 export interface SessionRecap {
   n_frames: number;
   n_kept: number;
@@ -1687,6 +1698,8 @@ export const api = {
     req<ObjectInfo | null>(`/api/targets/${safe}/identify`),
   sessionRecap: (safe: string) =>
     req<SessionRecap | null>(`/api/targets/${safe}/session-recap`),
+  autoStackHold: (safe: string) =>
+    req<AutoStackHold | null>(`/api/targets/${safe}/autostack-hold`),
   stackHealth: (safe: string, runId?: number) =>
     req<StackHealth | null>(
       `/api/targets/${safe}/stack-health` +

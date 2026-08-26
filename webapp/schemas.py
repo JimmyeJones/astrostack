@@ -158,6 +158,24 @@ class SessionQualityDriftOut(BaseModel):
     n_baseline: int
 
 
+class AutoStackHoldOut(BaseModel):
+    """Why the last hands-off scan held *this* target's stack back.
+
+    The walk-away readability preflight (v0.270.1) refuses to publish a picture
+    made thin by subs it couldn't read, and says so on the Jobs page — but a
+    beginner whose picture stops updating looks at the **Target** page, where
+    their picture lives. Same numbers, same wording, at the surface they
+    actually stare at. Read-only, and derived from the most recent finished scan
+    only, so it disappears by itself the moment a scan stacks the target.
+    """
+
+    offered: int
+    readable: int
+    unreadable: int
+    reason: str | None = None
+    when_utc: str | None = None
+
+
 class SessionRecapOut(BaseModel):
     """Plain-language recap of a target's most recent capture session."""
 
