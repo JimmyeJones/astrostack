@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from seestack.io.library import Library
+from seestack.io.project import count_unreadable_frames
 from seestack.io.scanner import run_qc_and_solve, scan_and_organize
 from seestack.render.thumbnail import invalidate_frame_thumbs
 from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
@@ -50,6 +51,20 @@ AUTO_STACK_ATTEMPT_META_KEY = "web_auto_stack_attempt"
 # crash-loop discipline of ``AUTO_STACK_ATTEMPT_META_KEY`` so a restack that (for
 # any reason) stays uncalibrated can't re-trigger on every subsequent scan.
 AUTO_STACK_CALIB_META_KEY = "web_auto_stack_calib_retrigger"
+
+# Per-target meta marker recording how many of the last stack attempt's
+# solved+accepted subs had **no readable file on disk at the time**. The
+# attempt marker above is a pure DB-level count, so it cannot tell "I already
+# covered these 800 subs" from "I attempted 800 subs but could only read 280 of
+# them" — and without that distinction a stack crippled by a transient storage
+# problem (an unmounted drive, a NAS share that flapped, a folder moved
+# mid-session) marks the data covered and is never retried, leaving the thin,
+# noisy result standing as the target's newest picture indefinitely. Pairing the
+# attempt count with the unreadable count lets the trigger re-fire *once* the
+# files come back, while still refusing to loop while they are still missing.
+# Absent (older installs, and every healthy target) reads as 0, which is exactly
+# today's behaviour — see :func:`_auto_stack_frame_count`.
+AUTO_STACK_UNREADABLE_META_KEY = "web_auto_stack_unreadable"
 
 
 def _progress(jm: JobManager, job: Job):
@@ -187,6 +202,7 @@ def _pipeline_body(
             stacked: list[str] = []
             skipped: list[str] = []
             held_thin: list[dict[str, Any]] = []
+            held_unreadable: list[dict[str, Any]] = []
             mixed_skipped: list[str] = []
             legacy_skipped: list[str] = []
             stack_errors: dict[str, str] = {}
@@ -240,6 +256,18 @@ def _pipeline_body(
                         held_thin.append(
                             {"target": safe, "frames": attempt_n,
                              "min": settings.auto_stack_min_frames})
+                        continue
+                    unread_hold = _auto_stack_readability_hold(
+                        lib, safe, attempt_n, settings.auto_stack_min_frames)
+                    if unread_hold is not None:
+                        # Some of this target's subs have no file on disk right
+                        # now, and stacking without them would publish a worse
+                        # picture than the one that already stands. Hold back
+                        # *without* marking the attempt — same discipline as
+                        # held_thin — so the next scan stacks it the moment the
+                        # files come back, instead of stamping the data
+                        # "covered" and stranding the degraded result.
+                        held_unreadable.append(unread_hold)
                         continue
                     if settings.mixed_pointing_guard and _mixed_pointing_check(
                             lib, safe) is not None:
@@ -314,6 +342,8 @@ def _pipeline_body(
             summary["auto_stack_skipped"] = skipped
             if held_thin:
                 summary["auto_stack_held_thin"] = held_thin
+            if held_unreadable:
+                summary["auto_stack_held_unreadable"] = held_unreadable
             if mixed_skipped:
                 summary["auto_stack_mixed_skipped"] = mixed_skipped
             if legacy_skipped:
@@ -1614,6 +1644,24 @@ def _solved_accepted_count(proj: Any) -> int:
     return sum(1 for f in proj.iter_frames(accepted_only=True) if f.wcs_json)
 
 
+def _solved_accepted_unreadable(proj: Any) -> int:
+    """How many of a target's solved+accepted subs have **no readable file now**.
+
+    The DB row for a sub survives its file going away, so every count derived
+    from the database alone (``_solved_accepted_count`` included) is a count of
+    subs the app *believes* it can stack, not of subs it can actually read. The
+    stacker already skips an unreadable frame silently and benignly
+    (``readable_frame_path`` → ``None``), which is right for one stack but means
+    a storage hiccup shows up only as a mysteriously thin result.
+
+    One ``stat()`` per solved+accepted frame — the same check the worker makes
+    per frame anyway — so callers keep it off the every-scan path and only ask
+    when the answer is about to change a decision.
+    """
+    return count_unreadable_frames(
+        f for f in proj.iter_frames(accepted_only=True) if f.wcs_json)
+
+
 def _detect_mixed_pointings(proj: Any) -> MixedPointings | None:
     """The mixed-pointing verdict over a target's accepted+solved subs, or ``None``.
 
@@ -1695,10 +1743,90 @@ def _auto_stack_frame_count(lib: Library, safe: str) -> int | None:
         if attempted is not None:
             with contextlib.suppress(TypeError, ValueError):
                 if int(attempted) >= solved_accepted:
-                    return None  # already tried this data; don't loop
+                    # Already tried this data — *unless* that attempt was
+                    # crippled by subs whose files were missing at the time and
+                    # have since come back. The marker is a DB-level count, so
+                    # without this it cannot tell "covered" from "attempted with
+                    # half the night unreadable"; a target hit by a transient
+                    # storage problem would keep its thin, noisy result as the
+                    # newest picture until brand-new subs happened to push the
+                    # count past the stale marker. Re-firing only when *fewer*
+                    # frames are missing than last time keeps a genuine, ongoing
+                    # outage from re-stacking on every single scan.
+                    if not _readability_recovered(proj):
+                        return None
         return solved_accepted
     finally:
         proj.close()
+
+
+def _readability_recovered(proj: Any) -> bool:
+    """Did subs that were unreadable at the last stack attempt come back?
+
+    ``False`` for every healthy target and every install that predates the
+    marker (no key ⇒ 0 missing last time ⇒ nothing to recover), so this only
+    ever *adds* a retry to a target that was demonstrably short-changed. The
+    ``stat()`` pass is reached only when the marker says frames were missing,
+    which is rare by construction.
+    """
+    raw = proj.get_meta(AUTO_STACK_UNREADABLE_META_KEY)
+    if not raw:
+        return False
+    try:
+        last_unreadable = int(raw)
+    except (TypeError, ValueError):
+        return False
+    if last_unreadable <= 0:
+        return False
+    return _solved_accepted_unreadable(proj) < last_unreadable
+
+
+def _auto_stack_readability_hold(
+        lib: Library, safe: str, offered: int, min_frames: int) -> dict[str, Any] | None:
+    """Why a walk-away stack of ``safe`` should be held back right now, or ``None``.
+
+    The trigger above counts subs in the *database*; this is the only place that
+    asks whether their files are actually on disk. A chunk of a night going
+    briefly unreadable — a share that flapped, a drive unmounted, a folder moved
+    or archived mid-session — is invisible to every DB-level count, so the stack
+    fires, silently drops what it cannot read (``readable_frame_path`` → ``None``
+    inside ``prepare``), and **publishes the thinner, noisier result as the
+    target's newest picture**. That is the walk-away path quietly making the
+    owner's image worse, which is the worst thing this app can do.
+
+    So: hold back when stacking *now* would produce something materially worse
+    than what the user already has — either below the same minimum-frames floor
+    the thin guard uses, or thinner than the best stack this target has already
+    produced. The caller holds without marking the attempt, exactly like
+    ``held_thin``, so the moment the files come back the next scan stacks it.
+
+    Deliberately gated on ``unreadable > 0``: when every sub's file is present
+    (every healthy install, always) this returns ``None`` before comparing
+    anything, so the guard cannot change the behaviour of a target that has no
+    storage problem. It also never holds a target's *first* stack for lack of a
+    better predecessor — there is no good picture to protect there, the loss may
+    be permanent, and refusing to stack at all would be the bigger harm.
+    """
+    proj = lib.open_target(safe)
+    try:
+        unreadable = _solved_accepted_unreadable(proj)
+        if unreadable <= 0:
+            return None
+        readable = max(0, offered - unreadable)
+        prior_max = max(
+            (r.n_frames_used for r in proj.iter_stack_runs()), default=None)
+    finally:
+        proj.close()
+    if readable < min_frames:
+        reason = "too few of its subs are readable right now"
+    elif prior_max is not None and readable < prior_max:
+        reason = "that would be a thinner stack than this target already has"
+    else:
+        return None
+    return {
+        "target": safe, "offered": offered, "readable": readable,
+        "unreadable": unreadable, "prior_best": prior_max, "reason": reason,
+    }
 
 
 def _mark_auto_stack_attempt(lib: Library, safe: str, frame_count: int) -> None:
@@ -2196,6 +2324,21 @@ def _stack_target(
             # handler clears the pre-stack marker for that survivable case).
             proj.set_meta(AUTO_STACK_ATTEMPT_META_KEY,
                           str(_solved_accepted_count(proj)))
+            # …and alongside it, how many of those subs had no file on disk for
+            # this run. That count is what turns the marker from "covered" into
+            # "attempted, but N subs were missing at the time" — so if the files
+            # come back, the trigger knows to try again instead of leaving the
+            # thin result standing (see AUTO_STACK_UNREADABLE_META_KEY). A run
+            # where everything was readable *deletes* the key rather than
+            # writing "0", so a healthy target's meta table is byte-for-byte
+            # what it is today and a stale count can never outlive its outage.
+            with contextlib.suppress(Exception):
+                _n_unreadable = _solved_accepted_unreadable(proj)
+                if _n_unreadable > 0:
+                    proj.set_meta(AUTO_STACK_UNREADABLE_META_KEY,
+                                  str(_n_unreadable))
+                else:
+                    proj.delete_meta(AUTO_STACK_UNREADABLE_META_KEY)
             # Stamp any saved calibration picks this run had to skip, so History
             # can say *why* the picture came out less calibrated than the user
             # asked for. Best-effort and additive: a run that skipped nothing
