@@ -1127,6 +1127,45 @@ def test_min_max_reject_takes_precedence_over_sigma_clip(tmp_path):
         assert hdul[0].header["STACKER"] == "min-max-reject"
 
 
+def test_auto_reject_small_kappa_3_frames_still_rejects(tmp_path):
+    """Regression: ``auto_reject`` with a small κ on exactly 3 frames must still run
+    a rejection pass.
+
+    ``kappa_min_frames`` floors at 3 (min/max's need), but the κ-σ dispatch gates on
+    ``n >= 4``; so at κ ≲ 1.155 (reachable via the webapp's ``sigma_kappa`` min of
+    1.0) ``kappa_min_frames`` returns 3 and a 3-frame stack used to *pick* κ-σ, which
+    then never ran — silently falling through to a plain mean with NO rejection
+    despite the user asking for ``auto_reject``. The fix resolves to the
+    order-statistic min/max drop below 4 frames.
+    """
+    from astropy.io import fits
+
+    from seestack.stack.stacker import _resolve_auto_reject, kappa_min_frames
+
+    # κ = 1.0 → kappa_min_frames == 3 (the floor): the case that used to break.
+    assert kappa_min_frames(1.0) == 3
+    resolved3 = _resolve_auto_reject(
+        StackOptions(auto_reject=True, sigma_kappa=1.0), n=3)
+    assert resolved3.min_max_reject and not resolved3.sigma_clip
+    # 4+ frames still pick κ-σ at low κ (the ≥4 guard doesn't disturb the large path).
+    resolved4 = _resolve_auto_reject(
+        StackOptions(auto_reject=True, sigma_kappa=1.0), n=4)
+    assert resolved4.sigma_clip and not resolved4.min_max_reject
+
+    proj = _build_project(tmp_path, n=3)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(auto_reject=True, sigma_kappa=1.0, max_workers=1,
+                         output_name="autorej3"),
+        )
+    finally:
+        proj.close()
+    with fits.open(result.fits_path) as hdul:
+        # Rejection actually ran — not a silent plain mean.
+        assert hdul[0].header["STACKER"] == "min-max-reject"
+
+
 def test_stack_fails_with_no_solved_frames(tmp_path):
     proj = Project.create(tmp_path / "p", name="empty")
     try:
