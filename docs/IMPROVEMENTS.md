@@ -400,34 +400,72 @@ _(none — claim an item here with your branch name)_
       `transparency_score` is byte-for-byte unchanged — the guard is safe on the no-data path. Size S (one guard
       + a provenance card + the measurement test).
 
-- **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace, Scout
-  2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**
-  `auto_reject` is documented as a no-op under drizzle (drizzle has its own `drizzle_reject`, which defaults
-  **off** and is never turned on by the walk-away `auto` chain the way `auto_reject`/`quality_weighted` are).
-  Every drizzled walk-away stack — satellites, plane trails, cosmic rays, the works — goes
-  straight into the combine unfiltered.
-  - **Scout 2026-08-26 — confirmed via trace; the "check REJMODE first" step is no longer needed.** Grepped
-    every read of `drizzle_reject` across `webapp/` + `seestack/`: it is only ever `options.drizzle_reject`
-    (engine default `False`, `stacker.py:443`), gated `and n >= 4`; **nothing** in `webapp/pipeline.py`'s auto
-    path sets it (the auto path sets only `auto_reject` + `quality_weighted`), and `_resolve_auto_reject`
-    returns options unchanged the moment drizzle is on (`stacker.py:608`, `if not options.auto_reject or
-    options.drizzle: return options`). So on a drizzled walk-away run `drizzle_reject` stays `False` → the
-    single-pass `_drizzle_pass` runs with `clip=None` → zero rejection, and `auto_reject`/κ-σ/min-max are all
-    no-ops under drizzle. The path is unambiguous from the code; a live `REJMODE` header would only re-confirm
-    it. **Fix:** set `drizzle_reject=True` on the auto path when nothing explicit was chosen (same guard shape
-    as the `auto_reject` branch in `_stack_target`, and — unlike the sibling `photometric_normalize` item above
-    — `drizzle_reject` **is** a plain `StackOptions` bool the pipeline can set directly at build time, no
-    `is_mosaic` knowledge needed), with the §9 measured before/after (a synthetic drizzled stack with a
-    planted satellite trail: assert the trail survives without and is clipped with). Note the two-pass drizzle
-    reject roughly doubles per-frame cost (`drizzle_path.py` docstring), so weigh it as an auto default vs.
-    only-on-mosaic; measure both.
+- ~~**🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace, Scout
+  2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**~~ —
+  **FIXED v0.271.1** (Builder 2026-08-26, branch `claude/compassionate-galileo-yhrbne`). *(Image quality,
+  priority 4 — every drizzled unattended stack, which is the owner's own setting.)*
 
-  The missing rejection is still the leading (though separate, and unconfirmed) explanation for the bright
-  saturated-looking blob the owner's screenshot showed near a mosaic seam — most likely a real star with a
-  debayer/SCNR chroma ring, amplified by drizzle ×1.5 and possibly by the missing rejection pass; ruled out as
-  a NaN/coverage hole (renders black, not white) and as seam ghosting (would double every star along the
-  join, not produce one blob) — confirm with the same RA/Dec appearing in a raw sub and linear FITS values at
-  its core).
+  **Fixed exactly as filed**, as the third leg of the `auto` chain in `_stack_target`
+  (`webapp/pipeline.py`): `if auto and opts_dict.get("drizzle") and "drizzle_reject" not in opts_dict:`.
+  Same "the user expressed no preference" guard as the `auto_reject` and `quality_weighted` legs beside it,
+  so a saved per-target default, the manual Stack form and reprocess-all are all honoured verbatim — and
+  only when drizzle is actually on, so an ordinary run's recorded options are byte-for-byte what they were.
+
+  **Measured before/after (§9), on the entry's own planted-trail scene** (16 subs, one carrying a satellite
+  streak, drizzled through the real `run_stack`): the trail's excess over parallel off-trail sky is
+  **247.5 ADU without rejection → −0.8 ADU with it** — i.e. it disappears into the noise. **And the cost the
+  entry asked to weigh: 2.12× wall-clock** on that scene (4.9 s → 10.3 s), matching the `drizzle_path.py`
+  docstring's "roughly doubles".
+
+  **Why unconditional on the auto path rather than mosaic-only.** The trade is the same one the app already
+  makes everywhere else it stacks unattended: the non-drizzle walk-away path auto-picks a *rejecting*
+  combine (κ-σ is itself two-pass) and pays for it. Drizzle was the one place a walk-away stack silently
+  chose speed over correctness, and a satellite in the finished picture is not recoverable while a slower
+  overnight job is merely slower. A user who wants the speed keeps it — ticking "Drizzle outlier rejection"
+  off in their saved defaults is an explicit choice and is respected (pinned by a test). The engine keeps
+  its own `and n >= 4` gate, so a stack too small for the statistics to mean anything still skips the pass.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk or API change, and no engine default flipped — the
+  `StackOptions.drizzle_reject` default stays `False`, so every existing run record replays exactly as
+  before. Rejection provenance (`REJMODE`/`REJFRAC`) was already stamped by the drizzle reject path, so the
+  History Info panel explains the new pass without any frontend change.
+
+  **Tests (+4 in `tests/webapp/test_auto_stack_pipeline.py`, 1 fail-before):** the walk-away drizzle stack
+  turning it on; an explicit saved `drizzle_reject: false` respected; a non-drizzle walk-away stack left
+  alone; and the manual form's drizzle stack left alone. The pixel-level claim it chains onto is already
+  pinned by `tests/test_drizzle_reject.py::test_e2e_satellite_trail_rejected` (and the star-cores-survive
+  safety property beside it).
+
+  Original spec, for the record:
+
+    **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace,
+    Scout 2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**
+    `auto_reject` is documented as a no-op under drizzle (drizzle has its own `drizzle_reject`, which defaults
+    **off** and is never turned on by the walk-away `auto` chain the way `auto_reject`/`quality_weighted` are).
+    Every drizzled walk-away stack — satellites, plane trails, cosmic rays, the works — goes
+    straight into the combine unfiltered.
+    - **Scout 2026-08-26 — confirmed via trace; the "check REJMODE first" step is no longer needed.** Grepped
+      every read of `drizzle_reject` across `webapp/` + `seestack/`: it is only ever `options.drizzle_reject`
+      (engine default `False`, `stacker.py:443`), gated `and n >= 4`; **nothing** in `webapp/pipeline.py`'s auto
+      path sets it (the auto path sets only `auto_reject` + `quality_weighted`), and `_resolve_auto_reject`
+      returns options unchanged the moment drizzle is on (`stacker.py:608`, `if not options.auto_reject or
+      options.drizzle: return options`). So on a drizzled walk-away run `drizzle_reject` stays `False` → the
+      single-pass `_drizzle_pass` runs with `clip=None` → zero rejection, and `auto_reject`/κ-σ/min-max are all
+      no-ops under drizzle. The path is unambiguous from the code; a live `REJMODE` header would only re-confirm
+      it. **Fix:** set `drizzle_reject=True` on the auto path when nothing explicit was chosen (same guard shape
+      as the `auto_reject` branch in `_stack_target`, and — unlike the sibling `photometric_normalize` item above
+      — `drizzle_reject` **is** a plain `StackOptions` bool the pipeline can set directly at build time, no
+      `is_mosaic` knowledge needed), with the §9 measured before/after (a synthetic drizzled stack with a
+      planted satellite trail: assert the trail survives without and is clipped with). Note the two-pass drizzle
+      reject roughly doubles per-frame cost (`drizzle_path.py` docstring), so weigh it as an auto default vs.
+      only-on-mosaic; measure both.
+
+    The missing rejection is still the leading (though separate, and unconfirmed) explanation for the bright
+    saturated-looking blob the owner's screenshot showed near a mosaic seam — most likely a real star with a
+    debayer/SCNR chroma ring, amplified by drizzle ×1.5 and possibly by the missing rejection pass; ruled out as
+    a NaN/coverage hole (renders black, not white) and as seam ghosting (would double every star along the
+    join, not produce one blob) — confirm with the same RA/Dec appearing in a raw sub and linear FITS values at
+    its core).
 
 - **⚪ HARDENING NOTE (found incidentally, 2026-08-17 audit — not currently firing for the owner, no fix
   needed yet, just a landmine to know about) — the mosaic-canvas outlier-exclusion pass's rejections are
