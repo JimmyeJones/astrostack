@@ -525,3 +525,16 @@ describe("Automated stacking defaults — min/max vs quality weighting", () => {
     await waitFor(() => expect(screen.queryByText(/don't combine/)).toBeNull());
   });
 });
+
+// The ASTAP timeout bounds ONE solve attempt, not one frame: the solver runs a
+// 3-rung ladder and a timeout on a rung falls through to the next, so an
+// unsolvable frame can take up to ~3× the setting. The hint must say so rather
+// than claim "a single frame", or a user under-sets it expecting a per-frame cap.
+describe("astap_timeout_s hint honesty", () => {
+  it("describes the timeout as per-attempt, not per-frame", () => {
+    const hint = HINTS.astap_timeout_s;
+    expect(hint).toMatch(/each solve attempt/i);
+    expect(hint).toMatch(/3/); // names the up-to-3× multiplier
+    expect(hint).not.toMatch(/solving a single frame after/i); // the old, misleading wording
+  });
+});
