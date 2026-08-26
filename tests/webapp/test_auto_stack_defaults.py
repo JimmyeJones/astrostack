@@ -74,6 +74,38 @@ def test_manual_options_override_saved_defaults(solved_library, monkeypatch):
     assert captured["opts"].sigma_kappa == 4.0
 
 
+def test_malformed_saved_defaults_meta_falls_back_not_crash(
+        solved_library, monkeypatch):
+    """A valid-JSON *non-dict* web_stack_defaults row must not crash the auto-stack.
+
+    The Stack form's writer only ever stores a dict, but a live install upgraded
+    in place could carry a legacy / hand-edited / foreign-version meta row holding
+    a JSON list or scalar. That survives json.loads, so before the guard
+    ``opts_dict.update(saved)`` raised TypeError and failed the whole walk-away
+    stack for that target. It must instead fall back to the plain defaults.
+    """
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = lib.list_targets()[0].safe_name
+        proj = lib.open_target(safe)
+        try:
+            # A JSON array — valid JSON, not a dict.
+            proj.set_meta(STACK_DEFAULTS_META_KEY, json.dumps([1, 2, 3]))
+        finally:
+            proj.close()
+
+        settings = Settings(data_root=str(solved_library))
+        job = Job(kind="pipeline")
+        # options=None → auto-stack path; must not raise on the malformed row.
+        pipeline._stack_target(settings, jm=_FakeJM(), job=job, lib=lib, safe=safe)
+    finally:
+        lib.close()
+
+    # It ran (run_stack was reached) with plain-default options rather than dying.
+    assert "opts" in captured
+
+
 def test_global_default_calibration_paths_never_reach_the_stacker(
         solved_library, monkeypatch):
     """A calibration master *path* in the global default_stack_options must not
