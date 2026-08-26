@@ -1362,9 +1362,15 @@ def run_stack(
         )
 
     # Build the per-frame weight map. Defaults to all-1.0 unless quality_weighted.
+    # On a mosaic the star-count / sky / transparency medians are taken per panel
+    # rather than target-wide: those three metrics depend on *where the scope
+    # pointed*, and target-wide they can only penalise a panel aimed at an
+    # emptier patch of sky (measured 0.73×, i.e. a quarter of that panel's depth
+    # thrown away for no reason). See ``weighting``'s module docstring.
     wstats: WeightingStats | None = None
     if options.quality_weighted:
-        weights, wstats = compute_frame_weights(frames)
+        weights, wstats = compute_frame_weights(
+            frames, group_by_pointing=bool(is_mosaic_canvas))
         log.info(
             "Quality weights: %d weighted (median=%.2f range=[%.2f, %.2f]), %d neutral",
             wstats.n_weighted, wstats.median_weight, wstats.min_weight,

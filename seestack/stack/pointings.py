@@ -129,6 +129,49 @@ def cluster_pointings(
     return labels
 
 
+def pointing_groups(
+    radecs: list[tuple[float | None, float | None]],
+    *,
+    min_members: int,
+    eligible: list[bool] | None = None,
+    link_dist_deg: float = PANEL_LINK_DIST_DEG,
+) -> list[int] | None:
+    """Per-index **mosaic panel** label, or ``None`` when there is no sound split.
+
+    The shared soundness gate behind every "compare a mosaic's subs against
+    their own panel, not against the other panels" decision in the engine — QC
+    grading, photometric normalization and quality weighting all need it, and
+    all need it to mean *exactly* the same thing.
+
+    Why it exists at all: a mosaic's panels are **different patches of sky**, so
+    the position-dependent metrics (star count, sky level, transparency — the
+    flux-like ones QC measures) legitimately differ between them. A panel aimed
+    at an emptier field really does have fewer, fainter stars, and judging it
+    against the whole target's population reads that as cloud or haze.
+
+    Returns a label per *input* index (``-1`` for an unsolved sub, or one in a
+    group too small to be a reference), or ``None`` — meaning "no split; use one
+    target-wide population, exactly as before" — unless at least **two** groups
+    each carry ``min_members`` eligible entries. So a single-pointing target, an
+    unsolved target and a mosaic too tightly packed to separate all keep today's
+    behaviour, and only a target that genuinely splits gets the per-panel
+    treatment. ``eligible`` (default: all) says which entries count toward a
+    group's size — a caller that can only use frames carrying a particular
+    metric passes that here, so a panel is "substantial" by the population it
+    can actually contribute.
+    """
+    labels = cluster_pointings(radecs, link_dist_deg=link_dist_deg)
+    counts: dict[int, int] = {}
+    for i, label in enumerate(labels):
+        if label < 0 or (eligible is not None and not eligible[i]):
+            continue
+        counts[label] = counts.get(label, 0) + 1
+    substantial = {label for label, n in counts.items() if n >= max(1, int(min_members))}
+    if len(substantial) < 2:
+        return None
+    return [label if label in substantial else -1 for label in labels]
+
+
 def detect_mixed_pointings(
     radecs: list[tuple[float | None, float | None]],
     *,
