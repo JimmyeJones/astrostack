@@ -954,6 +954,7 @@ def _build_output_header_meta(
     wstats: WeightingStats | None = None,
     calibration: "Any | None" = None,
     pstats: PhotometricStats | None = None,
+    photometric_auto: bool = False,
     rstats: "RejectionStats | None" = None,
     weights_applied: bool = True,
     n_roughly_aligned: int = 0,
@@ -1078,6 +1079,14 @@ def _build_output_header_meta(
         meta["PHOTMIN"] = (round(float(pstats.min_scale), 3), "min frame scale")
         meta["PHOTMAX"] = (round(float(pstats.max_scale), 3), "max frame scale")
         meta["PHOTMED"] = (round(float(pstats.median_scale), 3), "median frame scale")
+        # …and *why* it ran, so a mosaic's owner isn't left wondering where a
+        # normalization they never ticked came from (mirrors the final-gradient
+        # "auto for mosaic" note), plus how many panels were matched separately.
+        if photometric_auto:
+            meta["PHOTAUTO"] = (True, "normalization auto-enabled for mosaic")
+        if pstats.n_pointing_groups:
+            meta["PHOTPANL"] = (int(pstats.n_pointing_groups),
+                                "panels normalized against themselves")
     # Rejection provenance: how much the κ-σ pass actually clipped, so the user
     # can trust the rejection removed transient outliers (satellites/planes)
     # without over-clipping real signal. Stamped whenever a rejection pass ran
@@ -1316,15 +1325,30 @@ def run_stack(
     # Build the per-frame photometric scale map (all-1.0 unless enabled). Applied
     # to each frame's pixels *before* accumulation so it flows consistently
     # through every accumulator and rejection path (κ-σ, min/max, drizzle).
+    #
+    # Auto-enabled on a mosaic canvas, mirroring the ``final_gradient_removal``
+    # branch below: a mosaic is shot panel by panel across a night, so its subs
+    # see materially different transparency, and gain-matching them is simply
+    # the right correction for that shape of capture — the walk-away chains
+    # (watcher auto-stack / one-click Process target) never get to tick a box.
+    # Panels are normalised against *themselves* there (``group_by_pointing``),
+    # never against each other: see ``_pointing_references`` for the 2.2×
+    # panel-gain error a target-wide comparison manufactures on a mosaic.
+    # Self-neutralising on subs with no ``transparency_score`` (nothing measured
+    # → no scale map), so an un-QC'd mosaic is byte-for-byte unchanged.
     pscales: dict[int, float] | None = None
     pstats: PhotometricStats | None = None
-    if options.photometric_normalize:
-        pscales, pstats = compute_photometric_scales(frames)
+    auto_photometric = is_mosaic_canvas and not options.photometric_normalize
+    if options.photometric_normalize or is_mosaic_canvas:
+        pscales, pstats = compute_photometric_scales(
+            frames, group_by_pointing=bool(is_mosaic_canvas))
         log.info(
-            "Photometric normalization: %d scaled (median=%.3f range=[%.3f, %.3f]), "
-            "%d adjusted, %d neutral",
+            "Photometric normalization %s: %d scaled (median=%.3f range=[%.3f, %.3f]), "
+            "%d adjusted, %d neutral, %d panel(s)",
+            "(auto for mosaic)" if auto_photometric else "",
             pstats.n_scaled, pstats.median_scale, pstats.min_scale,
             pstats.max_scale, pstats.n_adjusted, pstats.n_neutral,
+            pstats.n_pointing_groups,
         )
         # Nothing measurable → don't carry a no-op scale map (keeps the hot path
         # and the provenance honest).
@@ -1806,6 +1830,7 @@ def run_stack(
     n_unreadable = min(n_unreadable, max(0, len(frames) - n_used))
     header_meta = _build_output_header_meta(project, frames, eff, n_used, wstats,
                                             calibration=calibration, pstats=pstats,
+                                            photometric_auto=auto_photometric,
                                             rstats=rej_stats,
                                             weights_applied=weights_applied,
                                             n_roughly_aligned=n_roughly,
