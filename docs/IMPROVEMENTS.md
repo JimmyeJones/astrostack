@@ -49,6 +49,83 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🟡 BROKEN-UX / AUTONOMY (Scout QA audit 2026-08-26 #4, traced + verified end-to-end) — PARTIALLY FIXED
+  (misleading-copy half shipped v0.272.2; optional behavioural half open) — the `astap_timeout_s` setting bounds
+  ONE solve *attempt*, not one frame, so an unsolvable sub can burn up to 3× the configured seconds; the Settings
+  help text used to say the opposite and now says so honestly.** *(Severity was broken-UX / autonomy — it
+  silently triples the wasted time on a cloudy walk-away night, the owner's exact workflow; not wrong-result.
+  Confidence: traced against the code.)*
+  `ASTAPSolver.solve` (`seestack/solve/astap.py:206`) runs a **3-rung** ladder (`_SOLVE_LADDER`, ~line 147:
+  default → full-res `-s 1000` → bin-2×), and each rung calls `_solve_once` → `subprocess.run(timeout=self.timeout_s)`
+  (~line 294). A timeout on a rung raises `ASTAPError`, which is caught and **falls through to the next rung**
+  (~line 216–226) — each getting the *full* `timeout_s` again. So a frame that never solves (heavy cloud, star-poor
+  sub) consumes up to `3 × astap_timeout_s` of wall clock: **180 s at the 60 s default**. Meanwhile the
+  frontend tooltip (`frontend/src/routes/Settings.tsx:52`) reads *"Give up on solving a single frame after this
+  many seconds."* — literally per-frame, which is false. On a clear night this is invisible (frames solve on rung 1
+  in a second or two; only *timeouts* accumulate), but on a cloudy night with hundreds of unsolvable subs it can turn
+  an expected ~100 min of wasted solve time into ~5 h, delaying the very auto-stack the owner walked away for.
+  **Fix options (the ladder's multi-attempt rescue is load-bearing, so don't just cut it):**
+  (a) ~~*Honest-copy, safe:* correct the tooltip.~~ — **SHIPPED v0.272.2** (Scout 2026-08-26, this run): the
+  `astap_timeout_s` hint now reads *"Give up on each solve attempt after this many seconds. The solver tries up to
+  3 strategies per frame, so a frame that never solves can take up to about 3× this before it's set aside (and
+  retried on the next scan)."* with a `Settings.test.tsx` assertion pinning the per-attempt wording. So the setting
+  is no longer *misleading*; the wasted-time behaviour itself is unchanged. **(b) is the remaining open half:**
+  *Behavioural, careful:* budget the timeout across the ladder (e.g. full `timeout_s` on rung 1 where most frames
+  solve, a fraction on rungs 2–3, or a shared deadline for the whole frame) so the setting bounds *per-frame* time as
+  its name implies, without starving the coarse rescue rungs — needs a test that a hard frame still gets its rescue
+  attempts and that total per-frame time is bounded. Only worth doing if the owner wants true per-frame bounding;
+  the label fix above already removes the surprise.
+
+- **⚪ HARDENING NOTE (Scout QA audit 2026-08-26 #4, traced — narrow trigger, self-heals, does NOT fire on the
+  normal Seestar path) — the folder watcher never re-arms a file that was already stable and is then overwritten
+  IN PLACE, so ingest's deliberate in-place-swap recovery is unreachable via the watcher alone.** *(Severity:
+  low — completeness/latency, not data corruption; the Seestar never overwrites (it writes fresh `frame_NNNN`
+  names), so this only bites an unusual NAS-resync-in-place. Confidence: traced.)*
+  `StabilityTracker.update` (`webapp/watcher.py`): a path already in `self._stable` is `continue`d **before** any
+  size/mtime comparison (~line 62), and `self._stable &= seen` (~line 81) only drops a path from `_stable` when it
+  *disappears* from the snapshot. So a sub that already went stable, then is overwritten in place (same filename, new
+  content, without vanishing) with **no other new file arriving**, is never re-detected as newly-stable → `update()`
+  returns `{}` → `on_batch_ready` isn't called → no scan → ingest's `content_changed` swap path
+  (`seestack/io/ingest.py` ~326, which refreshes the stale WCS/QC so the frame isn't stacked at its old sky
+  position) never runs. It **self-heals**: any *other* new file anywhere in the dataset, a manual "Scan incoming",
+  or an app restart (fresh `StabilityTracker`) triggers a full re-glob that re-ingests the swap and picks it up. So
+  it's a latency gap on a dormant target, not silent corruption. **Fix direction (small, additive):** when a path in
+  `_stable` reappears in the snapshot with a *changed* `(size, mtime)`, drop it from `_stable` and restart its
+  quiet timer (re-arm), mirroring the disappear-then-return path that already re-arms. Pure, clock-injectable — add a
+  `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
+  once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
+
+- **⚪ QA AUDIT RESULT (Scout 2026-08-26 #4, branch `claude/vigilant-knuth-243xct`) — rotated the lead QA off the
+  (drained) stacking engine per the prior audits' advice and swept the webapp routers + plate-solve + watcher/
+  ingest/QC + the post-processing colour chain; the engine's neighbours hold up, with the two low-severity traced
+  findings above the only new open items. Also dogfooded the running app end to end (clean).** Baseline green
+  before touching anything (**2790 passed, 2 skipped**). Read adversarially and, where cheap, probed the real code:
+  `seestack/post/color_cal.py` (gray-star / Gaia / background-neutral solvers — every scale clamped to
+  `[0.05, 20]`, G locked to 1.0, NaN-aware `_apply_scale`, the per-detection `idx`/`matched` index alignment in
+  `_solve_gaia` that a length-mismatch would otherwise silently break, the `MAX_CALIBRATION_STARS` cap that stops a
+  bad mosaic sky estimate from spawning hundreds of thousands of spurious detections — all correct); the
+  `webapp/routers/frames.py` list/preview/reject-summary endpoints (whitelisted `_SORTABLE`, clamped
+  `offset`/`limit`, nulls-last sort in *both* directions, server-side path resolution + bayer/int validation on the
+  preview so no filename separator or traversal reaches the cache path, `OperationalError`→503 read-only mapping);
+  and the plate-solve + watcher/ingest/QC paths via focused sub-audits (the `_store_solve_failed_reason`
+  preserve-guard that stops a re-QC-forever loop; the ladder's per-rung timeout fall-through vs fatal-error break;
+  `-ra`=deg/15, `-spd`=dec+90 pole-safety; `incoming/` strictly copy-only — `shutil.copy2` the only mutation, no
+  `unlink`/`rename`/`move`/truncate anywhere in ingest/watcher, filename traversal neutralised by
+  `stage1_path_for` building the stem from `frame_id`; QC modified-z direction, the `min_frames` gate closing the
+  empty-population/`_median([])` paths, the 25% rail only ever *reducing* rejections, per-panel fallback to
+  target-wide stats). The dogfood pass (`scripts/agent-dogfood.sh`: real app, bundled M42 sample stacked, Playwright
+  1440 px + 420 px across the Target / Stack / Editor / History / Library / planner routes) reported **nothing
+  overflowing, no console errors**, and by eye the whole journey is polished and beginner-friendly — the Target
+  page's IA (prioritised notes + "1 more note" disclosure, picture + actions + frames table above the fold, "Is it
+  enough yet?" goal card), the well-defaulted Stack form, and the auto-processed Editor with its plain-language
+  pipeline all read cleanly. **Backlog note:** the two items AGENTS.md §1's "2026-08-17 critical bug" paragraph and
+  the #2/#3 audit notes call "the front of the bug queue" — the mosaic `photometric_normalize` auto-enable and the
+  mosaic per-panel auto-grade — have **both since shipped** (v0.271.0 and v0.270.2), and the `_framecov.fits` prereq
+  with them (v0.270.4); so the actionable bug queue is now the two traced findings above plus the older
+  trigger-gated hardening notes (flat Bayer-pattern guard; non-windowed `reproject_rgb` inset), none of which fire
+  on the normal path. Future Scout runs can keep the lead on the routers (`stack.py`, `editor.py` are still
+  un-swept in depth) / video / storage and re-audit the engine only occasionally.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26 #3, branch `claude/vigilant-knuth-r0qxeh`) — re-audited the stacking
   engine + plate-solve + render adversarially (came back CLEAN), and dogfooded the running app end to end,
   where I found and FIXED one real friendliness bug (the mislabelled Lucky-imaging knob — see Shipped).**
@@ -7320,6 +7397,24 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Scout 2026-08-26 #4, grounded in the plate-solve audit) — when subs fail to plate-solve because
+  ASTAP *timed out* (not because the database/ASTAP is missing), say so and offer the one obvious fix: raise the
+  timeout.** *(Pillar: autonomy + friendliness — PRIORITY 3. Size: S–M.)* The reject-summary already classifies
+  solve *setup* problems (ASTAP missing / no star database → a "install this" banner, `frames._solve_setup_problem`),
+  but a distinct, common failure — a marginal or star-poor sub that ASTAP simply couldn't crack within
+  `astap_timeout_s` before the ladder gave up — is today indistinguishable from "not located yet" in the UI, so a
+  beginner whose subs are genuinely solvable-but-slow (a hazy night, a big-radius blind search) gets no hint that
+  *raising the timeout* would rescue them. Since the timeout bug above shows an unsolvable frame can already burn
+  3× the setting, this is doubly worth surfacing. **Shape:** have the solver/runner record a distinct
+  `solve_failed:timeout` reason (the `ASTAPError` message already contains "timed out"; classify it the way
+  `classify_solve_setup_error` classifies the setup cases), tally it in `reject_summary`, and when it dominates the
+  unsolved bucket render one plain line on the Target "why were some frames left out?" card: *"N subs ran out of
+  solving time — they'll retry next scan. If this keeps happening on a hazy night, raise the ASTAP timeout in
+  Settings."* with a link. **Beginner bar / feasibility:** plain-language, actionable, self-hides unless timeouts
+  dominate; offline, additive (a new reason string + a summary bucket + one card line), read-only, unit-testable
+  (a tally of timeout reasons → the line; a tally without them → nothing). Pairs naturally with fixing the
+  `astap_timeout_s` label so the number the user then raises actually means what they think.
+
 - **NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
   readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.** *(Pillar:
   autonomy + friendliness — PRIORITY 2–3. Size: S.)* v0.270.1 correctly holds a walk-away stack back when a
@@ -13727,6 +13822,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-26 #4) — "Does my colour look right?": an object-aware colour sanity
+  nudge on the finished picture.** *(Pillar: understand + trust / image quality — PRIORITY 3–4. Size: M.)*
+  A beginner who stacks and auto-edits an emission nebula has **no way to tell whether the colour came out
+  right** — is that grey-green M42 a bad white balance they should fix, or just what it looks like? The app
+  already *knows the object class*: the bundled catalogs carry a `type` field (galaxy / emission nebula /
+  cluster / …) and `seestack/post/target_id.py` already classifies the solved target (emission nebula, etc.),
+  so once a run is plate-solved we know what family it is. It can therefore say, in one plain line on the
+  result/History object-info card, whether the finished picture's dominant colour matches what that family
+  usually shows — and, when it clearly doesn't, nudge toward the existing one-click fix. **Verified genuinely
+  new (grepped this run):** nothing compares a picture's colour against an expected class today — the closest
+  code is the editor's *sky-cast* readout (neutral-background check) and SCNR (green removal), neither of which
+  knows or uses the object type.
+  **Shape:** a pure helper `colour_expectation(object_type, rgb_or_hue) -> ColourNote | None` that (a) maps the
+  handful of confident families to an expected dominant hue — emission/HII nebula → red-pink (Hα), reflection
+  nebula → blue, galaxy/cluster/most else → *no confident expectation* → return `None`; (b) measures the
+  finished picture's dominant hue on the **object** pixels (reuse the editor's existing object-mask + the
+  sky-cast/hue machinery — measure the *stretched, post-SCNR display* image, never the linear stack, since raw
+  OSC is green-heavy by construction); and (c) returns either a reassuring *"The colour looks right for an
+  emission nebula — a warm red-pink glow"* or a gentle, actionable *"Emission nebulae like this usually glow
+  red-pink; yours is coming out green-grey. Try the SCNR (green removal) step, or press Auto-process."* — never
+  the word "wrong". **Beginner bar:** clears it cleanly — a non-expert instantly understands "does my colour
+  look right?", it's phrased in plain language, ships with a sane default (self-hides unless the class has a
+  confident expectation *and* the deviation clears a comfortable margin), points at a one-click fix, and is not a
+  pro knob. **Guardrails against false-nagging (the whole risk):** only the two or three families with a genuinely
+  confident, class-wide expectation ever trigger; require a *strong* deviation (well past ordinary OSC
+  variation) before nudging; measure only the stretched display image so linear green-dominance can't trip it;
+  and default the whole card to the reassuring/absent state, so an honest picture is never told it's off.
+  **Feasibility:** offline, additive, read-only (renders from data the app already has — the solved type + the
+  picture it already displays), pure helper → unit-testable (emission nebula + red picture → reassure; emission
+  nebula + green picture → nudge; galaxy / unknown type → `None`; a mild green tint within margin → reassure,
+  not nag). **Slices —** (a) the pure `colour_expectation` helper + the family→hue table + tests (a shippable
+  Builder run on its own); (b) wire the object mask + display-hue measurement + render the line on the existing
+  object-info card (frontend, gated on presence). **Care:** this must earn a beginner's *trust*, so bias hard
+  toward silence — a single wrong "your colour is off" on a genuinely fine picture is worse than ten correct
+  reassurances are good.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #3) — "Print it": a print-ready export sized and DPI-tagged for a
   frame on the wall.** *(Pillar: enjoy + share — PRIORITY 3. Size: M.)* A beginner who finally gets a
