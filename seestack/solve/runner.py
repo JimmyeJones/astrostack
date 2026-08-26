@@ -20,7 +20,13 @@ import logging
 from dataclasses import dataclass
 
 from seestack.io.project import readable_frame_path
-from seestack.solve.astap import ASTAPError, ASTAPSolver, classify_solve_setup_error
+from seestack.solve.astap import (
+    SOLVE_FAILED_TIMEOUT,
+    ASTAPError,
+    ASTAPSolver,
+    classify_solve_setup_error,
+    is_solve_timeout_error,
+)
 
 log = logging.getLogger(__name__)
 
@@ -281,9 +287,19 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         # rather than a wall of un-classifiable "Plate-solve failed" chips.
         # Ordinary per-frame failures keep their raw (truncated) message for
         # debugging.
+        # The same canonicalisation applies to the *other* fixable failure: every
+        # rung of the ladder ran out of time. That one has an obvious next step
+        # ("give the solver longer"), but only if the Target page can tell it
+        # apart from an ordinary "no catalog match" — and the raw log tail that
+        # would otherwise be stored is per-frame text that no tally can group.
         raw = result.error or "unknown"
         setup = classify_solve_setup_error(raw)
-        reason = setup if setup is not None else raw[:120]
+        if setup is not None:
+            reason = setup
+        elif is_solve_timeout_error(raw):
+            reason = SOLVE_FAILED_TIMEOUT
+        else:
+            reason = raw[:120]
         # Preserve a real prior reason (see ``_store_solve_failed_reason``).
         _store_solve_failed_reason(project, result.frame_id, reason)
         return

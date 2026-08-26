@@ -772,3 +772,76 @@ def test_run_qc_and_solve_reports_zero_located_when_nothing_solves(tmp_path):
         proj.close()
 
     assert summary["solve_done"] == 3 and summary["solve_ok"] == 0
+
+
+def test_solve_timeout_is_stored_as_a_canonical_tallyable_reason(tmp_path):
+    """A frame whose every solve attempt ran out of time gets the stable
+    ``solve_failed:solve timed out`` reason, not a raw (per-frame, un-groupable,
+    120-char-truncated) log tail — so the Target page can count them and offer the
+    one fix that helps: raise the ASTAP timeout."""
+    from seestack.solve.astap import SOLVE_FAILED_TIMEOUT
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="x.fit"))
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=False,
+            wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None,
+            # What ``solve_one`` builds from the ladder's raised ASTAPError.
+            error=(f"ASTAPError: {SOLVE_FAILED_TIMEOUT} after 60s on every "
+                   "attempt\n[attempt 1 {}] ASTAP timed out after 60.0s"),
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        assert f.reject_reason == f"solve_failed:{SOLVE_FAILED_TIMEOUT}"
+        # …and it is counted as an accepted-but-unsolved sub with that reason, the
+        # subset the "why were some frames left out?" breakdown splits out.
+        assert proj.count_accepted_unsolved_with_reason(
+            f"solve_failed:{SOLVE_FAILED_TIMEOUT}") == 1
+        assert proj.count_accepted_unsolved() == 1
+    finally:
+        proj.close()
+
+
+def test_an_ordinary_solve_failure_keeps_its_raw_reason(tmp_path):
+    """The canonicalisation is narrow: a frame ASTAP finished on and simply
+    couldn't match still stores its own message, and is not counted as a timeout."""
+    from seestack.solve.astap import SOLVE_FAILED_TIMEOUT
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="x.fit"))
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=False,
+            wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None,
+            error="no solution found in search radius",
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        assert f.reject_reason == "solve_failed:no solution found in search radius"
+        assert proj.count_accepted_unsolved_with_reason(
+            f"solve_failed:{SOLVE_FAILED_TIMEOUT}") == 0
+    finally:
+        proj.close()
+
+
+def test_a_setup_failure_still_wins_over_the_timeout_classification(tmp_path):
+    """ASTAP missing / no star database is a one-time setup fix and must keep its
+    canonical reason even if the message also mentions a timeout — otherwise the
+    "install this" banner would lose to a "raise the timeout" line that can't help."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="x.fit"))
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path="x.fit", solved=False,
+            wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None,
+            error="solve timed out ... Error: no star database found",
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        assert f.reject_reason == f"solve_failed:{SOLVE_SETUP_NO_DATABASE}"
+    finally:
+        proj.close()

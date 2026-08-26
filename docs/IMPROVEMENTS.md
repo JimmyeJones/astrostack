@@ -7589,23 +7589,63 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Scout 2026-08-26 #4, grounded in the plate-solve audit) — when subs fail to plate-solve because
+- ~~**NEW IDEA (Scout 2026-08-26 #4, grounded in the plate-solve audit) — when subs fail to plate-solve because
   ASTAP *timed out* (not because the database/ASTAP is missing), say so and offer the one obvious fix: raise the
-  timeout.** *(Pillar: autonomy + friendliness — PRIORITY 3. Size: S–M.)* The reject-summary already classifies
-  solve *setup* problems (ASTAP missing / no star database → a "install this" banner, `frames._solve_setup_problem`),
-  but a distinct, common failure — a marginal or star-poor sub that ASTAP simply couldn't crack within
-  `astap_timeout_s` before the ladder gave up — is today indistinguishable from "not located yet" in the UI, so a
-  beginner whose subs are genuinely solvable-but-slow (a hazy night, a big-radius blind search) gets no hint that
-  *raising the timeout* would rescue them. Since the timeout bug above shows an unsolvable frame can already burn
-  3× the setting, this is doubly worth surfacing. **Shape:** have the solver/runner record a distinct
-  `solve_failed:timeout` reason (the `ASTAPError` message already contains "timed out"; classify it the way
-  `classify_solve_setup_error` classifies the setup cases), tally it in `reject_summary`, and when it dominates the
-  unsolved bucket render one plain line on the Target "why were some frames left out?" card: *"N subs ran out of
-  solving time — they'll retry next scan. If this keeps happening on a hazy night, raise the ASTAP timeout in
-  Settings."* with a link. **Beginner bar / feasibility:** plain-language, actionable, self-hides unless timeouts
-  dominate; offline, additive (a new reason string + a summary bucket + one card line), read-only, unit-testable
-  (a tally of timeout reasons → the line; a tally without them → nothing). Pairs naturally with fixing the
-  `astap_timeout_s` label so the number the user then raises actually means what they think.
+  timeout.**~~ — **SHIPPED v0.276.3** (Builder 2026-08-26, branch `claude/compassionate-galileo-c8yo7r`).
+  *(Pillar: autonomy + friendliness — PRIORITY 2–3.)*
+
+  **What shipped, exactly as filed.** `ASTAPSolver.solve` now leads the error it raises when *every* rung of the
+  ladder ran out of time with a canonical `solve timed out` token (`SOLVE_FAILED_TIMEOUT`), and
+  `apply_solve_result_to_db` stores it as the stable reason `solve_failed:solve timed out` — the same
+  canonicalise-so-it-can-be-tallied trick the ASTAP-missing / no-star-database setup reasons already use, and for
+  the same reason: the raw log tail is per-frame text, truncated to 120 chars, that no tally can group.
+  `Project.count_accepted_unsolved_with_reason` counts them (a subset of `count_accepted_unsolved`, exactly like
+  `count_accepted_unreadable`), `reject_summary` passes the count, and `summarize_rejections` splits them out of
+  the *"Not located in the sky yet — run Plate Solve"* bucket into their own: **"Ran out of time being located"**
+  — *"The star-matcher tried every strategy on these and ran out of time before it found a match — often a hazy
+  or star-poor sub. They'll be tried again on the next scan; if it keeps happening, raise the ASTAP timeout in
+  Settings and run Plate Solve again."* Plus two headline verdicts: one when the timeouts dominate the dropped
+  frames, one when they outnumber what actually stacked.
+
+  **Narrow on purpose.** Only a frame where *every* rung timed out is classified: a rung that ran to completion
+  and reported no catalog match is an ordinary per-frame failure, and raising the timeout would not rescue it —
+  telling a beginner otherwise is wrong advice. A setup problem still wins over the timeout classification, so
+  the "install ASTAP / a star database" banner can never be displaced by a "raise the timeout" line that can't
+  help.
+
+  **No frontend work.** `RejectionBreakdown` renders whatever buckets the server sends (label + count + note), so
+  the new bucket and its advice reach the Target page with zero React changes — and self-hide (zero-count buckets
+  are omitted server-side) on every install that never times out.
+
+  **Upgrade-safe (§9):** additive only — a new constant, a new engine helper, an extra *keyword* argument
+  defaulted to 0, and one more optional bucket inside an existing response field. No config, schema, on-disk,
+  endpoint or default change; omitting the new count reproduces today's output byte-for-byte (pinned by a test),
+  and an older frontend renders the new bucket generically.
+
+  **Tests (+11, all fail before):** `test_rejection_summary.py` (the split; coexisting with unreadable subs; the
+  clamp; the backward-compatible default; the dominant verdict; the plate-solve nudge still winning when untried
+  subs dominate; a rejected timed-out frame bucketing the same way), `test_astap.py` (the canonical token on an
+  all-timeout ladder, a finished-but-unmatched rung *not* called a timeout, the classifier ignoring unrelated
+  text), `test_solve_runner.py` (the stored reason + its count; an ordinary failure keeping its raw reason; setup
+  winning over timeout) and `test_api.py` end to end through the endpoint.
+
+  Original spec, for the record:
+
+    *(Pillar: autonomy + friendliness — PRIORITY 3. Size: S–M.)* The reject-summary already classifies
+    solve *setup* problems (ASTAP missing / no star database → a "install this" banner, `frames._solve_setup_problem`),
+    but a distinct, common failure — a marginal or star-poor sub that ASTAP simply couldn't crack within
+    `astap_timeout_s` before the ladder gave up — is today indistinguishable from "not located yet" in the UI, so a
+    beginner whose subs are genuinely solvable-but-slow (a hazy night, a big-radius blind search) gets no hint that
+    *raising the timeout* would rescue them. Since the timeout bug above shows an unsolvable frame can already burn
+    3× the setting, this is doubly worth surfacing. **Shape:** have the solver/runner record a distinct
+    `solve_failed:timeout` reason (the `ASTAPError` message already contains "timed out"; classify it the way
+    `classify_solve_setup_error` classifies the setup cases), tally it in `reject_summary`, and when it dominates the
+    unsolved bucket render one plain line on the Target "why were some frames left out?" card: *"N subs ran out of
+    solving time — they'll retry next scan. If this keeps happening on a hazy night, raise the ASTAP timeout in
+    Settings."* with a link. **Beginner bar / feasibility:** plain-language, actionable, self-hides unless timeouts
+    dominate; offline, additive (a new reason string + a summary bucket + one card line), read-only, unit-testable
+    (a tally of timeout reasons → the line; a tally without them → nothing). Pairs naturally with fixing the
+    `astap_timeout_s` label so the number the user then raises actually means what they think.
 
 - ~~**NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
   readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.**~~ —

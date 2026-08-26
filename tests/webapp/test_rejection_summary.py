@@ -260,3 +260,80 @@ def test_mid_drop_is_unaffected_by_a_dominant_bucket():
     v = s["verdict"]
     assert v["tone"] == "ok"
     assert "solid stack" in v["text"]
+
+
+# --- "ran out of time being located" ------------------------------------------
+#
+# ASTAP's 3-rung ladder can exhaust its timeout on every rung of a hazy/star-poor
+# sub. Those subs are accepted-but-unsolved like any un-plate-solved frame, so
+# they used to land in "Not located in the sky yet — Run Plate Solve to include
+# them" — advice that, for them, just spends the same minutes over again. They
+# get their own bucket and the knob that would actually rescue them.
+
+def test_solve_timeouts_are_bucketed_apart_from_not_located_yet():
+    s = summarize_rejections({}, n_accepted=100, n_unsolved=20, n_solve_timeout=8)
+    k = _keys(s)
+    assert k["unsolved"] == 12
+    assert k["solve_timeout"] == 8
+    assert s["used"] == 80       # totals unchanged — just re-bucketed
+    assert s["dropped"] == 20
+    note = next(b["note"] for b in s["buckets"] if b["key"] == "solve_timeout")
+    assert "ASTAP timeout" in note and "Settings" in note
+
+
+def test_solve_timeouts_coexist_with_unreadable_subs():
+    # Both are subsets of the unsolved count and are disjoint; what's left over is
+    # genuinely "not located yet".
+    s = summarize_rejections({}, n_accepted=50, n_unsolved=10,
+                             n_unreadable=3, n_solve_timeout=4)
+    assert _keys(s) == {"unsolved": 3, "solve_timeout": 4, "error": 3}
+    assert s["dropped"] == 10
+
+
+def test_solve_timeout_is_clamped_within_the_unsolved_count():
+    # A garbled count can never make the located-pending tally go negative, and
+    # never steals from the unreadable subset that was clamped first.
+    s = summarize_rejections({}, n_accepted=10, n_unsolved=5,
+                             n_unreadable=2, n_solve_timeout=99)
+    assert _keys(s) == {"solve_timeout": 3, "error": 2}
+    assert s["dropped"] == 5
+
+
+def test_solve_timeout_defaults_to_zero_backward_compatible():
+    s = summarize_rejections({}, n_accepted=100, n_unsolved=20, n_unreadable=2)
+    assert _keys(s) == {"unsolved": 18, "error": 2}
+    assert "ASTAP" not in s["verdict"]["text"]
+
+
+def test_mostly_timed_out_verdict_names_the_timeout_not_plate_solve():
+    # The dominant-case headline: re-running Plate Solve alone wouldn't help, so
+    # the lead advice is the timeout, and the plate-solve nudge must not fire.
+    s = summarize_rejections({}, n_accepted=10, n_unsolved=9, n_solve_timeout=9)
+    text = s["verdict"]["text"]
+    assert "ASTAP timeout" in text
+    assert "haven't been located" not in text
+    assert s["verdict"]["tone"] == "warn"
+
+
+def test_plate_solve_nudge_still_wins_when_untried_subs_dominate():
+    # The cheaper fix leads when most missing subs simply haven't been tried yet,
+    # even with a few timeouts alongside.
+    s = summarize_rejections({}, n_accepted=12, n_unsolved=11, n_solve_timeout=2)
+    assert "Run Plate Solve" in s["verdict"]["text"]
+
+
+def test_high_drop_timeout_dominated_names_the_timeout():
+    # High-drop but not the "most of your subs" case: the dominant-bucket verdict
+    # still names the timeout rather than the generic "cloud or wind".
+    s = summarize_rejections({}, n_accepted=100, n_unsolved=40, n_solve_timeout=40)
+    assert "ASTAP timeout" in s["verdict"]["text"]
+
+
+def test_a_rejected_timed_out_frame_buckets_as_a_timeout_too():
+    # If such a frame is later rejected by hand it keeps its canonical reason;
+    # the raw-count path must bucket it the same way, not as a generic
+    # "couldn't be located".
+    s = summarize_rejections({"solve_failed:solve timed out": 3,
+                              "solve_failed:no catalog match": 2},
+                             n_accepted=50)
+    assert _keys(s) == {"solve_failed": 2, "solve_timeout": 3}

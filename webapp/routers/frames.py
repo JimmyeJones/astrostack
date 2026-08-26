@@ -18,6 +18,7 @@ from seestack.io.project import (
 )
 from seestack.render.thumbnail import THUMB_VERSION, generate_thumbnail, thumbs_dir
 from seestack.solve.astap import (
+    SOLVE_FAILED_TIMEOUT,
     SOLVE_SETUP_ASTAP_MISSING,
     SOLVE_SETUP_NO_DATABASE,
     classify_solve_setup_error,
@@ -210,6 +211,14 @@ def reject_summary(safe: str, request: Request) -> dict:
         # rather than "not located yet", so the breakdown doesn't nudge a
         # plate-solve on a corrupt file (or double-count it against the callout).
         n_unreadable = proj.count_accepted_unreadable()
+        # …and the other distinct cause hiding in that bucket: subs the solver
+        # *did* try, on every rung of its ladder, until it ran out of time. The
+        # generic "not located yet" copy tells the user to run Plate Solve, which
+        # on these would spend the same minutes over again; they need the timeout
+        # raised instead, so they're split out and given that advice. Counted from
+        # the canonical reason the runner stamps, so it survives truncation.
+        n_solve_timeout = proj.count_accepted_unsolved_with_reason(
+            f"solve_failed:{SOLVE_FAILED_TIMEOUT}")
         # Preflight: accepted subs the database still lists but whose files are
         # *gone right now* — neither the Stage-1 cache nor the original source is
         # on disk (cache cleared while the originals sit on an offline share, a
@@ -239,7 +248,7 @@ def reject_summary(safe: str, request: Request) -> dict:
         # excluded from the stack) into the breakdown so a thin stack is
         # explained, not counted as "used".
         "summary": summarize_rejections(counts, n_accepted, n_unsolved,
-                                        n_unreadable),
+                                        n_unreadable, n_solve_timeout),
         # Additive storage preflight (see above). ``n_accepted`` is the denominator
         # the count was taken over, so the caller can phrase "N of M" without a
         # second request; both are omitted by older backends, so the UI self-hides.
