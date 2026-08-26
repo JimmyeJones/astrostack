@@ -1044,6 +1044,12 @@ def _build_output_header_meta(
         meta["WGTMIN"] = (round(float(wstats.min_weight), 3), "min frame weight")
         meta["WGTMAX"] = (round(float(wstats.max_weight), 3), "max frame weight")
         meta["WGTMED"] = (round(float(wstats.median_weight), 3), "median frame weight")
+        # On a mosaic the flux-like metrics are compared within each panel rather
+        # than across the whole target (a panel over emptier sky genuinely has
+        # fewer, fainter stars). Recorded only when that actually happened, so an
+        # ordinary single-pointing stack's header is unchanged.
+        if wstats.n_panels:
+            meta["WGTPANEL"] = (int(wstats.n_panels), "mosaic panels weighted within")
     # …and the mirror image: weighting was asked for and computed, but the path
     # that ran ignores it. Stamping *nothing* (the WGTMODE gate above) is honest
     # about the result but silent about the cause — and on the walk-away chains
@@ -1069,6 +1075,10 @@ def _build_output_header_meta(
         meta["PHOTMIN"] = (round(float(pstats.min_scale), 3), "min frame scale")
         meta["PHOTMAX"] = (round(float(pstats.max_scale), 3), "max frame scale")
         meta["PHOTMED"] = (round(float(pstats.median_scale), 3), "median frame scale")
+        # Same panel-awareness as WGTPANEL: the transparency reference is the
+        # frame's own mosaic panel wherever the target splits into panels.
+        if pstats.n_panels:
+            meta["PHOTPANL"] = (int(pstats.n_panels), "mosaic panels scaled within")
     # Rejection provenance: how much the κ-σ pass actually clipped, so the user
     # can trust the rejection removed transient outliers (satellites/planes)
     # without over-clipping real signal. Stamped whenever a rejection pass ran
@@ -1297,9 +1307,10 @@ def run_stack(
     if options.quality_weighted:
         weights, wstats = compute_frame_weights(frames)
         log.info(
-            "Quality weights: %d weighted (median=%.2f range=[%.2f, %.2f]), %d neutral",
+            "Quality weights: %d weighted (median=%.2f range=[%.2f, %.2f]), %d neutral%s",
             wstats.n_weighted, wstats.median_weight, wstats.min_weight,
             wstats.max_weight, wstats.n_neutral,
+            f" — compared within {wstats.n_panels} mosaic panels" if wstats.n_panels else "",
         )
     else:
         weights = unit_weights(frames)
@@ -1313,9 +1324,10 @@ def run_stack(
         pscales, pstats = compute_photometric_scales(frames)
         log.info(
             "Photometric normalization: %d scaled (median=%.3f range=[%.3f, %.3f]), "
-            "%d adjusted, %d neutral",
+            "%d adjusted, %d neutral%s",
             pstats.n_scaled, pstats.median_scale, pstats.min_scale,
             pstats.max_scale, pstats.n_adjusted, pstats.n_neutral,
+            f" — referenced within {pstats.n_panels} mosaic panels" if pstats.n_panels else "",
         )
         # Nothing measurable → don't carry a no-op scale map (keeps the hot path
         # and the provenance honest).

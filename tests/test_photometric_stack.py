@@ -179,3 +179,73 @@ def test_photometric_normalize_neutral_when_no_transparency(tmp_path):
     assert result.n_frames_used == 4
     with fits.open(result.fits_path) as hdul:
         assert "PHOTNORM" not in hdul[0].header
+
+
+def _build_two_panel_mosaic(tmp_path, n_per_panel: int = 5) -> Project:
+    """Two Seestar-field panels 0.4° apart — far enough to be a union-canvas
+    mosaic and to separate as panels, close enough to overlap."""
+    proj = Project.create(tmp_path / "pm", name="mosaic")
+    raws = tmp_path / "mraws"
+    raws.mkdir()
+    seed = 0
+    for panel, ra in enumerate((83.6, 84.0)):
+        wcs_text = make_synth_wcs_text(ra_center_deg=ra)
+        for _ in range(n_per_panel):
+            seed += 1
+            path = write_seestar_fits(
+                raws / f"m{seed}.fit", add_wcs=True, seed=seed, n_stars=30)
+            proj.add_frame(FrameRow(
+                source_path=str(path), cached_path=str(path),
+                width_px=480, height_px=320, bayer_pattern="RGGB",
+                wcs_json=wcs_text, ra_center_deg=ra, dec_center_deg=-5.4,
+                fwhm_px=3.0, star_count=100 if panel == 0 else 25,
+                sky_adu_median=1000.0,
+                transparency_score=5000.0 if panel == 0 else 2000.0,
+                eccentricity_median=0.2,
+            ))
+    return proj
+
+
+def test_a_star_poor_mosaic_panel_is_neither_gain_matched_nor_demoted(tmp_path):
+    # The whole chain on a real stack: the second panel points at an emptier
+    # field (a quarter of the stars, and correspondingly fainter "brightest
+    # stars"). Compared against the mosaic as a whole it would be multiplied up
+    # to the 2× bound *and* down-weighted — a brighter, less-trusted panel, for
+    # no reason but where the scope was pointed. Each panel is its own
+    # population, so nothing moves, and the run says so in its header.
+    proj = _build_two_panel_mosaic(tmp_path)
+    try:
+        result = run_stack(proj, StackOptions(
+            sigma_clip=False, max_workers=2, output_name="panels",
+            quality_weighted=True, photometric_normalize=True))
+    finally:
+        proj.close()
+
+    # A real union-of-footprints canvas — wider than the 480 px reference frame.
+    assert result.canvas_shape[1] > 480
+    with fits.open(result.fits_path) as hdul:
+        hdr = hdul[0].header
+    assert hdr["WGTPANEL"] == 2
+    assert hdr["WGTNDOWN"] == 0        # no panel demoted for its own star field
+    assert hdr["PHOTPANL"] == 2
+    assert hdr["PHOTNADJ"] == 0        # nothing gain-matched across panels
+
+
+def test_a_single_field_stack_carries_no_panel_provenance(tmp_path):
+    # The no-regression guard: an ordinary single-pointing stack's header is
+    # exactly what it has always been — no panel cards at all.
+    proj = _build_project(tmp_path, n=4)
+    try:
+        for f in proj.iter_frames():
+            proj.update_frame(f.id, transparency_score=3000.0, fwhm_px=3.0,
+                              star_count=100, sky_adu_median=1000.0)
+        result = run_stack(proj, StackOptions(
+            sigma_clip=False, max_workers=2, output_name="single",
+            quality_weighted=True, photometric_normalize=True))
+    finally:
+        proj.close()
+
+    with fits.open(result.fits_path) as hdul:
+        hdr = hdul[0].header
+    assert "WGTPANEL" not in hdr
+    assert "PHOTPANL" not in hdr

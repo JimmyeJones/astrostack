@@ -1007,6 +1007,15 @@ describe("photometricSummaryText", () => {
       "Photometrically normalized · 1 frame gain-matched",
     );
   });
+  it("says when the reference was taken within each mosaic panel", () => {
+    expect(photometricSummaryText({ mode: "transparency", n_adjusted: 2, panels: 6 })).toBe(
+      "Photometrically normalized · 2 frames gain-matched · matched within each of 6 mosaic panels",
+    );
+    // Silent on a single-field stack, and on any run made before this shipped.
+    expect(photometricSummaryText({ mode: "transparency", n_adjusted: 2 })).not.toContain(
+      "mosaic",
+    );
+  });
 });
 
 describe("darkScalingSummaryText", () => {
@@ -1116,6 +1125,26 @@ describe("weightingSummaryText", () => {
     expect(weightingSummaryText({ mode: "quality", n_downweighted: 120 }, 2400)).toContain(
       "of your 2,400 subs, 120 were",
     );
+  });
+  it("explains that a mosaic's panels were judged against themselves", () => {
+    const s = weightingSummaryText({ mode: "quality", n_downweighted: 0, panels: 6 }, 500);
+    expect(s).toContain("6-panel mosaic");
+    expect(s).toContain("compared against itself");
+    expect(s).toContain("emptier sky isn't mistaken for a hazy one");
+    // …and on a run that did demote some subs, alongside the usual sentence.
+    const t = weightingSummaryText({ mode: "quality", n_downweighted: 7, panels: 3 }, 840);
+    expect(t).toContain("of your 840 subs, 7 were softer or hazier");
+    expect(t).toContain("3-panel mosaic");
+  });
+  it("says nothing about panels on an ordinary single-field stack", () => {
+    // Absent (every stack made before panel-aware weighting) and the
+    // single-population value both stay silent.
+    expect(weightingSummaryText({ mode: "quality", n_downweighted: 0 }, 500)).not.toContain(
+      "mosaic",
+    );
+    expect(
+      weightingSummaryText({ mode: "quality", n_downweighted: 0, panels: 0 }, 500),
+    ).not.toContain("mosaic");
   });
 });
 

@@ -30,6 +30,17 @@ Design choices (all in service of "never make a live stack worse"):
     quality weighting down-weights the *contribution*. Both can be on together
     (a hazy frame is scaled up to match *and* trusted less), and either can be
     off. The two are orthogonal and compose correctly.
+  * **Per mosaic panel.** ``transparency_score`` is the median flux of a frame's
+    brightest stars, so it is as much a property of *where the scope pointed* as
+    of the sky's clarity: a mosaic panel over an emptier field has genuinely
+    fainter "brightest stars". Normalising such a panel against the whole
+    mosaic's median would multiply its pixels up by the bounded maximum — a
+    visibly brighter panel, i.e. the coloured-grid artefact this app has already
+    had to hunt down once. The reference is therefore the median of the frame's
+    *own* panel wherever the target splits into panels (see
+    :func:`~seestack.stack.pointings.panel_labels`), which is what makes the
+    correction mean "how hazy was this sub compared to the rest of this panel"
+    on a mosaic and leaves every single-pointing stack exactly as it was.
 
 The scale is comparable only *within one target* (same camera/gain/exposure) —
 exactly the assumption the quality-weighting ``transparency_factor`` already
@@ -44,6 +55,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from seestack.io.project import FrameRow
+from seestack.stack.pointings import panel_labels
+from seestack.stack.weighting import panel_reference_medians
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +75,9 @@ class PhotometricStats:
     min_scale: float
     max_scale: float
     median_scale: float
+    # Mosaic panels the transparency reference was taken *within* (0 = one
+    # population, i.e. every ordinary single-pointing stack).
+    n_panels: int = 0
 
 
 def compute_photometric_scales(
@@ -76,30 +92,35 @@ def compute_photometric_scales(
 
     ``max_ratio`` bounds each scale to ``[1/max_ratio, max_ratio]``. A frame with
     no usable ``transparency_score`` (or when too few frames carry one) gets the
-    neutral scale ``1.0``.
+    neutral scale ``1.0``. On a mosaic the reference is the frame's **own
+    panel's** median (see the module docstring); a panel with too few measured
+    subs to support one falls back to the run-wide median, as does every
+    single-pointing target.
     """
     max_ratio = max(1.0, float(max_ratio))
-    measured = [
-        f.transparency_score for f in frames
-        if f.transparency_score is not None and f.transparency_score > 0
-    ]
+    transparencies = [f.transparency_score for f in frames]
+    measured = [t for t in transparencies if t is not None and t > 0]
     # Not enough signal to establish a robust reference → everything neutral.
     if len(measured) < max(1, int(min_frames)):
         scales = {f.id: 1.0 for f in frames if f.id is not None}
         n = len(scales)
         return scales, PhotometricStats(0, n, 0, 1.0, 1.0, 1.0)
 
-    ref = float(np.median(measured))
+    labels = panel_labels([(f.ra_center_deg, f.dec_center_deg) for f in frames])
+    refs = panel_reference_medians(transparencies, labels)
+    n_panels = len({lab for lab in labels if lab >= 0}) if labels else 0
     lo, hi = 1.0 / max_ratio, max_ratio
 
     scales: dict[int, float] = {}
     measured_scales: list[float] = []
     n_neutral = 0
     n_adjusted = 0
-    for f in frames:
+    for i, f in enumerate(frames):
         if f.id is None:
             continue
-        if f.transparency_score is not None and f.transparency_score > 0 and ref > 0:
+        ref = refs[i]
+        if (f.transparency_score is not None and f.transparency_score > 0
+                and ref is not None and ref > 0):
             s = float(np.clip(ref / f.transparency_score, lo, hi))
             scales[f.id] = s
             measured_scales.append(s)
@@ -117,7 +138,8 @@ def compute_photometric_scales(
             min_scale=float(min(measured_scales)),
             max_scale=float(max(measured_scales)),
             median_scale=float(np.median(measured_scales)),
+            n_panels=n_panels,
         )
     else:
-        stats = PhotometricStats(0, n_neutral, 0, 1.0, 1.0, 1.0)
+        stats = PhotometricStats(0, n_neutral, 0, 1.0, 1.0, 1.0, n_panels=n_panels)
     return scales, stats

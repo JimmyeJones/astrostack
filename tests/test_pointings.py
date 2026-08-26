@@ -7,7 +7,11 @@ well-separated targets in one folder split into two.
 
 from __future__ import annotations
 
-from seestack.stack.pointings import MIN_POINTING_FRAMES, detect_mixed_pointings
+from seestack.stack.pointings import (
+    MIN_POINTING_FRAMES,
+    detect_mixed_pointings,
+    panel_labels,
+)
 
 
 def _pointing(ra: float, dec: float, n: int) -> list[tuple[float, float]]:
@@ -81,3 +85,56 @@ def test_none_and_nonfinite_coords_ignored():
     frames += [(None, -5.4), (float("nan"), 1.0), (83.6, None)]
     # Only the 20 valid single-pointing frames remain → not bimodal.
     assert detect_mixed_pointings(frames) is None
+
+
+# ---- panel_labels: telling one mosaic *panel* from the next ------------------
+
+
+def test_panel_labels_splits_a_mosaic_into_its_panels():
+    # Six panels a comfortable 0.9° apart, each dithered by arc-minutes.
+    frames: list[tuple[float | None, float | None]] = []
+    for p in range(6):
+        frames += _pointing(83.6 + p * 0.9, -5.4, 8)
+    labels = panel_labels(frames)
+    assert labels is not None
+    assert len({lab for lab in labels} ) == 6
+    # Each panel's eight frames share one label.
+    for p in range(6):
+        assert len(set(labels[p * 8:(p + 1) * 8])) == 1
+
+
+def test_panel_labels_keeps_a_dithered_single_pointing_together():
+    # One pointing, dithered — no split at all, so callers use the target-wide
+    # population exactly as they always have.
+    assert panel_labels(_pointing(83.6, -5.4, 20)) is None
+
+
+def test_panel_labels_needs_two_substantial_groups():
+    # A big panel plus a two-frame stray is not a sound split: the stray can't
+    # carry its own population, so there is nothing to compare within.
+    frames = _pointing(83.6, -5.4, 20) + [(90.0, -5.4), (90.0, -5.4)]
+    assert panel_labels(frames) is None
+
+
+def test_panel_labels_marks_a_stray_as_no_panel():
+    # …but once there *are* two real panels, a stray outside both comes back as
+    # -1 ("no panel — use the target-wide population") rather than its own group.
+    frames = (
+        _pointing(83.6, -5.4, 8)
+        + _pointing(84.6, -5.4, 8)
+        + [(120.0, -80.0)]
+    )
+    labels = panel_labels(frames)
+    assert labels is not None
+    assert labels[-1] == -1
+    assert set(labels[:8]) != set(labels[8:16])
+
+
+def test_panel_labels_ignores_unsolved_frames():
+    frames: list[tuple[float | None, float | None]] = (
+        _pointing(83.6, -5.4, 8) + _pointing(84.6, -5.4, 8)
+    )
+    frames += [(None, None), (float("nan"), 1.0)]
+    labels = panel_labels(frames)
+    assert labels is not None
+    assert labels[-1] == -1 and labels[-2] == -1

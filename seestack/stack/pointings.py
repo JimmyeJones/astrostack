@@ -129,6 +129,42 @@ def cluster_pointings(
     return labels
 
 
+def panel_labels(
+    radecs: list[tuple[float | None, float | None]],
+    *,
+    min_frames: int = MIN_POINTING_FRAMES,
+) -> list[int] | None:
+    """Per-index mosaic-panel label, or ``None`` when there is no sound split.
+
+    A mosaic's panels are **different patches of sky**, so anything derived from
+    the *flux* a frame recorded — star count, sky level, transparency — differs
+    between them for reasons that have nothing to do with frame quality. Any
+    statistic that compares frames against the target's whole population
+    therefore has to know which panel a frame belongs to (see
+    :func:`~seestack.stack.weighting.compute_frame_weights` and
+    :func:`~seestack.stack.photometric.compute_photometric_scales`, and
+    ``qc.grading``, which all ask this question).
+
+    Clusters at :data:`PANEL_LINK_DIST_DEG`, which separates neighbouring panels
+    while keeping a dithered set together, and returns ``None`` — meaning
+    "one population, exactly as before" — unless the split is *sound*: at least
+    two clusters each carrying ``min_frames`` frames. A single-pointing target,
+    an unsolved target and a mosaic whose panels are too tightly packed to
+    separate therefore all behave exactly as they do today. Frames outside a
+    substantial cluster (an unsolved sub, a lone stray pointing) come back as
+    ``-1``, i.e. "no panel — use the target-wide population".
+    """
+    labels = cluster_pointings(radecs, link_dist_deg=PANEL_LINK_DIST_DEG)
+    sizes: dict[int, int] = {}
+    for label in labels:
+        if label >= 0:
+            sizes[label] = sizes.get(label, 0) + 1
+    substantial = {label for label, n in sizes.items() if n >= min_frames}
+    if len(substantial) < 2:
+        return None
+    return [label if label in substantial else -1 for label in labels]
+
+
 def detect_mixed_pointings(
     radecs: list[tuple[float | None, float | None]],
     *,

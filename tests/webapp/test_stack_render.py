@@ -627,6 +627,55 @@ def test_stack_info_surfaces_quality_weighting_summary(client, solved_library):
     assert w["median"] == 0.72
 
 
+def test_stack_info_surfaces_the_mosaic_panel_count(client, solved_library):
+    """A mosaic stack records how many panels the flux-like metrics were compared
+    *within*, so the panel can explain why a star-poor panel wasn't demoted."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["WGTMODE"] = "quality"
+                hdul[0].header["WGTNDOWN"] = 0
+                hdul[0].header["WGTPANEL"] = 6
+                hdul[0].header["PHOTNORM"] = "transparency"
+                hdul[0].header["PHOTNADJ"] = 2
+                hdul[0].header["PHOTPANL"] = 6
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["weighting"]["panels"] == 6
+    assert body["photometric"]["panels"] == 6
+
+
+def test_stack_info_omits_panels_on_a_single_field_stack(client, solved_library):
+    """No WGTPANEL card (an ordinary stack, or any run made before panel-aware
+    weighting shipped) → the key is simply absent, not a fabricated 0."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["WGTMODE"] = "quality"
+                hdul[0].header["WGTNDOWN"] = 3
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert "panels" not in body["weighting"]
+
+
 def test_stack_info_weighting_absent_for_unweighted_stack(client, solved_library):
     """A plain (unweighted) stack has no WGT* cards, so weighting is None."""
     safe = client.get("/api/targets").json()[0]["safe_name"]

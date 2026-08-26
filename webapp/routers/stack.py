@@ -1622,6 +1622,10 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
         for hk, k in (("WGTMIN", "min"), ("WGTMAX", "max"), ("WGTMED", "median")):
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 weighting[k] = float(header[hk])
+        # Only stamped on a mosaic whose panels separated, so its absence means
+        # "one population" — every ordinary stack, and every run made before this.
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            weighting["panels"] = int(header["WGTPANEL"])
 
     # The other half of the weighting story: quality weighting was on, but the
     # method that actually ran (order-statistic min/max) combines by rank and
@@ -1649,6 +1653,8 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
         for hk, k in (("PHOTMIN", "min"), ("PHOTMAX", "max"), ("PHOTMED", "median")):
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 photometric[k] = float(header[hk])
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            photometric["panels"] = int(header["PHOTPANL"])
 
     # Dark exposure-scaling summary (present only when a master dark was actually
     # scaled to the subs' exposure), parsed the same way so the panel can show a

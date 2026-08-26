@@ -178,6 +178,110 @@ def test_min_weight_floor():
     assert w[2] >= 0.1
 
 
+# ---- Mosaic panels: flux-like metrics are compared within a panel -----------
+#
+# A mosaic's panels are different patches of sky, so star count / sky level /
+# transparency legitimately differ between them. Compared against the whole
+# target, a panel over an emptier field reads as a hazy or clouded one and every
+# one of its subs is demoted together — which tilts the overlaps it shares with
+# its neighbours toward the neighbouring panel.
+
+
+def _mosaic(n_panels=6, per_panel=8, poor_panel=None, poor_stars=25,
+            poor_transp=2000.0, cloud_sub=None):
+    """A synthetic mosaic: identical seeing/sky/haze in every panel, except
+    ``poor_panel``, which merely points at an emptier field (fewer, fainter
+    stars). ``cloud_sub`` puts one genuinely clouded sub inside that panel."""
+    frames = []
+    fid = 0
+    for p in range(n_panels):
+        ra = 83.6 + p * 0.9  # a comfortable mosaic step, well past PANEL_LINK_DIST_DEG
+        poor = p == poor_panel
+        for k in range(per_panel):
+            fid += 1
+            stars = poor_stars if poor else 100
+            transp = poor_transp if poor else 5000.0
+            if cloud_sub is not None and poor and k == cloud_sub:
+                stars, transp = 6, 500.0
+            frames.append(FrameRow(
+                id=fid, source_path=f"p{p}_{k}.fit",
+                fwhm_px=3.0, star_count=stars, sky_adu_median=1000.0,
+                transparency_score=transp, eccentricity_median=0.2,
+                # A dither of a few arc-seconds — must stay inside one panel.
+                ra_center_deg=ra + (k % 2) * 0.01, dec_center_deg=-5.4,
+            ))
+    return frames
+
+
+def _panel_ids(frames, panel, per_panel=8):
+    return [f.id for f in frames[panel * per_panel:(panel + 1) * per_panel]]
+
+
+def test_star_poor_mosaic_panel_is_not_demoted():
+    # Before panel-awareness this panel's subs came out at ~0.63 against the
+    # mosaic-wide median (a 6× spread in effective trust with nothing wrong).
+    frames = _mosaic(poor_panel=3)
+    w, stats = compute_frame_weights(frames)
+    assert stats.n_panels == 6
+    assert all(w[i] == 1.0 for i in _panel_ids(frames, 3))
+    assert stats.n_downweighted == 0
+
+
+def test_a_clouded_sub_inside_a_panel_is_still_demoted():
+    # The other direction: judging each panel against itself must not blind the
+    # weighting to a genuinely bad sub — it is an outlier within its own panel.
+    frames = _mosaic(poor_panel=3, cloud_sub=0)
+    w, _ = compute_frame_weights(frames)
+    clouded = _panel_ids(frames, 3)[0]
+    assert w[clouded] < 0.7
+    assert all(w[i] == 1.0 for i in _panel_ids(frames, 3)[1:])
+
+
+def test_single_pointing_target_is_unchanged_by_panel_awareness():
+    # One pointing (a dithered set) never splits, so the target-wide population
+    # is used exactly as before — the no-regression guard for ordinary stacks.
+    frames = _mosaic(n_panels=1, per_panel=8)
+    frames[0].star_count = 25  # one genuinely star-poor sub in the set
+    w, stats = compute_frame_weights(frames)
+    assert stats.n_panels == 0
+    assert w[frames[0].id] < 1.0
+
+
+def test_unsolved_frames_fall_back_to_the_target_wide_population():
+    # No pointing to cluster on → no panels, and the metrics behave as they
+    # always have (this is also every frame row that predates plate-solving).
+    frames = _mosaic(poor_panel=3)
+    for f in frames:
+        f.ra_center_deg = None
+        f.dec_center_deg = None
+    w, stats = compute_frame_weights(frames)
+    assert stats.n_panels == 0
+    assert all(w[i] < 1.0 for i in _panel_ids(frames, 3))
+
+
+def test_a_panel_too_thin_to_measure_uses_the_target_wide_median():
+    # A stray two-frame pointing can't support its own median, so it is graded
+    # against the whole target rather than against itself (which would make any
+    # pair of frames trivially "normal").
+    frames = _mosaic(n_panels=3, per_panel=8)
+    strays = [
+        FrameRow(id=900 + k, source_path=f"stray{k}.fit", fwhm_px=3.0,
+                 star_count=10, sky_adu_median=1000.0, transparency_score=500.0,
+                 eccentricity_median=0.2, ra_center_deg=90.0, dec_center_deg=-5.4)
+        for k in range(2)
+    ]
+    w, stats = compute_frame_weights(frames + strays)
+    assert stats.n_panels == 3  # the pair is too small to be a panel of its own
+    assert all(w[900 + k] < 0.5 for k in range(2))
+
+
+def test_panel_reference_medians_without_labels_is_the_overall_median():
+    from seestack.stack.weighting import panel_reference_medians
+
+    values = [10.0, 20.0, 30.0, None, -5.0]
+    assert panel_reference_medians(values, None) == [20.0] * 5
+
+
 # ---- Inverse-variance combine weight (photometric scaling) ------------------
 
 def test_combine_weights_no_photometric_is_identity_object():

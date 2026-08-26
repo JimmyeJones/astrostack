@@ -216,10 +216,80 @@ _(none — claim an item here with your branch name)_
     the existing 25%-per-population rail; verify it now applies per cluster too, not just globally, or a small
     cluster could still lose disproportionately.
 
+- ~~**🟠 STACKING-ENGINE CORRECTNESS (found by the Builder 2026-08-26 while scoping the
+  `photometric_normalize` item directly below; repro-verified) — quality weighting compares a mosaic's
+  panels against EACH OTHER, so a legitimately star-poor panel is systematically demoted on every
+  walk-away stack. Same root cause as the auto-grade bug fixed in v0.270.2 — the *other* consumer of the
+  same pointing-confounded metrics.**~~ — **FIXED v0.270.3** (Builder 2026-08-26, branch
+  `claude/compassionate-galileo-il93a9`). *(Priority 1 by AGENTS.md §1 "Current focus" — a
+  `seestack/stack/*` bug that silently biases the final image.)*
+
+  **The bug, measured.** `compute_frame_weights` takes `stars_factor`, `sky_factor` and
+  `transparency_factor` against the **target-wide** median. All three measure *what the frame recorded*,
+  which on a mosaic is as much a property of where the scope pointed as of the sky: a panel over an
+  emptier field genuinely has fewer stars and fainter "brightest stars". Repro — 6 panels × 8 subs,
+  identical seeing/sky/haze everywhere, one panel at 25 % star density: **every one of that panel's subs
+  came out at weight 0.631 against 1.000 for the rest**, and a thinner panel would slide toward the 0.1
+  floor. This fires on the owner's live install today: the walk-away chain turns `quality_weighted` on
+  automatically (`_stack_target`'s `auto` flag). Where the panel is the only data a common scale factor
+  cancels in a weighted mean, but the **overlaps it shares with its neighbours are tilted toward the
+  neighbour** — thinner, noisier, discoloured joins, on a Seestar mosaic where panels overlap by roughly
+  half a field.
+
+  **The same confound made the item below actively dangerous.** `compute_photometric_scales` divides by
+  `transparency_score` too, so enabling `photometric_normalize` on a mosaic *as that entry proposes* would
+  have multiplied the star-poor panel's pixels by the full 2× bound — **a visibly brighter panel, i.e. the
+  coloured-grid artefact this app already had to hunt down once**. Measured on the same scene: scale 2.000
+  for all 8 subs of the star-poor panel before, 1.000 after.
+
+  **What shipped.** `panel_labels()` (`seestack/stack/pointings.py`) — the sound-split test extracted from
+  the v0.270.2 grading fix, which now reuses it — plus `panel_reference_medians()`
+  (`seestack/stack/weighting.py`), a per-frame yardstick that is the frame's **own panel's** median where
+  the panel can support one and the target-wide median everywhere else. Wired into both
+  `compute_frame_weights` (the three flux-like factors only — FWHM and eccentricity stay target-wide,
+  since seeing and tracking are properties of the *night*) and `compute_photometric_scales`. Gated
+  exactly as the grading fix is: a single-pointing target, an unsolved target, and a mosaic too tightly
+  packed to separate all fall through to today's behaviour byte-for-byte, and a panel with fewer than 3
+  usable measurements of a metric falls back to the target-wide yardstick rather than trusting a median
+  of one or two subs. A genuinely hazy/clouded sub *inside* a panel is still caught and still gain-matched
+  — it is an outlier against its own panel, which is the right comparison — pinned by its own test.
+
+  **Surfaced:** new `WGTPANEL` / `PHOTPANL` FITS cards (stamped only when panels actually separated),
+  carried through the run-info endpoint as additive `weighting.panels` / `photometric.panels`, and the
+  History Info panel now says *"This is a 6-panel mosaic, so each panel was compared against itself — a
+  panel over emptier sky isn't mistaken for a hazy one."*
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, endpoint or default change; two additive header cards
+  and two additive response keys an older frontend ignores; every single-pointing stack unchanged.
+
+  **Tests (+19, 10 of them fail-before):** `tests/test_quality_weighting.py` (star-poor panel not demoted;
+  a clouded sub inside a panel still demoted; single-pointing and unsolved targets unchanged; a stray
+  pointing too thin to be its own panel; the reference helper), `tests/test_photometric_normalize.py` (the
+  same five for the scales), `tests/test_pointings.py` (`panel_labels` splits a mosaic, keeps a dither
+  together, needs two substantial groups, marks strays `-1`, ignores unsolved),
+  `tests/test_photometric_stack.py` (end-to-end through `run_stack` on a real 2-panel union canvas: the
+  panel is neither gain-matched nor demoted, and a single-field stack carries no panel cards),
+  `tests/webapp/test_stack_render.py` (+2 for the run-info keys),
+  `frontend/src/routes/History.test.tsx` (+3 for the copy).
+
 - **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit, repro-verified) — the "Panels: check" badge is
   HONEST (does not false-fire), but the machinery that could actually FIX what it detects is built and
   wired up everywhere except the one path that needs it most.** *(Not a correctness bug — a real improvement
   with existing machinery, not a new feature.)*
+
+  > **⚠️ READ THE ENTRY DIRECTLY ABOVE BEFORE STARTING THIS — its "fix direction" below is WRONG AS
+  > WRITTEN, and the safety prerequisite has now shipped (v0.270.3).** Turning `photometric_normalize` on
+  > for a mosaic *target-wide* multiplies a star-poor panel up to the 2× bound (measured: 2.000 on a
+  > 25 %-star-density panel) — it would manufacture the very coloured grid the badge exists to warn about.
+  > As of v0.270.3 the scales are taken **per panel**, which removes that landmine but also changes what
+  > this item can deliver: **a hazy *whole panel* still isn't gain-matched, and can't be from
+  > `transparency_score` alone** — that metric cannot separate "dim because haze" from "dim because the
+  > field is emptier" across two different patches of sky. What per-panel normalization *does* correct is
+  > haze variation **within** a panel across nights, which is real value. So the honest remaining scope is:
+  > (a) measure whether auto-enabling per-panel `photometric_normalize` on the walk-away path improves a
+  > synthetic haze-mid-panel mosaic, and (b) if a cross-panel correction is genuinely wanted, it needs a
+  > *different* estimator — the flux of stars **in the panels' overlap regions**, which are the same sky
+  > seen twice — not the whole-frame transparency score. (b) is materially bigger than this entry implies.
 
   Reproduced through the real stack path: haze arriving mid-mosaic (transparency 1.0→0.45) walks the seam
   residual 0.97→1.78 (crosses the "check" bar at 1.5) and correctly lights both "Panels: check" and "Hazy

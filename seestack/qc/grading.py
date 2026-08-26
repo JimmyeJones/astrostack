@@ -73,7 +73,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from seestack.io.project import FrameRow
-from seestack.stack.pointings import PANEL_LINK_DIST_DEG, cluster_pointings
+from seestack.stack.pointings import panel_labels
 
 log = logging.getLogger(__name__)
 
@@ -304,31 +304,24 @@ def _pointing_groups(
     target-wide, an entire panel's subs can be flagged for rejection — a real
     loss of good data, since ``auto_grade_frames`` acts on its own.
 
-    Groups come from single-linkage clustering at
-    :data:`~seestack.stack.pointings.PANEL_LINK_DIST_DEG`, which separates
-    neighbouring panels while keeping a dithered set together. Returns ``None``
-    — meaning "grade target-wide, exactly as before" — unless the split is
-    *sound*: at least two groups each big enough to carry a robust population.
-    A single-pointing target, an unsolved target, and a mosaic whose panels are
-    too tightly packed to separate therefore all behave exactly as they do
-    today; only a target that genuinely splits gets the per-panel treatment.
+    Groups come from :func:`~seestack.stack.pointings.panel_labels`, which
+    returns ``None`` — meaning "grade target-wide, exactly as before" — unless
+    the split is *sound*: at least two groups each big enough to carry a robust
+    population. A single-pointing target, an unsolved target, and a mosaic whose
+    panels are too tightly packed to separate therefore all behave exactly as
+    they do today; only a target that genuinely splits gets the per-panel
+    treatment.
     """
-    ids = [f.id for f in frames]
-    labels = cluster_pointings(
+    labels = panel_labels(
         [(f.ra_center_deg, f.dec_center_deg) for f in frames],
-        link_dist_deg=PANEL_LINK_DIST_DEG,
+        min_frames=min_frames,
     )
-    sizes: dict[int, int] = {}
-    for label in labels:
-        if label >= 0:
-            sizes[label] = sizes.get(label, 0) + 1
-    substantial = {label for label, n in sizes.items() if n >= min_frames}
-    if len(substantial) < 2:
+    if labels is None:
         return None
     return {
-        fid: label
-        for fid, label in zip(ids, labels, strict=True)
-        if fid is not None and label in substantial
+        f.id: label
+        for f, label in zip(frames, labels, strict=True)
+        if f.id is not None and label >= 0
     }
 
 

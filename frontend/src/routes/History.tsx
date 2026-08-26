@@ -163,6 +163,15 @@ export function photometricSummaryText(
   if (typeof photometric.median === "number") {
     s += ` (median ${photometric.median.toFixed(2)})`;
   }
+  // Same panel-awareness note as the weighting line: on a mosaic the "how hazy
+  // was this sub" reference is the frame's own panel, never the whole mosaic.
+  if (
+    typeof photometric.panels === "number" &&
+    Number.isFinite(photometric.panels) &&
+    photometric.panels > 1
+  ) {
+    s += ` · matched within each of ${photometric.panels} mosaic panels`;
+  }
   return s;
 }
 
@@ -242,10 +251,21 @@ export function weightingSummaryText(
   nFrames?: number | null,
 ): string | null {
   if (!weighting) return null;
+  // On a mosaic each panel is judged against itself: panels point at different
+  // patches of sky, so an emptier one genuinely has fewer, fainter stars and
+  // must not be treated as a hazy night. Said out loud because the alternative
+  // reads as an unexplained difference between this stack and a single-field one.
+  const panels =
+    typeof weighting.panels === "number" && Number.isFinite(weighting.panels) && weighting.panels > 1
+      ? ` This is a ${weighting.panels}-panel mosaic, so each panel was compared against itself — ` +
+        `a panel over emptier sky isn't mistaken for a hazy one.`
+      : "";
   const n = weighting.n_downweighted;
   if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) {
     // Weighting ran but nothing stood out — reassure the subs were consistent.
-    return "Quality-weighted — your subs were consistent, so they all counted about equally.";
+    return (
+      "Quality-weighted — your subs were consistent, so they all counted about equally." + panels
+    );
   }
   const was = n === 1 ? "was" : "were";
   const them = n === 1 ? "it" : "them";
@@ -256,7 +276,7 @@ export function weightingSummaryText(
   return (
     `Quality-weighted — ${count} softer or hazier than the rest, so the ` +
     `stacker trusted ${them} a little less (not dropped — just weighted down). ` +
-    `Your best subs did the heavy lifting.`
+    `Your best subs did the heavy lifting.` + panels
   );
 }
 

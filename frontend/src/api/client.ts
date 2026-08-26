@@ -798,6 +798,10 @@ export interface StackWeightingSummary {
   min?: number;
   max?: number;
   median?: number;
+  // Mosaic panels the flux-like metrics were compared *within*. Present only on
+  // a mosaic whose panels separated — absent on every ordinary stack, and on
+  // every run made before panel-aware weighting shipped.
+  panels?: number;
 }
 
 // Quality weighting was on, but the method that ran ignored it (min/max is an
@@ -818,6 +822,9 @@ export interface StackPhotometricSummary {
   min?: number;
   max?: number;
   median?: number;
+  // Mosaic panels the transparency reference was taken within — see
+  // StackWeightingSummary.panels.
+  panels?: number;
 }
 
 export interface StackDarkScalingSummary {
