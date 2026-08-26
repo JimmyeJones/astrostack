@@ -24,7 +24,7 @@ import { describeSuggestion, suggestionHeading } from "./suggestTargets";
  * never duplicates the "set a location" prompt the Tonight page already shows.
  */
 function SuggestionRow({ s }: { s: SuggestedTarget }) {
-  const framingBadge = framingRowBadge(s.framing);
+  const framingBadge = framingRowBadge(s.framing, s.mosaic);
   const difficultyBadge = difficultyRowBadge(s.difficulty);
   return (
     <Paper withBorder p="sm" radius="sm" bg="var(--mantine-color-body)">

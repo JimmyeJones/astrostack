@@ -52,7 +52,7 @@ _(none — claim an item here with your branch name)_
 - ~~**🟠 FOUND AND FIXED (Builder 2026-08-26, branch `agent/mosaic-photometric-per-panel`) — quality
   weighting systematically PENALISES a mosaic panel for pointing at emptier sky. Measured 0.78× on a panel
   whose only difference from its neighbour was its star field — about a quarter of that panel's depth thrown
-  away, on every walk-away mosaic.**~~ — **FIXED v0.272.1.** *(Image quality, priority 4, on the
+  away, on every walk-away mosaic.**~~ — **FIXED v0.273.0.** *(Image quality, priority 4, on the
   on-by-default path — the walk-away `auto` chain turns `quality_weighted` on itself.)*
 
   **This is the THIRD instance of one class of bug, found by looking for it after fixing the second.** QC
@@ -84,6 +84,29 @@ _(none — claim an item here with your branch name)_
   **Tests (+5, all fail before):** the 0.78 penalty and its 1.00 fix, a clouded sub still caught inside its
   own panel, the seeing metrics staying target-wide, a dithered single-field target's weights *identical*
   with and without grouping, and the end-to-end 3.09 → 4.00 coverage through `run_stack`.
+
+- **⚪ QA AUDIT RESULT (Scout 2026-08-26 #2, branch `claude/vigilant-knuth-xh4b6y`) — rotated the lead QA off
+  the (already-drained) stacking engine and adversarially re-audited the subsystems the engine feeds and is
+  fed by: QC (`qc/grading.py`, `metrics.py`, `streaks.py`, `noise_ratio.py`), ingest (`io/ingest.py`),
+  the folder watcher (`webapp/watcher.py`), the render/output path (`render/orient.py`, `render/deepening.py`,
+  `stack/output.py`) and the final-gradient/coverage-leveling bg passes (`bg/final_gradient.py`,
+  `bg/coverage_leveling.py`). Came back CLEAN — no new verified bug.** Traced adversarially and, where cheap,
+  *probed* the real code: `final_gradient.remove_final_gradient` on an all-NaN canvas (both modes → input
+  returned, no crash), a 12×12 image (box clamp degrades, finite out), and `green_channel` on odd dims / a 1×1
+  frame (empty array, no uint16 overflow — the float32-before-add cast holds). Re-verified the recently-shipped
+  v0.270.4 `{base}_framecov.fits` path end to end: `output._same_map` writes the sibling *only* when Σ-weights ≠
+  frame count, `proxy.load_frame_coverage` returns `None` when it's absent, and `coverage_leveling._level_context`
+  falls back to the weighted map on `None` — so an unweighted run is byte-for-byte unchanged and a weighted one
+  bins panels by the honest count. The per-panel auto-grade split (v0.270.2), the QC `cluster_pointings` None/
+  unsolved handling, the ingest fingerprint/`_same_capture` benign-touch-vs-swap logic, the watcher
+  stranded-batch re-arm, and the north-up rotation math all held under the edges I could construct. **Also
+  confirmed the front-of-queue `photometric_normalize` Builder item's traced site is exact:** `is_mosaic_canvas`
+  is set at `stacker.py:1259` and `compute_photometric_scales` is gated at `stacker.py:1321` — the one-line
+  mirror `if options.photometric_normalize or is_mosaic_canvas:` lands *after* the canvas is known, and the
+  1341–1344 comment already documents the coverage-map shift that v0.270.4 addresses. So both front-of-queue
+  Builder items below are accurately shaped. **This confirms the drained state now extends past the engine into
+  its neighbours;** future Scout runs can lead with the webapp routers / plate-solve (`solve/`) or re-audit the
+  engine only occasionally.
 
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26, branch `claude/vigilant-knuth-7slpid`) — the stacking engine was
   deeply re-audited this run and came back CLEAN: no new verified bug found.** Adversarially traced the whole
@@ -341,158 +364,267 @@ _(none — claim an item here with your branch name)_
     the existing 25%-per-population rail; verify it now applies per cluster too, not just globally, or a small
     cluster could still lose disproportionately.
 
+- ~~**🟠 FOUND WHILE MERGING, MEASURED AND FIXED (Builder 2026-08-26, branch
+  `agent/mosaic-photometric-per-panel`) — the v0.271.0 auto-enable directly below made a REAL bug in
+  `photometric_normalize` on-by-default for every mosaic: it gain-matched whole PANELS apart, measured at
+  2.23×.**~~ — **FIXED v0.273.0.** *(Image quality, priority 4. Not a criticism of that change — it is the
+  right correction and its own tests are sound; the flaw was already there in the opt-in path, and its
+  synthetic mosaic gave both panels the **same star seed**, which is exactly the case that cannot expose it.)*
+
+  `transparency_score` is the median flux of a frame's **brightest stars**, so it is a property of *where the
+  scope pointed* as much as of the sky: a panel aimed at an emptier patch genuinely has fainter brightest
+  stars. Normalising a mosaic against one **target-wide** median reads that intrinsic difference as haze.
+  **Measured** on two identically-exposed 8-sub panels whose only difference was their star fields: panel A
+  scaled 0.73×, panel B 1.67× — a **2.23× relative panel gain error**; end to end on the finished canvas a
+  **1.64× → 1.00×** step across the join. The pass meant to prevent a panel grid was manufacturing one.
+
+  **Same class of bug as the target-wide QC grading fixed in v0.270.2** — which is precisely why
+  `seestack/qc/grading.py` already tags this metric `per_pointing=True`. Third instance: see the
+  quality-weighting entry at the top of this section, found by going looking after this one.
+
+  **The fix:** `compute_photometric_scales` grows `group_by_pointing` (set by the stacker on a mosaic canvas)
+  and `_pointing_references` gives **each panel its own median**. Within-panel haze is still corrected — a
+  real transparency change on one patch of sky — while panel-to-panel brightness stays where the data put it,
+  so the v0.271.0 win is kept and the panel step is not. Same soundness gate as the grading fix (≥2 groups
+  each carrying `min_frames` scored subs, else the single target-wide median, so single-field targets are
+  byte-for-byte unchanged); a frame in no substantial group stays **neutral** rather than borrowing another
+  patch of sky's yardstick. Provenance: a `PHOTPANL` card → `photometric.n_panels` → *"each of 4 panels
+  matched against its own subs"* in History, so nobody reads "gain-matched" on a mosaic as "the panels were
+  brightened to match each other".
+
+  **Tests (+9, `tests/test_photometric_mosaic.py`, 7 fail before):** the 2.23×-apart panels and their 1.00×
+  fix; within-panel haze still corrected; a single-pointing target's scales *identical* with and without
+  grouping; a thin panel and an unsolved sub staying neutral; the end-to-end 1.64× → 1.00× panel step through
+  `run_stack`; an un-QC'd mosaic untouched; a single-field stack never auto-normalizing.
+
+  **⚠ THIS CHANGED TWO ASSERTIONS IN ANOTHER AGENT'S TESTS — flagged here deliberately, because "don't weaken
+  a test to go green" is a hard rule and this needs to be visibly *not* that.** `tests/test_photometric_
+  mosaic_auto.py` (shipped with v0.271.0) asserted that a **wholly hazy panel** is gain-matched to its
+  neighbour to within 10%. Its fixture gives both panels the **same star seed**, so the only difference
+  between them really is haze — and on that fixture the old behaviour is right. On a *real* mosaic the panels
+  never share a star field, and the metric cannot tell the two causes apart, so the same code corrects a
+  difference it has no evidence for. The assertion was pinning an estimator that is only correct on
+  synthetic data. It is now split into two honest tests, both measured, neither deleted: **haze *within* a
+  panel is still gain-matched out** (the half that can be done soundly, and what a real drifting night
+  actually produces, since the Seestar revisits panels), and **a wholly hazy panel is deliberately left
+  alone**, with the reason and the pointer to the overlap-based fix in its docstring. The fixture grew a
+  `within_panel` mode rather than losing its old one. Nothing was skipped, xfailed or deleted.
+
+  **Still open, filed under Ideas → "Image quality":** genuine *cross-panel* gain matching (a hazy **whole**
+  panel is still dim, because per-panel normalization can't see it). It needs the panel **overlaps**, not
+  `transparency_score` — read that entry before reaching for a target-wide median again.
+
 - ~~**🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit, repro-verified) — the "Panels: check" badge is
   HONEST (does not false-fire), but the machinery that could actually FIX what it detects is built and
-  wired up everywhere except the one path that needs it most.**~~ — **SHIPPED v0.271.0**
-  (Builder 2026-08-26, branch `agent/mosaic-photometric-per-panel`), **but NOT the way this entry and the
-  Scout's trace directed — following them literally would have shipped a much worse bug than the one they
-  described. Read this before touching photometric normalization again.**
+  wired up everywhere except the one path that needs it most.**~~ — **FIXED v0.271.0** (Builder 2026-08-26,
+  branch `claude/compassionate-galileo-yhrbne`). *(Image quality, priority 4 — on the owner's exact workflow:
+  every mosaic, walk-away or manual.)*
 
-  **The blocker nobody spotted: `photometric_normalize` was ALREADY BROKEN ON MOSAICS, and auto-enabling it
-  as filed would have turned an opt-in bug into an on-by-default one.** `transparency_score` is *the median
-  flux of a frame's brightest stars* — a property of **where the scope pointed** as much as of the sky. A
-  mosaic panel aimed at an emptier patch genuinely has fainter "brightest" stars, so normalising a mosaic
-  against one **target-wide** median reads that intrinsic difference as haze and gain-matches whole panels
-  apart. **Measured: a 2.23× relative panel gain error** on two identically-exposed panels whose only
-  difference was their star fields (panel A scaled 0.73×, panel B 1.67×) — i.e. the pass meant to prevent a
-  panel grid *manufactures* one, the owner's exact long-standing complaint. This is the same class of bug
-  as the target-wide QC grading fixed in v0.270.2 — which is precisely why `transparency_score` is already
-  tagged `per_pointing=True` in `seestack/qc/grading.py`. The filed 30.6%→6.8% "signal continuity" win was
-  measured on a synthetic mosaic whose panels had *identical* star fields, so it never exercised this.
+  **A mosaic now gain-matches its own panels.** One guard, at exactly the site the Scout traced:
+  `if options.photometric_normalize or is_mosaic_canvas:` around `compute_photometric_scales`
+  (`seestack/stack/stacker.py`), mirroring the `final_gradient_removal` precedent a few lines below — the
+  same reasoning, too: the corrections a mosaic already gets automatically all act on the **sky** (the
+  per-frame background flatten removes each frame's additive offset, `level_by_coverage` removes the
+  panel-to-panel sky step), and haze dims the **signal** multiplicatively, which leaves the sky alone and
+  survives both.
 
-  **What shipped, in order:**
-  1. **The fix.** `compute_photometric_scales` grows `group_by_pointing`; `_pointing_references`
-     (`seestack/stack/photometric.py`) single-linkage-clusters the frames' solved pointings at the existing
-     `PANEL_LINK_DIST_DEG` (0.25°) and gives **each panel its own median reference**. Within-panel haze is
-     still corrected (a real transparency change on one patch of sky); panel-to-panel brightness is left
-     exactly where the data put it. **Measured end-to-end: the panel step across the join goes 1.64× → 1.00×.**
-     Mirrors the v0.270.2 grading fix's soundness gate exactly — it needs ≥2 pointing groups each carrying
-     `min_frames` scored subs, so a single-pointing target, an unsolved target and a too-tightly-packed
-     mosaic all fall through to today's single target-wide median, byte for byte. A frame in no substantial
-     group (a thin panel, an unsolved sub) stays **neutral** rather than borrowing a yardstick measured
-     somewhere else on the sky.
-  2. **Then the auto-enable this entry asked for**, at the site the Scout correctly traced —
-     `stacker.py` ~1321, `if options.photometric_normalize or is_mosaic_canvas:`, mirroring the
-     `final_gradient_removal` precedent 400 lines below. Only reachable *because* of (1). It
-     self-neutralises on a mosaic whose subs carry no `transparency_score` (`n_scaled == 0` → no scale map),
-     so an un-QC'd mosaic is byte-for-byte unchanged, and single-field stacks never auto-enable at all.
-  3. **Surfaced, not silent:** `PHOTAUTO` / `PHOTPANL` provenance cards → `photometric.auto` /
-     `photometric.n_panels` on the run-info endpoint → *"…· each of 4 panels matched against its own subs
-     (automatic for mosaics)"* in the History panel, so nobody wonders where a setting they never ticked
-     came from, or whether panels were brightened to match each other (they aren't).
+  **Measured before/after (§9), on the metric this entry itself insisted on — signal continuity across the
+  join, never `SEAMRES`.** Synthetic two-panel mosaic, 4 subs each, the second panel's files dimmed to 50%
+  of signal with `transparency_score` set as QC would, both panels carrying the *same* star seeds so the two
+  halves are directly comparable: mean star-core flux step across the join **50.4% → 0.7%**. `SEAMRES` reads
+  0.0091 vs 0.0115 — i.e. unchanged, exactly as this entry predicted, which is why the test measures panels
+  and not seams. Scales applied were 0.75× (clear) / 1.5× (hazy), both inside the 2× clamp.
 
-  **Upgrade-safe (§9):** no config, schema, on-disk or API-shape change (two additive optional fields an
-  older frontend ignores); `StackOptions.photometric_normalize` still defaults **off**. The one behaviour
-  change is mosaic-only and matches the `final_gradient_removal` precedent. Its coverage-map prerequisite
-  (v0.270.4's `{base}_framecov.fits`) is what makes it safe: the sky-leveling pass bins panels by the honest
-  frame count, so the 1/s² weighted coverage moving no longer moves the panel bins.
+  **The prerequisite was verified, not assumed.** `test_the_panel_bins_do_not_move_when_the_scaling_is_on`
+  stacks the same quality-weighted mosaic with and without the scaling and asserts the leveling bins are
+  identical (`[4, 8]` both ways) — v0.270.4's `_framecov.fits` is what makes that true, and the test fails
+  loudly if a future change puts the binning back on the weighted map.
 
-  **Tests (+9 python in the new `tests/test_photometric_mosaic.py`, 7 of which fail before; +1 webapp,
-  +2 frontend):** the 2.23×-apart panels and their 1.00× fix; within-panel haze still corrected; a
-  single-pointing target's scales *identical* with and without grouping; a thin panel and an unsolved sub
-  staying neutral; the end-to-end 1.64×→1.00× panel step through `run_stack`; the mosaic auto-enable and its
-  provenance; an un-QC'd mosaic untouched; a single-field stack never auto-normalizing.
+  **Provenance (a run nobody ticked a box for still explains itself):** the header gains `PHOTAUTO`
+  alongside the existing `PHOTNORM`/`PHOT*` cards, the run-info endpoint carries it as `photometric.auto`,
+  and the History Info panel appends *"· automatic for a mosaic"* to the line it already showed. The Stack
+  form's help text says it too.
 
-  **Still open, filed under Ideas → "Image quality":** genuine *cross-panel* gain matching (a hazy whole
-  panel is still dim, since per-panel normalization can't see it). It needs the panel **overlaps**, not
-  `transparency_score` — see the new entry for why, so nobody re-derives the target-wide version.
+  **Upgrade-safe (§9):** no config, schema, on-disk-layout or API-shape change; one additive header card and
+  one additive response key an older frontend ignores; no `StackOptions` field added or default flipped, so
+  every recorded run's options replay exactly as before. A single-field target is untouched, and a mosaic
+  whose subs carry no usable `transparency_score` self-neutralises (`n_scaled == 0`) and is byte-for-byte
+  what it was.
+
+  **Tests (+6 python / +1 webapp / +1 frontend, 3 of them fail-before):**
+  `tests/test_photometric_mosaic_auto.py` (the 50.4%→0.7% measurement; the `PHOTAUTO` provenance for the
+  automatic and the explicit case; the no-transparency-score no-op; a single-field stack left alone; and the
+  panel-bin invariance above), `tests/webapp/test_stack_render.py` (`photometric.auto` through the endpoint,
+  and absent on an older master), `frontend/src/routes/History.test.tsx` (the summary line, with the
+  old-master and user-chose cases pinned unchanged).
 
   Original spec, for the record:
 
-  Reproduced through the real stack path: haze arriving mid-mosaic (transparency 1.0→0.45) walks the seam
-  residual 0.97→1.78 (crosses the "check" bar at 1.5) and correctly lights both "Panels: check" and "Hazy
-  night" together — not a bug, a true positive. The metric doesn't false-fire on flat-noise canvases either
-  (0.03–0.36 measured vs. the 1.5 bar, even at 64 coverage levels). **The gap:** `level_by_coverage`
-  (automatic, on the mosaic path) only removes *additive* sky offsets between panels — a hazy panel's
-  *multiplicative* dimming survives it untouched. `photometric_normalize` is the op that corrects exactly
-  that, but unlike `auto_reject`/`quality_weighted` (which the walk-away chain turns on automatically per
-  `_stack_target`'s `auto` flag — see `webapp/pipeline.py` docstring), **nothing ever enables
-  `photometric_normalize` on the walk-away path**; it is off by default and stays off.
+    **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit, repro-verified) — the "Panels: check" badge is
+    HONEST (does not false-fire), but the machinery that could actually FIX what it detects is built and
+    wired up everywhere except the one path that needs it most.** *(Not a correctness bug — a real improvement
+    with existing machinery, not a new feature.)*
 
-  **Fix direction:** extend the same "auto turns this on when the user made no explicit choice" pattern
-  already used for `auto_reject`/`quality_weighted` to `photometric_normalize`, gated on `is_mosaic` (mirror
-  the existing `if is_mosaic:` branch in `auto_recipe`/`_stack_target`). **Measure a real before/after** (seam
-  residual with vs. without, on a synthetic hazy-mid-session mosaic) before flipping any default, per
-  `AGENTS.md` §9 — do not blind-flip.
+    Reproduced through the real stack path: haze arriving mid-mosaic (transparency 1.0→0.45) walks the seam
+    residual 0.97→1.78 (crosses the "check" bar at 1.5) and correctly lights both "Panels: check" and "Hazy
+    night" together — not a bug, a true positive. The metric doesn't false-fire on flat-noise canvases either
+    (0.03–0.36 measured vs. the 1.5 bar, even at 64 coverage levels). **The gap:** `level_by_coverage`
+    (automatic, on the mosaic path) only removes *additive* sky offsets between panels — a hazy panel's
+    *multiplicative* dimming survives it untouched. `photometric_normalize` is the op that corrects exactly
+    that, but unlike `auto_reject`/`quality_weighted` (which the walk-away chain turns on automatically per
+    `_stack_target`'s `auto` flag — see `webapp/pipeline.py` docstring), **nothing ever enables
+    `photometric_normalize` on the walk-away path**; it is off by default and stays off.
 
-  **MEASURED, 2026-08-26 (Builder). The improvement is real and large — but do NOT use seam residual to
-  judge it, and read the blocker below before starting.**
-  - **Seam residual is the wrong metric here and will tell you the change does nothing.** Measured on a
-    synthetic 2×2 mosaic with one panel shot through haze (transparency 1.0 → 0.45, real files dimmed
-    multiplicatively, `transparency_score` set as QC would): `seam_residual` **0.0 with and without**
-    `photometric_normalize`. That is correct behaviour, not a null result — `background_flatten` already
-    removes the per-frame *sky* offset, and seam residual measures a **sky** step between coverage levels.
-    Multiplicative *signal* dimming leaves the sky alone, which is precisely why `level_by_coverage` can't
-    fix it and why this entry exists.
-  - **The right metric is signal continuity across the panel join**, and there the win is big: mean bright-
-    pixel (star) flux compared between a clear-panel region and the hazy-panel region gives a step of
-    **30.6% → 6.8%** with `photometric_normalize` on. Residual 6.8% is the 2× scale clamp (0.45 haze wants
-    2.22×). Reproduce with that measurement, not with `SEAMRES`.
-  - **The `is_mosaic` the fix direction assumes does not exist in `_stack_target`.** It is the *stacker's*
-    decision (`compute_mosaic_canvas(...).is_mosaic`, `seestack/stack/stacker.py` ~1250), made well after
-    `_stack_target` has already built its options. Deciding it outside means either re-running the canvas
-    computation pre-stack or clustering the pointings (`cluster_pointings` at `PANEL_LINK_DIST_DEG`, added
-    v0.270.2, is a cheap proxy); the tidier option is a new default-off `StackOption` the walk-away chain
-    sets, which the engine honours *after* it knows `is_mosaic_canvas`. Either way, keep manual stacks
-    unchanged.
-  - **⚠ Its coverage-map prerequisite is now SHIPPED (v0.270.4) — check it holds before flipping.** Turning
-    photometric normalization on makes a pixel's weighted coverage Σ(w/s²), which can be 4× off at the
-    clamp. That map is what the sky-leveling pass bins mosaic panels by, so before v0.270.4 this would have
-    scrambled the panel bins — the exact seam-grid failure mode the owner has complained about. v0.270.4
-    persists the honest frame count as `{base}_framecov.fits` and the leveling pass now prefers it, so the
-    binning no longer moves when photometric scaling is on. **Verify that on a fresh run** (the frame-count
-    bins must be identical with and without `photometric_normalize`) as the first step of this task.
+    **Fix direction:** extend the same "auto turns this on when the user made no explicit choice" pattern
+    already used for `auto_reject`/`quality_weighted` to `photometric_normalize`, gated on `is_mosaic` (mirror
+    the existing `if is_mosaic:` branch in `auto_recipe`/`_stack_target`). **Measure a real before/after** (seam
+    residual with vs. without, on a synthetic hazy-mid-session mosaic) before flipping any default, per
+    `AGENTS.md` §9 — do not blind-flip.
 
-  - **Scout 2026-08-26 — precise implementation site traced; the filed "mirror it in `_stack_target`"
-    direction is WRONG and would send the Builder down a dead end.** `_stack_target` / `build_stack_options`
-    (`webapp/pipeline.py`) builds the options **before** any canvas is computed, so **it does not know
-    `is_mosaic`** — the union-vs-reference decision is made *inside* `run_stack` (`is_mosaic_canvas`, set from
-    the canvas around `seestack/stack/stacker.py:1246–1250`). Turning `photometric_normalize` on at
-    option-build time can therefore only be unconditional, not mosaic-gated. **The clean, correct site is the
-    engine, and the precedent already exists a few lines below:** `final_gradient_removal` is auto-enabled for
-    every mosaic with `do_final_grad = options.final_gradient_removal or is_mosaic_canvas`
-    (`stacker.py:1735`) — unconditionally, no per-user "auto" flag, because it's simply the right correction
-    for a mosaic. `is_mosaic_canvas` is known by `stacker.py:1250`, and `photometric_normalize` is applied at
-    `stacker.py:1312` (during weight/scale-map build, before the passes) — *after* `is_mosaic_canvas` is set.
-    So the one-line mirror is at 1312: `if options.photometric_normalize or is_mosaic_canvas:` guarding
-    `compute_photometric_scales`. This composes with quality weighting automatically (the existing
-    `combine_weights_with_photometric` folds the `1/s²` variance correction in) and needs no pipeline change
-    at all. **Caveats for the Builder:** (1) it changes the *default* result of a **manual** mosaic stack too
-    (same as the `final_gradient_removal` precedent already does), so it's a mosaic-only image-quality default
-    change — surface it in provenance (a `PHOTOSKA`-style "auto for mosaic" card mirroring the final-gradient
-    `why` log) and still do the §9 measured before/after; (2) `compute_photometric_scales` self-neutralises
-    (`n_scaled == 0 → pscales=None`) on a run with no usable transparency scores, so a mosaic whose subs lack
-    `transparency_score` is byte-for-byte unchanged — the guard is safe on the no-data path. Size S (one guard
-    + a provenance card + the measurement test).
+    **MEASURED, 2026-08-26 (Builder). The improvement is real and large — but do NOT use seam residual to
+    judge it, and read the blocker below before starting.**
+    - **Seam residual is the wrong metric here and will tell you the change does nothing.** Measured on a
+      synthetic 2×2 mosaic with one panel shot through haze (transparency 1.0 → 0.45, real files dimmed
+      multiplicatively, `transparency_score` set as QC would): `seam_residual` **0.0 with and without**
+      `photometric_normalize`. That is correct behaviour, not a null result — `background_flatten` already
+      removes the per-frame *sky* offset, and seam residual measures a **sky** step between coverage levels.
+      Multiplicative *signal* dimming leaves the sky alone, which is precisely why `level_by_coverage` can't
+      fix it and why this entry exists.
+    - **The right metric is signal continuity across the panel join**, and there the win is big: mean bright-
+      pixel (star) flux compared between a clear-panel region and the hazy-panel region gives a step of
+      **30.6% → 6.8%** with `photometric_normalize` on. Residual 6.8% is the 2× scale clamp (0.45 haze wants
+      2.22×). Reproduce with that measurement, not with `SEAMRES`.
+    - **The `is_mosaic` the fix direction assumes does not exist in `_stack_target`.** It is the *stacker's*
+      decision (`compute_mosaic_canvas(...).is_mosaic`, `seestack/stack/stacker.py` ~1250), made well after
+      `_stack_target` has already built its options. Deciding it outside means either re-running the canvas
+      computation pre-stack or clustering the pointings (`cluster_pointings` at `PANEL_LINK_DIST_DEG`, added
+      v0.270.2, is a cheap proxy); the tidier option is a new default-off `StackOption` the walk-away chain
+      sets, which the engine honours *after* it knows `is_mosaic_canvas`. Either way, keep manual stacks
+      unchanged.
+    - **⚠ Its coverage-map prerequisite is now SHIPPED (v0.270.4) — check it holds before flipping.** Turning
+      photometric normalization on makes a pixel's weighted coverage Σ(w/s²), which can be 4× off at the
+      clamp. That map is what the sky-leveling pass bins mosaic panels by, so before v0.270.4 this would have
+      scrambled the panel bins — the exact seam-grid failure mode the owner has complained about. v0.270.4
+      persists the honest frame count as `{base}_framecov.fits` and the leveling pass now prefers it, so the
+      binning no longer moves when photometric scaling is on. **Verify that on a fresh run** (the frame-count
+      bins must be identical with and without `photometric_normalize`) as the first step of this task.
 
-- **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace, Scout
-  2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**
-  `auto_reject` is documented as a no-op under drizzle (drizzle has its own `drizzle_reject`, which defaults
-  **off** and is never turned on by the walk-away `auto` chain the way `auto_reject`/`quality_weighted` are).
-  Every drizzled walk-away stack — satellites, plane trails, cosmic rays, the works — goes
-  straight into the combine unfiltered.
-  - **Scout 2026-08-26 — confirmed via trace; the "check REJMODE first" step is no longer needed.** Grepped
-    every read of `drizzle_reject` across `webapp/` + `seestack/`: it is only ever `options.drizzle_reject`
-    (engine default `False`, `stacker.py:443`), gated `and n >= 4`; **nothing** in `webapp/pipeline.py`'s auto
-    path sets it (the auto path sets only `auto_reject` + `quality_weighted`), and `_resolve_auto_reject`
-    returns options unchanged the moment drizzle is on (`stacker.py:608`, `if not options.auto_reject or
-    options.drizzle: return options`). So on a drizzled walk-away run `drizzle_reject` stays `False` → the
-    single-pass `_drizzle_pass` runs with `clip=None` → zero rejection, and `auto_reject`/κ-σ/min-max are all
-    no-ops under drizzle. The path is unambiguous from the code; a live `REJMODE` header would only re-confirm
-    it. **Fix:** set `drizzle_reject=True` on the auto path when nothing explicit was chosen (same guard shape
-    as the `auto_reject` branch in `_stack_target`, and — unlike the sibling `photometric_normalize` item above
-    — `drizzle_reject` **is** a plain `StackOptions` bool the pipeline can set directly at build time, no
-    `is_mosaic` knowledge needed), with the §9 measured before/after (a synthetic drizzled stack with a
-    planted satellite trail: assert the trail survives without and is clipped with). Note the two-pass drizzle
-    reject roughly doubles per-frame cost (`drizzle_path.py` docstring), so weigh it as an auto default vs.
-    only-on-mosaic; measure both.
+    - **Scout 2026-08-26 — precise implementation site traced; the filed "mirror it in `_stack_target`"
+      direction is WRONG and would send the Builder down a dead end.** `_stack_target` / `build_stack_options`
+      (`webapp/pipeline.py`) builds the options **before** any canvas is computed, so **it does not know
+      `is_mosaic`** — the union-vs-reference decision is made *inside* `run_stack` (`is_mosaic_canvas`, set from
+      the canvas around `seestack/stack/stacker.py:1246–1250`). Turning `photometric_normalize` on at
+      option-build time can therefore only be unconditional, not mosaic-gated. **The clean, correct site is the
+      engine, and the precedent already exists a few lines below:** `final_gradient_removal` is auto-enabled for
+      every mosaic with `do_final_grad = options.final_gradient_removal or is_mosaic_canvas`
+      (`stacker.py:1735`) — unconditionally, no per-user "auto" flag, because it's simply the right correction
+      for a mosaic. `is_mosaic_canvas` is known by `stacker.py:1250`, and `photometric_normalize` is applied at
+      `stacker.py:1312` (during weight/scale-map build, before the passes) — *after* `is_mosaic_canvas` is set.
+      So the one-line mirror is at 1312: `if options.photometric_normalize or is_mosaic_canvas:` guarding
+      `compute_photometric_scales`. This composes with quality weighting automatically (the existing
+      `combine_weights_with_photometric` folds the `1/s²` variance correction in) and needs no pipeline change
+      at all. **Caveats for the Builder:** (1) it changes the *default* result of a **manual** mosaic stack too
+      (same as the `final_gradient_removal` precedent already does), so it's a mosaic-only image-quality default
+      change — surface it in provenance (a `PHOTOSKA`-style "auto for mosaic" card mirroring the final-gradient
+      `why` log) and still do the §9 measured before/after; (2) `compute_photometric_scales` self-neutralises
+      (`n_scaled == 0 → pscales=None`) on a run with no usable transparency scores, so a mosaic whose subs lack
+      `transparency_score` is byte-for-byte unchanged — the guard is safe on the no-data path. Size S (one guard
+      + a provenance card + the measurement test).
 
-  The missing rejection is still the leading (though separate, and unconfirmed) explanation for the bright
-  saturated-looking blob the owner's screenshot showed near a mosaic seam — most likely a real star with a
-  debayer/SCNR chroma ring, amplified by drizzle ×1.5 and possibly by the missing rejection pass; ruled out as
-  a NaN/coverage hole (renders black, not white) and as seam ghosting (would double every star along the
-  join, not produce one blob) — confirm with the same RA/Dec appearing in a raw sub and linear FITS values at
-  its core).
+- **🟠 FOLLOW-ON TO THE v0.271.1 DRIZZLE AUTO-REJECT DIRECTLY BELOW — auto-enabling it at option-build time
+  can turn a large drizzled mosaic that produces a picture today into a hard MemoryError REFUSAL, and on the
+  walk-away path nobody is watching to act on the advice.** *(Severity: an unattended stack that silently
+  stops producing pictures — worse than the satellites it removes. Confidence: HIGH, traced + arithmetic, not
+  yet reproduced on a real canvas. Small fix.)*
+  *(Filed by the Builder who implemented the same feature concurrently, engine-side and budget-aware, and
+  reverted it in favour of the shipped pipeline version rather than stacking two implementations — branch
+  `agent/mosaic-photometric-per-panel`, commit "Revert the drizzle auto-reject fix". The version there is a
+  ready reference implementation.)*
+  **The arithmetic:** two-pass drizzle rejection holds `_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT = 7` full-canvas
+  RGB float32 arrays against the single pass's `_PEAK_CANVAS_ARRAYS = 4` (`seestack/stack/stacker.py` ~70) —
+  a **1.75× jump in the memory estimate**, charged by `_guard_stack_memory`, which *raises* rather than
+  degrading. `_stack_memory_budget_bytes` defaults to ~70% of available RAM, so whether an install crosses
+  the line depends entirely on its canvas and its box; the owner drizzles ×1.5 on a mosaic union canvas,
+  which is the largest canvas this app produces. Before v0.271.1 that guard was never charged on the
+  walk-away path, so this is a *new* way for an unattended run to fail.
+  **Why the pipeline can't fix it:** `_stack_target` builds the options **before** any canvas exists — the
+  union canvas is computed inside `run_stack` — so it cannot know whether the extra pass fits.
+  **Fix direction:** decide it in the engine, where the canvas is known, and make it **fail-safe**: when the
+  two-pass estimate exceeds the budget and the single pass fits, log it plainly and stack *without* the
+  rejection rather than refusing the run — the picture matters more than the pass. The reverted commit does
+  exactly this in `_auto_drizzle_reject`, with `run_stack`'s dispatch, memory guard and in-flight cap all
+  reading one resolved `eff.drizzle_reject` so the three can't disagree, plus `estimate_stack` mirroring it;
+  it also carries the test (a budget the single pass fits and the two-pass one doesn't → declines; room for
+  both → takes it). **Keep the distinction the revert had to give up:** an *explicitly* ticked
+  `drizzle_reject` on a manual stack should still refuse loudly with its actionable advice — the user is
+  watching and can drop the drizzle scale. Only the auto-enabled case should degrade quietly.
+
+- ~~**🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace, Scout
+  2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**~~ —
+  **FIXED v0.271.1** (Builder 2026-08-26, branch `claude/compassionate-galileo-yhrbne`). *(Image quality,
+  priority 4 — every drizzled unattended stack, which is the owner's own setting.)*
+
+  **Fixed exactly as filed**, as the third leg of the `auto` chain in `_stack_target`
+  (`webapp/pipeline.py`): `if auto and opts_dict.get("drizzle") and "drizzle_reject" not in opts_dict:`.
+  Same "the user expressed no preference" guard as the `auto_reject` and `quality_weighted` legs beside it,
+  so a saved per-target default, the manual Stack form and reprocess-all are all honoured verbatim — and
+  only when drizzle is actually on, so an ordinary run's recorded options are byte-for-byte what they were.
+
+  **Measured before/after (§9), on the entry's own planted-trail scene** (16 subs, one carrying a satellite
+  streak, drizzled through the real `run_stack`): the trail's excess over parallel off-trail sky is
+  **247.5 ADU without rejection → −0.8 ADU with it** — i.e. it disappears into the noise. **And the cost the
+  entry asked to weigh: 2.12× wall-clock** on that scene (4.9 s → 10.3 s), matching the `drizzle_path.py`
+  docstring's "roughly doubles".
+
+  **Why unconditional on the auto path rather than mosaic-only.** The trade is the same one the app already
+  makes everywhere else it stacks unattended: the non-drizzle walk-away path auto-picks a *rejecting*
+  combine (κ-σ is itself two-pass) and pays for it. Drizzle was the one place a walk-away stack silently
+  chose speed over correctness, and a satellite in the finished picture is not recoverable while a slower
+  overnight job is merely slower. A user who wants the speed keeps it — ticking "Drizzle outlier rejection"
+  off in their saved defaults is an explicit choice and is respected (pinned by a test). The engine keeps
+  its own `and n >= 4` gate, so a stack too small for the statistics to mean anything still skips the pass.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk or API change, and no engine default flipped — the
+  `StackOptions.drizzle_reject` default stays `False`, so every existing run record replays exactly as
+  before. Rejection provenance (`REJMODE`/`REJFRAC`) was already stamped by the drizzle reject path, so the
+  History Info panel explains the new pass without any frontend change.
+
+  **Tests (+4 in `tests/webapp/test_auto_stack_pipeline.py`, 1 fail-before):** the walk-away drizzle stack
+  turning it on; an explicit saved `drizzle_reject: false` respected; a non-drizzle walk-away stack left
+  alone; and the manual form's drizzle stack left alone. The pixel-level claim it chains onto is already
+  pinned by `tests/test_drizzle_reject.py::test_e2e_satellite_trail_rejected` (and the star-cores-survive
+  safety property beside it).
+
+  Original spec, for the record:
+
+    **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace,
+    Scout 2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**
+    `auto_reject` is documented as a no-op under drizzle (drizzle has its own `drizzle_reject`, which defaults
+    **off** and is never turned on by the walk-away `auto` chain the way `auto_reject`/`quality_weighted` are).
+    Every drizzled walk-away stack — satellites, plane trails, cosmic rays, the works — goes
+    straight into the combine unfiltered.
+    - **Scout 2026-08-26 — confirmed via trace; the "check REJMODE first" step is no longer needed.** Grepped
+      every read of `drizzle_reject` across `webapp/` + `seestack/`: it is only ever `options.drizzle_reject`
+      (engine default `False`, `stacker.py:443`), gated `and n >= 4`; **nothing** in `webapp/pipeline.py`'s auto
+      path sets it (the auto path sets only `auto_reject` + `quality_weighted`), and `_resolve_auto_reject`
+      returns options unchanged the moment drizzle is on (`stacker.py:608`, `if not options.auto_reject or
+      options.drizzle: return options`). So on a drizzled walk-away run `drizzle_reject` stays `False` → the
+      single-pass `_drizzle_pass` runs with `clip=None` → zero rejection, and `auto_reject`/κ-σ/min-max are all
+      no-ops under drizzle. The path is unambiguous from the code; a live `REJMODE` header would only re-confirm
+      it. **Fix:** set `drizzle_reject=True` on the auto path when nothing explicit was chosen (same guard shape
+      as the `auto_reject` branch in `_stack_target`, and — unlike the sibling `photometric_normalize` item above
+      — `drizzle_reject` **is** a plain `StackOptions` bool the pipeline can set directly at build time, no
+      `is_mosaic` knowledge needed), with the §9 measured before/after (a synthetic drizzled stack with a
+      planted satellite trail: assert the trail survives without and is clipped with). Note the two-pass drizzle
+      reject roughly doubles per-frame cost (`drizzle_path.py` docstring), so weigh it as an auto default vs.
+      only-on-mosaic; measure both.
+
+    The missing rejection is still the leading (though separate, and unconfirmed) explanation for the bright
+    saturated-looking blob the owner's screenshot showed near a mosaic seam — most likely a real star with a
+    debayer/SCNR chroma ring, amplified by drizzle ×1.5 and possibly by the missing rejection pass; ruled out as
+    a NaN/coverage hole (renders black, not white) and as seam ghosting (would double every star along the
+    join, not produce one blob) — confirm with the same RA/Dec appearing in a raw sub and linear FITS values at
+    its core).
 
 - **⚪ HARDENING NOTE (found incidentally, 2026-08-17 audit — not currently firing for the owner, no fix
   needed yet, just a landmine to know about) — the mosaic-canvas outlier-exclusion pass's rejections are
@@ -12451,6 +12583,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   fail-neutral, never fail-guessy. Measure the before/after with the **seam residual on signal**, not
   `SEAMRES` (which measures *sky* steps and reads 0.0 either way — see the shipped entry above).
 
+- **IDEA (Scout 2026-08-26 #2, follow-on to the front-of-queue `photometric_normalize`-for-mosaic Builder item)
+  — once photometric normalization auto-enables for mosaics, weigh doing the same measurement for a
+  *single-field* target stacked across nights of **mixed transparency** (one hazy night + one clear night).**
+  *(Pillar: image quality — PRIORITY 4. Size: S–M. Do AFTER the mosaic item ships, and measured — not a
+  blind flip.)* The mosaic item corrects a hazy *panel*'s multiplicative dimming; the same mechanism
+  (`compute_photometric_scales` gain-matching by `transparency_score`, folded into the `1/s²` combine weight)
+  would gain-match a hazy *night*'s subs up to a clear night's on an ordinary single-target stack, which the
+  walk-away chain builds constantly as a beginner revisits one object. **Honest caveat that bounds the value:**
+  quality weighting (which the auto chain already enables) *down-weights* a hazy sub by `1/s²` today, so it
+  already does most of the SNR-optimal thing — the residual photometric normalization would add is mainly
+  **consistency of the combined signal level** (and cleaner behaviour where a night's transparency varies
+  within the stack), not a large noise win. So this is worth a **measurement** (a synthetic single-field target,
+  half its subs dimmed multiplicatively, star-flux step across the two sub-populations with vs. without
+  normalization) to decide whether the marginal gain justifies enabling it outside mosaics — file the numbers,
+  don't assume. `compute_photometric_scales` already self-neutralises when no usable transparency scores exist,
+  so the no-data path is safe either way. **Prereq:** the mosaic item's coverage-map interaction is already
+  handled by v0.270.4's `{base}_framecov.fits`, so the single-field extension inherits that safety for free.
+
 - **IDEA (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — the 16-bit *linear* export TIFF clips the
   brightest 0.1% (star / galaxy / nebula cores) to pure white, which its own docstring calls "the full data
   preserved".** *(Pillar: image quality / trust — PRIORITY 4; size S; **VERIFY the convention before changing —
@@ -13695,6 +13845,56 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW IDEA (Builder 2026-08-26, the half deliberately left out of "How big a mosaic?" v0.272.0) — tell a
+  beginner roughly how LONG that mosaic will take, not only how many panels.** *(Pillar: autonomy +
+  friendliness — PRIORITY 2–3; size S.)* The panel count now lands where the question is asked ("Needs 3×2
+  mosaic"), but the decision a beginner is actually making is *"can I do that tonight?"* — and 6 panels is a
+  very different evening from 12. The planner already knows this owner's real pace (`recent_pace_s`, the
+  median kept integration per clear night, used by the "how many more clear nights" row), so the row could
+  add *"at your usual pace, about two clear nights"* — never a guess: the sentence must **self-hide** for a
+  first-timer with no pace history, which is exactly why it wasn't bolted onto `mosaic_plan` (a pure catalog
+  helper with no access to the library's history, and no business acquiring one). **Slice:** a pure helper
+  next to the readiness maths that takes `panels` + `recent_pace_s` + the target's own integration goal and
+  returns a sentence or `None`; render it on the Tonight row's mosaic tooltip only (not the object-info card,
+  which has no pace). **Care:** a mosaic's per-panel integration is a fraction of a single-field target's, so
+  don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
+  already thinks in.
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-26 #2) — "My deep-sky wall": one-click, share-ready montage of a
+  beginner's best finished pictures.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: M.)*
+  A Seestar owner accumulates dozens of finished targets over a season, but the app can only ever show them
+  **one at a time** — there is no single image that says *"look at everything I've captured."* That montage
+  is the thing a beginner actually posts to friends/socials at the end of a good run of nights, and nothing
+  produces it today.
+  **Verified genuinely new (grepped this run):** the existing "Share your sky" poster (v0.223.0) is a
+  **stats/text** card (integration totals + target *names*, server-rendered in `seestack/recap.py`), *not* a
+  grid of the real pictures; the deepening reel is **one** target across nights; A/B compare is **two** stacks;
+  "What's in this picture?" labels objects *inside one* frame. No feature assembles multiple finished
+  **images** into one shareable canvas — this is that.
+  **It composes pieces that already exist.** `summarize_library` (`seestack/library_summary.py`) already
+  returns `heroes` — the exposure-ranked imaged targets **whose `last_stack_preview` PNG still exists on disk**
+  — so the picture set, ranking, and per-target labels (name + integration) are all in hand; and `recap.py`
+  already renders shareable posters server-side with Pillow, so the rendering pattern (and its ASCII-font /
+  self-hiding conventions) is established.
+  **Shape:** a pure layout helper `build_gallery_montage(tiles, *, columns=None, title=None) -> PIL.Image`
+  where each tile is a loaded preview + a short caption; it fits the top N heroes (default ~6–9, a sane cap)
+  into a tidy grid on the app's dark NaN=black canvas, letterboxing each tile to keep its true aspect (reuse
+  `deepening._fit_onto`, which already does exactly this) so a portrait single-field and a landscape mosaic
+  sit together without squashing, burns a small per-tile caption (reuse `deepening._draw_corner_label`), and
+  an optional overall title strip ("My deep-sky wall — 14 targets, 38 h total"). Then `GET /api/gallery/montage`
+  renders and caches it beside the library outputs, and a "Make a montage" button on the Gallery/Dashboard
+  offers download / To phone / wallpaper — reusing the share plumbing already wired for the single-picture case.
+  **Beginner bar:** clears it cleanly — a non-expert instantly understands and enjoys it, sane default (best N
+  by integration, no picking required), plain language, no expert knob; it *removes* work (no manual collage in
+  another app) — Method D.
+  **Guardrails/feasibility:** offline, additive, read-only (renders from previews the app already keeps, writes
+  only a cached montage under the library's own outputs — never `incoming/`); self-hides when fewer than ~2
+  heroes have a preview (one picture is not a "wall"); a missing/ío-error preview tile is simply dropped, never a
+  crash. Pure helper → trivially unit-testable (N tiles → grid dimensions; a portrait+landscape pair both
+  undistorted; a dropped unreadable tile doesn't shift the rest; <2 tiles → `None`).
+  **Slices —** (a) the pure `build_gallery_montage` helper + tests (a shippable Builder run on its own);
+  (b) the `/api/gallery/montage` endpoint + caching; (c) the Gallery/Dashboard button + share menu (frontend).
+
 - **NEW BEGINNER FEATURE (Scout 2026-08-26) — "When will I finish this?": an observability-aware completion
   forecast for a target that has an integration goal.** *(Pillar: autonomy + friendliness — PRIORITY 2–3.
   Size: M.)* The app already holds every piece separately: a target's integration **goal** (`goal_s`), its
@@ -13723,7 +13923,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   presence). Slice (a) alone is a shippable Builder run.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-26) — "How far did you see?": a light-travel-time wow-badge on the
-  finished picture.**~~ — **SHIPPED v0.272.0** (Builder 2026-08-26, branch
+  finished picture.**~~ — **SHIPPED v0.273.0** (Builder 2026-08-26, branch
   `agent/mosaic-photometric-per-panel`), **both slices, built to the spec.**
   *(Friendliness / enjoy + understand — PRIORITY 3.)*
   `seestack/lighttravel.py` — a pure, offline `light_travel(distance_ly) -> LightTravel | None` returning the
@@ -13775,44 +13975,78 @@ problems. Dogfood it every big-picture run and fix root causes.
   `distance_ly` to the catalog + the pure blurb helper + unit tests; (b) render the line on the existing
   object-info card (frontend, gated on presence). Slice (a) alone is a shippable Builder run.
 
-- **⚠ NOTE BEFORE STARTING THE "How big a mosaic?" ITEM BELOW (Builder 2026-08-26 — scoped it, found a data
-  gap, and deliberately did not build it).** The shape is right and the value is real, but the bundled
-  catalogs carry **only `size_arcmin` (the major axis)** — there is no minor axis. Modelling the object as a
-  square of its major axis, which is the conservative choice everywhere else in `framing.py`, over-states the
-  panel count badly: M 31 (178'×63') comes out as **3 cols × 5 rows = 15 panels** against a real answer near
-  2×3, and telling a beginner to shoot 15 panels when 6 will do is worse advice than saying nothing. Two
-  honest ways forward: (a) curate a `size_minor_arcmin` for the ~20 catalog objects that actually exceed one
-  frame (small, bounded data work — the same discipline the v0.272.0 `distance_ly` curation used, including
-  its "no field ⇒ no line" rule), then compute a real `cols × rows`; or (b) ship only the objects that have
-  both axes and return `None` for the rest. **Also unverified: the Seestar mosaic mode's own panel overlap**,
-  which the panel count divides by — pick a documented, conservative figure and *say* it is approximate,
-  rather than implying a precision the app doesn't have.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26) — "How big a mosaic?": when the app tells a beginner an object is
+  bigger than one frame and to "shoot it in mosaic mode", also say **how many panels** it takes to capture the
+  whole thing.**~~ — **SHIPPED v0.272.0** (Builder 2026-08-26, branch `claude/compassionate-galileo-yhrbne`).
+  *(Autonomy + friendliness, priority 2–3.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26) — "How big a mosaic?": when the app tells a beginner an object is
-  bigger than one frame and to "shoot it in mosaic mode", also say **how many panels** (and roughly how long)
-  it takes to capture the whole thing.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size S–M.)*
-  **The gap (verified in code):** `seestack/framing.py` (`framing_hint`, and the post-stack `partial` verdict)
-  already tells a beginner *"M 31 is bigger than the Seestar's single frame — shoot it in mosaic mode to
-  capture all of it"*, but it stops exactly where the beginner's next question begins — *how big a mosaic?* A
-  non-expert has no idea whether that means a 2×2 or a 4×5, or whether it's a one-night or a five-night job, so
-  they either don't start or under-shoot. Nothing in the backlog or the planner fills this (grepped: no
-  "how many panels" / panel-count / mosaic-size feature exists).
-  **Shape:** a pure engine helper `mosaic_plan(size_arcmin_major, size_arcmin_minor|None) -> MosaicPlan | None`
-  that divides the object's angular extent by the Seestar's single-frame FOV (already encoded in
-  `framing.py` — ~1.29°×0.73° with the overlap the Seestar app uses) and rounds up to a panel grid, returning
-  e.g. `cols=2, rows=2, panels=4` plus a plain sentence *"M 31's ~3°×1° span needs about a 2×2 mosaic (4
-  panels)."* Returns `None` (never a guess) for an object that fits in one frame or has no vetted size.
-  Optionally fold in a rough time budget from the planner's existing per-target pace (`recent_night_pace_s`) —
-  *"at your usual pace, budget about N hours for a clean result"* — but keep that half self-hiding so a
-  first-timer with no pace history still gets the panel count.
-  **Surface:** extend the existing pre-shoot framing hint (Tonight rows / Target `ObjectInfoCard`) and the
-  post-stack `partial` framing verdict with the one extra sentence — no new banner; it rides the notice that
-  already exists. **Beginner bar:** a non-expert immediately understands "shoot a 2×2 mosaic" and it's directly
-  actionable on their next clear night; it's a sane default with plain language and no expert knob (not
-  pro/niche — it *removes* the mosaic-planning guesswork rather than exposing panel-overlap sliders).
-  **Feasibility:** pure/offline, composes pieces that already exist (single-frame FOV + catalog `size_arcmin`),
-  additive, trivially unit-testable (fits-in-one-frame→None, a 2×2 case, an elongated 1×3 case, unknown
-  size→None). Upgrade-safe: additive nullable payload field + one sentence of copy.
+  **Built to the filed shape.** `seestack/framing.py` grows a pure `mosaic_plan(size_arcmin,
+  size_minor_arcmin=None)` returning a `MosaicPlan(cols, rows, panels, text)` — cols along the frame's long
+  edge, rows along its short one — and `None` (never a guess) for an unknown size or anything that fits a
+  single frame, so nothing ever proposes a one-panel "mosaic". It tiles honestly: the **first** panel covers a
+  whole field and each one after it adds only its step, because the 10% overlap the stitch needs sits
+  *between* panels and can't eat into a single panel's own field. M 31 → 3×2 (6 panels), M 42 → 2×2 (4),
+  the California Nebula → 2×1 (2).
+
+  **The data half is what makes it honest for the objects that matter.** The bundled catalogs carried only a
+  major axis, so a long thin object (the Veil, California, Seagull) would have been planned as a square and
+  over-called by 2–3×. All **23** bundled objects bigger than the short frame edge now carry a vetted
+  `size_minor_arcmin`; anything without one still falls back to the square (worst-case) box, which errs toward
+  a bigger mosaic rather than promising a beginner that a too-small grid will do. A drift test fails if a
+  future catalog entry is added big enough to plan but without a minor axis, and a sanity test pins
+  `0 < minor <= major` across the whole catalog.
+
+  **Surfaced where the question is actually asked** — no new banner, no new card:
+  - The "What am I looking at?" card appends it to the sentence it already shows: *"M 31 is bigger than the
+    Seestar's single frame — shoot it in mosaic mode to capture all of it. About a 3×2 mosaic (6 panels)
+    covers all of it."*
+  - The Tonight planner row and the discovery suggestion badge now say **"Needs 3×2 mosaic"** instead of
+    "Needs mosaic", with the full sentence on hover — the panel count is what a beginner actually sets in the
+    Seestar app, and it is the difference between "I can do that tonight" and "that is a project".
+
+  **Deliberately not in this slice:** the optional time-budget half (*"at your usual pace, budget about N
+  hours"*). It needs the planner's per-target pace, which the object-info card has no access to; filed as its
+  own idea below rather than half-built here.
+
+  **Upgrade-safe (§9):** one additive optional catalog field (an old file without it still loads), one
+  additive nullable API field on three payloads that an older frontend ignores, and a badge label that falls
+  back to its previous wording when the backend sends no plan. No config, DB, on-disk or default change.
+
+  **Tests (+13):** `tests/test_framing.py` (+8 — the never-guess/fits cases, the M 31 grid, the elongated
+  object taking fewer panels than a square box, the square fallback and its clamp, the first-panel-is-a-whole-
+  field boundary, overlap costing panels, plus the two catalog-data guards), `tests/test_objectinfo.py` (+2),
+  `tests/webapp/test_target_identify.py` (+2 incl. a fits-in-one-frame null), `tests/test_nightplan.py` (+1
+  and an extended suggestion invariant), `tests/webapp/test_plan.py` (extended), and on the frontend
+  `ObjectInfoCard.test.tsx` (+2 incl. a render assertion that it is one sentence, not a second banner) and
+  `tonight.test.ts` (+2 incl. the older-backend fallback).
+
+  Original spec, for the record:
+
+  - **NEW BEGINNER FEATURE (Scout 2026-08-26) — "How big a mosaic?": when the app tells a beginner an object is
+    bigger than one frame and to "shoot it in mosaic mode", also say **how many panels** (and roughly how long)
+    it takes to capture the whole thing.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size S–M.)*
+    **The gap (verified in code):** `seestack/framing.py` (`framing_hint`, and the post-stack `partial` verdict)
+    already tells a beginner *"M 31 is bigger than the Seestar's single frame — shoot it in mosaic mode to
+    capture all of it"*, but it stops exactly where the beginner's next question begins — *how big a mosaic?* A
+    non-expert has no idea whether that means a 2×2 or a 4×5, or whether it's a one-night or a five-night job, so
+    they either don't start or under-shoot. Nothing in the backlog or the planner fills this (grepped: no
+    "how many panels" / panel-count / mosaic-size feature exists).
+    **Shape:** a pure engine helper `mosaic_plan(size_arcmin_major, size_arcmin_minor|None) -> MosaicPlan | None`
+    that divides the object's angular extent by the Seestar's single-frame FOV (already encoded in
+    `framing.py` — ~1.29°×0.73° with the overlap the Seestar app uses) and rounds up to a panel grid, returning
+    e.g. `cols=2, rows=2, panels=4` plus a plain sentence *"M 31's ~3°×1° span needs about a 2×2 mosaic (4
+    panels)."* Returns `None` (never a guess) for an object that fits in one frame or has no vetted size.
+    Optionally fold in a rough time budget from the planner's existing per-target pace (`recent_night_pace_s`) —
+    *"at your usual pace, budget about N hours for a clean result"* — but keep that half self-hiding so a
+    first-timer with no pace history still gets the panel count.
+    **Surface:** extend the existing pre-shoot framing hint (Tonight rows / Target `ObjectInfoCard`) and the
+    post-stack `partial` framing verdict with the one extra sentence — no new banner; it rides the notice that
+    already exists. **Beginner bar:** a non-expert immediately understands "shoot a 2×2 mosaic" and it's directly
+    actionable on their next clear night; it's a sane default with plain language and no expert knob (not
+    pro/niche — it *removes* the mosaic-planning guesswork rather than exposing panel-overlap sliders).
+    **Feasibility:** pure/offline, composes pieces that already exist (single-frame FOV + catalog `size_arcmin`),
+    additive, trivially unit-testable (fits-in-one-frame→None, a 2×2 case, an elongated 1×3 case, unknown
+    size→None). Upgrade-safe: additive nullable payload field + one sentence of copy.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — "Did I frame it well?": a
   post-stack, plain-language centring / edge-cutoff verdict on the *finished* picture.**~~ — **SHIPPED v0.256.0**

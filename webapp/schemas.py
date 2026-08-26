@@ -63,6 +63,15 @@ class LightTravelOut(BaseModel):
     text: str    # the ready-to-render sentence
 
 
+class MosaicPlanOut(BaseModel):
+    """"How big a mosaic?" — the panel grid a too-big target's span needs."""
+
+    cols: int   # panels along the frame's long edge
+    rows: int   # panels along its short edge
+    panels: int
+    text: str   # a complete sentence, e.g. "About a 3×2 mosaic (6 panels) covers all of it."
+
+
 class DifficultyHintOut(BaseModel):
     """A "how hard is this for a Seestar?" verdict for a matched target."""
 
@@ -112,6 +121,10 @@ class ObjectInfoOut(BaseModel):
     # backends omit both, so the UI treats absent as "no framing hint".
     size_arcmin: float | None = None
     framing: FramingHintOut | None = None
+    # "How big a mosaic?" — the panel grid for a target bigger than one frame;
+    # ``null`` when it fits or has no vetted size. Old backends omit it, so the
+    # UI treats absent as "nothing to say".
+    mosaic: MosaicPlanOut | None = None
     # A plain-language, beginner-friendly one-liner about the object ("what am I
     # looking at?"), for the popular targets; ``""`` when the catalog has none.
     # Old backends omit it, so the UI treats absent/empty as "no blurb".
@@ -577,7 +590,9 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "help": "Gain-match every frame's brightness to the run's median before combining, "
              "so haze and airmass across a multi-night session don't weaken outlier "
              "rejection or let hazy nights dim the result. Uses each frame's measured "
-             "transparency; leaves un-measured frames untouched."},
+             "transparency; leaves un-measured frames untouched. Mosaics do this "
+             "automatically — a panel shot through haze would otherwise stay dimmer "
+             "than the one next to it."},
     {"key": "lucky_fraction", "label": "Lucky imaging (keep best %)", "type": "float",
      "group": "simple", "min": 0.05, "max": 1.0, "step": 0.05,
      "help": "Keep only the best fraction of frames by FWHM. 1.0 = keep all."},

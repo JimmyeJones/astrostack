@@ -49,7 +49,7 @@ function TargetRow({ t }: { t: PlannedTarget }) {
   // Pre-capture "will it fit?" nudge for a catalog candidate that's bigger than
   // (or as wide as) a single Seestar frame — so a beginner reaches for mosaic
   // mode before pointing. Only the too-big cases badge; "fits" stays silent.
-  const framingBadge = framingRowBadge(t.framing);
+  const framingBadge = framingRowBadge(t.framing, t.mosaic);
   // "How hard for a Seestar?" so a beginner sees difficulty while choosing, not
   // only after shooting. Catalog rows only; library/un-vetted rows carry none.
   const difficultyBadge = difficultyRowBadge(t.difficulty);
