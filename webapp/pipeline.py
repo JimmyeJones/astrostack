@@ -66,6 +66,21 @@ AUTO_STACK_CALIB_META_KEY = "web_auto_stack_calib_retrigger"
 # today's behaviour — see :func:`_auto_stack_frame_count`.
 AUTO_STACK_UNREADABLE_META_KEY = "web_auto_stack_unreadable"
 
+# Per-target meta marker for the "your newest picture is thinner than one you
+# already had" heal (:func:`_auto_stack_degraded_recheck`). Holds a fingerprint
+# of the exact situation that was healed (best:newest:solved), so a given
+# collapse is re-stacked **once** and never on every subsequent scan — the same
+# discipline as the calibration recheck's master-set fingerprint.
+AUTO_STACK_DEGRADED_META_KEY = "web_auto_stack_degraded_heal"
+
+# How much thinner than *both* the target's best stack and its currently-readable
+# sub count the newest stack must be before the heal above will re-stack it. A
+# normal stack drops a few subs at alignment, so the bar sits well clear of that:
+# below 80 % of both is a collapse, not a rounding difference. Being generous
+# costs at most one redundant re-stack of data that is all on disk — which
+# produces an equal-or-better picture, and is fingerprint-guarded to once.
+DEGRADED_STACK_RATIO = 0.8
+
 
 def _progress(jm: JobManager, job: Job):
     """Engine ``(phase, done, total)`` callback bound to a job."""
@@ -203,6 +218,7 @@ def _pipeline_body(
             skipped: list[str] = []
             held_thin: list[dict[str, Any]] = []
             held_unreadable: list[dict[str, Any]] = []
+            healed: list[dict[str, Any]] = []
             mixed_skipped: list[str] = []
             legacy_skipped: list[str] = []
             stack_errors: dict[str, str] = {}
@@ -234,6 +250,7 @@ def _pipeline_body(
                 # target — the exact non-fatality the QC/solve loop above honours.
                 try:
                     calib_fp: str | None = None
+                    degraded_fp: str | None = None
                     attempt_n = _auto_stack_frame_count(lib, safe)
                     if attempt_n is None:
                         # No *new* frames to stack — but if the target's stack is
@@ -241,10 +258,19 @@ def _pipeline_body(
                         # become available (the beginner added darks after their
                         # first stack), re-stack it once to actually apply them.
                         recheck = _auto_stack_calibration_recheck(settings, lib, safe)
-                        if recheck is None:
-                            skipped.append(safe)
-                            continue
-                        attempt_n, calib_fp = recheck
+                        if recheck is not None:
+                            attempt_n, calib_fp = recheck
+                        else:
+                            # …and the other "no new subs, but a re-stack is now
+                            # worth it" case: the target's newest picture is
+                            # materially thinner than one it already produced
+                            # (a storage outage from before v0.270.1), and every
+                            # sub is readable again. Heal it once.
+                            heal = _auto_stack_degraded_recheck(lib, safe)
+                            if heal is None:
+                                skipped.append(safe)
+                                continue
+                            attempt_n, degraded_fp = heal
                     if attempt_n < settings.auto_stack_min_frames:
                         # Too few located subs to make anything but single-frame
                         # colour speckle (the owner-reported gibberish). Hold the
@@ -286,6 +312,14 @@ def _pipeline_body(
                     # uncalibrated can't loop the recheck on every scan.
                     if calib_fp is not None:
                         _mark_auto_stack_calib_retrigger(lib, safe, calib_fp)
+                    if degraded_fp is not None:
+                        # Same discipline, for the "heal a thin newest picture"
+                        # re-stack: stamp the situation's fingerprint *before*
+                        # stacking so a re-stack that (for any reason) stays thin
+                        # can't re-trigger the heal on every subsequent scan.
+                        _mark_auto_stack_degraded_heal(lib, safe, degraded_fp)
+                        healed.append({"target": safe, "frames": attempt_n,
+                                       "fingerprint": degraded_fp})
                     _mark_auto_stack_attempt(lib, safe, attempt_n)
                     res = _stack_target(
                         settings, jm, job, lib, safe,
@@ -305,6 +339,11 @@ def _pipeline_body(
                         if calib_fp is not None:
                             with contextlib.suppress(Exception):
                                 _clear_auto_stack_calib_retrigger(lib, safe)
+                        if degraded_fp is not None:
+                            with contextlib.suppress(Exception):
+                                _clear_auto_stack_degraded_heal(lib, safe)
+                            if healed and healed[-1].get("target") == safe:
+                                healed.pop()  # not healed — the user cancelled it
                         summary["cancelled"] = True
                         break
                     stacked.append(safe)
@@ -330,6 +369,16 @@ def _pipeline_body(
                     if calib_fp is not None:
                         with contextlib.suppress(Exception):
                             _clear_auto_stack_calib_retrigger(lib, safe)
+                    if degraded_fp is not None:
+                        # Same reasoning as the calibration marker above: the
+                        # fingerprint is written pre-stack only to break a
+                        # process-*crash* loop, so a survivable failure must not
+                        # strand the heal — a genuinely reproducible one simply
+                        # re-fails fast and is re-logged each scan.
+                        with contextlib.suppress(Exception):
+                            _clear_auto_stack_degraded_heal(lib, safe)
+                        if healed and healed[-1].get("target") == safe:
+                            healed.pop()  # it didn't heal — don't claim it did
                     # A cancel that surfaced as a raise (rather than a graceful
                     # cancelled result) is a cancel, not a target error — classify
                     # it as one and stop, mirroring the QC/solve loop above.
@@ -344,6 +393,8 @@ def _pipeline_body(
                 summary["auto_stack_held_thin"] = held_thin
             if held_unreadable:
                 summary["auto_stack_held_unreadable"] = held_unreadable
+            if healed:
+                summary["auto_stack_healed"] = healed
             if mixed_skipped:
                 summary["auto_stack_mixed_skipped"] = mixed_skipped
             if legacy_skipped:
@@ -1919,6 +1970,93 @@ def _auto_stack_calibration_recheck(
         if proj.get_meta(AUTO_STACK_CALIB_META_KEY) == fingerprint:
             return None  # already re-stacked for this exact master set
         return solved_accepted, fingerprint
+    finally:
+        proj.close()
+
+
+def _auto_stack_degraded_recheck(
+    lib: Library, safe: str) -> tuple[int, str] | None:
+    """``(frame_count, fingerprint)`` to re-stack a target whose **newest picture
+    is thinner than one it already produced**, or ``None`` to skip.
+
+    v0.270.1 stops a walk-away stack ever *publishing* a picture made thin by
+    subs whose files weren't readable, but only for outages from then on. An
+    install already hit by one keeps the thin result as its newest picture,
+    because :func:`_auto_stack_frame_count`'s ``prior_max`` guard correctly
+    refuses to re-stack unchanged data. It heals itself the next clear night —
+    new subs push the count past ``prior_max`` — but until then the *worse*
+    picture is the one on the Dashboard, for the owner's install and any other.
+
+    Fires once when **all** hold:
+
+    * the target has a *genuine* stack run (editor-export and channel-combine
+      runs record a tiny ``n_frames_used`` and are not integrations — the
+      ``prior_max`` docstring names this exact trap);
+    * that newest genuine run used less than :data:`DEGRADED_STACK_RATIO` of the
+      best any genuine run reached — a collapse, not an alignment rounding;
+    * **and** less than that share of the target's *current* solved+accepted
+      count. This is what separates the two cases: a storage outage leaves every
+      sub accepted in the DB and only the files missing, so the count still
+      stands at 787 while the run used 271 — whereas a user who deliberately
+      rejected half the target's frames and re-stacked has a count that fell
+      with the run, and must not be second-guessed;
+    * every solved+accepted sub is readable **right now**, so the re-stack can
+      actually do better rather than reproducing the thin result;
+    * and the fingerprint marker says this exact situation hasn't been healed
+      already, so it can never loop.
+
+    Returns the current solved+accepted count (the caller stacks exactly the
+    frames it would have) and the fingerprint the caller persists before
+    stacking. The ``stat()`` pass is reached only after the cheap thinness tests
+    have already matched, which is rare by construction — a healthy target pays
+    nothing for this beyond reading its own run list.
+    """
+    proj = lib.open_target(safe)
+    try:
+        solved_accepted = _solved_accepted_count(proj)
+        if solved_accepted == 0:
+            return None
+        genuine = [r for r in proj.iter_stack_runs()
+                   if _stack_options_from_run_json(r.options_json) is not None]
+        if not genuine:
+            return None  # never genuinely stacked — the frame-count path owns that
+        newest_n = int(genuine[0].n_frames_used)  # iter_stack_runs is newest-first
+        best_n = max(int(r.n_frames_used) for r in genuine)
+        if newest_n >= DEGRADED_STACK_RATIO * best_n:
+            return None  # the newest picture is not materially thinner
+        if newest_n >= DEGRADED_STACK_RATIO * solved_accepted:
+            return None  # the subs went away too — a deliberate rejection, not a loss
+        fingerprint = f"{best_n}:{newest_n}:{solved_accepted}"
+        if proj.get_meta(AUTO_STACK_DEGRADED_META_KEY) == fingerprint:
+            return None  # already healed this exact situation
+        if _solved_accepted_unreadable(proj) > 0:
+            # Still mid-outage: re-stacking now would just reproduce the thin
+            # result. Say nothing and let the next scan look again — and don't
+            # burn the fingerprint on an attempt that can't succeed.
+            return None
+        log.info(
+            "Auto-stack heal for %s: newest stack used %d frames but this target "
+            "reached %d, and all %d solved+accepted subs are readable — re-stacking",
+            safe, newest_n, best_n, solved_accepted,
+        )
+        return solved_accepted, fingerprint
+    finally:
+        proj.close()
+
+
+def _mark_auto_stack_degraded_heal(lib: Library, safe: str, fingerprint: str) -> None:
+    proj = lib.open_target(safe)
+    try:
+        proj.set_meta(AUTO_STACK_DEGRADED_META_KEY, fingerprint)
+    finally:
+        proj.close()
+
+
+def _clear_auto_stack_degraded_heal(lib: Library, safe: str) -> None:
+    """Drop the heal fingerprint so the next scan may retry the re-stack."""
+    proj = lib.open_target(safe)
+    try:
+        proj.delete_meta(AUTO_STACK_DEGRADED_META_KEY)
     finally:
         proj.close()
 

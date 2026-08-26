@@ -7120,28 +7120,68 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-26, the deliberate follow-on to the v0.270.1 readability fix) — heal a target
-  that is ALREADY sitting on a degraded newest picture, instead of only preventing the next one.** *(Priority 2
-  autonomy / priority 4 image quality. Size M. Serves the owner's live install directly.)*
-  v0.270.1 stops a walk-away stack publishing a picture made thin by unreadable subs, and re-fires once the
-  files come back — but only for outages **from now on**. An install already hit by this (the owner's, per the
-  fixed bug above: runs of 787 → 575 → **271** frames) keeps the 271-frame result as its newest picture,
-  because `_auto_stack_frame_count`'s `prior_max` guard correctly refuses to re-stack unchanged data. It heals
-  itself the next clear night — new subs push `solved_accepted` past `prior_max` and the fixed path stacks the
-  full set — but until then the *worse* picture is the one on the Dashboard.
-  **Shape (mirror `_auto_stack_calibration_recheck`, which solves the same "no new subs, but a restack is now
-  worth it" problem):** a `_auto_stack_degraded_recheck` that fires **once** when all hold — the target's
-  *newest* genuine stack run used materially fewer frames than its best prior run; **every** solved+accepted
-  sub is readable right now (so the retry can actually do better); and a fingerprint marker
-  (`best_n:newest_n`) says this exact situation hasn't already been re-stacked. Stamp the marker before
-  stacking, exactly like the calibration recheck, so it can never loop.
-  **Cautions:** "genuine run" must exclude channel-combine / editor-export runs, whose tiny `n_frames_used`
-  would look like a collapse (the existing `prior_max` docstring already names this trap); a user who
-  *deliberately* rejected half a target's frames and re-stacked has a legitimately thinner newest run and must
-  not be second-guessed — gate on readability having *recovered*, not on thinness alone, or better, on the
-  `AUTO_STACK_UNREADABLE_META_KEY` marker being set. **Measure it:** the acceptance test is the owner's own
-  sequence — 787 → 271 with files restored — healing back to a full-frame stack in one scan and then staying
-  quiet on every subsequent scan.
+- ~~**NEW IDEA (Builder 2026-08-26, the deliberate follow-on to the v0.270.1 readability fix) — heal a target
+  that is ALREADY sitting on a degraded newest picture, instead of only preventing the next one.**~~ —
+  **SHIPPED v0.270.5** (Builder 2026-08-26, branch `claude/compassionate-galileo-il93a9`). *(Priority 2
+  autonomy / priority 4 image quality. Serves the owner's live install directly.)*
+
+  **What shipped — built to the filed shape.** `_auto_stack_degraded_recheck` mirrors
+  `_auto_stack_calibration_recheck` exactly: the scan loop consults it when `_auto_stack_frame_count` has
+  nothing new *and* the calibration recheck declines, and it returns the current solved+accepted count plus
+  a `best:newest:solved` fingerprint the caller stamps **before** stacking, so a re-stack that (for any
+  reason) stays thin can never loop. It fires once when all hold: the target has a *genuine* stack run
+  (`_stack_options_from_run_json`, so an editor-export or channel-combine row's tiny `n_frames_used` can't
+  masquerade as a collapse — the trap the entry named); that newest genuine run used less than
+  `DEGRADED_STACK_RATIO` (0.8) of the best any genuine run reached; **and** less than that share of the
+  target's *current* solved+accepted count; and every solved+accepted sub is readable right now.
+
+  **How it avoids second-guessing a deliberate rejection** — the caution the entry flagged, solved without
+  needing the `AUTO_STACK_UNREADABLE_META_KEY` marker (which a pre-fix install, i.e. the whole point of this
+  item, never wrote): a storage outage leaves every sub *accepted in the DB* and only the files missing, so
+  the count still stands at 787 while the run used 271. A user who rejected half the target's frames has a
+  count that fell *with* the run. Comparing the newest run against the live count is what tells them apart.
+
+  **Cheap on a healthy install:** the `stat()` pass is reached only after the two cheap thinness tests have
+  already matched, so an ordinary target pays nothing beyond reading its own run list. Mid-outage it holds
+  off **without** spending the fingerprint, so the heal still fires once the files return.
+
+  **Surfaced:** the scan job records `auto_stack_healed`, the Jobs summary line gains *"re-stacked 1 that had
+  come out thin"*, and a green alert says *"…newest picture had come out thinner than one you already had —
+  which happens when subs are briefly off-line while a stack runs. All of their subs are readable again, so
+  the full set was re-stacked. Nothing was lost, and nothing was deleted — your earlier pictures are all
+  still in History."*
+
+  **Upgrade-safe (§9):** one new *additive* project-meta key (absent ⇒ never healed ⇒ the heal simply gets
+  its one shot), no schema, config, on-disk, default or response-shape change (a new optional summary key an
+  older frontend ignores). Gated behind `auto_stack`, which is off by default.
+
+  **Tests (+5 python, 2 fail-before; +3 frontend):** `tests/webapp/test_auto_stack_pipeline.py` — the
+  re-stack fires and then stays quiet on every subsequent scan; a healthy target is never touched; a
+  deliberate rejection isn't second-guessed; an ongoing outage holds off without spending the fingerprint;
+  an editor-export row isn't mistaken for a collapse. `frontend/src/routes/Jobs.test.tsx` — the summary
+  clause, malformed-entry tolerance, and the alert.
+
+  Original spec, for the record:
+
+      v0.270.1 stops a walk-away stack publishing a picture made thin by unreadable subs, and re-fires once the
+      files come back — but only for outages **from now on**. An install already hit by this (the owner's, per the
+      fixed bug above: runs of 787 → 575 → **271** frames) keeps the 271-frame result as its newest picture,
+      because `_auto_stack_frame_count`'s `prior_max` guard correctly refuses to re-stack unchanged data. It heals
+      itself the next clear night — new subs push `solved_accepted` past `prior_max` and the fixed path stacks the
+      full set — but until then the *worse* picture is the one on the Dashboard.
+      **Shape (mirror `_auto_stack_calibration_recheck`, which solves the same "no new subs, but a restack is now
+      worth it" problem):** a `_auto_stack_degraded_recheck` that fires **once** when all hold — the target's
+      *newest* genuine stack run used materially fewer frames than its best prior run; **every** solved+accepted
+      sub is readable right now (so the retry can actually do better); and a fingerprint marker
+      (`best_n:newest_n`) says this exact situation hasn't already been re-stacked. Stamp the marker before
+      stacking, exactly like the calibration recheck, so it can never loop.
+      **Cautions:** "genuine run" must exclude channel-combine / editor-export runs, whose tiny `n_frames_used`
+      would look like a collapse (the existing `prior_max` docstring already names this trap); a user who
+      *deliberately* rejected half a target's frames and re-stacked has a legitimately thinner newest run and must
+      not be second-guessed — gate on readability having *recovered*, not on thinness alone, or better, on the
+      `AUTO_STACK_UNREADABLE_META_KEY` marker being set. **Measure it:** the acceptance test is the owner's own
+      sequence — 787 → 271 with files restored — healing back to a full-frame stack in one scan and then staying
+      quiet on every subsequent scan.
 
 - ~~**NEW IDEA (Builder 2026-08-16, the obvious next step after the library-wide un-exported-edit note v0.263.0) —
   "Finish them all": one job that exports every edit the user saved and never exported.**~~ — **SHIPPED v0.265.0**

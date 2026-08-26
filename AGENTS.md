@@ -91,14 +91,18 @@ so it never retried. **Both halves shipped:** a readability preflight that holds
 stamping the marker — when stacking now would land below the minimum-frames floor or *thinner than the best
 stack that target already has*, plus a missing-file count stamped beside the attempt marker so a crippled
 attempt retries once the files return. Gated on there being unreadable files at all, so a healthy install is
-bit-for-bit unaffected. Full write-up at the top of `docs/IMPROVEMENTS.md` → "Bugs (fix these first)". **The
-one follow-on deliberately left open** is *healing* an install already sitting on a degraded picture from
-before the fix (it self-heals the next clear night) — filed under Ideas → "Autonomy & friendliness". Two
-smaller, lower-severity findings from the same audit are still open directly beneath the fixed entry (a
-latent mosaic auto-grade population bug, gated off by default; and a design gap where
-`photometric_normalize` never gets enabled on the walk-away mosaic path even though `level_by_coverage`
-alone can't fix a hazy panel's multiplicative dimming) — **these are now the front of the bug queue**, worth
-a run each.
+bit-for-bit unaffected. Full write-up at the top of `docs/IMPROVEMENTS.md` → "Bugs (fix these first)". *(The one follow-on this paragraph used to
+leave open — *healing* an install already sitting on a degraded picture from before the fix — **shipped in
+v0.270.5**; don't go looking for it.)* The two smaller
+findings from the same audit that this paragraph used to point at are **also dealt with** (refreshed
+2026-08-26): the latent mosaic auto-grade population bug shipped in **v0.270.2**, and the
+`photometric_normalize`-on-the-mosaic-path gap turned out to rest on a false premise — `transparency_score`
+is the median flux of a frame's *brightest stars*, so across two panels of different sky it cannot separate
+"dim because haze" from "dim because the field is emptier". Enabling it mosaic-wide would have manufactured
+a coloured panel grid; **v0.270.3** made both the quality weights and the photometric scales **per panel**
+instead, which was also a live bug in its own right (a star-poor panel's subs were all demoted to 0.63 on
+every walk-away stack). The entry is still open, but read its ⚠️ note first — its original "fix direction"
+is wrong as written, and what remains of it is materially bigger than it looks.
 
 **🎨 STANDING OWNER PRIORITY (2026-08-08) — the UI is "extremely busy"; fix the information
 architecture, page by page.** The owner's top complaint about the live build: *"there are like 30

@@ -1027,3 +1027,196 @@ def test_stack_records_how_many_subs_were_unreadable(solved_library, monkeypatch
             proj.close()
     finally:
         lib.close()
+
+
+# ---- Healing a target already sitting on a degraded picture -----------------
+#
+# v0.270.1 stops a walk-away stack *publishing* a picture made thin by subs whose
+# files weren't readable, but only for outages from then on. An install already
+# hit by one keeps the thin result as its newest picture, because the frame-count
+# guard correctly refuses to re-stack unchanged data — it heals itself only on the
+# next clear night. These cover the one-shot re-stack that puts the better picture
+# back the moment every sub is readable again.
+
+_GENUINE_OPTIONS = '{"sigma_clip": true, "sigma_kappa": 3.0}'
+
+
+def _record_genuine_run(proj, n_frames_used: int) -> None:
+    """A run whose ``options_json`` parses as real StackOptions — i.e. an actual
+    integration, not an editor-export or channel-combine row."""
+    proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-05-01T00:00:00Z",
+        output_basename="master", fits_path=None, tiff_path=None,
+        preview_path=None, n_frames_used=n_frames_used,
+        canvas_h=10, canvas_w=10, coverage_min=1, coverage_max=n_frames_used,
+        options_json=_GENUINE_OPTIONS,
+    ))
+
+
+def _first_target(lib) -> str:
+    return lib.list_targets()[0].safe_name
+
+
+def _only_target(lib, keep: str) -> None:
+    """Reject every other target's frames so the scan has exactly one candidate."""
+    for entry in lib.list_targets():
+        if entry.safe_name == keep:
+            continue
+        proj = lib.open_target(entry.safe_name)
+        try:
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, accept=False, reject_reason="test")
+        finally:
+            proj.close()
+        lib.refresh_target_stats(entry.safe_name)
+
+
+def _degraded_target(solved_library, best: int, newest: int) -> str:
+    """Set one target up as "already sitting on a degraded picture": a good run of
+    ``best`` frames, then a collapsed newest run of ``newest`` — with every sub
+    still accepted and readable, which is what a storage outage leaves behind."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_target(lib)
+        _only_target(lib, safe)
+        proj = lib.open_target(safe)
+        try:
+            _record_genuine_run(proj, best)
+            _record_genuine_run(proj, newest)   # newest — the collapsed one
+            proj.set_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY,
+                          str(pipeline._solved_accepted_count(proj)))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    return safe
+
+
+def test_a_thin_newest_picture_is_re_stacked_once_when_the_subs_are_all_back(
+    solved_library, monkeypatch,
+):
+    calls = _patch_run_stack(monkeypatch)
+    safe = _degraded_target(solved_library, best=3, newest=1)
+    settings = _settings(solved_library)
+    summary = pipeline._pipeline_body(settings, _FakeJM(), Job(kind="pipeline"), root=None)
+
+    assert calls, "the degraded target should have been re-stacked"
+    assert summary["auto_stacked"] == [safe]
+    assert [h["target"] for h in summary["auto_stack_healed"]] == [safe]
+    assert summary["auto_stack_healed"][0]["frames"] == 3
+
+    # …and exactly once: a second scan over the same (still unchanged) data must
+    # not re-stack again, or an install would re-stack on every single scan.
+    calls.clear()
+    second = pipeline._pipeline_body(settings, _FakeJM(), Job(kind="pipeline"), root=None)
+    assert calls == []
+    assert second["auto_stacked"] == []
+    assert "auto_stack_healed" not in second
+
+
+def test_a_healthy_target_is_never_re_stacked_by_the_heal(solved_library, monkeypatch):
+    # The no-regression guard: a target whose newest run covered everything is
+    # left completely alone — this is every target on every healthy install.
+    calls = _patch_run_stack(monkeypatch)
+    _degraded_target(solved_library, best=3, newest=3)
+    summary = pipeline._pipeline_body(
+        _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+    assert calls == []
+    assert summary["auto_stacked"] == []
+    assert "auto_stack_healed" not in summary
+
+
+def test_the_heal_does_not_second_guess_a_deliberate_rejection(
+    solved_library, monkeypatch,
+):
+    # A user who rejected most of a target's subs and re-stacked has a
+    # legitimately thinner newest run — and, unlike a storage outage, the *subs*
+    # went with it. Gating on the current solved+accepted count is what tells the
+    # two apart, so this must stay untouched.
+    calls = _patch_run_stack(monkeypatch)
+    safe = _degraded_target(solved_library, best=3, newest=1)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            accepted = [f for f in proj.iter_frames(accepted_only=True)]
+            for f in accepted[1:]:
+                proj.update_frame(f.id, accept=False, reject_reason="user")
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+    summary = pipeline._pipeline_body(
+        _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+    assert calls == []
+    assert "auto_stack_healed" not in summary
+
+
+def test_the_heal_waits_while_the_subs_are_still_missing(solved_library, monkeypatch):
+    # Mid-outage, a re-stack would only reproduce the thin result — so it holds
+    # off and, crucially, does not burn the one-shot fingerprint on it.
+    calls = _patch_run_stack(monkeypatch)
+    safe = _degraded_target(solved_library, best=3, newest=1)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            # Repoint the *recorded* paths at files that don't exist — the outage
+            # is simulated in the DB, never by touching a byte on disk.
+            for f in proj.iter_frames(accepted_only=True):
+                proj.update_frame(f.id, cached_path=f"/nope/gone{f.id}.fit",
+                                  source_path=f"/nope/gone{f.id}.fit")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    summary = pipeline._pipeline_body(
+        _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+    assert calls == []
+    assert "auto_stack_healed" not in summary
+
+    # The fingerprint was not spent, so the heal still fires once the files are
+    # back — that is the whole point of not stamping it during an outage.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            assert proj.get_meta(pipeline.AUTO_STACK_DEGRADED_META_KEY) is None
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_an_editor_export_run_is_not_mistaken_for_a_collapsed_stack(
+    solved_library, monkeypatch,
+):
+    # Editor-export and channel-combine rows live in ``stack_runs`` too and record
+    # a tiny n_frames_used. If the newest of those counted, every target with a
+    # saved edit would look like it had collapsed and be re-stacked for nothing.
+    calls = _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_target(lib)
+        _only_target(lib, safe)
+        proj = lib.open_target(safe)
+        try:
+            _record_genuine_run(proj, 3)
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-02T00:00:00Z",
+                output_basename="edited", fits_path=None, tiff_path=None,
+                preview_path=None, n_frames_used=1,
+                canvas_h=10, canvas_w=10, coverage_min=1, coverage_max=1,
+                options_json='{"editor_recipe": {"ops": []}}', notes="edited",
+            ))
+            proj.set_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY,
+                          str(pipeline._solved_accepted_count(proj)))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    summary = pipeline._pipeline_body(
+        _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+    assert calls == []
+    assert "auto_stack_healed" not in summary

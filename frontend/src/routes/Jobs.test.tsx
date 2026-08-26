@@ -393,6 +393,26 @@ describe("pipelineSummary", () => {
       { target: "X", offered: 0, readable: 0, unreadable: 0 },
     ]);
   });
+
+  it("credits a target whose thin newest picture was re-stacked", () => {
+    // An install hit by an outage *before* the app learned to hold such a stack
+    // back keeps the thin result as its newest picture until the next clear
+    // night. This is the scan saying it put the better one back.
+    const { line, healed } = pipelineSummary({
+      scanned: 0, auto_stacked: ["M 42"],
+      auto_stack_healed: [{ target: "M 42", frames: 787, fingerprint: "787:271:787" }],
+    });
+    expect(line).toBe(
+      "No new frames · auto-stacked 1 target · re-stacked 1 that had come out thin.",
+    );
+    expect(healed).toEqual([{ target: "M 42", frames: 787 }]);
+  });
+
+  it("says nothing about healing on an ordinary scan, and tolerates junk", () => {
+    expect(pipelineSummary({ scanned: 3, auto_stacked: [] }).healed).toEqual([]);
+    expect(pipelineSummary({ auto_stack_healed: [null, "junk", { target: "X" }] }).healed)
+      .toEqual([{ target: "X", frames: 0 }]);
+  });
 });
 
 describe("bootstrapRescueNote", () => {
@@ -593,6 +613,25 @@ describe("JobsView pipeline result actions", () => {
     )).toBeInTheDocument();
     expect(screen.getByText(
       /516 of 787 subs couldn't be read \(271 still readable\)\./,
+    )).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "M 42" }))
+      .toHaveAttribute("href", "/targets/M 42");
+  });
+
+  it("renders the put-a-better-picture-back alert", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-1h", kind: "pipeline", target: null, state: "done",
+        result: {
+          scanned: 0, auto_stacked: ["M 42"],
+          auto_stack_healed: [{ target: "M 42", frames: 787 }],
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText("Put a better picture back")).toBeInTheDocument();
+    expect(screen.getByText(
+      /re-stacked with all 787 of its subs\./,
     )).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "M 42" }))
       .toHaveAttribute("href", "/targets/M 42");
