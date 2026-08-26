@@ -678,33 +678,68 @@ _(none — claim an item here with your branch name)_
       `transparency_score` is byte-for-byte unchanged — the guard is safe on the no-data path. Size S (one guard
       + a provenance card + the measurement test).
 
-- **🟠 FOLLOW-ON TO THE v0.271.1 DRIZZLE AUTO-REJECT DIRECTLY BELOW — auto-enabling it at option-build time
+- ~~**🟠 FOLLOW-ON TO THE v0.271.1 DRIZZLE AUTO-REJECT DIRECTLY BELOW — auto-enabling it at option-build time
   can turn a large drizzled mosaic that produces a picture today into a hard MemoryError REFUSAL, and on the
-  walk-away path nobody is watching to act on the advice.** *(Severity: an unattended stack that silently
-  stops producing pictures — worse than the satellites it removes. Confidence: HIGH, traced + arithmetic, not
-  yet reproduced on a real canvas. Small fix.)*
-  *(Filed by the Builder who implemented the same feature concurrently, engine-side and budget-aware, and
-  reverted it in favour of the shipped pipeline version rather than stacking two implementations — branch
-  `agent/mosaic-photometric-per-panel`, commit "Revert the drizzle auto-reject fix". The version there is a
-  ready reference implementation.)*
-  **The arithmetic:** two-pass drizzle rejection holds `_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT = 7` full-canvas
-  RGB float32 arrays against the single pass's `_PEAK_CANVAS_ARRAYS = 4` (`seestack/stack/stacker.py` ~70) —
-  a **1.75× jump in the memory estimate**, charged by `_guard_stack_memory`, which *raises* rather than
-  degrading. `_stack_memory_budget_bytes` defaults to ~70% of available RAM, so whether an install crosses
-  the line depends entirely on its canvas and its box; the owner drizzles ×1.5 on a mosaic union canvas,
-  which is the largest canvas this app produces. Before v0.271.1 that guard was never charged on the
-  walk-away path, so this is a *new* way for an unattended run to fail.
-  **Why the pipeline can't fix it:** `_stack_target` builds the options **before** any canvas exists — the
-  union canvas is computed inside `run_stack` — so it cannot know whether the extra pass fits.
-  **Fix direction:** decide it in the engine, where the canvas is known, and make it **fail-safe**: when the
-  two-pass estimate exceeds the budget and the single pass fits, log it plainly and stack *without* the
-  rejection rather than refusing the run — the picture matters more than the pass. The reverted commit does
-  exactly this in `_auto_drizzle_reject`, with `run_stack`'s dispatch, memory guard and in-flight cap all
-  reading one resolved `eff.drizzle_reject` so the three can't disagree, plus `estimate_stack` mirroring it;
-  it also carries the test (a budget the single pass fits and the two-pass one doesn't → declines; room for
-  both → takes it). **Keep the distinction the revert had to give up:** an *explicitly* ticked
-  `drizzle_reject` on a manual stack should still refuse loudly with its actionable advice — the user is
-  watching and can drop the drizzle scale. Only the auto-enabled case should degrade quietly.
+  walk-away path nobody is watching to act on the advice.**~~ — **FIXED v0.276.2** (Builder 2026-08-26, branch
+  `claude/compassionate-galileo-c8yo7r`). *(Autonomy, priority 2 — an unattended stack that stops producing
+  pictures at all.)*
+
+  **What shipped.** `stacker._afford_drizzle_reject` answers, in the one place that can, whether the two-pass
+  rejection actually runs: it folds in the existing `n >= 4` floor, passes an **explicitly** ticked
+  `drizzle_reject` straight through (that user is watching, and the refusal names a fix — "lower the drizzle
+  scale to ×1.3" — they can act on), and for a rejection the app switched on *for* the user (`auto_reject`,
+  which is exactly what `_stack_target` sets alongside it) prices the two-pass canvas against the memory
+  budget and **declines it when it doesn't fit**. The run then proceeds precisely as it did before v0.271.1
+  ever auto-enabled the pass, instead of raising `MemoryError` at 3 a.m. with nobody there to lower the scale.
+
+  **Only the rejection is forgiven, never the canvas.** The helper returns the *single-pass* answer, so a
+  canvas that is over budget without the pass too is still refused by `_guard_stack_memory` — with the message
+  and the `_best_memory_fix` suggestion computed for the run that would actually be attempted, not for planes
+  it had already declined to allocate. `run_stack`'s dispatch, memory guard and in-flight cap now all read one
+  resolved `eff.drizzle_reject`, so the three can't disagree about which pass is running, and `estimate_stack`
+  mirrors it so the pre-submit estimate stops warning about a pass the run would decline.
+
+  **Surfaced, not silent:** a plainly-worded `log.warning` with both figures and how to get the pass back, plus
+  a `DRZREJSK = 'memory'` FITS card so the finished picture self-documents *why* it carries no `REJMODE` long
+  after the server log has rolled. The Stack form's help text now says unattended stacks turn the pass on for
+  themselves "when there's memory for it".
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API or default change, and no new `StackOptions` key —
+  `auto_reject` (engine default `False`, form default `False`) already carries the "I expressed no preference"
+  meaning this needs. Every explicit run, every non-drizzle run and every run that fits is byte-for-byte what
+  it was.
+
+  **Tests (+5 in `tests/test_drizzle_reject.py`, all fail before):** the auto decline on a budget that fits one
+  pass but not two and the take when there's room; an explicit tick still refusing loudly; the
+  never-hide-an-oversized-canvas rail (and that its message drops the "with outlier rejection" clause); the
+  `n < 4` / drizzle-off / reject-off folds; and the end-to-end proof — the same 8-sub drizzled stack on the
+  same budget raising `MemoryError` when ticked explicitly and **producing its picture** (with
+  `DRZREJSK`, without `REJMODE`) on the unattended shape, with `estimate_stack` agreeing in both directions.
+
+  Original spec, for the record:
+
+    *(Filed by the Builder who implemented the same feature concurrently, engine-side and budget-aware, and
+    reverted it in favour of the shipped pipeline version rather than stacking two implementations — branch
+    `agent/mosaic-photometric-per-panel`, commit "Revert the drizzle auto-reject fix". The version there is a
+    ready reference implementation.)*
+    **The arithmetic:** two-pass drizzle rejection holds `_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT = 7` full-canvas
+    RGB float32 arrays against the single pass's `_PEAK_CANVAS_ARRAYS = 4` (`seestack/stack/stacker.py` ~70) —
+    a **1.75× jump in the memory estimate**, charged by `_guard_stack_memory`, which *raises* rather than
+    degrading. `_stack_memory_budget_bytes` defaults to ~70% of available RAM, so whether an install crosses
+    the line depends entirely on its canvas and its box; the owner drizzles ×1.5 on a mosaic union canvas,
+    which is the largest canvas this app produces. Before v0.271.1 that guard was never charged on the
+    walk-away path, so this is a *new* way for an unattended run to fail.
+    **Why the pipeline can't fix it:** `_stack_target` builds the options **before** any canvas exists — the
+    union canvas is computed inside `run_stack` — so it cannot know whether the extra pass fits.
+    **Fix direction:** decide it in the engine, where the canvas is known, and make it **fail-safe**: when the
+    two-pass estimate exceeds the budget and the single pass fits, log it plainly and stack *without* the
+    rejection rather than refusing the run — the picture matters more than the pass. The reverted commit does
+    exactly this in `_auto_drizzle_reject`, with `run_stack`'s dispatch, memory guard and in-flight cap all
+    reading one resolved `eff.drizzle_reject` so the three can't disagree, plus `estimate_stack` mirroring it;
+    it also carries the test (a budget the single pass fits and the two-pass one doesn't → declines; room for
+    both → takes it). **Keep the distinction the revert had to give up:** an *explicitly* ticked
+    `drizzle_reject` on a manual stack should still refuse loudly with its actionable advice — the user is
+    watching and can drop the drizzle scale. Only the auto-enabled case should degrade quietly.
 
 - ~~**🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace, Scout
   2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**~~ —
