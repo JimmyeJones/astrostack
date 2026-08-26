@@ -581,9 +581,12 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "transparency; leaves un-measured frames untouched. Mosaics do this "
              "automatically — a panel shot through haze would otherwise stay dimmer "
              "than the one next to it."},
-    {"key": "lucky_fraction", "label": "Lucky imaging (keep best %)", "type": "float",
+    {"key": "lucky_fraction", "label": "Lucky imaging (keep sharpest fraction)", "type": "float",
      "group": "simple", "min": 0.05, "max": 1.0, "step": 0.05,
-     "help": "Keep only the best fraction of frames by FWHM. 1.0 = keep all."},
+     "help": "Keep only the sharpest frames by FWHM and drop the rest. This is a "
+             "fraction, not a percentage: 1.0 = keep all, 0.75 = keep the sharpest "
+             "three-quarters, 0.5 = the sharpest half. Shown as a percentage "
+             "(e.g. \"Lucky 50%\") on the finished picture."},
     {"key": "drizzle", "label": "Drizzle (super-resolution)", "type": "bool", "group": "simple",
      "help": "Use the drizzle algorithm. Best with 200+ dithered frames."},
     {"key": "drizzle_reject", "label": "Drizzle outlier rejection", "type": "bool",

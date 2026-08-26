@@ -46,3 +46,21 @@ def test_every_form_field_has_plain_language_help():
     # label with an empty hint. Guards against a new field shipping without help.
     without_help = [f.key for f in stack_option_fields() if not (f.help or "").strip()]
     assert not without_help, f"Stack-form fields missing help text: {without_help}"
+
+
+def test_fractional_fields_do_not_label_themselves_as_percentages():
+    # Friendliness bar (AGENTS.md §1 priority 3): a numeric field whose value is a
+    # *fraction* (max ≤ 1.0) must not carry a "%" in its label — that reads as a
+    # 0–100 percentage, so a beginner types "50" (silently clamped to the 1.0 max =
+    # keep-all, the opposite of a lucky-imaging cut) or reads the default "1" as
+    # "keep best 1%". lucky_fraction shipped this way; the Gallery already renders
+    # the same value as "Lucky 50%", so the input label was the lone inconsistency.
+    mislabelled = [
+        f.key for f in stack_option_fields()
+        if f.type == "float" and f.max is not None and f.max <= 1.0
+        and "%" in (f.label or "")
+    ]
+    assert not mislabelled, (
+        f"Fractional (max ≤ 1.0) stack-form fields whose label implies a percentage: "
+        f"{mislabelled}"
+    )
