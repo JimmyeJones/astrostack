@@ -163,6 +163,12 @@ export function photometricSummaryText(
   if (typeof photometric.median === "number") {
     s += ` (median ${photometric.median.toFixed(2)})`;
   }
+  // Say who asked for it. A mosaic gets gain-matching automatically (panels are
+  // shot through different air), so on those runs the user never chose it and
+  // would otherwise wonder where the line came from.
+  if (photometric.auto) {
+    s += " · automatic for a mosaic";
+  }
   return s;
 }
 
