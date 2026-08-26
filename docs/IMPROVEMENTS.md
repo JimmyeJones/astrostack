@@ -49,6 +49,29 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **⚪ QA AUDIT RESULT (Scout 2026-08-26 #2, branch `claude/vigilant-knuth-xh4b6y`) — rotated the lead QA off
+  the (already-drained) stacking engine and adversarially re-audited the subsystems the engine feeds and is
+  fed by: QC (`qc/grading.py`, `metrics.py`, `streaks.py`, `noise_ratio.py`), ingest (`io/ingest.py`),
+  the folder watcher (`webapp/watcher.py`), the render/output path (`render/orient.py`, `render/deepening.py`,
+  `stack/output.py`) and the final-gradient/coverage-leveling bg passes (`bg/final_gradient.py`,
+  `bg/coverage_leveling.py`). Came back CLEAN — no new verified bug.** Traced adversarially and, where cheap,
+  *probed* the real code: `final_gradient.remove_final_gradient` on an all-NaN canvas (both modes → input
+  returned, no crash), a 12×12 image (box clamp degrades, finite out), and `green_channel` on odd dims / a 1×1
+  frame (empty array, no uint16 overflow — the float32-before-add cast holds). Re-verified the recently-shipped
+  v0.270.4 `{base}_framecov.fits` path end to end: `output._same_map` writes the sibling *only* when Σ-weights ≠
+  frame count, `proxy.load_frame_coverage` returns `None` when it's absent, and `coverage_leveling._level_context`
+  falls back to the weighted map on `None` — so an unweighted run is byte-for-byte unchanged and a weighted one
+  bins panels by the honest count. The per-panel auto-grade split (v0.270.2), the QC `cluster_pointings` None/
+  unsolved handling, the ingest fingerprint/`_same_capture` benign-touch-vs-swap logic, the watcher
+  stranded-batch re-arm, and the north-up rotation math all held under the edges I could construct. **Also
+  confirmed the front-of-queue `photometric_normalize` Builder item's traced site is exact:** `is_mosaic_canvas`
+  is set at `stacker.py:1259` and `compute_photometric_scales` is gated at `stacker.py:1321` — the one-line
+  mirror `if options.photometric_normalize or is_mosaic_canvas:` lands *after* the canvas is known, and the
+  1341–1344 comment already documents the coverage-map shift that v0.270.4 addresses. So both front-of-queue
+  Builder items below are accurately shaped. **This confirms the drained state now extends past the engine into
+  its neighbours;** future Scout runs can lead with the webapp routers / plate-solve (`solve/`) or re-audit the
+  engine only occasionally.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26, branch `claude/vigilant-knuth-7slpid`) — the stacking engine was
   deeply re-audited this run and came back CLEAN: no new verified bug found.** Adversarially traced the whole
   `seestack/stack/*` + `seestack/calibrate/*` hot path, trying to break each edge: `accumulator.py`
@@ -12403,6 +12426,24 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **IDEA (Scout 2026-08-26 #2, follow-on to the front-of-queue `photometric_normalize`-for-mosaic Builder item)
+  — once photometric normalization auto-enables for mosaics, weigh doing the same measurement for a
+  *single-field* target stacked across nights of **mixed transparency** (one hazy night + one clear night).**
+  *(Pillar: image quality — PRIORITY 4. Size: S–M. Do AFTER the mosaic item ships, and measured — not a
+  blind flip.)* The mosaic item corrects a hazy *panel*'s multiplicative dimming; the same mechanism
+  (`compute_photometric_scales` gain-matching by `transparency_score`, folded into the `1/s²` combine weight)
+  would gain-match a hazy *night*'s subs up to a clear night's on an ordinary single-target stack, which the
+  walk-away chain builds constantly as a beginner revisits one object. **Honest caveat that bounds the value:**
+  quality weighting (which the auto chain already enables) *down-weights* a hazy sub by `1/s²` today, so it
+  already does most of the SNR-optimal thing — the residual photometric normalization would add is mainly
+  **consistency of the combined signal level** (and cleaner behaviour where a night's transparency varies
+  within the stack), not a large noise win. So this is worth a **measurement** (a synthetic single-field target,
+  half its subs dimmed multiplicatively, star-flux step across the two sub-populations with vs. without
+  normalization) to decide whether the marginal gain justifies enabling it outside mosaics — file the numbers,
+  don't assume. `compute_photometric_scales` already self-neutralises when no usable transparency scores exist,
+  so the no-data path is safe either way. **Prereq:** the mosaic item's coverage-map interaction is already
+  handled by v0.270.4's `{base}_framecov.fits`, so the single-field extension inherits that safety for free.
+
 - **IDEA (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — the 16-bit *linear* export TIFF clips the
   brightest 0.1% (star / galaxy / nebula cores) to pure white, which its own docstring calls "the full data
   preserved".** *(Pillar: image quality / trust — PRIORITY 4; size S; **VERIFY the convention before changing —
@@ -13661,6 +13702,41 @@ problems. Dogfood it every big-picture run and fix root causes.
   which has no pace). **Care:** a mosaic's per-panel integration is a fraction of a single-field target's, so
   don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
   already thinks in.
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-26 #2) — "My deep-sky wall": one-click, share-ready montage of a
+  beginner's best finished pictures.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: M.)*
+  A Seestar owner accumulates dozens of finished targets over a season, but the app can only ever show them
+  **one at a time** — there is no single image that says *"look at everything I've captured."* That montage
+  is the thing a beginner actually posts to friends/socials at the end of a good run of nights, and nothing
+  produces it today.
+  **Verified genuinely new (grepped this run):** the existing "Share your sky" poster (v0.223.0) is a
+  **stats/text** card (integration totals + target *names*, server-rendered in `seestack/recap.py`), *not* a
+  grid of the real pictures; the deepening reel is **one** target across nights; A/B compare is **two** stacks;
+  "What's in this picture?" labels objects *inside one* frame. No feature assembles multiple finished
+  **images** into one shareable canvas — this is that.
+  **It composes pieces that already exist.** `summarize_library` (`seestack/library_summary.py`) already
+  returns `heroes` — the exposure-ranked imaged targets **whose `last_stack_preview` PNG still exists on disk**
+  — so the picture set, ranking, and per-target labels (name + integration) are all in hand; and `recap.py`
+  already renders shareable posters server-side with Pillow, so the rendering pattern (and its ASCII-font /
+  self-hiding conventions) is established.
+  **Shape:** a pure layout helper `build_gallery_montage(tiles, *, columns=None, title=None) -> PIL.Image`
+  where each tile is a loaded preview + a short caption; it fits the top N heroes (default ~6–9, a sane cap)
+  into a tidy grid on the app's dark NaN=black canvas, letterboxing each tile to keep its true aspect (reuse
+  `deepening._fit_onto`, which already does exactly this) so a portrait single-field and a landscape mosaic
+  sit together without squashing, burns a small per-tile caption (reuse `deepening._draw_corner_label`), and
+  an optional overall title strip ("My deep-sky wall — 14 targets, 38 h total"). Then `GET /api/gallery/montage`
+  renders and caches it beside the library outputs, and a "Make a montage" button on the Gallery/Dashboard
+  offers download / To phone / wallpaper — reusing the share plumbing already wired for the single-picture case.
+  **Beginner bar:** clears it cleanly — a non-expert instantly understands and enjoys it, sane default (best N
+  by integration, no picking required), plain language, no expert knob; it *removes* work (no manual collage in
+  another app) — Method D.
+  **Guardrails/feasibility:** offline, additive, read-only (renders from previews the app already keeps, writes
+  only a cached montage under the library's own outputs — never `incoming/`); self-hides when fewer than ~2
+  heroes have a preview (one picture is not a "wall"); a missing/ío-error preview tile is simply dropped, never a
+  crash. Pure helper → trivially unit-testable (N tiles → grid dimensions; a portrait+landscape pair both
+  undistorted; a dropped unreadable tile doesn't shift the rest; <2 tiles → `None`).
+  **Slices —** (a) the pure `build_gallery_montage` helper + tests (a shippable Builder run on its own);
+  (b) the `/api/gallery/montage` endpoint + caching; (c) the Gallery/Dashboard button + share menu (frontend).
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26) — "When will I finish this?": an observability-aware completion
   forecast for a target that has an integration goal.** *(Pillar: autonomy + friendliness — PRIORITY 2–3.
