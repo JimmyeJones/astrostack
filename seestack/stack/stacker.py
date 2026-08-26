@@ -1815,6 +1815,11 @@ def run_stack(
         out_basename=options.output_name,
         tiff_mode=options.tiff_mode,
         header_meta=header_meta,
+        # The honest per-pixel frame count, so the *editor* can bin this mosaic's
+        # panels by subs rather than by a sum of weights when it re-levels the
+        # sky. The in-stack leveling pass above already gets it directly; the
+        # editor reloads from disk and until now had nothing to reload.
+        frame_coverage=frame_cov,
     )
     # Assemble the "watch it appear" reel now that the previous run's reel (if
     # any) has been archived aside by write_stack_outputs — so this becomes the
