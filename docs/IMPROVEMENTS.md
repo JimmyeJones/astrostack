@@ -49,64 +49,114 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🔴🔴🔴 OWNER-REPORTED REGRESSION, ROOT-CAUSED BY ADVANCED-AI AUDIT (2026-08-17) — a walk-away auto-stack
+- ~~**🔴🔴🔴 OWNER-REPORTED REGRESSION, ROOT-CAUSED BY ADVANCED-AI AUDIT (2026-08-17) — a walk-away auto-stack
   never checks whether it can actually READ its subs before it fires, and once it fires on a bad night it can
   NEVER TRY AGAIN. This is the "my images turned out worse" bug, verified with a real repro against the live
   engine.** *(Severity CRITICAL — this silently degrades the final image on autopilot, the single worst thing
   this app can do, and the owner has already been hit by it on real data. Confidence: HIGH — repro-verified,
-  not inferred. Fix this before anything else, including the standing UI/IA priorities.)*
+  not inferred. Fix this before anything else, including the standing UI/IA priorities.)*~~
 
-  **The owner's evidence:** three walk-away auto-stacks of the same mosaic target ("gray_star"), same night
-  (2026-08-16), same settings (drizzle ×1.5). In time order: 787 frames / 4.4 h / noise 0.015 →
-  575 frames / 3.2 h / noise 0.015 → 271 frames / 1.5 h / noise 0.020. Frame count and integration time fell
-  by nearly 3× and noise got measurably worse, across ONE growing night — the opposite of what should ever
-  happen as a Seestar drips in more subs.
+  — **FIXED v0.270.1** (Builder 2026-08-26, branch `claude/compassionate-galileo-o7249h`).
+  *(Priority 0 — the critical walk-away image-degradation bug at the top of AGENTS.md §1.)*
 
-  **Root cause (audit's repro: synthetic growing 3-panel mosaic through the real pipeline; baseline healthy
-  24→42→60 frames monotone; then hid 28 of 42 source files mid-night):**
-  1. `_auto_stack_frame_count` (`webapp/pipeline.py:1663`) decides whether to fire a fresh auto-stack purely
-     from the DB's `solved_accepted` count (`_solved_accepted_count`) — it never asks whether those frames'
-     *files* are actually readable right now.
-  2. The real stack (`run_stack` → `prepare`, `seestack/stack/stacker.py` ~2115) silently drops any frame
-     whose `readable_frame_path()` comes back `None` — correct behaviour for a *single* stack, but nothing
-     upstream treats "offered vs. actually used" as a signal.
-  3. The stack still completes, still gets recorded, and **still gets published as the target's newest
-     auto-edited picture** — a materially thinner, noisier image than a night ago, with no warning.
-  4. The attempt marker written after every stack (`AUTO_STACK_ATTEMPT_META_KEY`, `webapp/pipeline.py:2197`)
-     stamps `_solved_accepted_count(proj)` — the same DB-level count from step 1, **blind to what was
-     actually readable**. Since that DB count doesn't change just because files came back on disk, the
-     trigger in step 1 (`if int(attempted) >= solved_accepted: return None`) never re-fires. **If the bad
-     stack happened to be the last one that night, the degraded picture is the target's final image
-     indefinitely**, until brand-new subs eventually push `solved_accepted` past the stale marker.
-  - **Repro (verified):** hide 28/42 source files mid-night → auto-stack still fires, stacks
-    `used=14 offered=42 unreadable=28`, publishes it as newest. Restore the files → `trigger=None` forever
-    (bug 2, confirmed separately).
-  - **What made the owner's files briefly unreadable is NOT a code bug** — `incoming/` is read-only and the
-    app has no delete/move path into it (guardrail + CI-enforced spy test, `AGENTS.md` §10). This is
-    storage-side on the owner's box: a moved/archived folder, a flaky NAS share, etc. **The bug is that the
-    app has no defence against a transient version of this at all** — it should notice and hold back, not
-    publish silently.
+  **What shipped — both halves of it.**
+  1. **A readability preflight that holds the stack back rather than publishing a worse picture.**
+     `_auto_stack_readability_hold` (`webapp/pipeline.py`) runs `count_unreadable_frames` over the
+     target's solved+accepted subs at the moment the scan is about to fire, and holds the target back —
+     *without* stamping the attempt marker, exactly the `held_thin` discipline — when stacking now would
+     land **below the `auto_stack_min_frames` floor** or **thinner than the best stack this target has
+     already produced** (`prior_best`). So the owner's 787 → 271 collapse can no longer be published: the
+     good 787-frame picture stands, and the next scan stacks the full set the moment the files reappear.
+     **The guard returns `None` before comparing anything when `unreadable == 0`**, so a target with all
+     its subs on disk — every healthy install, always — is bit-for-bit unaffected. A target's *first*
+     stack is never held merely for missing files (no better predecessor to protect, and the loss may be
+     permanent); only the floor applies there.
+  2. **A crippled attempt is no longer recorded as "covered".** `_stack_target` now stamps
+     `AUTO_STACK_UNREADABLE_META_KEY` alongside the attempt marker with the missing-file count at stack
+     time, and `_auto_stack_frame_count` consults it: when the marker says frames were missing and *fewer*
+     are missing now, the trigger re-fires and re-stacks properly. Still-missing (or worse) reads as
+     "don't loop", so a real ongoing outage doesn't re-stack every scan. A run where nothing was missing
+     **deletes** the key rather than writing `0`, so a healthy target's meta table is unchanged and a
+     stale count can never outlive its outage.
 
-  **Fix direction (verify with the mosaic AND a single-field growing target — do not disturb the legit
-  align-drop guard, i.e. a stack that genuinely dropped subs at alignment must still be recognised as
-  "new work covered"):**
-  1. Run a readability preflight (`count_unreadable_frames()` — reuse, don't reinvent; the audit found this
-     already exists) inside `_auto_stack_frame_count`, and when a material fraction of the offered frames are
-     currently unreadable, **hold back** — same shape as the existing `held_thin` guard — and do **not** stamp
-     the attempt marker, so the retry keeps trying on the next scan.
-  2. When the marker *is* withheld for this reason, stamp the unreadable count too, so the trigger can tell
-     "still unreadable, don't loop" from "readable again, please retry" without re-stacking every single scan
-     during a real, ongoing outage.
-  3. Regression test: growing mosaic + growing single-field target, each with a mid-session readability dip
-     that later clears — assert no thin/degraded run gets published during the dip, and a full-frame stack
-     fires once files are readable again.
+  **Surfaced, not silent** (a silent hold is only a little better than a silent bad stack): the scan job
+  records `auto_stack_held_unreadable`, and the Jobs page renders a plain-language alert — *"Some of your
+  subs aren't on disk right now… Stacking without them would have made a thinner, noisier picture than the
+  one you already have… Put it back and the next scan will stack the full set automatically — nothing has
+  been lost"* — with the real numbers per target (`516 of 787 subs couldn't be read (271 still readable)`)
+  and a link to the target.
 
-  **Data worth pulling from the owner's live install to confirm this instance precisely (not required to fix
-  the bug, but confirms the mechanism and points at what happened storage-side):** the three runs' FITS
-  header cards `NOFFERED` / `NALIGNFL` / `NUNREAD` / `REJMODE` (predicted: `NOFFERED`≈790–900 on all three,
-  `NUNREAD`≈215/≈520 on runs 2–3); `GET /api/library/missing-files` right now; the target's `reject_reason`
-  histogram; whether `auto_grade_frames` / `copy_to_cache` are on; whether any `incoming/` folders were
-  moved/archived that evening.
+  **Upgrade-safe (§9):** one new *additive* project-meta key (absent ⇒ 0 ⇒ today's behaviour exactly), no
+  schema change, no config change, no default flipped, no endpoint or response shape changed (a new
+  optional summary key an older frontend ignores), on-disk layout untouched. No file is ever moved or
+  written under `incoming/` — the tests simulate an outage by repointing the *recorded* paths, never by
+  touching a byte on disk (§10).
+
+  **Tests (+5 python, 4 of which fail before / pass after; +3 frontend):**
+  `tests/webapp/test_auto_stack_pipeline.py` — the thinner-than-what-exists hold and its retry once files
+  return; a healthy target with an old thin run still stacking (the no-regression guard); a first stack
+  held only below the floor, never merely for missing files; the crippled-attempt retry through
+  `_auto_stack_frame_count`; and the marker being written on an outage and deleted when clean.
+  `frontend/src/routes/Jobs.test.tsx` for the summary line, malformed-entry tolerance, and the alert.
+
+  **Not shipped, filed instead:** healing a target that is *already* sitting on a degraded newest picture
+  from before this fix (the owner's live install). Its `prior_max` guard keeps it put until new subs
+  arrive, at which point the fixed path stacks the full set correctly — see the new Ideas entry.
+
+  Original spec, for the record:
+
+
+    **The owner's evidence:** three walk-away auto-stacks of the same mosaic target ("gray_star"), same night
+    (2026-08-16), same settings (drizzle ×1.5). In time order: 787 frames / 4.4 h / noise 0.015 →
+    575 frames / 3.2 h / noise 0.015 → 271 frames / 1.5 h / noise 0.020. Frame count and integration time fell
+    by nearly 3× and noise got measurably worse, across ONE growing night — the opposite of what should ever
+    happen as a Seestar drips in more subs.
+
+    **Root cause (audit's repro: synthetic growing 3-panel mosaic through the real pipeline; baseline healthy
+    24→42→60 frames monotone; then hid 28 of 42 source files mid-night):**
+    1. `_auto_stack_frame_count` (`webapp/pipeline.py:1663`) decides whether to fire a fresh auto-stack purely
+       from the DB's `solved_accepted` count (`_solved_accepted_count`) — it never asks whether those frames'
+       *files* are actually readable right now.
+    2. The real stack (`run_stack` → `prepare`, `seestack/stack/stacker.py` ~2115) silently drops any frame
+       whose `readable_frame_path()` comes back `None` — correct behaviour for a *single* stack, but nothing
+       upstream treats "offered vs. actually used" as a signal.
+    3. The stack still completes, still gets recorded, and **still gets published as the target's newest
+       auto-edited picture** — a materially thinner, noisier image than a night ago, with no warning.
+    4. The attempt marker written after every stack (`AUTO_STACK_ATTEMPT_META_KEY`, `webapp/pipeline.py:2197`)
+       stamps `_solved_accepted_count(proj)` — the same DB-level count from step 1, **blind to what was
+       actually readable**. Since that DB count doesn't change just because files came back on disk, the
+       trigger in step 1 (`if int(attempted) >= solved_accepted: return None`) never re-fires. **If the bad
+       stack happened to be the last one that night, the degraded picture is the target's final image
+       indefinitely**, until brand-new subs eventually push `solved_accepted` past the stale marker.
+    - **Repro (verified):** hide 28/42 source files mid-night → auto-stack still fires, stacks
+      `used=14 offered=42 unreadable=28`, publishes it as newest. Restore the files → `trigger=None` forever
+      (bug 2, confirmed separately).
+    - **What made the owner's files briefly unreadable is NOT a code bug** — `incoming/` is read-only and the
+      app has no delete/move path into it (guardrail + CI-enforced spy test, `AGENTS.md` §10). This is
+      storage-side on the owner's box: a moved/archived folder, a flaky NAS share, etc. **The bug is that the
+      app has no defence against a transient version of this at all** — it should notice and hold back, not
+      publish silently.
+
+    **Fix direction (verify with the mosaic AND a single-field growing target — do not disturb the legit
+    align-drop guard, i.e. a stack that genuinely dropped subs at alignment must still be recognised as
+    "new work covered"):**
+    1. Run a readability preflight (`count_unreadable_frames()` — reuse, don't reinvent; the audit found this
+       already exists) inside `_auto_stack_frame_count`, and when a material fraction of the offered frames are
+       currently unreadable, **hold back** — same shape as the existing `held_thin` guard — and do **not** stamp
+       the attempt marker, so the retry keeps trying on the next scan.
+    2. When the marker *is* withheld for this reason, stamp the unreadable count too, so the trigger can tell
+       "still unreadable, don't loop" from "readable again, please retry" without re-stacking every single scan
+       during a real, ongoing outage.
+    3. Regression test: growing mosaic + growing single-field target, each with a mid-session readability dip
+       that later clears — assert no thin/degraded run gets published during the dip, and a full-frame stack
+       fires once files are readable again.
+
+    **Data worth pulling from the owner's live install to confirm this instance precisely (not required to fix
+    the bug, but confirms the mechanism and points at what happened storage-side):** the three runs' FITS
+    header cards `NOFFERED` / `NALIGNFL` / `NUNREAD` / `REJMODE` (predicted: `NOFFERED`≈790–900 on all three,
+    `NUNREAD`≈215/≈520 on runs 2–3); `GET /api/library/missing-files` right now; the target's `reject_reason`
+    histogram; whether `auto_grade_frames` / `copy_to_cache` are on; whether any `incoming/` folders were
+    moved/archived that evening.
 
 - **🟠 LATENT (found incidentally by the same 2026-08-17 audit, repro-verified, NOT the owner's current
   regression) — auto-grade compares quality metrics across a mosaic TARGET-WIDE, when its panels are
@@ -6920,6 +6970,29 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **NEW IDEA (Builder 2026-08-26, the deliberate follow-on to the v0.270.1 readability fix) — heal a target
+  that is ALREADY sitting on a degraded newest picture, instead of only preventing the next one.** *(Priority 2
+  autonomy / priority 4 image quality. Size M. Serves the owner's live install directly.)*
+  v0.270.1 stops a walk-away stack publishing a picture made thin by unreadable subs, and re-fires once the
+  files come back — but only for outages **from now on**. An install already hit by this (the owner's, per the
+  fixed bug above: runs of 787 → 575 → **271** frames) keeps the 271-frame result as its newest picture,
+  because `_auto_stack_frame_count`'s `prior_max` guard correctly refuses to re-stack unchanged data. It heals
+  itself the next clear night — new subs push `solved_accepted` past `prior_max` and the fixed path stacks the
+  full set — but until then the *worse* picture is the one on the Dashboard.
+  **Shape (mirror `_auto_stack_calibration_recheck`, which solves the same "no new subs, but a restack is now
+  worth it" problem):** a `_auto_stack_degraded_recheck` that fires **once** when all hold — the target's
+  *newest* genuine stack run used materially fewer frames than its best prior run; **every** solved+accepted
+  sub is readable right now (so the retry can actually do better); and a fingerprint marker
+  (`best_n:newest_n`) says this exact situation hasn't already been re-stacked. Stamp the marker before
+  stacking, exactly like the calibration recheck, so it can never loop.
+  **Cautions:** "genuine run" must exclude channel-combine / editor-export runs, whose tiny `n_frames_used`
+  would look like a collapse (the existing `prior_max` docstring already names this trap); a user who
+  *deliberately* rejected half a target's frames and re-stacked has a legitimately thinner newest run and must
+  not be second-guessed — gate on readability having *recovered*, not on thinness alone, or better, on the
+  `AUTO_STACK_UNREADABLE_META_KEY` marker being set. **Measure it:** the acceptance test is the owner's own
+  sequence — 787 → 271 with files restored — healing back to a full-frame stack in one scan and then staying
+  quiet on every subsequent scan.
 
 - ~~**NEW IDEA (Builder 2026-08-16, the obvious next step after the library-wide un-exported-edit note v0.263.0) —
   "Finish them all": one job that exports every edit the user saved and never exported.**~~ — **SHIPPED v0.265.0**
@@ -19090,6 +19163,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.270.1** — 🔴 The walk-away auto-stack can no longer publish a picture made worse by subs whose files
+  aren't on disk — the owner's "my images turned out worse" regression (787 → 575 → 271 frames across one
+  growing night). A readability preflight (`_auto_stack_readability_hold`) now holds a target back, without
+  stamping the attempt marker, when stacking *now* would land below the minimum-frames floor or thinner than
+  the best stack that target already has; and `_stack_target` stamps the missing-file count next to the
+  attempt marker (`AUTO_STACK_UNREADABLE_META_KEY`) so a crippled attempt is retried once the files return
+  instead of being recorded as "covered" forever. Gated on `unreadable > 0`, so a healthy install is
+  bit-for-bit unaffected; a first stack is never held merely for missing files. The Jobs page says so in plain
+  language with the real numbers. Tests: `tests/webapp/test_auto_stack_pipeline.py` (+5, 4 fail-before),
+  `frontend/src/routes/Jobs.test.tsx` (+3).
 - **v0.237.2** — Level a big mosaic's thin panel the same way in the preview and the export.
   `coverage_leveling` scaled its per-level pixel floor by the proxy stride, but a hard
   `_MIN_STRIDED_PIXELS = 12` safety floor stopped that scaling past ~×4 — so on a canvas over ~7500 px
