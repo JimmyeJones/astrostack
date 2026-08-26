@@ -1007,12 +1007,27 @@ describe("photometricSummaryText", () => {
       "Photometrically normalized · 1 frame gain-matched",
     );
   });
-  it("says a mosaic matched each panel against its own subs, automatically", () => {
+  it("says when the mosaic path turned it on rather than the user", () => {
+    expect(
+      photometricSummaryText({ mode: "transparency", n_adjusted: 8, auto: true }),
+    ).toBe("Photometrically normalized · 8 frames gain-matched · automatic for a mosaic");
+    // The user's own choice reads exactly as it always has…
+    expect(
+      photometricSummaryText({ mode: "transparency", n_adjusted: 8, auto: false }),
+    ).toBe("Photometrically normalized · 8 frames gain-matched");
+    // …as does a master written before the flag existed.
+    expect(photometricSummaryText({ mode: "transparency", n_adjusted: 8 })).toBe(
+      "Photometrically normalized · 8 frames gain-matched",
+    );
+  });
+  it("says a mosaic matched each panel against its own subs", () => {
+    // Not against each other — which is what "gain-matched" on a mosaic would
+    // otherwise sound like, and is exactly what the pass must never do.
     expect(
       photometricSummaryText({ mode: "transparency", n_adjusted: 6, auto: true, n_panels: 4 }),
     ).toBe(
       "Photometrically normalized · 6 frames gain-matched · " +
-        "each of 4 panels matched against its own subs (automatic for mosaics)",
+        "each of 4 panels matched against its own subs · automatic for a mosaic",
     );
   });
   it("says nothing about panels on a single-field run", () => {

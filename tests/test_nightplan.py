@@ -142,6 +142,19 @@ def test_catalog_plan_rows_carry_a_framing_hint():
     assert m57.framing.level == "fits"
 
 
+def test_catalog_plan_rows_say_how_big_a_mosaic():
+    """…and the row answers the question that hint provokes: *how big* a mosaic.
+    A beginner choosing tonight's target needs the panel count to decide whether
+    it is a one-night job at all."""
+    plan = plan_tonight(LONDON, JAN_EVENING)
+    by_id = {t.id: t for t in plan.targets}
+    m31 = by_id["M31"]
+    assert m31.mosaic is not None
+    assert (m31.mosaic.cols, m31.mosaic.rows, m31.mosaic.panels) == (3, 2, 6)
+    # …and nothing at all for a target that fits one frame.
+    assert by_id["M57"].mosaic is None
+
+
 def test_catalog_plan_rows_carry_a_difficulty_verdict():
     """A vetted catalog candidate surfaces its "how hard for a Seestar?" verdict
     pre-capture, so a beginner sees difficulty while choosing a target."""
@@ -837,6 +850,11 @@ def test_suggest_targets_carries_a_framing_hint():
     for t in sized:
         assert t.framing is not None
         assert t.framing.level in {"fits", "tight", "mosaic"}
+        # A row that needs a mosaic says how big a one; a row that fits says
+        # nothing (never a one-panel "mosaic").
+        if t.mosaic is not None:
+            assert t.framing.level in {"tight", "mosaic"}
+            assert t.mosaic.panels == t.mosaic.cols * t.mosaic.rows > 1
 
 
 # --- best_months ("best time of year to shoot *this* target") ----------------

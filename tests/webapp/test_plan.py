@@ -88,6 +88,11 @@ def test_tonight_with_settings_location(client, solved_library):
         assert m31["size_arcmin"] == 178.0
         assert m31["framing"]["level"] == "mosaic"
         assert "mosaic" in m31["framing"]["text"]
+        # …and how big a mosaic, serialized through asdict as a nested dict.
+        assert m31["mosaic"]["cols"] == 3
+        assert m31["mosaic"]["rows"] == 2
+        assert m31["mosaic"]["panels"] == 6
+        assert "3×2 mosaic (6 panels)" in m31["mosaic"]["text"]
         # ...and its "how hard for a Seestar?" verdict, so the planner shows
         # difficulty while choosing (serialized through asdict → nested dict).
         assert m31["difficulty"]["level"] == "easy"

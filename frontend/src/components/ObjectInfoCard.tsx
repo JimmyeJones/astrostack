@@ -1,7 +1,7 @@
 import { Badge, Group, Paper, Stack, Text } from "@mantine/core";
 import { IconStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { api, type DifficultyHint, type FramingHint } from "../api/client";
+import { api, type DifficultyHint, type FramingHint, type MosaicPlan } from "../api/client";
 
 /** A plain-language one-liner for the object card, e.g.
  *  "A galaxy in the constellation Andromeda." Constellation is dropped when the
@@ -22,6 +22,22 @@ export function framingSentence(
 ): string {
   if (!framing) return "";
   return `${displayName} ${framing.text}`;
+}
+
+/** The "will it fit?" sentence with the panel count appended when we know it —
+ *  "M 31 is bigger than the Seestar's single frame … About a 3×2 mosaic
+ *  (6 panels) covers all of it." Telling a beginner to "shoot it in mosaic mode"
+ *  stops exactly where their next question starts, and a non-expert has no idea
+ *  whether that means a 2×2 or a 4×5. Falls back to the bare framing sentence
+ *  when the catalog has no vetted size to plan from. */
+export function framingWithMosaic(
+  displayName: string,
+  framing: FramingHint | null | undefined,
+  mosaic: MosaicPlan | null | undefined,
+): string {
+  const base = framingSentence(displayName, framing);
+  if (!base || !mosaic?.text) return base;
+  return `${base} ${mosaic.text}`;
 }
 
 /** Mantine text colour for a framing verdict: a gentle nudge to mosaic mode for
@@ -104,7 +120,7 @@ export function ObjectInfoCard(
           ) : null}
           {d.framing && !hideFraming ? (
             <Text size="sm" c={framingColor(d.framing.level)}>
-              {framingSentence(d.name || d.id, d.framing)}
+              {framingWithMosaic(d.name || d.id, d.framing, d.mosaic)}
             </Text>
           ) : null}
           {/* "How far did you see?" — the one line on this card that is pure

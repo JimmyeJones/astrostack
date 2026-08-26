@@ -8,6 +8,7 @@ import {
   difficultyColor,
   framingColor,
   framingSentence,
+  framingWithMosaic,
 } from "./ObjectInfoCard";
 import * as client from "../api/client";
 
@@ -45,6 +46,23 @@ describe("framingSentence / framingColor", () => {
     // No framing hint → empty string (card renders nothing).
     expect(framingSentence("M 13", null)).toBe("");
     expect(framingSentence("M 13", undefined)).toBe("");
+  });
+
+  it("appends the panel count when the catalog can plan the mosaic", () => {
+    const framing = { level: "mosaic" as const, text: "is bigger than one frame." };
+    const plan = {
+      cols: 3, rows: 2, panels: 6,
+      text: "About a 3×2 mosaic (6 panels) covers all of it.",
+    };
+    expect(framingWithMosaic("M 31", framing, plan)).toBe(
+      "M 31 is bigger than one frame. About a 3×2 mosaic (6 panels) covers all of it.",
+    );
+    // No plan (a target that fits, or an older backend) → the sentence the card
+    // has always shown, unchanged.
+    expect(framingWithMosaic("M 31", framing, null)).toBe("M 31 is bigger than one frame.");
+    expect(framingWithMosaic("M 31", framing, undefined)).toBe("M 31 is bigger than one frame.");
+    // …and no framing hint at all still renders nothing, plan or no plan.
+    expect(framingWithMosaic("M 13", null, plan)).toBe("");
   });
 
   it("nudges to mosaic in a warmer colour for the too-big cases", () => {
@@ -87,6 +105,24 @@ describe("ObjectInfoCard", () => {
     expect(
       screen.getByText(/Andromeda Galaxy is bigger than the Seestar's single frame/),
     ).toBeInTheDocument();
+  });
+
+  it("says how big a mosaic on the same line as the framing hint", async () => {
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+      size_arcmin: 178,
+      framing: { level: "mosaic", text: "is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of it." },
+      mosaic: { cols: 3, rows: 2, panels: 6, text: "About a 3×2 mosaic (6 panels) covers all of it." },
+    });
+    renderCard();
+    // One sentence, not a second banner: "shoot it in mosaic mode" and "how big
+    // a mosaic" belong together.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/mosaic mode to capture all of it\. About a 3×2 mosaic \(6 panels\)/),
+      ).toBeInTheDocument());
   });
 
   it("drops only the framing line when the page already measured it", async () => {

@@ -1076,14 +1076,16 @@ def _build_output_header_meta(
     if pstats is not None and pstats.n_scaled:
         meta["PHOTNORM"] = ("transparency", "photometric normalization mode")
         meta["PHOTNADJ"] = (int(pstats.n_adjusted), "frames photometrically scaled")
+        # …and whether the *user* asked for it or the mosaic path turned it on
+        # itself (mirrors the auto-for-mosaic final gradient pass), so a run the
+        # user never ticked a box for still explains itself.
+        meta["PHOTAUTO"] = (bool(photometric_auto), "auto-enabled for a mosaic")
         meta["PHOTMIN"] = (round(float(pstats.min_scale), 3), "min frame scale")
         meta["PHOTMAX"] = (round(float(pstats.max_scale), 3), "max frame scale")
         meta["PHOTMED"] = (round(float(pstats.median_scale), 3), "median frame scale")
-        # …and *why* it ran, so a mosaic's owner isn't left wondering where a
-        # normalization they never ticked came from (mirrors the final-gradient
-        # "auto for mosaic" note), plus how many panels were matched separately.
-        if photometric_auto:
-            meta["PHOTAUTO"] = (True, "normalization auto-enabled for mosaic")
+        # …and how many panels were matched against *themselves* rather than
+        # against each other, so a mosaic's owner can see the normalization
+        # didn't reach across the join. Omitted on a single-field run.
         if pstats.n_pointing_groups:
             meta["PHOTPANL"] = (int(pstats.n_pointing_groups),
                                 "panels normalized against themselves")
@@ -1332,26 +1334,34 @@ def run_stack(
     # to each frame's pixels *before* accumulation so it flows consistently
     # through every accumulator and rejection path (κ-σ, min/max, drizzle).
     #
-    # Auto-enabled on a mosaic canvas, mirroring the ``final_gradient_removal``
-    # branch below: a mosaic is shot panel by panel across a night, so its subs
-    # see materially different transparency, and gain-matching them is simply
-    # the right correction for that shape of capture — the walk-away chains
-    # (watcher auto-stack / one-click Process target) never get to tick a box.
-    # Panels are normalised against *themselves* there (``group_by_pointing``),
-    # never against each other: see ``_pointing_references`` for the 2.2×
-    # panel-gain error a target-wide comparison manufactures on a mosaic.
-    # Self-neutralising on subs with no ``transparency_score`` (nothing measured
-    # → no scale map), so an un-QC'd mosaic is byte-for-byte unchanged.
+    # Auto-enabled on a mosaic canvas for the same reason the final-stack
+    # gradient pass below is (and with the same shape): a mosaic's panels are
+    # shot at different times through different air, and the corrections that
+    # already run automatically only touch the *sky*. The per-frame background
+    # flatten removes each frame's additive sky offset and the coverage-leveling
+    # pass removes the panel-to-panel sky step — but a panel shot through haze is
+    # dimmed **multiplicatively**, which leaves the sky alone and survives both.
+    # Gain-matching the frames is the correction for that, so a mosaic gets it
+    # without the user having to know the word. Self-neutralising: a run whose
+    # subs carry no usable transparency score scales nothing (``n_scaled == 0``)
+    # and comes out byte-for-byte as before.
+    #
+    # On a mosaic the panels are matched against **themselves**, never against
+    # each other (``group_by_pointing``): ``transparency_score`` is the median
+    # flux of a frame's brightest stars, so a panel aimed at an emptier patch of
+    # sky reads as "hazy" to a target-wide comparison and gets gain-matched away
+    # from its neighbours — measured at a 2.2× panel step. See
+    # ``photometric._pointing_references``.
     pscales: dict[int, float] | None = None
     pstats: PhotometricStats | None = None
-    auto_photometric = is_mosaic_canvas and not options.photometric_normalize
+    photometric_auto = bool(is_mosaic_canvas) and not options.photometric_normalize
     if options.photometric_normalize or is_mosaic_canvas:
         pscales, pstats = compute_photometric_scales(
             frames, group_by_pointing=bool(is_mosaic_canvas))
         log.info(
-            "Photometric normalization %s: %d scaled (median=%.3f range=[%.3f, %.3f]), "
+            "Photometric normalization%s: %d scaled (median=%.3f range=[%.3f, %.3f]), "
             "%d adjusted, %d neutral, %d panel(s)",
-            "(auto for mosaic)" if auto_photometric else "",
+            " (auto for mosaic)" if photometric_auto else "",
             pstats.n_scaled, pstats.median_scale, pstats.min_scale,
             pstats.max_scale, pstats.n_adjusted, pstats.n_neutral,
             pstats.n_pointing_groups,
@@ -1360,6 +1370,7 @@ def run_stack(
         # and the provenance honest).
         if pstats.n_scaled == 0:
             pscales = None
+            photometric_auto = False
 
     # Inverse-variance combine weight: gain-matching a hazy frame up by ``s``
     # amplifies its noise by ``s`` too, so the *weighted-sum* combine down-weights
@@ -1369,9 +1380,11 @@ def run_stack(
     # statistics) keep the plain quality ``weights``. When photometric scaling is
     # off (``pscales`` is None), this returns ``weights`` unchanged → byte-for-byte
     # identical stack. NB: the weighted-sum accumulator's coverage map is Σ of the
-    # weights fed in, so an opt-in photometric run's ``master_coverage.fits`` (and
-    # the editor's coverage-leveling binning off it) shifts with the 1/s² factor —
-    # a benign diagnostic change, gated behind the off-by-default flag.
+    # weights fed in, so a photometric run's ``master_coverage.fits`` shifts with
+    # the 1/s² factor — a benign diagnostic change. The *leveling* binning no
+    # longer rides on it: both the in-stack pass and the editor bin by the honest
+    # per-pixel frame count (``frame_coverage`` / the ``_framecov.fits`` sibling),
+    # which is what makes the auto-for-mosaic enable above safe.
     combine_weights = combine_weights_with_photometric(weights, pscales)
 
     # Pre-compute the reference patch for sub-pixel alignment, by aligning
@@ -1836,7 +1849,7 @@ def run_stack(
     n_unreadable = min(n_unreadable, max(0, len(frames) - n_used))
     header_meta = _build_output_header_meta(project, frames, eff, n_used, wstats,
                                             calibration=calibration, pstats=pstats,
-                                            photometric_auto=auto_photometric,
+                                            photometric_auto=photometric_auto,
                                             rstats=rej_stats,
                                             weights_applied=weights_applied,
                                             n_roughly_aligned=n_roughly,
