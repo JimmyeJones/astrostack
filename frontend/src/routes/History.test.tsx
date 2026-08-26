@@ -1020,6 +1020,21 @@ describe("photometricSummaryText", () => {
       "Photometrically normalized · 8 frames gain-matched",
     );
   });
+  it("says a mosaic matched each panel against its own subs", () => {
+    // Not against each other — which is what "gain-matched" on a mosaic would
+    // otherwise sound like, and is exactly what the pass must never do.
+    expect(
+      photometricSummaryText({ mode: "transparency", n_adjusted: 6, auto: true, n_panels: 4 }),
+    ).toBe(
+      "Photometrically normalized · 6 frames gain-matched · " +
+        "each of 4 panels matched against its own subs · automatic for a mosaic",
+    );
+  });
+  it("says nothing about panels on a single-field run", () => {
+    expect(
+      photometricSummaryText({ mode: "transparency", n_adjusted: 2, n_panels: 0 }),
+    ).toBe("Photometrically normalized · 2 frames gain-matched");
+  });
 });
 
 describe("darkScalingSummaryText", () => {

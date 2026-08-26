@@ -1083,6 +1083,12 @@ def _build_output_header_meta(
         meta["PHOTMIN"] = (round(float(pstats.min_scale), 3), "min frame scale")
         meta["PHOTMAX"] = (round(float(pstats.max_scale), 3), "max frame scale")
         meta["PHOTMED"] = (round(float(pstats.median_scale), 3), "median frame scale")
+        # …and how many panels were matched against *themselves* rather than
+        # against each other, so a mosaic's owner can see the normalization
+        # didn't reach across the join. Omitted on a single-field run.
+        if pstats.n_pointing_groups:
+            meta["PHOTPANL"] = (int(pstats.n_pointing_groups),
+                                "panels normalized against themselves")
     # Rejection provenance: how much the κ-σ pass actually clipped, so the user
     # can trust the rejection removed transient outliers (satellites/planes)
     # without over-clipping real signal. Stamped whenever a rejection pass ran
@@ -1307,9 +1313,15 @@ def run_stack(
         )
 
     # Build the per-frame weight map. Defaults to all-1.0 unless quality_weighted.
+    # On a mosaic the star-count / sky / transparency medians are taken per panel
+    # rather than target-wide: those three metrics depend on *where the scope
+    # pointed*, and target-wide they can only penalise a panel aimed at an
+    # emptier patch of sky (measured 0.73×, i.e. a quarter of that panel's depth
+    # thrown away for no reason). See ``weighting``'s module docstring.
     wstats: WeightingStats | None = None
     if options.quality_weighted:
-        weights, wstats = compute_frame_weights(frames)
+        weights, wstats = compute_frame_weights(
+            frames, group_by_pointing=bool(is_mosaic_canvas))
         log.info(
             "Quality weights: %d weighted (median=%.2f range=[%.2f, %.2f]), %d neutral",
             wstats.n_weighted, wstats.median_weight, wstats.min_weight,
@@ -1333,17 +1345,26 @@ def run_stack(
     # without the user having to know the word. Self-neutralising: a run whose
     # subs carry no usable transparency score scales nothing (``n_scaled == 0``)
     # and comes out byte-for-byte as before.
+    #
+    # On a mosaic the panels are matched against **themselves**, never against
+    # each other (``group_by_pointing``): ``transparency_score`` is the median
+    # flux of a frame's brightest stars, so a panel aimed at an emptier patch of
+    # sky reads as "hazy" to a target-wide comparison and gets gain-matched away
+    # from its neighbours — measured at a 2.2× panel step. See
+    # ``photometric._pointing_references``.
     pscales: dict[int, float] | None = None
     pstats: PhotometricStats | None = None
     photometric_auto = bool(is_mosaic_canvas) and not options.photometric_normalize
     if options.photometric_normalize or is_mosaic_canvas:
-        pscales, pstats = compute_photometric_scales(frames)
+        pscales, pstats = compute_photometric_scales(
+            frames, group_by_pointing=bool(is_mosaic_canvas))
         log.info(
             "Photometric normalization%s: %d scaled (median=%.3f range=[%.3f, %.3f]), "
-            "%d adjusted, %d neutral",
+            "%d adjusted, %d neutral, %d panel(s)",
             " (auto for mosaic)" if photometric_auto else "",
             pstats.n_scaled, pstats.median_scale, pstats.min_scale,
             pstats.max_scale, pstats.n_adjusted, pstats.n_neutral,
+            pstats.n_pointing_groups,
         )
         # Nothing measurable → don't carry a no-op scale map (keeps the hot path
         # and the provenance honest).

@@ -23,6 +23,7 @@ from webapp.schemas import (
     HealthNoteOut,
     IntegrationGoalOut,
     IntegrationGoalPatch,
+    LightTravelOut,
     MergeRequest,
     MergeSuggestionOut,
     MergeSuggestionTarget,
@@ -328,6 +329,10 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
             BackgroundModeHintOut(mode=info.background_mode_hint.mode,
                                   text=info.background_mode_hint.text)
             if info.background_mode_hint is not None else None),
+        light_travel=(LightTravelOut(distance_ly=info.light_travel.distance_ly,
+                                     years=info.light_travel.years,
+                                     text=info.light_travel.text)
+                      if info.light_travel is not None else None),
     )
 
 
