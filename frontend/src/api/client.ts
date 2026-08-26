@@ -2121,6 +2121,8 @@ export const api = {
   // from the same figures over the user's own best picture. A href/download,
   // not a fetch: the browser saves the image.
   recapPosterUrl: () => `/api/recap.jpg`,
+  galleryMontageUrl: (limit?: number) =>
+    `/api/gallery/montage.jpg${limit ? `?limit=${limit}` : ""}`,
 
   // "Try it with a sample image" onboarding demo
   getSampleStatus: () => req<SampleStatus>("/api/sample"),
