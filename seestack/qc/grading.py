@@ -73,6 +73,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from seestack.io.project import FrameRow
+from seestack.stack.pointings import PANEL_LINK_DIST_DEG, cluster_pointings
 
 log = logging.getLogger(__name__)
 
@@ -121,6 +122,7 @@ class _MetricSpec:
     label: str
     min_ratio: float | None = None
     min_delta: float | None = None
+    per_pointing: bool = False
 
 
 _METRICS: list[_MetricSpec] = [
@@ -129,11 +131,14 @@ _METRICS: list[_MetricSpec] = [
     # +0.15 eccentricity: clearly elongated stars, not measurement wobble.
     _MetricSpec("eccentricity_median", _HIGH, False, "eccentricity", min_delta=0.15),
     # ≥1.5× brighter sky: cloud/moon/twilight, not normal sky drift.
-    _MetricSpec("sky_adu_median", _HIGH, True, "sky level", min_ratio=1.5),
+    _MetricSpec("sky_adu_median", _HIGH, True, "sky level",
+                min_ratio=1.5, per_pointing=True),
     # ≥30% of the stars gone: cloud, not detection jitter.
-    _MetricSpec("star_count", _LOW, True, "star count", min_ratio=1.0 / 0.7),
+    _MetricSpec("star_count", _LOW, True, "star count",
+                min_ratio=1.0 / 0.7, per_pointing=True),
     # Bright stars ≥30% dimmer: haze/thin cloud.
-    _MetricSpec("transparency_score", _LOW, True, "transparency", min_ratio=1.0 / 0.7),
+    _MetricSpec("transparency_score", _LOW, True, "transparency",
+                min_ratio=1.0 / 0.7, per_pointing=True),
 ]
 
 METRIC_LABELS: dict[str, str] = {m.attr: m.label for m in _METRICS}
@@ -203,6 +208,12 @@ class GradeReport:
     # so ``apply_grade_report`` puts them back. Always empty when no
     # ``reconsider`` list was given (every existing caller).
     re_accept: list[int] = field(default_factory=list)
+    # How many mosaic panels (pointing clusters) the flux-like metrics were
+    # graded against separately. 0 for every single-pointing target — i.e. the
+    # split didn't apply and grading was target-wide, as it always has been.
+    pointing_groups: int = 0
+    # Which metrics actually used those per-panel populations.
+    metrics_per_pointing: list[str] = field(default_factory=list)
 
 
 def _median(values: list[float]) -> float:
@@ -241,6 +252,84 @@ def _practically_worse(spec: _MetricSpec, value: float, typical: float) -> bool:
         ratio = (value / typical) if spec.bad_dir == _HIGH else (typical / value)
         return ratio >= spec.min_ratio
     return True  # no floor configured — statistics alone decide
+
+
+@dataclass(frozen=True)
+class _PopStats:
+    """The robust yardstick one metric is graded against, over one population."""
+
+    med_domain: float   # median in the grading domain (log for flux-like metrics)
+    scale: float        # robust scale in that same domain
+    med_linear: float   # the median as a human-readable number
+    n: int              # how many frames carried the metric
+
+
+def _population_stats(
+    frames: list[FrameRow], spec: _MetricSpec, min_frames: int,
+) -> _PopStats | tuple[None, str]:
+    """``_PopStats`` for one metric over one population, or ``(None, why-not)``."""
+    metric = spec.attr
+    pop = [
+        float(getattr(f, metric))
+        for f in frames
+        if getattr(f, metric) is not None
+        and math.isfinite(float(getattr(f, metric)))
+        and (not spec.log_domain or float(getattr(f, metric)) > 0)
+    ]
+    if len(pop) < min_frames:
+        return None, (
+            f"only {len(pop)} of {len(frames)} accepted frames carry "
+            f"this metric (need {min_frames})"
+        )
+    domain = [math.log(v) for v in pop] if spec.log_domain else pop
+    med_d = _median(domain)
+    scale = _robust_scale(domain, med_d)
+    if scale is None:
+        return None, "no spread — every frame is identical"
+    return _PopStats(
+        med_domain=med_d, scale=scale,
+        med_linear=math.exp(med_d) if spec.log_domain else med_d, n=len(pop),
+    )
+
+
+def _pointing_groups(
+    frames: list[FrameRow], min_frames: int,
+) -> dict[int, int] | None:
+    """Frame id → mosaic-panel group, or ``None`` when there is no sound split.
+
+    A mosaic's panels are **different patches of sky**, so the flux-like metrics
+    (star count, sky level, transparency) legitimately differ between them: a
+    panel pointed at a star-poor field really does have fewer stars, and grading
+    it against the whole target's population reads that as cloud. Left
+    target-wide, an entire panel's subs can be flagged for rejection — a real
+    loss of good data, since ``auto_grade_frames`` acts on its own.
+
+    Groups come from single-linkage clustering at
+    :data:`~seestack.stack.pointings.PANEL_LINK_DIST_DEG`, which separates
+    neighbouring panels while keeping a dithered set together. Returns ``None``
+    — meaning "grade target-wide, exactly as before" — unless the split is
+    *sound*: at least two groups each big enough to carry a robust population.
+    A single-pointing target, an unsolved target, and a mosaic whose panels are
+    too tightly packed to separate therefore all behave exactly as they do
+    today; only a target that genuinely splits gets the per-panel treatment.
+    """
+    ids = [f.id for f in frames]
+    labels = cluster_pointings(
+        [(f.ra_center_deg, f.dec_center_deg) for f in frames],
+        link_dist_deg=PANEL_LINK_DIST_DEG,
+    )
+    sizes: dict[int, int] = {}
+    for label in labels:
+        if label >= 0:
+            sizes[label] = sizes.get(label, 0) + 1
+    substantial = {label for label, n in sizes.items() if n >= min_frames}
+    if len(substantial) < 2:
+        return None
+    return {
+        fid: label
+        for fid, label in zip(ids, labels, strict=True)
+        if fid is not None and label in substantial
+    }
 
 
 def grade_frames(
@@ -301,36 +390,49 @@ def grade_frames(
     reasons: dict[int, list[GradeReason]] = {}
     names: dict[int, str] = {}
 
+    # Mosaic panels are different patches of sky, so the flux-like metrics must
+    # be judged against a panel's *own* population — see :func:`_pointing_groups`.
+    # ``None`` (single pointing, unsolved, or too tightly packed to split) means
+    # "target-wide, exactly as before", which is every non-mosaic target.
+    groups = _pointing_groups(accepted, min_frames)
+    if groups is not None:
+        by_group: dict[int, list[FrameRow]] = {}
+        for f in accepted:
+            gid = groups.get(f.id) if f.id is not None else None
+            if gid is not None:
+                by_group.setdefault(gid, []).append(f)
+        report.pointing_groups = len(by_group)
+
     for spec in _METRICS:
         metric = spec.attr
         # Population = every accepted frame carrying the metric (log metrics
         # need strictly positive values to transform).
-        pop = [
-            float(getattr(f, metric))
-            for f in accepted
-            if getattr(f, metric) is not None
-            and math.isfinite(float(getattr(f, metric)))
-            and (not spec.log_domain or float(getattr(f, metric)) > 0)
-        ]
-        if len(pop) < min_frames:
-            report.metrics_skipped[metric] = (
-                f"only {len(pop)} of {len(accepted)} accepted frames carry "
-                f"this metric (need {min_frames})"
-            )
+        stats = _population_stats(accepted, spec, min_frames)
+        if isinstance(stats, tuple):
+            report.metrics_skipped[metric] = stats[1]
             continue
-        domain = [math.log(v) for v in pop] if spec.log_domain else pop
-        med_d = _median(domain)
-        scale = _robust_scale(domain, med_d)
-        if scale is None:
-            report.metrics_skipped[metric] = "no spread — every frame is identical"
-            continue
-        med_linear = math.exp(med_d) if spec.log_domain else med_d
+        # Per-panel yardsticks for the position-dependent metrics. A panel whose
+        # own population is too thin or too flat to grade simply falls back to
+        # the target-wide one, so nothing is ever left ungraded by the split.
+        per_group: dict[int, _PopStats] = {}
+        if spec.per_pointing and groups is not None:
+            for gid, members in by_group.items():
+                gstats = _population_stats(members, spec, min_frames)
+                if not isinstance(gstats, tuple):
+                    per_group[gid] = gstats
+            if per_group:
+                report.metrics_per_pointing.append(metric)
 
         report.metrics_used.append(metric)
         for f in considered:
             raw = getattr(f, metric)
             if raw is None or not math.isfinite(float(raw)):
                 continue
+            fstats = stats
+            if per_group and f.id is not None:
+                fstats = per_group.get(groups.get(f.id, -1), stats)  # type: ignore[union-attr]
+            med_d, scale, med_linear = (
+                fstats.med_domain, fstats.scale, fstats.med_linear)
             value = float(raw)
             if spec.log_domain and value <= 0:
                 # log undefined. A non-positive value on a low-is-bad metric
@@ -366,6 +468,40 @@ def grade_frames(
     # z-score tie at the cap boundary would otherwise flip a frame in and out
     # between scans.
     recs.sort(key=lambda g: (-g.worst_z, g.frame_id))
+
+    # Per-panel safety rail. The target-wide cap below is measured against the
+    # *whole* target, so on a mosaic a single small panel can still lose a
+    # disproportionate share of its subs without ever reaching it (40 of one
+    # panel's 40 subs is only 17% of a six-panel target). Applying the same
+    # fraction within each panel first bounds the damage where it is actually
+    # felt. Deterministic for the same reason the global cap is: the groups come
+    # from the invariant combined set and ``recs`` is already in a total order.
+    if groups is not None:
+        per_group_considered: dict[int, int] = {}
+        for f in considered:
+            gid = groups.get(f.id) if f.id is not None else None
+            if gid is not None:
+                per_group_considered[gid] = per_group_considered.get(gid, 0) + 1
+        kept: list[FrameGrade] = []
+        used: dict[int, int] = {}
+        for g in recs:
+            gid = groups.get(g.frame_id)
+            if gid is None:
+                kept.append(g)
+                continue
+            gcap = max(1, int(per_group_considered.get(gid, 0) * max_reject_fraction))
+            if used.get(gid, 0) >= gcap:
+                report.capped = True
+                continue
+            used[gid] = used.get(gid, 0) + 1
+            kept.append(g)
+        if len(kept) < len(recs):
+            log.info(
+                "Auto-grade per-panel rail kept %d of %d flagged frames across "
+                "%d panels (%.0f%% each)", len(kept), len(recs),
+                len(per_group_considered), max_reject_fraction * 100,
+            )
+        recs = kept
 
     # Safety rail: never recommend more than the cap, keep the worst offenders.
     cap = max(1, int(len(considered) * max_reject_fraction)) if considered else 0

@@ -525,3 +525,72 @@ def test_auto_grade_never_re_accepts_a_user_or_streak_rejection(
             proj.close()
     finally:
         lib.close()
+
+
+def _seed_mosaic(data_root, safe: str = "M_42", n_per_panel: int = 20,
+                 poor_panel: int = 1, panels: int = 3) -> set[int]:
+    """Seed a multi-panel mosaic where one panel legitimately has fewer stars.
+
+    Returns the ids of the star-poor panel's frames. Panels are stepped 1° apart
+    in declination — far enough to be separate patches of sky, close enough that
+    the mixed-pointing guard still reads them as one contiguous mosaic.
+    """
+    rng = random.Random(5)
+    poor_ids: set[int] = set()
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            # Park the fixture's own (pointing-less) frames out of the way.
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, accept=False, reject_reason="test:setup",
+                                  user_override=True)
+            for panel in range(panels):
+                base = 400 * (0.25 if panel == poor_panel else 1.0)
+                for i in range(n_per_panel):
+                    fid = proj.add_frame(FrameRow(
+                        source_path=f"/synthetic/p{panel}_{i:03d}.fit",
+                        fwhm_px=3.0 + rng.gauss(0, 0.05),
+                        star_count=int(base * rng.uniform(0.95, 1.05)),
+                        sky_adu_median=1200.0 + rng.gauss(0, 20),
+                        eccentricity_median=0.40 + rng.gauss(0, 0.005),
+                        transparency_score=5000.0 + rng.gauss(0, 50),
+                        ra_center_deg=83.6,
+                        dec_center_deg=-5.4 + panel + rng.uniform(-0.01, 0.01),
+                    ))
+                    if panel == poor_panel:
+                        poor_ids.add(fid)
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+    return poor_ids
+
+
+def test_auto_grade_does_not_call_a_star_poor_mosaic_panel_cloud(
+        client, built_library, data_root):
+    """End-to-end through the endpoint: a mosaic panel pointed at emptier sky
+    must not have its whole sub population recommended for rejection.
+
+    Fail-before: every one of the poor panel's subs came back as "far fewer
+    stars than typical — likely cloud", up to the 25% rail. That is real,
+    permanent data loss when ``auto_grade_frames`` is on, because it acts by
+    itself with nobody watching.
+    """
+    poor_ids = _seed_mosaic(data_root)
+    body = client.get("/api/targets/M_42/frames/auto-grade").json()
+    flagged = {rec["frame_id"] for rec in body["recommendations"]}
+    assert not (flagged & poor_ids), (
+        f"{len(flagged & poor_ids)} good subs from the star-poor panel were "
+        "recommended for rejection")
+    assert body["pointing_groups"] == 3, "each panel is its own population"
+
+
+def test_auto_grade_reports_no_panels_for_a_single_pointing_target(
+        client, built_library, data_root):
+    """The per-panel split is reported as *not applied* on an ordinary target,
+    so the UI only mentions panels when there really are some."""
+    _seed_metrics(data_root)
+    body = client.get("/api/targets/M_42/frames/auto-grade").json()
+    assert body["pointing_groups"] == 0

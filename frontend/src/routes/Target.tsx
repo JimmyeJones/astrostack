@@ -168,6 +168,25 @@ const SENSITIVITIES = [
 
 // Preview-first auto-grading: shows which accepted frames are statistical
 // outliers (and why, in plain language) before anything is rejected.
+/** Say, in the auto-grade dialog, that a mosaic's panels are judged against
+ * themselves — or nothing at all for an ordinary single-pointing target.
+ *
+ * Panels are different patches of sky, so a panel pointed at emptier sky
+ * legitimately shows fewer stars; grading it against the rest of the target
+ * used to read that as cloud and could flag the whole panel. The backend now
+ * splits the flux-like metrics per panel and reports how many it found
+ * (`pointing_groups`; absent on an older backend, hence the optional). Saying
+ * so is the difference between a user trusting the numbers and wondering why
+ * one panel is treated differently. */
+export function mosaicGradingNote(groups: number | undefined): string | null {
+  if (!groups || groups < 2) return null;
+  return (
+    `This looks like a ${groups}-panel mosaic, so each panel is compared `
+    + "against itself — a panel pointed at emptier sky genuinely has fewer "
+    + "stars, and that isn't cloud."
+  );
+}
+
 function AutoGradeModal({
   safe, opened, onClose, onApplied,
 }: {
@@ -213,6 +232,11 @@ function AutoGradeModal({
           outliers — trailed, cloud-hit or hazy subs. Nothing is rejected until
           you apply, and one click undoes it.
         </Text>
+        {mosaicGradingNote(report?.pointing_groups) ? (
+          <Text size="sm" c="dimmed">
+            {mosaicGradingNote(report?.pointing_groups)}
+          </Text>
+        ) : null}
         <Select
           label="Sensitivity" size="xs" w={280} allowDeselect={false}
           data={SENSITIVITIES}

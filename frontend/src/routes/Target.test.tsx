@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TargetView, countNewSubsSinceStack, countQcUncheckable, describeObject, rejectReasonLabel } from "./Target";
+import { TargetView, countNewSubsSinceStack, countQcUncheckable, describeObject, mosaicGradingNote, rejectReasonLabel } from "./Target";
 import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
 import { formatStampDate } from "../format";
@@ -1786,5 +1786,22 @@ describe("TargetView share text", () => {
 
     restore();
     vi.unstubAllGlobals();
+  });
+});
+
+describe("mosaicGradingNote", () => {
+  it("says nothing for an ordinary single-pointing target", () => {
+    // The backend reports 0 when the per-panel split didn't apply, and an older
+    // backend doesn't report it at all — neither should mention panels.
+    expect(mosaicGradingNote(0)).toBeNull();
+    expect(mosaicGradingNote(1)).toBeNull();
+    expect(mosaicGradingNote(undefined)).toBeNull();
+  });
+
+  it("explains that a mosaic's panels are judged against themselves", () => {
+    const note = mosaicGradingNote(6);
+    expect(note).toContain("6-panel mosaic");
+    expect(note).toContain("compared against itself");
+    expect(note).toContain("isn't cloud");
   });
 });

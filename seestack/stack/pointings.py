@@ -33,6 +33,18 @@ from dataclasses import dataclass
 LINK_DIST_DEG = 3.0
 MIN_POINTING_FRAMES = 5
 
+# Link distance for telling one *mosaic panel* from the next, as opposed to one
+# target from another (``LINK_DIST_DEG`` above). The two live at very different
+# scales: a dither nudges a pointing by arc-minutes (≲0.1°), while even the
+# tightest mosaic steps adjacent panels by roughly half a field of view (~0.5°,
+# and commonly several degrees for a framed mosaic). 0.25° sits with a ~2×
+# margin on both sides, so a dithered set stays one group and neighbouring
+# panels stay apart. Getting it wrong is safe in both directions: too small and
+# a dither splits into groups too small to grade (callers fall back to the
+# target-wide population, i.e. today's behaviour); too large and the panels
+# merge back into one group — also today's behaviour.
+PANEL_LINK_DIST_DEG = 0.25
+
 
 @dataclass(frozen=True)
 class MixedPointings:
@@ -56,6 +68,65 @@ def _sep_deg(
 ) -> float:
     dot = min(1.0, max(-1.0, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))
     return math.degrees(math.acos(dot))
+
+
+def cluster_pointings(
+    radecs: list[tuple[float | None, float | None]],
+    *,
+    link_dist_deg: float = LINK_DIST_DEG,
+) -> list[int]:
+    """Single-linkage-cluster ``(ra_deg, dec_deg)`` pointings on the unit sphere.
+
+    Returns one cluster label per *input* index — so the caller can map labels
+    straight back onto its own rows — using ``-1`` for an entry with a missing
+    or non-finite coordinate (an unsolved sub has no pointing to cluster). Two
+    pointings within ``link_dist_deg`` of each other share a label; single
+    linkage keys on the *gap between* groups rather than their total span, so an
+    arbitrarily wide but contiguous chain stays one cluster. Working on unit
+    vectors makes it wrap-safe (RA 359°↔1°) and pole-safe by construction.
+
+    O(n²) in the number of solved pointings, the same bound
+    :func:`detect_mixed_pointings` has always carried.
+    """
+    valid = [
+        i for i, (ra, dec) in enumerate(radecs)
+        if ra is not None and dec is not None
+        and math.isfinite(ra) and math.isfinite(dec)
+    ]
+    labels = [-1] * len(radecs)
+    if not valid:
+        return labels
+    vecs = [_to_vec(radecs[i][0], radecs[i][1]) for i in valid]  # type: ignore[arg-type]
+    cos_thresh = math.cos(math.radians(link_dist_deg))
+
+    parent = list(range(len(vecs)))
+
+    def find(i: int) -> int:
+        r = i
+        while parent[r] != r:
+            r = parent[r]
+        while parent[i] != r:
+            nxt = parent[i]
+            parent[i] = r
+            i = nxt
+        return r
+
+    for i in range(len(vecs)):
+        vi = vecs[i]
+        for j in range(i + 1, len(vecs)):
+            vj = vecs[j]
+            if vi[0] * vj[0] + vi[1] * vj[1] + vi[2] * vj[2] >= cos_thresh:
+                parent[find(j)] = find(i)
+
+    # Renumber roots to dense 0..n-1 labels in first-appearance order, so the
+    # labels are deterministic given the input order (and stable across runs).
+    dense: dict[int, int] = {}
+    for k, orig in enumerate(valid):
+        root = find(k)
+        if root not in dense:
+            dense[root] = len(dense)
+        labels[orig] = dense[root]
+    return labels
 
 
 def detect_mixed_pointings(
@@ -84,35 +155,16 @@ def detect_mixed_pointings(
         return None
 
     vecs = [_to_vec(ra, dec) for (ra, dec) in pts]
-    cos_thresh = math.cos(math.radians(link_dist_deg))
-
     # Single-linkage clustering via union-find: two frames within link_dist_deg
-    # (dot ≥ cos(threshold)) share a cluster. O(n²), bounded by the frame-list cap.
-    parent = list(range(len(vecs)))
+    # share a cluster. O(n²), bounded by the frame-list cap. ``pts`` is already
+    # filtered to finite coordinates, so no label comes back -1.
+    labels = cluster_pointings(pts, link_dist_deg=link_dist_deg)  # type: ignore[arg-type]
 
-    def find(i: int) -> int:
-        r = i
-        while parent[r] != r:
-            r = parent[r]
-        while parent[i] != r:
-            nxt = parent[i]
-            parent[i] = r
-            i = nxt
-        return r
-
-    for i in range(len(vecs)):
-        vi = vecs[i]
-        for j in range(i + 1, len(vecs)):
-            vj = vecs[j]
-            if vi[0] * vj[0] + vi[1] * vj[1] + vi[2] * vj[2] >= cos_thresh:
-                parent[find(j)] = find(i)
-
-    # Collect clusters as (count, summed unit vector) → centroid, keyed by root.
+    # Collect clusters as (count, summed unit vector) → centroid, keyed by label.
     groups: dict[int, tuple[int, tuple[float, float, float]]] = {}
-    for i in range(len(vecs)):
-        root = find(i)
-        count, s = groups.get(root, (0, (0.0, 0.0, 0.0)))
-        groups[root] = (
+    for i, label in enumerate(labels):
+        count, s = groups.get(label, (0, (0.0, 0.0, 0.0)))
+        groups[label] = (
             count + 1,
             (s[0] + vecs[i][0], s[1] + vecs[i][1], s[2] + vecs[i][2]),
         )
