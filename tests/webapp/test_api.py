@@ -819,6 +819,33 @@ def test_stack_defaults_roundtrip(client, built_library):
     assert client.get("/api/targets/M_42/stack-defaults").json()["sigma_kappa"] == 2.0
 
 
+def test_stack_defaults_malformed_meta_row_degrades_not_500(client, built_library):
+    # A valid-JSON *non-dict* web_stack_defaults meta row (a legacy / hand-edited /
+    # foreign-version value — the PUT writer only ever stores a dict) used to 500
+    # the Stack form load: json.loads succeeds, but merged.update(<non-dict>) raises
+    # TypeError, which suppress(json.JSONDecodeError) doesn't catch. It must instead
+    # degrade to "no saved defaults" and return the plain form, like every sibling
+    # meta reader does.
+    import json as _json
+
+    from seestack.io.library import Library
+    from webapp.schemas import STACK_DEFAULTS_META_KEY
+
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            proj.set_meta(STACK_DEFAULTS_META_KEY, _json.dumps([1, 2, 3]))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    r = client.get("/api/targets/M_42/stack-defaults")
+    assert r.status_code == 200
+    assert "sigma_kappa" in r.json()
+
+
 def test_stack_defaults_persists_calibration_master_picks(client, built_library):
     # "Save as defaults" used to silently drop the calibration-master picks (they
     # aren't StackOptions fields, so the schema whitelist excluded them), leaving

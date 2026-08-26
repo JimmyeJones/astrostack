@@ -181,8 +181,15 @@ def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
         lib.close()
     merged = dict(settings.default_stack_options)
     if raw:
+        # A valid-JSON *non-dict* (a legacy/hand-edited/foreign-version meta row —
+        # this endpoint's writer only ever stores a dict) survives json.loads but
+        # would make merged.update() raise TypeError, 500-ing the Stack form load.
+        # Guard it exactly like every sibling meta reader above so a malformed row
+        # degrades to "no saved defaults" rather than breaking the page.
         with contextlib.suppress(json.JSONDecodeError):
-            merged.update(json.loads(raw))
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                merged.update(parsed)
     # For a *never-configured* target (no per-target saved defaults and no
     # global default_stack_options), turn smart auto outlier removal on in the
     # form the beginner sees. auto_reject (v0.143.0) picks min/max vs kappa-sigma
