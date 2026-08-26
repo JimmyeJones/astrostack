@@ -695,6 +695,33 @@ def test_stack_info_surfaces_photometric_normalization_summary(client, solved_li
     assert p["min"] == 0.62
     assert p["max"] == 2.0
     assert p["median"] == 1.03
+    # No PHOTAUTO card at all (a master written before the flag existed) reads
+    # as "the user chose it", which is what every such run in fact was.
+    assert "auto" not in p
+
+
+def test_stack_info_says_when_a_mosaic_normalized_itself(client, solved_library):
+    """A mosaic gain-matches its panels without being asked, so the panel has to
+    be able to say so — otherwise the line looks like a setting nobody touched."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["PHOTNORM"] = "transparency"
+                hdul[0].header["PHOTNADJ"] = 8
+                hdul[0].header["PHOTAUTO"] = True
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    p = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["photometric"]
+    assert p["auto"] is True
 
 
 def test_stack_info_photometric_absent_for_unnormalized_stack(client, solved_library):

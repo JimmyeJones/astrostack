@@ -818,6 +818,9 @@ export interface StackPhotometricSummary {
   min?: number;
   max?: number;
   median?: number;
+  // True when the mosaic path turned normalization on itself rather than the
+  // user ticking the box. Absent on masters written before v0.271.0.
+  auto?: boolean;
 }
 
 export interface StackDarkScalingSummary {

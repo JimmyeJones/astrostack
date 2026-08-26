@@ -565,7 +565,9 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "help": "Gain-match every frame's brightness to the run's median before combining, "
              "so haze and airmass across a multi-night session don't weaken outlier "
              "rejection or let hazy nights dim the result. Uses each frame's measured "
-             "transparency; leaves un-measured frames untouched."},
+             "transparency; leaves un-measured frames untouched. Mosaics do this "
+             "automatically — a panel shot through haze would otherwise stay dimmer "
+             "than the one next to it."},
     {"key": "lucky_fraction", "label": "Lucky imaging (keep best %)", "type": "float",
      "group": "simple", "min": 0.05, "max": 1.0, "step": 0.05,
      "help": "Keep only the best fraction of frames by FWHM. 1.0 = keep all."},

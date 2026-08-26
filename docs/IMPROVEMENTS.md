@@ -283,76 +283,122 @@ _(none — claim an item here with your branch name)_
     the existing 25%-per-population rail; verify it now applies per cluster too, not just globally, or a small
     cluster could still lose disproportionately.
 
-- **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit, repro-verified) — the "Panels: check" badge is
+- ~~**🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit, repro-verified) — the "Panels: check" badge is
   HONEST (does not false-fire), but the machinery that could actually FIX what it detects is built and
-  wired up everywhere except the one path that needs it most.** *(Not a correctness bug — a real improvement
-  with existing machinery, not a new feature.)*
+  wired up everywhere except the one path that needs it most.**~~ — **FIXED v0.271.0** (Builder 2026-08-26,
+  branch `claude/compassionate-galileo-yhrbne`). *(Image quality, priority 4 — on the owner's exact workflow:
+  every mosaic, walk-away or manual.)*
 
-  Reproduced through the real stack path: haze arriving mid-mosaic (transparency 1.0→0.45) walks the seam
-  residual 0.97→1.78 (crosses the "check" bar at 1.5) and correctly lights both "Panels: check" and "Hazy
-  night" together — not a bug, a true positive. The metric doesn't false-fire on flat-noise canvases either
-  (0.03–0.36 measured vs. the 1.5 bar, even at 64 coverage levels). **The gap:** `level_by_coverage`
-  (automatic, on the mosaic path) only removes *additive* sky offsets between panels — a hazy panel's
-  *multiplicative* dimming survives it untouched. `photometric_normalize` is the op that corrects exactly
-  that, but unlike `auto_reject`/`quality_weighted` (which the walk-away chain turns on automatically per
-  `_stack_target`'s `auto` flag — see `webapp/pipeline.py` docstring), **nothing ever enables
-  `photometric_normalize` on the walk-away path**; it is off by default and stays off.
+  **A mosaic now gain-matches its own panels.** One guard, at exactly the site the Scout traced:
+  `if options.photometric_normalize or is_mosaic_canvas:` around `compute_photometric_scales`
+  (`seestack/stack/stacker.py`), mirroring the `final_gradient_removal` precedent a few lines below — the
+  same reasoning, too: the corrections a mosaic already gets automatically all act on the **sky** (the
+  per-frame background flatten removes each frame's additive offset, `level_by_coverage` removes the
+  panel-to-panel sky step), and haze dims the **signal** multiplicatively, which leaves the sky alone and
+  survives both.
 
-  **Fix direction:** extend the same "auto turns this on when the user made no explicit choice" pattern
-  already used for `auto_reject`/`quality_weighted` to `photometric_normalize`, gated on `is_mosaic` (mirror
-  the existing `if is_mosaic:` branch in `auto_recipe`/`_stack_target`). **Measure a real before/after** (seam
-  residual with vs. without, on a synthetic hazy-mid-session mosaic) before flipping any default, per
-  `AGENTS.md` §9 — do not blind-flip.
+  **Measured before/after (§9), on the metric this entry itself insisted on — signal continuity across the
+  join, never `SEAMRES`.** Synthetic two-panel mosaic, 4 subs each, the second panel's files dimmed to 50%
+  of signal with `transparency_score` set as QC would, both panels carrying the *same* star seeds so the two
+  halves are directly comparable: mean star-core flux step across the join **50.4% → 0.7%**. `SEAMRES` reads
+  0.0091 vs 0.0115 — i.e. unchanged, exactly as this entry predicted, which is why the test measures panels
+  and not seams. Scales applied were 0.75× (clear) / 1.5× (hazy), both inside the 2× clamp.
 
-  **MEASURED, 2026-08-26 (Builder). The improvement is real and large — but do NOT use seam residual to
-  judge it, and read the blocker below before starting.**
-  - **Seam residual is the wrong metric here and will tell you the change does nothing.** Measured on a
-    synthetic 2×2 mosaic with one panel shot through haze (transparency 1.0 → 0.45, real files dimmed
-    multiplicatively, `transparency_score` set as QC would): `seam_residual` **0.0 with and without**
-    `photometric_normalize`. That is correct behaviour, not a null result — `background_flatten` already
-    removes the per-frame *sky* offset, and seam residual measures a **sky** step between coverage levels.
-    Multiplicative *signal* dimming leaves the sky alone, which is precisely why `level_by_coverage` can't
-    fix it and why this entry exists.
-  - **The right metric is signal continuity across the panel join**, and there the win is big: mean bright-
-    pixel (star) flux compared between a clear-panel region and the hazy-panel region gives a step of
-    **30.6% → 6.8%** with `photometric_normalize` on. Residual 6.8% is the 2× scale clamp (0.45 haze wants
-    2.22×). Reproduce with that measurement, not with `SEAMRES`.
-  - **The `is_mosaic` the fix direction assumes does not exist in `_stack_target`.** It is the *stacker's*
-    decision (`compute_mosaic_canvas(...).is_mosaic`, `seestack/stack/stacker.py` ~1250), made well after
-    `_stack_target` has already built its options. Deciding it outside means either re-running the canvas
-    computation pre-stack or clustering the pointings (`cluster_pointings` at `PANEL_LINK_DIST_DEG`, added
-    v0.270.2, is a cheap proxy); the tidier option is a new default-off `StackOption` the walk-away chain
-    sets, which the engine honours *after* it knows `is_mosaic_canvas`. Either way, keep manual stacks
-    unchanged.
-  - **⚠ Its coverage-map prerequisite is now SHIPPED (v0.270.4) — check it holds before flipping.** Turning
-    photometric normalization on makes a pixel's weighted coverage Σ(w/s²), which can be 4× off at the
-    clamp. That map is what the sky-leveling pass bins mosaic panels by, so before v0.270.4 this would have
-    scrambled the panel bins — the exact seam-grid failure mode the owner has complained about. v0.270.4
-    persists the honest frame count as `{base}_framecov.fits` and the leveling pass now prefers it, so the
-    binning no longer moves when photometric scaling is on. **Verify that on a fresh run** (the frame-count
-    bins must be identical with and without `photometric_normalize`) as the first step of this task.
+  **The prerequisite was verified, not assumed.** `test_the_panel_bins_do_not_move_when_the_scaling_is_on`
+  stacks the same quality-weighted mosaic with and without the scaling and asserts the leveling bins are
+  identical (`[4, 8]` both ways) — v0.270.4's `_framecov.fits` is what makes that true, and the test fails
+  loudly if a future change puts the binning back on the weighted map.
 
-  - **Scout 2026-08-26 — precise implementation site traced; the filed "mirror it in `_stack_target`"
-    direction is WRONG and would send the Builder down a dead end.** `_stack_target` / `build_stack_options`
-    (`webapp/pipeline.py`) builds the options **before** any canvas is computed, so **it does not know
-    `is_mosaic`** — the union-vs-reference decision is made *inside* `run_stack` (`is_mosaic_canvas`, set from
-    the canvas around `seestack/stack/stacker.py:1246–1250`). Turning `photometric_normalize` on at
-    option-build time can therefore only be unconditional, not mosaic-gated. **The clean, correct site is the
-    engine, and the precedent already exists a few lines below:** `final_gradient_removal` is auto-enabled for
-    every mosaic with `do_final_grad = options.final_gradient_removal or is_mosaic_canvas`
-    (`stacker.py:1735`) — unconditionally, no per-user "auto" flag, because it's simply the right correction
-    for a mosaic. `is_mosaic_canvas` is known by `stacker.py:1250`, and `photometric_normalize` is applied at
-    `stacker.py:1312` (during weight/scale-map build, before the passes) — *after* `is_mosaic_canvas` is set.
-    So the one-line mirror is at 1312: `if options.photometric_normalize or is_mosaic_canvas:` guarding
-    `compute_photometric_scales`. This composes with quality weighting automatically (the existing
-    `combine_weights_with_photometric` folds the `1/s²` variance correction in) and needs no pipeline change
-    at all. **Caveats for the Builder:** (1) it changes the *default* result of a **manual** mosaic stack too
-    (same as the `final_gradient_removal` precedent already does), so it's a mosaic-only image-quality default
-    change — surface it in provenance (a `PHOTOSKA`-style "auto for mosaic" card mirroring the final-gradient
-    `why` log) and still do the §9 measured before/after; (2) `compute_photometric_scales` self-neutralises
-    (`n_scaled == 0 → pscales=None`) on a run with no usable transparency scores, so a mosaic whose subs lack
-    `transparency_score` is byte-for-byte unchanged — the guard is safe on the no-data path. Size S (one guard
-    + a provenance card + the measurement test).
+  **Provenance (a run nobody ticked a box for still explains itself):** the header gains `PHOTAUTO`
+  alongside the existing `PHOTNORM`/`PHOT*` cards, the run-info endpoint carries it as `photometric.auto`,
+  and the History Info panel appends *"· automatic for a mosaic"* to the line it already showed. The Stack
+  form's help text says it too.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk-layout or API-shape change; one additive header card and
+  one additive response key an older frontend ignores; no `StackOptions` field added or default flipped, so
+  every recorded run's options replay exactly as before. A single-field target is untouched, and a mosaic
+  whose subs carry no usable `transparency_score` self-neutralises (`n_scaled == 0`) and is byte-for-byte
+  what it was.
+
+  **Tests (+6 python / +1 webapp / +1 frontend, 3 of them fail-before):**
+  `tests/test_photometric_mosaic_auto.py` (the 50.4%→0.7% measurement; the `PHOTAUTO` provenance for the
+  automatic and the explicit case; the no-transparency-score no-op; a single-field stack left alone; and the
+  panel-bin invariance above), `tests/webapp/test_stack_render.py` (`photometric.auto` through the endpoint,
+  and absent on an older master), `frontend/src/routes/History.test.tsx` (the summary line, with the
+  old-master and user-chose cases pinned unchanged).
+
+  Original spec, for the record:
+
+    **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit, repro-verified) — the "Panels: check" badge is
+    HONEST (does not false-fire), but the machinery that could actually FIX what it detects is built and
+    wired up everywhere except the one path that needs it most.** *(Not a correctness bug — a real improvement
+    with existing machinery, not a new feature.)*
+
+    Reproduced through the real stack path: haze arriving mid-mosaic (transparency 1.0→0.45) walks the seam
+    residual 0.97→1.78 (crosses the "check" bar at 1.5) and correctly lights both "Panels: check" and "Hazy
+    night" together — not a bug, a true positive. The metric doesn't false-fire on flat-noise canvases either
+    (0.03–0.36 measured vs. the 1.5 bar, even at 64 coverage levels). **The gap:** `level_by_coverage`
+    (automatic, on the mosaic path) only removes *additive* sky offsets between panels — a hazy panel's
+    *multiplicative* dimming survives it untouched. `photometric_normalize` is the op that corrects exactly
+    that, but unlike `auto_reject`/`quality_weighted` (which the walk-away chain turns on automatically per
+    `_stack_target`'s `auto` flag — see `webapp/pipeline.py` docstring), **nothing ever enables
+    `photometric_normalize` on the walk-away path**; it is off by default and stays off.
+
+    **Fix direction:** extend the same "auto turns this on when the user made no explicit choice" pattern
+    already used for `auto_reject`/`quality_weighted` to `photometric_normalize`, gated on `is_mosaic` (mirror
+    the existing `if is_mosaic:` branch in `auto_recipe`/`_stack_target`). **Measure a real before/after** (seam
+    residual with vs. without, on a synthetic hazy-mid-session mosaic) before flipping any default, per
+    `AGENTS.md` §9 — do not blind-flip.
+
+    **MEASURED, 2026-08-26 (Builder). The improvement is real and large — but do NOT use seam residual to
+    judge it, and read the blocker below before starting.**
+    - **Seam residual is the wrong metric here and will tell you the change does nothing.** Measured on a
+      synthetic 2×2 mosaic with one panel shot through haze (transparency 1.0 → 0.45, real files dimmed
+      multiplicatively, `transparency_score` set as QC would): `seam_residual` **0.0 with and without**
+      `photometric_normalize`. That is correct behaviour, not a null result — `background_flatten` already
+      removes the per-frame *sky* offset, and seam residual measures a **sky** step between coverage levels.
+      Multiplicative *signal* dimming leaves the sky alone, which is precisely why `level_by_coverage` can't
+      fix it and why this entry exists.
+    - **The right metric is signal continuity across the panel join**, and there the win is big: mean bright-
+      pixel (star) flux compared between a clear-panel region and the hazy-panel region gives a step of
+      **30.6% → 6.8%** with `photometric_normalize` on. Residual 6.8% is the 2× scale clamp (0.45 haze wants
+      2.22×). Reproduce with that measurement, not with `SEAMRES`.
+    - **The `is_mosaic` the fix direction assumes does not exist in `_stack_target`.** It is the *stacker's*
+      decision (`compute_mosaic_canvas(...).is_mosaic`, `seestack/stack/stacker.py` ~1250), made well after
+      `_stack_target` has already built its options. Deciding it outside means either re-running the canvas
+      computation pre-stack or clustering the pointings (`cluster_pointings` at `PANEL_LINK_DIST_DEG`, added
+      v0.270.2, is a cheap proxy); the tidier option is a new default-off `StackOption` the walk-away chain
+      sets, which the engine honours *after* it knows `is_mosaic_canvas`. Either way, keep manual stacks
+      unchanged.
+    - **⚠ Its coverage-map prerequisite is now SHIPPED (v0.270.4) — check it holds before flipping.** Turning
+      photometric normalization on makes a pixel's weighted coverage Σ(w/s²), which can be 4× off at the
+      clamp. That map is what the sky-leveling pass bins mosaic panels by, so before v0.270.4 this would have
+      scrambled the panel bins — the exact seam-grid failure mode the owner has complained about. v0.270.4
+      persists the honest frame count as `{base}_framecov.fits` and the leveling pass now prefers it, so the
+      binning no longer moves when photometric scaling is on. **Verify that on a fresh run** (the frame-count
+      bins must be identical with and without `photometric_normalize`) as the first step of this task.
+
+    - **Scout 2026-08-26 — precise implementation site traced; the filed "mirror it in `_stack_target`"
+      direction is WRONG and would send the Builder down a dead end.** `_stack_target` / `build_stack_options`
+      (`webapp/pipeline.py`) builds the options **before** any canvas is computed, so **it does not know
+      `is_mosaic`** — the union-vs-reference decision is made *inside* `run_stack` (`is_mosaic_canvas`, set from
+      the canvas around `seestack/stack/stacker.py:1246–1250`). Turning `photometric_normalize` on at
+      option-build time can therefore only be unconditional, not mosaic-gated. **The clean, correct site is the
+      engine, and the precedent already exists a few lines below:** `final_gradient_removal` is auto-enabled for
+      every mosaic with `do_final_grad = options.final_gradient_removal or is_mosaic_canvas`
+      (`stacker.py:1735`) — unconditionally, no per-user "auto" flag, because it's simply the right correction
+      for a mosaic. `is_mosaic_canvas` is known by `stacker.py:1250`, and `photometric_normalize` is applied at
+      `stacker.py:1312` (during weight/scale-map build, before the passes) — *after* `is_mosaic_canvas` is set.
+      So the one-line mirror is at 1312: `if options.photometric_normalize or is_mosaic_canvas:` guarding
+      `compute_photometric_scales`. This composes with quality weighting automatically (the existing
+      `combine_weights_with_photometric` folds the `1/s²` variance correction in) and needs no pipeline change
+      at all. **Caveats for the Builder:** (1) it changes the *default* result of a **manual** mosaic stack too
+      (same as the `final_gradient_removal` precedent already does), so it's a mosaic-only image-quality default
+      change — surface it in provenance (a `PHOTOSKA`-style "auto for mosaic" card mirroring the final-gradient
+      `why` log) and still do the §9 measured before/after; (2) `compute_photometric_scales` self-neutralises
+      (`n_scaled == 0 → pscales=None`) on a run with no usable transparency scores, so a mosaic whose subs lack
+      `transparency_score` is byte-for-byte unchanged — the guard is safe on the no-data path. Size S (one guard
+      + a provenance card + the measurement test).
 
 - **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace, Scout
   2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**
