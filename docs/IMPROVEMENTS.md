@@ -237,15 +237,51 @@ _(none — claim an item here with your branch name)_
   residual with vs. without, on a synthetic hazy-mid-session mosaic) before flipping any default, per
   `AGENTS.md` §9 — do not blind-flip.
 
-- **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit — needs confirmation from a live header, not yet
-  fully verified) — the drizzle path may be running with NO outlier rejection at all on walk-away stacks.**
+  - **Scout 2026-08-26 — precise implementation site traced; the filed "mirror it in `_stack_target`"
+    direction is WRONG and would send the Builder down a dead end.** `_stack_target` / `build_stack_options`
+    (`webapp/pipeline.py`) builds the options **before** any canvas is computed, so **it does not know
+    `is_mosaic`** — the union-vs-reference decision is made *inside* `run_stack` (`is_mosaic_canvas`, set from
+    the canvas around `seestack/stack/stacker.py:1246–1250`). Turning `photometric_normalize` on at
+    option-build time can therefore only be unconditional, not mosaic-gated. **The clean, correct site is the
+    engine, and the precedent already exists a few lines below:** `final_gradient_removal` is auto-enabled for
+    every mosaic with `do_final_grad = options.final_gradient_removal or is_mosaic_canvas`
+    (`stacker.py:1735`) — unconditionally, no per-user "auto" flag, because it's simply the right correction
+    for a mosaic. `is_mosaic_canvas` is known by `stacker.py:1250`, and `photometric_normalize` is applied at
+    `stacker.py:1312` (during weight/scale-map build, before the passes) — *after* `is_mosaic_canvas` is set.
+    So the one-line mirror is at 1312: `if options.photometric_normalize or is_mosaic_canvas:` guarding
+    `compute_photometric_scales`. This composes with quality weighting automatically (the existing
+    `combine_weights_with_photometric` folds the `1/s²` variance correction in) and needs no pipeline change
+    at all. **Caveats for the Builder:** (1) it changes the *default* result of a **manual** mosaic stack too
+    (same as the `final_gradient_removal` precedent already does), so it's a mosaic-only image-quality default
+    change — surface it in provenance (a `PHOTOSKA`-style "auto for mosaic" card mirroring the final-gradient
+    `why` log) and still do the §9 measured before/after; (2) `compute_photometric_scales` self-neutralises
+    (`n_scaled == 0 → pscales=None`) on a run with no usable transparency scores, so a mosaic whose subs lack
+    `transparency_score` is byte-for-byte unchanged — the guard is safe on the no-data path. Size S (one guard
+    + a provenance card + the measurement test).
+
+- **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace, Scout
+  2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**
   `auto_reject` is documented as a no-op under drizzle (drizzle has its own `drizzle_reject`, which defaults
   **off** and is never turned on by the walk-away `auto` chain the way `auto_reject`/`quality_weighted` are).
-  If confirmed, every drizzled walk-away stack — satellites, plane trails, cosmic rays, the works — goes
-  straight into the combine unfiltered. **Confirm first:** check the `REJMODE` FITS header card on a real
-  drizzled walk-away run (its absence would confirm no rejection ran). If confirmed, extend the same
-  `_stack_target` "`auto` turns this on when nothing explicit was set" pattern to `drizzle_reject`, with a
-  measured before/after (this is also the leading, though unconfirmed, explanation for the bright
+  Every drizzled walk-away stack — satellites, plane trails, cosmic rays, the works — goes
+  straight into the combine unfiltered.
+  - **Scout 2026-08-26 — confirmed via trace; the "check REJMODE first" step is no longer needed.** Grepped
+    every read of `drizzle_reject` across `webapp/` + `seestack/`: it is only ever `options.drizzle_reject`
+    (engine default `False`, `stacker.py:443`), gated `and n >= 4`; **nothing** in `webapp/pipeline.py`'s auto
+    path sets it (the auto path sets only `auto_reject` + `quality_weighted`), and `_resolve_auto_reject`
+    returns options unchanged the moment drizzle is on (`stacker.py:608`, `if not options.auto_reject or
+    options.drizzle: return options`). So on a drizzled walk-away run `drizzle_reject` stays `False` → the
+    single-pass `_drizzle_pass` runs with `clip=None` → zero rejection, and `auto_reject`/κ-σ/min-max are all
+    no-ops under drizzle. The path is unambiguous from the code; a live `REJMODE` header would only re-confirm
+    it. **Fix:** set `drizzle_reject=True` on the auto path when nothing explicit was chosen (same guard shape
+    as the `auto_reject` branch in `_stack_target`, and — unlike the sibling `photometric_normalize` item above
+    — `drizzle_reject` **is** a plain `StackOptions` bool the pipeline can set directly at build time, no
+    `is_mosaic` knowledge needed), with the §9 measured before/after (a synthetic drizzled stack with a
+    planted satellite trail: assert the trail survives without and is clipped with). Note the two-pass drizzle
+    reject roughly doubles per-frame cost (`drizzle_path.py` docstring), so weigh it as an auto default vs.
+    only-on-mosaic; measure both.
+
+  The missing rejection is still the leading (though separate, and unconfirmed) explanation for the bright
   saturated-looking blob the owner's screenshot showed near a mosaic seam — most likely a real star with a
   debayer/SCNR chroma ring, amplified by drizzle ×1.5 and possibly by the missing rejection pass; ruled out as
   a NaN/coverage hole (renders black, not white) and as seam ghosting (would double every star along the
@@ -766,6 +802,31 @@ when you take it.
 > and the planner pace math (`session_recap.recent_night_pace_s` vs frontend `clearNights.ts` — consistent, and
 > guarded by v0.254.1's shared-constant test). No verified bug in any of these — consistent with the ~16 prior
 > clean re-audits. The rotation's yield this run was in **ingest idempotency** and the **deepening reel**.
+
+> **SCOUT ADVERSARIAL QA — stacking-engine re-audit at v0.270.2 traced CLEAN, this time backed by empirical
+> probes; no verified bug found (Scout 2026-08-26, branch `claude/vigilant-knuth-q2sre0`).** Read adversarially
+> end to end (NaN/coverage semantics, rejection & weighting math, memory bounds, preview↔export parity):
+> `accumulator.py` (all four accumulators; ±inf k-set insertion for `MinMaxReject`; any-channel `_count`;
+> Welford n<2→NaN), `stacker.py` (`_kappa_sigma_keep_mask`'s two keep-all widenings; photometric+weight applied
+> identically across both κ-σ passes and drizzle; `_resolve_auto_reject`), `weighting.py` / `photometric.py`
+> (factor guards; `1/s²` variance fold), `drizzle_path.py` (`_clip_tolerance` float64 var, `neff`=true-frame
+> gate, ULP(m²) floor; half-open in-bounds), `mosaic.py` (wrap-safe circular mean both outlier passes; px+MP
+> caps), `align.py` (windowed reproject inset/valid; order-1 NaN-mask `cval=1.0`), `output.py`
+> (already-display path; covered-only percentiles), `calibrate/apply.py` (dark-vs-bias never-double-subtract;
+> exposure-scale no-data masks), the **new v0.270.2** per-panel grading (`qc/grading.py` `_pointing_groups` +
+> the per-panel *and* global reject rails) and its `stack/pointings.py::cluster_pointings` (union-find +
+> dense relabel), and `render/thumbnail.py` (`autostretch` MTF + `_nan_aware_area_downscale_plane`).
+> **New this run — empirical probes, not just reading** (reproduced tier): drove the pure functions directly and
+> confirmed each behaves as designed — the σ=0 saturated-core keep (exact-equal kept; a would-be tiny-noise
+> deviation can't arise because both κ-σ passes reproject the *same* deterministic pixels), `MinMaxReject` k=3
+> tie-safety on an all-identical bright core, single-satellite k=1 drop, the any-channel `frame_coverage` guard
+> under a per-channel NaN, and `_clip_tolerance` returning `+inf` on a bright-flat pixel (variance below
+> ULP(m²)) vs a finite tol on a dim real-variance pixel. All correct. No verified bug — consistent with the
+> ~17 prior clean re-audits. **Yield this run was in the backlog, not code:** traced the exact, correct
+> implementation site for the front-of-queue `photometric_normalize`-on-mosaic item (engine `stacker.py:1312`,
+> gated on `is_mosaic_canvas` mirroring the `final_gradient_removal or is_mosaic_canvas` precedent at
+> `stacker.py:1735` — **not** `_stack_target`, which cannot know `is_mosaic` at option-build time), and added a
+> new beginner feature to the Ideas list.
 
 > **SCOUT ADVERSARIAL QA — stacking-engine core re-audit traced CLEAN; no verified bug found (Scout 2026-08-08,
 > branch `claude/focused-keller-g87d0d`).** Baseline before the audit: the stacking + calibrate subset is green
@@ -13367,6 +13428,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-26) — "How far did you see?": a light-travel-time wow-badge on the
+  finished picture.** *(Pillar: friendliness / enjoy + understand — PRIORITY 3. Size: S–M.)* A beginner who
+  stacks a galaxy has no intuitive sense of what they just did. We already identify the object
+  (`seestack/post/target_id.py` + the "What am I looking at?" card, v0.110.0) and ship the offline deep-sky
+  catalog (`seestack/data/messier.json`, `deepsky_popular.json`), so once a run is solved we know *which*
+  object it is. Add one short, delightful line to the result/History object-info card: **"The light in this
+  picture left the Andromeda Galaxy about 2.5 million years ago — before our species existed."** That single
+  sentence turns a grey smudge into a genuine wow moment, and it's the kind of thing a beginner screenshots
+  and shares. Distinct from every existing feature: the "deepest yet"/timelapse/"cut your noise ~N×" badges are
+  all about *integration depth / SNR*, never astronomical **distance**; nothing surfaces light-travel-time.
+  **What it needs:** a static `distance_ly` (or `distance_mly`) field added to the bundled catalog entries for
+  the ~150 common objects (Messier + popular NGC) — pure data curation, no network, no new dependency; distance
+  is well-known and stable for these objects. Then a pure helper `light_travel_blurb(distance_ly) -> str | None`
+  (round to a friendly order of magnitude, pick the human comparison — "before humans", "when dinosaurs
+  roamed", "as the pyramids were built" for nearby clusters/nebulae ≲10 kly, plain "X thousand/million years"
+  otherwise) and one line rendered on the object-info card. **Beginner bar:** clears it cleanly — a non-expert
+  understands and enjoys it, it ships with a sane default and plain language, it's not a pro knob.
+  **Guardrails:** additive/read-only; `None` (render nothing) for any object with no vetted distance, so it
+  never guesses — exactly the discipline `size_arcmin`/framing already use. Testable: the helper is pure, and
+  the catalog field is asserted present-and-numeric for a couple of anchor objects. **Slices —** (a) add
+  `distance_ly` to the catalog + the pure blurb helper + unit tests; (b) render the line on the existing
+  object-info card (frontend, gated on presence). Slice (a) alone is a shippable Builder run.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — "Did I frame it well?": a
   post-stack, plain-language centring / edge-cutoff verdict on the *finished* picture.**~~ — **SHIPPED v0.256.0**
