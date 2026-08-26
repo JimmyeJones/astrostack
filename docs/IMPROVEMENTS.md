@@ -465,53 +465,8 @@ _(none — claim an item here with your branch name)_
     `transparency_score` is byte-for-byte unchanged — the guard is safe on the no-data path. Size S (one guard
     + a provenance card + the measurement test).
 
-- ~~**🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace, Scout
-  2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**~~
-  — **FIXED v0.271.1** (Builder 2026-08-26, branch `agent/mosaic-photometric-per-panel`).
-  *(Image quality, priority 4 — on the owner's default workflow: every unattended drizzled stack.)*
-
-  **What shipped.** `auto_reject` already means "the user expressed no rejection preference — pick something
-  sensible", and the walk-away chains set it on every unattended run. The engine now reads that on the
-  **drizzle** path too: `_auto_drizzle_reject` (`seestack/stack/stacker.py`) resolves it into
-  `drizzle_reject=True`, and `run_stack`'s dispatch, memory guard and in-flight cap all read the resolved
-  `eff.drizzle_reject` so the three can never disagree. `estimate_stack` mirrors it, so the pre-run number
-  still matches the guard.
-
-  **The filed "set it in `_stack_target` at build time" direction was NOT taken, and shouldn't be.** Two-pass
-  rejection holds ~7 canvas planes at once against the single pass's 4 (`_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT`),
-  so flipping it on unconditionally can push an already-large drizzled mosaic past `_guard_stack_memory` and
-  turn a run that produces a picture today into a **hard MemoryError refusal** — on a live install, silently
-  ending the owner's walk-away pictures. The pipeline can't see that coming: the union canvas is computed
-  inside `run_stack`. So the decision lives in the engine, where the real canvas is known, and it is
-  **budget-aware and fail-safe**: when the extra pass doesn't fit it is simply not taken and the run proceeds
-  exactly as it does today (logged, not failed). The `n >= 4` floor the two-pass path already enforces still
-  applies, and an explicit `drizzle_reject` — Stack form or saved per-target default — passes through
-  untouched in both directions.
-
-  **Measured before/after** (the §9 evidence, on the audit's own repro shape): 16 subs, one carrying a
-  synthetic satellite trail, drizzled through `run_stack` with `auto_reject` and nothing else. Trail-minus-
-  background along the streak: **+247.5 ADU without → −0.8 ADU with** (the existing explicit-`drizzle_reject`
-  test's own bars: contaminated > 150, rejected < 60). Provenance follows for free — the run stamps
-  `REJMODE = "drizzle-reject"`, so History's rejection trust line and `stackhealth` describe a walk-away
-  drizzled run correctly for the first time.
-
-  **Cost, accepted knowingly:** the two-pass drizzle roughly doubles per-frame work on unattended runs. That
-  is background time on a machine nobody is watching, traded for satellites and plane trails not being baked
-  into the final picture — and the memory guard above is what keeps it from ever costing a picture instead.
-  Interactive stacks are unaffected (the Stack form never sets `auto_reject`), so the pre-run estimate the UI
-  shows doesn't move either.
-
-  **Upgrade-safe (§9):** no config, schema, on-disk, API or default change — `StackOptions.drizzle_reject`
-  still defaults `False` and every non-`auto` run is byte-for-byte identical. The Stack form's help text now
-  says unattended stacks turn it on for themselves.
-
-  **Tests (+5, all fail before):** `tests/test_drizzle_reject.py` — the trail surviving without and clipped
-  with through the `auto_reject` path; the `REJMODE` provenance; `drizzle_reject` staying off on a
-  non-drizzled auto run; an explicit choice honoured in both directions; and the memory decline (a budget the
-  single pass fits and the two-pass one doesn't → declines; room for both → takes it).
-
-  Original spec, for the record:
-
+- **🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace, Scout
+  2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**
   `auto_reject` is documented as a no-op under drizzle (drizzle has its own `drizzle_reject`, which defaults
   **off** and is never turned on by the walk-away `auto` chain the way `auto_reject`/`quality_weighted` are).
   Every drizzled walk-away stack — satellites, plane trails, cosmic rays, the works — goes

@@ -620,52 +620,6 @@ def _resolve_auto_reject(options: StackOptions, n: int) -> StackOptions:
     return replace(options, sigma_clip=use_kappa, min_max_reject=not use_kappa)
 
 
-def _auto_drizzle_reject(options: StackOptions, n: int,
-                         dst_shape: tuple[int, int],
-                         memory_budget_gb: float | None) -> bool:
-    """Whether a drizzled run should switch its own two-pass rejection on.
-
-    ``auto_reject`` means "the user expressed no rejection preference — pick
-    something sensible", and the walk-away chains (watcher auto-stack, one-click
-    Process target) set it on every unattended run. On the standard path
-    :func:`_resolve_auto_reject` honours that; on the **drizzle** path it returns
-    the options untouched, because drizzle ignores κ-σ / min-max and has its own
-    two-pass ``drizzle_reject`` — which nothing ever turned on. So a drizzled
-    walk-away stack, the Seestar default the owner actually runs, combined with
-    **no outlier rejection at all**: every satellite, plane trail and cosmic ray
-    went straight into the final image.
-
-    This closes that gap at the only place that can decide it safely — the
-    stacker, which knows the real canvas. Two fail-safe guards:
-
-    * ``n >= 4``, the same floor the two-pass path already enforces.
-    * **It must fit.** Two-pass rejection holds ~7 canvas planes at once against
-      the single pass's 4, so charging it could push an already-large drizzled
-      mosaic past :func:`_guard_stack_memory` and turn a run that produces a
-      picture today into a hard refusal. A rejection we can't afford is simply
-      not taken — the run stays exactly as it is today rather than failing.
-
-    An explicit ``drizzle_reject`` (the Stack form, a saved per-target default)
-    is passed through untouched in both directions, and a run that never set
-    ``auto_reject`` is byte-for-byte unchanged.
-    """
-    if options.drizzle_reject:
-        return True
-    if not (options.auto_reject and options.drizzle) or n < 4:
-        return False
-    need, _ = _estimate_peak_bytes(
-        dst_shape, drizzle=True, drizzle_scale=options.drizzle_scale,
-        drizzle_reject=True)
-    if need > _stack_memory_budget_bytes(memory_budget_gb):
-        log.info(
-            "Drizzle outlier rejection not auto-enabled: it would need "
-            "~%.1f GB, over the budget — stacking without it rather than "
-            "refusing the run", need / 1e9,
-        )
-        return False
-    return True
-
-
 def _kappa_sigma_keep_mask(
     aligned: np.ndarray,
     mean_win: np.ndarray,
@@ -750,13 +704,8 @@ def estimate_stack(project: Project, options: StackOptions,
 
     n = len(frames)
     # Resolve auto-reject so the pre-run memory estimate matches the method
-    # ``run_stack`` will actually use (min/max costs extra canvas planes, and a
-    # drizzled auto run switches on the two-pass reject when it can afford it —
-    # which is itself budget-aware, so this never turns a fitting estimate into
-    # an over-budget one).
+    # ``run_stack`` will actually use (min/max costs extra canvas planes).
     options = _resolve_auto_reject(options, n)
-    options = replace(options, drizzle_reject=_auto_drizzle_reject(
-        options, n, dst_shape, memory_budget_gb))
     peak, (out_h, out_w) = _estimate_peak_bytes(
         dst_shape, drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
         drizzle_reject=options.drizzle_reject and n >= 4,
@@ -1477,12 +1426,6 @@ def run_stack(
     # gets persisted in the run record; ``eff`` drives the method dispatch, the
     # memory guard, and the STACKER provenance card so all three agree.
     eff = _resolve_auto_reject(options, n)
-    # …and the drizzle half of the same question, which needs the real canvas to
-    # answer (it only auto-enables a rejection pass the memory budget can afford).
-    eff = replace(eff, drizzle_reject=_auto_drizzle_reject(
-        eff, n, dst_shape, memory_budget_gb))
-    if eff.drizzle_reject and not options.drizzle_reject:
-        log.info("Drizzle outlier rejection (auto: nothing explicit was chosen)")
     backend = "GPU (cupy)" if (
         (options.use_gpu is True) or (options.use_gpu is None and GPU_AVAILABLE)
     ) else "CPU (numpy/scipy)"
@@ -1498,7 +1441,7 @@ def run_stack(
     # (Rejection is skipped below 4 frames, so don't charge its extra arrays.)
     _guard_stack_memory(dst_shape, drizzle=options.drizzle,
                         drizzle_scale=options.drizzle_scale,
-                        drizzle_reject=eff.drizzle_reject and n >= 4,
+                        drizzle_reject=options.drizzle_reject and n >= 4,
                         reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
                                        if eff.min_max_reject and not options.drizzle and n >= 3
                                        else 0),
@@ -1518,7 +1461,7 @@ def run_stack(
         ref_shape, dst_shape,
         max_in_flight=_max_workers * 2,
         drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
-        drizzle_reject=eff.drizzle_reject and n >= 4,
+        drizzle_reject=options.drizzle_reject and n >= 4,
         reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
                        if eff.min_max_reject and not options.drizzle and n >= 3
                        else 0),
@@ -1566,8 +1509,8 @@ def run_stack(
         # value² to get per-output-pixel contribution statistics, pass 2
         # re-drizzles with outliers (satellites, plane trails, cosmic rays)
         # zero-weighted. Mirrors the standard path's n>=4 sigma-clip gate.
-        reject = eff.drizzle_reject and n >= 4
-        if eff.drizzle_reject and not reject:
+        reject = options.drizzle_reject and n >= 4
+        if options.drizzle_reject and not reject:
             log.info("Drizzle outlier rejection skipped: needs >=4 frames, have %d", n)
         clip = None
         if reject:
