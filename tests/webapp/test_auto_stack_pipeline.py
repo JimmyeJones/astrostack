@@ -647,3 +647,259 @@ def test_auto_stack_retries_after_a_recoverable_failure(solved_library, monkeypa
     second = run_pipeline()          # same data, transient error → must RETRY
     assert len(calls) == 2 * attempted   # every eligible target tried again
     assert second["stack_errors"]
+
+
+# --- Readability preflight: a walk-away stack must never publish a picture made
+# --- worse by subs whose files are temporarily off-line (the owner's
+# --- "my images turned out worse" regression, 2026-08-17).
+
+
+def _unread(proj, frame_ids: list[int]) -> None:
+    """Make frames unreadable *without touching a byte on disk* — repoint their
+    recorded paths at a file that isn't there, which is exactly what the app
+    sees when a share unmounts, a folder is archived, or a drive drops out.
+    (Never move the real files: ``incoming/`` is strictly read-only, AGENTS §10.)"""
+    for fid in frame_ids:
+        f = proj.get_frame(fid)
+        assert f is not None
+        proj.update_frame(
+            fid,
+            source_path=f"{f.source_path}.__gone__",
+            cached_path=None if not f.cached_path else f"{f.cached_path}.__gone__",
+        )
+
+
+def _reread(proj, frame_ids: list[int]) -> None:
+    """Undo :func:`_unread` — the share came back."""
+    for fid in frame_ids:
+        f = proj.get_frame(fid)
+        assert f is not None
+        fields = {}
+        for col in ("source_path", "cached_path"):
+            val = getattr(f, col)
+            if val and val.endswith(".__gone__"):
+                fields[col] = val[: -len(".__gone__")]
+        if fields:
+            proj.update_frame(fid, **fields)
+
+
+def _solved_ids(proj) -> list[int]:
+    return [f.id for f in proj.iter_frames(accepted_only=True) if f.wcs_json]
+
+
+def _record_run(proj, n_frames_used: int) -> None:
+    proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-05-01T00:00:00Z",
+        output_basename="master", fits_path=None, tiff_path=None,
+        preview_path=None, n_frames_used=n_frames_used,
+        canvas_h=10, canvas_w=10, coverage_min=1, coverage_max=n_frames_used,
+        options_json="{}",
+    ))
+
+
+def test_auto_stack_holds_back_when_subs_are_unreadable(solved_library, monkeypatch):
+    """The owner-reported regression: a growing target's walk-away stack must NOT
+    publish a thinner, noisier picture just because some subs' files went briefly
+    off-line.
+
+    Before the fix ``_auto_stack_frame_count`` decided purely from the DB's
+    accepted+solved count, never asking whether those frames could actually be
+    *read*; ``run_stack`` then silently dropped the unreadable ones and the
+    result was published as the target's newest picture — 787 → 271 frames
+    across one growing night, with the noise measurably worse. Fail-before: the
+    target auto-stacked with only 1 of its 3 subs readable, over a run that had
+    already used 2.
+    """
+    calls = _patch_run_stack(monkeypatch)
+    # Floor of 1 so the *thin* guard can't be what holds the target back — this
+    # asserts the "don't publish something worse than what already stands" half.
+    settings = _settings(solved_library).model_copy(
+        update={"auto_stack_min_frames": 1})
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            assert len(ids) >= 3
+            _record_run(proj, n_frames_used=len(ids) - 1)  # a better run exists
+            _unread(proj, ids[:-1])                        # only one still readable
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe not in summary["auto_stacked"], (
+            "must not publish a stack made thin by missing files")
+        assert summary["auto_stacked"], (
+            "the library's other, healthy targets must still stack")
+        held = summary.get("auto_stack_held_unreadable") or []
+        entry = next((h for h in held if h["target"] == safe), None)
+        assert entry is not None, "the hold should be reported, not silent"
+        assert entry["unreadable"] == len(ids) - 1
+        assert entry["readable"] == 1
+        assert entry["prior_best"] == len(ids) - 1
+
+        # …and it is held WITHOUT marking the attempt, so the next scan retries.
+        proj = lib.open_target(safe)
+        try:
+            assert proj.get_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY) is None
+            _reread(proj, ids)          # the share comes back
+        finally:
+            proj.close()
+
+        summary2 = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe in summary2["auto_stacked"], (
+            "once the files are readable again it must stack the full set")
+        assert not summary2.get("auto_stack_held_unreadable")
+    finally:
+        lib.close()
+
+
+def test_auto_stack_still_fires_when_every_sub_is_readable(solved_library, monkeypatch):
+    """The guard is gated on there being unreadable files at all, so a healthy
+    target — every install with its subs on disk — behaves exactly as before,
+    including the case where a prior run legitimately dropped subs at alignment
+    (which must still be recognised as coverable work, not held back)."""
+    calls = _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            _record_run(proj, n_frames_used=1)  # an old, much thinner run
+        finally:
+            proj.close()
+        summary = pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe in summary["auto_stacked"]
+        assert calls, "run_stack must be reached for a healthy target"
+        assert not summary.get("auto_stack_held_unreadable")
+    finally:
+        lib.close()
+
+
+def test_auto_stack_holds_a_first_stack_only_when_below_the_floor(
+    solved_library, monkeypatch,
+):
+    """A target with no prior stack has no good picture to protect, and the loss
+    may be permanent (originals deleted, cache cleared) — so it is held back only
+    when too few subs are readable to make anything but speckle, never merely
+    because *some* are missing. Otherwise the guard would strand first stacks."""
+    calls = _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            _unread(proj, ids[:1])   # one missing, no prior run
+        finally:
+            proj.close()
+        # Floor of 1: two readable subs clear it, so this must still stack.
+        settings = _settings(solved_library).model_copy(
+            update={"auto_stack_min_frames": 1})
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe in summary["auto_stacked"]
+
+        # Below the floor, though, it is held — the same "don't publish speckle"
+        # rule as held_thin, now honest about which subs actually exist.
+        calls.clear()
+        proj = lib.open_target(safe)
+        try:
+            proj.delete_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY)
+            proj.delete_meta(pipeline.AUTO_STACK_UNREADABLE_META_KEY)
+            _reread(proj, ids)
+            _unread(proj, ids[1:])   # now only one readable, floor is 3
+        finally:
+            proj.close()
+        summary2 = pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe not in summary2["auto_stacked"]
+        held = summary2.get("auto_stack_held_unreadable") or []
+        entry = next((h for h in held if h["target"] == safe), None)
+        assert entry is not None and entry["readable"] == 1
+    finally:
+        lib.close()
+
+
+def test_auto_stack_retries_a_stack_crippled_by_missing_files(
+    solved_library, monkeypatch,
+):
+    """The second half of the regression: once a crippled stack *has* fired, the
+    attempt marker recorded the DB-level count — blind to what was readable — so
+    the trigger never fired again and the degraded picture stood indefinitely.
+
+    Fail-before: after a stack that could read only 1 of 3 subs, restoring the
+    files left ``_auto_stack_frame_count`` returning ``None`` forever.
+    """
+    _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            n = len(ids)
+            _unread(proj, ids[:-1])
+            # The state a crippled stack leaves behind: "covered n" + "n-1 of
+            # them were missing at the time".
+            proj.set_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY, str(n))
+            proj.set_meta(pipeline.AUTO_STACK_UNREADABLE_META_KEY, str(n - 1))
+        finally:
+            proj.close()
+        # Still missing → must NOT loop, re-stacking the same thin data forever.
+        assert pipeline._auto_stack_frame_count(lib, safe) is None
+
+        proj = lib.open_target(safe)
+        try:
+            _reread(proj, ids)
+        finally:
+            proj.close()
+        # Files are back → the same data is worth stacking again, properly.
+        assert pipeline._auto_stack_frame_count(lib, safe) == n
+    finally:
+        lib.close()
+
+
+def test_stack_records_how_many_subs_were_unreadable(solved_library, monkeypatch):
+    """Every stack stamps the missing-file count next to its attempt marker, so
+    the retry above has something to compare against — and a run where nothing
+    was missing writes no key at all, leaving a healthy target's meta untouched
+    and never letting a stale count outlive its outage."""
+    _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            _unread(proj, ids[:1])
+        finally:
+            proj.close()
+        settings = _settings(solved_library).model_copy(
+            update={"auto_stack_min_frames": 1})
+        pipeline._pipeline_body(settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        proj = lib.open_target(safe)
+        try:
+            assert proj.get_meta(pipeline.AUTO_STACK_UNREADABLE_META_KEY) == "1"
+            _reread(proj, ids)
+            proj.delete_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY)
+        finally:
+            proj.close()
+        pipeline._pipeline_body(settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        proj = lib.open_target(safe)
+        try:
+            assert proj.get_meta(pipeline.AUTO_STACK_UNREADABLE_META_KEY) is None
+        finally:
+            proj.close()
+    finally:
+        lib.close()

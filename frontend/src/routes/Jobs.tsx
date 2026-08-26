@@ -431,6 +431,16 @@ export function buildMasterSummary(r: Record<string, unknown>): string {
  * speckle — the `auto_stack_held_thin` entries the pipeline job records. */
 export interface HeldForSubs { target: string; frames: number; min: number; }
 
+/** One target the walk-away auto-stack is holding back because some of its subs
+ * have **no file on disk right now** — a share that unmounted, a drive that
+ * dropped out, a folder moved or archived mid-session. Stacking without them
+ * would quietly publish a thinner, noisier picture than the one the target
+ * already has, so the scan holds off and retries once the files come back
+ * (`auto_stack_held_unreadable`). */
+export interface HeldForFiles {
+  target: string; offered: number; readable: number; unreadable: number;
+}
+
 /** Plain-language outcome of a finished "Importing & processing new frames"
  * (`pipeline`) scan job (pure, tested). A hands-off scan otherwise shows a bare
  * "done" with no hint of what it did — how many frames came in, how many targets
@@ -440,7 +450,7 @@ export interface HeldForSubs { target: string; frames: number; min: number; }
  * the Target page already explains the wait per target, but a beginner who kicks
  * off a scan and watches Jobs had no signal there. */
 export function pipelineSummary(r: Record<string, unknown>): {
-  line: string; held: HeldForSubs[];
+  line: string; held: HeldForSubs[]; heldFiles: HeldForFiles[];
 } {
   const scanned = Number(r.scanned ?? 0) || 0;
   const stacked = Array.isArray(r.auto_stacked) ? r.auto_stacked.length : 0;
@@ -452,6 +462,16 @@ export function pipelineSummary(r: Record<string, unknown>): {
           target: typeof o.target === "string" ? o.target : "",
           frames: Number(o.frames ?? 0) || 0,
           min: Number(o.min ?? 0) || 0,
+        }))
+    : [];
+  const heldFiles: HeldForFiles[] = Array.isArray(r.auto_stack_held_unreadable)
+    ? (r.auto_stack_held_unreadable as unknown[])
+        .filter((h): h is Record<string, unknown> => !!h && typeof h === "object")
+        .map((o) => ({
+          target: typeof o.target === "string" ? o.target : "",
+          offered: Number(o.offered ?? 0) || 0,
+          readable: Number(o.readable ?? 0) || 0,
+          unreadable: Number(o.unreadable ?? 0) || 0,
         }))
     : [];
   // Failed targets across both unattended passes (QC/solve + auto-stack).
@@ -467,8 +487,11 @@ export function pipelineSummary(r: Record<string, unknown>): {
     clauses.push(`finished ${autoEdited} into ${autoEdited === 1 ? "a picture" : "pictures"}`);
   }
   if (held.length > 0) clauses.push(`held ${held.length} for more subs`);
+  if (heldFiles.length > 0) {
+    clauses.push(`held ${heldFiles.length} — some subs aren't on disk`);
+  }
   if (errors > 0) clauses.push(`${errors} couldn't finish`);
-  return { line: `${clauses.join(" · ")}.`, held };
+  return { line: `${clauses.join(" · ")}.`, held, heldFiles };
 }
 
 /** Result-specific actions for finished editor jobs (download / view). */
@@ -566,7 +589,7 @@ function JobResultActions({ job }: { job: Job }) {
     );
   }
   if (job.kind === "pipeline") {
-    const { line, held } = pipelineSummary(r);
+    const { line, held, heldFiles } = pipelineSummary(r);
     const autoEdited = Number(r.auto_edited ?? 0) || 0;
     const rescue = bootstrapRescueNote(r);
     const putBack = autoRegradedBackNote(r);
@@ -594,6 +617,29 @@ function JobResultActions({ job }: { job: Job }) {
                     <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
                   ) : "This target"}
                   {`: ${h.frames} of your subs located so far — needs ${h.min}.`}
+                </Text>
+              ))}
+            </Stack>
+          </Alert>
+        ) : null}
+        {heldFiles.length ? (
+          <Alert color="yellow" variant="light" p="xs"
+            title="Some of your subs aren't on disk right now">
+            <Text size="xs">
+              {"Stacking without them would have made a thinner, noisier picture "}
+              {"than the one you already have, so it was left alone. This usually "}
+              {"means a drive or network share went off-line, or a folder was "}
+              {"moved. Put it back and the next scan will stack the full set "}
+              {"automatically — nothing has been lost:"}
+            </Text>
+            <Stack gap={0} mt={4}>
+              {heldFiles.map((h) => (
+                <Text size="xs" key={h.target}>
+                  {h.target ? (
+                    <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
+                  ) : "This target"}
+                  {`: ${h.unreadable} of ${h.offered} subs couldn't be read `}
+                  {`(${h.readable} still readable).`}
                 </Text>
               ))}
             </Stack>

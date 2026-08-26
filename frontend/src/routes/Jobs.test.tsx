@@ -367,6 +367,32 @@ describe("pipelineSummary", () => {
     const { held } = pipelineSummary({ auto_stack_held_thin: [null, "junk", { target: "X" }] });
     expect(held).toEqual([{ target: "X", frames: 0, min: 0 }]);
   });
+
+  it("surfaces targets held back because their subs aren't on disk", () => {
+    // The walk-away path used to stack whatever it could read and publish the
+    // thinner result silently — the owner's "my images turned out worse". Now
+    // it holds off, and this is where a scan says so.
+    const { line, heldFiles } = pipelineSummary({
+      scanned: 0, auto_stacked: [],
+      auto_stack_held_unreadable: [
+        { target: "M 42", offered: 787, readable: 271, unreadable: 516,
+          prior_best: 787, reason: "that would be a thinner stack…" },
+      ],
+    });
+    expect(line).toBe("No new frames · held 1 — some subs aren't on disk.");
+    expect(heldFiles).toEqual([
+      { target: "M 42", offered: 787, readable: 271, unreadable: 516 },
+    ]);
+  });
+
+  it("tolerates malformed unreadable-hold entries", () => {
+    const { heldFiles } = pipelineSummary({
+      auto_stack_held_unreadable: [null, "junk", { target: "X" }],
+    });
+    expect(heldFiles).toEqual([
+      { target: "X", offered: 0, readable: 0, unreadable: 0 },
+    ]);
+  });
 });
 
 describe("bootstrapRescueNote", () => {
@@ -547,6 +573,29 @@ describe("JobsView pipeline result actions", () => {
     expect(screen.getByText("Waiting for more of your subs to be located")).toBeInTheDocument();
     const link = screen.getByRole("link", { name: "M 42" });
     expect(link).toHaveAttribute("href", "/targets/M 42");
+  });
+
+  it("renders the subs-not-on-disk alert with the real numbers", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-1u", kind: "pipeline", target: null, state: "done",
+        result: {
+          scanned: 0, auto_stacked: [],
+          auto_stack_held_unreadable: [
+            { target: "M 42", offered: 787, readable: 271, unreadable: 516 },
+          ],
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "Some of your subs aren't on disk right now",
+    )).toBeInTheDocument();
+    expect(screen.getByText(
+      /516 of 787 subs couldn't be read \(271 still readable\)\./,
+    )).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "M 42" }))
+      .toHaveAttribute("href", "/targets/M 42");
   });
 
   it("credits the stack-then-solve rescue on a finished scan", async () => {
