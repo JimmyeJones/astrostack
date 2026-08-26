@@ -2221,6 +2221,14 @@ def _stack_target(
     honoured verbatim; reprocess-all likewise reuses the prior run's options
     untouched. Off (the default) leaves the built options byte-for-byte unchanged.
 
+    On a **drizzled** run the engine reads that same ``auto_reject`` as "switch on
+    the two-pass ``drizzle_reject``" (κ-σ and min/max are no-ops under drizzle, so
+    without it an unattended drizzled stack ran with no rejection at all — see
+    ``stacker._auto_drizzle_reject``). That decision is the engine's rather than
+    this function's because it is budget-aware: it needs the real output canvas to
+    know whether the extra pass fits, and declines rather than turning a run that
+    produces a picture today into a memory refusal.
+
     ``auto`` also turns on ``StackOptions.quality_weighted`` when the merged options
     carry no explicit preference, for the same reason and with the same guard: a
     walk-away stack spanning many nights of different seeing, haze and moon would
