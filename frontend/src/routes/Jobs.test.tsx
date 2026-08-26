@@ -393,6 +393,27 @@ describe("pipelineSummary", () => {
       { target: "X", offered: 0, readable: 0, unreadable: 0 },
     ]);
   });
+
+  it("says when a thin picture was re-made from the full set", () => {
+    // The other half of the same story: the hold prevents the *next* thin
+    // picture, this repairs one already published. A picture silently getting
+    // better deserves the same explanation as one silently getting worse.
+    const { line, healed } = pipelineSummary({
+      scanned: 0, auto_stacked: ["M 42"],
+      auto_stack_healed: [{ target: "M 42", frames: 787, previous: 271, best: 787 }],
+    });
+    expect(line).toBe("No new frames · auto-stacked 1 target · re-made 1 thin picture.");
+    expect(healed).toEqual([
+      { target: "M 42", frames: 787, previous: 271, best: 787 },
+    ]);
+  });
+
+  it("tolerates malformed heal entries and says nothing when there are none", () => {
+    expect(pipelineSummary({ auto_stack_healed: [null, "junk", { target: "X" }] }).healed)
+      .toEqual([{ target: "X", frames: 0, previous: 0, best: 0 }]);
+    expect(pipelineSummary({ scanned: 3 }).healed).toEqual([]);
+    expect(pipelineSummary({ scanned: 3 }).line).toBe("Imported 3 new frames.");
+  });
 });
 
 describe("bootstrapRescueNote", () => {

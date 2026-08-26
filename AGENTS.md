@@ -91,14 +91,13 @@ so it never retried. **Both halves shipped:** a readability preflight that holds
 stamping the marker — when stacking now would land below the minimum-frames floor or *thinner than the best
 stack that target already has*, plus a missing-file count stamped beside the attempt marker so a crippled
 attempt retries once the files return. Gated on there being unreadable files at all, so a healthy install is
-bit-for-bit unaffected. Full write-up at the top of `docs/IMPROVEMENTS.md` → "Bugs (fix these first)". **The
-one follow-on deliberately left open** is *healing* an install already sitting on a degraded picture from
-before the fix (it self-heals the next clear night) — filed under Ideas → "Autonomy & friendliness". Two
-smaller, lower-severity findings from the same audit are still open directly beneath the fixed entry (a
-latent mosaic auto-grade population bug, gated off by default; and a design gap where
-`photometric_normalize` never gets enabled on the walk-away mosaic path even though `level_by_coverage`
-alone can't fix a hazy panel's multiplicative dimming) — **these are now the front of the bug queue**, worth
-a run each.
+bit-for-bit unaffected. Full write-up at the top of `docs/IMPROVEMENTS.md` → "Bugs (fix these first)". **The whole chain is now
+closed:** the one follow-on this paragraph used to point at as open — *healing* an install already sitting
+on a degraded picture from before the fix — **shipped in v0.273.0** (`_auto_stack_degraded_recheck`: a
+walk-away scan re-stacks a target whose newest run collapsed below 80 % of its best, once every sub is
+readable again, exactly once per collapse), and the two smaller findings from the same audit shipped too
+(the latent mosaic auto-grade population bug in v0.270.2, and `photometric_normalize`-for-mosaics in
+v0.271.0). Don't go looking for any of them.
 
 **🎨 STANDING OWNER PRIORITY (2026-08-08) — the UI is "extremely busy"; fix the information
 architecture, page by page.** The owner's top complaint about the live build: *"there are like 30

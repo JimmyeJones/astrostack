@@ -441,6 +441,15 @@ export interface HeldForFiles {
   target: string; offered: number; readable: number; unreadable: number;
 }
 
+/** One target whose newest picture was a *degraded* one — a storage hiccup let a
+ * thin stack get published before the readability guard existed — and which this
+ * scan re-stacked back to the full set now that every sub is readable again
+ * (`auto_stack_healed`). Worth saying out loud: a picture silently getting
+ * *better* is as confusing as one silently getting worse. */
+export interface HealedTarget {
+  target: string; frames: number; previous: number; best: number;
+}
+
 /** Plain-language outcome of a finished "Importing & processing new frames"
  * (`pipeline`) scan job (pure, tested). A hands-off scan otherwise shows a bare
  * "done" with no hint of what it did — how many frames came in, how many targets
@@ -451,6 +460,7 @@ export interface HeldForFiles {
  * off a scan and watches Jobs had no signal there. */
 export function pipelineSummary(r: Record<string, unknown>): {
   line: string; held: HeldForSubs[]; heldFiles: HeldForFiles[];
+  healed: HealedTarget[];
 } {
   const scanned = Number(r.scanned ?? 0) || 0;
   const stacked = Array.isArray(r.auto_stacked) ? r.auto_stacked.length : 0;
@@ -474,6 +484,16 @@ export function pipelineSummary(r: Record<string, unknown>): {
           unreadable: Number(o.unreadable ?? 0) || 0,
         }))
     : [];
+  const healed: HealedTarget[] = Array.isArray(r.auto_stack_healed)
+    ? (r.auto_stack_healed as unknown[])
+        .filter((h): h is Record<string, unknown> => !!h && typeof h === "object")
+        .map((o) => ({
+          target: typeof o.target === "string" ? o.target : "",
+          frames: Number(o.frames ?? 0) || 0,
+          previous: Number(o.previous ?? 0) || 0,
+          best: Number(o.best ?? 0) || 0,
+        }))
+    : [];
   // Failed targets across both unattended passes (QC/solve + auto-stack).
   const countErrs = (v: unknown) =>
     v && typeof v === "object" ? Object.keys(v as object).length : 0;
@@ -490,8 +510,11 @@ export function pipelineSummary(r: Record<string, unknown>): {
   if (heldFiles.length > 0) {
     clauses.push(`held ${heldFiles.length} — some subs aren't on disk`);
   }
+  if (healed.length > 0) {
+    clauses.push(`re-made ${healed.length} thin picture${healed.length === 1 ? "" : "s"}`);
+  }
   if (errors > 0) clauses.push(`${errors} couldn't finish`);
-  return { line: `${clauses.join(" · ")}.`, held, heldFiles };
+  return { line: `${clauses.join(" · ")}.`, held, heldFiles, healed };
 }
 
 /** Result-specific actions for finished editor jobs (download / view). */
@@ -589,7 +612,7 @@ function JobResultActions({ job }: { job: Job }) {
     );
   }
   if (job.kind === "pipeline") {
-    const { line, held, heldFiles } = pipelineSummary(r);
+    const { line, held, heldFiles, healed } = pipelineSummary(r);
     const autoEdited = Number(r.auto_edited ?? 0) || 0;
     const rescue = bootstrapRescueNote(r);
     const putBack = autoRegradedBackNote(r);
@@ -640,6 +663,29 @@ function JobResultActions({ job }: { job: Job }) {
                   ) : "This target"}
                   {`: ${h.unreadable} of ${h.offered} subs couldn't be read `}
                   {`(${h.readable} still readable).`}
+                </Text>
+              ))}
+            </Stack>
+          </Alert>
+        ) : null}
+        {healed.length ? (
+          <Alert color="teal" variant="light" p="xs"
+            title="Re-made a picture that had come out thin">
+            <Text size="xs">
+              {healed.length === 1 ? "One of your targets" : `${healed.length} of your targets`}
+              {" had a newest picture made from far fewer subs than an earlier "}
+              {"one — usually because a drive or share was off-line when it was "}
+              {"stacked. All of those subs are readable again, so it was stacked "}
+              {"afresh from the full set. Nothing was deleted; the older pictures "}
+              {"are still in History:"}
+            </Text>
+            <Stack gap={0} mt={4}>
+              {healed.map((h) => (
+                <Text size="xs" key={h.target}>
+                  {h.target ? (
+                    <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
+                  ) : "This target"}
+                  {`: was ${h.previous} subs, now ${h.frames} (best before: ${h.best}).`}
                 </Text>
               ))}
             </Stack>
