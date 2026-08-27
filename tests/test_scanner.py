@@ -304,6 +304,102 @@ def test_seestar_output_bases_maps_single_field_sub_only():
     assert bases == {"M 31": "M 31"}
 
 
+def test_seestar_output_bases_leaves_a_bare_folder_it_is_ingesting_alone():
+    """The output-reject must not turn round and reject the very frames the
+    convention just ingested.
+
+    A bare ``M 31/`` with no same-parent ``M 31_sub`` is *real subs* — v0.277.4
+    made the convention ingest it — so registering ``M 31`` as an output base
+    would mark those frames as on-device output. The base still registers when
+    the bare folder is genuinely skipped as output (same parent), and when it
+    isn't in the drop at all (an already-migrated library still heals)."""
+    # Unrelated container child: the bare root folder is ingested → no base.
+    assert _seestar_output_bases(
+        _fake("M 31", "M 31_sub"), parents=["/inc", "/inc/MyWorks"]) == {}
+    # A true same-parent output folder → the base still registers.
+    assert _seestar_output_bases(
+        _fake("M 31", "M 31_sub"), parents=["/inc", "/inc"]) == {"M 31": "M 31"}
+    # No bare folder in the drop at all → the upgrade-path healing is untouched.
+    assert _seestar_output_bases(
+        _fake("M 31_sub"), parents=["/inc/MyWorks"]) == {"M 31": "M 31"}
+
+
+def test_scan_keeps_a_tiny_root_session_when_a_container_shares_its_name(tmp_path):
+    """Regression (the residual of the v0.277.4 fix): a root-level bare ``M 31/``
+    holding only a sub or two must stay *accepted*, not just ingested.
+
+    v0.277.4 parent-scoped the convention's skip, so the folder is ingested — but
+    ``_seestar_output_bases`` still built its reject map from a global basename
+    set, so the unrelated container's ``M 31_sub`` registered ``M 31`` as an
+    on-device-output base and the size guard (≤2 frames, an output folder holds
+    one image) then rejected exactly those root subs. A 3-sub session was safe;
+    a 2-sub one silently left the stack."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 31").mkdir(parents=True)
+    for i in range(2):                       # small enough to trip the size guard
+        write_seestar_fits(scan_root / "M 31" / f"Light_{i:03d}.fit", n_stars=5, seed=i)
+    works = scan_root / "MyWorks"
+    (works / "M 31_sub").mkdir(parents=True)
+    for i in range(2):
+        write_seestar_fits(works / "M 31_sub" / f"Light_{i:03d}.fit", n_stars=5, seed=50 + i)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, scan_root)
+        entry = lib.find_target("M 31")
+        assert entry is not None
+        proj = lib.open_target(entry.safe_name)
+        try:
+            frames = list(proj.iter_frames())
+        finally:
+            proj.close()
+        root_subs = [f for f in frames if "MyWorks" not in f.source_path]
+        assert len(root_subs) == 2, [f.source_path for f in frames]
+        assert all(f.accept for f in root_subs)
+        assert all(f.reject_reason is None for f in root_subs)
+        assert all(f.accept for f in frames)
+    finally:
+        lib.close()
+
+
+def test_scan_still_rejects_a_real_on_device_output_beside_its_subs(tmp_path):
+    """The no-regression half: a genuine same-parent ``M 31/`` output folder
+    beside ``M 31_sub/`` is still recognised and its frame still rejected."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 31").mkdir(parents=True)
+    write_seestar_fits(scan_root / "M 31" / "Stacked_60s.fit", n_stars=5, seed=9)
+    (scan_root / "M 31_sub").mkdir(parents=True)
+    for i in range(3):
+        write_seestar_fits(scan_root / "M 31_sub" / f"Light_{i:03d}.fit", n_stars=5, seed=i)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        # First scan under the convention: the bare folder is skipped outright,
+        # so nothing from it is ingested at all.
+        scan_and_organize(lib, scan_root)
+        entry = lib.find_target("M 31")
+        proj = lib.open_target(entry.safe_name)
+        try:
+            assert all("M 31_sub" in f.source_path for f in proj.iter_frames())
+            # Now simulate the pre-v0.184.9 library this heals: the output frame
+            # already registered inside the same target.
+            proj.add_frame(FrameRow(
+                source_path=str(scan_root / "M 31" / "Stacked_60s.fit")))
+        finally:
+            proj.close()
+        scan_and_organize(lib, scan_root)
+        proj = lib.open_target(entry.safe_name)
+        try:
+            out = [f for f in proj.iter_frames() if f.source_path.endswith("Stacked_60s.fit")]
+            assert len(out) == 1
+            assert out[0].accept is False
+            assert out[0].reject_reason == REJECT_REASON_SEESTAR_OUTPUT
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
 def test_reject_seestar_output_frames_rejects_output_and_video_not_subs(tmp_path):
     """The Project helper additively rejects frames whose source lives in the
     bare ``<T>/`` output folder or any ``*_video`` folder, leaves the raw ``_sub``
