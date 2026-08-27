@@ -169,6 +169,50 @@ describe("EditorView", () => {
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
   });
 
+  it("offers a print size the picture can actually fill, and hides the offer when it can't", async () => {
+    // "Print it" is a promise: only sizes this picture has the detail to fill
+    // sharply are listed, biggest first, so the default is the best real print.
+    mockEditorQueries();
+    vi.spyOn(client.api, "printSizes").mockResolvedValue({
+      sizes: [
+        { name: "A4", dpi: 240, label: "A4 · 240 DPI", width_in: 11.69, height_in: 8.27 },
+        { name: "7×5 in", dpi: 300, label: "7×5 in · 300 DPI", width_in: 7, height_in: 5 },
+      ],
+      advice: "Best print size for this picture: up to A4 at 240 DPI.",
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    expect(await screen.findByText("Download print file")).toBeInTheDocument();
+    // The recommendation is stated in plain language, not left to the DPI number.
+    expect(screen.getByText(/Best print size for this picture/)).toBeInTheDocument();
+    // The biggest printable size is pre-selected — a user picks a size, not a DPI.
+    expect(screen.getByDisplayValue("A4 · 240 DPI")).toBeInTheDocument();
+  });
+
+  it("hides the print offer for a picture too small to print sharply", async () => {
+    mockEditorQueries();
+    vi.spyOn(client.api, "printSizes").mockResolvedValue({
+      sizes: [],
+      advice: "This picture doesn't have enough detail for a sharp print yet — "
+        + "another night or two of subs will get it there.",
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // The rest of the export panel still renders…
+    expect(await screen.findByText("Download full-res PNG")).toBeInTheDocument();
+    await waitFor(() => expect(client.api.printSizes).toHaveBeenCalled());
+    // …but no print control, so nobody is tempted into a soft enlargement.
+    expect(screen.queryByText("Download print file")).toBeNull();
+  });
+
   it("surfaces the 'How's my stack?' health check on the result, without a redundant Trim-border self-link", async () => {
     // The health card is shown here too (as on Target/History), so a beginner
     // gets "is this any good, and what next?" right where they craft the picture.

@@ -16825,29 +16825,80 @@ problems. Dogfood it every big-picture run and fix root causes.
     a page render, which is the same trade `/api/imaging-log` already makes. Testable: a target with a pinned
     cover puts *that* picture on the wall; one without is unchanged.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26 #3) — "Print it": a print-ready export sized and DPI-tagged for a
-  frame on the wall.** *(Pillar: enjoy + share — PRIORITY 3. Size: M.)* A beginner who finally gets a
-  picture they love wants to **print and hang it** — but every export today (PNG / full-res PNG / JPEG / TIFF)
-  is native-resolution with **no print sizing and no DPI metadata**, so it lands in a photo-print service at
-  whatever size the pixel count implies and often prints soft or tiny with no warning. Nothing bridges
-  "great picture on screen" → "nice print in my hands." **Verified genuinely new (grepped this run):** no
-  `print` / DPI / print-size feature exists in code or backlog; the closest neighbours are all *screen/share*
-  outputs (wallpaper, QR-to-phone, JPEG share, the montage/poster ideas) — none targets a physical print.
-  **Shape:** reuse the share-render pipeline. A pure helper `build_print_export(rgb, *, size_name, min_dpi=150)
-  -> (PIL.Image, dpi)` that (a) picks the **largest standard size** the picture's native resolution supports at
-  ≥ `min_dpi` (so the beginner is never asked to reason about DPI — the sane default just works), (b) fits the
-  picture onto that size's pixel canvas letterboxed on the app's dark NaN=black ground (reuse
-  `deepening._fit_onto`, which already preserves aspect without squashing), and (c) returns the image plus the
-  DPI to stamp into the file's metadata (`img.save(..., dpi=(d, d))`). A small **"Print"** entry in the editor's
-  "Save / share ▾" menu offers a couple of common sizes (e.g. 8×10 in / A4 / A3) with a one-line plain-language
-  note (*"Best print size for this picture: up to A4 at 200 DPI"*), self-hiding a size the resolution can't hit
-  at `min_dpi`. Optionally include the existing nameplate. **Beginner bar:** clears it cleanly — a non-expert
-  instantly understands "print it", the size is chosen for them, plain language, no expert knob; it removes work
-  (no guessing DPI in another app) — Method A/D. **Guardrails/feasibility:** offline, additive, read-only
-  (renders from the run/edit the app already produces, writes only the downloaded file — never `incoming/`);
-  pure helper → trivially unit-testable (native res → chosen size + DPI; a too-small picture self-hides the
-  bigger sizes; aspect preserved undistorted). **Slices —** (a) the pure `build_print_export` helper + size
-  table + tests (a shippable Builder run on its own); (b) wire it into the editor/History share menu (frontend).
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #3) — "Print it": a print-ready export sized and DPI-tagged for a
+  frame on the wall.**~~ — **SHIPPED v0.286.0** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-t89lw9`) — **both filed slices, (a) and (b).** *(Pillar: enjoy + share —
+  PRIORITY 3.)*
+
+  **Sibling of "Framed keepsake" (v0.282.0), not a duplicate.** That one *mats and titles* a picture so its
+  story travels with the file; this one answers a different question — **how big can I print this, and will
+  it come out sharp?** — and produces a file sized to the paper and tagged with the DPI a lab reads. Neither
+  subsumes the other, and a natural follow-up is to let the print export take a keepsake mat.
+
+  **(a) The pure helper.** `seestack/printexport.py` — `print_options(width_px, height_px, min_dpi=150)`
+  returning **every** size the picture can print sharply, largest first, rather than the filed single
+  `build_print_export(..., size_name)`: the list *is* the menu, its head is the recommended default, and one
+  piece of arithmetic answers both "what can I offer?" and "is this choice honest?". Plus
+  `print_advice(options)` (one plain-language line) and `render_print(rgb, option)` (the Pillow image).
+
+  **The rule the whole feature rests on: never upscale.** Enlarging a 1000 px picture to 3000 px adds no
+  detail, it just makes the softness bigger — which is exactly the surprise a beginner gets from a lab today.
+  So a paper size qualifies only when `min(width_px / paper_w_in, height_px / paper_h_in) >= min_dpi`, the
+  point at which the fitted picture exactly fills the shorter dimension; the render then uses that DPI capped
+  at 300 (no consumer lab resolves more). A picture that clears nothing offers **nothing**, and says why
+  (*"another night or two of subs will get it there"*) rather than leaving an unexplained empty menu.
+
+  **Two things the spec left open, decided here.** Paper is **oriented to match the picture**, so a landscape
+  stack gets landscape paper and the letterbox bars are the aspect mismatch alone rather than the mismatch
+  plus a rotation. And the fit uses **LANCZOS**, not `deepening._fit_onto`'s BOX — the share JPEG's own
+  comment says BOX softens star cores, and softness is precisely what a print exposes.
+
+  **(b) The offer.** `GET .../editor/print-sizes` (sized from the run's own canvas, so no render and no FITS
+  read — a cropping recipe makes it slightly optimistic and the export re-checks against the real pixels),
+  `POST .../editor/print` and its download twin, mirroring the share endpoints exactly. In the editor's
+  "Export full resolution" panel: a size Select (pre-set to the biggest good print, labelled *"A4 · 240 DPI"*
+  — size first, because that is what a user picks), a **Download print file** button, and the advice line.
+  **The whole control self-hides** when nothing prints sharply, so nobody is tempted into a soft enlargement.
+  A size the picture can't fill is refused with advice, never quietly upscaled. The existing nameplate
+  checkbox composes, drawn at the print's own resolution.
+
+  **Upgrade-safe (§9):** one new engine module and three new additive endpoints; no config, schema, on-disk,
+  default or existing-response-shape change, and nothing is written outside the target's own `output/`.
+
+  **Tests (+17):** 11 in `tests/test_printexport.py` (a size qualifying *exactly* at the floor and not one
+  pixel below — pinned against real A4 inches, where a `<` vs `<=` slip would silently offer a soft print —
+  the largest-first order and the no-upscale invariant across every offer, the orientation rule, the 300 DPI
+  cap, a small picture offering only 6×4, a too-small one offering nothing with a kind explanation, the
+  degenerate-input refusals, the advice naming the size rather than the arithmetic, letterboxing without
+  distortion on a square-into-6×4 fit including the mono path, and NaN rendering black); 4 in
+  `tests/webapp/test_editor.py` (the offered list and its self-hiding, the 404, the downloaded file's canvas
+  *and* its DPI tag, and honouring a smaller size while refusing one that would print soft); and 2 in
+  `Editor.test.tsx`.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy + share — PRIORITY 3. Size: M.)* A beginner who finally gets a
+    picture they love wants to **print and hang it** — but every export today (PNG / full-res PNG / JPEG / TIFF)
+    is native-resolution with **no print sizing and no DPI metadata**, so it lands in a photo-print service at
+    whatever size the pixel count implies and often prints soft or tiny with no warning. Nothing bridges
+    "great picture on screen" → "nice print in my hands." **Verified genuinely new (grepped this run):** no
+    `print` / DPI / print-size feature exists in code or backlog; the closest neighbours are all *screen/share*
+    outputs (wallpaper, QR-to-phone, JPEG share, the montage/poster ideas) — none targets a physical print.
+    **Shape:** reuse the share-render pipeline. A pure helper `build_print_export(rgb, *, size_name, min_dpi=150)
+    -> (PIL.Image, dpi)` that (a) picks the **largest standard size** the picture's native resolution supports at
+    ≥ `min_dpi` (so the beginner is never asked to reason about DPI — the sane default just works), (b) fits the
+    picture onto that size's pixel canvas letterboxed on the app's dark NaN=black ground (reuse
+    `deepening._fit_onto`, which already preserves aspect without squashing), and (c) returns the image plus the
+    DPI to stamp into the file's metadata (`img.save(..., dpi=(d, d))`). A small **"Print"** entry in the editor's
+    "Save / share ▾" menu offers a couple of common sizes (e.g. 8×10 in / A4 / A3) with a one-line plain-language
+    note (*"Best print size for this picture: up to A4 at 200 DPI"*), self-hiding a size the resolution can't hit
+    at `min_dpi`. Optionally include the existing nameplate. **Beginner bar:** clears it cleanly — a non-expert
+    instantly understands "print it", the size is chosen for them, plain language, no expert knob; it removes work
+    (no guessing DPI in another app) — Method A/D. **Guardrails/feasibility:** offline, additive, read-only
+    (renders from the run/edit the app already produces, writes only the downloaded file — never `incoming/`);
+    pure helper → trivially unit-testable (native res → chosen size + DPI; a too-small picture self-hides the
+    bigger sizes; aspect preserved undistorted). **Slices —** (a) the pure `build_print_export` helper + size
+    table + tests (a shippable Builder run on its own); (b) wire it into the editor/History share menu (frontend).
 
 - **NEW IDEA (Builder 2026-08-26, the half deliberately left out of "How big a mosaic?" v0.272.0) — tell a
   beginner roughly how LONG that mosaic will take, not only how many panels.** *(Pillar: autonomy +
