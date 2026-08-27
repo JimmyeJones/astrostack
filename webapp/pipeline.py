@@ -2747,6 +2747,14 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                 out, render_ctx = render_run_display_array(
                     proj.project_dir, run, recipe, return_ctx=True)
                 _write_preview_png(Path(run.preview_path), out, already_display=True)
+                # This render is on the master's own (un-rotated) grid, so any
+                # North-up rotation an earlier "Adjust → North up → Save" baked
+                # into the old bytes is gone. Clear the recorded angle with them:
+                # every surface that lines up with the stored preview — the Sky
+                # map's footprint and tile, the share/wallpaper North-up turn —
+                # reads that column, and a stale one would have them correcting
+                # for a rotation that is no longer there.
+                proj.set_stack_preview_north_up(run_id, 0.0)
                 # The preview is now the Auto recipe's tone-mapped result, but the
                 # run's FITS stays linear (the recipe is stored separately and is
                 # reversible). Mark the run so the parity surfaces — the one-sub-vs-

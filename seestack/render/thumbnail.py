@@ -197,6 +197,29 @@ def render_sub_preview(
     return buf.getvalue()
 
 
+#: The width :func:`render_stack_png` caps a preview at — and therefore the grid
+#: every *stored* preview PNG written by "Save as preview" sits on, before any
+#: North-up rotation. Named so a caller that has to reason about that un-rotated
+#: grid (the share/wallpaper paths, which must undo a baked rotation) shares one
+#: definition with the renderer rather than hard-coding 1024 again.
+PREVIEW_MAX_WIDTH = 1024
+
+
+def preview_grid_size(
+    full_w: int, full_h: int, *, max_width: int = PREVIEW_MAX_WIDTH,
+) -> tuple[int, int]:
+    """The ``(width, height)`` grid :func:`load_stack_rgb` decimates a
+    ``full_w``×``full_h`` canvas onto — a stored preview PNG's own pixel grid,
+    before any North-up rotation.
+
+    A canvas narrower than ``max_width`` is kept at native size; anything wider is
+    scaled to exactly ``max_width`` with the height following the aspect ratio.
+    """
+    if full_w > max_width:
+        return max_width, max(1, int(round(full_h * max_width / full_w)))
+    return int(full_w), int(full_h)
+
+
 def load_stack_rgb(
     fits_path: str | Path, *, max_width: int = 1024,
 ) -> tuple[np.ndarray, bool]:
@@ -247,22 +270,18 @@ def load_stack_rgb(
             n_out, grey = 3, True
 
         h, w = planes[0].shape
-        if w > max_width:
-            # Downscale to the full ``max_width`` with a NaN-aware area (box)
-            # average, not nearest-neighbour striding. Striding (a) only reached
-            # ``ceil(w/max_width)`` integer steps — a 1080-wide Seestar stack
-            # strode to 540 px, not 1024, visibly coarser than the box-averaged
-            # baked preview beside it — and (b) *dropped* samples: a FWHM≈2 px
-            # star could lose up to half its flux depending on subpixel phase, so
-            # stars aliased/twinkled. The area average spreads each star's flux
-            # instead. NaN (uncovered / mosaic-gap) is treated as no-coverage, so
-            # an output pixel is the mean of the finite samples under it and
-            # stays NaN only where every contributing input pixel was NaN — the
-            # property striding was originally chosen to preserve.
-            new_w = max_width
-            new_h = max(1, int(round(h * max_width / w)))
-        else:
-            new_w, new_h = w, h
+        # Downscale to the full ``max_width`` with a NaN-aware area (box)
+        # average, not nearest-neighbour striding. Striding (a) only reached
+        # ``ceil(w/max_width)`` integer steps — a 1080-wide Seestar stack
+        # strode to 540 px, not 1024, visibly coarser than the box-averaged
+        # baked preview beside it — and (b) *dropped* samples: a FWHM≈2 px
+        # star could lose up to half its flux depending on subpixel phase, so
+        # stars aliased/twinkled. The area average spreads each star's flux
+        # instead. NaN (uncovered / mosaic-gap) is treated as no-coverage, so
+        # an output pixel is the mean of the finite samples under it and
+        # stays NaN only where every contributing input pixel was NaN — the
+        # property striding was originally chosen to preserve.
+        new_w, new_h = preview_grid_size(w, h, max_width=max_width)
 
         rgb = np.empty((new_h, new_w, n_out), dtype=np.float32)
         for i, plane in enumerate(planes):
@@ -468,7 +487,9 @@ def _apply_north_up(disp: np.ndarray, fits_path: str | Path) -> np.ndarray:
     return np.clip(rotate_image_north_up(disp, angle), 0.0, 1.0)
 
 
-def orient_preview_north_up(preview_png: bytes, fits_path: str | Path) -> bytes:
+def orient_preview_north_up(
+    preview_png: bytes, fits_path: str | Path, *, already_deg: float = 0.0,
+) -> bytes:
     """Rotate an already-rendered stack *preview* PNG so celestial North is up,
     using the run's own master-FITS WCS, and return it re-encoded as PNG.
 
@@ -482,15 +503,31 @@ def orient_preview_north_up(preview_png: bytes, fits_path: str | Path) -> bytes:
     no-correction request is byte-for-byte the un-oriented preview and never
     needlessly resamples. Exposed corners fill with black (the app's uncovered/NaN
     convention), matching the JPEG flatten in :func:`~seestack.stack.output.
-    png_bytes_to_jpeg`."""
+    png_bytes_to_jpeg`.
+
+    ``already_deg`` is the rotation **these bytes already carry** — History's
+    "Adjust → North up → Save" overwrites the stored preview with a rotated
+    render and records the angle on the run (``preview_north_up_deg``). Pass it
+    and only the *remainder* is applied, so a preview already saved North-up is a
+    clean no-op instead of being turned a second time (which shared it 180° from
+    the picture on screen). The default of ``0.0`` is exactly the old behaviour,
+    so every un-rotated run is byte-for-byte unchanged. When the run carries no
+    usable WCS the bytes are returned untouched even if ``already_deg`` is set:
+    we can't recompute the correction, and leaving a recorded North-up preview
+    alone is right, while "un-rotating" it on a guess would not be."""
     import io
 
     from PIL import Image
 
     from seestack.render.orient import NORTH_UP_MIN_DEG, rotate_image_north_up
 
-    angle = stack_north_up_deg(fits_path)
-    if angle is None or abs(angle) < NORTH_UP_MIN_DEG:
+    total = stack_north_up_deg(fits_path)
+    if total is None:
+        return preview_png
+    if abs(total) < NORTH_UP_MIN_DEG:
+        total = 0.0
+    angle = total - float(already_deg)
+    if abs(angle) < NORTH_UP_MIN_DEG:
         return preview_png
     with Image.open(io.BytesIO(preview_png)) as src:
         rgb = np.asarray(src.convert("RGB"), dtype=np.float32) / 255.0

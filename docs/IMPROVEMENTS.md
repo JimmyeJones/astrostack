@@ -164,9 +164,56 @@ _(none — claim an item here with your branch name)_
   (2) an unadjusted linear run and a display-space run are byte-for-byte unchanged (no regression). One-two
   files (`stack.py`, `thumbnail.py`) + tests. *(Found by the render/export-parity adversarial audit this run.)*
 
-- **🟠 WRONG-RESULT / SHARE (Builder 2026-08-27, branch `claude/compassionate-galileo-zixgdj`, REPRODUCED
-  end-to-end) — a share download asked for North-up **double-rotates** a preview a previous save already baked
-  the rotation into, so the picture the user shares is 180° from the one on screen.** *(Severity: wrong-result
+- **✅ SHIPPED (Builder, v0.290.1, branch `claude/compassionate-galileo-xhognz`) — ~~a share download asked
+  for North-up **double-rotates** a preview a previous save already baked the rotation into, so the picture the
+  user shares is 180° from the one on screen.~~** Fixed exactly as the direction below specifies, **with the
+  sweep it asked for** — which turned up three more instances of the same root class, all fixed here.
+
+  **The fix.** `orient_preview_north_up` grows an `already_deg` keyword and applies only the **remainder**
+  (`total − already`); a run saved at the same angle is then a clean no-op whose bytes are never resampled a
+  second time, and `already_deg=0.0` — every un-rotated run, i.e. every run nobody has saved North-up — is
+  byte-for-byte the old behaviour. Both sites that re-orient *stored preview bytes* pass
+  `run.preview_north_up_deg`: the share JPEG and the wallpaper. A run with no usable WCS keeps whatever the
+  save left rather than being "un-rotated" on a guess — we can't recompute a correction we can't read.
+
+  **What the sweep found (same root class: a consumer of the stored bytes assuming they are the un-rotated
+  FITS grid).**
+  1. **The wallpaper's crop centre**, called out in the entry: `wallpaper_target_pixel` maps the target's
+     RA/Dec onto a *uniform downscale* of the master, which a rotated stored preview is not. It is now given
+     the un-rotated grid and its answer turned by the baked angle — so the crop finds the object even when
+     North-up **isn't** asked for, which is where this one bit.
+  2. **The baked North/East rose** (`?scale=true`): its angle was "how far *this request* turned the pixels",
+     which is zero for a picture the save had already turned. It is now the rotation the bytes actually carry
+     (the baked angle, or the run's total once a North-up request completes it).
+  3. **The scale bar's length**: measured as a fraction of the stored PNG's width, which a rotate-with-expand
+     has changed without changing the pixel scale. New `_unrotated_preview_width` recovers the pre-turn grid
+     from the master's own dimensions (`save_stack_preview` renders at `PREVIEW_MAX_WIDTH`, now a named
+     constant beside `preview_grid_size`), falling back to the stored width — which is the same number for
+     every preview nobody saved North-up.
+  4. **A stale recorded angle.** "Process target"'s auto-edit rewrites the stored preview from the master's own
+     un-rotated grid, so an earlier North-up save's rotation is *gone* — but the column still said 90°. A stale
+     angle is worse than none (every reader then corrects for a turn that isn't there), so the rewrite now
+     clears it. This one would have quietly broken the Sky map's tile and the fix above.
+
+  **Checked and deliberately unchanged:** the nameplate/keepsake captions (bottom-edge text, no FITS geometry),
+  the montage tiles (decode bytes only), `sky_overlay` and the History object pins (already fixed, v0.288.1 /
+  v0.289.2), and `stack_run_framing` (works in FITS pixels, never touches the preview).
+
+  **Upgrade-safe (§9):** no schema, config, on-disk-layout, default or API-shape change — one new keyword with
+  a no-rotation default and one column write that already existed. Every run whose preview has never been saved
+  North-up takes byte-for-byte the path it took before, pinned by three no-regression tests.
+
+  **Tests (+7 in `tests/webapp/test_share_north_up_double_rotation.py`, 4 fail before):** the filed repro end to
+  end (saved North-up, `?north_up=true` stays landscape and equals the stored picture transcoded, where before
+  it came back portrait); an un-rotated run's North-up share equal to
+  `png_bytes_to_jpeg(orient_preview_north_up(stored, fits))` and its plain share untouched; a no-WCS run served
+  as stored; the rose + bar measured against the un-rotated grid and visibly different from the stale ones; the
+  wallpaper no-op plus its crop centred on the turned target pixel (and *not* on the old one); an un-rotated
+  wallpaper equal to the old computation on both paths; and the auto-edit clearing the angle it rendered away.
+
+  Original spec, for the record:
+
+  *(Severity: wrong-result
   on a share/export surface — the shared file is visibly upside-down; the stack and the stored preview are
   fine. Confidence: reproduced end to end through the real endpoints.)*
 
