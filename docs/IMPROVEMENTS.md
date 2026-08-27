@@ -49,12 +49,32 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟠 BROKEN-UX (Scout QA audit 2026-08-27 #18, branch `claude/vigilant-knuth-qtz5h4`, reproduced end-to-end)
+- ~~**🟠 BROKEN-UX (Scout QA audit 2026-08-27 #18, branch `claude/vigilant-knuth-qtz5h4`, reproduced end-to-end)
   — a Moon/Sun still stacked with BOTH `crop` and `sharpen>0` advertises its sharpen slider as editable
   (`sharpen_editable=True`) but EVERY attempt to change the sharpening is refused with a 400: *"This picture's
   crop can't be worked out any more, so changing the sharpening would lose it — stack the capture again
-  instead."* The advertised control is permanently dead, and the only "recovery" it offers (re-stack) is
-  impossible once the source clip is off the NAS.** *(Severity: broken-UX — a control the app offers always
+  instead."*~~ — **FIXED v0.286.1** (Builder 2026-08-27, branch `claude/compassionate-galileo-0d0lp8`).
+
+  **Fix (exactly the direction filed below).** The two "crop_applied with no box" shapes are now told apart by
+  the kept original's **size**, in one new helper `_kept_original_is_full_frame(out_dir, meta)`
+  (`webapp/video.py`) — a bigger original means an *in-place* crop that still has a slice to re-apply; a
+  same-size one means a *stack-time* crop already baked into it. `crop_is_restorable` now delegates to that
+  helper (same answer, one implementation); `_measured_box` returns `None` up front unless the original really
+  is a full frame, which is what makes the **double-crop** unreachable; and `sharpen_saved_still` only demands
+  a box — and so can only refuse for want of one — in the in-place case. The same conflation also let
+  `POST …/uncrop` "succeed" on a stack-time crop, handing back the identical picture while marking it
+  *uncropped* (which then offers a crop that would trim it again); it now refuses with a plain-language line,
+  matching the `crop_restorable: false` the wire already reported. Nothing about the finished picture, the
+  on-disk layout or the meta schema changes, and an in-place crop's behaviour is untouched.
+  **Tests (+4 in `tests/webapp/test_video_sharpen_still.py`, all fail before / pass after):** re-sharpening a
+  stack-time crop+sharpen still succeeds and matches `sharpen(kept cropped-soft original)` byte-for-byte; the
+  crop survives at its own size with no box invented; the picture is never trimmed twice even when the framing
+  measurement is forced to say "worth trimming" (so the guarantee doesn't rest on scene luck); and `uncrop`
+  refuses with a sentence instead of pretending. Existing crop/sharpen suites unchanged (51 passed).
+
+  Original spec, for the record:
+
+  *(Severity: broken-UX — a control the app offers always
   fails on a common option combination; not wrong-result, the finished picture is fine. Confidence: reproduced
   end-to-end by reconstructing the exact on-disk artefacts + meta that `_video_stack_body(crop=True,
   sharpen>0)` writes, then calling `sharpen_saved_still`.)*
@@ -16019,6 +16039,24 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW IDEA (Builder 2026-08-27, traced while reviewing the v0.285.0 pictures zip) — "Download all my
+  pictures" leaves out the Moon and the Sun, which are most beginners' *first* good picture.** *(Pillar: get +
+  share + back-up, PRIORITY 3; size S; additive, read-only, no new deps. Confidence: traced against the code —
+  `_library_pictures` walks `lib.list_targets()` only.)* A finished lunar/solar still is **not** a library
+  target: it lives in its own video-results store (`webapp/video.py`, `result_dir()` + `stack.png` +
+  `meta.json`) and never gets a project DB or a `last_stack_preview`. So `GET /api/gallery/pictures.zip` —
+  which enumerates library targets — silently omits every one of them, even though the Gallery itself shows
+  them (`GalleryResponse.videos`) and the button says "all my pictures". For a Seestar owner the Moon is often
+  the picture they were proudest of first, and the one they'd most notice missing from a backup.
+  **Shape.** After the targets, walk the same finished-still listing the Gallery's `videos` list already
+  builds, and add each still's `stack.png` under its capture label (`Moon 2026-05-02.png`), reusing the
+  existing `safe_name`-style sanitising and the `-2`/`-3` collision suffix. **Cautions:** copy the saved
+  `stack.png` bytes — never re-render, and never touch `incoming/`; a capture whose `meta.json` is unreadable
+  should drop like a missing target picture rather than sink the archive; the count on the button
+  (`heroes.length`, `MyDeepSkyWallCard`) counts library targets only, so it has to learn about stills too or
+  it will promise fewer files than the zip holds; and the card currently hides below two *targets*, which
+  would still hide the button from someone whose only pictures are Moon stills.
+
 - **NEW BEGINNER FEATURE (Builder 2026-08-27, the motivating half "Print it" v0.286.0 deliberately left out) —
   turn "how big can I print this?" into a *reason to keep shooting*: tell a target still short of a good print
   what it would take to get there.** *(Pillar: enjoy + autonomy — PRIORITY 2–3. Size: S.)* v0.286.0 can now
@@ -16105,9 +16143,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   than a second definition of "a session" (AGENTS §-style single-source-of-truth, as `goals.py` documents for the
   integration goal).
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #18) — "Then vs now": a side-by-side slider that compares your
-  target's newest deep stack against an earlier one, so a beginner can *see* their picture getting cleaner and
-  deeper as the nights add up — and trust that another night out was worth it.** *(Pillar: understand + enjoy +
+- **MOSTLY ALREADY SHIPPED — what's left is one link, not a view (rescoped from size M to size S by the
+  Builder 2026-08-27, branch `claude/compassionate-galileo-0d0lp8`, after doing the grep this entry asked
+  for).** The premise below — *"there is **no way** to put two of those runs beside each other"*, *"the web app
+  never got the equivalent"* — is **wrong as filed**. `/compare?a=<safe>:<id>&b=<safe>:<id>` is a full,
+  bookmarkable run-vs-run A/B route (`frontend/src/routes/Compare.tsx`) with a **drag-the-divider split
+  slider** (`components/editor/splitCompare.ts`), quantified per-side captions, and plain-language verdicts on
+  noise (`noiseComparison`) and panel flatness. The Gallery links into it from any two selected runs
+  (`routes/Gallery.tsx:618`), and **History already offers exactly the "this run vs the one before it" pairing
+  this entry describes**, per row (`historyCompareHref`, `History.tsx:1013`). **The only real gap** is that the
+  **Target page** has no shortcut into it, so a beginner who never opens History never discovers the
+  comparison at all. The remaining work is therefore a *size-S* affordance — one "Compare with my last one"
+  link on the Target page pointing at `historyCompareHref(safe, newestRunId, previousRunId)`, hidden when the
+  target has fewer than two runs with a preview — **not** the size-M new view described below. Whoever picks
+  it up should build that link and nothing else, and per the standing IA priority (AGENTS §1) put it inside an
+  existing group on that page rather than adding one more always-on control.
+
+  Original spec, for the record (its "why" still reads true; its "there is no way to" does not):
+
+  *(Pillar: understand + enjoy +
   trust, PRIORITY 3 (with a 4 flavour — it builds trust in the result); size M; fully offline, additive,
   read-only — reuses the stack-run artifacts already on disk, no new deps, no schema/config change.)*
   **Why (real friction).** A target accumulates **multiple finished stack-runs** over nights: every re-stack
