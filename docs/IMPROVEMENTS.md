@@ -8298,10 +8298,17 @@ to **Shipped**.)_
   grep first** — confirm no caller passes a legitimately-out-of-tree `root` (e.g. a one-off import flow) before
   tightening; if one exists, allow-list it rather than break it.
 
-- **NEW IDEA (Builder 2026-08-27, spotted while independently building the same nudge) — the v0.283.0
-  grainier-restack note states its gap as a percentage, which stops reading as a quantity past a doubling.**
-  *(Pillar: friendliness / trust — PRIORITY 3. Size: XS — one expression and one test in
-  `GrainierNewestNote.tsx`.)* `percent_grainier` is honest at any size, but the copy prints it raw: a manual
+- ~~**NEW IDEA (Builder 2026-08-27, spotted while independently building the same nudge) — the v0.283.0
+  grainier-restack note states its gap as a percentage, which stops reading as a quantity past a doubling.**~~
+  — **SHIPPED v0.285.1** (Builder 2026-08-27, branch `claude/compassionate-galileo-5du96e`). *(Pillar:
+  friendliness / trust — PRIORITY 3.)* A pure `grainierGap(percent)` (`components/grainierNewest.ts`) returns
+  the clause and the joiner the phrasing needs: below a tripling it is unchanged — *"about 18% more background
+  grain **than** your 14 May stack"* — and at or past 200 % it becomes *"about 25.0× as much background grain
+  **as** your 14 May stack"*. Copy only: the endpoint reports the same number, and the ordinary band (where
+  nearly every real firing lands, the bar being ~17.6 %) is untouched. Tests pin both branches — including that
+  the ordinary band still reads as a percent, and that a 2400 % gap never prints "2400%" anywhere.
+
+  Original entry: `percent_grainier` is honest at any size, but the copy prints it raw: a manual
   restack of a handful of subs against a 500-sub master gives *"about 2400 % more background grain"*, which is
   arithmetically right and reads as a bug — exactly the wrong impression for a note whose whole job is to make
   the app look trustworthy when the picture got worse. Past ~200 %, say it the way anyone would out loud:
