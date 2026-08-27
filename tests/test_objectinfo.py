@@ -165,3 +165,41 @@ def test_every_catalog_blurb_is_a_clean_sentence():
         if obj.blurb:
             assert len(obj.blurb) >= 20, obj.id
             assert obj.blurb.rstrip().endswith("."), obj.id
+
+
+def test_every_bundled_catalog_object_carries_a_blurb():
+    """The "what am I looking at?" card's whole job is to say something when a
+    beginner opens a target, and for most of the catalog's life it said nothing:
+    only 36 of 110 Messier objects and 34 of 47 popular NGC/IC objects had a
+    blurb, so M2, M3, M5 and named nebulae like the Wizard and the Seagull
+    opened an empty card at exactly the moment it exists to serve.
+
+    Now every object has one, and this pins that shut: a future catalog addition
+    without a blurb fails here rather than quietly reopening the gap."""
+    from seestack.nightplan import load_catalog
+
+    catalog = load_catalog()
+    assert len(catalog) >= 157  # both bundled files loaded, not just one
+    without = [o.id for o in catalog if not (o.blurb or "").strip()]
+    assert without == [], f"catalog objects with no beginner blurb: {without}"
+
+
+def test_a_blurb_stays_a_one_liner():
+    """It renders as a single line on a card that already carries up to six, and
+    the owner's standing complaint is that the pages are too busy. The longest
+    curated blurb today is under 200 characters; the bound leaves room to write
+    a good one without letting a paragraph in."""
+    from seestack.nightplan import load_catalog
+
+    for obj in load_catalog():
+        assert len(obj.blurb) <= 260, (obj.id, len(obj.blurb))
+
+
+def test_the_previously_blank_targets_now_say_something_real():
+    """Spot-check the objects the gap was measured on — a beginner who shoots
+    any of these used to get an empty card."""
+    for name in ("M2", "M3", "M5", "NGC 7380", "IC 405", "IC 2177", "NGC 2174"):
+        info = identify_object(name)
+        assert info is not None, name
+        assert info.blurb, f"{name} still has no blurb"
+        assert len(info.blurb) >= 60, name
