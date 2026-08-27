@@ -855,6 +855,11 @@ export interface StackRun {
   // lower = sharper. Null for runs recorded before the column existed (schema
   // < 14) or when too few stars to fit. Comparable across a target's runs.
   stack_fwhm_px?: number | null;
+  // The North-up rotation (degrees) baked into this run's *stored preview PNG*
+  // by a previous "Adjust" save — 0/null when it was saved un-rotated. The
+  // object pins and scale bar are measured on the un-rotated FITS grid, so they
+  // can't be drawn on a picture that was saved turned.
+  preview_north_up_deg?: number | null;
   // How flat this *mosaic's* panel joins came out, read for us by the backend:
   // "flat" (the sky matches across the joins), "check" (a step big enough to show
   // once stretched), or null/absent when there's nothing honest to say — a

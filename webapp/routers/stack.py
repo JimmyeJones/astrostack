@@ -468,6 +468,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             transparency_ratio=r.transparency_ratio,
             noise_sigma=r.noise_sigma,
             stack_fwhm_px=r.stack_fwhm_px,
+            preview_north_up_deg=r.preview_north_up_deg,
             seam_residual=r.seam_residual,
             seam_verdict=seam_verdict(r.seam_residual),
             calstat=r.calstat,
