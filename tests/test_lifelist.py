@@ -12,9 +12,11 @@ import pytest
 
 from seestack.lifelist import (
     MATCH_RADIUS_DEG,
+    LifeListEntry,
     catalog_capture_status,
     is_messier,
     life_list_summary,
+    nearly_complete_constellations,
 )
 from seestack.nightplan import CatalogObject, load_catalog
 
@@ -177,3 +179,68 @@ def test_the_bundled_catalog_yields_the_full_110_object_milestone():
     # ...and nothing is duplicated across the two bundled files.
     ids = [e.catalog_id for e in entries]
     assert len(ids) == len(set(ids))
+
+
+# --- "One away from Orion" — nearly-finished constellations -----------------
+
+
+def _entry(cid: str, con: str, *, captured: bool) -> LifeListEntry:
+    """A life-list entry with only the fields the grouping reads."""
+    return LifeListEntry(
+        catalog_id=cid, name="", type="galaxy", con=con,
+        ra_deg=0.0, dec_deg=0.0, size_arcmin=None, blurb="",
+        captured=captured,
+    )
+
+
+def test_one_missing_object_ranks_ahead_of_two():
+    entries = [
+        _entry("M42", "Ori", captured=True),
+        _entry("M43", "Ori", captured=True),
+        _entry("M78", "Ori", captured=False),          # Orion: 1 missing
+        _entry("M36", "Aur", captured=True),
+        _entry("M37", "Aur", captured=False),
+        _entry("M38", "Aur", captured=False),          # Auriga: 2 missing
+    ]
+    got = nearly_complete_constellations(entries)
+    assert [p.con for p in got] == ["Ori", "Aur"]
+    assert got[0].captured == 2 and got[0].total == 3
+    assert [e.catalog_id for e in got[0].missing] == ["M78"]
+
+
+def test_an_unstarted_constellation_is_not_nearly_finished():
+    """Nothing captured isn't 'nearly done' — it's just unshot sky, which is
+    what the existing 'start something new tonight' suggestions are for."""
+    entries = [_entry("M78", "Ori", captured=False)]
+    assert nearly_complete_constellations(entries) == []
+
+
+def test_a_finished_constellation_drops_out():
+    entries = [_entry("M42", "Ori", captured=True), _entry("M43", "Ori", captured=True)]
+    assert nearly_complete_constellations(entries) == []
+
+
+def test_too_many_missing_is_not_a_nudge():
+    entries = [_entry("M42", "Ori", captured=True)] + [
+        _entry(f"M{n}", "Ori", captured=False) for n in (43, 78, 79)
+    ]
+    assert nearly_complete_constellations(entries) == []
+    # …but raising the bar does include it, so the threshold is the only gate.
+    assert [p.con for p in nearly_complete_constellations(entries, max_missing=3)] == ["Ori"]
+
+
+def test_ties_break_on_most_captured_then_alphabetically():
+    entries = [
+        _entry("M42", "Ori", captured=True), _entry("M78", "Ori", captured=False),
+        _entry("M36", "Aur", captured=True), _entry("M31", "Aur", captured=True),
+        _entry("M37", "Aur", captured=False),
+        _entry("M1", "Tau", captured=True), _entry("M45", "Tau", captured=False),
+    ]
+    # All three have exactly 1 missing: Auriga (2 captured) first, then the
+    # 1-captured pair in alphabetical order.
+    assert [p.con for p in nearly_complete_constellations(entries)] == ["Aur", "Ori", "Tau"]
+
+
+def test_entries_without_a_constellation_are_skipped():
+    entries = [_entry("X1", "", captured=True), _entry("X2", "", captured=False)]
+    assert nearly_complete_constellations(entries) == []
