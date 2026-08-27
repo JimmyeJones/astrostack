@@ -909,6 +909,44 @@ def test_stack_info_frame_accounting_omits_unreadable_on_an_older_master(
     assert "n_unreadable" not in fa
 
 
+def test_stack_info_surfaces_an_unattended_drizzle_scale_degrade(
+        client, solved_library):
+    """A walk-away run whose drizzle canvas didn't fit stamps DRZSCLAD/DRZSCLRQ
+    rather than refusing to make a picture. Nobody watched the job decide that, so
+    the info endpoint has to carry it — it's the only place the owner can find out
+    why last night's image is a different size."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["DRZSCLAD"] = 1.3
+                hdul[0].header["DRZSCLRQ"] = 1.5
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    dd = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["drizzle_degraded"]
+    assert dd["applied"] == 1.3
+    assert dd["requested"] == 1.5
+    assert dd["reason"] == "memory"
+
+
+def test_stack_info_drizzle_degrade_absent_on_a_run_that_fitted(
+        client, solved_library):
+    """Which is every run on a healthy box — the line must self-hide, not read as
+    "unknown"."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["drizzle_degraded"] is None
+
+
 def test_stack_info_frame_accounting_absent_on_older_master(client, solved_library):
     """A master recorded before frame accounting existed has no NOFFERED card, so
     frame_accounting is None (older masters degrade gracefully)."""

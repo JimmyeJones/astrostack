@@ -919,6 +919,15 @@ export interface StackRejectionSummary {
   fraction?: number;
 }
 
+/** An unattended run that lowered its drizzle scale to fit the memory budget. */
+export interface StackDrizzleDegraded {
+  reason: string;
+  /** The super-resolution scale the run actually used. */
+  applied?: number;
+  /** The scale it was asked for, when the run recorded it. */
+  requested?: number;
+}
+
 export interface StackFrameAccounting {
   // Subs the stacker attempted to combine (after lucky/mosaic-outlier filtering).
   n_offered: number;
@@ -1022,6 +1031,11 @@ export interface StackRunInfo {
   // Honest per-run frame accounting — how many subs the stacker attempted to
   // combine and how many couldn't be aligned. Absent on older masters.
   frame_accounting?: StackFrameAccounting | null;
+  // Present only when an *unattended* run's drizzle canvas didn't fit the memory
+  // budget and the engine stepped the super-resolution scale down to the largest
+  // one that did — instead of refusing to make a picture at all with advice
+  // nobody was there to read. Absent on every run that fitted.
+  drizzle_degraded?: StackDrizzleDegraded | null;
   // Plain-language "what the unattended auto-edit did (and why)" note, present
   // only on runs an autonomous job auto-edited (Process-target / reprocess /
   // watcher auto-stack). Absent on manual/un-edited runs.

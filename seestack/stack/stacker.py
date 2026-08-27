@@ -471,6 +471,26 @@ class StackOptions:
     # unscaled dark otherwise. Off by default. Lets a dark library shot at one
     # exposure still calibrate subs at another.
     scale_dark_to_light: bool = False
+    # **Posture, not a knob:** True when *nobody is watching this run* — the
+    # walk-away chains (watcher auto-stack, "Process target") set it; the manual
+    # Stack form, the desktop app and reprocess-all never do. It is not a user
+    # setting: it has no form descriptor (it lives in ``NON_FORM_KEYS``), a client
+    # can't set it (``webapp.pipeline._stack_target`` writes it last, after every
+    # merge), and it changes no picture on its own.
+    #
+    # It exists because several decisions in here are a genuine fork on *that*
+    # question and nothing else: when a user is sitting in front of the Stack form
+    # and the run doesn't fit in memory, refusing with one concrete fix ("lower the
+    # drizzle scale to ×1.3") is the *better* outcome — they click it and get the
+    # picture they asked for. At 3 a.m. with nobody there, the identical refusal
+    # produces no picture at all on a target that made one yesterday. Before this
+    # flag, ``_afford_drizzle_reject`` read ``auto_reject`` as the proxy for
+    # "unattended", which is wrong: ``get_stack_defaults`` seeds ``auto_reject=True``
+    # into the *manual form* for a never-configured target, so a watching beginner
+    # posted it too and was quietly degraded instead of being told the fix.
+    # Off by default → every existing run record, config and desktop run is
+    # byte-for-byte unchanged.
+    unattended: bool = False
 
     def background_options(self) -> BackgroundOptions:
         return BackgroundOptions(
@@ -626,27 +646,34 @@ def _afford_drizzle_reject(options: StackOptions, n: int,
     """Whether the two-pass drizzle rejection actually runs for this stack.
 
     Folds in the ``n >= 4`` floor the pass needs for its statistics to mean
-    anything, and — for a rejection the app switched on *for* the user — whether
-    the memory budget can afford it.
+    anything, and — on an **unattended** run — whether the memory budget can
+    afford it.
 
     Two-pass rejection holds ``_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT`` (7)
     full-canvas RGB planes against the single pass's ``_PEAK_CANVAS_ARRAYS`` (4):
     a 1.75× jump in the number :func:`_guard_stack_memory` refuses on. That is the
-    right trade when a *watching* user ticked "Drizzle outlier rejection" — the
-    refusal names one concrete fix ("lower the drizzle scale to ×1.3") and they
-    can act on it — so an explicit choice is passed through untouched and still
-    refuses loudly.
+    right trade when a *watching* user submitted the run — the refusal names one
+    concrete fix ("lower the drizzle scale to ×1.3") and they can act on it — so
+    an attended run is passed through untouched and still refuses loudly.
 
-    But the walk-away chains turn the pass on for the user (``auto_reject`` means
-    "I expressed no preference — pick something sensible", and ``_stack_target``
-    sets ``drizzle_reject`` alongside it), and nobody is watching an unattended
-    stack at 3 a.m. There, a refusal doesn't produce a better picture — it
-    produces **no picture at all** on a target that made one yesterday, which is
-    worse than the satellites the pass removes. The owner drizzles a mosaic union
-    canvas, the largest canvas this app builds, so that is a real way for the
-    v0.271.1 auto-enable to stop an install that works today. When the extra
-    planes are what push the run over budget, the rejection is simply not taken
-    and the run proceeds exactly as it did before it was ever auto-enabled.
+    But the walk-away chains turn the pass on for the user (``_stack_target`` sets
+    ``drizzle_reject`` alongside ``auto_reject`` when the merged options express no
+    preference), and nobody is watching an unattended stack at 3 a.m. There, a
+    refusal doesn't produce a better picture — it produces **no picture at all** on
+    a target that made one yesterday, which is worse than the satellites the pass
+    removes. The owner drizzles a mosaic union canvas, the largest canvas this app
+    builds, so that is a real way for the v0.271.1 auto-enable to stop an install
+    that works today. When the extra planes are what push the run over budget, the
+    rejection is simply not taken and the run proceeds exactly as it did before it
+    was ever auto-enabled.
+
+    The posture comes from ``options.unattended``, not from ``auto_reject``.
+    ``auto_reject`` looks like the same question ("the user expressed no
+    preference") and was used for it until v0.281.0, but it isn't: the Stack form
+    seeds ``auto_reject=True`` for a never-configured target
+    (``get_stack_defaults``), so a beginner sitting *right there* posted it too and
+    had their explicitly-ticked rejection quietly dropped instead of being handed
+    the one-line fix — the opposite of what this docstring promised.
 
     Only the *rejection* is forgiven, never the canvas: this returns the
     single-pass answer, so a canvas that doesn't fit without the pass either is
@@ -658,8 +685,8 @@ def _afford_drizzle_reject(options: StackOptions, n: int,
     inside :func:`run_stack`."""
     if not (options.drizzle and options.drizzle_reject and n >= 4):
         return False
-    if not options.auto_reject:
-        return True  # an explicit tick — let the guard refuse loudly instead
+    if not options.unattended:
+        return True  # someone is watching — let the guard refuse loudly instead
     need, _ = _estimate_peak_bytes(
         dst_shape, drizzle=True, drizzle_scale=options.drizzle_scale,
         drizzle_reject=True)
@@ -1011,6 +1038,7 @@ def _build_output_header_meta(
     n_roughly_aligned: int = 0,
     n_unreadable: int = 0,
     drizzle_reject_declined: bool = False,
+    drizzle_scale_requested: float | None = None,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -1158,6 +1186,17 @@ def _build_output_header_meta(
     # server log has rolled.
     if drizzle_reject_declined:
         meta["DRZREJSK"] = ("memory", "drizzle rejection skipped (over budget)")
+    # …and the same story one level up: an unattended run whose *canvas* didn't fit,
+    # stepped down to the largest super-resolution scale the budget could hold
+    # rather than refusing to make a picture at all. ``options.drizzle_scale`` here
+    # is already the scale that ran (the caller passes the effective options), so
+    # the pair reads "asked for ×1.5, made ×1.3" — the finished image explains its
+    # own size without anyone finding the job log.
+    if drizzle_scale_requested is not None:
+        meta["DRZSCLAD"] = (round(float(options.drizzle_scale), 4),
+                            "drizzle scale lowered to fit memory budget")
+        meta["DRZSCLRQ"] = (round(float(drizzle_scale_requested), 4),
+                            "drizzle scale originally requested")
     # Frame-accounting provenance: how many of the subs the stacker *attempted*
     # to combine actually made it in. ``frames`` here is the post-filter list the
     # passes iterated (after lucky-imaging selection and any gross plate-solve
@@ -1523,6 +1562,45 @@ def run_stack(
             _reject_need / 1e9,
             _stack_memory_budget_bytes(memory_budget_gb) / 1e9,
         )
+    # …and the second half of the same asymmetry, one level up: the *canvas*
+    # itself over budget. Dropping the rejection above only frees the extra
+    # rejection planes; when even the single pass doesn't fit, the guard below
+    # refuses the whole run. For a watching user that refusal is the better
+    # outcome — it names the one lever that would fit ("lower the drizzle scale
+    # to ×1.3 (~4.2 GB)") and they click it. At 3 a.m. nobody reads it, so the
+    # target simply stops producing pictures until the owner next opens the Jobs
+    # page — on an install that made a picture yesterday.
+    #
+    # So on an unattended run only, when the least-destructive fix the engine
+    # already computes *is* a smaller super-resolution scale, take it instead of
+    # refusing. A picture at ×1.3 beats no picture; nothing is lost but zoom, and
+    # the run stamps DRZSCLAD so the finished image says so. Deliberately narrow:
+    # only the ``drizzle_scale`` lever is auto-applied. ``reference_canvas`` is
+    # not — silently cropping the field a user spent five nights building is a
+    # different order of change — and an attended run is untouched.
+    drizzle_scale_requested: float | None = None
+    if eff.unattended and eff.drizzle:
+        _need, _ = _estimate_peak_bytes(
+            dst_shape, drizzle=True, drizzle_scale=eff.drizzle_scale,
+            drizzle_reject=eff.drizzle_reject)
+        _budget = int(_stack_memory_budget_bytes(memory_budget_gb))
+        if int(_need) > _budget:
+            _fix = _best_memory_fix(
+                dst_shape, ref_shape, is_mosaic=is_mosaic_canvas, drizzle=True,
+                drizzle_scale=eff.drizzle_scale,
+                drizzle_reject=eff.drizzle_reject, reject_arrays=0,
+                min_max_reject_count=1, budget=_budget)
+            if _fix is not None and _fix.kind == "drizzle_scale":
+                drizzle_scale_requested = float(eff.drizzle_scale)
+                eff = replace(eff, drizzle_scale=float(_fix.value))
+                log.warning(
+                    "Unattended stack: the ×%g drizzle canvas would need ~%.1f GB "
+                    "of working memory, over the ~%.1f GB budget. Using ×%g "
+                    "(~%.1f GB) instead of refusing the run — the picture is "
+                    "slightly less zoomed-in, nothing else changes.",
+                    drizzle_scale_requested, _need / 1e9, _budget / 1e9,
+                    eff.drizzle_scale, _fix.peak_bytes / 1e9,
+                )
     backend = "GPU (cupy)" if (
         (options.use_gpu is True) or (options.use_gpu is None and GPU_AVAILABLE)
     ) else "CPU (numpy/scipy)"
@@ -1536,8 +1614,11 @@ def run_stack(
     # drizzled near-cap mosaic canvas can otherwise reach tens of GB and get the
     # whole container OOM-killed (there's no cgroup limit to catch it).
     # (Rejection is skipped below 4 frames, so don't charge its extra arrays.)
+    # ``eff.drizzle_scale`` (not ``options``) from here down: an unattended
+    # over-budget run may have just stepped it down, and the guard, the in-flight
+    # cap and the drizzler must all price the canvas that is actually allocated.
     _guard_stack_memory(dst_shape, drizzle=options.drizzle,
-                        drizzle_scale=options.drizzle_scale,
+                        drizzle_scale=eff.drizzle_scale,
                         drizzle_reject=eff.drizzle_reject,
                         reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
                                        if eff.min_max_reject and not options.drizzle and n >= 3
@@ -1557,7 +1638,7 @@ def run_stack(
     max_in_flight = _memory_bounded_in_flight(
         ref_shape, dst_shape,
         max_in_flight=_max_workers * 2,
-        drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
+        drizzle=options.drizzle, drizzle_scale=eff.drizzle_scale,
         drizzle_reject=eff.drizzle_reject,
         reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
                        if eff.min_max_reject and not options.drizzle and n >= 3
@@ -1599,7 +1680,10 @@ def run_stack(
             raise ValueError("reference WCS could not be parsed for drizzle")
         params = DrizzleParams(
             pixfrac=options.drizzle_pixfrac,
-            scale=options.drizzle_scale,
+            # ``eff``, not ``options``: an unattended over-budget run stepped this
+            # down to what the memory budget can hold, and the drizzler must build
+            # exactly the canvas the guard above certified.
+            scale=eff.drizzle_scale,
             kernel=options.drizzle_kernel,
         )
         # Optional two-pass outlier rejection: pass 1 accumulates value and
@@ -1943,7 +2027,9 @@ def run_stack(
                                             n_unreadable=n_unreadable,
                                             drizzle_reject_declined=(
                                                 _drizzle_reject_wanted
-                                                and not eff.drizzle_reject))
+                                                and not eff.drizzle_reject),
+                                            drizzle_scale_requested=(
+                                                drizzle_scale_requested))
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     if stack_fwhm is not None:
