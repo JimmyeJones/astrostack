@@ -220,6 +220,13 @@ class SessionRecapOut(BaseModel):
     night_date: str | None = None
     reject_buckets: dict[str, int] = {}
     quality_drift: SessionQualityDriftOut | None = None
+    # "Was the Moon washing this out?" — one plain-language sentence, present
+    # **only** when a bright Moon was genuinely up and close to this target while
+    # the session was being shot. Deliberately quiet: ``None`` on a good or merely
+    # passable night (the common case), when the site is unknown, or when the
+    # target has no solved position — so the card hides it rather than nagging.
+    # Additive and optional; an older frontend simply ignores it.
+    moon_note: str | None = None
 
 
 class NightSummaryOut(BaseModel):

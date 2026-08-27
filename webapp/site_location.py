@@ -122,6 +122,19 @@ def resolve_site_lon(request: Any, lib: Any, configured_lon: float | None) -> fl
     """
     if configured_lon is not None:
         return configured_lon
+    site = detect_site_cached(request, lib)
+    return site[1] if site is not None else None
+
+
+def detect_site_cached(request: Any, lib: Any) -> tuple[float, float] | None:
+    """``(lat, lon)`` sniffed from the library's FITS headers, memoised on the app.
+
+    The header probe walks real files, so it is far too expensive to redo on every
+    request that wants to know where the telescope is. Cached for
+    :data:`SITE_LON_CACHE_TTL_S`, keyed on the target set so a scan invalidates it.
+    ``None`` means "no frame carries a site" — every caller must have a
+    site-unknown behaviour, never a failure.
+    """
     try:
         targets = lib.list_targets()
     except Exception:  # noqa: BLE001 — a broken library just means "unknown site"
@@ -130,8 +143,12 @@ def resolve_site_lon(request: Any, lib: Any, configured_lon: float | None) -> fl
     cache = getattr(request.app.state, "activity_lon_cache", None)
     now = time.monotonic()
     if cache and cache["sig"] == tsig and (now - cache["at"]) < SITE_LON_CACHE_TTL_S:
-        return cache["lon"]
+        return cache.get("site")
     site = detect_site_from_library(lib)
-    lon = site[1] if site is not None else None
-    request.app.state.activity_lon_cache = {"sig": tsig, "at": now, "lon": lon}
-    return lon
+    # ``lon`` is kept beside ``site`` because it is what the night-bucketing
+    # callers read; both are written together so the two can never diverge.
+    request.app.state.activity_lon_cache = {
+        "sig": tsig, "at": now, "lon": site[1] if site is not None else None,
+        "site": site,
+    }
+    return site

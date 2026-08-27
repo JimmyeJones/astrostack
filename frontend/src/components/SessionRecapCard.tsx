@@ -117,6 +117,13 @@ export function SessionRecapCard({ safe }: { safe: string }) {
                 r.quality_drift, isRecentNight(r.night_date ?? r.start_utc))}
             </Text>
           )}
+          {/* Only ever present when a bright Moon was genuinely up and close
+              while this was being shot — so it explains a disappointing picture
+              on the one night that has a sky-side explanation, and is invisible
+              on every other. Dimmed, not a warning colour: nothing went wrong. */}
+          {r.moon_note && (
+            <Text size="sm" c="dimmed">{r.moon_note}</Text>
+          )}
         </Stack>
       </Group>
     </Paper>
