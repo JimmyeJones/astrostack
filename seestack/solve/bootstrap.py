@@ -230,7 +230,9 @@ def propagate_wcs(
     from seestack.io.wcs_io import wcs_from_text, wcs_to_text
 
     base = wcs_from_text(deep_wcs_text)
-    if base is None:
+    if base is None or not base.has_celestial:
+        # A celestial-less blob (an empty/truncated ``.wcs`` parses to one) is
+        # not a solution — propagating it would locate nothing for every member.
         return [None] * len(shifts)
     out: list[str | None] = []
     for i, s in enumerate(shifts):
@@ -327,7 +329,7 @@ def bootstrap_solve(
     ``deep_solver`` is injectable for testing; production uses ASTAP on a temp
     FITS of the deep image.
     """
-    from seestack.io.wcs_io import wcs_center_deg_from_text
+    from seestack.io.wcs_io import wcs_center_deg_from_text, wcs_text_is_usable
     from seestack.solve.astap import classify_solve_setup_error
     from seestack.solve.runner import _fov_deg_for_frame
 
@@ -396,7 +398,12 @@ def bootstrap_solve(
 
     result.engaged = True
     wcs_text = getattr(solve_res, "wcs_text", None)
-    if not getattr(solve_res, "solved", False) or not wcs_text:
+    # Gate on the WCS being *usable*, not merely present: a returncode-0 solve
+    # whose ``.wcs`` sidecar is empty or truncated still yields truthy header
+    # text, and stamping that on every rescued member would give the whole
+    # bootstrap batch a celestial-less WCS — solved-looking frames that locate
+    # nothing and are never re-offered (see ``apply_solve_result_to_db``).
+    if not getattr(solve_res, "solved", False) or not wcs_text_is_usable(wcs_text):
         raw = getattr(solve_res, "error", None) or ""
         setup = classify_solve_setup_error(raw)
         result.reason = setup or "deep image did not solve"

@@ -2448,7 +2448,9 @@ def _drizzle_pass(
             if scale != 1.0:
                 rgb = rgb * np.float32(scale)
         in_wcs = wcs_from_text(frame.wcs_json)
-        if in_wcs is None:
+        if in_wcs is None or not in_wcs.has_celestial:
+            # Celestial-less blobs parse fine but locate nothing (see
+            # ``align_one``) — skip, don't drizzle the frame somewhere arbitrary.
             return None
         return rgb, in_wcs
 

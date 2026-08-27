@@ -49,7 +49,7 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟠 BROKEN-UX / DATA-INTEGRITY (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`,
+- ~~**🟠 BROKEN-UX / DATA-INTEGRITY (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`,
   reproduced) — a returncode-0 ASTAP solve whose `.wcs` sidecar is readable but carries NO celestial WCS
   (empty / truncated / partial-header) is persisted as a *solved* frame with a garbage `wcs_json` and a null
   centre, then locked out of retry forever — the exact "malformed/partial sidecar" case the runner's own guard
@@ -57,7 +57,27 @@ _(none — claim an item here with your branch name)_
   marked solved-yet-unusable, never re-solved (so it can never contribute), and its celestial-less WCS passes
   align's `is None` guard and is fed into reprojection instead of being cleanly skipped. Confidence: reproduced
   — the truthy-but-useless `wcs_text`, the null centre, and the bypassed guard all reproduced against the real
-  code; downstream skip/align traced.)*
+  code; downstream skip/align traced.)*~~ — **FIXED v0.287.2** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-wdi9ii`).
+
+  **Fix (the direction filed below, plus the two downstream guards).** "Readable" and "usable" are now
+  different questions, asked by one shared helper: `wcs_text_is_usable(text)` (`seestack/io/wcs_io.py`) — true
+  only when the blob carries a celestial reference point (it delegates to the existing
+  `wcs_center_deg_from_text`, so a real ASTAP solve always passes and a `Header.fromstring("")` blob never
+  does). `apply_solve_result_to_db` (`runner.py`) gates on it instead of `result.wcs_text is None`, so the
+  garbage case is recorded as the honest `solve_failed:unreadable plate solution` the branch's own comment
+  always described — accept untouched, `wcs_json` left NULL, and therefore **re-offered** by
+  `build_solve_arglist` on the next pass instead of locked out. `bootstrap_solve` (`bootstrap.py`) gates its
+  deep solve the same way, so a celestial-less deep WCS is never stamped across a whole rescued batch, and
+  `propagate_wcs` refuses a celestial-less base as a second line of defence. Downstream, for DBs already
+  carrying such a blob from an older version: `align_one` (`stack/align.py`) and the drizzle path's
+  `prepare()` (`stack/stacker.py`) now skip a source WCS with no celestial solution benignly (the same `None`
+  as a footprint that misses the canvas) instead of reprojecting through a WCS that locates nothing. Five
+  regression tests (fail-before/pass-after): the empty and partial-header sidecar cases stored as an honest
+  retryable failure, a normal solve (with and without an `.ini` centre) unchanged and not re-offered, the
+  bootstrap batch left untouched, `propagate_wcs`'s all-`None`, and `align_one`'s skip. The four
+  `wcs_text="CRVAL1=1.0"` placeholders in `tests/test_solve_runner.py` became real TAN headers via a new
+  `real_wcs_text()` helper — a stand-in string is no longer a stand-in for "ASTAP solved this".
 
   **Root cause (traced + reproduced).** `ASTAPSolver._solve_once` (`seestack/solve/astap.py:311`) sets
   `solved = proc.returncode == 0 and wcs_sidecar.exists()` — **existence only, not validity**. `solve_one`

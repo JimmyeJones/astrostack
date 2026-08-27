@@ -197,6 +197,46 @@ def test_bootstrap_leaves_everything_untouched_when_deep_solve_fails(tmp_path):
         proj.close()
 
 
+def test_bootstrap_leaves_everything_untouched_when_the_deep_wcs_is_celestial_less(tmp_path):
+    """A deep solve that reports success but whose ``.wcs`` sidecar is empty or
+    truncated must not be propagated — it would stamp *every* rescued member with
+    a WCS that locates nothing.
+
+    Regression: the gate was ``not wcs_text``, and an empty sidecar reads back as
+    a truthy (celestial-less) header blob, so the whole batch was written as
+    "solved" and could never be re-offered.
+    """
+    from astropy.io.fits import Header
+
+    proj, _ = _make_project_with_faint_subs(tmp_path, n=8)
+
+    def _celestial_less_solver(*args, **kwargs):
+        return SolveResult(
+            frame_id=-1, fits_path="deep.fits", solved=True,
+            wcs_text=str(Header.fromstring("")), ra_center_deg=None,
+            dec_center_deg=None, pixscale_arcsec=None, rotation_deg=None,
+            error=None,
+        )
+
+    try:
+        res = bootstrap_solve(proj, min_frames=4, deep_solver=_celestial_less_solver)
+        assert res.engaged
+        assert not res.deep_solved
+        assert res.n_propagated == 0
+        assert all(f.wcs_json is None for f in proj.iter_frames())
+    finally:
+        proj.close()
+
+
+def test_propagate_wcs_refuses_a_celestial_less_base():
+    """The propagation helper itself hands back all-``None`` for a base WCS with
+    no celestial reference point, rather than cloning a useless solution."""
+    from astropy.io.fits import Header
+
+    out = propagate_wcs(str(Header.fromstring("")), [(0.0, 0.0), (1.0, 2.0)], 0)
+    assert out == [None, None]
+
+
 def test_bootstrap_skips_deliberately_rejected_subs(tmp_path):
     proj, _ = _make_project_with_faint_subs(tmp_path, n=8)
     try:

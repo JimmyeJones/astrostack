@@ -22,6 +22,24 @@ from seestack.solve.runner import (  # noqa: E402
 )
 
 
+def real_wcs_text(ra: float = 83.63, dec: float = -5.39) -> str:
+    """A minimal but *real* plate solution, shaped the way ASTAP writes one.
+
+    ``apply_solve_result_to_db`` now requires a solved result's WCS to carry a
+    celestial reference point (an empty/truncated ``.wcs`` sidecar parses to a
+    truthy but celestial-less blob), so a stand-in string is no longer a stand-in
+    for "ASTAP solved this frame".
+    """
+    from astropy.wcs import WCS
+
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [ra, dec]
+    w.wcs.crpix = [960.5, 540.5]
+    w.wcs.cdelt = [-2.5 / 3600.0, 2.5 / 3600.0]
+    return str(w.to_header(relax=True))
+
+
 def test_build_solve_arglist_skips_solved(tmp_path):
     proj = Project.create(tmp_path / "p", name="t")
     try:
@@ -243,7 +261,7 @@ def test_solve_one_backfilled_centre_makes_frame_reference_eligible(tmp_path):
         fid = proj.add_frame(FrameRow(source_path="x.fit"))
         apply_solve_result_to_db(proj, SolveResult(
             frame_id=fid, fits_path="x.fit", solved=True,
-            wcs_text="CRVAL1=1.0", ra_center_deg=149.75, dec_center_deg=69.06,
+            wcs_text=real_wcs_text(149.75, 69.06), ra_center_deg=149.75, dec_center_deg=69.06,
             pixscale_arcsec=None, rotation_deg=None, error=None,
         ))
         f = proj.get_frame(fid)
@@ -262,13 +280,13 @@ def test_apply_solve_result_writes_db(tmp_path):
         fid = proj.add_frame(FrameRow(source_path="x.fit"))
         result = SolveResult(
             frame_id=fid, fits_path="x.fit", solved=True,
-            wcs_text="CRVAL1=1.0", ra_center_deg=83.63, dec_center_deg=-5.39,
+            wcs_text=real_wcs_text(), ra_center_deg=83.63, dec_center_deg=-5.39,
             pixscale_arcsec=2.5, rotation_deg=12.0, error=None,
         )
         apply_solve_result_to_db(proj, result)
         f = proj.get_frame(fid)
         assert f is not None
-        assert f.wcs_json == "CRVAL1=1.0"
+        assert f.wcs_json == real_wcs_text()
         assert f.ra_center_deg == 83.63
         assert f.pixscale_arcsec == 2.5
     finally:
@@ -411,12 +429,12 @@ def test_apply_solve_result_clears_stale_solve_failed_reason(tmp_path):
         # Retry succeeds — WCS lands and the stale reason must be gone.
         apply_solve_result_to_db(proj, SolveResult(
             frame_id=fid, fits_path="x.fit", solved=True,
-            wcs_text="CRVAL1=1.0", ra_center_deg=83.63, dec_center_deg=-5.39,
+            wcs_text=real_wcs_text(), ra_center_deg=83.63, dec_center_deg=-5.39,
             pixscale_arcsec=2.5, rotation_deg=12.0, error=None,
         ))
         f = proj.get_frame(fid)
         assert f is not None
-        assert f.wcs_json == "CRVAL1=1.0"
+        assert f.wcs_json == real_wcs_text()
         assert f.reject_reason is None
     finally:
         proj.close()
@@ -449,6 +467,90 @@ def test_apply_solve_result_success_without_wcs_is_an_honest_failure(tmp_path):
         assert (f.reject_reason or "").startswith("solve_failed:")
         # accept is left alone — this is a location failure, not a bad frame.
         assert f.accept is True
+    finally:
+        proj.close()
+
+
+def test_apply_solve_result_rejects_a_readable_but_celestial_less_wcs(tmp_path):
+    """A returncode-0 solve whose ``.wcs`` sidecar reads but carries **no celestial
+    WCS** (empty / truncated / partial header) must be recorded as an honest
+    failure and stay retryable — not stored as a "solved" frame.
+
+    Regression: ``wcs_text_from_sidecar`` returns header text for *any* readable
+    sidecar, so an empty ``.wcs`` came back as a truthy ``"END"``-padding blob that
+    sailed past the ``result.wcs_text is None`` guard the comment says exists to
+    catch "a malformed/partial sidecar". The frame was then persisted with
+    ``wcs_json`` set and a null centre — which ``build_solve_arglist`` skips for
+    ever (truthy ``wcs_json``), so it could never be re-solved, and which
+    ``align_one``'s ``is None`` check also let through into reprojection.
+    """
+    from astropy.io.fits import Header
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        # Exactly what ``wcs_text_from_sidecar`` returns for an empty sidecar and
+        # for a partial header ASTAP hadn't finished writing.
+        empty_sidecar_text = str(Header.fromstring(""))
+        partial_header_text = str(Header.fromstring(
+            "SIMPLE  =                    T"))
+        for i, blob in enumerate((empty_sidecar_text, partial_header_text)):
+            assert blob  # truthy — this is what defeated the old ``is None`` guard
+            path = tmp_path / f"x{i}.fit"
+            path.write_bytes(b"")
+            fid = proj.add_frame(FrameRow(source_path=str(path)))
+            apply_solve_result_to_db(proj, SolveResult(
+                frame_id=fid, fits_path=str(path), solved=True,
+                wcs_text=blob, ra_center_deg=None, dec_center_deg=None,
+                pixscale_arcsec=None, rotation_deg=None, error=None,
+            ))
+            f = proj.get_frame(fid)
+            assert f is not None
+            # Not stored as solved (fail-before: ``wcs_json`` held the blob)...
+            assert f.wcs_json is None
+            assert (f.reject_reason or "").startswith("solve_failed:")
+            # ...the pixels may be fine, so the frame stays accepted...
+            assert f.accept is True
+        # ...and it is re-offered on the next solve pass rather than locked out.
+        offered = [a[0] for a in build_solve_arglist(proj)]
+        assert len(offered) == 2
+    finally:
+        proj.close()
+
+
+def test_apply_solve_result_stores_a_valid_solve_unchanged(tmp_path):
+    """The celestial-validity gate rejects only the garbage case: a normal solve —
+    with or without a parseable ``.ini`` centre — is stored verbatim and is *not*
+    re-offered."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        path = tmp_path / "ok.fit"
+        path.write_bytes(b"")
+        wcs_text = real_wcs_text(149.75, 69.06)
+        fid = proj.add_frame(FrameRow(source_path=str(path)))
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path=str(path), solved=True,
+            wcs_text=wcs_text, ra_center_deg=149.75, dec_center_deg=69.06,
+            pixscale_arcsec=2.5, rotation_deg=12.0, error=None,
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        assert f.wcs_json == wcs_text
+        assert f.ra_center_deg == pytest.approx(149.75)
+        assert [a[0] for a in build_solve_arglist(proj)] == []
+
+        # Same, but the ``.ini`` gave no centre — ``solve_one`` backfills it from
+        # the WCS, so the result still carries one and still stores.
+        path2 = tmp_path / "ok2.fit"
+        path2.write_bytes(b"")
+        fid2 = proj.add_frame(FrameRow(source_path=str(path2)))
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid2, fits_path=str(path2), solved=True,
+            wcs_text=wcs_text, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None, error=None,
+        ))
+        f2 = proj.get_frame(fid2)
+        assert f2 is not None and f2.wcs_json == wcs_text
+        assert [a[0] for a in build_solve_arglist(proj)] == []
     finally:
         proj.close()
 
@@ -502,12 +604,12 @@ def test_apply_solve_result_preserves_a_user_reject_on_success(tmp_path):
         proj.update_frame(fid, accept=False, reject_reason="user")
         apply_solve_result_to_db(proj, SolveResult(
             frame_id=fid, fits_path="x.fit", solved=True,
-            wcs_text="CRVAL1=1.0", ra_center_deg=83.63, dec_center_deg=-5.39,
+            wcs_text=real_wcs_text(), ra_center_deg=83.63, dec_center_deg=-5.39,
             pixscale_arcsec=2.5, rotation_deg=12.0, error=None,
         ))
         f = proj.get_frame(fid)
         assert f is not None
-        assert f.wcs_json == "CRVAL1=1.0"
+        assert f.wcs_json == real_wcs_text()
         # The user's reject stands.
         assert f.reject_reason == "user"
         assert f.accept is False
@@ -717,7 +819,7 @@ def test_run_qc_and_solve_reports_the_frames_it_actually_located(tmp_path):
             if fid == 1:
                 return SolveResult(
                     frame_id=fid, fits_path=args[1], solved=True,
-                    wcs_text="CRVAL1=1.0", ra_center_deg=1.0, dec_center_deg=2.0,
+                    wcs_text=real_wcs_text(1.0, 2.0), ra_center_deg=1.0, dec_center_deg=2.0,
                     pixscale_arcsec=1.0, rotation_deg=0.0, error=None,
                 )
             if fid == 2:

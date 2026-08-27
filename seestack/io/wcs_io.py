@@ -73,6 +73,21 @@ def wcs_center_deg_from_text(text: str | None) -> tuple[float, float] | None:
         return None
 
 
+def wcs_text_is_usable(text: str | None) -> bool:
+    """True when a stored/serialized WCS blob is a *usable* plate solution.
+
+    "Readable" is not the same as "usable": :func:`wcs_text_from_sidecar` returns
+    the header text of *any* readable ``.wcs`` file, and an empty or truncated
+    sidecar parses to a perfectly valid — but celestial-less — header blob
+    (``"END"`` padding, or ``SIMPLE``/``BITPIX`` with no ``CTYPE``/``CRVAL``).
+    That blob is truthy and :func:`wcs_from_text` returns a non-``None`` WCS for
+    it, so ``is None`` guards let it through and it ends up persisted as a frame's
+    solution and fed to reprojection, where it locates nothing. A real solve
+    always carries a celestial reference point, so that's the test.
+    """
+    return wcs_center_deg_from_text(text) is not None
+
+
 def wcs_text_from_sidecar(wcs_path: str | Path) -> str | None:
     """Read an ASTAP ``.wcs`` sidecar file and return its FITS header as text."""
     wcs_path = Path(wcs_path)

@@ -64,3 +64,34 @@ def test_align_returns_none_when_footprint_off_canvas(tmp_path):
         dst_shape=(320, 480),
     )
     assert result is None
+
+
+def test_align_skips_a_celestial_less_source_wcs(tmp_path):
+    """A stored WCS blob that parses but carries no celestial reference point is
+    skipped benignly (``None``) instead of being reprojected.
+
+    Regression: an empty/truncated ASTAP ``.wcs`` sidecar reads as a valid-but-
+    celestial-less FITS header, and older versions persisted that blob as a
+    frame's ``wcs_json``. ``wcs_from_text`` returns a non-``None`` WCS for it, so
+    the ``src_wcs is None`` guard let it through and the frame was reprojected
+    through a WCS that locates nothing — quietly smearing it onto the canvas.
+    """
+    from astropy.io.fits import Header
+
+    p = write_seestar_fits(tmp_path / "x.fit", add_wcs=True, n_stars=10, seed=5)
+    wcs_text = make_synth_wcs_text()
+    # Exactly what an empty ``.wcs`` sidecar reads back as: truthy, parseable,
+    # and useless.
+    garbage = str(Header.fromstring(""))
+    assert garbage
+    assert align_one(
+        str(p), bayer_pattern="RGGB",
+        src_wcs_text=garbage, dst_wcs_text=wcs_text,
+        dst_shape=(320, 480),
+    ) is None
+    # The same frame with its real WCS still aligns (the guard is narrow).
+    assert align_one(
+        str(p), bayer_pattern="RGGB",
+        src_wcs_text=wcs_text, dst_wcs_text=wcs_text,
+        dst_shape=(320, 480),
+    ) is not None

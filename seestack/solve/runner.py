@@ -273,6 +273,8 @@ def _store_solve_failed_reason(project, frame_id, reason: str) -> None:
 
 def apply_solve_result_to_db(project, result: SolveResult) -> None:
     """Write a SolveResult back to the project DB."""
+    from seestack.io.wcs_io import wcs_text_is_usable
+
     if not result.solved:
         # Don't touch accept/reject — a frame may be unsolved transiently
         # (clouds blocked the catalog match) but be perfectly fine for stacking
@@ -303,7 +305,7 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         # Preserve a real prior reason (see ``_store_solve_failed_reason``).
         _store_solve_failed_reason(project, result.frame_id, reason)
         return
-    if result.wcs_text is None:
+    if not wcs_text_is_usable(result.wcs_text):
         # ASTAP reported success (returncode 0 + a ``.wcs`` sidecar) but no usable
         # WCS could be extracted from it — a malformed/partial sidecar, or the
         # ``.ini`` parse raised so the centre coords came back None. Persisting
@@ -320,6 +322,16 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         # ``accept=True`` and is re-offered to solve; a "solved-but-unreadable"
         # result on it must not overwrite its QC state — see
         # ``_store_solve_failed_reason``).
+        #
+        # The gate is *usability*, not ``is None``: ``wcs_text_from_sidecar``
+        # happily returns header text for an empty/truncated ``.wcs`` (a
+        # returncode-0 solve whose sidecar write was cut short), and that blob is
+        # truthy, so an ``is None`` check let it through — the frame was stored
+        # "solved" with a celestial-less ``wcs_json`` and a null centre, which
+        # ``build_solve_arglist`` then skips forever (truthy ``wcs_json``) while
+        # align feeds the useless WCS to reprojection. A genuine ASTAP solve
+        # always ends with a celestial reference point, so requiring one rejects
+        # exactly the garbage case and leaves every real solve untouched.
         _store_solve_failed_reason(
             project, result.frame_id, "unreadable plate solution"
         )

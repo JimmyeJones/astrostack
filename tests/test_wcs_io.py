@@ -225,3 +225,27 @@ def test_canvas_extent_from_fits_reads_the_stored_geometry(tmp_path):
 
     # Missing / headerless master → None (frame-0 fallback).
     assert canvas_extent_from_fits(tmp_path / "nope.fits") is None
+
+
+def test_wcs_text_is_usable_separates_readable_from_usable(tmp_path):
+    """An empty or partial ``.wcs`` sidecar is *readable* — it parses to a truthy
+    header blob and a non-None WCS — but it is not a plate solution. The
+    usability test is the one the solve/align guards rely on to tell them apart.
+    """
+    from seestack.io.wcs_io import wcs_text_is_usable
+
+    empty = tmp_path / "empty.wcs"
+    empty.write_bytes(b"")
+    blob = wcs_text_from_sidecar(empty)
+    assert blob                                     # readable and truthy...
+    assert wcs_from_text(blob) is not None          # ...and parses...
+    assert not wcs_text_is_usable(blob)             # ...but locates nothing.
+
+    partial = tmp_path / "partial.wcs"
+    partial.write_bytes(b"SIMPLE  =                    T")
+    assert not wcs_text_is_usable(wcs_text_from_sidecar(partial))
+
+    assert not wcs_text_is_usable(None)
+    assert not wcs_text_is_usable("")
+    # A real solve is usable.
+    assert wcs_text_is_usable(wcs_to_text(_make_simple_wcs()))

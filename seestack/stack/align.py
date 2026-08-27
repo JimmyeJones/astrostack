@@ -153,6 +153,14 @@ def align_one(
     dst_wcs = wcs_from_text(dst_wcs_text)
     if src_wcs is None or dst_wcs is None:
         raise ValueError(f"missing WCS for {fits_path}")
+    if not src_wcs.has_celestial:
+        # A stored WCS blob that parses but carries no celestial reference point
+        # (an empty/truncated ASTAP ``.wcs`` sidecar reads as one, and older
+        # versions persisted those as "solved" — see ``apply_solve_result_to_db``)
+        # locates nothing, so reprojecting through it would smear this frame onto
+        # an arbitrary part of the canvas. Skip the frame benignly instead, the
+        # same as a footprint that misses the canvas.
+        return None
 
     # When a sub-pixel refine shift (up to SUBPIXEL_SHIFT_CAP_PX px) will follow,
     # widen the reproject window pad to at least that cap so the shift can't push
