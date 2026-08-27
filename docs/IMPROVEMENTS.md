@@ -49,6 +49,34 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**🟡 COSMETIC / SHARE-FACING (Builder 2026-08-27, found by rendering the caption rather than reading it) —
+  the acquisition nameplate baked a hollow `.notdef` box into every shared picture, right where the exposure
+  should be: `(505□30s)`.**~~ — **FIXED v0.282.1** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-z1yulm`). *(Severity: cosmetic, but it lands on the one artefact the owner
+  shows other people — a share export that looks broken. Confidence: reproduced by rendering.)*
+
+  **Root cause.** `nameplate_line` built the sub detail as `f"({n}×{sub_exp})"` with U+00D7, the typographic
+  multiplication sign. The nameplate is drawn with Pillow's *bundled* face (`ImageFont.load_default(size=…)`
+  → Aileron), which covers ASCII and the middot `·` we join parts with, but has **no glyph for `×`** — so
+  FreeType substituted the `.notdef` box. It fired on the common case (both `NFRAMES` and `EXPOSURE` stamped),
+  i.e. essentially every nameplate a healthy install produces. Nothing in the suite noticed, because every
+  existing assertion compared caption *strings*, and the string was always exactly what we intended — the
+  defect only exists once those characters meet the font.
+
+  **Fix.** The detail now reads `(505x30s)` with a plain ASCII `x`, which is the notation astrophotographers
+  write by hand anyway. Two characters of copy; the sole behavioural change.
+
+  **The test is the point.** Rather than pin the one character, `test_nameplate.py` pins the *rule*: it renders
+  every caption shape (full provenance, count-only, single sub, no target) and asserts no character's mask
+  matches the font's `.notdef` box — with the reference glyph itself asserted non-empty, so the check can't
+  quietly degrade into one that always passes. A future tidy-the-typography edit that reaches for `×`, an em
+  dash or a curly quote now fails here instead of shipping a box into someone's picture.
+
+  **Audited the neighbours while here (all clean, no change needed):** every other module that bakes text —
+  `montage.py`, `recap.py`, `render/deepening.py`, `sharecard.py` — was exercised through its real caption
+  builders and every character it can emit has a glyph. `·` is fine; `—` and `→` appear only in *comments and
+  docstrings*, never in drawn strings. The nameplate was the only one.
+
 - ~~**🟠 WRONG-RESULT / DATA-LOSS (Scout QA audit 2026-08-27 #8, branch `claude/vigilant-knuth-gnif14`,
   reproduced end-to-end) — the Seestar "skip a bare `<T>/` output folder when its `<T>_sub` sibling exists"
   rule used a GLOBAL basename set, not a same-parent sibling test, so a root-level `incoming/<T>/` folder of
@@ -179,10 +207,52 @@ _(none — claim an item here with your branch name)_
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
-- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #14, branch `claude/vigilant-knuth-xgiykw`) — a **depth** sweep of the
-  stacking/calibration engine and the walk-away orchestration. Result: CLEAN — no verified bug this run, the
-  fifth consecutive clean engine sweep (#10–#14). Baseline green (full headless suite: **3021 passed, 2
-  skipped** in 12:40).**
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #15, branch `claude/vigilant-knuth-ilxa69`) — a **depth** sweep that
+  led with the stacking engine and then rotated onto the **QC metric layer** (`seestack/qc/*`) that feeds
+  weighting/photometric/grading, plus the stack **output/parity** path. Result: CLEAN — no verified bug this run,
+  the **sixth** consecutive clean engine sweep (#10–#15). Baseline green (full headless suite: **3068 passed, 2
+  skipped** in 11:30). Live app booted + sample stacked end-to-end via `scripts/agent-dogfood.sh` (happy path
+  clean).**
+  **What was read adversarially and traced this run (every item below is a NON-finding — traced to a guard, not a
+  bug). The engine combine/drizzle/photometric/mosaic/calibrate paths re-confirmed as in #14; new-this-run
+  coverage is the QC + output layer:**
+  **QC metrics** (`qc/metrics.py`) — `green_channel` promotes the raw Bayer mosaic to float32 *before* averaging
+  the two green sites, so summing two bright 16-bit green pixels can't wrap mod 2¹⁶ and corrupt exactly the bright
+  stars QC leans on; all four Bayer layouts map G to the correct sites; `median_star_flux`'s `flux[-top_k:]` is
+  slice-safe below `top_k` stars; `median_eccentricity`/`median_fwhm` drop non-finite rows before the median so
+  one NaN source can't poison the whole frame's metric.
+  **QC grading** (`qc/grading.py`) — the `reconsider` pass grades over the *combined* (accepted + previously
+  auto-graded) set, which is invariant under auto-grade's own accept/reject moves, so recommendations are a fixed
+  point (no reject↔re-accept churn) and the `max_reject_fraction` rail is cumulative for free; the total order
+  `(-worst_z, frame_id)` makes the cap boundary deterministic; `star_count==0` (log-undefined, low-is-bad) is
+  treated as maximally bad while the same non-positive value on a high-is-bad metric is correctly skipped; the
+  per-panel rail bounds the damage inside one mosaic panel before the target-wide cap.
+  **QC streaks** (`qc/streaks.py`) — the probabilistic Hough is seeded (`_HOUGH_SEED`) so `streak_count` written
+  to the DB is deterministic and QC stays idempotent; compact bright blobs (stars) are removed by an
+  elongation+length test on the pixel covariance before line-fitting, so a dense star field isn't mistaken for a
+  trail.
+  **QC noise-ratio** (`qc/noise_ratio.py`) — the √N "cut your noise ~N×" badge measures a *raw* neighbour-diff
+  MAD σ (`Var(Iᵢ₊₁−Iᵢ)=2σ²`) over covered pairs only, with a `_MIN_PAIRS` floor and a two-pass object-drop so a
+  bright extended target doesn't inflate the background σ; returns `None` rather than a bogus ratio when either
+  side can't be measured.
+  **QC sky-quality** (`qc/sky_quality.py`) — the "brighter than usual?" read normalises each frame's sky by
+  exposure, keys on the *dominant* (gain, exposure) group so a mixed-setting session can't read as a sky change,
+  buckets by observing night (noon-to-noon) with `MIN_FRAMES_PER_NIGHT`/`MIN_NIGHTS` floors, and stays silent
+  (returns `None`) rather than guessing when there's no "usual" to compare against.
+  **weighting** (`weighting.py`) — geometric mean keeps the weight in `[min_weight, 1.0]`; each factor guards its
+  own zero divisor (`frame_sky<=0`, `frame_ecc==0`) as neutral; the position-dependent trio (stars/sky/transp) is
+  taken per mosaic panel and the `combine_weights_with_photometric` inverse-variance `1/s²` correction only fires
+  on a genuinely-applied scale (returns the same object untouched when photometric is off — byte-for-byte).
+  **stack output / preview↔export parity** (`stack/output.py`) — an editor export is stamped `SSDISPLY`
+  display-space and written verbatim (no double-stretch) across FITS/TIFF/PNG; `_sanitize_basename` blocks path
+  traversal from the web "output name"; `_archive_existing_outputs` moves the whole run set to one timestamped
+  basename (siblings stay siblings) rather than overwriting, and the `_framecov` sibling is only written when it
+  differs from the weighted coverage map — so an ordinary unweighted stack's output set is exactly the size it
+  always was, and the sky-leveling pass reads the honest frame count on a weighted/drizzle mosaic.
+  **pointings** (`pointings.py`) — single-linkage union-find on unit vectors is wrap-safe (RA 359↔1) and pole-safe;
+  `pointing_groups` returns `None` (one target-wide population, today's behaviour) unless ≥2 groups each carry
+  `min_members` eligible frames, so a single-field/unsolved/tightly-packed target is unaffected by every per-panel
+  path that gates on it.
   **What was read adversarially and traced this run (every item below is a NON-finding — traced to a guard, not
   a bug):**
   **stack combine** (`accumulator.py`, `stacker.py`) — the `WeightedSumAccumulator` any-channel frame-count
@@ -8148,9 +8218,89 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-27, spotted while independently building the same nudge) — the v0.283.0
+  grainier-restack note states its gap as a percentage, which stops reading as a quantity past a doubling.**
+  *(Pillar: friendliness / trust — PRIORITY 3. Size: XS — one expression and one test in
+  `GrainierNewestNote.tsx`.)* `percent_grainier` is honest at any size, but the copy prints it raw: a manual
+  restack of a handful of subs against a 500-sub master gives *"about 2400 % more background grain"*, which is
+  arithmetically right and reads as a bug — exactly the wrong impression for a note whose whole job is to make
+  the app look trustworthy when the picture got worse. Past ~200 %, say it the way anyone would out loud:
+  *"about 25.0× as much background grain as your 14 May one"*. Purely phrasing — the endpoint keeps reporting
+  the same number, and the ordinary band (which is where nearly every real firing lands, since the bar is
+  ~17.6 %) is unchanged. **Care:** pin both branches, and pin that the ordinary band still reads as a percent.
+
+- **⚠️ PROCESS NOTE (Builder 2026-08-27) — two Builders independently built the grainier-restack cover nudge in
+  the same hour, from the same backlog entry, and one run's work was thrown away.** *(Not a feature — a
+  coordination lesson worth one paragraph, per AGENTS.md §11.)* Branch `…-z1yulm` shipped `grainier_newest`
+  (v0.281.0) while `…-c43ksl` built a functionally identical `grainier_default` (same bar, same
+  best-earlier-run choice, same round-down, same one-tap `set-cover`); the second was reverted unmerged. §11's
+  claim-by-moving-to-**In progress** rule is exactly what would have prevented it, and *neither* run did it —
+  including this one. The cost is real (a full task's worth of engine + endpoint + component + 22 tests), so:
+  **move the item to "In progress" with your branch name in the commit that starts it, and push that commit
+  early** — a claim that only exists locally until the task is finished claims nothing. Cheap extra insurance
+  for a small item: `git fetch` and re-read the entry right before you start writing code, not just at the top
+  of the run.
+
+- **NEW IDEA (Scout 2026-08-27 #15) — close the loop when auto-grade *brings frames back*: a plain-language,
+  self-hiding note telling the owner "N subs you'd set aside earlier turned out typical after all and are back in
+  your stack", so the machine's second-thoughts are visible instead of silent.** *(Pillar: autonomy + trust,
+  PRIORITY 2–3; size S; additive/read-only — no schema/config/default change. Confidence: traced against the
+  code that already does the re-accepting.)*
+  **The mechanism already exists and is invisible.** On every scan the unattended hook re-grades a live target
+  over the *combined* accepted + previously-auto-graded set (`grade_frames(..., reconsider=...)`), and
+  `apply_grade_reaccepts` genuinely **puts frames back**: a sub auto-rejected *early* — graded against a tiny,
+  noisy population — is re-accepted once hundreds of good subs make it plainly typical (`GradeReport.re_accept`,
+  `qc/grading.py`). This is exactly the kind of "it just fixed itself" autonomy the app is built on. But nothing
+  tells the owner it happened: the reject direction surfaces (frames move to a "set aside" bucket with a reason),
+  while the *re-accept* direction is silent, so a beginner who once saw "40 rejected" and now sees "28 rejected"
+  has no idea the app reconsidered — it just looks like the number wobbled.
+  **Why it's worth surfacing.** The single most trust-building thing an autonomous app can do is *show its work*
+  when it changes its mind in the user's favour. "As more subs arrived, 12 frames you'd set aside turned out
+  typical after all and were welcomed back into your stack" is reassuring, teaches the beginner that early
+  rejections aren't permanent, and pre-empts the "why did my accepted count jump?" confusion. It also makes the
+  fixed-point property (the reconsider pass can't churn) legible: the owner learns the app settles, not thrashes.
+  **Shape (small, honest, quiet).** `apply_grade_reaccepts` already returns the ids it changed; thread that count
+  through the scan/auto-grade result the Target page already reads (the same place the reject count and
+  "N couldn't be aligned" line come from) as one additive field, and render one calm sentence **only when the
+  count is > 0** — self-hiding otherwise, exactly like the existing set-aside note, so it's never a nag. No new
+  endpoint shape is required if the auto-grade summary is already returned; if it isn't surfaced at all yet, a
+  read-only `reaccepted: N` on the target's QC/grade summary is the whole backend. **Guardrails:** additive,
+  read-only, off nothing; incoming/ untouched; a plain regression test that a target whose population grew past a
+  borderline early-reject reports a non-zero re-accept count and the sentence renders (and hides at 0).
+
+- **NEW IDEA (Builder 2026-08-27, the class of bug the v0.282.1 tofu-glyph fix belongs to) — nothing in the app
+  ever *looks at* the pixels it bakes text onto, so a whole family of "the picture is wrong but the string is
+  right" defects is invisible to the suite.** *(Pillar: trust / image quality — PRIORITY 3–4. Size: S.
+  Confidence: this run shipped a fix for exactly one instance of it, which had been live for months.)*
+  The nameplate shipped `(505×30s)` into every share export for months; every assertion in the suite compared
+  the caption *string*, which was always exactly right — the defect only existed once the characters met
+  Pillow's bundled Aileron face, which has no glyph for `×`. `tests/test_nameplate.py` and
+  `tests/test_keepsake.py` now pin the glyph rule for those two modules, but the same blind spot covers
+  **every** module that draws text: `montage.py`, `recap.py`, `render/deepening.py`, `sharecard.py` (all
+  audited clean by hand this run — but by hand, not by a test that stays true). **The idea:** one shared test
+  helper (`assert_drawable(text)`, comparing each character's mask to the font's `.notdef` box) plus a small
+  parametrised test that walks *every* caption builder in the codebase through it. Cheap, permanent, and it
+  turns a hand-audit into a guarantee. **Care:** the reference glyph must itself be asserted non-empty — a
+  future Pillow that maps unmapped codepoints to a blank would silently turn the check into one that can never
+  fail (that trap is already commented in `test_nameplate.py`).
+
+- **NEW IDEA (Builder 2026-08-27, the natural next tap on the v0.283.0 keepsake) — the keepsake titles itself
+  from the FITS `OBJECT` card, so an Unsorted or folder-named target gets a keepsake titled with a folder
+  name.** *(Pillar: enjoy + share / friendliness — PRIORITY 3. Size: S — both halves already exist.)*
+  `_nameplate_fields` takes the title from `OBJECT`, falling back to the library entry's name. For a beginner
+  who dropped loose FITS, that is `Unsorted` or `MyWorks_2026-08-14` — printed, in serif, under the picture
+  they were about to post. Meanwhile `GET /api/targets/{safe}/identify` already resolves the proper catalog
+  name from the plate-solved centre (`seestack.objectinfo.identify_object`, `matched_by == "coords"`), and the
+  `ObjectInfoCard` already *shows* it. Wire the one to the other: when the stored name is generic and
+  `identify` matched by coordinates with a confident separation, title the keepsake with the catalog name.
+  **Pairs with** the still-open "Rename to {name}?" chip in this section — same signal, two surfaces — and
+  either could ship first. **Care:** keep it to the *keepsake caption* (a display-time render), never write the
+  name back to the target or the FITS without a tap; and keep the fallback chain honest, so a confident
+  identification is the only thing that overrides what the user's own data says.
+
 - ~~**NEW IDEA (Scout 2026-08-27 #14) — make the "keep shooting?" readiness verdict defer to the *measured*
   result when a real stack exists, so the Target page can never tell a beginner "keep going" while their
-  picture is already visibly clean (or "plenty" while it's still grainy).**~~ — **SHIPPED v0.282.0**
+  picture is already visibly clean (or "plenty" while it's still grainy).**~~ — **SHIPPED v0.284.0**
   (Builder 2026-08-27, branch `claude/compassionate-galileo-c43ksl`) — folded into the "Is more time worth
   it?" feature it was filed to pair with, rather than shipped as a second surface. *(Pillar: friendliness +
   trust — PRIORITY 3.)*
@@ -8191,24 +8341,60 @@ to **Shipped**.)_
     confirm the Target page doesn't already cross-reference `noise_sigma` in the readiness card
     (`LibraryProgressCard`/`readiness.ts` today read only the integration total).
 
-- **NEW IDEA (Builder 2026-08-27, the mirror case the v0.279.1 cover nudge deliberately left out) — when
+- ~~**NEW IDEA (Builder 2026-08-27, the mirror case the v0.279.1 cover nudge deliberately left out) — when
   *nothing* is pinned, the cover follows the newest stack, so a cloudy night's restack can silently replace a
-  better picture with a grainier one. Offer to pin the good one back.** *(Pillar: autonomy + trust —
-  PRIORITY 2–3. Size: S — the machinery already exists.)* `seestack/covernudge.py` answers "is the newest
-  stack cleaner than the **pinned** cover?"; with no pin there is nothing to compare against, so it stays
-  silent by design — but that is exactly the state a beginner is in, and it is the state where the *default*
-  can go backwards. A restack through haze, or one where a lot of subs were set aside, produces a legitimately
-  newer stack with a materially **higher** `noise_sigma` than one the target already has, and because the
-  unpinned cover means "newest", the Library tile, "My best pictures" and the montage wall all switch to it
-  with nothing said. **The nudge:** when nothing is pinned and the newest genuine stack is materially noisier
-  (the same `CLEANER_RATIO` in reverse) than the best earlier genuine stack, say so once — *"Last night's
-  stack came out grainier than your 14 May one (about 30 % more background grain) — it was probably hazy.
-  Show the better one instead?"* — with a one-tap pin of the earlier run, reusing `set-cover` exactly as the
-  cleaner-shot note does. **Why it is worth a run:** it turns a silent quality regression into an explained
-  one, which is the trust half of the app's promise, and it is the case a beginner (who never pins anything)
-  actually hits. **Care:** genuine stacks only, both σ finite, and the *earlier* run must still have its
-  preview on disk; keep it to one nudge, and make sure it and the v0.279.1 note can never both speak (they are
-  mutually exclusive by construction — one needs a pin, the other needs none — but pin a test on that).
+  better picture with a grainier one. Offer to pin the good one back.**~~ — **SHIPPED v0.282.0** (Builder
+  2026-08-27, branch `claude/compassionate-galileo-z1yulm`).
+
+  **What shipped.** `seestack/covernudge.py` grew `grainier_newest(genuine_runs, cover_run_id)` — the exact
+  mirror of `cleanest_shot`, firing *only* when nothing is pinned, and offering the **cleanest earlier** genuine
+  run (not merely the previous one), with ties broken toward the more recent picture. It reuses the same
+  `CLEANER_RATIO` in reverse (the newest must be ≥ ~17.6 % grainier — `1/0.85`) and the same `_usable_sigma`
+  guard, so a pre-schema-6 or degenerate σ on *either* side is silence, and one unusable run in the history
+  doesn't silence the nudge — it just isn't a candidate. `percent_grainier` rounds **down** and floors at 1, so
+  the headline can only understate. `GET /api/targets/{safe}/grainier-newest` +
+  `frontend/src/components/GrainierNewestNote.tsx` (in the Target page's NoticeBoard at `advisory` priority,
+  beside the cleaner-shot note) offer the earlier run through the same one-tap `setTargetCover` History's star
+  uses. It never pins anything by itself.
+
+  **Two guards the original spec asked for, both pinned by tests.** (1) *Mutual exclusivity* — provable by
+  construction (`cleanest_shot` returns `None` unless `cover_run_id is not None`; `grainier_newest` returns
+  `None` unless it is `None`), and pinned end-to-end in `test_the_two_cover_nudges_are_mutually_exclusive`,
+  which flips the pin and checks both endpoints in both states. (2) *The earlier run's preview must still be on
+  disk*, else pinning it falls straight back to the newest stack and the nudge looks broken.
+
+  **One guard the spec didn't ask for, added after tracing the display path.** Unpinned, every showcase surface
+  takes the newest run *with a preview* out of **all** runs (`gallery._representative_run`), which can be an
+  **editor export** rather than the newest genuine stack — so telling the owner their picture got grainier while
+  a different image is on screen would simply be wrong. The endpoint asks that same shared helper and stays
+  silent unless the grainy stack is genuinely what's on show.
+
+  **Upgrade-safe (§9):** one added read-only endpoint and one added response model; no config, schema, on-disk,
+  default or API-shape change, and nothing is ever pinned without a tap. **Tests:** +9 in
+  `tests/test_covernudge.py` (the cleanest-earlier pick, tie-break, threshold in both directions, unusable-σ
+  matrix, the skip-don't-silence case, the pinned-is-silent mirror), +8 in
+  `tests/webapp/test_target_grainier_newest.py` (the offer and its numbers, mutual exclusivity, editor-export
+  not compared, not-the-picture-on-show, missing preview, single stack, 404), and +5 in
+  `frontend/src/components/GrainierNewestNote.test.tsx` (copy with the numbers, the sky-not-sub-count branch,
+  the set-cover call targeting the *earlier* run, and both silent paths).
+
+  Original spec, for the record:
+
+    `seestack/covernudge.py` answers "is the newest
+    stack cleaner than the **pinned** cover?"; with no pin there is nothing to compare against, so it stays
+    silent by design — but that is exactly the state a beginner is in, and it is the state where the *default*
+    can go backwards. A restack through haze, or one where a lot of subs were set aside, produces a legitimately
+    newer stack with a materially **higher** `noise_sigma` than one the target already has, and because the
+    unpinned cover means "newest", the Library tile, "My best pictures" and the montage wall all switch to it
+    with nothing said. **The nudge:** when nothing is pinned and the newest genuine stack is materially noisier
+    (the same `CLEANER_RATIO` in reverse) than the best earlier genuine stack, say so once — *"Last night's
+    stack came out grainier than your 14 May one (about 30 % more background grain) — it was probably hazy.
+    Show the better one instead?"* — with a one-tap pin of the earlier run, reusing `set-cover` exactly as the
+    cleaner-shot note does. **Why it is worth a run:** it turns a silent quality regression into an explained
+    one, which is the trust half of the app's promise, and it is the case a beginner (who never pins anything)
+    actually hits. **Care:** genuine stacks only, both σ finite, and the *earlier* run must still have its
+    preview on disk; keep it to one nudge, and make sure it and the v0.279.1 note can never both speak (they are
+    mutually exclusive by construction — one needs a pin, the other needs none — but pin a test on that).
 
 - **NEW IDEA (Builder 2026-08-27, the obvious next tap on the v0.280.0 "nearly there" card) — the constellation
   nudge names the object that's up tonight but gives no way to act on it.** *(Pillar: friendliness /
@@ -8234,7 +8420,25 @@ to **Shipped**.)_
   to those two keys (with their own copy — "kept your existing picture because last night's frames were thinner /
   from a different framing") so all three hold reasons have a Target-page answer, not just one. Grep-confirm they
   aren't surfaced elsewhere first (`ambient/voicing.ts` and `mixedPointings.ts` mention thin/mixed but for other
-  surfaces). Original idea kept below for the record.
+  surfaces).
+
+  _(**Builder 2026-08-27 — did that grep, and the remaining slice is now mostly REDUNDANT. Read this before
+  picking it up; I considered it and deliberately did not build it.**_ Both leftover cases already have a
+  Target-page voice, and adding a second one would be exactly the banner-piling the standing IA item forbids:
+  * **mixed-pointing** — `routes/Target.tsx` already renders *"This batch looks like N different targets"*
+    (`detectMixedPointings`, computed client-side from the frames) **with a one-tap "Reject the N odd-target
+    frames" button**. That is strictly more useful than a passive hold note, because it offers the fix.
+  * **held-thin** — `routes/Target.tsx` already computes `heldForSolve` from the live settings
+    (`auto_stack` + `auto_stack_min_frames`) against the target's own solved-accepted count, and says so with
+    the plate-solve next step; `thinStackWarning` covers the after-the-fact half. Between them the beginner is
+    told.
+  **The one genuinely uncovered sliver**, if anyone wants it: `heldForSolve` requires `unsolvedCount > 0` (it is
+  framed as "waiting to be located"), so a target sitting below the floor with *nothing left to solve* — e.g. 2
+  accepted frames, both solved — gets no note. That is also the case where the beginner can plainly see they
+  have two frames, so the value is small. If it is ever built, extend the **existing** `heldForSolve` branch
+  rather than adding a third banner, and prefer the server's recorded fact over the client-side guess.)_
+
+  Original idea kept below for the record.
 
   **⛔ Builder 2026-08-27 — DID the grep this slice asks for, BUILT it, then REVERTED it and closed the slice.
   Do not re-pick it: both remaining kinds are already on the Target page, from better data.** I implemented the
@@ -15238,9 +15442,50 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready *cinematic zoom* of your
+  finished picture — a short looping clip that glides from the whole frame into the target and back out, so a
+  galaxy or nebula makes a scroll-stopping post instead of a still that's easy to swipe past.** *(Pillar: enjoy +
+  share, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network, no schema/config
+  change.)*
+  **Why a beginner wants it.** After the app has done its job the owner has a genuinely beautiful frame, and the
+  *only* thing they want to do with it is show people. The app already exports it well as a still (share JPEG,
+  wallpaper, keepsake, recap poster) — but the platforms a Seestar beginner actually posts to (Instagram Reels,
+  TikTok, WhatsApp status) reward **motion**: a slow push-in on a spiral galaxy reads as "look what I made" in a
+  way a static image never does, and it's the format a non-expert has no tool to produce. A one-tap "Reveal"
+  turns the finished picture into that clip with zero craft required.
+  **What it is (and is deliberately NOT).** A short (~6 s) looping **Ken-Burns** animation of the *already
+  display-stretched* result: ease-in from the full field to a centred, ~2× crop on the target, hold a beat, ease
+  back out. That's it — no music, no text overlay, no multi-clip edit. It is **not** the existing "deepening"
+  reel (`render/deepening.py`, a *temporal* cross-run "getting deeper night after night" animation) nor the
+  in-stack "watch it appear" progress reel (`stacker.py` `_progress.webp`) — both show the stack *accumulating
+  over time*; Reveal is a purely **spatial** camera move over one finished frame, a different artefact answering
+  a different want (grepped 2026-08-27: no ken-burns / cinematic / zoom-reveal / pan feature filed or shipped —
+  the only "zoom" hit is the Gallery lightbox's manual pan/zoom, which is interactive viewing, not an export).
+  **Sane auto-default (no knobs).** The crop centre is the target: use the run WCS to project the catalogued
+  object's RA/Dec to pixels (the same `identify`/`objects_in_field`/scale-bar WCS path already read on the
+  result), falling back to the picture's brightness centroid (or plain image centre) when there's no solve — so
+  a beginner never frames anything. Fixed timing, fixed ~2× zoom, fixed easing. NaN/uncovered pixels render black
+  exactly like every other export.
+  **Reuses existing machinery — almost no new surface.** The frames are Pillow crops+resizes of the stored
+  display-space preview/FITS (no re-stretch — `already_display` semantics), and the encoder is the **same
+  animated-WEBP-with-APNG-fallback** path `render/deepening.py` and `stacker.py` already use
+  (`img.save(..., save_all=True, append_images=..., loop=0)`). The core is a pure, unit-testable
+  `render/reveal.py::build_reveal(rgb, focus_xy, *, seconds, zoom, size) -> list[PIL.Image]` (deterministic
+  keyframe schedule; assert frame count, that frame 0 ≈ full-frame and the mid frame is a tighter crop centred on
+  `focus_xy`, and that a NaN canvas stays finite/black). Cached beside the outputs as `{base}_reveal.webp`
+  (add to `RUN_ARTEFACT_SUFFIXES` so archive/delete already sweep it), served through the existing result/History
+  download menu next to Share/To-phone/Wallpaper.
+  **Guardrails/feasibility.** Additive and reversible; nothing on by default changes; incoming/ untouched;
+  offline and deterministic (no `Date.now`/RNG in the schedule — timing is index-derived), so it's fully
+  testable. Memory-bounded: one downscaled crop frame at a time, at share resolution (≤~1080 px long edge), never
+  the full 100-MP mosaic. **Builder slices:** (a) pure `build_reveal(...)` + unit tests; (b) wire the cached
+  `_reveal.webp` write into the output writer + `RUN_ARTEFACT_SUFFIXES` + a result-menu download button
+  (self-hiding until the file exists); (c) optional later — a portrait (9:16) variant for phone-native posting,
+  mirroring the existing wallpaper-aspect crops.
+
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #14) — "Is more time worth it?": a plain-language, *measured*
   grain projection that tells a beginner how much cleaner their picture would actually get with more light —
-  from THIS target's own result, not a generic rule of thumb.**~~ — **SHIPPED v0.282.0** (Builder 2026-08-27,
+  from THIS target's own result, not a generic rule of thumb.**~~ — **SHIPPED v0.284.0** (Builder 2026-08-27,
   branch `claude/compassionate-galileo-c43ksl`). *(Pillar: understand + plan — PRIORITY 2–3.)*
 
   **What shipped.** `frontend/src/components/target/grainProjection.ts` — a pure
@@ -15331,31 +15576,75 @@ problems. Dogfood it every big-picture run and fix root causes.
     the readiness improvement filed under Autonomy & friendliness this run (make the fixed time-goal defer to the
     measured result so the two surfaces never contradict).
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #13) — "Framed keepsake": a one-tap, print-and-share-ready export of
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #13) — "Framed keepsake": a one-tap, print-and-share-ready export of
   a finished picture with a tasteful matte border and the object's name, capture date, and total integration
-  time baked into the image itself.** *(Pillar: enjoy + share — PRIORITY 3. Size: M. Confidence the gap is real:
-  grepped this run — the share path shares the *raw* JPEG with only a share-sheet caption; nothing bakes a
-  titled/bordered keepsake into the pixels.)*
-  **The gap.** Today `SharePictureButton` (`frontend/src/components/SharePictureButton.tsx`) opens the OS share
-  sheet with the run's bare JPEG plus a pre-filled *text* caption (`sharePictureText`, `src/share.ts:106`). But
-  on Instagram / Messages / a printed 6×4, **the caption text doesn't travel with the picture** — the beginner
-  ends up with an unlabelled rectangle and no record of what it is or how much light it took. Every "proper"
-  astrophoto a beginner admires online is a *titled, framed* keepsake; we produce only the raw frame.
-  **The feature.** A *"Save as keepsake"* action (next to Share/Download) that composites the finished picture
-  onto a small matte with a caption strip: **object name** (from the target / the `identify` card that already
-  exists), **capture date**, and **total integration** (e.g. "2 h 14 m · 132 subs") — every field the app already
-  computes (`session-recap` / integration-goal machinery expose the integration total; the target carries name +
-  date). Output is one self-contained PNG/JPEG the user can post or print, with the story baked in.
-  **Why it clears the beginner bar:** zero knowledge required, a sane default layout (dark matte, small serif
-  caption, the app never asks the user to design anything), plain-language fields, and it is **purely additive** —
-  a new export artefact beside the existing ones; the raw picture, the FITS, and every current surface are
-  untouched. Not a pro knob.
-  **Why it's cheap:** the compositing is the montage/annotation pattern already in the codebase
-  (`seestack/montage.py`, the annotation renderer, and the recap-poster path `GET /api/recap.jpg` which *already*
-  renders a captioned hero image server-side — the keepsake is the same shape scoped to one run). Reuse
-  `write_share_jpeg`'s encode. **Pairs naturally with** the #12 "Scale & sky-compass" idea below (a keepsake with
-  a scale bar is the complete package) and the #13 curation note that `identify` already supplies the object's
-  proper name. Additive/offline/upgrade-safe; new endpoint + one button, no schema/default/API removal.
+  time baked into the image itself.**~~ — **SHIPPED v0.283.0** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-z1yulm`).
+
+  **What shipped.** `seestack/keepsake.py` — pure, offline, no `webapp` imports — mats a finished picture on a
+  dark card and sets its **name as a title** and its **acquisition data as a subtitle beneath it**:
+  *"M 31" / "2h 14m (132x30s) · 26 Aug 2026 · ZWO Seestar S50"*. `GET
+  …/stack-runs/{id}/jpeg?keepsake=true` serves it (composing with `north_up`), and it is one tap from the
+  **Target** page's existing "Save / share" menu — as a download *and* as a **share**, which is the tap that
+  actually matters — plus the **History** card's menu for older runs. Nothing new appears on the page: both
+  live inside the grouping the IA slice already built.
+
+  **How it relates to the nameplate, which the Scout's grep didn't spot.** `seestack/nameplate.py` already
+  existed and already bakes these facts — but as a translucent bar drawn *over* the picture, reachable only
+  from an Editor-export checkbox a beginner never finds. So the keepsake is deliberately its **sibling, not a
+  duplicate**: a nameplate covers sky and keeps the frame's shape (still a wallpaper); a keepsake adds a mount
+  and covers nothing (a print). Both read the same `NameplateFields` and now share one
+  `nameplate.acquisition_parts()` — an additive refactor with `nameplate_line` byte-identical — so the two can
+  never drift on wording or on which fields count as missing. `png_bytes_to_jpeg` takes both, and a keepsake
+  **wins** if somehow both are asked for, so nothing is ever captioned twice.
+
+  **Design decisions worth keeping.** The matte is near-black but *not* black (a picture's own NaN corners are
+  black and would bleed into the mount), with a hairline just outside the picture so a dark sky still reads as
+  a framed photograph rather than a hole in the card. Mount and type sizes scale with the picture's **short**
+  side, so a wide mosaic and a square crop get proportionally the same frame; the caption shrinks to fit rather
+  than overflowing. No provenance at all is a clean **no-op** — an empty mount is worse than no mount. The
+  keepsake carries its own filename (`…_keepsake.jpg`, and `keepsakeFilename()` on the share side) so saving
+  both can't have one silently overwrite the other.
+
+  **Upgrade-safe (§9):** a new opt-in query flag on an existing endpoint, a new pure module, and two menu items;
+  no config, schema, on-disk, default or API-shape change, and a test pins that the plain JPEG download is
+  **byte-for-byte unchanged** without the flag. **Tests:** +12 in `tests/test_keepsake.py` (caption split and
+  its degradations, the picture's pixels untouched, mount geometry and the deep foot, the hairline, the no-op,
+  short-side scaling, a long caption on a tiny card, non-RGB input, and the glyph rule), +3 in
+  `tests/webapp/test_stack_render.py` (the framed download and its filename, keepsake-beats-nameplate, and the
+  unchanged-without-the-flag guarantee), +3 in `frontend/src/api/stackRenderUrl.test.ts`, +4 in
+  `share.test.ts`, +1 in `Target.test.tsx`.
+
+  **Found and fixed on the way (shipped separately, v0.282.1):** rendering the caption rather than reading it
+  showed the *nameplate* had been baking a hollow `.notdef` box into every share — `(505□30s)` — because
+  Pillow's bundled Aileron face has no glyph for `×`. See the Bugs section. Both modules now pin the rule that
+  every character a caption can emit must have a real glyph.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy + share — PRIORITY 3. Size: M. Confidence the gap is real:
+    grepped this run — the share path shares the *raw* JPEG with only a share-sheet caption; nothing bakes a
+    titled/bordered keepsake into the pixels.)*
+    **The gap.** Today `SharePictureButton` (`frontend/src/components/SharePictureButton.tsx`) opens the OS share
+    sheet with the run's bare JPEG plus a pre-filled *text* caption (`sharePictureText`, `src/share.ts:106`). But
+    on Instagram / Messages / a printed 6×4, **the caption text doesn't travel with the picture** — the beginner
+    ends up with an unlabelled rectangle and no record of what it is or how much light it took. Every "proper"
+    astrophoto a beginner admires online is a *titled, framed* keepsake; we produce only the raw frame.
+    **The feature.** A *"Save as keepsake"* action (next to Share/Download) that composites the finished picture
+    onto a small matte with a caption strip: **object name** (from the target / the `identify` card that already
+    exists), **capture date**, and **total integration** (e.g. "2 h 14 m · 132 subs") — every field the app already
+    computes (`session-recap` / integration-goal machinery expose the integration total; the target carries name +
+    date). Output is one self-contained PNG/JPEG the user can post or print, with the story baked in.
+    **Why it clears the beginner bar:** zero knowledge required, a sane default layout (dark matte, small serif
+    caption, the app never asks the user to design anything), plain-language fields, and it is **purely additive** —
+    a new export artefact beside the existing ones; the raw picture, the FITS, and every current surface are
+    untouched. Not a pro knob.
+    **Why it's cheap:** the compositing is the montage/annotation pattern already in the codebase
+    (`seestack/montage.py`, the annotation renderer, and the recap-poster path `GET /api/recap.jpg` which *already*
+    renders a captioned hero image server-side — the keepsake is the same shape scoped to one run). Reuse
+    `write_share_jpeg`'s encode. **Pairs naturally with** the #12 "Scale & sky-compass" idea below (a keepsake with
+    a scale bar is the complete package) and the #13 curation note that `identify` already supplies the object's
+    proper name. Additive/offline/upgrade-safe; new endpoint + one button, no schema/default/API removal.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
   intuitive units) plus a North/East compass baked into a shared/exported picture, so a beginner's shot reads
