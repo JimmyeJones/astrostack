@@ -1231,6 +1231,7 @@ describe("StackView", () => {
       is_mosaic: false, peak_bytes: 7e6, peak_gb: 0.01,
       budget_bytes: 8e9, budget_gb: 8, would_exceed: false,
       suggested_drizzle_scale: null, suggested_reference_canvas: false, memory_fix: null,
+      auto_reject_resolved: null,
     });
 
     renderStack();
@@ -1250,6 +1251,7 @@ describe("StackView", () => {
       is_mosaic: true, peak_bytes: 5.4e9, peak_gb: 5.4,
       budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
       suggested_drizzle_scale: null, suggested_reference_canvas: false, memory_fix: null,
+      auto_reject_resolved: null,
     });
 
     renderStack();
@@ -1271,6 +1273,7 @@ describe("StackView", () => {
       budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
       suggested_drizzle_scale: 1.4, suggested_reference_canvas: false,
       memory_fix: { kind: "drizzle_scale", value: 1.4, peak_bytes: 1.3e9, peak_gb: 1.3 },
+      auto_reject_resolved: null,
     });
 
     renderStack();
@@ -1294,6 +1297,7 @@ describe("StackView", () => {
       budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: true,
       suggested_drizzle_scale: null, suggested_reference_canvas: true,
       memory_fix: { kind: "reference_canvas", value: null, peak_bytes: 1.2e9, peak_gb: 1.2 },
+      auto_reject_resolved: null,
     });
 
     renderStack();
@@ -1321,6 +1325,7 @@ describe("StackView", () => {
       // passes (a smaller change than cropping the canvas) is offered first.
       suggested_drizzle_scale: null, suggested_reference_canvas: false,
       memory_fix: { kind: "reduce_outlier_passes", value: null, peak_bytes: 0.77e9, peak_gb: 0.77 },
+      auto_reject_resolved: null,
     });
 
     renderStack();
@@ -1342,8 +1347,71 @@ describe("StackView", () => {
       is_mosaic: mosaic, peak_bytes: over ? 5.4e9 : 3e8, peak_gb: over ? 5.4 : 0.3,
       budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: over,
       suggested_drizzle_scale: null, suggested_reference_canvas: false, memory_fix: null,
+      auto_reject_resolved: null,
     };
   }
+
+  function rejectFields(): client.StackOptionField[] {
+    return [
+      { key: "auto_reject", label: "Auto outlier removal", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+      { key: "min_max_reject", label: "Min/max rejection", type: "bool", group: "simple",
+        default: false, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ];
+  }
+
+  it("says which method Auto outlier removal will actually use, and greys the toggles it overrides", async () => {
+    // The form used to show "Sigma clipping: ON" while a 6-frame stack really
+    // ran min/max — the displayed state could be the exact opposite of what
+    // happened, and the beginner only found out from the History badge.
+    mockSchema(rejectFields());
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({
+      auto_reject: true, sigma_clip: true, min_max_reject: false });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue({
+      ...estimateResult(false, false),
+      n_frames: 6,
+      auto_reject_resolved: { method: "min_max", switch_at_frames: 11, n_frames: 6 },
+    });
+
+    renderStack();
+
+    // The truth, in the user's own numbers, not a generic "auto decides".
+    await waitFor(() => expect(
+      screen.getByText(/with 6 accepted, solved subs it will use min\/max rejection/),
+    ).toBeInTheDocument());
+    expect(screen.getByText(/switches to sigma clipping from about 11 subs/))
+      .toBeInTheDocument();
+    // …and the two switches Auto overrides no longer read as live controls.
+    expect(screen.getByRole("switch", { name: "Sigma clipping" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Min/max rejection" })).toBeDisabled();
+    // Auto itself stays live — turning it off is how you take the wheel back.
+    expect(screen.getByRole("switch", { name: "Auto outlier removal" }))
+      .not.toBeDisabled();
+  });
+
+  it("leaves the rejection toggles live when Auto outlier removal is off", async () => {
+    mockSchema(rejectFields());
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({
+      auto_reject: false, sigma_clip: true, min_max_reject: false });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue({
+      ...estimateResult(false, false), n_frames: 6, auto_reject_resolved: null });
+
+    renderStack();
+
+    await waitFor(() => expect(
+      screen.getByRole("switch", { name: "Sigma clipping" })).not.toBeDisabled());
+    expect(screen.getByRole("switch", { name: "Min/max rejection" }))
+      .not.toBeDisabled();
+    expect(screen.queryByText(/Auto outlier removal is on/)).not.toBeInTheDocument();
+  });
 
   it("nudges Drizzle on a large single-field set that fits the budget", async () => {
     mockSchema([

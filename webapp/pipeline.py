@@ -444,6 +444,11 @@ def submit_build_master(
             "n_frames": entry["n_frames"], "width_px": entry["width_px"],
             "height_px": entry["height_px"],
             "n_skipped": len(skipped), "skipped_buckets": skipped_buckets,
+            # How many frames the user actually pointed at, so a build that was
+            # sampled down to the memory bound can say so. A beginner who drops
+            # 200 darks and reads "built from 64 frames" has no way to tell
+            # whether 136 failed or the app is broken; it did neither.
+            "n_supplied": meta.n_supplied,
         }
 
     return jm.submit("build_master", body)
