@@ -49,15 +49,46 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟠 BROKEN-UX (Scout QA audit 2026-08-27 #18, branch `claude/vigilant-knuth-qtz5h4`, reproduced end-to-end)
+- ~~**🟠 BROKEN-UX (Scout QA audit 2026-08-27 #18, branch `claude/vigilant-knuth-qtz5h4`, reproduced end-to-end)
   — a Moon/Sun still stacked with BOTH `crop` and `sharpen>0` advertises its sharpen slider as editable
   (`sharpen_editable=True`) but EVERY attempt to change the sharpening is refused with a 400: *"This picture's
   crop can't be worked out any more, so changing the sharpening would lose it — stack the capture again
   instead."* The advertised control is permanently dead, and the only "recovery" it offers (re-stack) is
-  impossible once the source clip is off the NAS.** *(Severity: broken-UX — a control the app offers always
+  impossible once the source clip is off the NAS.**~~ — **FIXED v0.286.1** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-j38hmo`). *(Severity: broken-UX — a control the app offers always
   fails on a common option combination; not wrong-result, the finished picture is fine. Confidence: reproduced
   end-to-end by reconstructing the exact on-disk artefacts + meta that `_video_stack_body(crop=True,
   sharpen>0)` writes, then calling `sharpen_saved_still`.)*
+
+  **Fix — exactly the direction filed below: the kept original's *size* separates the two crop shapes.** A new
+  `_backup_is_already_framed(out_dir, meta)` answers "does `stack-full.*` already carry the picture's current
+  framing?" from one PNG header read (`width <= meta.width and height <= meta.height`), sharing a new
+  `_backup_size` helper with `crop_is_restorable`, which was already deciding its own question the same way.
+  `sharpen_saved_still` now asks for a box **only** when the original is the bigger, uncropped frame an
+  in-place crop trimmed; a stack-time crop rebuilds with `box=None`, which is right because the backup is
+  already the cropped soft render — sharpening it reproduces `stack.*` exactly. The refusal is kept for the
+  case it was written for (a genuine in-place crop whose full frame is there but whose box can no longer be
+  established). Two latent problems in the same code went with it: the **double-crop risk** the audit flagged
+  (a re-measured box can never be applied to an already-cropped backup now, whatever `measure_framing` would
+  have said), and a crop whose box *was* recorded but whose backup is gone, which used to re-crop the finished
+  picture on the next sharpen. A box that is deliberately not re-applied is now left recorded rather than
+  cleared. **Also closed the matching hole in `restore_full_still`:** "undo crop" is already hidden for these
+  stills (`crop_is_restorable` is False), but a direct POST would have moved the *cropped* original back,
+  relabelled the picture uncropped and consumed the only copy the sharpening re-derives from — it now refuses
+  with a sentence that says why ("cropped while it was being stacked… stack the capture again without
+  cropping").
+
+  **Upgrade-safe (§9):** pure read-time logic over artefacts that already exist; no config, schema, on-disk
+  layout, API shape or default change, and every existing still keeps behaving exactly as it did — the new
+  branch is reachable only for the stack-time-crop+sharpen shape, which is precisely the one that was broken.
+  **Tests (+3 in `tests/webapp/test_video_sharpen_still.py`, all fail before / pass after):** a stack-time
+  crop+sharpen still re-sharpens to a new strength and lands **byte-for-byte** on `sharpen(cropped_soft, a)`
+  with the crop kept; an off-centre disk walked through three strengths never loses a pixel of framing; and
+  the direct uncrop is refused without consuming the original (the sharpening still works afterwards). A new
+  `_write_stack_time_crop_still` helper builds the artefacts `_video_stack_body(crop=True, sharpen>0)` writes,
+  so none of this needs ffmpeg. Full suite green.
+
+  Original spec, for the record:
 
   **Root cause (traced + reproduced).** A **stack-time** crop and an **old in-place** crop leave two different
   on-disk shapes, and the re-sharpen path conflates them. `_video_stack_body` (`webapp/video.py:1065-1074,1096,
