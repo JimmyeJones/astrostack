@@ -18,6 +18,7 @@ import { HistoryView } from "./routes/History";
 import { EditorView } from "./routes/Editor";
 import { GalleryView } from "./routes/Gallery";
 import { BestPicturesView } from "./routes/BestPictures";
+import { ShowAndTellView } from "./routes/ShowAndTell";
 import { JobsView } from "./routes/Jobs";
 import { LogsView } from "./routes/Logs";
 import { SettingsView } from "./routes/Settings";
@@ -60,6 +61,7 @@ const router = createBrowserRouter([
       { path: "combine", element: <CombineView /> },
       { path: "gallery", element: <GalleryView /> },
       { path: "best", element: <BestPicturesView /> },
+      { path: "show", element: <ShowAndTellView /> },
       { path: "compare", element: <CompareView /> },
       { path: "tonight", element: <TonightView /> },
       { path: "sky-so-far", element: <SkySoFarView /> },
