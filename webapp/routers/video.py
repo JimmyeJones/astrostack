@@ -25,6 +25,7 @@ call; no filesystem path ever comes from the client.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -36,6 +37,8 @@ from seestack.video.discover import find_video_capture, find_video_captures
 from seestack.video.ffmpeg import ffmpeg_available
 from seestack.video.quality import quicklook_note, sharpness_profile
 from webapp import deps, video
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["video"])
 
@@ -244,6 +247,23 @@ def _grade_panels(
     grade = video.read_grade(settings, capture_id)
     if grade is None:
         return None, None
+    try:
+        return _grade_panels_from(settings, capture_id, grade, files)
+    except Exception:  # noqa: BLE001 — one unusable grade must not fail the page
+        # Same reasoning as :func:`_result_out`: ``read_grade`` checks field
+        # *names*, not types, so a wrong-typed ``grade.json`` only fails here.
+        # It reads as "never checked" — the "Check this capture first" button
+        # comes back — rather than 500-ing the whole capture list.
+        log.warning(
+            "video grade metadata for %s is unusable; reporting no grade",
+            capture_id, exc_info=True,
+        )
+        return None, None
+
+
+def _grade_panels_from(
+    settings, capture_id: str, grade, files: list[str] | None,  # noqa: ANN001
+) -> tuple[SharpnessProfileOut | None, QuickLookOut | None]:
     if not video.grade_matches_source(grade, list(files or [])):
         return None, None
     profile = sharpness_profile(grade.scores, None)
@@ -263,9 +283,31 @@ def _grade_panels(
 
 
 def _result_out(settings, capture_id: str) -> VideoResultOut | None:
+    """One capture's finished-picture panel, or ``None`` when there isn't a usable one.
+
+    ``read_meta``'s contract is that a damaged ``meta.json`` reads as "no result"
+    rather than breaking the page that lists captures — but it only enforces the
+    *field names*: a plain dataclass does no type checking, so a JSON-valid but
+    wrong-*typed* value (``"width": "big"``, ``"source_name": null`` — a
+    hand-edited or foreign-version file on an in-place-upgraded install) survives
+    the dataclass and only blows up here, in the Pydantic build, taking the whole
+    ``/api/videos`` list with it. Honour the contract at this boundary instead:
+    one bad capture reads as "never stacked", the rest of the page is fine.
+    """
     meta = video.read_meta(settings, capture_id)
     if meta is None or not video.has_result(settings, capture_id):
         return None
+    try:
+        return _build_result_out(settings, capture_id, meta)
+    except Exception:  # noqa: BLE001 — one unusable result must not fail the page
+        log.warning(
+            "video result metadata for %s is unusable; reporting no result",
+            capture_id, exc_info=True,
+        )
+        return None
+
+
+def _build_result_out(settings, capture_id: str, meta) -> VideoResultOut:  # noqa: ANN001
     # A still stacked before framing existed has never been looked at, which is
     # not the same as "nothing to trim" — measure it once, from the picture, so
     # pictures the owner already has get the same offer a new one does.

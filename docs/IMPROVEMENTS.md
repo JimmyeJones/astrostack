@@ -335,36 +335,62 @@ _(none — claim an item here with your branch name)_
   the seventh consecutive essentially-clean engine-side audit.** Future runs can lead with the watcher-ingest
   storage layer / `deps.py` / `config.py` load path, or re-audit the engine only occasionally.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #7, traced — not reachable through the app's own writers;
-  needs a hand-edited / partially-foreign result file on a live install) — a JSON-valid but *wrong-typed* field
-  in a video capture's `meta.json` 500s the WHOLE `/api/videos` list instead of degrading to "no result", in
-  breach of `read_meta`'s own "reads as no result rather than breaking the page" contract.** *(Severity: low —
-  broken-UX, and video/Moon-Sun is a niche path; the app only ever writes well-typed meta, and a partial write
-  yields `JSONDecodeError` which is already caught. Confidence: traced, not reproduced with an app-written
-  file.)* `read_meta` / `iter_results` (`webapp/video.py` ~174/310) catch `OSError`/`JSONDecodeError`/`TypeError`
-  and filter to known dataclass fields, but a plain `@dataclass` does no type enforcement, so a value like
-  `source_name: null` or a non-numeric `width` survives the dataclass build and only blows up later in the
-  Pydantic `_result_out` construction — an uncaught `ValidationError` that fails the entire list endpoint, not
-  just the one bad capture. **This is the same class the project has chosen to fix before** (the non-dict
-  `web_stack_defaults` meta row, v0.276.2): a legacy / hand-edited / foreign-version file on an in-place-upgraded
-  install (§9) is the trigger. **Fix direction (small, additive):** wrap the per-capture `_result_out` build in
-  a try/except that logs-and-skips one bad capture (mirroring the per-target `except Exception: continue` the
-  stats roll-ups already use), and add a `test_videos_list_degrades_on_wrong_typed_meta` regression. Do it
-  alongside a quick grep for any sibling list endpoint with the same "dataclass tolerates, Pydantic doesn't"
-  shape.
+- ~~**⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #7) — a JSON-valid but *wrong-typed* field in a video
+  capture's `meta.json` 500s the WHOLE `/api/videos` list instead of degrading to "no result"; and
+  `get_gallery`'s per-run loop had no per-item `except` either.**~~ — **FIXED v0.277.6** (Builder 2026-08-27,
+  branch `claude/compassionate-galileo-4en6ua`), as the paired "list endpoints degrade per-item" pass the
+  second note below asked for. Four boundaries now honour the degrade-don't-500 contract, each with the reason
+  written where it is enforced:
+  **(1)** `_result_out` (`webapp/routers/video.py`) builds its `VideoResultOut` inside a try/except — one
+  unusable `meta.json` reads as "never stacked", exactly what `read_meta`'s docstring already promises.
+  **(2)** `_grade_panels` got the same guard, found by the "grep for a sibling with the same shape" the note
+  asked for: `read_grade` checks field *names* too, so a wrong-typed `grade.json` (`"scores": "abc"`) blew up
+  identically — it now reads as "never checked" and the *Check this capture first* button comes back.
+  **(3)** `_video_stills` (`webapp/routers/gallery.py`) wraps its `VideoStillItem` build, so the Gallery's
+  stills strip loses the one bad still rather than all of them (its existing try only covered the framing
+  backfill, not the model build).
+  **(4)** `get_gallery`'s per-run loop: the card build moved into a `_gallery_item` helper called under
+  `except Exception: continue` with a debug log — the same shape `stats.py`'s roll-ups use, and no behaviour
+  change on a healthy install.
+  **Upgrade-safe (§9):** pure read-path error handling; no config/schema/on-disk/API/default change, and a
+  well-typed file takes exactly the path it did before. **Tests (+7 in the new
+  `tests/webapp/test_list_endpoints_degrade.py`, all 7 fail before / pass after):** a wrong-typed `meta.json`
+  and a wrong-typed `grade.json` each degrading while the healthy capture beside them keeps its panels; the
+  Gallery stills strip dropping only the bad still; a forced-to-raise gallery run being skipped with the rest
+  intact; and a 3-way parametrised "neither page ever 500s" over the shapes a hand-edited file actually takes.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #7, traced — no constructed trigger; a house-pattern deviation)
-  — `get_gallery`'s per-run item-construction loop (`webapp/routers/gallery.py` ~196–234) is wrapped in
-  `try/…finally` with NO `except`, so if any single `GalleryItem` build ever raised mid-loop the whole
-  `/api/gallery` would 500, whereas the equivalent roll-up loops in `stats.py` (`_rollup_stacks`,
-  `_collect_last_night`, …) catch `Exception` per target and skip the bad one.** *(Severity: low — every required
-  `GalleryItem` field is `NOT NULL` and the optional-field helpers (`seam_verdict`, `_parse_options`,
-  `_unexported_edit`) are all None-tolerant, so no concrete input was found that throws; this is a robustness
-  asymmetry, not a live bug. Confidence: deviation confirmed, failure not traced.)* **Fix direction:** give the
-  gallery loop the same per-item `except Exception: continue` (with a debug log) the stats roll-ups use, so a
-  future field addition that can raise can't take down the whole gallery. Cheap and matches the house
-  degrade-don't-500 pattern; pair with the video note above in one small "list endpoints degrade per-item"
-  Builder pass.
+  Original spec, for the record:
+
+    *(Severity: low —
+    broken-UX, and video/Moon-Sun is a niche path; the app only ever writes well-typed meta, and a partial write
+    yields `JSONDecodeError` which is already caught. Confidence: traced, not reproduced with an app-written
+    file.)* `read_meta` / `iter_results` (`webapp/video.py` ~174/310) catch `OSError`/`JSONDecodeError`/`TypeError`
+    and filter to known dataclass fields, but a plain `@dataclass` does no type enforcement, so a value like
+    `source_name: null` or a non-numeric `width` survives the dataclass build and only blows up later in the
+    Pydantic `_result_out` construction — an uncaught `ValidationError` that fails the entire list endpoint, not
+    just the one bad capture. **This is the same class the project has chosen to fix before** (the non-dict
+    `web_stack_defaults` meta row, v0.276.2): a legacy / hand-edited / foreign-version file on an in-place-upgraded
+    install (§9) is the trigger. **Fix direction (small, additive):** wrap the per-capture `_result_out` build in
+    a try/except that logs-and-skips one bad capture (mirroring the per-target `except Exception: continue` the
+    stats roll-ups already use), and add a `test_videos_list_degrades_on_wrong_typed_meta` regression. Do it
+    alongside a quick grep for any sibling list endpoint with the same "dataclass tolerates, Pydantic doesn't"
+    shape.
+
+- ~~**⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #7) — `get_gallery`'s per-run item-construction loop is
+  wrapped in `try/…finally` with NO `except`, so a single raising `GalleryItem` build would 500 the whole
+  `/api/gallery`.**~~ — **FIXED v0.277.6** (Builder 2026-08-27), shipped together with the video note above
+  as the single "list endpoints degrade per-item" pass this entry asked for. See that entry for what landed.
+
+  Original spec, for the record:
+
+    *(Severity: low — every required
+    `GalleryItem` field is `NOT NULL` and the optional-field helpers (`seam_verdict`, `_parse_options`,
+    `_unexported_edit`) are all None-tolerant, so no concrete input was found that throws; this is a robustness
+    asymmetry, not a live bug. Confidence: deviation confirmed, failure not traced.)* **Fix direction:** give the
+    gallery loop the same per-item `except Exception: continue` (with a debug log) the stats roll-ups use, so a
+    future field addition that can raise can't take down the whole gallery. Cheap and matches the house
+    degrade-don't-500 pattern; pair with the video note above in one small "list endpoints degrade per-item"
+    Builder pass.
 
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26 #5, branch `claude/vigilant-knuth-t39r9x`) — led the rotation back
   through the stacking engine's remaining un-swept surface (the accumulators, mosaic-canvas sizing, the
