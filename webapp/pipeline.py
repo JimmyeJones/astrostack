@@ -2384,8 +2384,17 @@ def _stack_target(
     the single pass's 4, and only ``run_stack`` knows the real (for a mosaic, union)
     canvas it would allocate them on. An auto-enabled rejection the memory budget
     can't take is quietly skipped rather than refusing the run — see
-    ``stacker._afford_drizzle_reject``. An explicitly ticked one still refuses
-    loudly, because the user who ticked it is watching and can act on the advice.
+    ``stacker._afford_drizzle_reject``. A run somebody is *watching* still refuses
+    loudly, because that user can act on the advice.
+
+    ``auto`` finally sets ``StackOptions.unattended`` — the plain "nobody is
+    watching this run" posture, written after every option merge so it can't be
+    spoofed by a saved default or a POST body. It is not a preference and changes
+    no picture by itself; the engine reads it wherever the right answer to an
+    over-budget run depends on whether there is a human there to act on the fix.
+    It replaces ``auto_reject`` in that role, which only *looked* like the same
+    question: ``get_stack_defaults`` seeds ``auto_reject=True`` into the manual
+    Stack form for a never-configured target, so a watching beginner sent it too.
     """
     from seestack.stack.stacker import run_stack
 
@@ -2472,6 +2481,17 @@ def _stack_target(
             # frames — the same trade the non-drizzle walk-away path already makes
             # by auto-picking a rejecting combine.
             opts_dict["drizzle_reject"] = True
+        # The posture, written **last** so nothing can spoof it: a stale saved
+        # per-target default, a crafted POST body or a reused prior-run option
+        # blob may all carry ``unattended``, and only this function knows whether
+        # anybody is actually watching. ``auto`` is exactly that question — it is
+        # set by the watcher auto-stack and "Process target" and by nothing else,
+        # so the manual Stack form and reprocess-all resolve to False. The engine
+        # reads it where "refuse loudly with a fix" and "degrade quietly and still
+        # make a picture" are the two right answers to the same over-budget run
+        # (see ``stacker._afford_drizzle_reject``). Always written, so the value is
+        # a property of *this* run rather than of whatever was merged into it.
+        opts_dict["unattended"] = bool(auto)
         calibration_skipped: list[str] = []
         if saved_master_ids:
             # The user's own "Save as defaults" calibration picks win over the

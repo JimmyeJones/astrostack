@@ -795,10 +795,14 @@ def stack_option_fields() -> list[StackOptionField]:
     return fields
 
 
-# StackOptions fields that are intentionally NOT user-facing form controls:
-# the webapp resolves them server-side (calibration master paths) and they must
-# never be set from raw client input, so they have no descriptor.
-NON_FORM_KEYS = {"dark_path", "flat_path", "flat_dark_path", "bias_path"}
+# StackOptions fields that are intentionally NOT user-facing form controls, so
+# they have no descriptor. Two kinds, both server-owned:
+#   * the calibration master *paths*, resolved server-side from master ids;
+#   * ``unattended`` — the "nobody is watching this run" posture, written by
+#     ``pipeline._stack_target`` after every option merge.
+# Neither may ever be set from raw client input.
+NON_FORM_KEYS = {"dark_path", "flat_path", "flat_dark_path", "bias_path",
+                 "unattended"}
 
 
 def describable_keys() -> set[str]:
@@ -806,14 +810,17 @@ def describable_keys() -> set[str]:
 
 
 def strip_non_form_keys(data: dict[str, Any]) -> dict[str, Any]:
-    """Return *data* without any ``NON_FORM_KEYS`` (calibration master paths).
+    """Return *data* without any ``NON_FORM_KEYS`` (the calibration master paths
+    and the ``unattended`` posture flag).
 
     Those paths are resolved server-side from master *ids* and must never
     originate from raw client input (a settings PUT body, a persisted global
     ``default_stack_options``). Callers that seed a StackOptions dict from a
     source that could carry client-supplied paths strip them with this first;
     legitimate server-resolved paths (from ``trigger_stack`` / auto-bind) are
-    applied downstream, after the stripped base.
+    applied downstream, after the stripped base. ``unattended`` rides along for
+    the same reason — it says whether anybody is watching the run, which only the
+    server that started the job knows.
     """
     return {k: v for k, v in data.items() if k not in NON_FORM_KEYS}
 
