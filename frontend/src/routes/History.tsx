@@ -839,9 +839,16 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   // While the first suggestion fetch is still in flight, keep showing the STF
   // preview thumbnail rather than briefly rendering at the fixed defaults and
   // then jumping to the anchored sliders.
-  const imgSrc = adjust && run.has_fits && !suggestion.isLoading
+  const adjusting = adjust && run.has_fits && !suggestion.isLoading;
+  const imgSrc = adjusting
     ? api.stackRenderUrl(safe, run.id, dStretch, dBlack, applyNorthUp)
     : previewSrc;
+  // Download what the card is showing. While Adjust is open that's the live
+  // slider render, so send the sliders; otherwise it's the stored preview, and
+  // the server reproduces *that* look from the run's saved stretch (or the
+  // autostretch when it was never adjusted).
+  const dlStretch = adjusting ? dStretch : undefined;
+  const dlBlack = adjusting ? dBlack : undefined;
 
   return (
     <Card withBorder padding="md" radius="md">
@@ -1051,7 +1058,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                 {run.has_fits && (
                   <Menu.Item
                     leftSection={<IconPhotoDown size={16} />}
-                    component="a" href={api.stackFullResPngUrl(safe, run.id, applyNorthUp)}
+                    component="a" href={api.stackFullResPngUrl(safe, run.id, applyNorthUp, dlStretch, dlBlack)}
                   >
                     Full-res PNG
                     <span style={MENU_HINT}>
@@ -1280,7 +1287,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         title={run.output_basename}
         downloadHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "preview") : undefined}
         jpegHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate) : undefined}
-        fullResHref={run.has_fits ? api.stackFullResPngUrl(safe, run.id, applyNorthUp) : undefined}
+        fullResHref={run.has_fits
+          ? api.stackFullResPngUrl(safe, run.id, applyNorthUp, dlStretch, dlBlack) : undefined}
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
         {...(run.has_preview
           ? (() => {

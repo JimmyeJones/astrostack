@@ -662,6 +662,7 @@ _FULL_RES_PNG_MAX_LONG_EDGE = 8000
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
 async def download_full_res_png(
     safe: str, run_id: int, request: Request, north_up: bool = False,
+    stretch: float | None = None, black: float | None = None,
 ) -> Response:
     """The finished picture as a **native-resolution PNG** — the same look as the
     gallery/History thumbnail, just at full output resolution instead of the
@@ -678,7 +679,14 @@ async def download_full_res_png(
     as the run's editor recipe, so for such a run the plain STF render would serve
     the *un-edited* master. When the run's preview is a baked display-space edit and
     a saved recipe exists, render that recipe at native resolution instead, so the
-    download matches the preview the user clicked."""
+    download matches the preview the user clicked.
+
+    ``stretch``/``black`` (both, or neither) render the adjustable asinh curve at
+    full size instead of the STF — History passes whatever its Adjust sliders
+    currently show, so the download is the picture on screen. Omitted, the run's
+    *saved* stretch is used when it has one, so a link with no sliders attached
+    (a bookmark, the gallery) still matches the saved thumbnail rather than
+    reverting to the STF."""
     from webapp.routers.editor import RECIPE_META_PREFIX
 
     lib, proj = deps.open_target_project(request, safe)
@@ -692,9 +700,21 @@ async def download_full_res_png(
         recipe_json = None
         if _preview_is_display_space(run.options_json):
             recipe_json = proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
+        # If the run's preview was re-saved through History's "Adjust" sliders,
+        # the baked preview — and so the thumbnail, the share-JPEG and the
+        # wallpaper — is the asinh curve, not the STF autostretch. Carry the saved
+        # curve into the full-res render so this download doesn't silently revert
+        # to a look the user replaced. Both columns are NULL for a never-adjusted
+        # (or display-space) run, which keeps the STF render verbatim.
+        saved_stretch, saved_black = run.preview_stretch, run.preview_black
     finally:
         proj.close()
         lib.close()
+
+    if stretch is not None and black is not None:
+        # Explicit sliders win over the saved ones (History sends its live pair).
+        saved_stretch = _clamp(float(stretch), _STRETCH_MIN, _STRETCH_MAX)
+        saved_black = _clamp(float(black), _BLACK_MIN, _BLACK_MAX)
 
     recipe_dict = None
     if recipe_json:
@@ -713,6 +733,7 @@ async def download_full_res_png(
         png = await run_in_threadpool(
             render_preview_png_full_res, fits_path,
             max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=bool(north_up),
+            stretch=saved_stretch, black=saved_black,
         )
     filename = f"{basename}_fullres.png"
     return Response(

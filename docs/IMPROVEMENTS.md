@@ -132,13 +132,27 @@ _(none — claim an item here with your branch name)_
   path skips a celestial-less base instead of propagating it. Two files (`runner.py`, `bootstrap.py`) + tests.
   Left for the Builder to implement deliberately. *(Found by the plate-solve adversarial audit this run.)*
 
-- **🟡 BROKEN-UX (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`, reproduced) — after a
+- ~~**🟡 BROKEN-UX (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`, reproduced) — after a
   user tunes a run's look with the History "Adjust" (asinh stretch/black) sliders and saves, the "Download
   full-res PNG" button silently reverts to the STF autostretch — so the one full-resolution download disagrees
   with the thumbnail, the share-JPEG and the wallpaper, all of which show the saved asinh look.** *(Severity:
   broken-UX — the user's saved processing choice is lost on exactly the export they'd frame or print; the FITS
   is untouched, so not wrong-result. Confidence: reproduced — the two renders diverge on a synthetic linear
-  master; the missing forward-through traced end to end.)*
+  master; the missing forward-through traced end to end.)*~~ — **FIXED v0.287.3** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-wdi9ii`).
+
+  **Fix (the filed direction, plus the unsaved half).** `render_preview_png_full_res` takes optional
+  `stretch`/`black`; given both (and a linear run) it renders the *same* asinh curve `render_stack_png` baked
+  into the stored preview, otherwise the STF verbatim — so an unadjusted or display-space run is byte-for-byte
+  unchanged. `download_full_res_png` reads the run's saved `preview_stretch`/`preview_black` and passes them,
+  which is what makes a bookmarked link, the gallery and the Target page's download agree with the saved
+  thumbnail. It also now accepts explicit `stretch`/`black` query params (clamped to the slider bounds, both or
+  neither) that override the saved pair, and History sends its **live** sliders while the Adjust panel is open
+  — so the download matches the picture on screen *before* a save too, not just after one. Closed, the link
+  drops the params and falls back to the saved look, so a never-adjusted run still downloads the autostretch it
+  always did. Tests: the saved-adjust download matches `render_preview_png_full_res(stretch, black)` and
+  differs visibly from the pre-fix STF (fail-before/pass-after), an unadjusted run is unchanged, the query
+  params override / clamp / ignore a half-set pair, plus a vitest for the URL builder.
 
   **Root cause (traced + reproduced).** The History Adjust save (`set_stack_preview`,
   `webapp/routers/stack.py:1266-1296`) overwrites the run's stored `preview_path` with

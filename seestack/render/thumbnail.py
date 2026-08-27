@@ -365,12 +365,22 @@ def render_stack_png(
 def render_preview_png_full_res(
     fits_path: str | Path, *, max_long_edge: int = 8000,
     north_up: bool = False,
+    stretch: float | None = None, black: float | None = None,
 ) -> bytes:
     """Render a stacked-image FITS to a PNG at (near) native output resolution
     using the **same stretch as the baked gallery/History preview** — the STF
     autostretch for a linear stack, verbatim for a display-space editor export —
     i.e. the very picture the user already sees, at full output resolution instead
     of the 1024 px preview cap.
+
+    When the user has re-saved the run's preview through History's "Adjust"
+    sliders, the baked preview is no longer the STF render — it's the adjustable
+    asinh curve of :func:`render_stack_png`. Pass that run's saved
+    ``stretch``/``black`` and this renders the same asinh curve at full size, so
+    the one full-resolution download keeps agreeing with the thumbnail, the
+    share-JPEG and the wallpaper. Both must be given to take effect; either
+    missing (the common, never-adjusted run) keeps the STF render verbatim, as
+    does a display-space export (the sliders don't apply to one).
 
     This is the beginner-friendly answer to "why is my downloaded picture
     low-res?": the FITS/TIFF already hold full-resolution pixels but aren't easily
@@ -394,8 +404,12 @@ def render_preview_png_full_res(
     # ``load_stack_rgb`` area-averages the width down to ``max_long_edge`` during
     # load (cheap for a wide image); a tall image's height is capped after stretch.
     rgb, display_space = load_stack_rgb(fits_path, max_width=max_long_edge)
-    stretched = (np.nan_to_num(rgb, nan=0.0) if display_space
-                 else _autostretch_for_export(rgb))
+    if display_space:
+        stretched = np.nan_to_num(rgb, nan=0.0)
+    elif stretch is not None and black is not None:
+        stretched = asinh_stretch(rgb, stretch=float(stretch), black=float(black))
+    else:
+        stretched = _autostretch_for_export(rgb)
     disp = np.clip(np.nan_to_num(stretched), 0.0, 1.0)
     if north_up:
         disp = _apply_north_up(disp, fits_path)

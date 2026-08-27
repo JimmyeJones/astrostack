@@ -2087,9 +2087,23 @@ export const api = {
   // The finished picture as a native-resolution PNG (same look as the preview
   // thumbnail, just full-size instead of the 1024px preview cap) — the direct
   // answer to "why is my downloaded picture low-res?".
-  stackFullResPngUrl: (safe: string, id: number, northUp = false) =>
-    `/api/targets/${safe}/stack-runs/${id}/full-res-png` +
-    (northUp ? "?north_up=true" : ""),
+  // Pass the Adjust sliders' current stretch/black so the full-resolution
+  // download is the picture on screen. Omit them (gallery, a bookmarked link)
+  // and the server falls back to the run's *saved* stretch, so the download
+  // still matches the saved thumbnail instead of reverting to the autostretch.
+  stackFullResPngUrl: (
+    safe: string, id: number, northUp = false,
+    stretch?: number, black?: number,
+  ) => {
+    const q = new URLSearchParams();
+    if (northUp) q.set("north_up", "true");
+    if (stretch !== undefined && black !== undefined) {
+      q.set("stretch", String(stretch));
+      q.set("black", String(black));
+    }
+    const s = q.toString();
+    return `/api/targets/${safe}/stack-runs/${id}/full-res-png` + (s ? `?${s}` : "");
+  },
   stackRenderUrl: (
     safe: string, id: number, stretch: number, black: number, northUp = false,
   ) =>
