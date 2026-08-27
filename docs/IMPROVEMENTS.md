@@ -8042,9 +8042,10 @@ to **Shipped**.)_
     renders a keepsake; a "my Messier grid so far" image is the same shape and is the single most
     shareable artefact the app could produce. Largest of the three; do it last.
 
-- **NEW IDEA (Scout 2026-08-27 #11) — "Your cleanest shot so far": when a fresh stack of a target measures
+- ~~**NEW IDEA (Scout 2026-08-27 #11) — "Your cleanest shot so far": when a fresh stack of a target measures
   *cleaner* than the picture currently standing as its cover, offer a one-tap "make this the cover" nudge (never
-  auto-swap).** *(Pillar: autonomy + trust — PRIORITY 2–3. Size: S.)* The app already stores a normalized
+  auto-swap).**~~ — **SHIPPED v0.279.1** (Builder 2026-08-27, branch `claude/compassionate-galileo-4maz3z`),
+  built exactly as specified below. *(Pillar: autonomy + trust — PRIORITY 2–3. Size: S.)* The app already stores a normalized
   background-noise σ per run (`StackRunRow.noise_sigma`, `_compute_noise_sigma`) and already lets a user pin a
   run as its target's cover ("Set as cover" in History → `cover_stack_run_id`, honoured by the Library tile,
   `/api/gallery/best`, the montage wall and `_representative_run`). But the two never talk: a beginner who keeps
@@ -8059,6 +8060,23 @@ to **Shipped**.)_
   `_newest_genuine_stack_run`, skip channel-combine / editor-export runs whose σ isn't comparable), and gate on
   both runs carrying a finite `noise_sigma` (pre-schema-6 runs send `None` → no nudge). Read-only roll-up + one
   copy string + reuse of an existing mutation; no engine or schema change.
+
+  **What shipped.** New pure module `seestack/covernudge.py` — `cleanest_shot(genuine_runs, cover_run_id)` →
+  `CleanestShot | None`, with the 15 %-cleaner threshold as a named constant (`CLEANER_RATIO = 0.85`, sized so a
+  couple of percent of run-to-run wobble can't fire it: 15 % is roughly the extra session's worth of subs that
+  1/√N buys). It stays silent on every ambiguous case, each pinned by a test: nothing pinned (the cover already
+  *is* the newest stack), the newest already being the cover, a pruned/non-genuine pin, either σ missing
+  (pre-schema-6) or non-finite/zero, and a *noisier* newest stack. The percentage is rounded **down** so the copy
+  never overstates the gain, and floored at 1 % so a nudge that fired can't say "0 % cleaner".
+  `GET /api/targets/{safe}/cleanest-shot` (`CleanestShotOut | None`) filters to genuine runs with the same
+  `_stack_options_from_run_json` predicate the rest of the app uses, and additionally refuses to offer a
+  candidate whose preview file is gone (pinning it would fall back to the newest stack anyway and look broken).
+  Frontend: `CleanestShotNote`, a self-hiding note inside the Target page's existing **NoticeBoard**
+  (`advisory`, after "Ready to process?"/"Restack") — no new always-on banner, per the standing IA priority. Its
+  one button reuses `api.setTargetCover` and invalidates exactly what History's "Set as cover" does, so
+  accepting clears the note with no dismissal state to go stale. Tests: `tests/test_covernudge.py` (14),
+  `tests/webapp/test_target_cleanest_shot.py` (5), `CleanestShotNote.test.tsx` (4). Purely additive —
+  read-only endpoint, no config/DB/on-disk/default/API change, and the app still never swaps a cover by itself.
 
 - **NEW IDEA (Scout 2026-08-27 #10) — "This looks like M31": offline auto-identify an un-named / Unsorted
   target from its solved centre against the bundled catalog, in the web app.** *(Pillar: autonomy +
@@ -21458,6 +21476,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.279.1** — Autonomy/trust (Builder, branch `claude/compassionate-galileo-4maz3z`): **"Your cleanest shot
+  so far"** — a pinned cover never changes on its own, so a beginner who keeps adding subs can have every
+  showcase surface (Library tile, "My best pictures", the montage wall) showing an older, grainier picture than
+  their own library already holds. New pure `seestack/covernudge.py` compares the newest *genuine* stack's
+  `noise_sigma` against the pinned cover's and, only when it is ≥15 % cleaner, `GET
+  /api/targets/{safe}/cleanest-shot` offers the swap; the self-hiding `CleanestShotNote` renders it inside the
+  Target page's existing NoticeBoard with one button that reuses the existing `set-cover` path. It never
+  auto-swaps, stays silent on every ambiguous case (nothing pinned, pruned/editor-export pin, missing or
+  non-finite σ, a noisier stack, a candidate with no preview on disk), and rounds the quoted percentage down.
+  Additive and read-only — no config/DB/layout/default/API change.
 - **v0.277.3** — Memory/hardening (Scout, branch `claude/vigilant-knuth-yeeeim`; found by the calibrate-masters
   QA sub-audit this run): `build_master` (`seestack/calibrate/masters.py`) held **three live copies** of the
   frame set through the combine — the `arrays`+`loaded` lists, the `np.stack` copy, *and* a second full N×H×W

@@ -412,6 +412,22 @@ export interface AutoStackHold {
   when_utc?: string | null;
 }
 
+/** The newest stack is materially cleaner than the target's pinned cover
+ * (`GET /api/targets/{safe}/cleanest-shot`; `null` when there's nothing to say
+ * — nothing pinned, the newest already *is* the cover, or the gap is small).
+ * Purely a suggestion: taking it goes through the same `setTargetCover` the
+ * History page uses, and the app never swaps a cover by itself. */
+export interface CleanestShot {
+  run_id: number;
+  cover_run_id: number;
+  noise_sigma: number;
+  cover_noise_sigma: number;
+  percent_cleaner: number;
+  n_frames_used: number;
+  cover_n_frames_used: number;
+  timestamp_utc: string;
+}
+
 export interface SessionRecap {
   n_frames: number;
   n_kept: number;
@@ -1767,6 +1783,8 @@ export const api = {
     req<SessionRecap | null>(`/api/targets/${safe}/session-recap`),
   autoStackHold: (safe: string) =>
     req<AutoStackHold | null>(`/api/targets/${safe}/autostack-hold`),
+  cleanestShot: (safe: string) =>
+    req<CleanestShot | null>(`/api/targets/${safe}/cleanest-shot`),
   stackHealth: (safe: string, runId?: number) =>
     req<StackHealth | null>(
       `/api/targets/${safe}/stack-health` +
