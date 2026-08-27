@@ -49,12 +49,32 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟠 BROKEN-UX (Scout QA audit 2026-08-27 #18, branch `claude/vigilant-knuth-qtz5h4`, reproduced end-to-end)
+- ~~**🟠 BROKEN-UX (Scout QA audit 2026-08-27 #18, branch `claude/vigilant-knuth-qtz5h4`, reproduced end-to-end)
   — a Moon/Sun still stacked with BOTH `crop` and `sharpen>0` advertises its sharpen slider as editable
   (`sharpen_editable=True`) but EVERY attempt to change the sharpening is refused with a 400: *"This picture's
   crop can't be worked out any more, so changing the sharpening would lose it — stack the capture again
-  instead."* The advertised control is permanently dead, and the only "recovery" it offers (re-stack) is
-  impossible once the source clip is off the NAS.** *(Severity: broken-UX — a control the app offers always
+  instead."*~~ — **FIXED v0.286.1** (Builder 2026-08-27, branch `claude/compassionate-galileo-0d0lp8`).
+
+  **Fix (exactly the direction filed below).** The two "crop_applied with no box" shapes are now told apart by
+  the kept original's **size**, in one new helper `_kept_original_is_full_frame(out_dir, meta)`
+  (`webapp/video.py`) — a bigger original means an *in-place* crop that still has a slice to re-apply; a
+  same-size one means a *stack-time* crop already baked into it. `crop_is_restorable` now delegates to that
+  helper (same answer, one implementation); `_measured_box` returns `None` up front unless the original really
+  is a full frame, which is what makes the **double-crop** unreachable; and `sharpen_saved_still` only demands
+  a box — and so can only refuse for want of one — in the in-place case. The same conflation also let
+  `POST …/uncrop` "succeed" on a stack-time crop, handing back the identical picture while marking it
+  *uncropped* (which then offers a crop that would trim it again); it now refuses with a plain-language line,
+  matching the `crop_restorable: false` the wire already reported. Nothing about the finished picture, the
+  on-disk layout or the meta schema changes, and an in-place crop's behaviour is untouched.
+  **Tests (+4 in `tests/webapp/test_video_sharpen_still.py`, all fail before / pass after):** re-sharpening a
+  stack-time crop+sharpen still succeeds and matches `sharpen(kept cropped-soft original)` byte-for-byte; the
+  crop survives at its own size with no box invented; the picture is never trimmed twice even when the framing
+  measurement is forced to say "worth trimming" (so the guarantee doesn't rest on scene luck); and `uncrop`
+  refuses with a sentence instead of pretending. Existing crop/sharpen suites unchanged (51 passed).
+
+  Original spec, for the record:
+
+  *(Severity: broken-UX — a control the app offers always
   fails on a common option combination; not wrong-result, the finished picture is fine. Confidence: reproduced
   end-to-end by reconstructing the exact on-disk artefacts + meta that `_video_stack_body(crop=True,
   sharpen>0)` writes, then calling `sharpen_saved_still`.)*

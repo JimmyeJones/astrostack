@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import io
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -507,3 +507,204 @@ def test_a_failed_rebuild_leaves_the_picture_that_was_already_there(
     # still agree.
     result = client.get("/api/videos").json()["captures"][0]["result"]
     assert result["sharpen_amount"] == 0.0
+
+
+# --- a crop the *stack* applied, with the soft render kept beside it ----------
+#
+# ``_video_stack_body(crop=True, sharpen>0)`` is the one combination that leaves
+# `crop_applied` set *and* an original on disk — and that original is already
+# cropped, unlike the full frame an in-place crop keeps. The two used to be
+# conflated, which made the sharpen slider the app advertises on these pictures
+# fail every time it was moved.
+
+def _write_stack_time_cropped_still(
+    data_root: Path,
+    capture_id: str = "Lunar_video",
+    *,
+    sharpen: float = 1.0,
+    image: np.ndarray | None = None,
+) -> tuple[Settings, np.ndarray]:
+    """Reconstruct exactly what ``_video_stack_body(crop=True, sharpen>0)`` writes.
+
+    The sharpen happens on the whole frame and the crop after it, and the *soft*
+    render is kept beside the picture with the same framing — so the original on
+    disk is a cropped picture, not a full frame. Returns the settings and the
+    cropped soft render, which is what a re-sharpen has to rebuild from.
+    """
+    from seestack.stack.output import write_full_res_png
+    from seestack.video.detail import sharpen_still
+
+    settings = Settings(data_root=str(data_root))
+    soft = _textured_disk() if image is None else image
+    incoming = Path(data_root) / "incoming" / capture_id
+    incoming.mkdir(parents=True, exist_ok=True)
+    (incoming / "clip.mp4").write_bytes(b"not really a video")
+
+    display = sharpen_still(soft, sharpen)
+    framing = video.measure_framing(display)
+    assert framing is not None and framing.worthwhile, "the scene must be croppable"
+    cropped = video.crop_to_disk(display, framing)
+    cropped_soft = video.crop_to_disk(soft, framing)
+
+    out_dir = video.result_dir(settings, capture_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    write_full_res_png(out_dir / video.PNG_NAME, cropped)
+    video._write_tiff16(out_dir / video.TIFF_NAME, cropped)
+    write_full_res_png(out_dir / video.FULL_PNG_NAME, cropped_soft)
+    video._write_tiff16(out_dir / video.FULL_TIFF_NAME, cropped_soft)
+
+    meta = video.VideoStackMeta(
+        capture_id=capture_id,
+        label="Moon",
+        kind="lunar",
+        source_name="clip.mp4",
+        created_utc="2026-08-27T21:00:00+00:00",
+        width=int(cropped.shape[1]),
+        height=int(cropped.shape[0]),
+        keep_percent=30.0,
+        n_graded=10,
+        n_kept=3,
+        n_stacked=3,
+        n_align_failed=0,
+        stride=1,
+        aligned=True,
+        sharpness_best=1.0,
+        sharpness_kept_median=0.9,
+        sharpness_all_median=0.5,
+        warnings=[],
+        scores=[0.5] * 10,
+        crop_applied=True,
+        crop_available=False,
+        crop_trim_fraction=round(framing.trim_fraction, 4),
+        source_width=int(soft.shape[1]),
+        source_height=int(soft.shape[0]),
+        crop_measured=True,
+        sharpen_amount=float(sharpen),
+        # The copy kept beside it is the *soft* render, so the strength stays
+        # changeable — which is exactly what the app then advertises.
+        sharpen_baked=0.0,
+        crop_box=[],
+    )
+    (out_dir / video.META_NAME).write_text(
+        json.dumps(asdict(meta), indent=2), encoding="utf-8",
+    )
+    return settings, cropped_soft
+
+
+def test_a_still_the_stack_cropped_and_sharpened_can_have_its_sharpening_changed(
+    client, data_root,
+):
+    """The regression: the advertised slider used to fail on every move.
+
+    A stack-time crop records no box because it doesn't need one — the kept
+    original is the cropped soft render. Reading that as "an in-place crop whose
+    box was lost" refused the request outright, so a control the app said was
+    editable was permanently dead, and the recovery it suggested (re-stack) is
+    impossible once the clip is off the NAS.
+    """
+    settings, cropped_soft = _write_stack_time_cropped_still(data_root, sharpen=1.0)
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert result["sharpen_editable"] is True
+    before = _png_array(client)
+
+    r = _sharpen(client, 1.8)
+    assert r.status_code == 200, r.text
+    assert r.json()["sharpen_amount"] == pytest.approx(1.8)
+
+    after = _png_array(client)
+    # Rebuilt from the soft original at the new strength, never compounded on
+    # top of the picture that was there — which is the whole reason the stack
+    # kept that original in the first place.
+    from seestack.video.detail import sharpen_still
+
+    out_dir = video.result_dir(settings, "Lunar_video")
+    with Image.open(out_dir / video.FULL_PNG_NAME) as img:
+        kept = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
+    assert np.array_equal(
+        (np.clip(kept, 0.0, 1.0) * 255.0).astype(np.uint8),
+        (np.clip(cropped_soft, 0.0, 1.0) * 255.0).astype(np.uint8),
+    ), "the kept original is the cropped soft render"
+    expected = (np.clip(sharpen_still(kept, 1.8), 0.0, 1.0) * 255.0).astype(np.uint8)
+    assert after.shape == before.shape == expected.shape
+    assert np.array_equal(after, expected)
+    assert _detail(after) > _detail(before)
+
+
+def test_the_stack_time_crop_survives_a_re_sharpen_at_its_own_size(
+    client, data_root,
+):
+    """It must not be cropped a second time, and must stay marked as cropped."""
+    settings, _ = _write_stack_time_cropped_still(data_root, sharpen=1.0)
+    before = _png_array(client)
+
+    assert _sharpen(client, 0.4).status_code == 200
+    assert _png_array(client).shape == before.shape
+
+    meta = video.read_meta(settings, "Lunar_video")
+    assert meta is not None
+    assert meta.crop_applied is True
+    # Still no box: there is nothing to slice, so recording one would be a lie
+    # the next rebuild would act on.
+    assert meta.crop_box == []
+    assert (meta.width, meta.height) == (before.shape[1], before.shape[0])
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert (result["width"], result["height"]) == (before.shape[1], before.shape[0])
+
+
+def test_a_stack_time_crop_is_never_trimmed_a_second_time_by_a_re_sharpen(
+    client, data_root, monkeypatch,
+):
+    """The latent half of the same conflation, made unmissable.
+
+    Re-deriving a box from the kept original is how an in-place crop whose box
+    was never recorded survives — but on a stack-time crop that original is
+    *already cropped*, so any box it yields trims the picture a second time.
+    Whether a given cropped picture happens to measure as worth trimming again
+    depends on the scene, so the guarantee must not rest on it: force the
+    measurement to say "yes, trim it" and the picture still has to come back the
+    same size.
+    """
+    settings, _ = _write_stack_time_cropped_still(data_root, sharpen=1.0)
+    before = _png_array(client)
+    real = video.measure_framing
+
+    def always_worth_trimming(image, **kwargs):
+        framing = real(image, **kwargs)
+        if framing is None:
+            return None
+        y0, x0, y1, x1 = framing.box
+        return replace(
+            framing,
+            box=(y0, x0, max(y0 + 1, y1 - 2), max(x0 + 1, x1 - 2)),
+            worthwhile=True,
+        )
+
+    monkeypatch.setattr(video, "measure_framing", always_worth_trimming)
+    assert _sharpen(client, 1.8).status_code == 200
+    assert _png_array(client).shape == before.shape
+    assert _sharpen(client, 0.6).status_code == 200
+    assert _png_array(client).shape == before.shape
+    meta = video.read_meta(settings, "Lunar_video")
+    assert meta is not None and meta.crop_box == []
+
+
+def test_undoing_a_stack_time_crop_says_why_it_cannot_rather_than_pretending(
+    client, data_root,
+):
+    """There is no bigger frame behind it, and the wire already says so.
+
+    Letting the request through would hand back the same picture while marking
+    it uncropped — which then offers a crop that would trim it a second time.
+    """
+    settings, _ = _write_stack_time_cropped_still(data_root, sharpen=1.0)
+    result = client.get("/api/videos").json()["captures"][0]["result"]
+    assert result["crop_restorable"] is False
+    before = _png_array(client)
+
+    r = client.post("/api/videos/Lunar_video/uncrop")
+    assert r.status_code == 400
+    assert "cropped while it was being stacked" in r.json()["detail"]
+
+    assert np.array_equal(_png_array(client), before)
+    meta = video.read_meta(settings, "Lunar_video")
+    assert meta is not None and meta.crop_applied is True
