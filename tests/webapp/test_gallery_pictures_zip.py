@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from pathlib import Path
 
 from seestack.io.library import Library
 from seestack.io.project import StackRunRow
@@ -185,3 +186,84 @@ def test_download_never_writes_into_the_library(client, solved_library):
     assert client.get("/api/gallery/pictures.zip").status_code == 200
     after = sorted(str(p) for p in (solved_library / "library").rglob("*"))
     assert before == after
+
+
+# --- the two promises the archive makes that nothing above pins ---------------
+
+def test_a_big_picture_is_copied_a_chunk_at_a_time_not_held_whole(
+        client, solved_library, monkeypatch):
+    """"All" is honest because memory is bounded — so pin the thing that bounds it.
+
+    Every test above checks the *finished* archive, which a version that built
+    the whole zip in memory and handed it over in one go would pass identically.
+    The guarantee is the drain-after-every-chunk loop, and it only shows on a
+    picture bigger than one chunk: a deep-sky preview is megabytes and a library
+    is many of them, so a refactor that quietly lost this would only be
+    discovered on a real library. Watching the buffer's own high-water mark tests
+    the claim directly rather than by proxy.
+    """
+    import numpy as np
+    from PIL import Image
+
+    from webapp.routers import gallery
+
+    safes = _safes(client)
+    for safe in safes:
+        _register_picture(solved_library, safe)
+    # Random noise, so PNG can't compress it away and the file really is several
+    # chunks long. Replaces one target's picture in place, path unchanged.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        big = Path(lib.find_target(safes[0]).last_stack_preview)
+    finally:
+        lib.close()
+    rng = np.random.default_rng(7)
+    Image.fromarray(rng.integers(0, 256, (1200, 1200, 3), dtype=np.uint8)).save(big)
+    assert big.stat().st_size > 3 * gallery._ZIP_CHUNK, "the picture must span chunks"
+
+    peak = 0
+    real_write = gallery._ZipStreamBuffer.write
+
+    def watched_write(self, b):
+        nonlocal peak
+        n = real_write(self, b)
+        peak = max(peak, len(self._buf))
+        return n
+
+    monkeypatch.setattr(gallery._ZipStreamBuffer, "write", watched_write)
+    body = client.get("/api/gallery/pictures.zip").content
+    monkeypatch.undo()
+
+    # The buffer never held the big picture, let alone the whole archive.
+    assert peak <= 2 * gallery._ZIP_CHUNK
+    assert peak < big.stat().st_size
+    assert len(body) > big.stat().st_size  # it really did all arrive
+    zf = zipfile.ZipFile(io.BytesIO(body))
+    assert zf.testzip() is None
+    assert zf.read(f"{safes[0]}.png") == big.read_bytes()
+
+
+def test_downloading_writes_nothing_anywhere_in_the_data_root(client, solved_library):
+    """The read-only promise this makes is about ``incoming/`` above all (§10).
+
+    The sibling test above snapshots ``library/`` only, so a write into
+    ``incoming/`` — the one directory in the app that has no backup and no second
+    copy — would slip straight past it. This walks the *whole* data root and
+    compares size and mtime as well as the file list, so a rewrite in place is
+    caught alongside a create or a delete.
+    """
+    for safe in _safes(client):
+        _register_picture(solved_library, safe)
+    incoming = Path(solved_library) / "incoming"
+    incoming.mkdir(parents=True, exist_ok=True)
+    (incoming / "a-precious-sub.fit").write_bytes(b"the only copy there is")
+
+    def snapshot() -> dict[str, tuple[int, float]]:
+        return {
+            str(p.relative_to(solved_library)): (p.stat().st_size, p.stat().st_mtime)
+            for p in sorted(Path(solved_library).rglob("*")) if p.is_file()
+        }
+
+    before = snapshot()
+    assert _open_zip(client.get("/api/gallery/pictures.zip")).testzip() is None
+    assert snapshot() == before
