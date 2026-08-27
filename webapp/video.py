@@ -425,6 +425,35 @@ def has_full_frame_backup(settings: Settings, capture_id: str) -> bool:
     return (result_dir(settings, capture_id) / FULL_PNG_NAME).is_file()
 
 
+def _kept_original_is_full_frame(out_dir: Path, meta: VideoStackMeta) -> bool:
+    """Whether the kept original holds a *bigger* picture than the one on disk.
+
+    Two quite different edits leave ``crop_applied`` set with an original beside
+    the picture, and this is the question that tells them apart:
+
+    * an **in-place** crop kept the uncropped frame, so its original is larger
+      and still has a slice to re-apply (and a bigger picture to give back);
+    * a **stack-time** crop wrote the soft render *already cropped*, so its
+      original is the same size as the picture. The crop is baked into it —
+      there is nothing to restore, and nothing left to slice.
+
+    Costs one PNG header read. An original that isn't there, or can't be read,
+    answers "no", which is the safe way round for every caller: nothing is
+    restored and nothing is cropped a second time.
+    """
+    from PIL import Image
+
+    path = out_dir / FULL_PNG_NAME
+    if not path.is_file():
+        return False
+    try:
+        with Image.open(path) as img:
+            width, height = img.size
+    except (OSError, ValueError):
+        return False
+    return width > meta.width or height > meta.height
+
+
 def crop_is_restorable(
     settings: Settings, capture_id: str, meta: VideoStackMeta | None,
 ) -> bool:
@@ -438,17 +467,7 @@ def crop_is_restorable(
     """
     if meta is None or not meta.crop_applied:
         return False
-    path = result_dir(settings, capture_id) / FULL_PNG_NAME
-    if not path.is_file():
-        return False
-    from PIL import Image
-
-    try:
-        with Image.open(path) as img:
-            width, height = img.size
-    except (OSError, ValueError):
-        return False
-    return width > meta.width or height > meta.height
+    return _kept_original_is_full_frame(result_dir(settings, capture_id), meta)
 
 
 def can_resharpen(meta: VideoStackMeta | None) -> bool:
@@ -605,8 +624,13 @@ def _measured_box(out_dir: Path, meta: VideoStackMeta):
     re-derivable, and ``measure_framing`` is deterministic on the same picture —
     it is what chose the box in the first place. Returns ``None`` when this still
     isn't cropped in place, or when the box can no longer be established.
+
+    "Cropped in place" is the load-bearing part: a **stack-time** crop also sets
+    ``crop_applied``, but its kept original is the *already-cropped* soft render,
+    so a rebuild from it needs no box at all — and applying one would crop the
+    picture a second time. The original's size settles which of the two this is.
     """
-    if not meta.crop_applied:
+    if not meta.crop_applied or not _kept_original_is_full_frame(out_dir, meta):
         return None
     if len(meta.crop_box) == 4:
         return tuple(int(v) for v in meta.crop_box)  # type: ignore[return-value]
@@ -754,13 +778,16 @@ def sharpen_saved_still(
         raise StillCropError("This picture is already sharpened by that much.")
 
     # Worked out *before* the original is kept, because taking that copy is what
-    # would make an unanswerable crop look answerable. With no original there is
-    # nothing to re-derive from and the picture on disk is the original — so a
-    # crop the *stack* applied is simply baked into it, exactly like a stack-time
-    # sharpen, and needs no box.
-    had_original = (out_dir / FULL_PNG_NAME).is_file()
+    # would make an unanswerable crop look answerable. Only an **in-place** crop
+    # needs a box: its original is the larger, uncropped frame, so the slice has
+    # to be re-applied to it. A crop the *stack* applied needs none — with no
+    # original the picture on disk is the original, and with one (a stack-time
+    # sharpen keeps the soft render, and ``_video_stack_body`` writes it already
+    # cropped) the crop is baked into that. So only the in-place case can fail
+    # for want of a box, and the original's size is what tells them apart.
+    needs_box = meta.crop_applied and _kept_original_is_full_frame(out_dir, meta)
     box = _measured_box(out_dir, meta)
-    if meta.crop_applied and had_original and box is None:
+    if needs_box and box is None:
         raise StillCropError(
             "This picture's crop can't be worked out any more, so changing the "
             "sharpening would lose it — stack the capture again instead."
@@ -797,6 +824,17 @@ def restore_full_still(settings: Settings, capture_id: str) -> VideoStackMeta:
         raise StillCropError(
             "The full-frame version of this picture isn't saved — stack the "
             "capture again to get it back."
+        )
+    if meta.crop_applied and not _kept_original_is_full_frame(out_dir, meta):
+        # A stack-time crop keeps the *cropped* soft render as its original, so
+        # there is no bigger frame behind it. Rebuilding from it would hand back
+        # the same picture while marking it uncropped — which then offers a crop
+        # that would trim it a second time. This is the same "no" the wire's
+        # ``crop_restorable`` already gives, said out loud.
+        raise StillCropError(
+            "This picture was cropped while it was being stacked, so the full "
+            "frame isn't saved beside it — stack the capture again to get it "
+            "back."
         )
 
     height, width = _rebuild_still(out_dir, sharpen=_applied_sharpen(meta), box=None)
