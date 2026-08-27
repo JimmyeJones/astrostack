@@ -7677,6 +7677,31 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **⚠ READ THIS BEFORE PICKING UP THE DRIZZLE-SCALE AUTO-DEGRADE ITEM DIRECTLY BELOW (Builder 2026-08-27,
+  found while sizing it; the item's premise is off by one) — `options.auto_reject` is NOT a reliable
+  "unattended" signal, so the filed shape would silently change a *watching* user's output pixel grid.**
+  *(Pillar: autonomy — PRIORITY 2. Size: S as a prerequisite; do it before the M item below. Confidence:
+  traced.)* The item below reuses `auto_reject` as the "the user expressed no preference" flag, exactly as
+  `_afford_drizzle_reject` does. But `get_stack_defaults` (`webapp/routers/stack.py` ~203) also
+  `setdefault`s `auto_reject=True` **into the manual Stack form** for any *never-configured* target (no
+  per-target saved defaults and no global `default_stack_options`) — deliberately, so a beginner's first-light
+  stack gets sane rejection. So a watching beginner on a fresh target posts `auto_reject=True` too, and would
+  get a quietly rescaled picture instead of the actionable refusal (*"To fit, lower the drizzle scale to ×1.3
+  (~4.2 GB)"*) that they are sitting right there able to act on. That is a materially worse trade than the
+  rejection case, where the degrade is invisible in the output geometry — here it changes the output
+  resolution, and the item itself flags that a target's runs would stop being the same size.
+  **Fix direction (small, additive, upgrade-safe):** give `StackOptions` an explicit `unattended: bool = False`
+  set only by `_stack_target` on the walk-away path, add it to `NON_FORM_KEYS` (it is not a user knob — the
+  drift test in `schemas.py` enforces the choice), and gate the degrade on *that* rather than on `auto_reject`.
+  Then the two postures the whole design rests on — nobody is watching vs. someone is — are actually
+  distinguishable, and every future "degrade quietly rather than refuse" decision gets the right signal for
+  free. **Related, lower severity, filed rather than fixed:** the *shipped* `_afford_drizzle_reject` (v0.276.3)
+  has the same exposure — a watching user who explicitly ticks "Drizzle outlier rejection" on a
+  never-configured target has it silently dropped when it doesn't fit, though its docstring says an explicit
+  tick "refuses loudly instead". Outcome there is still a picture plus a `DRZREJSK` card History surfaces, so
+  it is a documented-intent divergence, not a wrong result — but it should switch to `unattended` in the same
+  change, so there is one definition of the posture rather than two.
+
 - **NEW IDEA (Builder 2026-08-26, spotted while shipping the drizzle-rejection affordability fix v0.276.3) —
   a walk-away stack whose *canvas* busts the memory budget still hard-refuses, even though the engine already
   knows the exact one-line change that would make it fit.** *(Pillar: autonomy — PRIORITY 2. Size: M.)*
@@ -7711,6 +7736,22 @@ to **Shipped**.)_
   it for free), and self-hiding on older backends that omit it. **Beginner bar:** it removes a navigation step
   from advice the app already decided to give — no new concept, no new knob. Pairs with the existing
   `solve_setup_problem` banner, which *does* already link, so the two would finally behave the same way.
+  **Builder 2026-08-27, sized it and found the constraint the entry doesn't mention — read this first.**
+  `RejectionBreakdown` renders **only** inside a `HoverCard.Dropdown` on the Target page
+  (`routes/Target.tsx` ~1044, on the "N rejected · N not located yet" badge). A hover card is fine for
+  *reading* advice and awkward for *clicking* it: it works with a desktop pointer (Mantine keeps the dropdown
+  open while it is hovered), but a Mantine `HoverCard` has no touch affordance at all, so on the phone the
+  owner actually uses, the whole breakdown — link and all — is unreachable today. Adding the link is still a
+  strict improvement (desktop gains a click; nothing regresses), but shipping it *alone* leaves a phone user
+  with advice they can neither see nor act on. **So do the two together, or the second one first:** give the
+  breakdown a non-hover home as well (a disclosure/section on the Target page, which the IA work is already
+  grouping), then hang the actions off it. Worth doing in the same change: the **verdict** line has the
+  identical problem — `_DOMINANT_VERDICTS["solve_timeout"]` and the "Most of your subs ran out of time…"
+  headline both say "raise the ASTAP timeout in Settings" with nothing to click — so the optional `action`
+  belongs on the verdict as well as on each bucket. Only one piece of bucket copy names a reachable
+  destination today (`solve_timeout` → `/settings/plate-solving`, via the existing `settingsLink` helper);
+  `unsolved` says "Run Plate Solve", whose control sits on the very page the breakdown renders on, so it
+  wants a scroll/focus affordance rather than a route.
 
 - ~~**NEW IDEA (Scout 2026-08-26 #4, grounded in the plate-solve audit) — when subs fail to plate-solve because
   ASTAP *timed out* (not because the database/ASTAP is missing), say so and offer the one obvious fix: raise the
@@ -11348,24 +11389,52 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **IMPROVEMENT IDEA (Scout 2026-08-26 #5, measured this run) — the shipped "what am I looking at?" object card
-  is SILENT for most real targets because the catalog `blurb` field is only half-populated.** *(Pillar:
-  understand + enjoy — PRIORITY 3. Size: S–M. Confidence: measured.)* The `blurb` (a beginner-friendly
-  one-liner about the object) drives a shipped card, but coverage is thin: **only 36 of 110 Messier objects
-  and 34 of 47 popular NGC/IC objects carry one** (measured directly from `seestack/data/messier.json` and
-  `deepsky_popular.json` this run). So a beginner who shoots M2, M3, M5, or well-known *named* nebulae like the
-  **Wizard (NGC 7380)**, **Flaming Star (IC 405)**, **Seagull (IC 2177)** or **Monkey Head (NGC 2174)** gets an
-  empty "what am I looking at?" — exactly the moment the card exists to serve. **Shape:** a pure data-curation
-  task — fill in the ~74 missing Messier blurbs and ~13 missing popular-NGC/IC blurbs with the same tone,
-  length and factual bar as the existing ones (one plain, warm sentence; standard published facts only; no
-  network, no per-object research beyond well-known catalog descriptions). **Feasibility:** offline, additive,
-  static-data only — no schema/config/API/on-disk change, and no engine change; the loader already reads
-  `blurb` and the card already renders it when present, so this is pure content. **Testable:** add a coverage
-  assertion pinning that every Messier id and every popular-catalog id now carries a non-empty `blurb` (so the
-  gap can't silently reopen), plus a bound on blurb length so a future addition stays a *one-liner*. **Care:**
-  keep each blurb genuinely beginner-friendly and factually conservative — the card's whole value is trust, so
-  a made-up or breathless line is worse than the current silence. Do it in one or two Builder passes (e.g.
-  Messier first, then the named popular nebulae), not one giant commit.
+- ~~**IMPROVEMENT IDEA (Scout 2026-08-26 #5, measured this run) — the shipped "what am I looking at?" object
+  card is SILENT for most real targets because the catalog `blurb` field is only half-populated.**~~ —
+  **SHIPPED v0.277.2** (Builder 2026-08-27, branch `claude/compassionate-galileo-g1g813`) — **both filed
+  passes in one, because the second was 13 objects.** *(Pillar: understand + enjoy — PRIORITY 3.)*
+
+  **Coverage, measured before and after:** Messier **36 / 110 → 110 / 110**, popular NGC/IC **34 / 47 → 47 /
+  47**; across both bundled files, **70 / 157 → 157 / 157**. Every one of the Scout's named examples now says
+  something — M2, M3, M5, the Wizard (NGC 7380), the Flaming Star (IC 405), the Seagull (IC 2177) and the
+  Monkey Head (NGC 2174).
+
+  **Written to the existing bar, not past it.** One or two plain, warm sentences in the voice of the 70 that
+  were already there (the new ones run 96–193 characters against the existing 66–183), standard published
+  facts only, no per-object research and no network. Deliberately **no light-year distances in the new
+  blurbs**: `test_lighttravel.py` already cross-checks any distance a blurb states against the object's
+  `distance_ly` field, and the card renders the honest light-travel line right underneath — a second copy of
+  the same number in prose is a thing that can drift, not a thing that helps.
+
+  **Pure content — no code changed at all.** Two static JSON files; the loader already reads `blurb` and the
+  card already renders it when present, so there is no schema, config, API, on-disk or default change and
+  nothing to migrate (§9).
+
+  **Tests (+3 in `tests/test_objectinfo.py`, 2 fail before):** every bundled catalog object carries a
+  non-blank blurb (so a future catalog addition without one fails here rather than quietly reopening the gap);
+  a blurb stays a one-liner (≤260 chars — it renders as one line on a card that can already run to six, and
+  the owner's standing complaint is that the pages are busy); and a spot-check that the seven objects the gap
+  was measured on now say something real.
+
+  Original spec, for the record:
+
+    *(Pillar:
+    understand + enjoy — PRIORITY 3. Size: S–M. Confidence: measured.)* The `blurb` (a beginner-friendly
+    one-liner about the object) drives a shipped card, but coverage is thin: **only 36 of 110 Messier objects
+    and 34 of 47 popular NGC/IC objects carry one** (measured directly from `seestack/data/messier.json` and
+    `deepsky_popular.json` this run). So a beginner who shoots M2, M3, M5, or well-known *named* nebulae like the
+    **Wizard (NGC 7380)**, **Flaming Star (IC 405)**, **Seagull (IC 2177)** or **Monkey Head (NGC 2174)** gets an
+    empty "what am I looking at?" — exactly the moment the card exists to serve. **Shape:** a pure data-curation
+    task — fill in the ~74 missing Messier blurbs and ~13 missing popular-NGC/IC blurbs with the same tone,
+    length and factual bar as the existing ones (one plain, warm sentence; standard published facts only; no
+    network, no per-object research beyond well-known catalog descriptions). **Feasibility:** offline, additive,
+    static-data only — no schema/config/API/on-disk change, and no engine change; the loader already reads
+    `blurb` and the card already renders it when present, so this is pure content. **Testable:** add a coverage
+    assertion pinning that every Messier id and every popular-catalog id now carries a non-empty `blurb` (so the
+    gap can't silently reopen), plus a bound on blurb length so a future addition stays a *one-liner*. **Care:**
+    keep each blurb genuinely beginner-friendly and factually conservative — the card's whole value is trust, so
+    a made-up or breathless line is worse than the current silence. Do it in one or two Builder passes (e.g.
+    Messier first, then the named popular nebulae), not one giant commit.
 
 - ~~**NEXT SLICE OF THE STANDING IA ITEM (Builder 2026-08-18, counted in `routes/Target.tsx` while shipping the
   History-card grouping v0.267.0) — the Target page's hero action row is **nine controls wide**, and four of them
@@ -14338,31 +14407,86 @@ problems. Dogfood it every big-picture run and fix root causes.
   new engine work, no networked dependency. **Grep before building:** confirm the noise-gain phrasing helper
   (search `integrationTrend` / "less noise" / the goal-card copy) so this reuses the one source of truth rather
   than re-deriving the curve — and that no existing Dashboard card already ranks targets this way.
+  **Builder 2026-08-27 — did that grep, and the answer is "mostly yes, one already does". Reshape this before
+  building it.** `ContinueTonightCard` (`continueTonight.ts` → `pickContinueTonight`) already ranks the
+  targets you have started, already drops the ones with "plenty" of integration so it never nags you to
+  over-shoot, already reads the goals from `/api/library-progress`, and already shows a pick plus two dimmed
+  runners-up you can click through to. `LibraryProgressCard` is the second Dashboard card over the same data.
+  So the *card* this entry describes largely exists; a third one ranking started targets would be exactly the
+  feature-piling the owner's "extremely busy" priority warns against. **What is genuinely missing is the
+  ranking key, not the card:** `pickContinueTonight` sorts by *closest to its goal* (highest readiness
+  fraction), which is not the same question as *where does one more hour buy the most noise reduction* — on a
+  target already at 80 % of goal the marginal gain can be small, and a target at 30 % on the steep part of its
+  √t curve would gain far more. **So the shippable slice is: give the existing card the marginal-gain sort**
+  (or a "biggest gain per hour" line on each row, using the wording the goal card already produces), rather
+  than a new card. Note `integrationTrend` needs *per-target stack history* (two runs spanning a real
+  integration increase, with measured `noise_sigma`), which `/api/library-progress` does not carry — so either
+  extend that roll-up additively or fall back to the ideal √t projection from `total_exposure_s` + goal, which
+  needs no new data at all and is the honest thing to say for a target with only one stack.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26 #5) — "How big is it, really?": a full-Moons-wide scale line on the
-  "what am I looking at?" object card.** *(Pillar: understand + enjoy — PRIORITY 3. Size: S.)* A beginner reads
-  "M31 · 178 arcmin" and it means nothing — arcminutes are an expert unit. But *"about as wide as 6 full
-  Moons"* lands instantly, and "M31 is six Moons across" is one of the classic wow-facts that make a newcomer
-  fall for this hobby. The app already stores the vetted `size_arcmin` (major axis) for every catalog object
-  and already renders an object-info card; nothing today translates that angular size into an intuitive
-  real-world unit. **Verified genuinely new (grepped this run):** `framing.py` only compares an object's size
-  to *a Seestar frame* ("about as wide as a single Seestar frame — shoot it in mosaic"), which answers "will it
-  fit?", not "how big is it in the sky?"; there is no full-Moon / naked-eye comparison anywhere in the engine,
-  webapp, or frontend. **Shape:** a pure helper `angular_size_phrase(size_arcmin) -> str | None` next to
-  `objectinfo`/`framing` that divides by the Moon's ~31 arcmin apparent diameter and phrases it for a beginner:
-  ≥ ~1.3 Moons → *"about as wide as N full Moons"* (round to a friendly integer/half, "1½", "6"); between ~0.4
-  and ~1.3 Moons → *"roughly the size of the full Moon"*; below that → *"a small target — well under the full
-  Moon's width"* (or simply return `None` and let the existing card stay quiet for a tiny planetary nebula
-  where the comparison isn't illuminating). Render it as one extra plain line on the existing object-info card,
-  right beside the distance/light-travel line it rhymes with. **Beginner bar:** clears it cleanly — instantly
-  understandable, plain language, no knob, a sane default (self-hides when `size_arcmin` is absent or the
-  object is far below Moon-scale), and it's pure *understand + enjoy*, not pro tooling. **Feasibility:**
-  offline, additive, read-only, uses data the app already has and already surfaces; the helper is trivially
-  unit-testable (178′ → "6 full Moons"; 31′ → "roughly the full Moon"; 4′ → `None`/"small"; missing size →
-  `None`). **Slices —** (a) the pure `angular_size_phrase` helper + tests (a shippable Builder run on its own);
-  (b) render the line on the object-info card (frontend, gated on presence). **Care:** round hard — a beginner
-  wants "6 Moons", never "5.74 Moons"; and the full Moon is the *only* comparison unit a non-astronomer already
-  has an intuition for, so don't reach for degrees or fists-at-arm's-length.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #5) — "How big is it, really?": a full-Moons-wide scale line on
+  the "what am I looking at?" object card.**~~ — **SHIPPED v0.277.0** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-g1g813`) — **both filed slices, (a) and (b).** *(Pillar: understand + enjoy —
+  PRIORITY 3.)*
+
+  **(a) The pure helper.** `seestack/angularsize.py` — `angular_size(size_arcmin, *, moon_arcmin=31.0)`
+  returning an `AngularSize(size_arcmin, moons, text)` rather than the filed bare `str | None`, so it matches
+  the shape every sibling line on that card already uses (`LightTravel`, `FramingHint`, `MosaicPlan`) and the
+  schema/serialisation layer gains nothing new to special-case. `moons` is the honest unrounded ratio; `text`
+  is the finished sentence, so the frontend never does astronomy.
+
+  **The rounding, and why the bands are where they are.** Above 1.3 Moons it counts Moons — nearest half below
+  three ("1½", "2½"), whole above it, because a half of a five-Moon span is false precision. Below 1.3 it names
+  a fraction of one Moon from a four-band table ("roughly as wide as", "about three-quarters", "about half",
+  "about a third"), each band chosen so its phrase is true within ~±20 % across the *whole* band — the same
+  "only claims that hold at both ends" discipline `lighttravel.py`'s historical anchors use, and inside the
+  spread of published catalog sizes anyway. M 31's 178′ → **"In the sky it's about as wide as 6 full Moons."**
+
+  **The one place this deliberately departs from the filed spec: it stays SILENT below ~a third of a Moon**
+  rather than saying *"a small target — well under the full Moon's width"* (the spec offered both). Down there
+  the comparison stops being picturable, and the framing line directly above it on the same card already says
+  the object fits comfortably in one Seestar frame — so the alternative was a second always-on line restating
+  the first, on a card that can already run to six, against the owner's standing "the UI is extremely busy"
+  priority. M 57 (~1.4′) therefore shows nothing at all.
+
+  **(b) The card.** `ObjectInfoOut.angular_size` / `AngularSizeOut` (additive, optional — an old frontend
+  ignores it, an old backend omitting it reads as "nothing to say"), mapped in `identify_target`, and rendered
+  on `ObjectInfoCard` in the accent italic it now shares with the light-travel line: the card's two pure-wonder
+  facts, paired, below the advice lines.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change — one new optional response
+  field and one new engine module. **Tests (+28):** 26 in `tests/test_angularsize.py` (every band at both its
+  edges, the quiet floor with no gap or overlap against the lowest band, a sweep across the whole catalog range
+  asserting the count is never a decimal and never ungrammatical, the NaN/inf/zero/negative refusals, and the
+  end-to-end M 31 / M 45 / M 57 path through `identify_object`), plus a cross-check that nothing the framing
+  hint calls bigger than a Seestar frame can fail to get a Moon count; and 2 in `ObjectInfoCard.test.tsx` for
+  the rendered line and its self-hiding.
+
+  Original spec, for the record:
+
+    *(Pillar: understand + enjoy — PRIORITY 3. Size: S.)* A beginner reads
+    "M31 · 178 arcmin" and it means nothing — arcminutes are an expert unit. But *"about as wide as 6 full
+    Moons"* lands instantly, and "M31 is six Moons across" is one of the classic wow-facts that make a newcomer
+    fall for this hobby. The app already stores the vetted `size_arcmin` (major axis) for every catalog object
+    and already renders an object-info card; nothing today translates that angular size into an intuitive
+    real-world unit. **Verified genuinely new (grepped this run):** `framing.py` only compares an object's size
+    to *a Seestar frame* ("about as wide as a single Seestar frame — shoot it in mosaic"), which answers "will it
+    fit?", not "how big is it in the sky?"; there is no full-Moon / naked-eye comparison anywhere in the engine,
+    webapp, or frontend. **Shape:** a pure helper `angular_size_phrase(size_arcmin) -> str | None` next to
+    `objectinfo`/`framing` that divides by the Moon's ~31 arcmin apparent diameter and phrases it for a beginner:
+    ≥ ~1.3 Moons → *"about as wide as N full Moons"* (round to a friendly integer/half, "1½", "6"); between ~0.4
+    and ~1.3 Moons → *"roughly the size of the full Moon"*; below that → *"a small target — well under the full
+    Moon's width"* (or simply return `None` and let the existing card stay quiet for a tiny planetary nebula
+    where the comparison isn't illuminating). Render it as one extra plain line on the existing object-info card,
+    right beside the distance/light-travel line it rhymes with. **Beginner bar:** clears it cleanly — instantly
+    understandable, plain language, no knob, a sane default (self-hides when `size_arcmin` is absent or the
+    object is far below Moon-scale), and it's pure *understand + enjoy*, not pro tooling. **Feasibility:**
+    offline, additive, read-only, uses data the app already has and already surfaces; the helper is trivially
+    unit-testable (178′ → "6 full Moons"; 31′ → "roughly the full Moon"; 4′ → `None`/"small"; missing size →
+    `None`). **Slices —** (a) the pure `angular_size_phrase` helper + tests (a shippable Builder run on its own);
+    (b) render the line on the object-info card (frontend, gated on presence). **Care:** round hard — a beginner
+    wants "6 Moons", never "5.74 Moons"; and the full Moon is the *only* comparison unit a non-astronomer already
+    has an intuition for, so don't reach for degrees or fists-at-arm's-length.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #4) — "Does my colour look right?": an object-aware colour sanity
   nudge on the finished picture.** *(Pillar: understand + trust / image quality — PRIORITY 3–4. Size: M.)*
@@ -14400,20 +14524,46 @@ problems. Dogfood it every big-picture run and fix root causes.
   toward silence — a single wrong "your colour is off" on a genuinely fine picture is worse than ten correct
   reassurances are good.
 
-- **NEW IDEA (Builder 2026-08-26, the obvious next step after shipping "My deep-sky wall" v0.275.0) — let the
-  wall use each target's **pinned cover**, not just its newest stack's preview.** *(Pillar: friendliness /
-  enjoy + share — PRIORITY 3. Size: S.)* The montage draws one picture per target from the library's
-  `last_stack_preview`, which is whatever that target stacked *most recently*. But the app already has a
-  feature for exactly this question — **"Set as cover"** (v0.145.0) — where the user has said, in as many
-  words, *which picture of this target is the good one*. On a target whose newest run is a linear master or a
-  quick restack, the wall currently shows that instead of the finished picture the owner chose, which is the
-  one thing the wall exists to show. **Shape:** in `_montage_tiles` (`webapp/routers/gallery.py`), prefer the
-  target's cover run's preview when one is pinned and readable, falling back to `last_stack_preview` exactly as
-  today — a few lines, no new endpoint, no engine change (`build_montage` neither knows nor cares where a tile
-  came from). **Care:** the library registry stamps `last_stack_preview` but the cover is a per-target
-  `cover_run_id`, so this costs one project open per hero — acceptable on a deliberate one-tap download, not on
-  a page render, which is the same trade `/api/imaging-log` already makes. Testable: a target with a pinned
-  cover puts *that* picture on the wall; one without is unchanged.
+- ~~**NEW IDEA (Builder 2026-08-26, the obvious next step after shipping "My deep-sky wall" v0.275.0) — let
+  the wall use each target's **pinned cover**, not just its newest stack's preview.**~~ — **SHIPPED v0.277.1**
+  (Builder 2026-08-27, branch `claude/compassionate-galileo-g1g813`). *(Pillar: friendliness / enjoy + share —
+  PRIORITY 3.)*
+
+  **What shipped, exactly as filed.** `_montage_tiles` (`webapp/routers/gallery.py`) now prefers the target's
+  pinned cover preview and falls back to `last_stack_preview` when nothing is pinned, the pinned run was pruned,
+  or its preview file has gone. It reuses `targets._cover_preview_path` rather than re-deriving the precedence:
+  that helper (and its run-level twin `gallery._representative_run`, which `/api/gallery/best` already uses) were
+  the two existing copies, and a third would have been the copy that eventually disagreed. So the wall, the
+  Library tile, the Dashboard tile and the best-pictures wall now all answer "which picture *is* this target?"
+  the same way.
+
+  **Cost, as the filed Care note priced it:** resolving a cover opens that target's project, so it happens only
+  for targets that actually have one pinned (the helper returns `None` on a null `cover_stack_run_id` before
+  opening anything). That is the same trade `/api/imaging-log` makes, and it is on a deliberate one-tap
+  download, never a page render.
+
+  **Upgrade-safe (§9):** read-only, no config/schema/on-disk/API/default change; a library with no pinned covers
+  renders a bit-for-bit identical wall. **Tests (+2 in `tests/webapp/test_gallery_montage.py`, 1 fails before):**
+  a target given a good picture *and* a later scrappy restack puts the restack on the wall until its owner pins
+  the good one, then puts the pinned one there and not the restack (asserted on the rendered JPEG's own pixels);
+  and a pinned cover whose file has since been deleted degrades to the newest picture rather than dropping the
+  target off the wall.
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: S.)* The montage draws one picture per target
+    from the library's
+    `last_stack_preview`, which is whatever that target stacked *most recently*. But the app already has a
+    feature for exactly this question — **"Set as cover"** (v0.145.0) — where the user has said, in as many
+    words, *which picture of this target is the good one*. On a target whose newest run is a linear master or a
+    quick restack, the wall currently shows that instead of the finished picture the owner chose, which is the
+    one thing the wall exists to show. **Shape:** in `_montage_tiles` (`webapp/routers/gallery.py`), prefer the
+    target's cover run's preview when one is pinned and readable, falling back to `last_stack_preview` exactly as
+    today — a few lines, no new endpoint, no engine change (`build_montage` neither knows nor cares where a tile
+    came from). **Care:** the library registry stamps `last_stack_preview` but the cover is a per-target
+    `cover_run_id`, so this costs one project open per hero — acceptable on a deliberate one-tap download, not on
+    a page render, which is the same trade `/api/imaging-log` already makes. Testable: a target with a pinned
+    cover puts *that* picture on the wall; one without is unchanged.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #3) — "Print it": a print-ready export sized and DPI-tagged for a
   frame on the wall.** *(Pillar: enjoy + share — PRIORITY 3. Size: M.)* A beginner who finally gets a
