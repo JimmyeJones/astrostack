@@ -15630,11 +15630,43 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #16) — "Download all my pictures": one button that streams every
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #16) — "Download all my pictures": one button that streams every
   finished target picture in the library as a single `.zip`, so a beginner can back up or share a whole
-  season's work in one tap instead of visiting each target and downloading one at a time.** *(Pillar: get +
-  share + trust/backup, PRIORITY 3; size S–M; fully offline, additive, read-only — stdlib `zipfile`, no new
-  deps, no network, no schema/config change.)*
+  season's work in one tap instead of visiting each target and downloading one at a time.**~~ — **SHIPPED
+  v0.285.0** (Builder 2026-08-27, branch `claude/compassionate-galileo-5du96e`). *(Pillar: get + share +
+  trust/backup — PRIORITY 3.)*
+
+  **What shipped.** `GET /api/gallery/best.zip` streams the whole *best pictures* wall as one archive, and a
+  **"Download all (N)"** button sits beside the wall's title on `/best` (self-hiding with the wall — the button
+  is only rendered when there are items, and the endpoint 404s with a plain reason below the wall's own floor).
+
+  **One definition of "this target's picture", shared.** `get_best_pictures` was split into
+  `_collect_best_pictures(request, limit)`, which returns each ranked `BestPicture` paired with its preview
+  file's path; the JSON endpoint drops the paths (they never leave the server), the zip uses them. So the
+  archive's members are the wall's items, in the wall's order, honouring the same `limit` — a pinned cover is
+  archived where one exists, exactly as it's displayed. Each member is the **stored display-space preview PNG**:
+  what you saw is what you get, with no re-render and no editor recompute.
+
+  **Streamed, not buffered.** `zipfile` accepts an unseekable output stream (it falls back to data descriptors),
+  so a tiny `_ZipSink` is drained chunk by chunk through a `StreamingResponse` — never more than one 256 KiB read
+  buffer plus the zip's bookkeeping in memory, however big the library. `ZIP_STORED`, not deflate: every member
+  is an already-compressed PNG, so re-compressing costs a NAS CPU for no size win. Members are named after the
+  **target** (`M 42.png`, not `M_42_20260814_213355.png`) via a pure `zip_entry_name()` that sanitises to a
+  separator-free ASCII-safe set (so an unzip can never write outside its folder) and de-duplicates
+  case-insensitively (`… (2)`), since Windows and macOS unzip onto case-insensitive filesystems.
+
+  **Read-only, per the guardrails.** It opens existing result files and streams bytes out; nothing is written to
+  the library and `incoming/` is never touched. A picture that can't be read is skipped and named in a trailing
+  `_skipped.txt` rather than sinking the archive — the same boundary the gallery draws around one bad preview.
+
+  **Tests (+6 in `tests/webapp/test_gallery_best_zip.py`, +2 in `BestPictures.test.tsx`):** a valid archive with
+  one target-named member per target whose bytes match the previews; self-hide/404 matching the wall's floor;
+  members equal to the wall's items in the wall's order, and `limit` honoured; one unreadable picture skipped
+  with the rest intact and a `_skipped.txt` explaining it; a ~1 MB member surviving the chunked stream byte-for-
+  byte; and the naming rule on its own (friendly, traversal-safe, unique). Frontend: the button links to
+  `/api/gallery/best.zip` with `download`, and is absent on an empty wall.
+
+  Original entry:
   **Why (real friction).** The library already has a **"My deep-sky wall"** montage (`GET /api/gallery/montage.jpg`,
   one composite JPEG) and per-target export/share/print/keepsake — but there is **no way to grab the individual
   full-res finished pictures in bulk.** A beginner with 20 targets shot over months who wants to back them up to
