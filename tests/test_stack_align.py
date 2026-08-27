@@ -64,3 +64,36 @@ def test_align_returns_none_when_footprint_off_canvas(tmp_path):
         dst_shape=(320, 480),
     )
     assert result is None
+
+
+def test_align_rejects_a_celestialless_stored_wcs(tmp_path):
+    """A frame whose stored ``wcs_json`` parses but carries no celestial keys is
+    rejected outright instead of being reprojected through a WCS that locates
+    nothing.
+
+    Regression: an empty / truncated ASTAP ``.wcs`` sidecar reads back as a
+    truthy ``"END"`` blob, and ``wcs_from_text`` returns a **non-None**,
+    ``has_celestial=False`` WCS for it — so the ``src_wcs is None`` guard let it
+    straight into ``reproject_rgb_windowed``. The solve runner now refuses to
+    persist such a blob, but an install upgraded from before that fix can still
+    have one in its DB; it must heal here rather than corrupt the stack. The
+    raise (not a silent ``None``) is what surfaces the frame in the run's
+    per-frame error list — ``run_stack`` records it and carries on.
+    """
+    p = write_seestar_fits(tmp_path / "x.fit", add_wcs=True, n_stars=20, seed=1)
+    good = make_synth_wcs_text()
+
+    for bad in ("END", "SIMPLE  =                    T\nEND"):
+        with pytest.raises(ValueError, match="celestial"):
+            align_one(
+                str(p), bayer_pattern="RGGB",
+                src_wcs_text=bad, dst_wcs_text=good,
+                dst_shape=(320, 480),
+            )
+        # …and the same for a reference frame that never got a real solution.
+        with pytest.raises(ValueError, match="celestial"):
+            align_one(
+                str(p), bayer_pattern="RGGB",
+                src_wcs_text=good, dst_wcs_text=bad,
+                dst_shape=(320, 480),
+            )

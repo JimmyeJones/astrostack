@@ -327,7 +327,7 @@ def bootstrap_solve(
     ``deep_solver`` is injectable for testing; production uses ASTAP on a temp
     FITS of the deep image.
     """
-    from seestack.io.wcs_io import wcs_center_deg_from_text
+    from seestack.io.wcs_io import wcs_center_deg_from_text, wcs_text_is_usable
     from seestack.solve.astap import classify_solve_setup_error
     from seestack.solve.runner import _fov_deg_for_frame
 
@@ -396,7 +396,12 @@ def bootstrap_solve(
 
     result.engaged = True
     wcs_text = getattr(solve_res, "wcs_text", None)
-    if not getattr(solve_res, "solved", False) or not wcs_text:
+    # Truthiness is not enough: an empty/truncated ``.wcs`` sidecar reads back as a
+    # truthy ``"END"`` blob that parses to a non-``None``, celestial-less WCS (see
+    # ``wcs_text_is_usable``). Propagating that would stamp *every* rescued member
+    # with a WCS that locates nothing — worse than the honest "didn't solve" here,
+    # because a stamped member is never re-offered to the solver again.
+    if not getattr(solve_res, "solved", False) or not wcs_text_is_usable(wcs_text):
         raw = getattr(solve_res, "error", None) or ""
         setup = classify_solve_setup_error(raw)
         result.reason = setup or "deep image did not solve"

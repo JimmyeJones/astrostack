@@ -151,8 +151,16 @@ def align_one(
 
     src_wcs = wcs_from_text(src_wcs_text)
     dst_wcs = wcs_from_text(dst_wcs_text)
+    # ``has_celestial`` as well as ``is None``: a header that parses but carries no
+    # RA/Dec keys (an empty or truncated ASTAP ``.wcs`` sidecar stored before the
+    # solve-runner validity gate landed) yields a non-``None`` WCS that locates
+    # nothing, and feeding it to ``reproject_rgb_windowed`` puts garbage on the
+    # canvas instead of cleanly dropping the frame. An install already carrying
+    # such a row heals here rather than corrupting its stack.
     if src_wcs is None or dst_wcs is None:
         raise ValueError(f"missing WCS for {fits_path}")
+    if not src_wcs.has_celestial or not dst_wcs.has_celestial:
+        raise ValueError(f"WCS carries no celestial solution for {fits_path}")
 
     # When a sub-pixel refine shift (up to SUBPIXEL_SHIFT_CAP_PX px) will follow,
     # widen the reproject window pad to at least that cap so the shift can't push

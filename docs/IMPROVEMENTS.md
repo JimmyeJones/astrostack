@@ -49,15 +49,25 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟠 BROKEN-UX / DATA-INTEGRITY (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`,
-  reproduced) — a returncode-0 ASTAP solve whose `.wcs` sidecar is readable but carries NO celestial WCS
-  (empty / truncated / partial-header) is persisted as a *solved* frame with a garbage `wcs_json` and a null
-  centre, then locked out of retry forever — the exact "malformed/partial sidecar" case the runner's own guard
-  was written to catch, and which it does not catch.** *(Severity: broken-UX / data-integrity — a frame is
-  marked solved-yet-unusable, never re-solved (so it can never contribute), and its celestial-less WCS passes
-  align's `is None` guard and is fed into reprojection instead of being cleanly skipped. Confidence: reproduced
-  — the truthy-but-useless `wcs_text`, the null centre, and the bypassed guard all reproduced against the real
-  code; downstream skip/align traced.)*
+- **✅ SHIPPED (Builder, v0.287.3, branch `claude/compassionate-galileo-pr7p04`) — ~~a returncode-0 ASTAP
+  solve whose `.wcs` sidecar is readable but carries NO celestial WCS is persisted as a *solved* frame with a
+  garbage `wcs_json` and a null centre, then locked out of retry forever.~~** Fixed exactly as specified, plus
+  two coherence fixes the trace implied. New `seestack/io/wcs_io.wcs_text_is_usable()` names the real question
+  ("does this blob carry a usable celestial reference point?") — the one truthiness and `is None` both get
+  wrong, because `Header.fromstring` turns an empty/truncated sidecar into a truthy `"END"` blob that
+  `wcs_from_text` happily returns a non-`None`, `has_celestial=False` WCS for. Four call sites now ask it
+  instead: `apply_solve_result_to_db` (`runner.py`) records an honest `solve_failed:unreadable plate solution`
+  and leaves the frame **retryable** rather than stamping the garbage; `bootstrap_solve` (`bootstrap.py:399`)
+  refuses to propagate a celestial-less base onto every rescued member; `run_qc_and_solve`'s `solve_ok` counter
+  (`io/scanner.py`) keeps using the *same* bar the DB write does, so the "located N frames" number can't
+  disagree with what was stored; and `align_one` (`stack/align.py`) now rejects a celestial-less src/dst WCS
+  outright — the backstop that heals an install already carrying such a row from before this fix, instead of
+  feeding it to `reproject_rgb_windowed`. A genuine ASTAP solve always ends with a centre, so a healthy install
+  is bit-for-bit unaffected. Tests: 5 new/extended regression tests across `tests/test_solve_runner.py`,
+  `tests/test_bootstrap_solve.py`, `tests/test_stack_align.py`, `tests/test_wcs_io.py` — all fail before,
+  pass after. (Four existing solve-runner tests had used a `"CRVAL1=1.0"` placeholder as their "successful
+  solve" fixture; that is now the shared `VALID_WCS_TEXT` built from `tests.synth.make_synth_wcs_text` —
+  a realistic solution blob, no assertion loosened.)
 
   **Root cause (traced + reproduced).** `ASTAPSolver._solve_once` (`seestack/solve/astap.py:311`) sets
   `solved = proc.returncode == 0 and wcs_sidecar.exists()` — **existence only, not validity**. `solve_one`
@@ -23640,6 +23650,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.287.3** — Data-integrity: **a plate solve is only believed when its WCS actually locates the frame.**
+  ASTAP returning 0 with a readable-but-empty/truncated `.wcs` sidecar used to be persisted as a *solved*
+  frame carrying a garbage `wcs_json` and a null centre — never re-solved (the solve arglist skips any truthy
+  `wcs_json`), and its celestial-less WCS slipped past `align_one`'s `is None` guard into reprojection. New
+  `wcs_text_is_usable()` gates the four places a stored solution is trusted: the DB write (honest failure,
+  frame stays retryable), the stack-then-solve bootstrap (won't stamp a celestial-less base onto every rescued
+  member), the `solve_ok` "located N" counter (same bar as the DB write), and `align_one` (the backstop that
+  heals a row an older version already stored). A real solve always ends with a centre, so a healthy install
+  is unaffected. Tests: +5 regression tests across `test_solve_runner.py`, `test_bootstrap_solve.py`,
+  `test_stack_align.py`, `test_wcs_io.py`.
 - **v0.281.0** — Autonomy: **a walk-away stack whose drizzle canvas won't fit now makes a slightly smaller
   picture instead of no picture.** `_best_memory_fix` has always computed the one lever that would fit
   (*"lower the drizzle scale to ×1.3 (~4.2 GB)"*) and the run-time guard has always quoted it — perfect for a
