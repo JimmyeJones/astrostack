@@ -98,3 +98,36 @@ def test_the_calibration_registry_round_trips_through_the_durable_write(tmp_path
     # Neither write leaves a temp file for the next reader to trip over.
     names = sorted(p.name for p in calibration.calibration_dir(tmp_path).iterdir())
     assert names == sorted([calibration.NEXT_ID_NAME, calibration.REGISTRY_NAME])
+
+
+def test_a_finished_still_keeps_its_metadata_through_a_rewrite(tmp_path: Path):
+    """``meta.json`` is what makes a finished picture findable at all.
+
+    It is rewritten in place on every crop and every re-sharpen, so a half-write
+    would drop a still off the Moon & Sun page and out of the Gallery while
+    ``stack.png`` sat right beside it — recoverable only by another multi-minute
+    decode of a capture the owner may have already cleared off the NAS.
+    """
+    from dataclasses import replace as dc_replace
+
+    from webapp import video
+
+    settings = Settings(data_root=str(tmp_path))
+    out_dir = video.result_dir(settings, "Lunar_video")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    meta = video.VideoStackMeta(
+        capture_id="Lunar_video", label="Moon", kind="lunar",
+        source_name="clip.mp4", created_utc="2026-08-27T21:00:00+00:00",
+        width=64, height=48, keep_percent=30.0, n_graded=10, n_kept=3,
+        n_stacked=3, n_align_failed=0, stride=1, aligned=True,
+        sharpness_best=1.0, sharpness_kept_median=0.9, sharpness_all_median=0.5,
+        warnings=[],
+    )
+    video._write_meta(out_dir, meta)
+    assert video.read_meta(settings, "Lunar_video") == meta
+
+    # The in-place-edit path rewrites the same file; it must still round-trip and
+    # leave no temp behind for the next reader to trip over.
+    video._write_meta(out_dir, dc_replace(meta, sharpen_amount=0.4))
+    assert video.read_meta(settings, "Lunar_video").sharpen_amount == 0.4
+    assert sorted(p.name for p in out_dir.iterdir()) == [video.META_NAME]
