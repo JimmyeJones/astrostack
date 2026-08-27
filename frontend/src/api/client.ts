@@ -318,6 +318,17 @@ export interface LightTravel {
   text: string;
 }
 
+/** "How big is it, really?" — a target's span in full Moons, the one angular
+ *  yardstick a non-astronomer already owns. */
+export interface AngularSize {
+  // The catalog major axis this was built from.
+  size_arcmin: number;
+  // That size in full-Moon widths, unrounded.
+  moons: number;
+  // A complete sentence: "In the sky it's about as wide as 6 full Moons."
+  text: string;
+}
+
 /** "How big a mosaic?" — the panel grid a too-big target's span needs. */
 export interface MosaicPlan {
   // Panels along the frame's long edge, and along its short edge.
@@ -369,6 +380,10 @@ export interface ObjectInfo {
   // the catalog's vetted distance; absent/null for an object without one (older
   // backends omit it — the card shows nothing either way).
   light_travel?: LightTravel | null;
+  // "How big is it, really?" — the object's span in full Moons; absent/null
+  // when the catalog has no vetted size or the object is too small for the
+  // comparison to help (older backends omit it — the card shows nothing).
+  angular_size?: AngularSize | null;
 }
 
 export interface BackgroundModeHint {

@@ -14339,30 +14339,69 @@ problems. Dogfood it every big-picture run and fix root causes.
   (search `integrationTrend` / "less noise" / the goal-card copy) so this reuses the one source of truth rather
   than re-deriving the curve — and that no existing Dashboard card already ranks targets this way.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26 #5) — "How big is it, really?": a full-Moons-wide scale line on the
-  "what am I looking at?" object card.** *(Pillar: understand + enjoy — PRIORITY 3. Size: S.)* A beginner reads
-  "M31 · 178 arcmin" and it means nothing — arcminutes are an expert unit. But *"about as wide as 6 full
-  Moons"* lands instantly, and "M31 is six Moons across" is one of the classic wow-facts that make a newcomer
-  fall for this hobby. The app already stores the vetted `size_arcmin` (major axis) for every catalog object
-  and already renders an object-info card; nothing today translates that angular size into an intuitive
-  real-world unit. **Verified genuinely new (grepped this run):** `framing.py` only compares an object's size
-  to *a Seestar frame* ("about as wide as a single Seestar frame — shoot it in mosaic"), which answers "will it
-  fit?", not "how big is it in the sky?"; there is no full-Moon / naked-eye comparison anywhere in the engine,
-  webapp, or frontend. **Shape:** a pure helper `angular_size_phrase(size_arcmin) -> str | None` next to
-  `objectinfo`/`framing` that divides by the Moon's ~31 arcmin apparent diameter and phrases it for a beginner:
-  ≥ ~1.3 Moons → *"about as wide as N full Moons"* (round to a friendly integer/half, "1½", "6"); between ~0.4
-  and ~1.3 Moons → *"roughly the size of the full Moon"*; below that → *"a small target — well under the full
-  Moon's width"* (or simply return `None` and let the existing card stay quiet for a tiny planetary nebula
-  where the comparison isn't illuminating). Render it as one extra plain line on the existing object-info card,
-  right beside the distance/light-travel line it rhymes with. **Beginner bar:** clears it cleanly — instantly
-  understandable, plain language, no knob, a sane default (self-hides when `size_arcmin` is absent or the
-  object is far below Moon-scale), and it's pure *understand + enjoy*, not pro tooling. **Feasibility:**
-  offline, additive, read-only, uses data the app already has and already surfaces; the helper is trivially
-  unit-testable (178′ → "6 full Moons"; 31′ → "roughly the full Moon"; 4′ → `None`/"small"; missing size →
-  `None`). **Slices —** (a) the pure `angular_size_phrase` helper + tests (a shippable Builder run on its own);
-  (b) render the line on the object-info card (frontend, gated on presence). **Care:** round hard — a beginner
-  wants "6 Moons", never "5.74 Moons"; and the full Moon is the *only* comparison unit a non-astronomer already
-  has an intuition for, so don't reach for degrees or fists-at-arm's-length.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #5) — "How big is it, really?": a full-Moons-wide scale line on
+  the "what am I looking at?" object card.**~~ — **SHIPPED v0.277.0** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-g1g813`) — **both filed slices, (a) and (b).** *(Pillar: understand + enjoy —
+  PRIORITY 3.)*
+
+  **(a) The pure helper.** `seestack/angularsize.py` — `angular_size(size_arcmin, *, moon_arcmin=31.0)`
+  returning an `AngularSize(size_arcmin, moons, text)` rather than the filed bare `str | None`, so it matches
+  the shape every sibling line on that card already uses (`LightTravel`, `FramingHint`, `MosaicPlan`) and the
+  schema/serialisation layer gains nothing new to special-case. `moons` is the honest unrounded ratio; `text`
+  is the finished sentence, so the frontend never does astronomy.
+
+  **The rounding, and why the bands are where they are.** Above 1.3 Moons it counts Moons — nearest half below
+  three ("1½", "2½"), whole above it, because a half of a five-Moon span is false precision. Below 1.3 it names
+  a fraction of one Moon from a four-band table ("roughly as wide as", "about three-quarters", "about half",
+  "about a third"), each band chosen so its phrase is true within ~±20 % across the *whole* band — the same
+  "only claims that hold at both ends" discipline `lighttravel.py`'s historical anchors use, and inside the
+  spread of published catalog sizes anyway. M 31's 178′ → **"In the sky it's about as wide as 6 full Moons."**
+
+  **The one place this deliberately departs from the filed spec: it stays SILENT below ~a third of a Moon**
+  rather than saying *"a small target — well under the full Moon's width"* (the spec offered both). Down there
+  the comparison stops being picturable, and the framing line directly above it on the same card already says
+  the object fits comfortably in one Seestar frame — so the alternative was a second always-on line restating
+  the first, on a card that can already run to six, against the owner's standing "the UI is extremely busy"
+  priority. M 57 (~1.4′) therefore shows nothing at all.
+
+  **(b) The card.** `ObjectInfoOut.angular_size` / `AngularSizeOut` (additive, optional — an old frontend
+  ignores it, an old backend omitting it reads as "nothing to say"), mapped in `identify_target`, and rendered
+  on `ObjectInfoCard` in the accent italic it now shares with the light-travel line: the card's two pure-wonder
+  facts, paired, below the advice lines.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change — one new optional response
+  field and one new engine module. **Tests (+28):** 26 in `tests/test_angularsize.py` (every band at both its
+  edges, the quiet floor with no gap or overlap against the lowest band, a sweep across the whole catalog range
+  asserting the count is never a decimal and never ungrammatical, the NaN/inf/zero/negative refusals, and the
+  end-to-end M 31 / M 45 / M 57 path through `identify_object`), plus a cross-check that nothing the framing
+  hint calls bigger than a Seestar frame can fail to get a Moon count; and 2 in `ObjectInfoCard.test.tsx` for
+  the rendered line and its self-hiding.
+
+  Original spec, for the record:
+
+    *(Pillar: understand + enjoy — PRIORITY 3. Size: S.)* A beginner reads
+    "M31 · 178 arcmin" and it means nothing — arcminutes are an expert unit. But *"about as wide as 6 full
+    Moons"* lands instantly, and "M31 is six Moons across" is one of the classic wow-facts that make a newcomer
+    fall for this hobby. The app already stores the vetted `size_arcmin` (major axis) for every catalog object
+    and already renders an object-info card; nothing today translates that angular size into an intuitive
+    real-world unit. **Verified genuinely new (grepped this run):** `framing.py` only compares an object's size
+    to *a Seestar frame* ("about as wide as a single Seestar frame — shoot it in mosaic"), which answers "will it
+    fit?", not "how big is it in the sky?"; there is no full-Moon / naked-eye comparison anywhere in the engine,
+    webapp, or frontend. **Shape:** a pure helper `angular_size_phrase(size_arcmin) -> str | None` next to
+    `objectinfo`/`framing` that divides by the Moon's ~31 arcmin apparent diameter and phrases it for a beginner:
+    ≥ ~1.3 Moons → *"about as wide as N full Moons"* (round to a friendly integer/half, "1½", "6"); between ~0.4
+    and ~1.3 Moons → *"roughly the size of the full Moon"*; below that → *"a small target — well under the full
+    Moon's width"* (or simply return `None` and let the existing card stay quiet for a tiny planetary nebula
+    where the comparison isn't illuminating). Render it as one extra plain line on the existing object-info card,
+    right beside the distance/light-travel line it rhymes with. **Beginner bar:** clears it cleanly — instantly
+    understandable, plain language, no knob, a sane default (self-hides when `size_arcmin` is absent or the
+    object is far below Moon-scale), and it's pure *understand + enjoy*, not pro tooling. **Feasibility:**
+    offline, additive, read-only, uses data the app already has and already surfaces; the helper is trivially
+    unit-testable (178′ → "6 full Moons"; 31′ → "roughly the full Moon"; 4′ → `None`/"small"; missing size →
+    `None`). **Slices —** (a) the pure `angular_size_phrase` helper + tests (a shippable Builder run on its own);
+    (b) render the line on the object-info card (frontend, gated on presence). **Care:** round hard — a beginner
+    wants "6 Moons", never "5.74 Moons"; and the full Moon is the *only* comparison unit a non-astronomer already
+    has an intuition for, so don't reach for degrees or fists-at-arm's-length.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #4) — "Does my colour look right?": an object-aware colour sanity
   nudge on the finished picture.** *(Pillar: understand + trust / image quality — PRIORITY 3–4. Size: M.)*

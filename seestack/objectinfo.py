@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from seestack.angularsize import AngularSize, angular_size
 from seestack.bg_advice import BackgroundModeHint, background_mode_hint
 from seestack.framing import FramingHint, MosaicPlan, framing_hint, mosaic_plan
 from seestack.lighttravel import LightTravel, light_travel
@@ -91,6 +92,11 @@ class ObjectInfo:
     # distance. None when the catalog has no vetted distance, so the card simply
     # says nothing rather than guessing.
     light_travel: LightTravel | None = None
+    # "How big is it, really?" — the catalog's angular size expressed in full
+    # Moons, the one yardstick a non-astronomer already owns. None when the
+    # catalog has no vetted size, or the object is too small for the comparison
+    # to say anything (see :mod:`seestack.angularsize`).
+    angular_size: AngularSize | None = None
 
 
 def _norm_name(s: str) -> str:
@@ -169,4 +175,5 @@ def _to_info(obj: CatalogObject, matched_by: str) -> ObjectInfo:
         difficulty=target_difficulty(obj.id, obj.type),
         background_mode_hint=background_mode_hint(obj.type, obj.size_arcmin),
         light_travel=light_travel(obj.distance_ly),
+        angular_size=angular_size(obj.size_arcmin),
     )
