@@ -281,6 +281,36 @@ describe("ObjectInfoCard", () => {
     expect(container.textContent).not.toContain("The light in this picture");
   });
 
+  it("renders the full-Moon size line, and nothing when the object is small", async () => {
+    // "178 arcmin" means nothing to a beginner; "6 full Moons" lands instantly.
+    // The backend hands over the finished sentence, so the card only decides
+    // whether to show it — and self-hides for an object too small to compare.
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+      angular_size: {
+        size_arcmin: 178, moons: 5.74,
+        text: "In the sky it's about as wide as 6 full Moons.",
+      },
+    });
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByText(/about as wide as 6 full Moons/)).toBeInTheDocument());
+  });
+
+  it("shows no size line for an object below Moon-scale", async () => {
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M57", name: "Ring Nebula", type: "planetary nebula",
+      constellation: "Lyra", constellation_abbr: "Lyr",
+      ra_deg: 283, dec_deg: 33, matched_by: "name",
+    });
+    const { container } = renderCard();
+    await waitFor(() =>
+      expect(screen.getAllByText("Ring Nebula").length).toBeGreaterThan(0));
+    expect(container.textContent).not.toContain("full Moon");
+  });
+
   it("renders nothing when the target isn't recognised", async () => {
     vi.spyOn(client.api, "identifyTarget").mockResolvedValue(null);
     const { container } = renderCard();

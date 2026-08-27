@@ -123,10 +123,20 @@ export function ObjectInfoCard(
               {framingWithMosaic(d.name || d.id, d.framing, d.mosaic)}
             </Text>
           ) : null}
-          {/* "How far did you see?" — the one line on this card that is pure
-              wonder rather than advice, so it sits last and reads in the app's
-              accent colour. Self-hiding: an object with no vetted catalog
-              distance shows nothing at all. */}
+          {/* "How big is it, really?" — arcminutes mean nothing to a beginner,
+              but "as wide as 6 full Moons" lands instantly. Pairs with the
+              light-travel line below as the card's two pure-wonder facts, so
+              they share its accent styling and sit last. Self-hiding: an object
+              with no vetted size, or one far below Moon-scale (where the
+              comparison says nothing useful), shows no line at all. */}
+          {d.angular_size ? (
+            <Text size="sm" c="indigo.5" fs="italic">
+              {d.angular_size.text}
+            </Text>
+          ) : null}
+          {/* "How far did you see?" — the other pure-wonder line, so it sits
+              last and reads in the app's accent colour. Self-hiding: an object
+              with no vetted catalog distance shows nothing at all. */}
           {d.light_travel ? (
             <Text size="sm" c="indigo.5" fs="italic">
               {d.light_travel.text}
