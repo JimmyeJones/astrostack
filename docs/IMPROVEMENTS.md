@@ -650,6 +650,60 @@ _(none — claim an item here with your branch name)_
   withholds the pins and says why for a run with a saved rotation (fails before / passes after); and the
   no-regression half — an ordinary run still labels its objects.
 
+- **🟠 WRONG-RESULT / BROKEN-UX (Builder 2026-08-27, traced end to end while sweeping the North-up family;
+  NOT yet reproduced — needs a repro before a fix) — the same root class as the whole v0.288.1→v0.290.3 chain,
+  but for **crop** instead of rotation: an auto-edited run's stored preview is a `geometry.crop` of the canvas,
+  and *nothing records that*, so every consumer that treats the preview as a uniform downscale of the FITS
+  places its geometry wrong.** *(Severity: wrong-result on the Sky map — a picture is placed at the wrong
+  size/centre on the sky — plus misplaced History object pins, a wrong scale bar and a mis-centred wallpaper
+  crop, on runs a beginner produced with one click. The picture itself is fine. Confidence: traced against the
+  code, on-by-default settings confirmed; **not** reproduced, which is why it is filed rather than fixed.)*
+
+  **Why this is the *third* instance of one shape.** v0.288.1 (Sky-map alpha + tile placement), v0.289.2
+  (History object pins) and v0.290.1 (share/wallpaper double-rotation, the rose, the scale bar) were all the
+  same bug: *something changed the stored preview relative to the FITS grid, and nothing recorded what.* The
+  fix each time was to record the fact (`stack_runs.preview_north_up_deg`) and have the consumers ask. **Crop
+  is the identical gap, still open** — and unlike the North-up save (a deliberate two-step user action), it
+  fires on the **one-click path a beginner actually uses**.
+
+  **Trace.** `_auto_edit_process_run` (`webapp/pipeline.py`) builds the Auto recipe with
+  `auto_crop=settings.auto_crop_border` — **`auto_crop_border` defaults to `True`** (`webapp/config.py:108`) —
+  and rewrites `run.preview_path` with `render_run_display_array(..., recipe)`, which applies the whole recipe
+  including its `geometry.crop`. It is chained unconditionally by the one-click **Process target**
+  (`pipeline.py:683`) and by reprocess-all (`pipeline.py:1051`), and opt-in on the walk-away auto-stack
+  (`pipeline.py:359`). So a Processed target's stored preview is routinely a *crop* of the canvas. Then:
+  - `sky.py:158-172` builds the tile's WCS with `wcs_dict_rescaled_to_preview(run.fits_path, preview_w,
+    preview_h)`, whose whole premise is "the preview is a uniform downscale of the canvas" — it maps the
+    **full** canvas onto the **cropped** picture, so the scale is wrong and the centre shifts by the crop's
+    offset. `canvas_extent_from_fits` sizes the tile from the full canvas too, so the cropped picture is drawn
+    stretched over the uncropped footprint.
+  - `sky_overlay` (`stack.py`) composites `stack_coverage_mask(fits_path)` — the **uncropped** footprint —
+    against the cropped preview, exactly the misalignment `rotate_mask_north_up` was added to fix for rotation.
+  - History's object pins position by `x_px / width` on the FITS grid (`…/annotations`), so they land off by
+    the crop offset — the same mis-plot v0.289.2 fixed for rotation, on a much more common trigger.
+  - `_sky_marks_for_run`'s bar is a fraction of the **canvas** width applied to the cropped preview's width,
+    and `wallpaper_target_pixel` maps the sky position onto the uncropped grid — both now handle rotation
+    (v0.290.1) and neither knows about crop.
+
+  **Reachability (honest).** Needs the auto-crop to actually fire: `_auto_crop_box` returns `None` when there
+  is nothing worth trimming, so a clean single-field stack with full coverage is likely uncropped and
+  unaffected. It fires on **ragged borders** — dithered stacks and mosaics — i.e. precisely the pictures whose
+  Sky-map footprint and object labels matter most. That is the gap a repro must close first.
+
+  **Suggested shape (do NOT bolt this on; give it its own run).** Mirror the rotation fix exactly: record what
+  the stored preview *is* relative to the canvas. An additive `stack_runs.preview_crop_json` (or four
+  fractional bounds) written wherever the preview is rewritten through a recipe — the writer's-half invariant
+  v0.290.3 just established — then have each consumer compose it, the way `wcs_dict_rescaled_to_preview`
+  already composes `north_up_deg`. **Sequencing matters:** the rotation work landed the *placement* WCS last
+  and deliberately, because a confidently-misplaced tile is worse than none; do the same here (a run whose
+  preview geometry can't be reconciled should fall back to no tile WCS rather than a guess).
+  **Repro to write first:** Process a target whose stack has a ragged border, confirm the saved recipe carries
+  a `geometry.crop` and the stored preview is smaller than the canvas rescale, then check `/api/sky` places its
+  centre away from the object and that `…/annotations` pins land off by the crop offset. **Tests:** the tile's
+  centre lands on the cropped picture's actual centre; an uncropped run is unchanged key-for-key.
+  *(Found by tracing the crop analogue of the North-up family this run; left for a run of its own because the
+  placement half is the risky part.)*
+
 - **⚪ HARDENING (Builder 2026-08-27, v0.290.3, branch `claude/compassionate-galileo-ex0t6z`) — the
   Process-target auto-edit rewrites a run's preview PNG from the FITS grid but left
   `stack_runs.preview_north_up_deg` alone, so a rotation an earlier "Adjust → North up → Save" recorded would
@@ -16679,6 +16733,20 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW IDEA (Builder 2026-08-27, the half v0.290.2 deliberately left out) — carry the "nudge it this way"
+  chip onto the *other* pre-session surfaces, above all "Finish what you started".** *(Pillar: autonomy +
+  better-picture-next-time, PRIORITY 2–3; size S; additive, no new deps — the fact is already computed and
+  cached.)* v0.290.2 put the chip on the Tonight planner's target rows, which is the right *first* home. But
+  the surface a beginner most often acts on before a session is the Dashboard's "Finish what you started" /
+  `ContinueTonightCard` — it names the one target to point at tonight, which is exactly the moment "and nudge
+  1.0° south this time" is worth saying. `SuggestTargetsCard` and `PointHereTonightCard` are the same shape.
+  **Shape:** those cards read `/api/plan/best-tonight` and `/api/plan/suggest`, not `/tonight`, so this is
+  annotating one or two more payloads from the same `newest_picture_nudge` (already behind the
+  registry-signature cache) and rendering the existing `recentreNudgeRowBadge`. **Cautions:** one chip per
+  card, not the same sentence stacked on three surfaces at once — and keep it silent for a well-framed
+  picture, as the planner does. **Builder: grep first** — `webapp/framing_advice.newest_picture_nudge` and
+  `frontend/src/tonight.recentreNudgeRowBadge` both already exist; do not write a second definition.
+
 - **✅ SHIPPED (Builder, v0.290.2, branch `claude/compassionate-galileo-ex0t6z`) — ~~say the nudge **before**
   the session, not only after it: carry "last time M 31 landed 1.0° south of centre — nudge north before you
   start" onto the pre-shoot planning surface.~~ Built exactly as specced, including both cautions.**
@@ -16750,6 +16818,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   into a real render on a RAM-capped NAS, so cap it, do it in the threadpool as the full-res download already
   does, and leave the *gallery/History thumbnail* on the cheap stored preview — only the export grows. Keep
   the un-rotated/no-marks path byte-identical where it can be, or state plainly that it changed.
+
+  **Builder note (2026-08-27, after the v0.290.1 North-up sweep):** this got *simpler*, not just more
+  worthwhile. A full-res render from the FITS is on the canvas grid by construction, so it takes
+  `north_up=True` directly and the whole "how much has this preview already been turned?" bookkeeping
+  (`preview_north_up_deg`, `pending_north_up_deg`, `already_deg=`) drops out of the export path entirely — the
+  share stops being a *consumer of the stored preview*, which is the single class of bug that has now bitten
+  four surfaces (Sky-map alpha and tile, History pins, the share double-rotation, the rose and scale bar; and
+  the open crop entry in "Bugs" is a fifth). The marks get easier too: measured against the canvas and drawn on
+  a canvas-grid render, so no `canvas_width_in_preview_px` conversion is needed. Worth doing partly *for* that
+  simplification.
 
 - **✅ MOSTLY ALREADY SHIPPED — and the one genuine gap SHIPPED this run (Builder, v0.289.0, branch
   `claude/compassionate-galileo-zixgdj`). Do NOT re-pick this as a new feature.** ~~"Was I centred?" — a
