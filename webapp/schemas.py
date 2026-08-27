@@ -222,30 +222,6 @@ class CleanestShotOut(BaseModel):
     timestamp_utc: str
 
 
-class GrainierDefaultOut(BaseModel):
-    """Nothing is pinned, so the cover follows the newest stack — and the newest
-    stack came out materially grainier than one this target already has.
-
-    The mirror of :class:`CleanestShotOut`, for the state a beginner is actually
-    in. With no pin, a restack through haze silently replaces a better picture on
-    the Library tile, "My best pictures" and the montage wall. This is the
-    one-tap offer to pin the good one back; it never changes anything by itself.
-    ``null`` whenever there's nothing to say (see
-    :func:`seestack.covernudge.grainier_default`), which includes every target
-    that has a pin — so this and ``cleanest-shot`` can never both speak.
-    """
-
-    run_id: int
-    newest_run_id: int
-    noise_sigma: float
-    best_noise_sigma: float
-    percent_grainier: int
-    n_frames_used: int
-    best_n_frames_used: int
-    timestamp_utc: str
-    best_timestamp_utc: str
-
-
 class SessionRecapOut(BaseModel):
     """Plain-language recap of a target's most recent capture session."""
 

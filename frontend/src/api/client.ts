@@ -428,24 +428,6 @@ export interface CleanestShot {
   timestamp_utc: string;
 }
 
-/** Nothing is pinned, so the cover follows the newest stack — and the newest
- * stack came out materially grainier than one this target already has
- * (`GET /api/targets/{safe}/grainier-default`; `null` when there's nothing to
- * say, which includes every target that *has* a pin, so this and `cleanestShot`
- * can never both speak). Purely a suggestion: taking it goes through the same
- * `setTargetCover` the History page uses, and the app never pins by itself. */
-export interface GrainierDefault {
-  run_id: number;
-  newest_run_id: number;
-  noise_sigma: number;
-  best_noise_sigma: number;
-  percent_grainier: number;
-  n_frames_used: number;
-  best_n_frames_used: number;
-  timestamp_utc: string;
-  best_timestamp_utc: string;
-}
-
 export interface SessionRecap {
   n_frames: number;
   n_kept: number;
@@ -1846,8 +1828,6 @@ export const api = {
     req<AutoStackHold | null>(`/api/targets/${safe}/autostack-hold`),
   cleanestShot: (safe: string) =>
     req<CleanestShot | null>(`/api/targets/${safe}/cleanest-shot`),
-  grainierDefault: (safe: string) =>
-    req<GrainierDefault | null>(`/api/targets/${safe}/grainier-default`),
   stackHealth: (safe: string, runId?: number) =>
     req<StackHealth | null>(
       `/api/targets/${safe}/stack-health` +
