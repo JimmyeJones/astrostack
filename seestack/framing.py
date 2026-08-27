@@ -456,3 +456,89 @@ def recentre_outcome(
         # than going quiet on the worst-framed pictures.
         return RecentreOutcome(None, "too_destructive", kept)
     return RecentreOutcome(RecentreCrop(x0, y0, x1, y1, kept), None, kept)
+
+
+# Below this the pointing is close enough that "nudge it" would be noise — a
+# Seestar's own go-to and field rotation move it by more than this between
+# sessions anyway, so a smaller correction isn't something a beginner can act on.
+NUDGE_MIN_DEG = 0.05
+
+#: Compass names for the eight 45° sectors, starting at due North and running
+#: through East (the way a position angle is measured on the sky).
+_COMPASS = ("north", "north-east", "east", "south-east",
+            "south", "south-west", "west", "north-west")
+
+
+@dataclass(frozen=True)
+class RecentreNudge:
+    """Which way — and how far — to move the telescope so the object lands in the
+    middle next session.
+
+    ``direction`` is one of eight plain compass words; ``degrees`` is the angular
+    move; ``text`` is the ready-to-render sentence.
+    """
+
+    direction: str
+    degrees: float
+    text: str
+
+
+def _friendly_degrees(deg: float) -> str:
+    """A move a Seestar owner can actually aim by: degrees once it's a tenth of
+    one or more, arcminutes below that (where "0.0°" would say nothing)."""
+    if deg >= 0.1:
+        return f"{deg:.1f}°"
+    return f"{int(round(deg * 60.0))}'"
+
+
+def recentre_nudge(
+    *,
+    centre_ra_deg: float,
+    centre_dec_deg: float,
+    object_ra_deg: float,
+    object_dec_deg: float,
+    min_deg: float = NUDGE_MIN_DEG,
+) -> RecentreNudge | None:
+    """Turn "re-centre it next session" into something a beginner can do.
+
+    The framing verdict can already tell someone their target landed off to one
+    side or ran off an edge — but "re-centre it" is advice you can't act on
+    without knowing *which way*. This answers that from the two sky positions the
+    caller already has: where the picture's centre actually pointed, and where the
+    object really is. The mount has to move **toward** the object, so the
+    direction is simply the object's bearing from the field centre.
+
+    Deliberately spherical, not pixel-based: working from RA/Dec sidesteps every
+    image-orientation sign hazard (a rotated canvas, a North-up-saved preview, the
+    CD-matrix parity) — the answer is the same whichever way the picture is turned,
+    because the sky isn't.
+
+    Returns ``None`` when the answer would be noise or a guess: a non-finite
+    input, a position at/over the pole (where "east" stops meaning anything
+    useful), or a correction below ``min_deg``.
+    """
+    values = (centre_ra_deg, centre_dec_deg, object_ra_deg, object_dec_deg)
+    if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in values):
+        return None
+    if abs(centre_dec_deg) >= 89.5 or abs(object_dec_deg) >= 89.5:
+        return None
+
+    d_dec = float(object_dec_deg) - float(centre_dec_deg)          # + = north
+    d_ra = (float(object_ra_deg) - float(centre_ra_deg) + 180.0) % 360.0 - 180.0
+    # RA degrees shrink toward the poles; convert to a true angular offset.
+    d_east = d_ra * math.cos(math.radians((object_dec_deg + centre_dec_deg) / 2.0))
+
+    degrees = math.hypot(d_east, d_dec)
+    if not math.isfinite(degrees) or degrees < min_deg:
+        return None
+
+    # Position angle: 0° at North, increasing toward East — the convention the
+    # compass names below are laid out in.
+    bearing = math.degrees(math.atan2(d_east, d_dec)) % 360.0
+    direction = _COMPASS[int(round(bearing / 45.0)) % 8]
+    return RecentreNudge(
+        direction,
+        degrees,
+        f"Next time, nudge your Seestar about {_friendly_degrees(degrees)} "
+        f"{direction} before you start, and it'll sit in the middle.",
+    )

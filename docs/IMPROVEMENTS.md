@@ -16478,9 +16478,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   does, and leave the *gallery/History thumbnail* on the cheap stored preview — only the export grows. Keep
   the un-rotated/no-marks path byte-identical where it can be, or state plainly that it changed.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #21) — "Was I centred? — a plain-language framing check on the
-  finished stack that tells a beginner if their object is running off an edge and which way to nudge the Seestar
-  next session.** *(Pillar: understand + friendliness + better-picture-next-time, PRIORITY 3; size M; additive,
+- **✅ MOSTLY ALREADY SHIPPED — and the one genuine gap SHIPPED this run (Builder, v0.289.0, branch
+  `claude/compassionate-galileo-zixgdj`). Do NOT re-pick this as a new feature.** ~~"Was I centred?" — a
+  plain-language framing check on the finished stack~~ already existed when this was filed: `GET
+  …/stack-runs/{id}/framing` (`webapp/routers/stack.py`) projects the catalog object through the run's own
+  solved WCS and `seestack.framing.framing_result_verdict` returns the four-level verdict
+  (`centred`/`off_centre`/`clipped`/`partial`), rendered by
+  `frontend/src/components/target/FramingVerdictNote.tsx` — with a "Re-centre this picture" crop offer on top.
+  The Scout's grep looked for `centred`/`recenter`/`framing`-*feedback* wording and for a rung in
+  `nextBestMove`, and missed the card that already says it. *(Recorded at this length deliberately: this is the
+  second idea in a week that turned out to be shipped — grep for the **endpoint and the engine module**, not
+  just the copy.)*
+
+  **The one thing genuinely missing, now shipped:** the verdict said *"just re-centre it next session"* without
+  ever saying **which way** — advice a beginner can't act on. New pure `seestack.framing.recentre_nudge` answers
+  it from the two sky positions the endpoint already has (where the picture's middle actually pointed, from the
+  WCS; and the object's catalog RA/Dec), so the mount is pointed *toward* the object: one of eight plain compass
+  words plus the angular move, as *"Next time, nudge your Seestar about 1.0° south before you start, and it'll
+  sit in the middle."* Deliberately **spherical, not pixel-based** — working in RA/Dec sidesteps every
+  image-orientation sign hazard (rotated canvas, North-up-saved preview, CD-matrix parity), and the RA offset is
+  scaled by `cos(dec)` so a 1° RA gap at Dec +60° correctly reads as half a degree of sky rather than
+  overshooting. Offered only for the two verdicts a better pointing actually fixes (`off_centre`, `clipped`) —
+  a centred picture needs nothing and an oversized object needs mosaic mode — and silent below a 0.05° floor,
+  where "move it 0.0°" would be noise. Additive `nudge` field on the endpoint (older frontends ignore it),
+  one extra line in the existing card (no new banner — AGENTS §1 IA priority). Tests: +6 engine (each compass
+  direction points at the object, the eight-point diagonal, the `cos(dec)` distance, RA-seam safety at 0h, the
+  no-guess/no-noise refusals, and degrees-vs-arcminutes wording), +3 endpoint (a north-pointed clip says
+  "south", an east-pointed off-centre says "west", and centred/oversized pictures get none), +2 frontend.
+
+  Original spec, for the record:
+
+  *(Pillar: understand + friendliness + better-picture-next-time, PRIORITY 3; size M; additive,
   read-only, no new deps — uses the stack WCS + the target's catalog coords the app already resolves.
   Confidence for the gap: traced — `frontend/src/components/target/nextBestMove.ts` coaches on
   locate-subs / too-thin / soft-stars / short-integration / all-good, but has **no framing/centering lever**;

@@ -1057,6 +1057,20 @@ export interface StackFraming {
   recentre?: StackRecentreCrop | null;
   // Additive: why the offer above is absent (older backend → omitted).
   recentre_refused?: StackRecentreRefusal | null;
+  // Additive: which way (and how far) to move the mount so the object lands in
+  // the middle next session — the missing half of "re-centre it next time".
+  // Null/omitted when the correction is too small to act on, or the verdict
+  // isn't one a better pointing fixes.
+  nudge?: StackRecentreNudge | null;
+}
+
+/** "Next time, nudge your Seestar about 0.4° west…" — the actionable half of a
+ *  re-centre verdict. `direction` is one of eight plain compass words and
+ *  `degrees` the angular move; `text` is the ready-to-render sentence. */
+export interface StackRecentreNudge {
+  direction: string;
+  degrees: number;
+  text: string;
 }
 
 export interface StackRunInfo {

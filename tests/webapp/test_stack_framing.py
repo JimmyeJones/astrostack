@@ -215,3 +215,49 @@ def test_an_offered_crop_carries_no_refusal(client, solved_library):
     assert body["level"] == "centred"
     assert body["recentre"] is None
     assert body["recentre_refused"] is None
+
+
+def test_a_re_centre_verdict_says_which_way_to_nudge_the_mount(client, solved_library):
+    """"Re-centre it next session" is only advice a beginner can act on once it
+    names a direction. The picture was pointed 1° *north* of M 42, so the nebula
+    is south of the frame's middle and the mount has to move south to catch it."""
+    safe = _m42(client)
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC + 1.0,
+                      w=4000, h=3000, arcsec_per_px=3.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "clipped"
+    nudge = body["nudge"]
+    assert nudge is not None
+    assert nudge["direction"] == "south"
+    assert nudge["degrees"] == pytest.approx(1.0, abs=0.02)
+    assert "1.0°" in nudge["text"] and "south" in nudge["text"]
+
+
+def test_the_nudge_names_an_east_west_correction_too(client, solved_library):
+    safe = _m42(client)
+    # Pointed 1° east of M 42 in RA (≈1.0° of sky at Dec −5°): the nebula is all
+    # in frame but well off to one side, and the fix is a westward re-point.
+    run_id = _add_run(solved_library, safe, ra=M42_RA + 1.0, dec=M42_DEC,
+                      w=6000, h=4500, arcsec_per_px=3.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "off_centre"
+    assert body["nudge"]["direction"] == "west"
+    assert body["nudge"]["degrees"] == pytest.approx(1.0, abs=0.02)
+
+
+def test_a_well_framed_or_oversized_picture_gets_no_nudge(client, solved_library):
+    """No nudge where a better pointing isn't the fix: a centred picture needs
+    nothing, and an object bigger than the frame needs mosaic mode."""
+    safe = _m42(client)
+    centred = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                       w=4000, h=3000, arcsec_per_px=3.0)
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{centred}/framing").json()["nudge"] is None
+
+    oversized = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                         w=1080, h=1920, arcsec_per_px=2.4)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{oversized}/framing").json()
+    assert body["level"] == "partial"
+    assert body["nudge"] is None
