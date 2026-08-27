@@ -201,6 +201,27 @@ class AutoStackHoldOut(BaseModel):
     when_utc: str | None = None
 
 
+class CleanestShotOut(BaseModel):
+    """The newest stack is materially cleaner than the target's pinned cover.
+
+    A pinned cover never changes on its own — deliberately, because the choice
+    is the user's — so a beginner who keeps adding subs can end up showing an
+    older, noisier picture on every showcase surface than the one their own
+    library already holds. This is the one-tap offer to close that gap; it never
+    swaps anything by itself. ``null`` whenever there's nothing to say (see
+    :func:`seestack.covernudge.cleanest_shot`).
+    """
+
+    run_id: int
+    cover_run_id: int
+    noise_sigma: float
+    cover_noise_sigma: float
+    percent_cleaner: int
+    n_frames_used: int
+    cover_n_frames_used: int
+    timestamp_utc: str
+
+
 class SessionRecapOut(BaseModel):
     """Plain-language recap of a target's most recent capture session."""
 
