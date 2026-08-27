@@ -624,11 +624,26 @@ def _montage_tiles(request: Request, limit: int) -> tuple[list, float]:
     five times. Best-effort per tile: a preview that has since been deleted or
     can't be decoded is dropped and the next hero takes its place, exactly like
     the recap poster's backdrop search.
+
+    A target's picture is the run the user **pinned as its cover** ("Set as
+    cover" in History) when there is one and its preview still exists, otherwise
+    its newest stack's preview — the same precedence the Library tile,
+    ``/api/gallery/best`` and ``/api/imaging-log`` already use. Without it a
+    target whose newest run is a linear master or a quick restack put *that* on
+    the wall instead of the finished picture its owner chose, which is the one
+    thing the wall exists to show. Resolving a cover costs one project open, so
+    it happens only for the targets that actually have one pinned; that trade is
+    fine on a deliberate one-tap download (it is the same one ``/api/imaging-log``
+    makes) and would not be on a page render.
     """
     from PIL import Image
 
     from seestack.library_summary import summarize_library
     from seestack.montage import MontageTile, montage_caption
+
+    # Package-private helper, shared rather than re-implemented so the wall can
+    # never disagree with the Library tile about which picture is a target's.
+    from webapp.routers.targets import _cover_preview_path
 
     lib = deps.open_library(request)
     try:
@@ -642,7 +657,9 @@ def _montage_tiles(request: Request, limit: int) -> tuple[list, float]:
             if len(tiles) >= limit:
                 break
             entry = by_safe.get(hero.safe)
-            path = getattr(entry, "last_stack_preview", None) if entry else None
+            cover = _cover_preview_path(lib, entry) if entry is not None else None
+            path = cover if cover is not None else (
+                getattr(entry, "last_stack_preview", None) if entry else None)
             if not path:
                 continue
             try:
