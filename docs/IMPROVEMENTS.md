@@ -15140,9 +15140,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   edge picks up a tint. Confidence: traced (single read; GPU path not executed). Do NOT blind-flip this on the
   hot path without a GPU repro.
 
-- **IDEA / DATA-INTEGRITY FOLLOW-UP (Scout 2026-08-27 #8, the residual of the v0.277.4 scanner fix) —
-  parent-scope `_seestar_output_bases` + the output-reject so a 1–2-sub root-level `<T>/` colliding with an
-  unrelated container `<T>_sub` is never wrongly rejected.** *(Pillar: image quality / correctness — PRIORITY 4;
+- **✅ SHIPPED (Builder, v0.289.1, branch `claude/compassionate-galileo-zixgdj`) — ~~parent-scope
+  `_seestar_output_bases` + the output-reject so a 1–2-sub root-level `<T>/` colliding with an unrelated
+  container `<T>_sub` is never wrongly rejected~~ — reproduced end-to-end first, then fixed.**
+
+  **Reproduced.** `incoming/M 31/` with **2** real subs plus an unrelated `incoming/MyWorks/M 31_sub/`: both
+  root subs came back `accept=0, reject_reason=auto:seestar_output`. (At 3 subs the size guard saves them,
+  which is why the existing v0.277.4 test — written with 3 — passed over this.)
+
+  **Fix.** `_seestar_output_bases` now takes the same optional `parents` list `_apply_seestar_convention` does,
+  and makes the *same* test the convention makes: a bare `<T>/` with no same-parent `<T>_sub` sibling is real
+  subs, so `<T>` is **not** registered as an output base — the reject can no longer turn round on the frames the
+  convention just ingested. Deliberately *not* the "only register when a same-parent `<T>_sub` exists" shape the
+  spec suggested: a base whose bare folder isn't in the drop at all still registers, so an already-migrated
+  library whose stale output folder has since been deleted keeps healing. A true same-parent output folder is
+  unchanged.
+
+  **Upgrade-safe (§9):** pure in-memory scan-time logic; `parents` defaults to `None` (every folder a sibling of
+  every other — the original single-level behaviour), no config/schema/on-disk/API/default change, and
+  `incoming/` stays strictly read-only.
+
+  **Tests (+3 in `tests/test_scanner.py`, 2 fail before / pass after):** the classifier leaves a base alone when
+  it is ingesting the bare folder, still registers it for a true same-parent output folder, and still registers
+  it when no bare folder is in the drop; the 2-sub root session survives a scan accepted end to end; and the
+  no-regression half — a genuine on-device output frame already registered in the target is still rejected on
+  the next scan.
+
+  Original spec, for the record:
+
+  *(Pillar: image quality / correctness — PRIORITY 4;
   size S; low urgency — non-destructive and narrow.)* The v0.277.4 fix parent-scoped the *convention skip* so a
   root `incoming/<T>/` of real subs is ingested even when an unrelated container child `<T>_sub` exists. But
   `_seestar_output_bases` still builds its `<T>→<T>` output-reject map from a global basename set, and
