@@ -9,6 +9,7 @@ as a browsable grid where each image can show exactly how it was stacked.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ from pydantic import BaseModel
 
 from seestack.stackhealth import seam_verdict
 from webapp import deps
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["gallery"])
 
@@ -194,41 +197,22 @@ def get_gallery(request: Request) -> GalleryResponse:
                 continue
             try:
                 for run in runs:
-                    has_preview = bool(run.preview_path and Path(run.preview_path).exists())
-                    options = _parse_options(run.options_json)
-                    items.append(GalleryItem(
-                        safe=t.safe_name,
-                        target_name=t.name,
-                        run_id=run.id,
-                        output_basename=run.output_basename,
-                        timestamp_utc=run.timestamp_utc,
-                        n_frames_used=run.n_frames_used,
-                        canvas_w=run.canvas_w,
-                        canvas_h=run.canvas_h,
-                        total_exposure_s=run.total_exposure_s,
-                        notes=run.notes,
-                        has_preview=has_preview,
-                        has_fits=bool(run.fits_path and Path(run.fits_path).exists()),
-                        has_tiff=bool(run.tiff_path and Path(run.tiff_path).exists()),
-                        preview_url=(
-                            f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview"
-                        ),
-                        options=options,
-                        reusable=_is_reusable(options),
-                        transparency_ratio=run.transparency_ratio,
-                        noise_sigma=run.noise_sigma,
-                        calstat=run.calstat,
-                        seam_verdict=seam_verdict(run.seam_residual),
-                        # Two extra keyed reads on the project DB this loop
-                        # already has open — the same near-free lookups the run
-                        # listing does, which is what made this affordable
-                        # library-wide.
-                        unexported_edit=_unexported_edit(
-                            run.options_json,
-                            proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}"),
-                            proj.get_meta(f"{EXPORTED_RECIPE_META_PREFIX}{run.id}"),
-                        ),
-                    ))
+                    try:
+                        items.append(_gallery_item(
+                            t, run, proj, RECIPE_META_PREFIX,
+                            EXPORTED_RECIPE_META_PREFIX, _unexported_edit,
+                        ))
+                    except Exception:  # noqa: BLE001 — one bad run must not hide the rest
+                        # Every required field is NOT NULL today, so nothing here
+                        # is known to raise — but a future field (or one odd row
+                        # on an in-place-upgraded install) must cost the owner
+                        # one picture, not the whole page. Same degrade-don't-500
+                        # rule the per-target skip above and stats.py already use.
+                        log.debug(
+                            "gallery item for %s run %s unreadable; skipping",
+                            t.safe_name, run.id, exc_info=True,
+                        )
+                        continue
             finally:
                 if proj is not None:
                     proj.close()
@@ -238,6 +222,46 @@ def get_gallery(request: Request) -> GalleryResponse:
     # Newest first across all targets.
     items.sort(key=lambda it: it.timestamp_utc, reverse=True)
     return GalleryResponse(items=items, videos=_video_stills(request))
+
+
+def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
+                  unexported_edit) -> GalleryItem:  # noqa: ANN001
+    """One finished stack's gallery card. Split out so the loop above can skip a
+    single unreadable run without losing every other target's pictures."""
+    has_preview = bool(run.preview_path and Path(run.preview_path).exists())
+    options = _parse_options(run.options_json)
+    return GalleryItem(
+        safe=t.safe_name,
+        target_name=t.name,
+        run_id=run.id,
+        output_basename=run.output_basename,
+        timestamp_utc=run.timestamp_utc,
+        n_frames_used=run.n_frames_used,
+        canvas_w=run.canvas_w,
+        canvas_h=run.canvas_h,
+        total_exposure_s=run.total_exposure_s,
+        notes=run.notes,
+        has_preview=has_preview,
+        has_fits=bool(run.fits_path and Path(run.fits_path).exists()),
+        has_tiff=bool(run.tiff_path and Path(run.tiff_path).exists()),
+        preview_url=(
+            f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview"
+        ),
+        options=options,
+        reusable=_is_reusable(options),
+        transparency_ratio=run.transparency_ratio,
+        noise_sigma=run.noise_sigma,
+        calstat=run.calstat,
+        seam_verdict=seam_verdict(run.seam_residual),
+        # Two extra keyed reads on the project DB the caller already has open —
+        # the same near-free lookups the run listing does, which is what made
+        # this affordable library-wide.
+        unexported_edit=unexported_edit(
+            run.options_json,
+            proj.get_meta(f"{recipe_prefix}{run.id}"),
+            proj.get_meta(f"{exported_prefix}{run.id}"),
+        ),
+    )
 
 
 def _video_stills(request: Request) -> list[VideoStillItem]:
@@ -269,29 +293,40 @@ def _video_stills(request: Request) -> list[VideoStillItem]:
             has_tiff = video.has_tiff(settings, m.capture_id)
         except Exception:  # noqa: BLE001 — one unreadable still must not hide the rest
             meta, restorable, has_tiff = m, False, False
-        items.append(VideoStillItem(
-            capture_id=meta.capture_id,
-            label=meta.label,
-            kind=meta.kind,
-            created_utc=meta.created_utc,
-            width=meta.width,
-            height=meta.height,
-            n_stacked=meta.n_stacked,
-            source_name=meta.source_name,
-            preview_url=f"/api/videos/{meta.capture_id}/preview.png",
-            tiff_url=(
-                f"/api/videos/{meta.capture_id}/download.tiff" if has_tiff else None
-            ),
-            crop_applied=meta.crop_applied,
-            crop_available=meta.crop_available,
-            crop_trim_fraction=meta.crop_trim_fraction,
-            source_width=meta.source_width,
-            source_height=meta.source_height,
-            crop_restorable=restorable,
-            warnings=list(meta.warnings),
-            sharpen_amount=meta.sharpen_amount,
-            sharpen_editable=video.can_resharpen(meta),
-        ))
+        try:
+            items.append(VideoStillItem(
+                capture_id=meta.capture_id,
+                label=meta.label,
+                kind=meta.kind,
+                created_utc=meta.created_utc,
+                width=meta.width,
+                height=meta.height,
+                n_stacked=meta.n_stacked,
+                source_name=meta.source_name,
+                preview_url=f"/api/videos/{meta.capture_id}/preview.png",
+                tiff_url=(
+                    f"/api/videos/{meta.capture_id}/download.tiff" if has_tiff else None
+                ),
+                crop_applied=meta.crop_applied,
+                crop_available=meta.crop_available,
+                crop_trim_fraction=meta.crop_trim_fraction,
+                source_width=meta.source_width,
+                source_height=meta.source_height,
+                crop_restorable=restorable,
+                warnings=list(meta.warnings),
+                sharpen_amount=meta.sharpen_amount,
+                sharpen_editable=video.can_resharpen(meta),
+            ))
+        except Exception:  # noqa: BLE001 — one bad meta.json must not 500 the gallery
+            # A ``meta.json`` can be JSON-valid but wrong-*typed* (hand-edited, or
+            # written by a foreign/older version on an in-place-upgraded install):
+            # the plain dataclass accepts it, the Pydantic model rejects it. Skip
+            # that one still rather than losing every picture on the page.
+            log.debug(
+                "video still %s has unusable metadata; skipping", m.capture_id,
+                exc_info=True,
+            )
+            continue
     return items
 
 
