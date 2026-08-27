@@ -207,10 +207,52 @@ _(none — claim an item here with your branch name)_
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
-- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #14, branch `claude/vigilant-knuth-xgiykw`) — a **depth** sweep of the
-  stacking/calibration engine and the walk-away orchestration. Result: CLEAN — no verified bug this run, the
-  fifth consecutive clean engine sweep (#10–#14). Baseline green (full headless suite: **3021 passed, 2
-  skipped** in 12:40).**
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #15, branch `claude/vigilant-knuth-ilxa69`) — a **depth** sweep that
+  led with the stacking engine and then rotated onto the **QC metric layer** (`seestack/qc/*`) that feeds
+  weighting/photometric/grading, plus the stack **output/parity** path. Result: CLEAN — no verified bug this run,
+  the **sixth** consecutive clean engine sweep (#10–#15). Baseline green (full headless suite: **3068 passed, 2
+  skipped** in 11:30). Live app booted + sample stacked end-to-end via `scripts/agent-dogfood.sh` (happy path
+  clean).**
+  **What was read adversarially and traced this run (every item below is a NON-finding — traced to a guard, not a
+  bug). The engine combine/drizzle/photometric/mosaic/calibrate paths re-confirmed as in #14; new-this-run
+  coverage is the QC + output layer:**
+  **QC metrics** (`qc/metrics.py`) — `green_channel` promotes the raw Bayer mosaic to float32 *before* averaging
+  the two green sites, so summing two bright 16-bit green pixels can't wrap mod 2¹⁶ and corrupt exactly the bright
+  stars QC leans on; all four Bayer layouts map G to the correct sites; `median_star_flux`'s `flux[-top_k:]` is
+  slice-safe below `top_k` stars; `median_eccentricity`/`median_fwhm` drop non-finite rows before the median so
+  one NaN source can't poison the whole frame's metric.
+  **QC grading** (`qc/grading.py`) — the `reconsider` pass grades over the *combined* (accepted + previously
+  auto-graded) set, which is invariant under auto-grade's own accept/reject moves, so recommendations are a fixed
+  point (no reject↔re-accept churn) and the `max_reject_fraction` rail is cumulative for free; the total order
+  `(-worst_z, frame_id)` makes the cap boundary deterministic; `star_count==0` (log-undefined, low-is-bad) is
+  treated as maximally bad while the same non-positive value on a high-is-bad metric is correctly skipped; the
+  per-panel rail bounds the damage inside one mosaic panel before the target-wide cap.
+  **QC streaks** (`qc/streaks.py`) — the probabilistic Hough is seeded (`_HOUGH_SEED`) so `streak_count` written
+  to the DB is deterministic and QC stays idempotent; compact bright blobs (stars) are removed by an
+  elongation+length test on the pixel covariance before line-fitting, so a dense star field isn't mistaken for a
+  trail.
+  **QC noise-ratio** (`qc/noise_ratio.py`) — the √N "cut your noise ~N×" badge measures a *raw* neighbour-diff
+  MAD σ (`Var(Iᵢ₊₁−Iᵢ)=2σ²`) over covered pairs only, with a `_MIN_PAIRS` floor and a two-pass object-drop so a
+  bright extended target doesn't inflate the background σ; returns `None` rather than a bogus ratio when either
+  side can't be measured.
+  **QC sky-quality** (`qc/sky_quality.py`) — the "brighter than usual?" read normalises each frame's sky by
+  exposure, keys on the *dominant* (gain, exposure) group so a mixed-setting session can't read as a sky change,
+  buckets by observing night (noon-to-noon) with `MIN_FRAMES_PER_NIGHT`/`MIN_NIGHTS` floors, and stays silent
+  (returns `None`) rather than guessing when there's no "usual" to compare against.
+  **weighting** (`weighting.py`) — geometric mean keeps the weight in `[min_weight, 1.0]`; each factor guards its
+  own zero divisor (`frame_sky<=0`, `frame_ecc==0`) as neutral; the position-dependent trio (stars/sky/transp) is
+  taken per mosaic panel and the `combine_weights_with_photometric` inverse-variance `1/s²` correction only fires
+  on a genuinely-applied scale (returns the same object untouched when photometric is off — byte-for-byte).
+  **stack output / preview↔export parity** (`stack/output.py`) — an editor export is stamped `SSDISPLY`
+  display-space and written verbatim (no double-stretch) across FITS/TIFF/PNG; `_sanitize_basename` blocks path
+  traversal from the web "output name"; `_archive_existing_outputs` moves the whole run set to one timestamped
+  basename (siblings stay siblings) rather than overwriting, and the `_framecov` sibling is only written when it
+  differs from the weighted coverage map — so an ordinary unweighted stack's output set is exactly the size it
+  always was, and the sky-leveling pass reads the honest frame count on a weighted/drizzle mosaic.
+  **pointings** (`pointings.py`) — single-linkage union-find on unit vectors is wrap-safe (RA 359↔1) and pole-safe;
+  `pointing_groups` returns `None` (one target-wide population, today's behaviour) unless ≥2 groups each carry
+  `min_members` eligible frames, so a single-field/unsolved/tightly-packed target is unaffected by every per-panel
+  path that gates on it.
   **What was read adversarially and traced this run (every item below is a NON-finding — traced to a guard, not
   a bug):**
   **stack combine** (`accumulator.py`, `stacker.py`) — the `WeightedSumAccumulator` any-channel frame-count
@@ -8176,6 +8218,33 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Scout 2026-08-27 #15) — close the loop when auto-grade *brings frames back*: a plain-language,
+  self-hiding note telling the owner "N subs you'd set aside earlier turned out typical after all and are back in
+  your stack", so the machine's second-thoughts are visible instead of silent.** *(Pillar: autonomy + trust,
+  PRIORITY 2–3; size S; additive/read-only — no schema/config/default change. Confidence: traced against the
+  code that already does the re-accepting.)*
+  **The mechanism already exists and is invisible.** On every scan the unattended hook re-grades a live target
+  over the *combined* accepted + previously-auto-graded set (`grade_frames(..., reconsider=...)`), and
+  `apply_grade_reaccepts` genuinely **puts frames back**: a sub auto-rejected *early* — graded against a tiny,
+  noisy population — is re-accepted once hundreds of good subs make it plainly typical (`GradeReport.re_accept`,
+  `qc/grading.py`). This is exactly the kind of "it just fixed itself" autonomy the app is built on. But nothing
+  tells the owner it happened: the reject direction surfaces (frames move to a "set aside" bucket with a reason),
+  while the *re-accept* direction is silent, so a beginner who once saw "40 rejected" and now sees "28 rejected"
+  has no idea the app reconsidered — it just looks like the number wobbled.
+  **Why it's worth surfacing.** The single most trust-building thing an autonomous app can do is *show its work*
+  when it changes its mind in the user's favour. "As more subs arrived, 12 frames you'd set aside turned out
+  typical after all and were welcomed back into your stack" is reassuring, teaches the beginner that early
+  rejections aren't permanent, and pre-empts the "why did my accepted count jump?" confusion. It also makes the
+  fixed-point property (the reconsider pass can't churn) legible: the owner learns the app settles, not thrashes.
+  **Shape (small, honest, quiet).** `apply_grade_reaccepts` already returns the ids it changed; thread that count
+  through the scan/auto-grade result the Target page already reads (the same place the reject count and
+  "N couldn't be aligned" line come from) as one additive field, and render one calm sentence **only when the
+  count is > 0** — self-hiding otherwise, exactly like the existing set-aside note, so it's never a nag. No new
+  endpoint shape is required if the auto-grade summary is already returned; if it isn't surfaced at all yet, a
+  read-only `reaccepted: N` on the target's QC/grade summary is the whole backend. **Guardrails:** additive,
+  read-only, off nothing; incoming/ untouched; a plain regression test that a target whose population grew past a
+  borderline early-reject reports a non-zero re-accept count and the sentence renders (and hides at 0).
+
 - **NEW IDEA (Builder 2026-08-27, the class of bug the v0.282.1 tofu-glyph fix belongs to) — nothing in the app
   ever *looks at* the pixels it bakes text onto, so a whole family of "the picture is wrong but the string is
   right" defects is invisible to the suite.** *(Pillar: trust / image quality — PRIORITY 3–4. Size: S.
@@ -15305,6 +15374,47 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready *cinematic zoom* of your
+  finished picture — a short looping clip that glides from the whole frame into the target and back out, so a
+  galaxy or nebula makes a scroll-stopping post instead of a still that's easy to swipe past.** *(Pillar: enjoy +
+  share, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network, no schema/config
+  change.)*
+  **Why a beginner wants it.** After the app has done its job the owner has a genuinely beautiful frame, and the
+  *only* thing they want to do with it is show people. The app already exports it well as a still (share JPEG,
+  wallpaper, keepsake, recap poster) — but the platforms a Seestar beginner actually posts to (Instagram Reels,
+  TikTok, WhatsApp status) reward **motion**: a slow push-in on a spiral galaxy reads as "look what I made" in a
+  way a static image never does, and it's the format a non-expert has no tool to produce. A one-tap "Reveal"
+  turns the finished picture into that clip with zero craft required.
+  **What it is (and is deliberately NOT).** A short (~6 s) looping **Ken-Burns** animation of the *already
+  display-stretched* result: ease-in from the full field to a centred, ~2× crop on the target, hold a beat, ease
+  back out. That's it — no music, no text overlay, no multi-clip edit. It is **not** the existing "deepening"
+  reel (`render/deepening.py`, a *temporal* cross-run "getting deeper night after night" animation) nor the
+  in-stack "watch it appear" progress reel (`stacker.py` `_progress.webp`) — both show the stack *accumulating
+  over time*; Reveal is a purely **spatial** camera move over one finished frame, a different artefact answering
+  a different want (grepped 2026-08-27: no ken-burns / cinematic / zoom-reveal / pan feature filed or shipped —
+  the only "zoom" hit is the Gallery lightbox's manual pan/zoom, which is interactive viewing, not an export).
+  **Sane auto-default (no knobs).** The crop centre is the target: use the run WCS to project the catalogued
+  object's RA/Dec to pixels (the same `identify`/`objects_in_field`/scale-bar WCS path already read on the
+  result), falling back to the picture's brightness centroid (or plain image centre) when there's no solve — so
+  a beginner never frames anything. Fixed timing, fixed ~2× zoom, fixed easing. NaN/uncovered pixels render black
+  exactly like every other export.
+  **Reuses existing machinery — almost no new surface.** The frames are Pillow crops+resizes of the stored
+  display-space preview/FITS (no re-stretch — `already_display` semantics), and the encoder is the **same
+  animated-WEBP-with-APNG-fallback** path `render/deepening.py` and `stacker.py` already use
+  (`img.save(..., save_all=True, append_images=..., loop=0)`). The core is a pure, unit-testable
+  `render/reveal.py::build_reveal(rgb, focus_xy, *, seconds, zoom, size) -> list[PIL.Image]` (deterministic
+  keyframe schedule; assert frame count, that frame 0 ≈ full-frame and the mid frame is a tighter crop centred on
+  `focus_xy`, and that a NaN canvas stays finite/black). Cached beside the outputs as `{base}_reveal.webp`
+  (add to `RUN_ARTEFACT_SUFFIXES` so archive/delete already sweep it), served through the existing result/History
+  download menu next to Share/To-phone/Wallpaper.
+  **Guardrails/feasibility.** Additive and reversible; nothing on by default changes; incoming/ untouched;
+  offline and deterministic (no `Date.now`/RNG in the schedule — timing is index-derived), so it's fully
+  testable. Memory-bounded: one downscaled crop frame at a time, at share resolution (≤~1080 px long edge), never
+  the full 100-MP mosaic. **Builder slices:** (a) pure `build_reveal(...)` + unit tests; (b) wire the cached
+  `_reveal.webp` write into the output writer + `RUN_ARTEFACT_SUFFIXES` + a result-menu download button
+  (self-hiding until the file exists); (c) optional later — a portrait (9:16) variant for phone-native posting,
+  mirroring the existing wallpaper-aspect crops.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #14) — "Is more time worth it?": a plain-language, *measured* grain
   projection that tells a beginner how much cleaner their picture would actually get with more light — from THIS
