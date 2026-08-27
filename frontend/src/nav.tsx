@@ -1,5 +1,6 @@
 import {
-  IconActivity, IconAward, IconDatabase, IconFileText, IconFlask, IconGauge, IconLayoutGrid,
+  IconActivity, IconAward, IconChecklist, IconDatabase, IconFileText, IconFlask, IconGauge,
+  IconLayoutGrid,
   IconMoon, IconPalette, IconRadar2, IconSettings, IconSparkles, IconStars, IconTelescope,
   IconVideo,
 } from "@tabler/icons-react";
@@ -49,6 +50,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: "/gallery", label: "Gallery", icon: <IconLayoutGrid size={18} /> },
       { to: "/best", label: "My best pictures", icon: <IconAward size={18} /> },
       { to: "/sky-so-far", label: "Your sky, so far", icon: <IconSparkles size={18} /> },
+      { to: "/life-list", label: "My life list", icon: <IconChecklist size={18} /> },
     ],
   },
   {
