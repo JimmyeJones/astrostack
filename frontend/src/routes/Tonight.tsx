@@ -7,6 +7,7 @@ import { IconMoon, IconStars, IconTelescope } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type PlannedTarget } from "../api/client";
+import { NearlyThereCard } from "../components/NearlyThereCard";
 import { QueryError } from "../components/QueryError";
 import { WorthMoreTimeList } from "../components/tonight/WorthMoreTimeList";
 import { formatIntegration } from "../format";
@@ -357,6 +358,12 @@ export function TonightView() {
           </Text>
         </Card>
       </SimpleGrid>
+
+      {/* "You're one away from finishing Lyra — and it's up tonight." Self-hides
+          until a constellation is genuinely close, so a fresh install never
+          sees it, and it sits above the tables because it's the one line that
+          turns "what's up?" into "point here". */}
+      <NearlyThereCard />
 
       <Paper withBorder p="md">
         <Title order={4} mb="xs">Add more to what you're shooting</Title>
