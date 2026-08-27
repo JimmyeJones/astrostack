@@ -20,6 +20,7 @@ import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
 import { AutoStackHoldNote } from "../components/AutoStackHoldNote";
 import { CleanestShotNote } from "../components/CleanestShotNote";
+import { GrainierNewestNote } from "../components/GrainierNewestNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { InsightTabs } from "../components/InsightTabs";
@@ -866,6 +867,12 @@ export function TargetView() {
               Only ever an offer, and only when a cover is pinned. Self-hides. */
           { key: "cleanest-shot", priority: NOTICE_PRIORITY.advisory,
             node: <CleanestShotNote safe={safe} /> },
+          /* The mirror case: with *nothing* pinned the cover follows the newest
+              stack, so a hazy restack can silently demote a better picture.
+              Mutually exclusive with the note above (that one needs a pin, this
+              one needs none), so the two can never both appear. Self-hides. */
+          { key: "grainier-newest", priority: NOTICE_PRIORITY.advisory,
+            node: <GrainierNewestNote safe={safe} /> },
           { key: "autostack-hold", priority: NOTICE_PRIORITY.warning,
             node: <AutoStackHoldNote safe={safe} /> },
           { key: "missing-files", priority: NOTICE_PRIORITY.warning, node: missingFiles !== null ? (

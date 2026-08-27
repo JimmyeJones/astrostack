@@ -8102,24 +8102,60 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-27, the mirror case the v0.279.1 cover nudge deliberately left out) — when
+- ~~**NEW IDEA (Builder 2026-08-27, the mirror case the v0.279.1 cover nudge deliberately left out) — when
   *nothing* is pinned, the cover follows the newest stack, so a cloudy night's restack can silently replace a
-  better picture with a grainier one. Offer to pin the good one back.** *(Pillar: autonomy + trust —
-  PRIORITY 2–3. Size: S — the machinery already exists.)* `seestack/covernudge.py` answers "is the newest
-  stack cleaner than the **pinned** cover?"; with no pin there is nothing to compare against, so it stays
-  silent by design — but that is exactly the state a beginner is in, and it is the state where the *default*
-  can go backwards. A restack through haze, or one where a lot of subs were set aside, produces a legitimately
-  newer stack with a materially **higher** `noise_sigma` than one the target already has, and because the
-  unpinned cover means "newest", the Library tile, "My best pictures" and the montage wall all switch to it
-  with nothing said. **The nudge:** when nothing is pinned and the newest genuine stack is materially noisier
-  (the same `CLEANER_RATIO` in reverse) than the best earlier genuine stack, say so once — *"Last night's
-  stack came out grainier than your 14 May one (about 30 % more background grain) — it was probably hazy.
-  Show the better one instead?"* — with a one-tap pin of the earlier run, reusing `set-cover` exactly as the
-  cleaner-shot note does. **Why it is worth a run:** it turns a silent quality regression into an explained
-  one, which is the trust half of the app's promise, and it is the case a beginner (who never pins anything)
-  actually hits. **Care:** genuine stacks only, both σ finite, and the *earlier* run must still have its
-  preview on disk; keep it to one nudge, and make sure it and the v0.279.1 note can never both speak (they are
-  mutually exclusive by construction — one needs a pin, the other needs none — but pin a test on that).
+  better picture with a grainier one. Offer to pin the good one back.**~~ — **SHIPPED v0.281.0** (Builder
+  2026-08-27, branch `claude/compassionate-galileo-z1yulm`).
+
+  **What shipped.** `seestack/covernudge.py` grew `grainier_newest(genuine_runs, cover_run_id)` — the exact
+  mirror of `cleanest_shot`, firing *only* when nothing is pinned, and offering the **cleanest earlier** genuine
+  run (not merely the previous one), with ties broken toward the more recent picture. It reuses the same
+  `CLEANER_RATIO` in reverse (the newest must be ≥ ~17.6 % grainier — `1/0.85`) and the same `_usable_sigma`
+  guard, so a pre-schema-6 or degenerate σ on *either* side is silence, and one unusable run in the history
+  doesn't silence the nudge — it just isn't a candidate. `percent_grainier` rounds **down** and floors at 1, so
+  the headline can only understate. `GET /api/targets/{safe}/grainier-newest` +
+  `frontend/src/components/GrainierNewestNote.tsx` (in the Target page's NoticeBoard at `advisory` priority,
+  beside the cleaner-shot note) offer the earlier run through the same one-tap `setTargetCover` History's star
+  uses. It never pins anything by itself.
+
+  **Two guards the original spec asked for, both pinned by tests.** (1) *Mutual exclusivity* — provable by
+  construction (`cleanest_shot` returns `None` unless `cover_run_id is not None`; `grainier_newest` returns
+  `None` unless it is `None`), and pinned end-to-end in `test_the_two_cover_nudges_are_mutually_exclusive`,
+  which flips the pin and checks both endpoints in both states. (2) *The earlier run's preview must still be on
+  disk*, else pinning it falls straight back to the newest stack and the nudge looks broken.
+
+  **One guard the spec didn't ask for, added after tracing the display path.** Unpinned, every showcase surface
+  takes the newest run *with a preview* out of **all** runs (`gallery._representative_run`), which can be an
+  **editor export** rather than the newest genuine stack — so telling the owner their picture got grainier while
+  a different image is on screen would simply be wrong. The endpoint asks that same shared helper and stays
+  silent unless the grainy stack is genuinely what's on show.
+
+  **Upgrade-safe (§9):** one added read-only endpoint and one added response model; no config, schema, on-disk,
+  default or API-shape change, and nothing is ever pinned without a tap. **Tests:** +9 in
+  `tests/test_covernudge.py` (the cleanest-earlier pick, tie-break, threshold in both directions, unusable-σ
+  matrix, the skip-don't-silence case, the pinned-is-silent mirror), +8 in
+  `tests/webapp/test_target_grainier_newest.py` (the offer and its numbers, mutual exclusivity, editor-export
+  not compared, not-the-picture-on-show, missing preview, single stack, 404), and +5 in
+  `frontend/src/components/GrainierNewestNote.test.tsx` (copy with the numbers, the sky-not-sub-count branch,
+  the set-cover call targeting the *earlier* run, and both silent paths).
+
+  Original spec, for the record:
+
+    `seestack/covernudge.py` answers "is the newest
+    stack cleaner than the **pinned** cover?"; with no pin there is nothing to compare against, so it stays
+    silent by design — but that is exactly the state a beginner is in, and it is the state where the *default*
+    can go backwards. A restack through haze, or one where a lot of subs were set aside, produces a legitimately
+    newer stack with a materially **higher** `noise_sigma` than one the target already has, and because the
+    unpinned cover means "newest", the Library tile, "My best pictures" and the montage wall all switch to it
+    with nothing said. **The nudge:** when nothing is pinned and the newest genuine stack is materially noisier
+    (the same `CLEANER_RATIO` in reverse) than the best earlier genuine stack, say so once — *"Last night's
+    stack came out grainier than your 14 May one (about 30 % more background grain) — it was probably hazy.
+    Show the better one instead?"* — with a one-tap pin of the earlier run, reusing `set-cover` exactly as the
+    cleaner-shot note does. **Why it is worth a run:** it turns a silent quality regression into an explained
+    one, which is the trust half of the app's promise, and it is the case a beginner (who never pins anything)
+    actually hits. **Care:** genuine stacks only, both σ finite, and the *earlier* run must still have its
+    preview on disk; keep it to one nudge, and make sure it and the v0.279.1 note can never both speak (they are
+    mutually exclusive by construction — one needs a pin, the other needs none — but pin a test on that).
 
 - **NEW IDEA (Builder 2026-08-27, the obvious next tap on the v0.280.0 "nearly there" card) — the constellation
   nudge names the object that's up tonight but gives no way to act on it.** *(Pillar: friendliness /
