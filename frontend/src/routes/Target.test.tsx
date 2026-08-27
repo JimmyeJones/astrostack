@@ -553,6 +553,71 @@ describe("TargetView readiness card", () => {
     ).toBeInTheDocument();
   });
 
+  it("answers 'is more time worth it?' from the measured stack, replacing the √N line", async () => {
+    // 3 h on a galaxy still reads "a solid start — keep going" against the 6 h
+    // type goal, but the picture itself measured σ 0.016 — inside the band the
+    // owner's own deep stacks land in. The measured answer supersedes the
+    // goal-independent √N line, and reconciles rather than contradicting: more
+    // time buys fainter detail, so it never tells them to stop.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 3 * 3600 }),
+    );
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+    });
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ total_exposure_s: 3 * 3600, noise_sigma: 0.016, reusable: true }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("grain-projection")).toBeInTheDocument());
+    expect(screen.getByTestId("grain-projection").textContent)
+      .toMatch(/background already looks clean at 3\.0 h \(grain 0\.016\)/);
+    expect(screen.getByTestId("grain-projection").textContent)
+      .toMatch(/fainter detail/);
+    // The goal verdict is untouched — nothing was removed, only superseded.
+    expect(screen.getByText(/3\.0 h of ~6 h — a solid start/)).toBeInTheDocument();
+    // …and the weaker, integration-only √N line no longer duplicates it.
+    expect(
+      screen.queryByText(/Another clear hour would cut background noise/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("tells a beginner their picture is still grainy even when the goal says 'plenty'", async () => {
+    // 3 h on a cluster is well past the 1.5 h type goal, so the goal verdict
+    // says "plenty for a clean image" — but the stack measured σ 0.05, the very
+    // bar the editor's denoise advisor calls full-strength. The measured line is
+    // the one that's right, and it quotes the light this target actually needs.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 3 * 3600 }),
+    );
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M13", name: "Great Globular Cluster", type: "globular cluster",
+      constellation: "Hercules", constellation_abbr: "Her",
+      ra_deg: 250, dec_deg: 36, matched_by: "name",
+    });
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ total_exposure_s: 3 * 3600, noise_sigma: 0.05, reusable: true }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("grain-projection")).toBeInTheDocument());
+    const text = screen.getByTestId("grain-projection").textContent ?? "";
+    expect(text).toMatch(/still grainy at 3\.0 h \(grain 0\.050\)/);
+    // (0.05/0.02)² = 6.25× the light → 6.3×, i.e. ~16 h more on top of the 3 h.
+    expect(text).toMatch(/6\.3× the light/);
+    expect(text).toMatch(/16 h more/);
+    expect(screen.getByText(/plenty for a clean image/)).toBeInTheDocument();
+  });
+
   it("uses a user-set goal over the default and labels it 'your goal'", async () => {
     // 5 h on a galaxy would be "close" at the 6 h default, but the user set a
     // 10 h goal, so it scores against 10 h (still "solid") and reads "your goal".

@@ -54,6 +54,7 @@ import { FramingVerdictNote, useStackFraming } from "../components/target/Framin
 import { LatestPictureCard } from "../components/target/LatestPictureCard";
 import { FrameColumnGuide } from "../components/target/FrameColumnGuide";
 import { FRAME_COLUMNS, type SortKey } from "../components/target/frameColumns";
+import { cardGrainProjection } from "../components/target/grainProjection";
 import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
 import { nextBestMove } from "../components/target/nextBestMove";
 import { softerThanUsual } from "../components/target/softStars";
@@ -704,6 +705,14 @@ export function TargetView() {
         : null,
     [readiness, nights.data],
   );
+
+  // "Is more time worth it?" — the same question again, but answered from the
+  // *measured* grain of this target's own deepest genuine stack instead of a
+  // per-object-type time goal. It supersedes the goal-independent √N line below
+  // it once a real stack exists (that line reads integration time alone and
+  // would just say a weaker version of the same thing), and stays null until
+  // then, so a target with no stack sees exactly what it saw before.
+  const grain = useMemo(() => cardGrainProjection(runs.data), [runs.data]);
 
   // Frames QC couldn't read at all (corrupt/truncated FITS): make them visible —
   // they're skipped when stacking but invisible in the reject breakdown. A full
@@ -1401,10 +1410,19 @@ export function TargetView() {
                   {clearNights ? (
                     <Text size="xs" c="dimmed">{clearNights.text}</Text>
                   ) : null}
-                  {/* The honest √N diminishing-returns figure: how much more a single
-                      extra hour would cut background noise, so "keep shooting?" gets a
-                      physics-based answer, not just a goal-fraction. */}
-                  {noiseReductionHint(target.data?.total_exposure_s ?? 0) ? (
+                  {/* "Is more time worth it?" — answered from the measured grain of
+                      this target's own deepest stack, which is strictly better than
+                      the time-goal fraction above once a real picture exists: it can
+                      say "already clean" where the goal says "keep going", or quote
+                      the light this one actually still needs where the goal says
+                      "plenty". Falls back to the goal-independent √N line whenever
+                      there's no measured stack yet (and defers to the measured
+                      plateau verdict when there is a trend to read). */}
+                  {grain ? (
+                    <Text size="xs" c="dimmed" data-testid="grain-projection">
+                      {grain.sentence}
+                    </Text>
+                  ) : noiseReductionHint(target.data?.total_exposure_s ?? 0) ? (
                     <Text size="xs" c="dimmed">
                       {noiseReductionHint(target.data?.total_exposure_s ?? 0)}
                     </Text>
