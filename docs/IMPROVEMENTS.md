@@ -12295,6 +12295,43 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-27, the parity gap the v0.284.0 "Scale & compass" feature just opened) — the
+  downloaded picture now carries a scale bar *and* a North/East rose, but the app's own on-screen overlay still
+  shows only the bar, and only on the History page. Screen and file should show the same two marks, and the
+  page a beginner actually lands on should show them at all.** *(Pillar: understand + friendliness — PRIORITY
+  3. Size: S–M. Confidence: certain — I built the baked half this run and read the overlay to match it.)*
+  **Two halves, either shippable alone.** (a) *The rose on screen.* `AnnotatedImage.tsx` already draws the
+  scale bar over a contain-fit preview via the pure `scaleBarLayout`; the compass needs the same treatment —
+  a pure `compassLayout(directions, …)` beside it and two short arms in the opposite corner. The **directions
+  already exist server-side** (`seestack.skymarks.sky_directions`, ground-truthed against astropy); the only
+  backend work is adding them to the `…/annotations` response beside `scale_bar` (additive, `null` for a run
+  with no usable WCS), which the History page already fetches. Note the one subtlety the baked version had to
+  solve: when the North-up toggle is on, the on-screen picture is rotated, so the arms must be turned by the
+  same angle (`seestack.render.orient.applied_rotation_deg`) — the existing code path already knows the angle.
+  (b) *On the Target page.* The overlay is wired only into History's picture card; the **Target page's latest
+  picture** — the screen a beginner lands on after a stack — offers neither the scale bar nor the object
+  labels, even though both are one query away and the Target page already fetches far more than this. Reuse
+  `AnnotatedImage` there behind the same quiet toggles History uses, inside the existing grouping rather than
+  as another always-on card (the standing IA priority). **Care:** keep both marks *off* by default on screen
+  exactly as they are today — this is about making them available and consistent, not about decorating the
+  picture for everyone.
+
+- **NEW IDEA (Builder 2026-08-27, the half deliberately left out of "Scale & compass" v0.284.0) — the marked
+  picture is a *download* only; the **share** sheet still sends the bare one.** *(Pillar: enjoy / share —
+  PRIORITY 3. Size: S.)* `?scale=true` composes with everything and is one query param, and
+  `SharePictureButton` already takes a `url` plus a `filename` override — the keepsake share is exactly this
+  shape (`keepsakeFilename`). But sharing is where the marks matter *most*: a picture posted with a scale bar
+  and a compass reads as a real astrophoto to whoever sees it, while the download is usually for the owner's
+  own archive. **Why it wasn't done in the same run:** the Target page's "Save / share" menu already carries
+  two share items and the owner's standing complaint is that pages are too busy, so a third needs either a
+  choice about *which* share is the default (marked? framed? both?) or a small rethink of that group rather
+  than one more line appended. **Shape:** most likely the right answer is that the *keepsake* share — the one
+  meant for other people — gains the marks, rather than adding a fourth item; that is a one-flag change
+  (`keepsake=true&scale=true`) plus a wording tweak, and it leaves the plain share untouched for anyone who
+  wants the naked picture. Confirm against a rendered keepsake first: the marks sit along the top of the
+  picture and the keepsake's caption sits beneath it, so they should compose, but it is worth *looking* at
+  rather than reasoning about — that is exactly how the v0.282.1 tofu box was found.
+
 - **NEW IDEA (Builder 2026-08-27, the obvious next slice of the "Was the Moon washing this out?" note shipped
   in v0.278.0) — say it on the *Nights* card too, so a beginner can see *which* of their nights the Moon hurt,
   not only the most recent one.** *(Pillar: understand + trust — PRIORITY 3. Size: S.)* v0.278.0 put the
