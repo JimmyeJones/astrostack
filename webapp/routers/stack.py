@@ -783,37 +783,20 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
                     headers={"Cache-Control": "no-store"})
 
 
-def _arcsec_per_px(wcs) -> float | None:  # noqa: ANN001
-    """The local plate scale (arcsec/px) of a run's celestial WCS — the mean of
-    the two axis scales, which is exact for the square, unrotated Seestar grid
-    and a sane average for a mosaic canvas. ``None`` when there is no usable WCS
-    or the scale can't be measured, so every caller can omit its answer cleanly
-    rather than working from a made-up number."""
-    if wcs is None:
-        return None
-    try:
-        from astropy.wcs.utils import proj_plane_pixel_scales
-
-        scales_deg = proj_plane_pixel_scales(wcs)  # deg/px per axis
-        scale = float(sum(scales_deg) / len(scales_deg)) * 3600.0
-    except Exception:  # noqa: BLE001 — a degenerate WCS just means "no answer"
-        return None
-    return scale if scale > 0 else None
-
-
 def _scale_bar_from_wcs(wcs, width: int, height: int):  # noqa: ANN001, ANN202
     """A :class:`~seestack.scalebar.ScaleBar` for a run from its celestial WCS
-    and :func:`_arcsec_per_px`, via the pure :func:`scale_bar_for`. Returns
-    ``None`` when there is no usable WCS or scale, so the caller omits the scale
-    bar cleanly."""
+    and :func:`~seestack.io.wcs_io.arcsec_per_px`, via the pure
+    :func:`scale_bar_for`. Returns ``None`` when there is no usable WCS or scale,
+    so the caller omits the scale bar cleanly."""
+    from seestack.io.wcs_io import arcsec_per_px
     from seestack.scalebar import scale_bar_for
 
     if wcs is None or width <= 0:
         return None
-    arcsec_per_px = _arcsec_per_px(wcs)
-    if arcsec_per_px is None:
+    scale = arcsec_per_px(wcs)
+    if scale is None:
         return None
-    return scale_bar_for(arcsec_per_px, width, height)
+    return scale_bar_for(scale, width, height)
 
 
 def _png_size(png_data: bytes) -> tuple[int, int]:
@@ -919,90 +902,13 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
     if info is None or info.size_arcmin is None or not fits_path:
         return None
 
-    def work() -> dict[str, Any] | None:
-        from seestack.framing import (
-            framing_result_verdict, recentre_nudge, recentre_outcome,
-        )
-        from seestack.io.wcs_io import celestial_wcs_from_fits
+    # The verdict itself lives in `webapp.framing_advice` because the night
+    # planner repeats its *nudge* on the row of a target the user already owns —
+    # the one moment "nudge a little south" is actionable is while they're
+    # pointing the scope, not the morning after. One definition, one voice.
+    from webapp.framing_advice import framing_payload
 
-        wcs, width, height = celestial_wcs_from_fits(fits_path)
-        if wcs is None:
-            return None
-        try:
-            xs, ys = wcs.world_to_pixel_values(info.ra_deg, info.dec_deg)
-            x_px, y_px = float(xs), float(ys)
-        except Exception:  # noqa: BLE001 — a degenerate WCS just means "no verdict"
-            return None
-        # Where this picture's middle actually pointed, so "re-centre it" can name
-        # a direction. Read from the same WCS, in sky coordinates — which is why
-        # it survives a rotated canvas without any orientation guesswork.
-        try:
-            cra, cdec = wcs.all_pix2world((width - 1) / 2.0, (height - 1) / 2.0, 0)
-            centre_ra, centre_dec = float(cra), float(cdec)
-        except Exception:  # noqa: BLE001 — no centre means no nudge, not no verdict
-            centre_ra = centre_dec = float("nan")
-        scale = _arcsec_per_px(wcs)
-        if scale is None:
-            return None
-        v = framing_result_verdict(
-            x_px=x_px, y_px=y_px, width_px=width, height_px=height,
-            arcsec_per_px=scale, size_arcmin=info.size_arcmin,
-        )
-        if v is None:
-            return None
-        # "Re-centre this picture": the crop that would bring an off-centre object
-        # back to the middle, offered only when the verdict is exactly that — a
-        # clipped or oversized object can't be helped by cropping, and a centred
-        # one has nothing to gain. The engine refuses on its own terms too
-        # (too destructive, or too cramped around the object), so this is `null`
-        # far more often than it isn't. An offer, never an automatic change.
-        outcome = recentre_outcome(
-            x_px=x_px, y_px=y_px, width_px=width, height_px=height,
-            arcsec_per_px=scale, size_arcmin=info.size_arcmin,
-        ) if v.level == "off_centre" else None
-        rc = outcome.crop if outcome else None
-        # "Re-centre it next session" is advice a beginner can't act on without
-        # knowing *which way*. Offered only for the two verdicts whose fix really
-        # is a better pointing — a well-centred picture needs nothing, and an
-        # object bigger than the frame needs mosaic mode, not a nudge.
-        nudge = recentre_nudge(
-            centre_ra_deg=centre_ra, centre_dec_deg=centre_dec,
-            object_ra_deg=info.ra_deg, object_dec_deg=info.dec_deg,
-        ) if v.level in ("off_centre", "clipped") else None
-        return {
-            "level": v.level,
-            "text": v.text,
-            "coverage": v.coverage,
-            "off_centre": v.off_centre,
-            # Which way, and how far, to move the mount so it lands in the middle
-            # next time. `null` when the correction is too small to act on, or the
-            # verdict isn't one a re-point fixes.
-            "nudge": None if nudge is None else {
-                "direction": nudge.direction,
-                "degrees": nudge.degrees,
-                "text": nudge.text,
-            },
-            # Fractional (0..1) crop bounds in the editor's own `geometry.crop`
-            # convention, plus the fraction of the frame it keeps.
-            "recentre": None if rc is None else {
-                "x0": rc.x0, "y0": rc.y0, "x1": rc.x1, "y1": rc.y1, "kept": rc.kept,
-            },
-            # Why there is no offer, when the verdict said "off to one side" but
-            # cropping can't help. Present so the *worst*-framed pictures don't
-            # get less help than the mildly off-centre ones: the caller can say
-            # "cropping back to the middle would leave only about a fifth of the
-            # picture" instead of going quiet. `kept` is what that crop would have
-            # kept (0–1), and is only meaningful for `too_destructive`.
-            "recentre_refused": None if (outcome is None or rc is not None) else {
-                "reason": outcome.reason, "kept": outcome.kept,
-            },
-            # The name the sentence is prefixed with, so one voice covers this
-            # card and the pre-shoot "will it fit?" hint.
-            "object_name": info.name or info.id,
-            "size_arcmin": info.size_arcmin,
-        }
-
-    return await run_in_threadpool(work)
+    return await run_in_threadpool(framing_payload, fits_path, info)
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/annotations")

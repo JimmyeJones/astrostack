@@ -364,6 +364,32 @@ describe("TonightView", () => {
     expect(screen.queryByText("Nearly there")).not.toBeInTheDocument();
   });
 
+  it("says which way to nudge a target its last picture missed the middle of", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [
+        // The framing advice from M31's last picture, on the screen you read
+        // *while pointing the scope* — the picture's own card says it the
+        // morning after, by which point the next clear night is a week away.
+        target({ id: "M31", name: "Andromeda", type: "galaxy", already_targeted: true,
+                 target_safe: "M_31", frames_accepted: 200, total_exposure_s: 5 * 3600,
+                 recentre_nudge: {
+                   direction: "south", degrees: 1.0, short: "1.0° south",
+                   text: "Next time, nudge your Seestar about 1.0° south before "
+                     + "you start, and it'll sit in the middle.",
+                 }, score: 80 }),
+        // A target whose last picture framed well says nothing at all.
+        target({ id: "M81", name: "Bode's", type: "galaxy", already_targeted: true,
+                 target_safe: "M_81", frames_accepted: 200, total_exposure_s: 5 * 3600,
+                 score: 70 }),
+      ],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    expect(screen.getByText("Nudge 1.0° south")).toBeInTheDocument();
+    expect(screen.queryByText(/Nudge .* north/)).not.toBeInTheDocument();
+  });
+
   it("tells a row how many more clear nights would finish it", async () => {
     vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
       targets: [

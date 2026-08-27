@@ -16601,9 +16601,42 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Builder 2026-08-27, the natural next tap on the v0.289.0 framing nudge) — say the
-  nudge **before** the session, not only after it: carry "last time M 31 landed 1.0° south of centre — nudge
-  north before you start" onto the pre-shoot planning surface.** *(Pillar: understand + better-picture-next-time
+- **✅ SHIPPED (Builder, v0.290.0, branch `claude/compassionate-galileo-ex0t6z`) — ~~say the nudge **before**
+  the session, not only after it: carry "last time M 31 landed 1.0° south of centre — nudge north before you
+  start" onto the pre-shoot planning surface.~~ Built exactly as specced, including both cautions.**
+
+  **What shipped.** A `Nudge 1.0° south` chip on the Tonight planner's row for a target the user has already
+  shot, with the finished picture's own sentence on hover. The advice is *not* recomputed: the verdict that
+  used to live inline in the `…/stack-runs/{id}/framing` endpoint moved wholesale into new
+  `webapp/framing_advice.py` (`framing_payload`), which both surfaces now call — so the card and the planner
+  physically cannot disagree about which way to move the scope. `newest_picture_nudge` there reads the
+  **newest** run with a readable master (a purged newest run falls back to the next, rather than silencing the
+  target), and returns `None` for a well-framed picture, an object bigger than the frame, an unidentified
+  target, or one never stacked — never a guessed direction. It is annotated in
+  `plan._annotate_library_targets` beside the goal/pace reads, so it rides the same registry-signature cache
+  and costs one FITS *header* read per already-shot target, only when the cache misses.
+  `seestack.framing.RecentreNudge` gained a `short` field ("1.0° south") built from the same
+  `_friendly_degrees` call the sentence uses, so the chip and the sentence share one rounding — the frontend
+  renders it verbatim rather than re-rounding `degrees`, and a backend that doesn't send it simply shows no
+  chip. Also lifted `_arcsec_per_px` out of `routers/stack.py` into `seestack.io.wcs_io.arcsec_per_px`, where
+  the scale bar, the framing verdict and the annotation overlay can share one definition of the picture's
+  scale.
+
+  **Upgrade-safe (§9):** purely additive — one optional field on the plan's already-targeted rows and one
+  optional key inside the framing endpoint's existing `nudge` object; no config, schema, on-disk, or default
+  change. An older frontend ignores both; a newer frontend against an older backend shows no chip.
+
+  **Tests (+7):** engine — the `short` phrase is the same rounding as the sentence, in both the degrees and
+  the arcminutes branch. Endpoint — a target last pointed 1° north of M 42 gets `south` / `1.0° south` on its
+  planner row, and that object is asserted **equal** to the one the picture's own card serves; a centred
+  picture, a never-stacked target and a catalog row all stay silent; and a newer well-framed run silences a row
+  the older badly-framed run had spoken on (the stale-advice caution). Frontend — the badge's label/tooltip,
+  its silence on a missing or `short`-less nudge, and a Tonight render showing the chip on the mis-framed row
+  and nothing on the well-framed one.
+
+  Original spec, for the record:
+
+  *(Pillar: understand + better-picture-next-time
   + autonomy, PRIORITY 2–3; size S–M; additive, read-only, no new deps — every ingredient already exists.)*
   **Why.** v0.289.0 made the post-stack framing verdict actionable ("Next time, nudge your Seestar about 1.0°
   south…"), but it says so on the **History/Target card of a finished picture** — which a beginner reads the
