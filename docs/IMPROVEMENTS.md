@@ -371,10 +371,26 @@ _(none — claim an item here with your branch name)_
   std → tol=+inf keep-all for single-coverage edges); memory guard `_estimate_peak_bytes` matches the real plane
   counts; preview↔export share `_autostretch_for_export`; NaN→black consistently across FITS/TIFF/PNG.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #17, traced — cosmetic, harmless today) —
+- ~~**⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #17, traced — cosmetic, harmless today) —
   `_archive_existing_outputs` (`seestack/stack/output.py:612`) excludes only `("coverage", "progress_webp",
   "progress_apng")` from the repoint map, but **not** `"frame_coverage"` (`_framecov.fits`), which is the same
-  kind of basename-resolved artefact with no history column.** So on a re-stack that archives a prior
+  kind of basename-resolved artefact with no history column.**~~ — **FIXED v0.284.6** (Builder 2026-08-27,
+  branch `claude/compassionate-galileo-0wtz21`).
+
+  **Fixed as a rule, not a patched list.** Rather than adding `"frame_coverage"` to the exclusions — which
+  would have left the *next* basename-resolved artefact with the identical gap — the test is now an **allow-list**:
+  `_REPOINTABLE_ARTEFACTS = frozenset({"fits", "tiff", "preview"})`, the three kinds that actually have a
+  `stack_runs` column, and `if kind in _REPOINTABLE_ARTEFACTS`. So a new entry in `RUN_ARTEFACT_SUFFIXES`
+  defaults to *out* of the map (the safe direction) instead of silently landing in it. Behaviour is otherwise
+  identical: every artefact is still archived, and the map's three real entries are unchanged.
+
+  **Test (+1 in `tests/test_output_archive.py`, fails before / passes after):**
+  `test_repoint_map_holds_only_the_artefacts_with_a_history_column` lands the *whole* `RUN_ARTEFACT_SUFFIXES`
+  set on disk (framecov and both progress reels included — the existing archive tests never produced those, which
+  is why nothing caught this) and asserts the returned map is exactly the fits/tiff/preview entries, while every
+  canonical name is still vacated and every file still lands under the one shared archived basename.
+
+  Original note, for the record: So on a re-stack that archives a prior
   `_framecov.fits`, its `{orig: dst}` entry is added to the map returned to `repoint_stack_runs`. Harmless
   today: `repoint_stack_runs` (`project.py:1061`) only runs `UPDATE ... WHERE {col}=?` over
   `fits_path`/`tiff_path`/`preview_path`, and no row ever stores a framecov path in those columns, so the extra
