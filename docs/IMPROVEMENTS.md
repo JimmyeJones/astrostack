@@ -164,9 +164,54 @@ _(none — claim an item here with your branch name)_
   (2) an unadjusted linear run and a display-space run are byte-for-byte unchanged (no regression). One-two
   files (`stack.py`, `thumbnail.py`) + tests. *(Found by the render/export-parity adversarial audit this run.)*
 
-- **🟠 WRONG-RESULT / SHARE (Builder 2026-08-27, branch `claude/compassionate-galileo-zixgdj`, REPRODUCED
-  end-to-end) — a share download asked for North-up **double-rotates** a preview a previous save already baked
-  the rotation into, so the picture the user shares is 180° from the one on screen.** *(Severity: wrong-result
+- **✅ SHIPPED (Builder, v0.289.3, branch `claude/compassionate-galileo-ex0t6z`) — ~~a share download asked for
+  North-up **double-rotates** a preview a previous save already baked the rotation into, so the picture the
+  user shares is 180° from the one on screen.~~ Fixed with the sweep the entry asked for: all four consumers of
+  the stored preview that derive geometry from the FITS were decided explicitly, and two more defects in the
+  same family were found and fixed alongside.**
+
+  **What shipped.** The missing fact was already on the run (`preview_north_up_deg`, v0.288.1); what was
+  missing was anything *asking* for it. New `seestack.render.thumbnail.pending_north_up_deg(fits, already_deg)`
+  is the one answer to "how much further must these bytes turn?", and `orient_preview_north_up` grew an
+  `already_deg=` keyword that routes through it — so a picture already North-up comes back **untouched**
+  instead of turned again. With the default `already_deg=0.0` the applied angle is `applied_rotation_deg(raw)`,
+  which `rotate_image_north_up` snaps to the identical pixels, so an un-rotated preview is **byte-for-byte** as
+  before. Then, per consumer:
+  - **share JPEG** (`download_stack_run(kind="jpeg")`) and **wallpaper** (`download_wallpaper`) pass the saved
+    angle and apply only the remainder. The wallpaper's target pixel follows the *pending* angle, not the full
+    one.
+  - **the wallpaper's crop centre** — the companion defect the entry named, wrong even with `north_up` *off*:
+    `wallpaper_target_pixel` gained `north_up_deg=` and, when set, reads the position off
+    `wcs_dict_rescaled_to_preview(..., north_up_deg=…)` — the same rotated preview-grid WCS that places the Sky
+    map's tile, so the two surfaces agree on one piece of geometry rather than each deriving its own.
+  - **the North/East rose** (found by the sweep): `applied_north_up` was `0.0` on any download that did not ask
+    for a rotation, so on a North-up-*saved* picture the rose pointed at the canvas's North, not the screen's.
+    It is now the total the picture carries — the saved angle plus whatever this download adds.
+  - **the scale bar** (found by the sweep): its length is held as a fraction of the **canvas** width, and a
+    90° save makes the stored preview's width the canvas's *height* — a bar a quarter too short. New
+    `seestack.render.orient.canvas_width_in_preview_px` converts back, using the canvas's own aspect as the
+    extra constraint so there is no ill-conditioned inversion of the expand bounding box (exact on the snapped
+    case, <0.1 % on a real 1024 px preview, including at 45°).
+  - **the Sky-map overlay + tile** were already correct (v0.288.1); **History's object pins** already withhold
+    (v0.289.2). Nothing else consumes the stored preview with FITS-derived geometry.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change — every new parameter defaults
+  to "no saved rotation", which is what every older run reads. `_png_width` became `_png_size` (a private
+  router helper with one caller).
+
+  **Tests (+9 in `tests/webapp/test_share_north_up.py`, +6 in `tests/test_orient.py`; 5 of the webapp ones fail
+  before / pass after):** a 90°-saved run's `?north_up=true` JPEG is byte-identical to its plain one and keeps
+  the saved shape; the **half-turn** case, where the size *doesn't* change so nothing looks wrong and the file
+  is simply upside down, is pinned by comparing against `rot90(k=2)`; a run re-saved un-rotated still gets the
+  full turn and is byte-identical to the old code's render; an already-North-up field is untouched on both
+  downloads; the rose reports the saved angle on a no-rotation download and the bar keeps *exactly* the pixel
+  length it has on the same run saved un-rotated; the wallpaper isn't double-turned, and its crop now contains
+  the object the un-rotated pixel cropped out entirely. Plus the round-trip, snapped-exactness,
+  preview-downscale and degenerate-input properties of the new span helper.
+
+  Original finding, for the record:
+
+  *(Severity: wrong-result
   on a share/export surface — the shared file is visibly upside-down; the stack and the stored preview are
   fine. Confidence: reproduced end to end through the real endpoints.)*
 
