@@ -190,6 +190,96 @@ def test_bilinear_debayer_uint16_does_not_overflow():
     assert np.allclose(rgb_f32, 60000.0)
 
 
+# Red sample position (py, px) within the 2x2 cell for each Bayer layout.
+_R_POS = {"RGGB": (0, 0), "BGGR": (1, 1), "GRBG": (0, 1), "GBRG": (1, 0)}
+
+
+@pytest.mark.parametrize("pattern", ("RGGB", "BGGR", "GRBG", "GBRG"))
+def test_bilinear_debayer_counts_genuine_zero_sample(pattern):
+    """A genuine sample that reads exactly 0.0 must still count toward the
+    neighbour average of the adjacent missing sites of its own channel.
+
+    The interpolators used to mask sample sites with a ``!= 0`` *value* test, which
+    conflates "not this channel's site" (correctly excluded) with "a real datum that
+    happens to be 0" (which must be counted). That excluded a genuine 0 from the
+    normalized-convolution count, so a missing site next to it divided a smaller sum
+    by a smaller count and read too high. After the fix the mask is *positional*, so
+    the 0 is counted. Reachable on the hot path when an integer master-dark
+    subtraction lands a light pixel exactly on the dark value."""
+    py, px = _R_POS[pattern]
+    mosaic = np.full((8, 8), 100.0, dtype=np.float32)
+    zy, zx = py + 2, px + 2          # an interior R sample site
+    mosaic[zy, zx] = 0.0             # a genuine zero datum at an R site
+    r = bilinear_debayer(mosaic, pattern=pattern)[:, :, 0]
+    # The zeroed R sample site itself keeps its 0 (a real sample is never overwritten).
+    assert r[zy, zx] == 0.0, r[zy, zx]
+    # The missing R site one column right averages its two horizontal R neighbours,
+    # the zero and the 100 → 50. The old value-mask dropped the 0 and returned 100.
+    assert r[zy, zx + 1] == pytest.approx(50.0), r[zy, zx + 1]
+
+
+def _debayer_value_mask_reference(mosaic, pattern):
+    """Independent reference reproducing the *pre-fix* value-based sample mask, to
+    pin byte-for-byte equivalence on frames with no exact-0 sample (the common
+    path). Uses the module's own ``_shift`` so only the mask source differs."""
+    from seestack.io import fits_loader as fl
+
+    layouts = {
+        "RGGB": (("r", "g"), ("g", "b")), "BGGR": (("b", "g"), ("g", "r")),
+        "GRBG": (("g", "r"), ("b", "g")), "GBRG": (("g", "b"), ("r", "g")),
+    }
+    m = mosaic.astype(np.float32)
+    r = np.zeros_like(m)
+    g = np.zeros_like(m)
+    b = np.zeros_like(m)
+    (tl, tr), (bl, br) = layouts[pattern]
+    plane = {"r": r, "g": g, "b": b}
+    plane[tl][0::2, 0::2] = m[0::2, 0::2]
+    plane[tr][0::2, 1::2] = m[0::2, 1::2]
+    plane[bl][1::2, 0::2] = m[1::2, 0::2]
+    plane[br][1::2, 1::2] = m[1::2, 1::2]
+
+    def interp_g(gp):
+        has = (gp != 0).astype(np.float32)
+        num = fl._shift(gp, 1, 0) + fl._shift(gp, -1, 0) + fl._shift(gp, 0, 1) + fl._shift(gp, 0, -1)
+        den = fl._shift(has, 1, 0) + fl._shift(has, -1, 0) + fl._shift(has, 0, 1) + fl._shift(has, 0, -1)
+        return np.where(gp != 0, gp, num / np.maximum(den, 1.0))
+
+    def interp_rb(p, channel):
+        hm = (p != 0).astype(np.float32)
+        h_avg = (fl._shift(p, 0, 1) + fl._shift(p, 0, -1)) / np.maximum(fl._shift(hm, 0, 1) + fl._shift(hm, 0, -1), 1.0)
+        v_avg = (fl._shift(p, 1, 0) + fl._shift(p, -1, 0)) / np.maximum(fl._shift(hm, 1, 0) + fl._shift(hm, -1, 0), 1.0)
+        d_num = fl._shift(p, 1, 1) + fl._shift(p, 1, -1) + fl._shift(p, -1, 1) + fl._shift(p, -1, -1)
+        d_den = fl._shift(hm, 1, 1) + fl._shift(hm, 1, -1) + fl._shift(hm, -1, 1) + fl._shift(hm, -1, -1)
+        d_avg = d_num / np.maximum(d_den, 1.0)
+        h, w = p.shape
+        yy, xx = np.indices((h, w))
+        pos = {tl: (0, 0), tr: (0, 1), bl: (1, 0), br: (1, 1)}[channel]
+        osr = (yy % 2) == pos[0]
+        osc = (xx % 2) == pos[1]
+        has = p != 0
+        out = p.copy()
+        out = np.where(~has & osr & ~osc, h_avg, out)
+        out = np.where(~has & ~osr & osc, v_avg, out)
+        out = np.where(~has & ~osr & ~osc, d_avg, out)
+        return out
+
+    return np.stack([interp_rb(r, "r"), interp_g(g), interp_rb(b, "b")], axis=-1)
+
+
+@pytest.mark.parametrize("pattern", ("RGGB", "BGGR", "GRBG", "GBRG"))
+def test_bilinear_debayer_unchanged_when_no_zero_samples(pattern):
+    """The positional-mask fix must be byte-for-byte identical to the old value-mask
+    on any frame with no exact-0 sample — i.e. every real install with a proper
+    (float-averaged) master dark or no calibration at all. Guards the hot path
+    against an accidental behaviour change."""
+    rng = np.random.default_rng(7)
+    mosaic = (rng.random((48, 72)).astype(np.float32) * 1000.0 + 1.0)  # strictly > 0
+    got = bilinear_debayer(mosaic, pattern=pattern)
+    ref = _debayer_value_mask_reference(mosaic, pattern)
+    assert np.array_equal(got, ref), float(np.abs(got - ref).max())
+
+
 def test_fov_deg_from_header_s30(tmp_path):
     """An S30-shaped header (150 mm f.l., 2.9 µm pixels, 1920 px long edge) yields
     the true ~2.1° field — not the hardcoded 1.3° that silently fails an S30's
