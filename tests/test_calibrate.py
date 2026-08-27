@@ -1012,3 +1012,41 @@ def test_flat_floor_guards_divide(tmp_path):
     assert np.isfinite(out).all()
     # The dead pixel is floored to flat_norm=1.0 → output stays at the raw value.
     assert out[0, 0] == 500.0
+
+
+def test_build_master_reports_how_many_frames_the_user_actually_gave(tmp_path):
+    """A big dark set is evenly sampled down to the memory bound before
+    combining — a sound default that used to live only in the log, so someone who
+    dropped 200 darks read "built from 64 frames" and reasonably concluded 136
+    had failed. The meta now carries the supplied count so the caller can say it.
+    """
+    paths = []
+    for i in range(9):
+        p = tmp_path / f"dark_{i:02d}.fits"
+        _write_raw(p, np.full((4, 4), 100.0 + i))
+        paths.append(p)
+
+    # Sampled: more frames supplied than the bound allows.
+    _, meta = build_master(paths, kind="dark", method="median", max_frames=4)
+    assert meta.n_supplied == 9
+    assert meta.n_frames == 4      # what was actually combined
+    assert meta.n_supplied > meta.n_frames  # the case worth telling the user
+
+    # Not sampled: the two agree, so a caller can tell "nothing was dropped"
+    # from the numbers alone rather than needing a separate flag.
+    _, small = build_master(paths[:3], kind="dark", method="median", max_frames=4)
+    assert small.n_supplied == small.n_frames == 3
+
+
+def test_master_meta_supplied_count_is_build_time_only(tmp_path):
+    """It is not part of a master's identity, so it isn't written to the FITS
+    header — a master loaded back reports None rather than a number it can't
+    stand behind, and every existing header keeps exactly the cards it had."""
+    from seestack.calibrate.masters import load_master, save_master
+
+    path = tmp_path / "dark.fits"
+    save_master(path, np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 4, 4, 4, "median", n_supplied=200))
+    _, meta = load_master(path)
+    assert meta.n_frames == 4
+    assert meta.n_supplied is None

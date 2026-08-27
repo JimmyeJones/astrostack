@@ -60,6 +60,14 @@ class MasterMeta:
     gain: float | None = None
     sensor_temp_c: float | None = None
     bayer_pattern: str | None = None
+    # How many frames the caller actually supplied, before the ``max_frames``
+    # memory bound sampled the set down. ``None`` when unknown — it is a
+    # *build-time* fact, not part of the master's identity, so it is deliberately
+    # not written into the FITS header and a master loaded back from disk reports
+    # ``None`` rather than a number it can't stand behind. Equal to
+    # :attr:`n_frames` plus any skipped frames when no sampling happened; larger
+    # when it did, which is the only case worth telling the user about.
+    n_supplied: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -163,6 +171,11 @@ def build_master(
     paths = [Path(p) for p in paths]
     if not paths:
         raise ValueError("no calibration frames supplied")
+
+    # How many the user actually gave us, kept so the caller can *say* that a
+    # large set was sampled rather than leaving them to wonder why their 200
+    # darks produced a master "from 64 frames".
+    n_supplied = len(paths)
 
     # Evenly sample down to max_frames so very large dark/flat sets don't OOM.
     if len(paths) > max_frames:
@@ -286,6 +299,7 @@ def build_master(
         gain=float(np.median(gains)) if gains else None,
         sensor_temp_c=float(np.median(temps)) if temps else None,
         bayer_pattern=_mode(patterns),
+        n_supplied=n_supplied,
     )
     return master, meta
 
