@@ -16729,6 +16729,54 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-REQUESTED (2026-08-28) — "Universe map": an all-sky view built ONLY from the owner's own captured
+  data, with each target's picture masked down to just its well-detailed pixels.** *(Enjoyment/pride feature —
+  "look what I've actually explored" — not a workflow necessity, so pull it on a slow run. Size M–L. Read-only
+  against existing per-run artifacts; cannot touch the imaging path.)* Owner's own framing: *"a rough universe
+  map based on the targets I have picked up and only mapping parts of images with enough detail... just to use
+  the data I have collected alone."* Two words carry real design weight: **"rough"** (a static, honest overview
+  beats a fussy interactive one) and **"only… enough detail"** (don't paste a target's whole rectangular
+  preview onto the map — the ragged, thin, low-coverage edges of a mosaic or a partially-finished target would
+  make the map look worse than the data deserves).
+
+  **This is NOT a from-scratch build — grep first, most of it already exists, just not connected this way:**
+  1. **`seestack/post/skymap.py`** already renders a whole-sky **Aitoff projection** with an offline bright-star
+     background (bundled catalog, no internet), a coordinate grid, the Galactic equator, and every target
+     dropped at its real RA/Dec/angular size from its own preview. **It is Qt-desktop-only and has never been
+     wired into the web app** — `webapp/routers/sky.py` already imports `bright_star_catalog` from it for the
+     3D globe's star background, so the two aren't strangers, but the Aitoff renderer itself is unused server-
+     side. Surfacing *this* (not a new sky-rendering stack) is most of the win, and it's already fully offline —
+     no internet dependency, unlike the existing `AladinSky.tsx` real-sky-survey mode.
+  2. **`frame_coverage` — the per-pixel frame-count map every stack run already writes** (`_framecov.fits`
+     sibling, `seestack/stack/output.py` `_write_frame_coverage_fits`) is exactly the signal needed to know
+     which pixels of a finished picture are backed by "enough" data. This is the piece that turns "drop the
+     whole image on the map" into "only map parts of images with enough detail" — composite a target's preview
+     onto the Aitoff canvas masked to pixels whose `frame_coverage` clears a threshold (measure a sensible
+     default against how the existing mosaic trim-crop / coverage-leveling machinery already reasons about
+     "enough coverage" — `seestack/edit/presets.py`'s `trim_crop` — rather than picking a number blind), so a
+     mosaic's noisy border or a still-thin target fades out or is excluded instead of looking like a smear on
+     an otherwise clean map.
+  3. **Placing an image at true sky position/size is already solved** in the web app — `Sky.tsx` /
+     `frontend/src/sky/projection.ts`'s `SkyImage` (`ra_deg`/`dec_deg`/`width_deg`/`height_deg`/`rotation_deg`)
+     is exactly the shape needed; reuse the projection math, don't reinvent it.
+
+  **Suggested delivery — a third mode on the existing Sky page, not a fourth unrelated concept.** `Sky.tsx`
+  already has a `SegmentedControl` switching between the offline 3D star-globe and the online real-sky Aladin
+  view; add **"My map"** as a third option there (flat, Aitoff, offline, coverage-masked, built only from the
+  owner's own targets) rather than a wholly separate route — it's the same underlying question ("where have I
+  been imaging?") at a different zoom level, not a different feature. If a genuinely separate page reads
+  cleaner once you're in it, that's fine too (new pages are allowed, per the standing IA item) — just don't
+  strand it somewhere the owner won't find it; link it from wherever the 3D globe lives today.
+
+  **Backend shape:** most likely a new endpoint that renders the Aitoff composite server-side (extending
+  `skymap.py`'s renderer with the coverage-masked compositing step) and returns a PNG — matches "rough" and
+  reuses proven, already-tested code, versus standing up a new client-side WebGL layer for something the 3D
+  globe already covers interactively. Cache it (it only changes when a target's picture changes) rather than
+  re-rendering the whole sky on every page load.
+
+  **Beginner bar:** clears it easily — no astro knowledge needed, purely "here's a picture of everywhere
+  you've pointed your scope," and it's explicitly a pride/fun feature, which the owner asked for directly.
+
 - **NEW IDEA (Builder 2026-08-27, the half v0.290.2 deliberately left out) — carry the "nudge it this way"
   chip onto the *other* pre-session surfaces, above all "Finish what you started".** *(Pillar: autonomy +
   better-picture-next-time, PRIORITY 2–3; size S; additive, no new deps — the fact is already computed and
