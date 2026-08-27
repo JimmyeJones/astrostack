@@ -79,6 +79,29 @@ def test_build_master_is_nan_aware(tmp_path, method):
     np.testing.assert_allclose(master, 100.0)
 
 
+@pytest.mark.parametrize("method", ["median", "mean", "sigma_mean"])
+def test_build_master_all_inf_pixel_stays_nan(tmp_path, method):
+    # Sibling of the all-NaN case, but with *inf*: the combine masks non-finite
+    # samples in place (the memory-frugal path), so an inf must be treated as
+    # "no data" exactly like a NaN — a pixel that is inf in every frame stays NaN
+    # (never folded to a finite value or left as inf), and n_frames is unaffected.
+    paths = []
+    for i in range(4):
+        arr = np.full((3, 3), 200.0, dtype=np.float32)
+        arr[0, 0] = np.inf  # no finite sample at (0, 0) in any frame
+        arr[1, 1] = np.inf if i == 0 else 200.0  # inf in one frame only → finite
+        p = tmp_path / f"f_{i}.fits"
+        _write_raw(p, arr, exptime=30.0)
+        paths.append(p)
+    master, meta = build_master(paths, kind="dark", method=method, sigma=3.0)
+    assert meta.n_frames == 4
+    assert np.isnan(master[0, 0]), "an all-inf pixel must stay NaN (no data)"
+    # Every pixel with at least one finite sample resolves to the finite value.
+    assert np.isfinite(master[1, 1]) and master[1, 1] == pytest.approx(200.0)
+    finite = np.isfinite(master)
+    np.testing.assert_allclose(master[finite], 200.0)
+
+
 def test_build_master_all_nan_pixel_stays_nan(tmp_path):
     # If *no* frame has a finite sample at a pixel, that pixel is genuinely
     # "no data" and must stay NaN (not be folded to 0), per the coverage invariant.

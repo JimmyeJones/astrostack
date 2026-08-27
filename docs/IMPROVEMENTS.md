@@ -137,6 +137,60 @@ _(none — claim an item here with your branch name)_
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #7, branch `claude/vigilant-knuth-yeeeim`) — re-audited the stacking
+  engine's weighting/photometric/pointing math + the un-swept-in-depth routers the #6 audit flagged
+  (`gallery.py`, `plan.py`, `stats.py`, `targets.py`, `video.py`) + `calibrate/masters.py`, adversarially.
+  Result: engine core still CLEAN; one real on-path memory gap found and FIXED (masters 3-copy peak → v0.277.3,
+  see Shipped); two low-severity latent robustness gaps filed below. Dogfood end-to-end clean.** Baseline green
+  before touching anything (**2898 passed, 2 skipped** — full headless suite). Traced by hand and, where cheap,
+  probed: `weighting.py` (geometric-mean of five clipped sub-weights, per-panel positional medians with
+  target-wide fallback, the `1/s²` photometric variance fold), `photometric.py` (per-panel references, neutral
+  fallback when <3 measured, `[1/max_ratio, max_ratio]` clamp), `pointings.py` (union-find single-linkage,
+  wrap/pole-safe unit vectors, the ≥2-substantial-groups soundness gate), `reference.py` (RA-unwrap median,
+  FWHM tiebreak), `align.py` (windowed-reproject inset valid-mask, order-1 sub-pixel-shift NaN-ring propagation
+  with the `cval=1.0` mask, GPU/CPU `cval` parity), and `stacker.py`'s `kappa_min_frames` / `_resolve_auto_reject`
+  (n<4 → min/max so `auto_reject` intent is always met) / `_kappa_sigma_keep_mask` (both σ-unknown and
+  mean-unknown widenings) / `_afford_drizzle_reject` (walk-away forgiveness of the extra planes) — every
+  NaN/coverage/rejection edge I could build was already handled and commented. The routers were swept via three
+  focused sub-audits: `gallery.py`/`plan.py`/`stats.py` (path resolution, offset/limit clamps, empty-population
+  medians, divide-by-zero, timezone/moon math, missing-column upgrade guards — all correct); `targets.py`/
+  `video.py` (client `capture_id`/`safe` sanitised server-side, `incoming/` strictly read-only, ffmpeg decode
+  guards, Pydantic-bounded numeric params, additive-column reads); `masters.py` (NaN/inf combine, `mad==0` tol=0
+  rejection, uint16→float32 no-overflow, empty/n=1/all-identical, `incoming/` read-only — all sound). **This is
+  the seventh consecutive essentially-clean engine-side audit.** Future runs can lead with the watcher-ingest
+  storage layer / `deps.py` / `config.py` load path, or re-audit the engine only occasionally.
+
+- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #7, traced — not reachable through the app's own writers;
+  needs a hand-edited / partially-foreign result file on a live install) — a JSON-valid but *wrong-typed* field
+  in a video capture's `meta.json` 500s the WHOLE `/api/videos` list instead of degrading to "no result", in
+  breach of `read_meta`'s own "reads as no result rather than breaking the page" contract.** *(Severity: low —
+  broken-UX, and video/Moon-Sun is a niche path; the app only ever writes well-typed meta, and a partial write
+  yields `JSONDecodeError` which is already caught. Confidence: traced, not reproduced with an app-written
+  file.)* `read_meta` / `iter_results` (`webapp/video.py` ~174/310) catch `OSError`/`JSONDecodeError`/`TypeError`
+  and filter to known dataclass fields, but a plain `@dataclass` does no type enforcement, so a value like
+  `source_name: null` or a non-numeric `width` survives the dataclass build and only blows up later in the
+  Pydantic `_result_out` construction — an uncaught `ValidationError` that fails the entire list endpoint, not
+  just the one bad capture. **This is the same class the project has chosen to fix before** (the non-dict
+  `web_stack_defaults` meta row, v0.276.2): a legacy / hand-edited / foreign-version file on an in-place-upgraded
+  install (§9) is the trigger. **Fix direction (small, additive):** wrap the per-capture `_result_out` build in
+  a try/except that logs-and-skips one bad capture (mirroring the per-target `except Exception: continue` the
+  stats roll-ups already use), and add a `test_videos_list_degrades_on_wrong_typed_meta` regression. Do it
+  alongside a quick grep for any sibling list endpoint with the same "dataclass tolerates, Pydantic doesn't"
+  shape.
+
+- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #7, traced — no constructed trigger; a house-pattern deviation)
+  — `get_gallery`'s per-run item-construction loop (`webapp/routers/gallery.py` ~196–234) is wrapped in
+  `try/…finally` with NO `except`, so if any single `GalleryItem` build ever raised mid-loop the whole
+  `/api/gallery` would 500, whereas the equivalent roll-up loops in `stats.py` (`_rollup_stacks`,
+  `_collect_last_night`, …) catch `Exception` per target and skip the bad one.** *(Severity: low — every required
+  `GalleryItem` field is `NOT NULL` and the optional-field helpers (`seam_verdict`, `_parse_options`,
+  `_unexported_edit`) are all None-tolerant, so no concrete input was found that throws; this is a robustness
+  asymmetry, not a live bug. Confidence: deviation confirmed, failure not traced.)* **Fix direction:** give the
+  gallery loop the same per-item `except Exception: continue` (with a debug log) the stats roll-ups use, so a
+  future field addition that can raise can't take down the whole gallery. Cheap and matches the house
+  degrade-don't-500 pattern; pair with the video note above in one small "list endpoints degrade per-item"
+  Builder pass.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26 #5, branch `claude/vigilant-knuth-t39r9x`) — led the rotation back
   through the stacking engine's remaining un-swept surface (the accumulators, mosaic-canvas sizing, the
   drizzle path, the video/lucky-imaging stack) and the calibration apply path, all adversarially; came back
@@ -11389,6 +11443,22 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **IMPROVEMENT IDEA (Scout 2026-08-27 #7, verified by grep) — a master dark/flat built from more than 64
+  frames silently drops the extras, and the beginner is never told.** *(Pillar: friendliness + trust — PRIORITY
+  3. Size: S.)* `build_master` (`seestack/calibrate/masters.py`) caps the frames actually combined at
+  `max_frames=64`, evenly sampling the input down to bound peak memory — a sound default — but the fact that it
+  sampled is **only written to the log** (`log.info("Master %s: sampling %d of %d frames", …)`); the Calibration
+  page's result (which already surfaces the `skipped` list of unusable frames) says nothing about it. A beginner
+  who drops 200 darks and gets a master "from 64 frames" may think 136 files failed, or that the app is broken.
+  **Verified genuinely un-surfaced (grepped this run):** `max_frames`/"sampling"/"sampled" appear nowhere in
+  `webapp/` or `frontend/src/` — only in the engine log. **Shape (small, additive):** thread the "used N of M
+  (evenly sampled — plenty for a clean master)" count out of `build_master` alongside the existing `skipped`
+  return, and render it as one reassuring plain line on the Calibration result — *"Built from 64 of your 200
+  darks (evenly sampled across the set — plenty for a clean master)."* No behaviour change, no new default; it
+  just explains a decision the app already makes. Testable at the helper (200 paths → reported used=64,
+  total=200) and the router (the line appears only when M > 64). **Care:** phrase it as *sufficiency*, never as
+  a loss — the beginner should come away reassured, not worried their frames were wasted.
+
 - ~~**IMPROVEMENT IDEA (Scout 2026-08-26 #5, measured this run) — the shipped "what am I looking at?" object
   card is SILENT for most real targets because the catalog `blurb` field is only half-populated.**~~ —
   **SHIPPED v0.277.2** (Builder 2026-08-27, branch `claude/compassionate-galileo-g1g813`) — **both filed
@@ -14388,6 +14458,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #7) — "Was the Moon washing this out?": a retrospective moonlight
+  verdict on a finished session/picture, so a beginner understands *why* a result looks flat and knows to
+  re-shoot on a dark-Moon night — not that they did something wrong.** *(Pillar: understand + trust — PRIORITY
+  3. Size: M.)* The planner already warns *before* a night (`nightplan.moon_context` → a good/ok/poor verdict
+  with copy like *"A bright 92%-lit Moon is only ~15° from this target — faint nebulosity will be washed out"*),
+  but **nothing tells the beginner this *after* the fact.** A newcomer who stacks a faint nebula shot under a
+  full Moon sees a flat, low-contrast picture and assumes their gear or their editing is at fault; the real
+  cause was the sky, and the fix is "wait for a darker night", which the app never says. **Verified genuinely
+  new (grepped this run):** `moon_context` and its verdict are used only on the *forward-looking* Tonight/plan
+  path; no code applies moon illumination/separation to a *completed* session or renders it on a result/History
+  card. **Shape:** the session's capture time is already stored (frame timestamps / the "Last session — 15 Nov
+  2024" roll-up) and the target's RA/Dec is solved, so recompute the same `moon_context` for the session's
+  midpoint and, **only when the verdict is "poor"** (bright *and* near), render one plain reassuring line on the
+  result/"Is it enough yet?" card: *"This session was shot under a bright Moon close to the target, so the
+  background is brighter and faint detail is harder to pull out — it's the sky, not your setup. A dark-Moon night
+  would give a cleaner result."* Self-hides on a "good"/"ok" night (the common case) so it never nags. **Beginner
+  bar:** clears it cleanly — instantly understandable, plain language, no knob, a sane default (silent unless the
+  Moon genuinely hurt this session), and it's pure *understand + trust*, not pro tooling; it turns a
+  discouraging "my picture is bad" into an actionable "shoot it again when the Moon's away." **Feasibility:**
+  offline, additive, read-only, reuses the existing `moon_context` helper and data the app already has (session
+  time + solved position); pure → unit-testable (full Moon 10° away on a nebula → poor → line shown; new-Moon or
+  Moon-down → None; a cluster/galaxy where moonlight matters less → the verdict's own leniency governs). **Slices
+  —** (a) a pure `session_moon_note(session_time, ra, dec, obs_site) -> str | None` wrapping `moon_context` for a
+  past instant + tests (shippable on its own); (b) wire it onto the result card (frontend, gated on presence).
+  **Care:** trust is the whole point, so bias toward silence — only a *clearly* Moon-hit session earns the line,
+  and never phrase it as the user's fault.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #6) — "Finish what you started": a Dashboard nudge that ranks the
   targets you *already have data on* by how much one more clear night would improve them, so the beginner's
@@ -20683,6 +20780,17 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.277.3** — Memory/hardening (Scout, branch `claude/vigilant-knuth-yeeeim`; found by the calibrate-masters
+  QA sub-audit this run): `build_master` (`seestack/calibrate/masters.py`) held **three live copies** of the
+  frame set through the combine — the `arrays`+`loaded` lists, the `np.stack` copy, *and* a second full N×H×W
+  copy from `finite_stack = np.where(np.isfinite(stack), stack, np.nan)` — so peak RAM was ~3× the docstring's
+  advertised "~0.5 GB for 64 Seestar frames" (measured shape: ~1.6 GB), a real OOM-headroom gap on a
+  memory-constrained box building a large dark/flat set. Now drops the per-frame arrays once `np.stack` owns
+  them (`del arrays, loaded`) and masks non-finite samples **in place** in the stack it exclusively owns instead
+  of allocating the second copy — **byte-for-byte identical output** (the combine reduces the same finite-masked
+  buffer), verified by the existing NaN/inf-awareness suite plus a new all-inf-pixel regression across all three
+  methods (`test_build_master_all_inf_pixel_stays_nan`). Docstring corrected to the real peak. Single file, no
+  config/schema/API/default change, upgrade-safe; `incoming/` untouched (read-only).
 - **v0.272.1** — Friendliness: the Stack form's **Lucky imaging** knob was labelled "keep best **%**" but its
   value is a *fraction* (0.05–1.0, default 1.0 = keep all) — so a beginner reads the default "1" as "keep best
   1%", or types "50" for 50% and is silently clamped to the 1.0 max (keep-all, the opposite of a cut). The
