@@ -113,6 +113,49 @@ def _source_fingerprint(src: Path) -> tuple[int, float] | None:
     return (st.st_size, st.st_mtime)
 
 
+def _source_incomplete(src: Path) -> bool:
+    """True if ``src`` looks like a copy / in-place rewrite still in progress —
+    0 bytes, or a FITS that can't be fully loaded yet (a truncated data section).
+
+    Used to tell a *transient* in-place rewrite apart from a genuine content swap
+    before doing anything destructive to an already-registered frame. The
+    pipeline re-globs the whole ``incoming/`` tree on every scan (independent of
+    the watcher's stability gate), so a scan fired by some *other* new file can
+    sweep in a registered frame mid-rewrite (a NAS re-sync, ``rsync --inplace``,
+    a truncate-then-write). Judged purely by ``(size, mtime)`` that transient
+    reads as a "different content" swap, which would drop the frame's plate
+    solution and re-accept an auto-rejected sub — exactly the harm ``_same_capture``
+    guards on the size-*equal* path. A still-incomplete source is not a confirmed
+    swap: skip it (like the new-file "still copying" skip) and re-check once it
+    settles.
+
+    Loads the pixel data (not just the header): a mid-write file often has a
+    complete header block but a truncated data section, which a header-only read
+    can't see but ``load_seestar_raw`` rejects (a reshape/OSError). This runs only
+    on the rare fingerprint-changed *and* content-changed path — an ordinary
+    re-scan (unchanged, or a same-capture touch) never gets here.
+    """
+    import warnings
+
+    from seestack.io.fits_loader import load_seestar_raw
+
+    try:
+        if src.stat().st_size == 0:
+            return True
+    except OSError:
+        return False  # can't stat → let the normal fingerprint logic handle it
+    try:
+        # A truncated data section makes astropy warn ("File may have been
+        # truncated") before the reshape fails; silence it — the raised exception
+        # below is how we report the truncation, the warning would just be noise.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            load_seestar_raw(src, debayer=False)
+    except Exception:  # noqa: BLE001 — astropy raises a zoo; a truncated FITS included
+        return True
+    return False
+
+
 def _same_capture(prior: FrameRow, src: Path) -> bool:
     """True if ``src`` still holds the **same capture** the frame row was built
     from, judged by its FITS header identity.
@@ -292,6 +335,22 @@ def ingest_files(
                 # QC verdict and plate solution alone; the new mtime is still
                 # recorded below so this doesn't re-check on every future scan.
                 content_changed = False
+            if content_changed and _source_incomplete(src):
+                # The fingerprint changed but the source isn't a complete, readable
+                # FITS yet — a copy / in-place rewrite caught mid-flight by the
+                # whole-tree re-glob, not a genuine content swap. Treat it like the
+                # new-file "still copying" skip: touch *nothing* (no QC/solution
+                # reset, no cache re-copy, no fingerprint advance) so the frame is
+                # re-checked cleanly once the source settles. Without this, a
+                # transient truncation (e.g. a 0-byte read during a NAS re-sync)
+                # would drop a solved frame's plate solution and re-accept an
+                # auto-rejected sub — the same harm _same_capture guards on the
+                # size-equal path, previously left open on the size-changed one.
+                yield IngestResult(
+                    source_path=src, frame_id=None, cached_path=None, skipped=True,
+                    skip_reason="still copying (incomplete rewrite)",
+                )
+                continue
             if copy_to_cache and prior.id is not None:
                 if not prior.cached_path:
                     recovered = _copy_to_stage1(project, cache, src, prior.id)
