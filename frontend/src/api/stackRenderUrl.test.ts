@@ -45,6 +45,23 @@ describe("stackArtifactUrl", () => {
     expect(api.stackArtifactUrl("M_31", 5, "preview", false, true)).toBe(
       "/api/targets/M_31/stack-runs/5/preview");
   });
+
+  it("appends keepsake=true only for the JPEG, combining with north_up", () => {
+    expect(api.stackArtifactUrl("M_31", 5, "jpeg", false, false, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/jpeg?keepsake=true");
+    expect(api.stackArtifactUrl("M_31", 5, "jpeg", true, false, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/jpeg?north_up=true&keepsake=true");
+    // The framed card is a picture, not a science artifact.
+    expect(api.stackArtifactUrl("M_31", 5, "fits", false, false, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/fits");
+  });
+
+  it("leaves every existing caller byte-for-byte unchanged", () => {
+    // keepsake is the third optional flag, so no positional call written before
+    // it existed can start asking for a framed card by accident.
+    expect(api.stackArtifactUrl("M_31", 5, "jpeg", true, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/jpeg?north_up=true&nameplate=true");
+  });
 });
 
 describe("saveStackPreview", () => {

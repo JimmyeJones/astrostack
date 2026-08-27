@@ -1946,7 +1946,8 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/{kind}")
 def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
-                       north_up: bool = False, nameplate: bool = False) -> Response:
+                       north_up: bool = False, nameplate: bool = False,
+                       keepsake: bool = False) -> Response:
     # "jpeg" is a share-friendly transcode of the stored preview PNG (no separate
     # file on disk), served at the same resolution; the rest map to stored paths.
     if kind not in _KIND_FIELDS and kind != "jpeg":
@@ -1986,11 +1987,22 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # image. Best-effort provenance: a field it can't read is simply omitted,
         # and an empty nameplate is a clean no-op, so the default download is
         # byte-for-byte unchanged.
+        # keepsake frames the picture on a dark matte with the same facts set
+        # *beneath* it — the print-and-post variant, where nameplate draws them
+        # as a bar over the picture. Both read the same provenance; which one
+        # wins when both are asked for is `png_bytes_to_jpeg`'s rule (keepsake,
+        # so the caption is never drawn twice), stated in one place rather than
+        # re-derived here.
         plate = None
-        if nameplate:
+        if nameplate or keepsake:
             plate = pipeline._nameplate_fields(run.fits_path or "", entry, run)
-        data = png_bytes_to_jpeg(preview, nameplate=plate)
-        filename = f"{run.output_basename}.jpg"
+        data = png_bytes_to_jpeg(
+            preview,
+            nameplate=plate if nameplate else None,
+            keepsake=plate if keepsake else None,
+        )
+        filename = (f"{run.output_basename}_keepsake.jpg" if keepsake
+                    else f"{run.output_basename}.jpg")
         return Response(
             content=data, media_type="image/jpeg",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
