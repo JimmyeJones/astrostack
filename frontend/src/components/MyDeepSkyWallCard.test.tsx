@@ -45,6 +45,18 @@ describe("MyDeepSkyWallCard", () => {
     expect(screen.getByText(/Your 2 best finished pictures/)).toBeInTheDocument();
   });
 
+  it("offers the whole library as a zip, counting every finished picture", async () => {
+    // The wall caps at 9; "download all" must not — a beginner backing up their
+    // season expects all of them, and the count on the button has to say so.
+    vi.spyOn(client.api, "getLibrarySummary").mockResolvedValue(
+      summary(Array.from({ length: 14 }, (_, i) => hero(`t_${i}`))));
+    renderCard();
+
+    const link = await screen.findByRole("link", { name: /Download all 14 pictures/ });
+    expect(link).toHaveAttribute("href", "/api/gallery/pictures.zip");
+    expect(link).toHaveAttribute("download");
+  });
+
   it("says how many it is showing when the library holds more than fit", async () => {
     vi.spyOn(client.api, "getLibrarySummary").mockResolvedValue(
       summary(Array.from({ length: 14 }, (_, i) => hero(`t_${i}`))));

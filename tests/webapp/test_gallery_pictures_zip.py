@@ -1,0 +1,187 @@
+"""GET /api/gallery/pictures.zip — "Download all my pictures".
+
+Bulk *upload* has been there since v0.229.0; the symmetric bulk *download* was
+the gap. Someone with a season of targets who wanted to back the results up, or
+put them all in a phone album, had to open each target and download one at a
+time — so the pictures stayed in the app. This is the one tap that gets them
+out, and these tests pin the three things that make it trustworthy: it holds
+*every* target's current picture, byte-for-byte; the picture it picks is the one
+the app has been showing; and one unreadable file can't sink the archive.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import zipfile
+
+from seestack.io.library import Library
+from seestack.io.project import StackRunRow
+
+
+def _register_picture(root, safe, *, w=32, h=24, basename="master",
+                      colour=(30, 50, 90),
+                      timestamp_utc="2026-05-02T00:00:00Z") -> int:
+    """Give ``safe`` a finished picture on disk, registered as a stack run so the
+    library stamps ``last_stack_preview`` at that path. Returns the run id, so a
+    test can pin one as the target's cover."""
+    from PIL import Image
+
+    lib = Library.open_or_create(root / "library")
+    try:
+        entry = lib.find_target(safe)
+        preview_path = lib.target_dir(entry) / f"{basename}_preview.png"
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (w, h), colour).save(preview_path)
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc=timestamp_utc,
+                output_basename=basename, fits_path=None, tiff_path=None,
+                preview_path=str(preview_path), n_frames_used=3,
+                canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=3,
+                options_json=json.dumps({}), total_exposure_s=600.0,
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+    return run_id
+
+
+def _safes(client) -> list[str]:
+    return [t["safe_name"] for t in client.get("/api/targets").json()]
+
+
+def _open_zip(response) -> zipfile.ZipFile:
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "application/zip"
+    assert "my-astrostack-pictures.zip" in response.headers["content-disposition"]
+    return zipfile.ZipFile(io.BytesIO(response.content))
+
+
+def test_zip_holds_every_targets_picture_byte_for_byte(client, solved_library):
+    """One entry per target, named for the target, and the bytes are the file the
+    gallery already serves — nothing re-rendered."""
+    safes = _safes(client)
+    assert len(safes) >= 2
+    for i, safe in enumerate(safes):
+        _register_picture(solved_library, safe, colour=(10 * i, 20, 30))
+
+    zf = _open_zip(client.get("/api/gallery/pictures.zip"))
+    assert sorted(zf.namelist()) == sorted(f"{s}.png" for s in safes)
+
+    # Byte-for-byte against what's on disk: this is a copy, not a re-encode.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for safe in safes:
+            entry = lib.find_target(safe)
+            on_disk = (lib.target_dir(entry) / "master_preview.png").read_bytes()
+            assert zf.read(f"{safe}.png") == on_disk
+    finally:
+        lib.close()
+
+
+def test_zip_is_a_valid_streamed_archive(client, solved_library):
+    """The archive is built without ever seeking, so the one thing that could
+    silently break is the central directory. Make ``zipfile`` verify it."""
+    for safe in _safes(client):
+        _register_picture(solved_library, safe)
+
+    zf = _open_zip(client.get("/api/gallery/pictures.zip"))
+    assert zf.testzip() is None  # every member's CRC checks out
+    assert zf.namelist()
+
+
+def test_zip_uses_the_pinned_cover_not_the_newest_stack(client, solved_library):
+    """"Set as cover" is the user saying which picture of a target *is* the
+    picture. The archive must hold that one, exactly as the Library tile, the
+    best-pictures wall and the montage do — not silently the newest restack."""
+    safes = _safes(client)
+    for safe in safes:
+        _register_picture(solved_library, safe)
+    cover_id = _register_picture(
+        solved_library, safes[0], basename="chosen", colour=(200, 40, 40))
+    # …and a *newer* stack after it, which must lose to the pin.
+    _register_picture(solved_library, safes[0], basename="newest",
+                      colour=(9, 9, 9), timestamp_utc="2026-06-09T00:00:00Z")
+    assert client.put(f"/api/targets/{safes[0]}/cover",
+                      json={"run_id": cover_id}).status_code == 200
+
+    zf = _open_zip(client.get("/api/gallery/pictures.zip"))
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        entry = lib.find_target(safes[0])
+        chosen = (lib.target_dir(entry) / "chosen_preview.png").read_bytes()
+    finally:
+        lib.close()
+    assert zf.read(f"{safes[0]}.png") == chosen
+
+
+def test_a_deleted_picture_just_drops_that_target(client, solved_library):
+    """A target whose preview file is gone is simply not in the archive — the
+    same "no finished picture" it already reads as everywhere else — and the
+    other targets still arrive."""
+    safes = _safes(client)
+    for safe in safes:
+        _register_picture(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        (lib.target_dir(lib.find_target(safes[0])) / "master_preview.png").unlink()
+    finally:
+        lib.close()
+
+    zf = _open_zip(client.get("/api/gallery/pictures.zip"))
+    assert f"{safes[0]}.png" not in zf.namelist()
+    for safe in safes[1:]:
+        assert f"{safe}.png" in zf.namelist()
+
+
+def test_a_file_lost_mid_stream_is_named_not_silently_dropped(
+        client, solved_library, monkeypatch):
+    """The race the pre-check can't cover: a picture that vanishes *between* the
+    enumeration and its turn in the stream. The rest of the archive must still
+    arrive intact, and ``_skipped.txt`` must name what was missed — an archive
+    that quietly came up short would look like a complete backup."""
+    from webapp.routers import gallery
+
+    safes = _safes(client)
+    for safe in safes:
+        _register_picture(solved_library, safe)
+
+    real = gallery._library_pictures
+
+    def _with_a_ghost(request):
+        picks = real(request)
+        picks.insert(0, ("ghost.png", solved_library / "library" / "not-here.png"))
+        return picks
+
+    monkeypatch.setattr(gallery, "_library_pictures", _with_a_ghost)
+
+    zf = _open_zip(client.get("/api/gallery/pictures.zip"))
+    assert zf.testzip() is None
+    for safe in safes:
+        assert f"{safe}.png" in zf.namelist()
+    assert "_skipped.txt" in zf.namelist()
+    assert "ghost.png" in zf.read("_skipped.txt").decode()
+
+
+def test_no_finished_pictures_self_hides_with_404(client, built_library):
+    """A library with nothing finished gets a clean 404, so the button can hide
+    rather than handing someone an empty zip."""
+    r = client.get("/api/gallery/pictures.zip")
+    assert r.status_code == 404
+    assert "finished pictures" in r.json()["detail"]
+
+
+def test_download_never_writes_into_the_library(client, solved_library):
+    """Read-only by contract: streaming the archive must not create, move or
+    delete a single file (§10 — and the montage's same promise)."""
+    for safe in _safes(client):
+        _register_picture(solved_library, safe)
+
+    before = sorted(str(p) for p in (solved_library / "library").rglob("*"))
+    assert client.get("/api/gallery/pictures.zip").status_code == 200
+    after = sorted(str(p) for p in (solved_library / "library").rglob("*"))
+    assert before == after

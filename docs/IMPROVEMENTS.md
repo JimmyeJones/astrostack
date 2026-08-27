@@ -15778,9 +15778,23 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #17) — "Was the Moon in your way?": a plain-language per-session
-  moonlight note that tells a beginner when a bright, nearby Moon washed out their faint target, so they
-  understand why some nights look worse and can plan Moon-free nights.** *(Pillar: understand + plan, PRIORITY
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #17) — "Was the Moon in your way?": a plain-language per-session
+  moonlight note.**~~ — **ALREADY SHIPPED; pruned by the Builder 2026-08-27** (branch
+  `claude/compassionate-galileo-0wtz21`) after doing exactly the grep the spec itself asked for. This exists
+  **end to end** and predates the idea: `seestack/nightplan.py` has `SessionMoon` + `session_moon()` (a
+  retrospective verdict at the session midpoint, reusing the planner's own `_moon_verdict` bands so the
+  after-the-fact note and tonight's warning grade the same sky the same way) and `_session_moon_text()` for the
+  sentence; `webapp/routers/targets.py::_session_moon_note` wires it into the **session recap** — the exact
+  surface the idea proposed; and it is covered by `tests/test_session_moon.py` plus
+  `tests/webapp/test_target_session_recap.py`. It is even *quieter* than the spec asked: `text` is `None` on
+  anything but a "poor" night, so it can never nag. The one deliberate difference is that the shipped version
+  uses the observer location it has to include Moon **altitude** ("it was below the horizon, so it can't have
+  hurt you"), which is strictly better than the location-free phase+separation the spec settled for. **Nothing
+  to build.** Filed here rather than deleted so a future run doesn't re-derive the same idea a third time —
+  this is the pattern AGENTS.md §1 warns about ("the Ideas list has repeatedly carried items that were already
+  shipped"). Original spec below.
+
+  *(Pillar: understand + plan, PRIORITY
   3 (with a 2 flavour — it nudges better scheduling); size S; fully offline — `astropy` is already a dependency,
   no network, no location needed, additive, read-only.)*
   **Why (real friction).** A beginner shoots the same target across several nights and sees one night come out
@@ -15804,9 +15818,46 @@ problems. Dogfood it every big-picture run and fix root causes.
   `(session_time, target_ra_dec)`, tested against a couple of known dates. **Grep first:** confirm no existing
   session-recap/planner card already surfaces Moon phase before building.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #16) — "Download all my pictures": one button that streams every
-  finished target picture in the library as a single `.zip`, so a beginner can back up or share a whole
-  season's work in one tap instead of visiting each target and downloading one at a time.** *(Pillar: get +
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #16) — "Download all my pictures": one button that streams every
+  finished target picture in the library as a single `.zip`.**~~ — **SHIPPED v0.285.0** (Builder 2026-08-27,
+  branch `claude/compassionate-galileo-0wtz21`).
+
+  **What shipped.** `GET /api/gallery/pictures.zip` streams one entry per target — that target's **current
+  picture**, resolved with the shared `_cover_preview_path` precedence (pinned cover, else newest stack
+  preview), the same one the Library tile, `/api/gallery/best` and the montage wall use — so the archive holds
+  the pictures the app has been showing all along. Entries are named from the target's `safe_name` (already
+  sanitised, so no display name can put a `/` or `..` into someone's extraction) with a `-2`/`-3` suffix on
+  collision. Byte-for-byte copies: nothing is re-rendered, and `ZIP_STORED` rather than deflate, because PNG/JPEG
+  previews are already compressed. In the UI it's a second button inside the existing **"My deep-sky wall"** card
+  — *"Download all N pictures"* — deliberately *not* a new always-on block (the standing IA priority): it's the
+  same "get my pictures out" moment, one tap along, with one line of copy distinguishing it from the montage.
+
+  **Bounded memory, which is what makes "all" honest.** The archive is built through a small
+  `_ZipStreamBuffer(io.RawIOBase)` that `zipfile` writes into and the response drains after every 1 MiB chunk,
+  so peak memory is one chunk plus a header regardless of library size — which is why the endpoint doesn't
+  inherit the `BEST_PICTURES_MAX` cap the spec suggested. A "download all" that silently gave you 24 of your
+  40 targets would be worse than not having it.
+
+  **Guardrails.** Read-only: it only opens existing result files and streams bytes out — `incoming/` is never
+  touched (§10) and nothing is written into the library (pinned by a test that diffs the whole library tree
+  across a download). Best-effort per picture, like the montage: a file gone at enumeration time just drops
+  that target, and one that vanishes *mid-stream* is skipped with a `_skipped.txt` member naming it, so a
+  short archive can never pass for a complete backup. 404 with a plain-language detail when nothing is
+  finished, so the offer self-hides.
+
+  **Upgrade-safe (§9):** one additive read-only GET endpoint and one additive button; no config, schema,
+  on-disk or default change, and no existing response shape touched.
+
+  **Tests (+7 backend in `tests/webapp/test_gallery_pictures_zip.py`, +1 frontend):** every target present and
+  byte-identical to disk; `testzip()` verifying the central directory a never-seeking writer produces; the
+  pinned cover beating a newer stack; a deleted preview dropping only its target; a mid-stream loss named in
+  `_skipped.txt` with the rest of the archive intact; the empty-library 404; and the library tree unchanged by
+  a download. Frontend: the button's count is the *whole* library (14), not the wall's 9, and it points at the
+  zip with `download`.
+
+  Original spec, for the record:
+
+  *(Pillar: get +
   share + trust/backup, PRIORITY 3; size S–M; fully offline, additive, read-only — stdlib `zipfile`, no new
   deps, no network, no schema/config change.)*
   **Why (real friction).** The library already has a **"My deep-sky wall"** montage (`GET /api/gallery/montage.jpg`,
