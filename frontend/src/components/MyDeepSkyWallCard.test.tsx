@@ -21,12 +21,12 @@ const hero = (safe: string) => ({
   thumbnail_url: `/api/targets/${safe}/thumbnail`,
 });
 
-function summary(heroes: ReturnType<typeof hero>[]) {
+function summary(heroes: ReturnType<typeof hero>[], n_finished_stills = 0) {
   return {
     n_targets_imaged: heroes.length, n_subs_kept: 100,
     total_integration_s: 3600 * heroes.length, integration_hours: heroes.length,
     first_light_utc: "2026-01-01T00:00:00Z",
-    longest_target: null, most_imaged_target: null, heroes,
+    longest_target: null, most_imaged_target: null, heroes, n_finished_stills,
   } as never;
 }
 
@@ -73,6 +73,28 @@ describe("MyDeepSkyWallCard", () => {
     renderCard();
     await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(screen.queryByText("My deep-sky wall")).toBeNull();
+  });
+
+  it("counts finished Moon/Sun stills in the zip, not just targets", async () => {
+    // The archive holds one picture per target *plus* every finished still, so
+    // a button that counted only targets under-promised what the download has.
+    vi.spyOn(client.api, "getLibrarySummary")
+      .mockResolvedValue(summary([hero("m_42"), hero("m_31")], 3));
+    renderCard();
+
+    await screen.findByRole("link", { name: /Download all 5 pictures/ });
+    expect(screen.getByText(/every Moon and Sun picture/)).toBeInTheDocument();
+  });
+
+  it("still offers the zip when the only pictures are Moon/Sun stills", async () => {
+    // A Seestar owner's first week is often all Moon. The wall needs two
+    // *targets* to compose, but the download shouldn't be hidden with it.
+    vi.spyOn(client.api, "getLibrarySummary").mockResolvedValue(summary([], 2));
+    renderCard();
+
+    await screen.findByRole("link", { name: /Download all 2 pictures/ });
+    expect(screen.getByText("My pictures")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Download wall/ })).toBeNull();
   });
 
   it("stays hidden while loading and on a failed fetch", async () => {

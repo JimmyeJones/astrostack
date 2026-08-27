@@ -227,6 +227,12 @@ class LibrarySummaryResponse(BaseModel):
     longest_target: SummaryTargetOut | None = None
     most_imaged_target: SummaryTargetOut | None = None
     heroes: list[SummaryTargetOut] = []
+    #: How many finished Moon/Sun stills sit alongside the deep-sky targets.
+    #: They are not library targets (their own results store, no project DB), so
+    #: every tally above misses them — but they *are* pictures, and the
+    #: "download all my pictures" archive includes them. Additive with a 0
+    #: default, so an older frontend simply ignores it.
+    n_finished_stills: int = 0
 
 
 def _summary_target_out(t) -> SummaryTargetOut:  # noqa: ANN001 — SummaryTarget
@@ -288,7 +294,23 @@ def get_library_summary(request: Request) -> LibrarySummaryResponse:
             if summary.most_imaged_target else None
         ),
         heroes=[_summary_target_out(h) for h in summary.heroes],
+        n_finished_stills=_n_finished_stills(request),
     )
+
+
+def _n_finished_stills(request: Request) -> int:
+    """How many finished Moon/Sun stills exist. Best-effort: an unreadable video
+    store answers 0 rather than 500-ing the whole summary.
+
+    Deliberately outside the cached ``summarize_library`` roll-up — that cache is
+    keyed on the *targets* registry, which a new lunar still doesn't change, so
+    folding this in would serve a stale count for up to a minute after stacking
+    one.
+    """
+    try:
+        return len(video.iter_results(deps.get_settings(request)))
+    except Exception:  # noqa: BLE001 — a video-store problem must not 500 the summary
+        return 0
 
 
 # --- library-wide storage preflight -------------------------------------------

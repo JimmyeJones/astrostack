@@ -20,6 +20,13 @@ from seestack.solve.runner import (  # noqa: E402
     build_solve_arglist,
     solve_one,
 )
+from tests.synth import make_synth_wcs_text  # noqa: E402
+
+# A realistic ASTAP-style solution blob. The DB write path gates on the WCS
+# carrying a usable *celestial* reference point (an empty/truncated ``.wcs``
+# sidecar reads back as a truthy but celestial-less header), so a solve fixture
+# has to be a real WCS rather than a placeholder card.
+VALID_WCS_TEXT = make_synth_wcs_text()
 
 
 def test_build_solve_arglist_skips_solved(tmp_path):
@@ -142,13 +149,13 @@ def test_solve_one_with_mock_solver(tmp_path):
             return fake_result
 
     with patch("seestack.solve.runner.ASTAPSolver", FakeSolver), \
-         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value="CRVAL1=1.0"):
+         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value=VALID_WCS_TEXT):
         result = solve_one(7, str(fits))
 
     assert result.solved is True
     assert result.frame_id == 7
     assert result.ra_center_deg == 83.63
-    assert result.wcs_text == "CRVAL1=1.0"
+    assert result.wcs_text == VALID_WCS_TEXT
     assert result.error is None
 
 
@@ -243,7 +250,7 @@ def test_solve_one_backfilled_centre_makes_frame_reference_eligible(tmp_path):
         fid = proj.add_frame(FrameRow(source_path="x.fit"))
         apply_solve_result_to_db(proj, SolveResult(
             frame_id=fid, fits_path="x.fit", solved=True,
-            wcs_text="CRVAL1=1.0", ra_center_deg=149.75, dec_center_deg=69.06,
+            wcs_text=VALID_WCS_TEXT, ra_center_deg=149.75, dec_center_deg=69.06,
             pixscale_arcsec=None, rotation_deg=None, error=None,
         ))
         f = proj.get_frame(fid)
@@ -262,13 +269,13 @@ def test_apply_solve_result_writes_db(tmp_path):
         fid = proj.add_frame(FrameRow(source_path="x.fit"))
         result = SolveResult(
             frame_id=fid, fits_path="x.fit", solved=True,
-            wcs_text="CRVAL1=1.0", ra_center_deg=83.63, dec_center_deg=-5.39,
+            wcs_text=VALID_WCS_TEXT, ra_center_deg=83.63, dec_center_deg=-5.39,
             pixscale_arcsec=2.5, rotation_deg=12.0, error=None,
         )
         apply_solve_result_to_db(proj, result)
         f = proj.get_frame(fid)
         assert f is not None
-        assert f.wcs_json == "CRVAL1=1.0"
+        assert f.wcs_json == VALID_WCS_TEXT
         assert f.ra_center_deg == 83.63
         assert f.pixscale_arcsec == 2.5
     finally:
@@ -411,13 +418,63 @@ def test_apply_solve_result_clears_stale_solve_failed_reason(tmp_path):
         # Retry succeeds — WCS lands and the stale reason must be gone.
         apply_solve_result_to_db(proj, SolveResult(
             frame_id=fid, fits_path="x.fit", solved=True,
-            wcs_text="CRVAL1=1.0", ra_center_deg=83.63, dec_center_deg=-5.39,
+            wcs_text=VALID_WCS_TEXT, ra_center_deg=83.63, dec_center_deg=-5.39,
             pixscale_arcsec=2.5, rotation_deg=12.0, error=None,
         ))
         f = proj.get_frame(fid)
         assert f is not None
-        assert f.wcs_json == "CRVAL1=1.0"
+        assert f.wcs_json == VALID_WCS_TEXT
         assert f.reject_reason is None
+    finally:
+        proj.close()
+
+
+@pytest.mark.parametrize(
+    "sidecar_blob",
+    [
+        # An empty / zero-byte ``.wcs`` (the write was interrupted after ASTAP
+        # returned, or the disk filled) — ``Header.fromstring("")`` gives a bare
+        # "END" blob, which is *truthy*.
+        "END",
+        # A partial header: readable FITS cards, but not one celestial keyword.
+        "SIMPLE  =                    T\nBITPIX  =                  -32\nEND",
+    ],
+    ids=["empty-sidecar", "partial-header"],
+)
+def test_apply_solve_result_celestialless_wcs_is_an_honest_failure(
+        tmp_path, sidecar_blob):
+    """A returncode-0 solve whose ``.wcs`` sidecar is *readable but carries no
+    celestial WCS* is recorded as an honest failure and stays retryable — it is not
+    persisted as a solved frame with a garbage ``wcs_json`` and a null centre.
+
+    Regression: the guard tested ``result.wcs_text is None``, but
+    ``wcs_text_from_sidecar`` returns a **truthy** ``"END"``/``"SIMPLE=…"`` string
+    for any readable file, so an empty or truncated sidecar sailed past it. The
+    frame was then stored ``wcs_json="END…"`` with ``ra/dec_center_deg=None``:
+    marked solved-yet-unusable, skipped forever by ``build_solve_arglist`` (which
+    skips any *truthy* ``wcs_json``) so it could never be re-solved, and its
+    celestial-less WCS slipped past ``align_one``'s ``is None`` check into
+    reprojection instead of being cleanly dropped."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        path = tmp_path / "x.fit"
+        path.write_bytes(b"")
+        fid = proj.add_frame(FrameRow(source_path=str(path)))
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path=str(path), solved=True,
+            wcs_text=sidecar_blob, ra_center_deg=None, dec_center_deg=None,
+            pixscale_arcsec=None, rotation_deg=None, error=None,
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        # The garbage blob is NOT persisted as a solution...
+        assert f.wcs_json is None
+        # ...it reads as an honest, tallyable failure...
+        assert (f.reject_reason or "").startswith("solve_failed:")
+        # ...the pixels are untouched (a location failure, not a bad frame)...
+        assert f.accept is True
+        # ...and the frame is still offered to the solver, so it can recover.
+        assert fid in [a[0] for a in build_solve_arglist(proj)]
     finally:
         proj.close()
 
@@ -502,12 +559,12 @@ def test_apply_solve_result_preserves_a_user_reject_on_success(tmp_path):
         proj.update_frame(fid, accept=False, reject_reason="user")
         apply_solve_result_to_db(proj, SolveResult(
             frame_id=fid, fits_path="x.fit", solved=True,
-            wcs_text="CRVAL1=1.0", ra_center_deg=83.63, dec_center_deg=-5.39,
+            wcs_text=VALID_WCS_TEXT, ra_center_deg=83.63, dec_center_deg=-5.39,
             pixscale_arcsec=2.5, rotation_deg=12.0, error=None,
         ))
         f = proj.get_frame(fid)
         assert f is not None
-        assert f.wcs_json == "CRVAL1=1.0"
+        assert f.wcs_json == VALID_WCS_TEXT
         # The user's reject stands.
         assert f.reject_reason == "user"
         assert f.accept is False
@@ -618,7 +675,7 @@ def test_solve_one_derives_fov_from_s30_header(tmp_path):
             )
 
     with patch("seestack.solve.runner.ASTAPSolver", RecordingSolver), \
-         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value="CRVAL1=1.0"):
+         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value=VALID_WCS_TEXT):
         # Pass the *wrong* fallback FOV; the header derivation must override it.
         solve_one(1, str(fits), fov_deg=1.3)
 
@@ -649,7 +706,7 @@ def test_solve_one_falls_back_to_passed_fov_without_optics(tmp_path):
             )
 
     with patch("seestack.solve.runner.ASTAPSolver", RecordingSolver), \
-         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value="CRVAL1=1.0"):
+         patch("seestack.io.wcs_io.wcs_text_from_sidecar", return_value=VALID_WCS_TEXT):
         solve_one(1, str(fits), fov_deg=1.9)
 
     assert seen_fov and seen_fov[0] == pytest.approx(1.9)
@@ -705,25 +762,35 @@ def test_run_qc_and_solve_reports_the_frames_it_actually_located(tmp_path):
 
     proj = Project.create(tmp_path / "p", name="t")
     try:
-        for i in range(4):
+        for i in range(5):
             f = tmp_path / f"{i}.fit"
             f.write_bytes(b"")
             proj.add_frame(FrameRow(source_path=str(f)))
 
         def fake_solve_one(*args):
             fid = args[0]
-            # One clean success, one "solved" with an unusable sidecar (which the
-            # DB layer records as a failure), and two honest failures.
+            # One clean success; one "solved" with an unreadable sidecar and one
+            # with a readable-but-celestial-less sidecar (both of which the DB
+            # layer records as failures); and two honest failures.
             if fid == 1:
                 return SolveResult(
                     frame_id=fid, fits_path=args[1], solved=True,
-                    wcs_text="CRVAL1=1.0", ra_center_deg=1.0, dec_center_deg=2.0,
+                    wcs_text=VALID_WCS_TEXT, ra_center_deg=1.0, dec_center_deg=2.0,
                     pixscale_arcsec=1.0, rotation_deg=0.0, error=None,
                 )
             if fid == 2:
                 return SolveResult(
                     frame_id=fid, fits_path=args[1], solved=True,
                     wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                    pixscale_arcsec=None, rotation_deg=None, error=None,
+                )
+            if fid == 3:
+                # A truthy-but-useless blob from an empty/truncated ``.wcs``: it
+                # must not inflate the located count either, or the two halves of
+                # the same bar disagree.
+                return SolveResult(
+                    frame_id=fid, fits_path=args[1], solved=True,
+                    wcs_text="END", ra_center_deg=None, dec_center_deg=None,
                     pixscale_arcsec=None, rotation_deg=None, error=None,
                 )
             return SolveResult(
@@ -740,8 +807,8 @@ def test_run_qc_and_solve_reports_the_frames_it_actually_located(tmp_path):
     finally:
         proj.close()
 
-    assert summary["solve_total"] == 4
-    assert summary["solve_done"] == 4, "every frame was attempted"
+    assert summary["solve_total"] == 5
+    assert summary["solve_done"] == 5, "every frame was attempted"
     assert summary["solve_ok"] == 1, "only one frame came back with a usable WCS"
 
 

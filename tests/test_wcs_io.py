@@ -225,3 +225,28 @@ def test_canvas_extent_from_fits_reads_the_stored_geometry(tmp_path):
 
     # Missing / headerless master → None (frame-0 fallback).
     assert canvas_extent_from_fits(tmp_path / "nope.fits") is None
+
+
+def test_wcs_text_is_usable_separates_a_real_solution_from_a_readable_blob():
+    """``wcs_text_is_usable`` is the "is this actually a solution?" test that
+    truthiness and ``wcs_from_text() is not None`` both fail to be.
+
+    An empty or truncated ASTAP ``.wcs`` sidecar reads back as a bare ``"END"``
+    header: a truthy string that parses to a non-None, celestial-less WCS. Every
+    caller that trusts a stored solution (persisting it, propagating it, counting
+    it as located) needs to tell that apart from a real solve.
+    """
+    from seestack.io.wcs_io import wcs_text_is_usable
+
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [83.6, -5.4]
+    w.wcs.crpix = [240.5, 160.5]
+    w.wcs.cdelt = [-5.0 / 3600.0, 5.0 / 3600.0]
+    assert wcs_text_is_usable(wcs_to_text(w)) is True
+
+    for blob in (None, "", "END", "SIMPLE  =                    T\nEND",
+                 "BITPIX  =                  -32\nNAXIS   =                    2\nEND"):
+        # Truthy for most of these, and wcs_from_text returns an object for the
+        # readable ones — but none of them locates the frame on the sky.
+        assert wcs_text_is_usable(blob) is False

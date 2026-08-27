@@ -623,6 +623,10 @@ export interface LibrarySummary {
   longest_target: SummaryTarget | null;
   most_imaged_target: SummaryTarget | null;
   heroes: SummaryTarget[];
+  /** Finished Moon/Sun stills. They aren't library targets, so no other tally
+   * here counts them — but they are pictures, and the "download all my
+   * pictures" archive includes them. Optional: an older backend omits it. */
+  n_finished_stills?: number;
 }
 
 /** One target whose accepted subs the library still lists but disk no longer

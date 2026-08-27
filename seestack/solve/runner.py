@@ -20,6 +20,7 @@ import logging
 from dataclasses import dataclass
 
 from seestack.io.project import readable_frame_path
+from seestack.io.wcs_io import wcs_text_is_usable
 from seestack.solve.astap import (
     SOLVE_FAILED_TIMEOUT,
     ASTAPError,
@@ -303,7 +304,7 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         # Preserve a real prior reason (see ``_store_solve_failed_reason``).
         _store_solve_failed_reason(project, result.frame_id, reason)
         return
-    if result.wcs_text is None:
+    if not wcs_text_is_usable(result.wcs_text):
         # ASTAP reported success (returncode 0 + a ``.wcs`` sidecar) but no usable
         # WCS could be extracted from it — a malformed/partial sidecar, or the
         # ``.ini`` parse raised so the centre coords came back None. Persisting
@@ -320,6 +321,19 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         # ``accept=True`` and is re-offered to solve; a "solved-but-unreadable"
         # result on it must not overwrite its QC state — see
         # ``_store_solve_failed_reason``).
+        #
+        # The test is WCS *validity*, not ``is None``: ``wcs_text_from_sidecar``
+        # returns a **truthy** ``"END"``/``"SIMPLE=…"`` blob for a sidecar that is
+        # readable but empty, truncated, or carries only a partial header (a write
+        # interrupted after ASTAP returned, a disk-full zero-byte file, a stale
+        # partial sidecar). An ``is None`` check never fires on those, so the
+        # garbage blob used to be stored as ``wcs_json`` with a null centre — a
+        # frame marked solved-yet-unusable, skipped by ``build_solve_arglist``
+        # (truthy ``wcs_json``) so it could never be re-solved, and whose
+        # celestial-less WCS slipped past ``align_one``'s ``is None`` guard into
+        # reprojection. Gating on a recoverable celestial reference point rejects
+        # exactly that case: a genuine ASTAP solve always ends with a centre
+        # (from the ``.ini``, or recovered from the valid ``.wcs`` above).
         _store_solve_failed_reason(
             project, result.frame_id, "unreadable plate solution"
         )
