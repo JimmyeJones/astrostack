@@ -17,6 +17,7 @@ from webapp.schemas import (
     AutoStackHoldOut,
     BackgroundModeHintOut,
     BestFrameOut,
+    CleanestShotOut,
     CleanupSuggestionOut,
     DarkSpecOut,
     DifficultyHintOut,
@@ -383,6 +384,57 @@ def target_autostack_hold(safe: str, request: Request) -> AutoStackHoldOut | Non
                 )
         return None
     return None
+
+
+@router.get("/{safe}/cleanest-shot", response_model=CleanestShotOut | None)
+def target_cleanest_shot(safe: str, request: Request) -> CleanestShotOut | None:
+    """Offer to promote the newest stack to cover when it's materially cleaner
+    than the pinned one, or ``null`` when there's nothing to say.
+
+    A pinned cover stays pinned forever — right, because the choice is the
+    user's — but a beginner who keeps adding subs gets steadily cleaner stacks
+    while every showcase surface (Library tile, "My best pictures", the montage
+    wall) keeps showing the older picture. This is that gap, stated once, with
+    the same one-tap ``set-cover`` the History page already offers. It never
+    swaps the cover by itself.
+
+    Compares like with like: only *genuine* stack runs (editor-export / combine
+    runs are skipped — their σ isn't measured on the same kind of image), and
+    only when both runs carry a usable noise σ. Read-only.
+    """
+    from seestack.covernudge import cleanest_shot
+    from webapp.pipeline import _stack_options_from_run_json
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        entry = lib.find_target(safe)
+        cover_id = entry.cover_stack_run_id if entry is not None else None
+        runs = [r for r in proj.iter_stack_runs()  # newest first
+                if _stack_options_from_run_json(r.options_json) is not None]
+    finally:
+        proj.close()
+        lib.close()
+    shot = cleanest_shot(runs, cover_id)
+    if shot is None:
+        return None
+    # Never offer a cover whose picture is gone: pinning it would leave every
+    # showcase surface falling back to the newest stack anyway (see
+    # ``_cover_preview_path``), which makes the nudge look broken.
+    candidate = next((r for r in runs if r.id == shot.run_id), None)
+    if candidate is None or not candidate.preview_path:
+        return None
+    if not Path(candidate.preview_path).exists():
+        return None
+    return CleanestShotOut(
+        run_id=shot.run_id,
+        cover_run_id=shot.cover_run_id,
+        noise_sigma=shot.noise_sigma,
+        cover_noise_sigma=shot.cover_noise_sigma,
+        percent_cleaner=shot.percent_cleaner,
+        n_frames_used=shot.n_frames_used,
+        cover_n_frames_used=shot.cover_n_frames_used,
+        timestamp_utc=shot.timestamp_utc,
+    )
 
 
 def _recap_observer(request: Request, lib, settings):  # noqa: ANN001, ANN202

@@ -19,6 +19,7 @@ import { integrationReadiness, readinessColor, noiseReductionHint } from "../rea
 import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
 import { AutoStackHoldNote } from "../components/AutoStackHoldNote";
+import { CleanestShotNote } from "../components/CleanestShotNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { InsightTabs } from "../components/InsightTabs";
@@ -861,6 +862,10 @@ export function TargetView() {
               </Group>
             </Alert>
           ) : null },
+          /* "Your newest stack is cleaner than the cover you pinned — swap?"
+              Only ever an offer, and only when a cover is pinned. Self-hides. */
+          { key: "cleanest-shot", priority: NOTICE_PRIORITY.advisory,
+            node: <CleanestShotNote safe={safe} /> },
           { key: "autostack-hold", priority: NOTICE_PRIORITY.warning,
             node: <AutoStackHoldNote safe={safe} /> },
           { key: "missing-files", priority: NOTICE_PRIORITY.warning, node: missingFiles !== null ? (
