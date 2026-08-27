@@ -321,3 +321,67 @@ def test_batch_reoffered_when_callback_raises(tmp_path):
     clock.advance(31)
     assert w.poll_once() == set()
     assert len(calls) == 2
+
+
+def test_a_stable_file_rewritten_in_place_re_arms_and_fires_again():
+    """The mirror of ``test_disappearing_file_is_forgotten_and_rearms``: a sub
+    that already went stable and is then overwritten **in place** — same name,
+    new bytes, never vanishing from the snapshot — must be detected again.
+
+    Without this the watcher returns ``{}`` forever for that path, so with no
+    other new file arriving no scan runs, and ingest's deliberate in-place-swap
+    recovery (refreshing the stale WCS/QC so the frame isn't stacked at its old
+    sky position) is unreachable through the watcher at all."""
+    clock = FakeClock()
+    tr = StabilityTracker(quiet_period_s=30, time_fn=clock)
+    mtime = clock.t - 100
+    tr.update({"a.fit": (100, mtime)})
+    clock.advance(31)
+    assert tr.update({"a.fit": (100, mtime)}) == {"a.fit"}
+
+    # Overwritten in place: different size and mtime, still the only file there.
+    clock.advance(10)
+    new_mtime = clock.t
+    assert tr.update({"a.fit": (250, new_mtime)}) == set()   # re-armed, not yet quiet
+    clock.advance(31)
+    assert tr.update({"a.fit": (250, new_mtime)}) == {"a.fit"}
+    # …and it settles again rather than re-firing every poll.
+    clock.advance(31)
+    assert tr.update({"a.fit": (250, new_mtime)}) == set()
+
+
+def test_an_untouched_stable_file_never_re_fires():
+    """The no-regression half: re-arming must key on the bytes actually changing,
+    so a file that just sits there is reported exactly once, however many polls
+    (and however many *other* files) go by."""
+    clock = FakeClock()
+    tr = StabilityTracker(quiet_period_s=30, time_fn=clock)
+    mtime = clock.t - 100
+    tr.update({"a.fit": (100, mtime)})
+    clock.advance(31)
+    assert tr.update({"a.fit": (100, mtime)}) == {"a.fit"}
+    for _ in range(5):
+        clock.advance(31)
+        assert tr.update({"a.fit": (100, mtime)}) == set()
+    # A *new* neighbour arriving doesn't drag the settled one along with it.
+    b_mtime = clock.t - 100
+    tr.update({"a.fit": (100, mtime), "b.fit": (50, b_mtime)})
+    clock.advance(31)
+    assert tr.update({"a.fit": (100, mtime), "b.fit": (50, b_mtime)}) == {"b.fit"}
+
+
+def test_a_rewritten_file_that_then_disappears_leaves_no_stale_state():
+    """A path removed from the snapshot is forgotten completely — including the
+    remembered stat — so a later file of the same name starts from scratch."""
+    clock = FakeClock()
+    tr = StabilityTracker(quiet_period_s=30, time_fn=clock)
+    mtime = clock.t - 100
+    tr.update({"a.fit": (100, mtime)})
+    clock.advance(31)
+    assert tr.update({"a.fit": (100, mtime)}) == {"a.fit"}
+    assert tr.update({}) == set()                 # gone
+    # Same name, same stat, brand-new arrival: it must go through the quiet
+    # period again rather than being remembered as already stable.
+    assert tr.update({"a.fit": (100, mtime)}) == set()
+    clock.advance(31)
+    assert tr.update({"a.fit": (100, mtime)}) == {"a.fit"}

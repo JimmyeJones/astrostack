@@ -555,6 +555,47 @@ def test_reject_summary_buckets_unreadable_subs_as_error_not_unsolved(
     assert summary["used"] == 0
 
 
+def test_reject_summary_splits_out_subs_the_solver_ran_out_of_time_on(
+    client, built_library, data_root,
+):
+    """A sub whose every solve attempt hit the ASTAP timeout is accepted and
+    unsolved like any un-plate-solved frame, so it used to read as "not located
+    yet — run Plate Solve", advice that on it just spends the same minutes again.
+    End to end, it must come back in its own bucket carrying the fix that helps."""
+    from seestack.io.library import Library
+    from seestack.solve.astap import SOLVE_FAILED_TIMEOUT
+
+    frames = client.get("/api/targets/M_42/frames").json()
+    n_total = len(frames)
+    assert n_total >= 2
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            proj.update_frame(frames[0]["id"],
+                              reject_reason=f"solve_failed:{SOLVE_FAILED_TIMEOUT}")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    summary = client.get(
+        "/api/targets/M_42/frames/reject-summary").json()["summary"]
+    keys = {b["key"]: b["count"] for b in summary["buckets"]}
+    assert keys.get("solve_timeout") == 1
+    assert keys.get("unsolved") == n_total - 1
+    note = next(b["note"] for b in summary["buckets"] if b["key"] == "solve_timeout")
+    assert "ASTAP timeout" in note
+    # Accounting unchanged — the sub is still left out, just explained better.
+    assert summary["dropped"] == n_total
+    assert summary["used"] == 0
+    # And it is not mistaken for a one-time setup problem (install ASTAP / a
+    # star database), which would show the wrong banner.
+    body = client.get("/api/targets/M_42/frames/reject-summary").json()
+    assert body["solve_setup_problem"] is None
+
+
 def test_reject_summary_counts_accepted_subs_whose_files_have_vanished(
     client, built_library, data_root,
 ):

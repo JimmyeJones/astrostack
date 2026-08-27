@@ -822,6 +822,26 @@ class Project:
             "AND reject_reason LIKE 'qc_error%'"
         ).fetchone()[0]
 
+    def count_accepted_unsolved_with_reason(self, reason: str) -> int:
+        """Count accepted, still-unsolved frames carrying exactly ``reason``.
+
+        The generalisation of :meth:`count_accepted_unreadable` for the *other*
+        cause the "why were some frames left out?" breakdown needs to split out
+        of the plate-solve bucket — currently the canonical
+        ``solve_failed:solve timed out`` reason, whose fix is "give the solver
+        longer", not "run Plate Solve again". Like that method it is a subset of
+        :meth:`count_accepted_unsolved` by the ``wcs_json IS NULL`` guard, so the
+        caller can subtract it without double-counting. Exact-match (not a
+        prefix) because only canonicalised reasons are safe to tally — a raw,
+        truncated ASTAP log tail differs per frame.
+        """
+        assert self._conn is not None
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM frames "
+            "WHERE accept = 1 AND wcs_json IS NULL AND reject_reason = ?",
+            (reason,),
+        ).fetchone()[0]
+
     def reject_reason_counts(self) -> dict[str, int]:
         """Tally rejected frames by ``reject_reason`` (e.g. ``qc:fwhm``,
         ``bulk:streaked``, ``user``). A rejected frame with a NULL reason is

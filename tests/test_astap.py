@@ -343,3 +343,61 @@ def test_solver_omits_hint_when_absent(tmp_path, monkeypatch):
     captured = _capture_cmd(monkeypatch)
     solver.solve(frame)
     assert "-ra" not in captured["cmd"] and "-spd" not in captured["cmd"]
+
+
+def test_every_rung_timing_out_raises_the_canonical_timeout_token(tmp_path, monkeypatch):
+    # "Ran out of time" is the one solve failure with an obvious fix (give the
+    # solver longer), but only if it can be told apart from an ordinary "no
+    # catalog match" *after* the raw log has been truncated for storage. The
+    # ladder therefore leads its error with a stable canonical token.
+    from seestack.solve.astap import SOLVE_FAILED_TIMEOUT, is_solve_timeout_error
+
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    solver = _make_solver(tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 60))
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    with pytest.raises(ASTAPError) as exc:
+        solver.solve(frame)
+    assert str(exc.value).startswith(SOLVE_FAILED_TIMEOUT)
+    assert is_solve_timeout_error(str(exc.value))
+    # The per-attempt detail is still there for debugging.
+    assert "attempt 3" in str(exc.value)
+
+
+def test_a_rung_that_finished_and_found_nothing_is_not_called_a_timeout(tmp_path, monkeypatch):
+    # A frame where some rung *ran to completion* and reported no match is an
+    # ordinary per-frame failure: raising the timeout wouldn't rescue it, so it
+    # must never be reported as "ran out of time".
+    from seestack.solve.astap import is_solve_timeout_error
+
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    solver = _make_solver(tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        if "-z" not in cmd:
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 60))
+
+        class _P:
+            returncode = 1
+            stdout = ""
+            stderr = "no solution found"
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    result = solver.solve(frame)          # a result, not a raise
+    assert not result.solved
+    assert not is_solve_timeout_error(result.log_tail)
+
+
+def test_is_solve_timeout_error_ignores_unrelated_text():
+    from seestack.solve.astap import is_solve_timeout_error
+
+    assert not is_solve_timeout_error(None)
+    assert not is_solve_timeout_error("")
+    assert not is_solve_timeout_error("no solution found")
+    assert not is_solve_timeout_error("no star database")
