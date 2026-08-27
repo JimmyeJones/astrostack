@@ -668,10 +668,11 @@ def _montage_tiles(request: Request, limit: int) -> tuple[list, float]:
     ``/api/gallery/best`` and ``/api/imaging-log`` already use. Without it a
     target whose newest run is a linear master or a quick restack put *that* on
     the wall instead of the finished picture its owner chose, which is the one
-    thing the wall exists to show. Resolving a cover costs one project open, so
-    it happens only for the targets that actually have one pinned; that trade is
-    fine on a deliberate one-tap download (it is the same one ``/api/imaging-log``
-    makes) and would not be on a page render.
+    thing the wall exists to show. Resolving it (``targets.current_picture_path``)
+    costs one project open, and only for a target that has a cover pinned or whose
+    stamped preview file has gone; that trade is fine on a deliberate one-tap
+    download (it is the same one ``/api/imaging-log`` makes) and would not be on a
+    page render.
     """
     from dataclasses import replace as _replace
 
