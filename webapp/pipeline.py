@@ -2747,6 +2747,14 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                 out, render_ctx = render_run_display_array(
                     proj.project_dir, run, recipe, return_ctx=True)
                 _write_preview_png(Path(run.preview_path), out, already_display=True)
+                # This render is on the master's own (un-rotated) grid, so any
+                # North-up rotation an earlier "Adjust → North up → Save" baked
+                # into the old bytes is gone. Clear the recorded angle with them:
+                # every surface that lines up with the stored preview — the Sky
+                # map's footprint and tile, the share/wallpaper North-up turn —
+                # reads that column, and a stale one would have them correcting
+                # for a rotation that is no longer there.
+                proj.set_stack_preview_north_up(run_id, 0.0)
                 # The preview is now the Auto recipe's tone-mapped result, but the
                 # run's FITS stays linear (the recipe is stored separately and is
                 # reversible). Mark the run so the parity surfaces — the one-sub-vs-
@@ -2754,14 +2762,6 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                 # of comparing a raw STF sub / anchoring an asinh curve to this
                 # recipe-toned thumbnail (they already do for a display-space export).
                 proj.set_run_preview_display_space(run_id)
-                # …and clear any North-up rotation an earlier "Adjust → North up →
-                # Save" recorded for those bytes: the render above is on the FITS
-                # grid, so the recorded angle would otherwise be a ghost that the
-                # Sky map, the History object pins and the share downloads all
-                # follow (turning a mask, a tile and a JPEG that were never
-                # turned). Written unconditionally, exactly as the manual save
-                # writes 0.0 when the toggle is off.
-                proj.set_stack_preview_north_up(run_id, 0.0)
                 # Stamp which colour-calibration (white-balance) path Auto actually
                 # ran and on how many stars — star-based, the v0.107.9
                 # background-neutral fallback, or a no-op — so the History Info panel
