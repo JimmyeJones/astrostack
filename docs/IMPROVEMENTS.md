@@ -8493,6 +8493,25 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-27, traced while independently building the same `unattended` posture that
+  shipped as v0.281.0) — the *non-drizzle* memory levers still hard-refuse an unattended run, and one of them
+  is a strictly invisible degrade the walk-away path should already be taking.** *(Pillar: autonomy —
+  PRIORITY 2. Size: S. Confidence: traced.)* `_best_memory_fix` offers three levers. Drizzle runs now
+  auto-take theirs (`drizzle_scale`, v0.281.0) when nobody is watching; a **non-drizzle** run still refuses
+  outright, even when the lever it would advise is `reduce_outlier_passes` — dropping `min_max_reject_count`
+  from k>1 to the proven single min/max drop. That one changes **nothing about the output geometry**: same
+  canvas, same pixel grid, same file size, just a little less multi-trail rejection. It is the *same* trade
+  `_afford_drizzle_reject` already makes (invisible-in-geometry ⇒ degrade quietly when unattended, refuse
+  loudly when watched) and strictly less destructive than the drizzle-scale degrade that shipped. So a
+  walk-away stack with `min_max_reject_count=3` on a tight budget still goes dark tonight when dropping to
+  k=1 would have produced the picture. **Shape:** in `run_stack`, mirror the v0.281.0 drizzle-scale block —
+  when `eff.unattended`, the guard would refuse, and `_best_memory_fix` returns `reduce_outlier_passes`,
+  apply it, log it, and stamp a provenance card beside `DRZSCLRQ`. **Do NOT extend this to
+  `reference_canvas`** — that crops a mosaic's field, a different order of change that stays a refusal (the
+  v0.281.0 tests pin that boundary; extend them rather than loosen them). The `drizzle_degraded` run-info
+  field is the template for saying it out loud, though this one arguably needs no note at all: nothing about
+  the picture the user can see has changed.
+
 - **NEW IDEA (Builder 2026-08-27, traced while building the v0.285.0 pictures zip) — the app has *two*
   different answers to "which picture is this target's", and one of them can come up empty where the other
   finds a picture. Make the fallback shared, not just the cover lookup.** *(Pillar: trust/consistency,
@@ -15930,6 +15949,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Builder 2026-08-27, the motivating half "Print it" v0.286.0 deliberately left out) —
+  turn "how big can I print this?" into a *reason to keep shooting*: tell a target still short of a good print
+  what it would take to get there.** *(Pillar: enjoy + autonomy — PRIORITY 2–3. Size: S.)* v0.286.0 can now
+  answer, from a picture's own pixels, the largest size it will print sharply — and for a small or
+  single-panel stack the honest answer is sometimes *nothing yet*. That is a genuinely motivating fact and the
+  app currently drops it on the floor: the print control simply hides. Meanwhile the goal/readiness card
+  already tells a beginner "another ~2 h reaches your goal" in *noise* terms, which is abstract. **"Turn on
+  ×1.5 super-resolution and this would print at A3" is the same nudge in a unit a human actually wants.**
+  **Shape:** a pure helper next to `printexport` that maps a *bigger* print size back to the pixels it needs,
+  and one line on the goal card (or the "Is it enough yet?" verdict), self-hiding whenever the picture already
+  prints at the largest size offered. **Care — the honest bit, and the reason this wasn't bolted on in
+  v0.286.0:** more integration does **not** add pixels. What unlocks a bigger print is more *resolution*
+  (drizzle/super-resolution, or a mosaic), so the sentence must name the right lever and must never imply that
+  another hour of subs alone enlarges the canvas. Where more integration genuinely helps is **perceived**
+  print quality (a cleaner picture survives enlargement better), which is a softer claim and should be phrased
+  as one, or left out. Get that distinction right or don't ship it: a wrong "keep shooting and you can print
+  bigger" is exactly the confident-and-false advice that costs a beginner's trust. **Grep before building:**
+  `print_options` / `PAPER_SIZES` (the size table), `readiness.ts` + the goal card (where the sentence would
+  land), and `estimate_stack`'s `suggested_drizzle_scale` / `memory_fix` (which already know whether a bigger
+  canvas would even fit memory — a print suggestion the memory guard would refuse is worse than silence).
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #17) — "Was the Moon in your way?": a plain-language per-session
   moonlight note.**~~ — **ALREADY SHIPPED; pruned by the Builder 2026-08-27** (branch
