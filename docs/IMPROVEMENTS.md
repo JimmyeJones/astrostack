@@ -179,6 +179,52 @@ _(none — claim an item here with your branch name)_
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #14, branch `claude/vigilant-knuth-xgiykw`) — a **depth** sweep of the
+  stacking/calibration engine and the walk-away orchestration. Result: CLEAN — no verified bug this run, the
+  fifth consecutive clean engine sweep (#10–#14). Baseline green (full headless suite: **3021 passed, 2
+  skipped** in 12:40).**
+  **What was read adversarially and traced this run (every item below is a NON-finding — traced to a guard, not
+  a bug):**
+  **stack combine** (`accumulator.py`, `stacker.py`) — the `WeightedSumAccumulator` any-channel frame-count
+  (`covered = valid.any(axis=2)`) equals `valid[...,0]` in the all-or-nothing common case; the
+  `MinMaxRejectAccumulator` k-set insertion-sort keeps the true k smallest/largest and is tie-safe on a
+  saturated star core (each extreme *value* subtracted once); the κ-σ two-pass `_kappa_sigma_keep_mask` widens
+  to keep-all on both NaN-σ (single-coverage mosaic edge) and NaN-mean (pass-1/pass-2 coverage divergence), so
+  the clip can never turn real pass-2 data into a NaN hole; the pass-1 Welford accumulator is `del`-freed before
+  pass 2 allocates, so peak stays at the 4 canvas planes the OOM guard charges; `frame_cov=None` is handled by
+  every downstream consumer (min/max coverage is already an exact frame count).
+  **drizzle** (`drizzle_path.py`) — `_clip_tolerance` computes the variance in float64 to dodge the
+  catastrophic-cancellation trap on ~counts² operands, gates rejection on the true **frame count** (`self._count`,
+  not the pixfrac-deflated `out_wht`), and disables clipping below the float32 resolution floor so a bright flat
+  region can't be punched into NaN; the half-open `[-0.5, N-0.5]` bounds correctly admit edge-band pixel centres;
+  `result()` returns `out_img` directly (already a running weighted mean — dividing again would deflate flux).
+  **photometric** (`photometric.py`) — neutral-fallback everywhere (no/≤0 transparency → scale 1.0, <3 measured
+  frames → whole run neutral), each scale clipped to `[1/max_ratio, max_ratio]`, and mosaic panels normalised
+  against *their own* pointing-group median (not one target-wide median that would read intrinsic panel star-field
+  differences as haze).
+  **mosaic** (`mosaic.py`) — the wrap-safe circular-mean centre RA (`_circ_mean_ra_deg` via `atan2`) is used
+  consistently in both outlier passes, so a frame straddling RA=0 isn't flung to ~180° and wrongly rejected;
+  MAX_CANVAS_PX + megapixel budget + "never drop >half" guards all hold.
+  **calibrate/apply** (`apply.py`) — no-data dark/bias pixels are remembered *before* sanitising to 0 and
+  restored to "no correction" on the exposure-scaling path (`bias + (dark−bias)·ratio` never scales a sanitized 0
+  into a spurious pedestal); flat non-finite → NaN sentinel (floored to 1.0), never the dark's 0; `apply_raw`
+  honours the "returns a fresh array" contract even on the empty-bundle path; the exposure/temperature mismatch
+  advisories gate on the *same* `_dark_scaling_applies` predicate the scaling path uses.
+  **coverage leveling** (`bg/coverage_leveling.py`) — the per-level detrend-before-threshold, the level-local
+  rescue of a starved level's sky, the "too structured to be sky" refusal, and the gapped-extrapolation clamp to
+  the measured envelope are all correct; a single-coverage-level (ordinary single-field) stack is byte-for-byte
+  unchanged.
+  **walk-away orchestration** (`webapp/pipeline.py`) — `_auto_stack_readability_hold` holds (without stamping the
+  attempt) when stacking now would land below the min-frames floor *or* thinner than the target's best existing
+  stack, gated on `unreadable > 0` so a healthy install is untouched; the crash-loop marker is cleared on a
+  *recoverable* exception so a transient I/O error doesn't disable auto-stack forever.
+  **Also cross-checked with two independent adversarial subagents** over `align.py`/`pointings.py`/`reference.py`/
+  `weighting.py` and `solve/*`/`calibrate/masters.py`: both returned CLEAN with every flagged suspicion traced to
+  a real guard (CPU/GPU reproject `cval` parity via the valid-mask inset; union-find path-compression termination;
+  sky/ecc divide-by-zero guards; `mad==0` sigma-clip using `tol=0` not `+inf`; uint16→float32 promotion before
+  every combine; the `solved = returncode==0 and sidecar.exists()` stale-sidecar gate). Curation + new ideas
+  filed alongside (a new beginner feature + an improvement idea — see below).
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #13, branch `claude/vigilant-knuth-ns5hys`) — a **breadth** sweep:
   led with the stacking engine per the rotation, then fanned four independent adversarial audits across the
   areas due for rotation (render, QC, stack combine/weighting/output, and the guardrail-critical webapp
@@ -8102,6 +8148,27 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Scout 2026-08-27 #14) — make the "keep shooting?" readiness verdict defer to the *measured* result
+  when a real stack exists, so the Target page can never tell a beginner "keep going" while their picture is
+  already visibly clean (or "plenty" while it's still grainy).** *(Pillar: friendliness + trust — PRIORITY 3.
+  Size: S. Confidence the gap is real: traced this run — `readiness.ts::integrationReadiness` judges *only*
+  integration hours against a per-type `GOAL_HOURS`, with no access to the stack's measured `noise_sigma`.)*
+  **The friction.** `integrationReadiness` is a good first-approximation steer *before* you've stacked, but once
+  a genuine stack exists the app has a strictly better signal — the picture's actual grain — and the two can
+  openly disagree in front of the beginner: the readiness card says "1.8 h of ~6 h — keep going" while the noise
+  badge right beside it shows an already-clean result (or vice versa). A beginner can't reconcile that, and the
+  generic time goal is the weaker of the two once real data is in.
+  **The fix (small, additive).** When the target has at least one genuine finished stack with a finite
+  `noise_sigma`, let the readiness verdict *acknowledge* the measured result rather than pretend it's still
+  pre-stack: soften "keep going" to "you can keep going for less grain, but it already looks clean" when the
+  measured grain is good, and keep "keep going" firm when it's still grainy — deferring to the same
+  `grainProjection` the new "Is more time worth it?" feature introduces (file them together; this is the
+  reconciliation half). No goal is *removed* — the time goal still shows for a target with no stack yet — so it's
+  purely additive and upgrade-safe. **Care:** only genuine stacks (skip edited/drizzle exports), and keep the
+  copy reassurance-shaped and never contradictory with the noise badge it sits next to. **Grep before building:**
+  confirm the Target page doesn't already cross-reference `noise_sigma` in the readiness card
+  (`LibraryProgressCard`/`readiness.ts` today read only the integration total).
+
 - **NEW IDEA (Builder 2026-08-27, the mirror case the v0.279.1 cover nudge deliberately left out) — when
   *nothing* is pinned, the cover follows the newest stack, so a cloudy night's restack can silently replace a
   better picture with a grainier one. Offer to pin the good one back.** *(Pillar: autonomy + trust —
@@ -15126,6 +15193,40 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #14) — "Is more time worth it?": a plain-language, *measured* grain
+  projection that tells a beginner how much cleaner their picture would actually get with more light — from THIS
+  target's own result, not a generic rule of thumb.** *(Pillar: understand + plan ("get a good image") —
+  PRIORITY 2–3. Size: M. Confidence the gap is real: grep-verified this run — `readiness.ts` gives a *time* goal
+  by object type ("~4 h for a nebula"), and its own comment says the numbers are "a rough 'enough for a clean
+  image', **not a precise SNR target**"; nothing projects the target's *measured* noise forward.)*
+  **The gap.** The app already measures each finished stack's real background grain (`stack_runs.noise_sigma`,
+  surfaced by `NoiseBadge`/`StackNoiseBadge`) and knows the integration behind it (accepted-sub exposure total).
+  But the only "should I keep shooting?" answer a beginner gets is `integrationReadiness` — a fixed
+  `GOAL_HOURS` per object *type* (Galaxy 6 h, Nebula 4 h, …). That can contradict what the picture actually shows:
+  a bright cluster already clean at 30 min is still told "keep going to 1.5 h", and a faint galaxy still grainy at
+  6 h is told "plenty". The beginner's real question — *"is another hour of my clear-sky time actually going to
+  make this picture noticeably better?"* — goes unanswered.
+  **The feature.** Stacking noise falls as ≈1/√(integration), so from one measured `(integration, noise_sigma)`
+  point the app can project the curve and answer in plain words on the Target page: *"Your M13 is already clean
+  (grain 0.011). More time would help only a little."* / *"M101 is still grainy at 2 h — roughly **4× the light**
+  (about 6 more hours) would halve the grain."* Always the diminishing-returns law stated for a beginner: doubling
+  the total time cuts grain by ~30 %, quadrupling it halves it. No SNR jargon, no knob — one honest sentence tied
+  to their own numbers.
+  **Why it clears the beginner bar:** zero knowledge required, a sane default (the 1/√t law is fixed, not a
+  setting), plain-language, and it answers the single most common uncertainty on the stack→result path with the
+  user's *own* data instead of a type-average. Purely additive — a new read-only line/card next to the existing
+  readiness verdict; nothing removed or changed.
+  **Why it's cheap:** every input already exists and is already on the Target page — `noise_sigma` (the noise
+  badge reads it), the integration total (`readiness.ts` reads it), and the object type. A pure
+  `grainProjection(integrationSeconds, noiseSigma)` → `{verdict, moreLightFactor, hoursToHalve}` mirrors
+  `integrationReadiness`'s shape and is unit-testable on synthetic points (clean → "little to gain", grainy →
+  "~4× light"). **Slices:** (a) the pure projection fn + tests (S); (b) a small Target-page line/card beside the
+  readiness verdict, hidden until at least one genuine stack exists (S). **Care:** use only *genuine* finished
+  stacks with a finite `noise_sigma` (skip drizzle/edited exports whose grain isn't comparable), and clamp the
+  projection to sane bounds so a fluke-clean single-night estimate can't promise the impossible. **Pairs with**
+  the readiness improvement filed under Autonomy & friendliness this run (make the fixed time-goal defer to the
+  measured result so the two surfaces never contradict).
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #13) — "Framed keepsake": a one-tap, print-and-share-ready export of
   a finished picture with a tasteful matte border and the object's name, capture date, and total integration
