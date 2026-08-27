@@ -14464,6 +14464,25 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **NEW IDEA / AUDIT SWEEP (Builder 2026-08-27, generalising the class of the v0.285.2 debayer fix) — sweep the
+  engine for every *other* place a pixel **value** stands in for a presence/coverage **mask**, where a legitimate
+  0 (or a legitimate negative) is silently read as "no data".** *(Pillar: image quality / correctness —
+  PRIORITY 4. Size: S to audit, unknown to fix. Confidence: the class is confirmed — this run shipped a fix for
+  one live instance of it that had been in the on-by-default hot path for months.)*
+  The debayer bug was not a typo: it was a *pattern*. `bilinear_debayer` built sparse colour planes with
+  `np.zeros_like`, then recovered "which pixels are this channel's samples" with `plane != 0` — correct only for
+  as long as no genuine sample equals 0, which dark subtraction against an integer master breaks. The engine's
+  documented sentinel for "no coverage" is **NaN**, not 0 (AGENTS.md §6), so *any* `!= 0` / `> 0` used as a
+  structural mask is a candidate for the same conflation. **The sweep:** grep `seestack/stack/*`
+  (`accumulator.py`, `drizzle_path.py`, `mosaic.py`), `seestack/calibrate/*`, `seestack/bg/*` and
+  `seestack/edit/ops/*` for value tests used as masks — weight/coverage planes, star masks, footprints, "was
+  this pixel written" checks — and for each ask: *can the real datum legitimately be exactly 0 (or negative)
+  here?* Where the answer is yes, replace the value test with the structural fact (a positional mask, an
+  explicit count/weight plane, or NaN) as v0.285.2 did. Where it's no, say so in a comment so the next reader
+  doesn't re-audit it. **Care:** several of these are on-by-default hot paths, so each fix wants the same two
+  tests the debayer one got — the triggering case now correct, *and* an ordinary frame byte-for-byte unchanged.
+  A good Scout run; the fixes themselves are Builder work, one at a time.
+
 - **IDEA / DATA-INTEGRITY FOLLOW-UP (Scout 2026-08-27 #8, the residual of the v0.277.4 scanner fix) —
   parent-scope `_seestar_output_bases` + the output-reject so a 1–2-sub root-level `<T>/` colliding with an
   unrelated container `<T>_sub` is never wrongly rejected.** *(Pillar: image quality / correctness — PRIORITY 4;
@@ -15781,6 +15800,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW IDEA (Builder 2026-08-27, the obvious next tap on "Download all my pictures" v0.285.0) — offer the bulk
+  archive as **JPEGs** as well as PNGs, so a season's pictures fit on a phone.** *(Pillar: share + get —
+  PRIORITY 3. Size: XS–S — one query parameter and one menu item; both halves already exist.)*
+  `GET /api/gallery/best.zip` archives each target's stored **preview PNG**, which is the right default (it is
+  literally the picture the wall showed, no re-render, no quality question). But a PNG of a 20-megapixel mosaic
+  is large, and the two things a beginner actually does with a bulk download — copy it to a phone, or attach it
+  to a message — both want JPEGs. The transcode already exists and is already wired to this exact artefact:
+  `download_stack_run`'s `kind="jpeg"` path runs `png_bytes_to_jpeg` over `run.preview_path` with no file on
+  disk. So `?format=jpeg` would stream the same members through it (naming them `<Target>.jpg`), typically
+  several times smaller. **Shape:** default stays `png` — nothing about the existing link changes — and the
+  button grows a small split/menu ("Download all · as JPEGs"). **Care:** the transcode is CPU per member, so it
+  can no longer be a pure file copy; keep it strictly one member at a time so the streaming memory bound holds,
+  and keep the skip-and-continue boundary (a member that fails to transcode joins `_skipped.txt` rather than
+  sinking the archive). Worth pinning that the PNG default is byte-for-byte unchanged.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #17) — "Was the Moon in your way?": a plain-language per-session
   moonlight note that tells a beginner when a bright, nearby Moon washed out their faint target, so they
