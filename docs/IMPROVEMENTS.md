@@ -7968,6 +7968,23 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-27, the follow-ups the life list v0.279.0 deliberately left out) — three small
+  slices that turn the life list from a page you visit into something that finds you.** *(Pillar: friendliness
+  / "enjoy + come back tomorrow" — PRIORITY 3. Size: S each, independent — pick one, they don't stack.)*
+  All three are cheap now that `GET /api/life-list` exists and `seestack/lifelist.py` is a pure function:
+  * **(i) The Dashboard stat.** A small "42 / 110 Messier" tile on the home screen linking to `/life-list`.
+    The one place a beginner sees every session, and the number is the whole hook. Careful: the Dashboard is
+    the *other* page the owner called "extremely busy", so this must go **inside** an existing group, not as
+    another always-on banner — see the standing IA item under Friendliness before adding it.
+  * **(ii) "One away from Orion" — tie the list into the night planner.** `catalog_capture_status` already
+    returns `con`, so "which constellation are you closest to completing, and is one of its missing objects up
+    tonight?" is a group-by plus a lookup against the existing `rank_targets_now`. That is the line that
+    actually gets someone outside on a clear night, and it needs no new data. Keep it to one nudge and only
+    when a constellation is genuinely close (≥1 captured, ≤2 missing), or it becomes noise.
+  * **(iii) Share the grid.** The existing share-card machinery (`ShareYourSkyCard` / `sharePictureText`)
+    renders a keepsake; a "my Messier grid so far" image is the same shape and is the single most
+    shareable artefact the app could produce. Largest of the three; do it last.
+
 - **NEW IDEA (Scout 2026-08-27 #10) — "This looks like M31": offline auto-identify an un-named / Unsorted
   target from its solved centre against the bundled catalog, in the web app.** *(Pillar: autonomy +
   friendliness — PRIORITY 2–3. Size: S–M.)* A beginner who drops loose FITS, or a folder the Seestar named
@@ -14791,8 +14808,67 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list": a Messier/catalog checklist that lights up
-  the famous objects you've already captured and shows the rest as a bucket list.** *(Pillar: friendliness /
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list": a Messier/catalog checklist that lights up
+  the famous objects you've already captured and shows the rest as a bucket list.**~~ — **SHIPPED v0.279.0**
+  (Builder 2026-08-27, branch `claude/compassionate-galileo-yw7tvl`). Slices **(a)+(b)+(c) all shipped in one
+  run** — the Scout was right that the machinery already existed, so splitting it would have shipped three
+  half-features instead of one working page.
+
+  **(a) Engine — new `seestack/lifelist.py`.** `catalog_capture_status(catalog, targets, *, radius_deg)` matches
+  every bundled object against the library's targets and returns `LifeListEntry` rows
+  (`catalog_id`, `name`, `type`, `con`, `ra/dec`, `size_arcmin`, `blurb`, `captured`, `safe_name`,
+  `target_name`, `sep_deg`), plus `life_list_summary()` for the counts and `is_messier()` for the split. Pure,
+  offline, duck-typed on the five target fields it reads, so it tests without a DB. **Three decisions worth
+  knowing:** the match radius is **0.35°** (`MATCH_RADIUS_DEG`) — a Seestar frame is ~1.3°×0.7°, so a match is
+  genuinely *in the picture*, and erring small is the right way round (claiming M65 when the owner pointed at
+  M66 next door would make the whole list untrustworthy, whereas a miss just leaves one tile grey). A target
+  counts only when **plate-solved *and* holding frames** — a registered-but-empty folder is not a capture, and
+  lighting its tile is a lie the owner would catch. When several targets sit near one object (the Seestar writes
+  a new folder per night, so three nights on M31 is three targets until merged) the **closest wins**, so the
+  collection says "got it", once. Sort is Messier-numeric then the rest, because a string sort puts M10 before
+  M9 and looks broken.
+
+  **(b) Backend — new `webapp/routers/lifelist.py`.** Read-only `GET /api/life-list` →
+  `{messier: [...], other: [...], counts: {messier_captured, messier_total, other_captured, other_total}}`.
+  Reads **only the target registry** — no project DB is opened, no network — so it is cheap enough to answer on
+  every visit and needed no `registry_cache` entry. Each captured item carries `thumbnail_url` only when the
+  preview file actually exists on disk (the same existence test `/api/targets` does for `has_preview`), so a
+  tile never hands the UI a URL that 404s.
+
+  **(c) Frontend — new `/life-list` route** (`routes/LifeList.tsx`), in the **"Your pictures"** nav group per
+  the standing IA priority (a new page, which the owner's brief explicitly allows; nothing was moved or
+  removed). A progress bar and a plain-language headline that has three voices — *"All 110 Messier objects are
+  still ahead of you"* / *"You've captured 42 of 110 — 68 to go"* / *"You've captured all 110… congratulations"*
+  — over a responsive tile grid: captured tiles at full strength showing their picture and linking to the
+  target, uncaptured ones dimmed with the catalog blurb on hover. An all / captured / still-to-shoot filter, and
+  a line explaining *why* a tile might still be grey ("a target still waiting to be located stays greyed out
+  until it's solved") so the one confusing case explains itself.
+
+  **Upgrade-safe (§9):** purely additive — a new engine module, a new read-only endpoint, a new route. No
+  config, schema, on-disk, existing-API or default change; nothing added to an existing screen; no hot-path
+  contact. It ships "on" because it *is* the feature (a new page nobody has to visit), the way Tonight, Best
+  pictures and Your sky so far did.
+
+  **Tests: +34.** 12 engine (`tests/test_lifelist.py` — radius boundary in/out, closest-of-several,
+  unsolved/empty target, RA-seam wrap, ordering incl. an unparseable id, and a pin that the real bundled catalog
+  yields M1…M110 exactly once), 12 API (`tests/webapp/test_life_list.py` — against a real Library: empty
+  library still lists all 110, capture lights up + links, missing preview file offers no thumbnail, unsolved and
+  frameless targets stay grey, three unmerged nights read as one capture, NGC/IC kept out of the Messier count,
+  and read-only-ness), 10 frontend (`routes/LifeList.test.tsx` — all three headline voices, both filters, the
+  link/no-link split, the grey-tile explanation, and the error state).
+
+  **One test edit, called out deliberately:** `nav.test.tsx`'s frozen-sidebar guard asserted the nav list
+  *equals* the pre-IA flat list, which encodes "the sidebar may never grow" — not the constraint it was written
+  for (the owner's "nothing may be **removed**", and their brief explicitly allows new pages). It is now a
+  **subset** assertion per frozen entry (a drop or rename still fails, and now names the missing entry), plus a
+  **new** test that an added destination may not reuse a frozen label — so the guard is strictly stronger about
+  shadowing while no longer forbidding growth.
+
+  **Follow-ups from the original spec, left open (each S):** the Dashboard stat ("42/110 Messier"), the
+  "one object away from all of Orion" nudge tied into the night planner, and an export/share of the completed
+  grid as a keepsake. Filed as a fresh idea below.
+
+  *(Original spec, kept for context.)* *(Pillar: friendliness /
   autonomy + "understand / enjoy" — PRIORITY 3. Size: M.)* Every beginner astrophotographer knows the Messier
   list — capturing all 110 is *the* classic milestone — yet the app has no "which have I got?" view. The
   night planner ranks *tonight's* targets and each target has its own integration progress, but nothing shows
