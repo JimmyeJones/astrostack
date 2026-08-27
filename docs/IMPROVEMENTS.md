@@ -8543,6 +8543,25 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-27, traced while independently building the same `unattended` posture that
+  shipped as v0.281.0) — the *non-drizzle* memory levers still hard-refuse an unattended run, and one of them
+  is a strictly invisible degrade the walk-away path should already be taking.** *(Pillar: autonomy —
+  PRIORITY 2. Size: S. Confidence: traced.)* `_best_memory_fix` offers three levers. Drizzle runs now
+  auto-take theirs (`drizzle_scale`, v0.281.0) when nobody is watching; a **non-drizzle** run still refuses
+  outright, even when the lever it would advise is `reduce_outlier_passes` — dropping `min_max_reject_count`
+  from k>1 to the proven single min/max drop. That one changes **nothing about the output geometry**: same
+  canvas, same pixel grid, same file size, just a little less multi-trail rejection. It is the *same* trade
+  `_afford_drizzle_reject` already makes (invisible-in-geometry ⇒ degrade quietly when unattended, refuse
+  loudly when watched) and strictly less destructive than the drizzle-scale degrade that shipped. So a
+  walk-away stack with `min_max_reject_count=3` on a tight budget still goes dark tonight when dropping to
+  k=1 would have produced the picture. **Shape:** in `run_stack`, mirror the v0.281.0 drizzle-scale block —
+  when `eff.unattended`, the guard would refuse, and `_best_memory_fix` returns `reduce_outlier_passes`,
+  apply it, log it, and stamp a provenance card beside `DRZSCLRQ`. **Do NOT extend this to
+  `reference_canvas`** — that crops a mosaic's field, a different order of change that stays a refusal (the
+  v0.281.0 tests pin that boundary; extend them rather than loosen them). The `drizzle_degraded` run-info
+  field is the template for saying it out loud, though this one arguably needs no note at all: nothing about
+  the picture the user can see has changed.
+
 - **NEW IDEA (Builder 2026-08-27, traced while building the v0.285.0 pictures zip) — the app has *two*
   different answers to "which picture is this target's", and one of them can come up empty where the other
   finds a picture. Make the fallback shared, not just the cover lookup.** *(Pillar: trust/consistency,
@@ -16000,6 +16019,27 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW BEGINNER FEATURE (Builder 2026-08-27, the motivating half "Print it" v0.286.0 deliberately left out) —
+  turn "how big can I print this?" into a *reason to keep shooting*: tell a target still short of a good print
+  what it would take to get there.** *(Pillar: enjoy + autonomy — PRIORITY 2–3. Size: S.)* v0.286.0 can now
+  answer, from a picture's own pixels, the largest size it will print sharply — and for a small or
+  single-panel stack the honest answer is sometimes *nothing yet*. That is a genuinely motivating fact and the
+  app currently drops it on the floor: the print control simply hides. Meanwhile the goal/readiness card
+  already tells a beginner "another ~2 h reaches your goal" in *noise* terms, which is abstract. **"Turn on
+  ×1.5 super-resolution and this would print at A3" is the same nudge in a unit a human actually wants.**
+  **Shape:** a pure helper next to `printexport` that maps a *bigger* print size back to the pixels it needs,
+  and one line on the goal card (or the "Is it enough yet?" verdict), self-hiding whenever the picture already
+  prints at the largest size offered. **Care — the honest bit, and the reason this wasn't bolted on in
+  v0.286.0:** more integration does **not** add pixels. What unlocks a bigger print is more *resolution*
+  (drizzle/super-resolution, or a mosaic), so the sentence must name the right lever and must never imply that
+  another hour of subs alone enlarges the canvas. Where more integration genuinely helps is **perceived**
+  print quality (a cleaner picture survives enlargement better), which is a softer claim and should be phrased
+  as one, or left out. Get that distinction right or don't ship it: a wrong "keep shooting and you can print
+  bigger" is exactly the confident-and-false advice that costs a beginner's trust. **Grep before building:**
+  `print_options` / `PAPER_SIZES` (the size table), `readiness.ts` + the goal card (where the sentence would
+  land), and `estimate_stack`'s `suggested_drizzle_scale` / `memory_fix` (which already know whether a bigger
+  canvas would even fit memory — a print suggestion the memory guard would refuse is worse than silence).
+
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #17) — "Was the Moon in your way?": a plain-language per-session
   moonlight note.**~~ — **ALREADY SHIPPED; pruned by the Builder 2026-08-27** (branch
   `claude/compassionate-galileo-0wtz21`) after doing exactly the grep the spec itself asked for. This exists
@@ -16916,29 +16956,80 @@ problems. Dogfood it every big-picture run and fix root causes.
     a page render, which is the same trade `/api/imaging-log` already makes. Testable: a target with a pinned
     cover puts *that* picture on the wall; one without is unchanged.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26 #3) — "Print it": a print-ready export sized and DPI-tagged for a
-  frame on the wall.** *(Pillar: enjoy + share — PRIORITY 3. Size: M.)* A beginner who finally gets a
-  picture they love wants to **print and hang it** — but every export today (PNG / full-res PNG / JPEG / TIFF)
-  is native-resolution with **no print sizing and no DPI metadata**, so it lands in a photo-print service at
-  whatever size the pixel count implies and often prints soft or tiny with no warning. Nothing bridges
-  "great picture on screen" → "nice print in my hands." **Verified genuinely new (grepped this run):** no
-  `print` / DPI / print-size feature exists in code or backlog; the closest neighbours are all *screen/share*
-  outputs (wallpaper, QR-to-phone, JPEG share, the montage/poster ideas) — none targets a physical print.
-  **Shape:** reuse the share-render pipeline. A pure helper `build_print_export(rgb, *, size_name, min_dpi=150)
-  -> (PIL.Image, dpi)` that (a) picks the **largest standard size** the picture's native resolution supports at
-  ≥ `min_dpi` (so the beginner is never asked to reason about DPI — the sane default just works), (b) fits the
-  picture onto that size's pixel canvas letterboxed on the app's dark NaN=black ground (reuse
-  `deepening._fit_onto`, which already preserves aspect without squashing), and (c) returns the image plus the
-  DPI to stamp into the file's metadata (`img.save(..., dpi=(d, d))`). A small **"Print"** entry in the editor's
-  "Save / share ▾" menu offers a couple of common sizes (e.g. 8×10 in / A4 / A3) with a one-line plain-language
-  note (*"Best print size for this picture: up to A4 at 200 DPI"*), self-hiding a size the resolution can't hit
-  at `min_dpi`. Optionally include the existing nameplate. **Beginner bar:** clears it cleanly — a non-expert
-  instantly understands "print it", the size is chosen for them, plain language, no expert knob; it removes work
-  (no guessing DPI in another app) — Method A/D. **Guardrails/feasibility:** offline, additive, read-only
-  (renders from the run/edit the app already produces, writes only the downloaded file — never `incoming/`);
-  pure helper → trivially unit-testable (native res → chosen size + DPI; a too-small picture self-hides the
-  bigger sizes; aspect preserved undistorted). **Slices —** (a) the pure `build_print_export` helper + size
-  table + tests (a shippable Builder run on its own); (b) wire it into the editor/History share menu (frontend).
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #3) — "Print it": a print-ready export sized and DPI-tagged for a
+  frame on the wall.**~~ — **SHIPPED v0.286.0** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-t89lw9`) — **both filed slices, (a) and (b).** *(Pillar: enjoy + share —
+  PRIORITY 3.)*
+
+  **Sibling of "Framed keepsake" (v0.282.0), not a duplicate.** That one *mats and titles* a picture so its
+  story travels with the file; this one answers a different question — **how big can I print this, and will
+  it come out sharp?** — and produces a file sized to the paper and tagged with the DPI a lab reads. Neither
+  subsumes the other, and a natural follow-up is to let the print export take a keepsake mat.
+
+  **(a) The pure helper.** `seestack/printexport.py` — `print_options(width_px, height_px, min_dpi=150)`
+  returning **every** size the picture can print sharply, largest first, rather than the filed single
+  `build_print_export(..., size_name)`: the list *is* the menu, its head is the recommended default, and one
+  piece of arithmetic answers both "what can I offer?" and "is this choice honest?". Plus
+  `print_advice(options)` (one plain-language line) and `render_print(rgb, option)` (the Pillow image).
+
+  **The rule the whole feature rests on: never upscale.** Enlarging a 1000 px picture to 3000 px adds no
+  detail, it just makes the softness bigger — which is exactly the surprise a beginner gets from a lab today.
+  So a paper size qualifies only when `min(width_px / paper_w_in, height_px / paper_h_in) >= min_dpi`, the
+  point at which the fitted picture exactly fills the shorter dimension; the render then uses that DPI capped
+  at 300 (no consumer lab resolves more). A picture that clears nothing offers **nothing**, and says why
+  (*"another night or two of subs will get it there"*) rather than leaving an unexplained empty menu.
+
+  **Two things the spec left open, decided here.** Paper is **oriented to match the picture**, so a landscape
+  stack gets landscape paper and the letterbox bars are the aspect mismatch alone rather than the mismatch
+  plus a rotation. And the fit uses **LANCZOS**, not `deepening._fit_onto`'s BOX — the share JPEG's own
+  comment says BOX softens star cores, and softness is precisely what a print exposes.
+
+  **(b) The offer.** `GET .../editor/print-sizes` (sized from the run's own canvas, so no render and no FITS
+  read — a cropping recipe makes it slightly optimistic and the export re-checks against the real pixels),
+  `POST .../editor/print` and its download twin, mirroring the share endpoints exactly. In the editor's
+  "Export full resolution" panel: a size Select (pre-set to the biggest good print, labelled *"A4 · 240 DPI"*
+  — size first, because that is what a user picks), a **Download print file** button, and the advice line.
+  **The whole control self-hides** when nothing prints sharply, so nobody is tempted into a soft enlargement.
+  A size the picture can't fill is refused with advice, never quietly upscaled. The existing nameplate
+  checkbox composes, drawn at the print's own resolution.
+
+  **Upgrade-safe (§9):** one new engine module and three new additive endpoints; no config, schema, on-disk,
+  default or existing-response-shape change, and nothing is written outside the target's own `output/`.
+
+  **Tests (+17):** 11 in `tests/test_printexport.py` (a size qualifying *exactly* at the floor and not one
+  pixel below — pinned against real A4 inches, where a `<` vs `<=` slip would silently offer a soft print —
+  the largest-first order and the no-upscale invariant across every offer, the orientation rule, the 300 DPI
+  cap, a small picture offering only 6×4, a too-small one offering nothing with a kind explanation, the
+  degenerate-input refusals, the advice naming the size rather than the arithmetic, letterboxing without
+  distortion on a square-into-6×4 fit including the mono path, and NaN rendering black); 4 in
+  `tests/webapp/test_editor.py` (the offered list and its self-hiding, the 404, the downloaded file's canvas
+  *and* its DPI tag, and honouring a smaller size while refusing one that would print soft); and 2 in
+  `Editor.test.tsx`.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy + share — PRIORITY 3. Size: M.)* A beginner who finally gets a
+    picture they love wants to **print and hang it** — but every export today (PNG / full-res PNG / JPEG / TIFF)
+    is native-resolution with **no print sizing and no DPI metadata**, so it lands in a photo-print service at
+    whatever size the pixel count implies and often prints soft or tiny with no warning. Nothing bridges
+    "great picture on screen" → "nice print in my hands." **Verified genuinely new (grepped this run):** no
+    `print` / DPI / print-size feature exists in code or backlog; the closest neighbours are all *screen/share*
+    outputs (wallpaper, QR-to-phone, JPEG share, the montage/poster ideas) — none targets a physical print.
+    **Shape:** reuse the share-render pipeline. A pure helper `build_print_export(rgb, *, size_name, min_dpi=150)
+    -> (PIL.Image, dpi)` that (a) picks the **largest standard size** the picture's native resolution supports at
+    ≥ `min_dpi` (so the beginner is never asked to reason about DPI — the sane default just works), (b) fits the
+    picture onto that size's pixel canvas letterboxed on the app's dark NaN=black ground (reuse
+    `deepening._fit_onto`, which already preserves aspect without squashing), and (c) returns the image plus the
+    DPI to stamp into the file's metadata (`img.save(..., dpi=(d, d))`). A small **"Print"** entry in the editor's
+    "Save / share ▾" menu offers a couple of common sizes (e.g. 8×10 in / A4 / A3) with a one-line plain-language
+    note (*"Best print size for this picture: up to A4 at 200 DPI"*), self-hiding a size the resolution can't hit
+    at `min_dpi`. Optionally include the existing nameplate. **Beginner bar:** clears it cleanly — a non-expert
+    instantly understands "print it", the size is chosen for them, plain language, no expert knob; it removes work
+    (no guessing DPI in another app) — Method A/D. **Guardrails/feasibility:** offline, additive, read-only
+    (renders from the run/edit the app already produces, writes only the downloaded file — never `incoming/`);
+    pure helper → trivially unit-testable (native res → chosen size + DPI; a too-small picture self-hides the
+    bigger sizes; aspect preserved undistorted). **Slices —** (a) the pure `build_print_export` helper + size
+    table + tests (a shippable Builder run on its own); (b) wire it into the editor/History share menu (frontend).
 
 - **NEW IDEA (Builder 2026-08-26, the half deliberately left out of "How big a mosaic?" v0.272.0) — tell a
   beginner roughly how LONG that mosaic will take, not only how many panels.** *(Pillar: autonomy +

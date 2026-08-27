@@ -6,7 +6,8 @@ import { useDebouncedValue } from "@mantine/hooks";
 import {
   IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconCheck, IconChevronDown,
   IconChevronUp, IconCopy, IconCrop, IconDeviceFloppy, IconDownload, IconHistory, IconInfoCircle,
-  IconPhotoDown, IconPlus, IconRefresh, IconShare, IconSparkles, IconStar, IconWand, IconZoomScan,
+  IconPhotoDown, IconPlus, IconPrinter, IconRefresh, IconShare, IconSparkles, IconStar, IconWand,
+  IconZoomScan,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -768,6 +769,7 @@ export function EditorView() {
   // Share: render a social-sized JPEG of the current look and reveal a
   // copy-friendly caption blurb (the beginner's "how do I post this?" step).
   const [shareProgress, setShareProgress] = useState<string | null>(null);
+  const [printProgress, setPrintProgress] = useState<string | null>(null);
   // Feature-detect OS file sharing once (stable per browser); gates the
   // editor's "Share to app" button so desktop browsers without it never see it.
   const [canShareToApp] = useState(() => canSharePictureFiles());
@@ -801,6 +803,58 @@ export function EditorView() {
     },
     onError: (e: Error) => { if (!isJobPollAbort(e)) notifications.show({ message: e.message, color: "red" }); },
     onSettled: () => setShareProgress(null),
+  });
+
+  // "Print it" — the same finished picture, fitted to a standard paper size and
+  // DPI-tagged so a photo lab prints it at the size we promised instead of
+  // guessing from the pixel count. The size list comes from the run's own canvas
+  // (cheap, no render), self-hides every size this picture can't fill sharply,
+  // and hides the whole control when none qualifies — a beginner is never
+  // offered a print that would come back soft.
+  const printSizes = useQuery({
+    queryKey: ["print-sizes", safe, rid],
+    queryFn: () => api.printSizes(safe, rid).catch(() => null),
+    enabled: Number.isFinite(rid),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const printableSizes = printSizes.data?.sizes ?? [];
+  // Default to the biggest print this picture can make — the whole point is that
+  // the user picks a size, never a DPI.
+  const [printSize, setPrintSize] = useState<string | null>(null);
+  const chosenPrintSize = printSize ?? printableSizes[0]?.name ?? null;
+  const downloadPrint = useMutation({
+    mutationFn: async () => {
+      setPrintProgress("Preparing…");
+      const { job_id } = await api.exportPrint(
+        safe, rid, recipe, chosenPrintSize ?? undefined, nameplate);
+      const j = await pollJobUntilDone(job_id, {
+        ...pollOptions, failureMessage: "Print file failed",
+        onProgress: (job) => setPrintProgress(pngProgressLabel(job)),
+      });
+      return {
+        jobId: job_id,
+        sizeName: typeof j.result?.size_name === "string" ? j.result.size_name : null,
+        dpi: typeof j.result?.dpi === "number" ? j.result.dpi : null,
+        opErrors: opErrorsMessage(j.result?.op_errors),
+      };
+    },
+    onSuccess: ({ jobId, sizeName, dpi, opErrors }) => {
+      const a = document.createElement("a");
+      a.href = api.editPrintUrl(safe, rid, jobId);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      notifications.show({
+        message: sizeName && dpi
+          ? `Print file ready — ${sizeName} at ${dpi} DPI`
+          : "Print file ready",
+        color: "teal",
+      });
+      if (opErrors) notifications.show({ message: opErrors, color: "orange", autoClose: 10000 });
+    },
+    onError: (e: Error) => { if (!isJobPollAbort(e)) notifications.show({ message: e.message, color: "red" }); },
+    onSettled: () => setPrintProgress(null),
   });
 
   // Share the finished picture straight to another app via the OS share sheet
@@ -2286,6 +2340,36 @@ export function EditorView() {
               ) : null}
               {(downloadShare.isPending || shareToApp.isPending) && shareProgress ? (
                 <Text size="xs" c="dimmed" ta="center" mt={4}>{shareProgress}</Text>
+              ) : null}
+              {/* Print it. Only sizes this picture can fill *sharply* are offered
+                  (largest first, so the default is the biggest good print), and
+                  the whole control hides on a picture that can't print well yet
+                  rather than tempting the user into a soft enlargement. */}
+              {printableSizes.length > 0 ? (
+                <>
+                  <Group align="flex-end" gap="xs" mt="sm">
+                    <Select flex={1} value={chosenPrintSize} allowDeselect={false}
+                      label={<HintLabel label="Print size"
+                        hint="Only sizes this picture has the detail to print sharply
+                          are listed, biggest first. The file is tagged with the right
+                          DPI, so a photo lab prints it at this size instead of
+                          guessing." />}
+                      data={printableSizes.map((s) => ({ value: s.name, label: s.label }))}
+                      onChange={(v) => setPrintSize(v)} />
+                  </Group>
+                  <Button mt="xs" fullWidth variant="light"
+                    leftSection={<IconPrinter size={16} />}
+                    loading={downloadPrint.isPending}
+                    onClick={() => downloadPrint.mutate()}>
+                    Download print file
+                  </Button>
+                  {downloadPrint.isPending && printProgress ? (
+                    <Text size="xs" c="dimmed" ta="center" mt={4}>{printProgress}</Text>
+                  ) : null}
+                  {printSizes.data?.advice ? (
+                    <Text size="xs" c="dimmed" mt={4}>{printSizes.data.advice}</Text>
+                  ) : null}
+                </>
               ) : null}
               {shareBlurb ? (
                 <Group gap="xs" mt={6} wrap="nowrap" align="center">
