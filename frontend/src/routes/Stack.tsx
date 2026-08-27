@@ -283,8 +283,40 @@ export function StackView() {
 
   const fields = schema.data ?? [];
   const set = (k: string, v: unknown) => setValues((p) => ({ ...p, [k]: v }));
+  // "Auto outlier removal" *overrides* exactly these two: the engine's
+  // `_resolve_auto_reject` picks the method from the frame count and writes both
+  // booleans, ignoring whatever they said. While it's on they must not read as
+  // live controls — a beginner seeing "Sigma clipping: ON" reasonably believes
+  // that is what will happen, when a small stack actually runs min/max. Greyed
+  // rather than cleared, so turning Auto off restores their manual pick intact.
+  //
+  // Deliberately *not* `sigma_kappa` / `min_max_reject_count`, even though those
+  // sit alongside: Auto rewrites only the two method flags and passes κ and k
+  // through untouched, so whichever method it lands on still uses the user's
+  // numbers. Greying them would be the same lie in the other direction.
+  const AUTO_REJECT_OVERRIDES = new Set(["sigma_clip", "min_max_reject"]);
+  // The server answers which method auto will really use (null = the toggles
+  // are live after all: auto is off, or drizzle is on and keeps its own pass).
+  const autoResolved = estimate.data?.auto_reject_resolved ?? null;
+  // What will *actually* run once Auto's override is taken into account. Every
+  // method-specific advisory below reads these rather than the raw toggles, so a
+  // hint can never coach the user about a method that isn't going to run.
+  const sigmaClipEffective =
+    autoResolved ? autoResolved.method === "sigma_clip" : !!values.sigma_clip;
+  const minMaxEffective =
+    autoResolved ? autoResolved.method === "min_max" : !!values.min_max_reject;
+  // `sigma_kappa` hangs off `sigma_clip` and `min_max_reject_count` off
+  // `min_max_reject`, so those dependencies have to be read against the method
+  // that will run too — otherwise Auto picking κ-σ on a target whose stored
+  // `sigma_clip` is false would grey out the very κ it is about to use.
+  const dependencyValue = (k: string) =>
+    autoResolved === null ? values[k]
+      : k === "sigma_clip" ? sigmaClipEffective
+      : k === "min_max_reject" ? minMaxEffective
+      : values[k];
   const isDisabled = (f: StackOptionField) =>
-    !dependencyMet(f.depends_on, (k) => values[k]);
+    !dependencyMet(f.depends_on, dependencyValue)
+    || (autoResolved !== null && AUTO_REJECT_OVERRIDES.has(f.key));
 
   const simple = fields.filter((f) => f.group === "simple");
   const advanced = fields.filter((f) => f.group === "advanced");
@@ -488,7 +520,7 @@ export function StackView() {
   const minMaxK = Number(values.min_max_reject_count ?? 1);
   const minMaxKSuggested = Math.max(1, Math.floor((solvedAccepted - 1) / 2));
   const minMaxKTooHighHint =
-    !frames.isLoading && !!values.min_max_reject && !values.drizzle
+    !frames.isLoading && minMaxEffective && !values.drizzle
     && minMaxK > 1 && solvedAccepted >= 3 && (2 * minMaxK + 1) > solvedAccepted
       ? `Min/max reject is set to drop the ${minMaxK} highest and lowest values (k=${minMaxK}) at each pixel, but that needs at least ${2 * minMaxK + 1} frames per pixel to fully apply — you have ${solvedAccepted}, so it will mostly fall back to a single min/max drop. Lower k to ${minMaxKSuggested} or add more frames.`
       : null;
@@ -501,7 +533,7 @@ export function StackView() {
   // where they overlap a pixel. Suggestion only; never auto-applies.
   const streakKSuggested = Math.min(streakedAccepted, 5, minMaxKSuggested);
   const minMaxKForStreaksHint =
-    !frames.isLoading && !!values.min_max_reject && !values.drizzle
+    !frames.isLoading && minMaxEffective && !values.drizzle
     && streakedAccepted >= 2 && streakKSuggested > minMaxK
       ? `${streakedAccepted} of your frames carry a satellite/plane streak, but min/max reject is set to drop only the ${minMaxK === 1 ? "single" : minMaxK} highest and lowest value${minMaxK === 1 ? "" : "s"} at each pixel (k=${minMaxK}). Raising k to ${streakKSuggested} drops the ${streakKSuggested} highest and lowest — enough to trim all ${streakedAccepted} trails where they cross a pixel.`
       : null;
@@ -516,7 +548,7 @@ export function StackView() {
   // wording (and the engine's `weights_applied` gate it mirrors) lives in
   // `weightingHint.ts`, shared with the global defaults in Settings. Advisory only.
   const minMaxIgnoresWeightingHint = frames.isLoading ? null : minMaxIgnoresWeighting({
-    minMaxReject: !!values.min_max_reject,
+    minMaxReject: minMaxEffective,
     qualityWeighted: !!values.quality_weighted,
     drizzle: !!values.drizzle,
     frames: solvedAccepted,
@@ -527,13 +559,27 @@ export function StackView() {
       ? `${streakedAccepted} accepted frame${streakedAccepted === 1 ? " has" : "s have"} a detected satellite/plane streak, but this stack has no per-pixel rejection enabled — the trail${streakedAccepted === 1 ? "" : "s"} will show in the result. Turn on ${values.drizzle ? "“Drizzle outlier rejection”" : "sigma clipping"} (or reject those frames) to remove ${streakedAccepted === 1 ? "it" : "them"}.`
       : null;
 
+  // "Auto outlier removal" decides the method for you, which is the right
+  // default — but until now the form still showed the sigma-clip and min/max
+  // toggles as live, so their displayed state could be the exact opposite of
+  // what ran (measured in a dogfood: "Sigma clipping ON" with 6 subs, and the
+  // finished run was min/max). They're greyed above; this says, in plain words,
+  // which method Auto will actually use and where the boundary sits — so the
+  // form tells the truth instead of leaving the user to discover it in History.
+  const autoRejectMethodNote =
+    autoResolved && autoResolved.n_frames > 0
+      ? (autoResolved.method === "min_max"
+        ? `Auto outlier removal is on, so it picks the method from your frame count: with ${autoResolved.n_frames} accepted, solved sub${autoResolved.n_frames === 1 ? "" : "s"} it will use min/max rejection, which drops the highest and lowest value at each pixel. It switches to sigma clipping from about ${autoResolved.switch_at_frames} subs, where there are enough frames to measure each pixel's spread.`
+        : `Auto outlier removal is on, so it picks the method from your frame count: with ${autoResolved.n_frames} accepted, solved subs it will use sigma clipping, which rejects pixels that sit far from the average. Below about ${autoResolved.switch_at_frames} subs it uses min/max rejection instead.`)
+      : null;
+
   // Sigma-clip rejection estimates each pixel's spread across the stack, so it
   // needs a handful of frames to be meaningful. With only a few it can throw
   // away real signal as if it were an outlier — a knob a beginner can't reason
   // about, so surface a plain-language "why". Advisory only; the pick stands.
   const SIGMA_CLIP_MIN_FRAMES = 5;
   const sigmaClipWarning =
-    values.sigma_clip && !frames.isLoading && solvedAccepted > 0
+    sigmaClipEffective && !frames.isLoading && solvedAccepted > 0
     && solvedAccepted < SIGMA_CLIP_MIN_FRAMES
       ? `Sigma-clip rejection estimates each pixel's spread across frames, but you only have ${solvedAccepted} accepted, solved frame${solvedAccepted === 1 ? "" : "s"}. With fewer than ~${SIGMA_CLIP_MIN_FRAMES} it can reject real signal as an outlier — consider turning it off for this stack.`
       : null;
@@ -546,7 +592,7 @@ export function StackView() {
   const kappa = Number(values.sigma_kappa ?? 3);
   const SIGMA_KAPPA_TIGHTER = 2.5;
   const sigmaKappaLargeHint =
-    values.sigma_clip && !frames.isLoading
+    sigmaClipEffective && !frames.isLoading
     && solvedAccepted >= SIGMA_CLIP_LARGE_FRAMES && kappa >= 3
       ? `With ${solvedAccepted} accepted frames the per-pixel spread is very well measured, so a tighter sigma-clip (κ≈2.5) can safely reject more satellites, planes and cosmic rays than the default κ=${kappa % 1 === 0 ? kappa.toFixed(0) : kappa}.`
       : null;
@@ -973,6 +1019,17 @@ export function StackView() {
               </Accordion.Panel>
             </Accordion.Item>
           </Accordion>
+
+          {autoRejectMethodNote ? (
+            <Alert color="blue" variant="light" py={6} px="sm">
+              <Text size="xs">{autoRejectMethodNote}</Text>
+              <Text size="xs" c="dimmed" mt={4}>
+                The sigma-clip and min/max switches are greyed out while Auto is
+                on — turn it off to pick the method yourself. Your κ and k
+                settings are still used either way.
+              </Text>
+            </Alert>
+          ) : null}
 
           {sigmaClipWarning ? (
             <Alert color="yellow" variant="light" py={6} px="sm">

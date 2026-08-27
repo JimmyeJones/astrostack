@@ -413,7 +413,17 @@ export function buildMasterSummary(r: Record<string, unknown>): string {
   const kind = typeof r.kind === "string" && r.kind ? r.kind : "master";
   const n = Number(r.n_frames ?? 0) || 0;
   const skipped = Number(r.n_skipped ?? 0) || 0;
-  let line = `Built a master ${kind} from ${n} frame${n === 1 ? "" : "s"}`;
+  // A very large dark/flat set is evenly sampled down to a memory bound before
+  // combining. That's a sound default, but it was only ever written to the log —
+  // so someone who dropped 200 darks read "built from 64 frames" and reasonably
+  // concluded 136 had failed. Say it, and say it as sufficiency rather than
+  // loss: the frames weren't wasted, they just weren't needed.
+  const supplied = Number(r.n_supplied ?? 0) || 0;
+  const sampled = supplied > n + skipped;
+  let line = sampled
+    ? `Built a master ${kind} from ${n} of the ${supplied} frames you gave`
+      + " (evenly sampled across the whole set — plenty for a clean master)"
+    : `Built a master ${kind} from ${n} frame${n === 1 ? "" : "s"}`;
   if (skipped > 0) {
     const buckets = r.skipped_buckets && typeof r.skipped_buckets === "object"
       ? (r.skipped_buckets as Record<string, unknown>) : {};

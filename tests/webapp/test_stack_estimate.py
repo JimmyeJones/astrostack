@@ -150,3 +150,40 @@ def test_estimate_422_when_nothing_solved(client, built_library):
 def test_estimate_unknown_target_404(client):
     r = client.get("/api/targets/does_not_exist/stack-estimate")
     assert r.status_code == 404
+
+
+def test_estimate_reports_what_auto_outlier_removal_resolves_to(
+    client, solved_library,
+):
+    """With "Auto outlier removal" on, the engine *overrides* the sigma-clip and
+    min/max toggles — so the form showing them as live could tell a beginner the
+    exact opposite of what runs. The estimate answers which method will actually
+    be used, from the same rule the picker applies, so the two can't drift."""
+    from seestack.stack.stacker import auto_reject_switch_frames
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    url = f"/api/targets/{safe}/stack-estimate"
+
+    # Auto off → null: the toggles below really are live, nothing to explain.
+    assert client.get(url).json()["auto_reject_resolved"] is None
+
+    # Auto on, 3 solved frames → min/max (κ-σ is blind to a lone outlier here).
+    resolved = client.get(url, params={"auto_reject": "true"}).json()[
+        "auto_reject_resolved"]
+    assert resolved["method"] == "min_max"
+    assert resolved["n_frames"] == 3
+    assert resolved["switch_at_frames"] == auto_reject_switch_frames(3.0)
+
+    # The boundary moves with κ, and the answer follows it rather than a
+    # hard-coded 11 in the browser.
+    tight = client.get(url, params={"auto_reject": "true",
+                                    "sigma_kappa": 1.0}).json()[
+        "auto_reject_resolved"]
+    assert tight["switch_at_frames"] == auto_reject_switch_frames(1.0)
+    assert tight["switch_at_frames"] < resolved["switch_at_frames"]
+
+    # Drizzle keeps its own two-pass rejection and auto leaves the toggles
+    # alone, so there is nothing to grey out → null again.
+    assert client.get(url, params={"auto_reject": "true",
+                                   "drizzle": "true"}).json()[
+        "auto_reject_resolved"] is None

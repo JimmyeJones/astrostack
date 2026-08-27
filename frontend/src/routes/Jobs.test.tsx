@@ -324,6 +324,38 @@ describe("buildMasterSummary", () => {
   it("falls back to 'master' when the kind is missing", () => {
     expect(buildMasterSummary({ n_frames: 4 })).toBe("Built a master master from 4 frames.");
   });
+
+  it("explains a large set that was evenly sampled, as sufficiency not loss", () => {
+    // 200 darks in, 64 combined: the beginner must not be left thinking 136
+    // files failed. Says what happened and that it was enough.
+    expect(buildMasterSummary({
+      kind: "dark", n_frames: 64, n_skipped: 0, n_supplied: 200,
+    })).toBe(
+      "Built a master dark from 64 of the 200 frames you gave (evenly sampled "
+      + "across the whole set — plenty for a clean master).",
+    );
+  });
+
+  it("keeps the set-aside detail alongside the sampling note", () => {
+    expect(buildMasterSummary({
+      kind: "flat", n_frames: 64, n_skipped: 2, n_supplied: 200,
+      skipped_buckets: { unreadable: 2 },
+    })).toBe(
+      "Built a master flat from 64 of the 200 frames you gave (evenly sampled "
+      + "across the whole set — plenty for a clean master) · 2 frames set aside "
+      + "(2 unreadable).",
+    );
+  });
+
+  it("says nothing about sampling when nothing was sampled", () => {
+    // Supplied == combined + set aside → the whole set was used; and an older
+    // backend that doesn't report the supplied count reads exactly as before.
+    expect(buildMasterSummary({
+      kind: "dark", n_frames: 18, n_skipped: 2, n_supplied: 20,
+    })).toBe("Built a master dark from 18 frames · 2 frames set aside.");
+    expect(buildMasterSummary({ kind: "dark", n_frames: 15, n_skipped: 0 }))
+      .toBe("Built a master dark from 15 frames.");
+  });
 });
 
 describe("pipelineSummary", () => {

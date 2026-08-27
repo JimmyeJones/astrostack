@@ -621,6 +621,95 @@ def test_jpeg_download_is_byte_for_byte_unchanged_without_the_new_flag(
 
     url = f"/api/targets/{safe}/stack-runs/{run_id}/jpeg"
     assert client.get(url).content == client.get(f"{url}?keepsake=false").content
+    assert client.get(url).content == client.get(f"{url}?scale=false").content
+
+
+def test_jpeg_download_scale_bakes_the_marks_onto_the_picture(client, solved_library):
+    """scale=true draws the scale bar and the North/East rose *onto* the shared
+    picture (the marks that don't travel with the file today, because the in-app
+    overlay is drawn in the browser). They go on the picture, not around it, so
+    unlike the keepsake the canvas size is unchanged."""
+    from io import BytesIO
+    from pathlib import Path
+
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    preview_path, run_id = _make_run_with_fits(solved_library, safe)
+    _add_rotated_wcs(Path(preview_path).parent / "master.fits", rot_deg=25.0)
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35}).status_code == 200
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/jpeg"
+    plain = client.get(url)
+    marked = client.get(f"{url}?scale=true")
+    assert plain.status_code == marked.status_code == 200
+    assert marked.headers["content-type"] == "image/jpeg"
+    assert marked.content[:2] == b"\xff\xd8"
+    assert marked.content != plain.content
+    with Image.open(BytesIO(plain.content)) as bare, \
+            Image.open(BytesIO(marked.content)) as withmarks:
+        assert withmarks.size == bare.size
+    # Its own filename, so saving it can't overwrite the plain download.
+    assert "_scale.jpg" in marked.headers["content-disposition"]
+    assert "_scale.jpg" not in plain.headers["content-disposition"]
+
+
+def test_jpeg_download_scale_is_a_clean_noop_without_a_wcs(client, solved_library):
+    """An older/edited run has no solved WCS, so there is no honest scale or
+    orientation to draw. Asking for the marks must give back the plain picture
+    rather than a made-up bar — the same graceful no-op north_up already has."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)  # no WCS
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35}).status_code == 200
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/jpeg"
+    assert client.get(f"{url}?scale=true").content == client.get(url).content
+
+
+def test_jpeg_download_scale_composes_with_north_up_and_keepsake(
+    client, solved_library,
+):
+    """The marks layer under both caption variants and follow a North-up rotate.
+
+    The rose has to turn with the pixels (it is read from the un-rotated WCS, so
+    a rotate that didn't carry it would leave the arms pointing at the old sky),
+    and the keepsake has to mat an *already-marked* picture — both are checked by
+    the combinations differing from the un-marked versions of themselves."""
+    from io import BytesIO
+    from pathlib import Path
+
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    preview_path, run_id = _make_run_with_fits(solved_library, safe)
+    _add_rotated_wcs(Path(preview_path).parent / "master.fits", rot_deg=25.0)
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35}).status_code == 200
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/jpeg"
+    north = client.get(f"{url}?north_up=true")
+    north_marked = client.get(f"{url}?north_up=true&scale=true")
+    assert north.status_code == north_marked.status_code == 200
+    assert north_marked.content != north.content
+    # Same canvas as the plain north-up picture: marks never resize the frame.
+    with Image.open(BytesIO(north.content)) as a, \
+            Image.open(BytesIO(north_marked.content)) as b:
+        assert a.size == b.size
+    # …and the marks are drawn differently once the picture has been turned, so
+    # they really did follow the pixels rather than staying put.
+    assert north_marked.content != client.get(f"{url}?scale=true").content
+
+    framed = client.get(f"{url}?keepsake=true")
+    framed_marked = client.get(f"{url}?keepsake=true&scale=true")
+    assert framed.status_code == framed_marked.status_code == 200
+    assert framed_marked.content != framed.content
+    with Image.open(BytesIO(framed.content)) as a, \
+            Image.open(BytesIO(framed_marked.content)) as b:
+        assert a.size == b.size  # the matte is unaffected by what's on the picture
+    # The keepsake still names itself, so the two downloads stay distinguishable.
+    assert "_keepsake.jpg" in framed_marked.headers["content-disposition"]
 
 
 def test_stack_info_reads_provenance_cards(client, solved_library):

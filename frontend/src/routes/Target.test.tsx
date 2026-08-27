@@ -260,6 +260,27 @@ describe("TargetView latest-picture download", () => {
       "Its name, date and exposure printed on the picture")).toBeInTheDocument();
   });
 
+  it("offers the scale-and-compass picture beside the plain downloads", async () => {
+    // The app draws both marks on screen, but a browser overlay doesn't travel
+    // with the file — so the downloaded picture loses the two things that make
+    // it read as a real astrophoto. This bakes them into the pixels.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await openSaveShare();
+    const marked = await screen.findByText("With scale & compass");
+    expect(marked.closest("a")).toHaveAttribute(
+      "href",
+      client.api.stackArtifactUrl("M_42", 9, "jpeg", false, false, false, true),
+    );
+    expect(screen.getByText(
+      "How big it is and which way is North, printed on the picture",
+    )).toBeInTheDocument();
+  });
+
   it("offers a wallpaper download of the latest stack's picture", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
