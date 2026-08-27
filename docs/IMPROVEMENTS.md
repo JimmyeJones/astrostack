@@ -49,6 +49,65 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🟡 WRONG-RESULT / IMAGE-QUALITY (Scout QA audit 2026-08-27 #17, branch `claude/vigilant-knuth-s4y5o3`,
+  reproduced) — bilinear debayer treats a genuine sample value of *exactly* `0.0` as "not a sample of this
+  channel", so it is dropped from the neighbour average used to interpolate the adjacent missing colour sites,
+  biasing those interpolated pixels. Fires on the on-by-default hot path (every debayer), but only meaningfully
+  when an *integer-valued* master dark makes exact-zero samples common.** *(Severity: low wrong-result /
+  image-quality — the interpolated chroma of pixels next to an exact-0 sample is off by up to ~1 ADU, mostly
+  upward on a positive sky background; gated on integer master darks — see reachability. Confidence:
+  reproduced end-to-end via `bilinear_debayer`.)*
+
+  **Root cause (traced + reproduced).** `bilinear_debayer` (`seestack/io/fits_loader.py`) builds sparse R/G/B
+  planes with `np.zeros_like(mosaic)` and populates only each channel's sample sites (`:234-254`). The two
+  interpolators then use a *value* test as the sample-site mask: `has_g = g_plane != 0` (`:310`) and
+  `has = plane != 0` (`:340`). That mask is used two ways — (a) `np.where(has, plane, avg)` keeps a real sample
+  and fills a missing site, and (b) the "normalized convolution" divides each missing site's neighbour **sum**
+  by a **count** of `!= 0` neighbours so off-frame (zero-filled) contributors are excluded. Both conflate
+  "structurally not this channel's site" (correct to exclude) with "a genuine datum that reads 0.0" (a real
+  sample that must be counted). So a real sample equal to `0.0` is excluded from the neighbour average of every
+  adjacent missing site of the same channel — the average then divides a smaller sum by a smaller count and
+  lands biased. (A genuine-0 *G sample site* is additionally overwritten by `avg`, but harmlessly: its cross
+  neighbours in the sparse `g_plane` are all non-G sites = 0, so `avg == 0` and 0→0. The R/B sample site is
+  protected by the positional `on_sample_row/col` masks at `:367-375`. The damage is purely to *neighbour
+  interpolation*.)
+
+  **Reachability (measured).** Exact-0 samples are essentially impossible in the *raw* sensor domain (Seestar
+  has a bias pedestal), and `align_one` debayers **after** dark/flat calibration (`align.py:133-144` →
+  `bilinear_debayer(raw)` where `raw = calibration.apply_raw(...)`), so the reachable trigger is dark
+  subtraction landing a light pixel exactly on the master-dark value. Measured on a synthetic Seestar-ish
+  background: a **float-averaged** master dark (the normal `_sigma_clip_mean` output) gives ~**0%** exact-zeros
+  → the bug essentially never fires; an **integer-valued** master dark (a single-frame master, or a median of
+  an odd count of integer darks) gives ~**10%** exact-zero pixels, each biasing its interpolated chroma
+  neighbours. So a healthy install with a proper multi-dark master is effectively unaffected; the bias is real
+  and non-trivial only with an integer master. Per-pixel magnitude is sub-ADU-to-~1-ADU and concentrated in the
+  darkest background (where neighbours are near 0), so it never touches star cores or bright nebulosity.
+
+  **Repro (reproduced this run):**
+  ```
+  python -c '
+  import numpy as np; from seestack.io.fits_loader import bilinear_debayer
+  m=np.zeros((4,4),np.float32); m[0,0]=100; m[0,2]=100; m[2,0]=0.0; m[2,2]=100
+  for y in range(4):
+   for x in range(4):
+    if m[y,x]==0 and not (y%2==0 and x%2==0): m[y,x]=50
+  print(bilinear_debayer(m,"RGGB")[1,1,0])'   # prints 100.0; correct diagonal mean incl the genuine 0 is 75.0
+  ```
+
+  **Fix direction (safe, byte-for-byte for the common case).** Replace the `!= 0` value test with an explicit
+  **positional** sample-site mask derived from the Bayer pattern — the same structure the code already computes
+  for R/B at `:367-375`. `_interp_rb` can build `has = on_sample_row & on_sample_col` (moving that computation
+  above the convolution); `_interp_g` needs the pattern passed in so it can mark G sites (`(yy+xx)%2 == g_parity`,
+  where `g_parity` is 1 for RGGB/BGGR and 0 for GRBG/GBRG). Shift the *structural* mask with the existing
+  zero-fill `_shift` so off-frame contributors still drop out (the edge-handling stays identical). This is
+  byte-for-byte identical to today for every frame with **no** exact-0 samples (the positional mask and `!= 0`
+  agree there), so a float-master or uncalibrated install is unchanged; only frames carrying genuine 0.0 samples
+  change, and there the new output is strictly more correct. **Guardrail:** this is the on-by-default debayer hot
+  path (§1) — a wrong G-parity would corrupt *every* frame, so it needs (1) a synthetic-frame regression proving
+  the exact-0 case now interpolates correctly for all four Bayer layouts, and (2) a byte-for-byte regression
+  proving an ordinary no-exact-0 frame is unchanged. Left for the Builder to implement deliberately with those
+  two tests rather than rushed in a Scout run.
+
 - ~~**🟠 WRONG-RESULT / DATA-THINNING (Scout QA audit 2026-08-27 #16, branch `claude/vigilant-knuth-vpqkm8`,
   reproduced end-to-end) — a registered, solved frame observed *mid in-place rewrite* (0-byte or truncated)
   was mistaken for a genuine content swap, so ingest dropped its plate solution and re-accepted it even when
@@ -253,6 +312,48 @@ _(none — claim an item here with your branch name)_
     quiet timer (re-arm), mirroring the disappear-then-return path that already re-arms. Pure, clock-injectable — add a
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
+
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #17, branch `claude/vigilant-knuth-s4y5o3`) — a **depth** sweep that
+  led with the stacking engine (`seestack/stack/*` + `seestack/calibrate/*`) across three parallel adversarial
+  traces, plus a live-app dogfood. Result: the engine core is clean for the **7th** consecutive sweep; one
+  low-severity **debayer** imperfection filed above (genuine exact-0 samples excluded from neighbour
+  interpolation — `fits_loader.py`, reproduced) and one cosmetic note below.** Baseline green before starting
+  (full headless suite: **3094 passed, 2 skipped** in 11:46). Live app booted + sample stacked end-to-end via
+  `scripts/agent-dogfood.sh` (happy path clean: no overflow, no console errors; the Target-page IA refactor has
+  landed — picture + frames above the fold, banner wall consolidated behind a "1 more note" disclosure).
+  **What was read adversarially and traced to a guard (every item a NON-finding except the debayer one filed
+  above):**
+  **Accumulators** (`accumulator.py`) — `WeightedSum`/`MinMaxReject`/`Welford` all NaN-aware; the min/max k-set
+  insertion sort maintains the k smallest/largest correctly and the ±inf identities never form an inf−inf NaN in
+  `result()`; the count-band degradation (≥2k+1 → full trim, 3..2k → single drop, 1-2 → mean, 0 → NaN) is exact;
+  `frame_coverage` counts a frame via `valid.any(axis=2)` so a per-channel κ-σ drop can't under-count "frames
+  per pixel".
+  **Weighting/photometric** (`weighting.py`, `photometric.py`) — geometric-mean weight stays in [min,1];
+  per-panel positional medians self-disable on a single field; `combine_weights_with_photometric` folds the
+  correct `1/s²` inverse-variance correction and returns the same object (byte-for-byte) when no scaling is
+  active.
+  **Drizzle/mosaic/pointings** (`drizzle_path.py`, `mosaic.py`, `pointings.py`) — NaN gaps stay NaN (never 0);
+  off-canvas frames deposit nothing; `_clip_tolerance` regimes all correct; CRPIX super-res scaling
+  `(crpix−0.5)·scale+0.5` and canvas bbox pad are exact; union-find pointing clustering wrap-safe.
+  **Align/calibrate** (`align.py`, `calibrate/apply.py`, `calibrate/masters.py`) — flat divide floors zero/neg/
+  sub-floor pixels to 1.0; dark exposure-scaling `bias+(dark−bias)·ratio` restores no-data pixels; a frame that
+  raises mid-stack is skipped cleanly (never touches the accumulator); reproject no-WCS raises, non-intersecting
+  footprint → None; all-float32 (no uint16 wrap).
+  **Stacker/output** (`stacker.py`, `output.py`) — κ-σ pass-1/pass-2 keep masks correct (NaN mean → keep, NaN
+  std → tol=+inf keep-all for single-coverage edges); memory guard `_estimate_peak_bytes` matches the real plane
+  counts; preview↔export share `_autostretch_for_export`; NaN→black consistently across FITS/TIFF/PNG.
+
+- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #17, traced — cosmetic, harmless today) —
+  `_archive_existing_outputs` (`seestack/stack/output.py:612`) excludes only `("coverage", "progress_webp",
+  "progress_apng")` from the repoint map, but **not** `"frame_coverage"` (`_framecov.fits`), which is the same
+  kind of basename-resolved artefact with no history column.** So on a re-stack that archives a prior
+  `_framecov.fits`, its `{orig: dst}` entry is added to the map returned to `repoint_stack_runs`. Harmless
+  today: `repoint_stack_runs` (`project.py:1061`) only runs `UPDATE ... WHERE {col}=?` over
+  `fits_path`/`tiff_path`/`preview_path`, and no row ever stores a framecov path in those columns, so the extra
+  entry matches zero rows (`rowcount==0`) — no image or history is affected. *(Severity: cosmetic — intent/
+  docstring inconsistency only. Confidence: traced.)* **Fix (one line):** add `"frame_coverage"` to the
+  exclusion tuple at `output.py:612` so it matches the docstring's "coverage + progress reel resolve from the
+  FITS basename" intent. Trivial, safe, easy to pair with the debayer fix or ship alone.
 
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #15, branch `claude/vigilant-knuth-ilxa69`) — a **depth** sweep that
   led with the stacking engine and then rotated onto the **QC metric layer** (`seestack/qc/*`) that feeds
@@ -10693,6 +10794,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
 
+- **NEW IDEA (Scout 2026-08-27 #17) — surface calibration *match confidence* on the interactive Stack form, so a
+  watching beginner gets the same smart dark/flat matching the walk-away path already does — and understands why
+  calibration is or isn't applied.** *(Pillar: autonomy + friendliness + image quality — PRIORITY 2/3. Size: S.)*
+  **Why (real gap).** The unattended chains already auto-bind the library's best *confidently-matching* master
+  dark/flat/bias when a walk-away stack has no calibration chosen — the whole `_confident_master_binding` →
+  `calibration.auto_bind_master_paths` machinery exists and compares the target's median exposure/gain/temp and
+  modal frame dims against every master (`webapp/pipeline.py:2122`, `2299`). But the **interactive Stack form**
+  gets none of that intelligence: today its Calibration box only says either *"No masters built yet"* or shows a
+  raw picker, and a beginner who *has* built a master has no idea whether it actually fits these subs. A 10s dark
+  bound to 30s lights makes the picture **worse**, silently. **Proposal:** when masters exist, run the same
+  read-only confidence check for the target being stacked and show a one-line verdict in the Calibration box —
+  green *"Your darks & flats match these subs (30s · gain 80)"* when auto-bind would confidently pick them, amber
+  *"Your only dark is 10s but these subs are 30s — it may not help"* when nothing matches, and offer the
+  confident pick as the default selection so the interactive path lands on the same masters the walk-away path
+  would. Pure surfacing of logic that already exists and is already tested engine-side; no new matching rules, no
+  default flip (the user still chooses), no schema/config change. Fits the "reduce the number of decisions"
+  mandate: the beginner stops having to *know* what a matching dark is. **Grep first:** `routers/stack.py` /
+  `get_stack_defaults` — confirm the form doesn't already thread a confidence hint before building; reuse
+  `_confident_master_binding` rather than re-deriving the match.
+
 - **NEW IDEA (Scout 2026-08-26 #6) — auto-detect the Seestar's calibration-frame folders sitting in `incoming/`
   and offer a one-click "Build master darks" instead of making the beginner know what calibration is.**
   *(Pillar: autonomy + image quality — PRIORITY 2/4. Size: M.)* The editor's "How's my stack?" panel already
@@ -15612,6 +15733,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #17) — "Was the Moon in your way?": a plain-language per-session
+  moonlight note that tells a beginner when a bright, nearby Moon washed out their faint target, so they
+  understand why some nights look worse and can plan Moon-free nights.** *(Pillar: understand + plan, PRIORITY
+  3 (with a 2 flavour — it nudges better scheduling); size S; fully offline — `astropy` is already a dependency,
+  no network, no location needed, additive, read-only.)*
+  **Why (real friction).** A beginner shoots the same target across several nights and sees one night come out
+  noticeably brighter/greyer with less faint detail, with no idea why. The usual culprit is the **Moon** — a
+  bright Moon near the target floods the sky with scattered light. The app already knows everything it needs:
+  each session's **date/time** (from the frames) and the target's **RA/Dec centre** (from the plate solve). So
+  it can compute, per session, the Moon's **illuminated fraction** (phase — needs only the time) and the
+  **geocentric angular separation** between the Moon and the target — both from `astropy`
+  (`get_body('moon', Time)` + the Sun for phase), with **no observer location required** (the topocentric
+  parallax is <1° and irrelevant to a plain-language "the Moon was bright and close" note). Surface it on the
+  existing **session recap** (`seestack/qc` / the Overview tab's "Last session" card): e.g. *"The Moon was 89%
+  full and 34° from Orion Nebula during your 15 Nov session — that's why the background looks brighter and faint
+  detail is harder. Your darker, Moon-free nights on this target will go deeper."* Keep it a **note, not a
+  verdict**: never reject frames or change a stack from this — it's pure understanding + planning. Degrade
+  cleanly (no note) when the session has no solved centre or no timestamp.
+  **Honest bar.** Frame it around **phase + separation** (both location-free and exact); do **not** claim Moon
+  *altitude* / "was it up" (that needs the observer location the headless app doesn't reliably have). A short
+  threshold table decides whether to speak at all — e.g. only note it when illuminated-fraction ≳ 40% **and**
+  separation ≲ 60°, so a thin crescent or a Moon on the far side of the sky stays silent. Pure/unit-testable:
+  the phase+separation math and the "should we say anything, and in what words" logic are pure functions over
+  `(session_time, target_ra_dec)`, tested against a couple of known dates. **Grep first:** confirm no existing
+  session-recap/planner card already surfaces Moon phase before building.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #16) — "Download all my pictures": one button that streams every
   finished target picture in the library as a single `.zip`, so a beginner can back up or share a whole
