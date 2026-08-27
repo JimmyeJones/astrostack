@@ -558,6 +558,59 @@ _(none — claim an item here with your branch name)_
   `stack/weighting.py` (`star_count > 0` — zero stars really is unusable). *(Confidence: read, not reproduced —
   each was traced to why 0 means "none" there. Filed as a note, not a bug.)* If a future change makes any of
   those quantities able to be a *measured* zero, this is the shape of the mistake to look for.
+- **✅ SHIPPED (Scout, v0.287.2, this run) — ~~the pre-run `estimate_stack` memory/frame estimate does NOT drop
+  gross plate-solve outliers the way the real `run_stack` does, so the estimate's `n_frames` (and, at a
+  threshold, its auto-reject method) can be higher than what the run actually stacks.~~** Fixed:
+  `estimate_stack` now removes `canvas.excluded_frame_ids` from `frames` before `n = len(frames)` (read-only —
+  unlike `run_stack` it doesn't flag them rejected in the DB), mirroring the run's outlier drop. Regression
+  test `test_estimate_drops_gross_outliers_like_the_run` (8 good subs + one 15°-away outlier → estimate reports
+  8, was 9; fails before / passes after). Full suite green. *(Original finding kept below for provenance.)*
+  *(Severity: cosmetic — affected only the pre-submit UI estimate; the stacked pixels were untouched.
+  Confidence: traced + reproduced.)*
+  **Root cause (traced).** `run_stack` builds the mosaic canvas and then removes `canvas.excluded_frame_ids`
+  from `frames` before it counts (`seestack/stack/stacker.py:1380-1383`, "Frames dropped as gross plate-solve
+  outliers during canvas sizing must also be excluded from the stack"). `estimate_stack` calls the *same*
+  `compute_mosaic_canvas` (`stacker.py:790`) and uses `canvas.shape`/`canvas.is_mosaic`, but never reads
+  `canvas.excluded_frame_ids` and never filters `frames` before `n = len(frames)` (`stacker.py:802`). So a
+  target with a few footprint-outlier subs reports an estimate `n` a handful of frames higher than the run
+  uses, and — only if that difference straddles the n≥4 (κ-σ) / n≥3 (min/max) reject-method gate that
+  `_resolve_auto_reject(options, n)` keys on — the estimated *method* (and thus the estimated peak, via the
+  min/max reject planes) can differ from the run's. **Reachability (honest):** only fires on a mosaic/union
+  canvas that actually excludes outliers, and the visible effect is almost always just a slightly-high frame
+  count in the estimate panel; the method/peak mismatch needs `n` to cross the gate. No effect on the final
+  image. **Fix direction:** after `compute_mosaic_canvas`, drop `canvas.excluded_frame_ids` from `frames`
+  before `n = len(frames)` (mirror the `run_stack` filter — no need to flag them rejected here, this is a
+  read-only estimate). Regression test: an estimate over frames including a gross-outlier sub reports the same
+  `n_frames` the run stacks. One file + test. Left for the Builder. *(Found by the stacker-rejection
+  adversarial audit this run.)*
+
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #21, branch `claude/vigilant-knuth-gcb43u`) — led with the stacking
+  engine per the rotation. Ran my own adversarial reads of `accumulator.py`, `weighting.py`, `photometric.py`,
+  `stacker.py` (κ-σ two-pass + min/max wiring + output/preview parity) and `render/thumbnail.py`
+  (asinh/STF stretch parity), plus **three parallel adversarial audits**: (1) `drizzle_path.py` + `mosaic.py`;
+  (2) `calibrate/apply.py` + `masters.py` + `align.py`; (3) `stacker.py` rejection/combine + `reference.py` +
+  `pointings.py`. **Result: the stacking engine core stays clean (11th consecutive sweep)** — no verifiable
+  data-integrity bug. Only ONE new verified finding, cosmetic: the `estimate_stack` outlier-exclusion
+  discrepancy (pre-run UI estimate only; pixels untouched) — **found, fixed and shipped this run (v0.287.2)**,
+  see the SHIPPED entry directly above. Baseline green before starting
+  (full headless suite: **3144 passed, 2 skipped, 0 failed**). **Traced NON-findings (recorded so they aren't
+  re-chased):** drizzle var-moments share weights so `E[v²]−E[v]²` is Jensen-nonneg; drizzle rejection floor /
+  `neff`=true-frame-count / `wht>0 ⇒ count≥1` all sound; drizzle CRPIX `(crpix−0.5)·s+0.5` and half-open
+  in-bounds edges correct; mosaic RA-wrap uses circular mean + haversine (wrap/pole-safe); calibrate
+  exposure-scaling `bias+(dark−bias)·(t_l/t_d)`, flat floor→1.0, pedestal sanitize→0 all correct and no
+  double-bias; `_sigma_clip_mean` mad==0→tol=0 rejects a minority spike while all-NaN degrades to NaN;
+  κ-σ pass-2 keep-mask widens to keep-all on σ-unknown (+inf tol) and mean-unknown (keep) so pass-2 data is
+  never turned into a NaN gap; photometric `pscales` applied once per fresh array in BOTH passes (no double-
+  apply — `align_one` has no caching) with the `1/s²` correction folded only into `combine_weights`;
+  `WeightedSum` keeps Σ-weights (`coverage`) separate from the true frame count (`frame_coverage`) and the
+  diagnostics/leveling read the honest count; min/max k-insertion sort + band schedule + `rejection_counts`
+  match `result()` exactly; asinh/STF both normalise over covered pixels with a robust 99.5th-pct ceiling and a
+  soft highlight rolloff, NaN excluded from every stat. **Low-severity edge notes (NOT filed — cannot affect a
+  real Seestar run):** CPU vs GPU reproject `cval` (NaN vs 0.0) diverge only on ≤12-px synthetic frames where
+  the 3-px edge inset is skipped; `win_valid` is left stale after a sub-pixel refine but every accumulator
+  recomputes `valid = np.isfinite(window_image)`, so the stale True at a now-NaN pixel is still excluded
+  (benign by contract). Editor/webapp not re-audited this run (drained + clean per #18-#20).**
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`) — led with the stacking
   engine per the rotation (my own adversarial read), then fanned three parallel audits across the
   **less-recently-swept** subsystems: (1) plate-solve (`seestack/solve/astap.py`, `runner.py`, `bootstrap.py`);
@@ -16331,6 +16384,38 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #21) — "Was I centred? — a plain-language framing check on the
+  finished stack that tells a beginner if their object is running off an edge and which way to nudge the Seestar
+  next session.** *(Pillar: understand + friendliness + better-picture-next-time, PRIORITY 3; size M; additive,
+  read-only, no new deps — uses the stack WCS + the target's catalog coords the app already resolves.
+  Confidence for the gap: traced — `frontend/src/components/target/nextBestMove.ts` coaches on
+  locate-subs / too-thin / soft-stars / short-integration / all-good, but has **no framing/centering lever**;
+  grep found no `centred`/`recenter`/`framing`-feedback surface anywhere in `frontend/src`, `seestack`, or
+  `webapp/routers`.)* **Why (real friction, distinct value).** A Seestar owner points, taps go-to, and trusts
+  the mount — but a beginner has no easy way to tell, *after the fact*, that Andromeda ran half off the frame or
+  that the galaxy they wanted is jammed against the top edge and clipped. The app already has the two facts
+  needed to say so: the finished stack's WCS (so it knows the sky footprint) and the target's catalog position
+  (`target_id` → RA/Dec, the same lookup `AnnotatedImage`/object-labels already use). Every existing
+  "next time" coach (`nextBestMove`) is about *depth/focus/plate-solve* — none is about *where you pointed*,
+  which is the other half of "why doesn't my picture look like the example." **Shape (one calm sentence, sane
+  default, no knobs).** Compute where the catalog object lands in the final canvas (project its RA/Dec through
+  the stack WCS), and how far that is from centre as a fraction of the field. If it's comfortably central →
+  say nothing (or a quiet "nicely framed ✓"). If it's well off-centre or its catalog extent overruns a canvas
+  edge → one plain line: *"Andromeda is running off the left edge — next clear night, nudge your Seestar a
+  little west (~0.4°) to centre it."* Translate the offset into a cardinal direction + a rough degrees value a
+  Seestar user can act on; never a pixel coordinate. Natural home: a new rung in the existing `nextBestMove`
+  coaching card (reuse its "one highest-leverage lever, fixed order, stays silent when all-good" shape) rather
+  than a new banner — keeps the IA priority (AGENTS §1). **Beginner bar:** clears it — a non-expert instantly
+  gets "my target is off to one side, move a bit that way", it needs zero configuration, and it directly helps
+  them get a better-framed picture next session. **Cautions / guardrails:** strictly read-only (reads the stack
+  WCS header + catalog coords; never touches `incoming/`, never re-renders); fire **only** when the object is
+  confidently identified (a resolved `target_id` with catalog coords) and the stack has a usable WCS —
+  otherwise stay silent, never guess; a *mosaic* is centred-by-construction on its union canvas, so suppress the
+  nudge there (or judge against the intended pointing, not the union centre); use the object's catalog *size*
+  where known so a large object that fills the frame reads as "well-framed" not "off-centre". **Builder: grep
+  first** — reuse the object/coords lookup that already backs the labels overlay and slot the logic into
+  `nextBestMove` rather than a parallel definition of "which object is this."
+
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #20) — "Show and tell": a full-screen, auto-advancing slideshow of
   your best pictures, each captioned with its object name and a one-line fact — a zero-config "just play" view a
   beginner can put on a TV, tablet or laptop at a star party, in a classroom, or for family.** *(Pillar: enjoy +
@@ -22688,6 +22773,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **IDEA (Scout 2026-08-27 #21) — extract the shared "resolve frames → build mosaic canvas → drop
+  gross-outlier subs" prologue that `estimate_stack` and `run_stack` each re-implement, so the two can't drift
+  apart again.** *(Pillar: trust — the pre-run estimate should match the run; size S–M; pure refactor, no
+  behaviour change.)* The cosmetic `estimate_stack` bug filed at the top of "Bugs" this run (the estimate not
+  dropping `canvas.excluded_frame_ids` before counting frames) is a *symptom*: both functions independently
+  pick the reference, call `compute_mosaic_canvas`, and decide the canvas — but only `run_stack` also removes
+  the outliers, because the prologue is copy-pasted rather than shared. Factor the common prologue into one
+  helper (`(frames, dst_shape, is_mosaic, ref_shape)` after outlier exclusion) that both call, so a future
+  change to canvas/frame resolution lands in both by construction. Keep it a **pure refactor** with the
+  existing tests as the guard, plus one new test asserting `estimate_stack` and `run_stack` agree on the frame
+  count for a target with a gross-outlier sub (which also closes the filed bug). Do this only when already in
+  `stacker.py` for something else — not worth a dedicated slot, but it retires a whole drift class.
 
 - **⚪ HARNESS PAPERCUT (Builder 2026-08-27, tripped over it and verified it on pristine `main` — recorded so
   the next agent doesn't spend the time I did) — naming `tests/webapp/…` and `tests/…` files in the *same*

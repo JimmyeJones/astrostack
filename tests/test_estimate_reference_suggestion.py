@@ -56,6 +56,57 @@ def test_suggests_reference_canvas_when_union_over_budget(tmp_path):
         proj.close()
 
 
+def _clustered_project_with_outlier(tmp_path) -> Project:
+    """Eight good frames on one compact pointing + one frame flung 15° away.
+
+    The far frame is a gross plate-solve outlier the mosaic canvas sizing drops
+    before it stacks — so a faithful estimate must count 8 frames, not 9.
+    """
+    proj = Project.create(tmp_path / "p", name="clustered")
+    good_wcs = make_synth_wcs_text(
+        width=480, height=320, ra_center_deg=50.0, dec_center_deg=10.0,
+        pixscale_arcsec=5.0,
+    )
+    for i in range(8):
+        proj.add_frame(FrameRow(
+            source_path=f"good_{i}.fit", cached_path=f"good_{i}.fit",
+            width_px=480, height_px=320, bayer_pattern="RGGB",
+            wcs_json=good_wcs, ra_center_deg=50.0, dec_center_deg=10.0,
+            pixscale_arcsec=5.0,
+        ))
+    far_wcs = make_synth_wcs_text(
+        width=480, height=320, ra_center_deg=65.0, dec_center_deg=10.0,
+        pixscale_arcsec=5.0,
+    )
+    proj.add_frame(FrameRow(
+        source_path="far.fit", cached_path="far.fit",
+        width_px=480, height_px=320, bayer_pattern="RGGB",
+        wcs_json=far_wcs, ra_center_deg=65.0, dec_center_deg=10.0,
+        pixscale_arcsec=5.0,
+    ))
+    return proj
+
+
+def test_estimate_drops_gross_outliers_like_the_run(tmp_path):
+    """Regression: ``estimate_stack`` must exclude the same gross plate-solve
+    outliers ``run_stack`` drops during canvas sizing, so its ``n_frames`` matches
+    what the run actually stacks.
+
+    Before the fix the estimate never read ``canvas.excluded_frame_ids`` and so
+    reported 9 frames for a target the run stacks with 8 (the 15°-away sub is
+    dropped as a footprint outlier). Cosmetic — estimate-only — but the estimate
+    should not disagree with the run about how many frames there are.
+    """
+    proj = _clustered_project_with_outlier(tmp_path)
+    try:
+        opts = StackOptions(drizzle=False, mosaic_canvas="auto")
+        est = estimate_stack(proj, opts, memory_budget_gb=1.0)
+        # The flung frame is excluded; only the 8 good subs count.
+        assert est.n_frames == 8
+    finally:
+        proj.close()
+
+
 def test_no_reference_suggestion_when_union_fits(tmp_path):
     proj = _mosaic_project(tmp_path)
     try:
