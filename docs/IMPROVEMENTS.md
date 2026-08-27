@@ -12387,21 +12387,51 @@ problems. Dogfood it every big-picture run and fix root causes.
     toggles' stored values intact (don't zero them) so turning Auto *off* restores the user's prior manual pick;
     test that the disable + the resolved-method line track `auto_reject` and the frame count.
 
-- **IMPROVEMENT IDEA (Scout 2026-08-27 #7, verified by grep) — a master dark/flat built from more than 64
-  frames silently drops the extras, and the beginner is never told.** *(Pillar: friendliness + trust — PRIORITY
-  3. Size: S.)* `build_master` (`seestack/calibrate/masters.py`) caps the frames actually combined at
-  `max_frames=64`, evenly sampling the input down to bound peak memory — a sound default — but the fact that it
-  sampled is **only written to the log** (`log.info("Master %s: sampling %d of %d frames", …)`); the Calibration
-  page's result (which already surfaces the `skipped` list of unusable frames) says nothing about it. A beginner
-  who drops 200 darks and gets a master "from 64 frames" may think 136 files failed, or that the app is broken.
-  **Verified genuinely un-surfaced (grepped this run):** `max_frames`/"sampling"/"sampled" appear nowhere in
-  `webapp/` or `frontend/src/` — only in the engine log. **Shape (small, additive):** thread the "used N of M
-  (evenly sampled — plenty for a clean master)" count out of `build_master` alongside the existing `skipped`
-  return, and render it as one reassuring plain line on the Calibration result — *"Built from 64 of your 200
-  darks (evenly sampled across the set — plenty for a clean master)."* No behaviour change, no new default; it
-  just explains a decision the app already makes. Testable at the helper (200 paths → reported used=64,
-  total=200) and the router (the line appears only when M > 64). **Care:** phrase it as *sufficiency*, never as
-  a loss — the beginner should come away reassured, not worried their frames were wasted.
+- ~~**IMPROVEMENT IDEA (Scout 2026-08-27 #7, verified by grep) — a master dark/flat built from more than 64
+  frames silently drops the extras, and the beginner is never told.**~~ — **SHIPPED v0.284.2** (Builder
+  2026-08-27, branch `agent/builder-run`).
+
+  **What shipped, exactly as filed.** `MasterMeta` grew `n_supplied` (how many frames the caller actually
+  pointed at, recorded *before* the `max_frames` sampling), the build job returns it beside the existing
+  `n_skipped`/`skipped_buckets`, and `buildMasterSummary` says it in one line —
+  *"Built a master dark from 64 of the 200 frames you gave (evenly sampled across the whole set — plenty for a
+  clean master)."* Phrased as **sufficiency, never loss**, per the item's own caution: the 136 weren't wasted,
+  they weren't needed. No behaviour change — the sampling is unchanged and remains the right default.
+
+  **Self-hiding by construction, not by a flag.** The note appears only when `n_supplied > n_frames +
+  n_skipped`, i.e. when sampling genuinely happened; an ordinary set reads exactly as it did before, and a job
+  result from an older backend (no `n_supplied`) also reads exactly as before. Sampling is deliberately *not*
+  counted as a skip, so the existing "N frames set aside" accounting is untouched and the two can appear
+  together without contradicting each other.
+
+  **One decision worth knowing:** `n_supplied` is **not** written into the master's FITS header. It is a
+  build-time fact, not part of the master's identity, and stamping it would mean a master loaded back from disk
+  either lying or carrying a card older masters lack. A loaded `MasterMeta` reports `None` — pinned by a test.
+
+  **Upgrade-safe (§9):** one dataclass field with a `None` default (every positional construction in the suite
+  still works), one additive key in a job result, one frontend string. No config, schema, on-disk, API-shape or
+  default change; existing master FITS files and registry entries are untouched. **Tests: +6** — 2 engine
+  (`test_calibrate.py`: the sampled and un-sampled counts, and the header staying clean), 2 API
+  (`tests/webapp/test_calibration.py`: the supplied count on a clean set, and a build forced through a small
+  bound reporting supplied 5 / combined 2 / skipped 0), 2 frontend (`Jobs.test.tsx`: the sampled line, the
+  sampled-plus-set-aside line, and the two silent cases).
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness + trust — PRIORITY
+    3. Size: S.)* `build_master` (`seestack/calibrate/masters.py`) caps the frames actually combined at
+    `max_frames=64`, evenly sampling the input down to bound peak memory — a sound default — but the fact that it
+    sampled is **only written to the log** (`log.info("Master %s: sampling %d of %d frames", …)`); the Calibration
+    page's result (which already surfaces the `skipped` list of unusable frames) says nothing about it. A beginner
+    who drops 200 darks and gets a master "from 64 frames" may think 136 files failed, or that the app is broken.
+    **Verified genuinely un-surfaced (grepped this run):** `max_frames`/"sampling"/"sampled" appear nowhere in
+    `webapp/` or `frontend/src/` — only in the engine log. **Shape (small, additive):** thread the "used N of M
+    (evenly sampled — plenty for a clean master)" count out of `build_master` alongside the existing `skipped`
+    return, and render it as one reassuring plain line on the Calibration result — *"Built from 64 of your 200
+    darks (evenly sampled across the set — plenty for a clean master)."* No behaviour change, no new default; it
+    just explains a decision the app already makes. Testable at the helper (200 paths → reported used=64,
+    total=200) and the router (the line appears only when M > 64). **Care:** phrase it as *sufficiency*, never as
+    a loss — the beginner should come away reassured, not worried their frames were wasted.
 
 - ~~**IMPROVEMENT IDEA (Scout 2026-08-26 #5, measured this run) — the shipped "what am I looking at?" object
   card is SILENT for most real targets because the catalog `blurb` field is only half-populated.**~~ —
