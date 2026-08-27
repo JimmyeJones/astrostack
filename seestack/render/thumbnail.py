@@ -456,6 +456,30 @@ def applied_north_up_deg(fits_path: str | Path) -> float:
     return applied_rotation_deg(angle)
 
 
+def pending_north_up_deg(fits_path: str | Path, already_deg: float = 0.0) -> float:
+    """How much *further* a picture that is already turned ``already_deg`` has to
+    turn for celestial North to be up — ``0.0`` when it is already there (or when
+    the run carries no usable WCS, where we can't say and so leave the pixels
+    alone).
+
+    The share/wallpaper downloads re-orient the run's **stored preview bytes**,
+    and History's "Adjust → North up → Save" can have baked the whole rotation
+    into those bytes already (recorded as ``stack_runs.preview_north_up_deg``).
+    Asking for the *remainder* rather than the full :func:`applied_north_up_deg`
+    is what stops such a download turning the picture a second time. With the
+    default ``already_deg=0.0`` this is exactly the angle those callers used
+    before, so an un-rotated preview is byte-for-byte unchanged.
+    """
+    from seestack.render.orient import NORTH_UP_MIN_DEG, applied_rotation_deg
+
+    angle = stack_north_up_deg(fits_path)
+    if angle is None:
+        return 0.0
+    total = 0.0 if abs(angle) < NORTH_UP_MIN_DEG else applied_rotation_deg(angle)
+    remainder = (total - float(already_deg) + 180.0) % 360.0 - 180.0
+    return 0.0 if abs(remainder) < NORTH_UP_MIN_DEG else remainder
+
+
 def _apply_north_up(disp: np.ndarray, fits_path: str | Path) -> np.ndarray:
     """Rotate a display image so North is up, using the FITS's own WCS. A missing
     WCS or a sub-threshold correction leaves the pixels unchanged, so the render
@@ -468,7 +492,9 @@ def _apply_north_up(disp: np.ndarray, fits_path: str | Path) -> np.ndarray:
     return np.clip(rotate_image_north_up(disp, angle), 0.0, 1.0)
 
 
-def orient_preview_north_up(preview_png: bytes, fits_path: str | Path) -> bytes:
+def orient_preview_north_up(
+    preview_png: bytes, fits_path: str | Path, *, already_deg: float = 0.0,
+) -> bytes:
     """Rotate an already-rendered stack *preview* PNG so celestial North is up,
     using the run's own master-FITS WCS, and return it re-encoded as PNG.
 
@@ -482,15 +508,22 @@ def orient_preview_north_up(preview_png: bytes, fits_path: str | Path) -> bytes:
     no-correction request is byte-for-byte the un-oriented preview and never
     needlessly resamples. Exposed corners fill with black (the app's uncovered/NaN
     convention), matching the JPEG flatten in :func:`~seestack.stack.output.
-    png_bytes_to_jpeg`."""
+    png_bytes_to_jpeg`.
+
+    ``already_deg`` is the rotation these bytes **already carry** — History's
+    "Adjust → North up → Save" bakes the whole correction into the stored preview
+    and records it on the run. Pass it and only the *remainder* is applied
+    (:func:`pending_north_up_deg`), so a picture that is already North-up comes
+    back untouched instead of being turned a second time. The default ``0.0``
+    leaves every existing call bit-for-bit unchanged."""
     import io
 
     from PIL import Image
 
-    from seestack.render.orient import NORTH_UP_MIN_DEG, rotate_image_north_up
+    from seestack.render.orient import rotate_image_north_up
 
-    angle = stack_north_up_deg(fits_path)
-    if angle is None or abs(angle) < NORTH_UP_MIN_DEG:
+    angle = pending_north_up_deg(fits_path, already_deg)
+    if not angle:
         return preview_png
     with Image.open(io.BytesIO(preview_png)) as src:
         rgb = np.asarray(src.convert("RGB"), dtype=np.float32) / 255.0
