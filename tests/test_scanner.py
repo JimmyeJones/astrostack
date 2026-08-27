@@ -116,6 +116,35 @@ def test_apply_seestar_convention_is_case_insensitive():
     assert [n for n, _ in units] == ["Ngc 7000"]
 
 
+def test_apply_seestar_convention_sibling_skip_is_parent_scoped():
+    """The bare-``<T>``-is-output skip must fire only when the ``<T>_sub`` sibling
+    shares the *same parent*. A ``<T>_sub`` under an unrelated parent (e.g. a
+    container-expanded drop) must NOT cause a root-level bare ``<T>`` of real subs
+    to be dropped — that silently loses a whole session's frames."""
+    # M31 (root) is a real folder of subs; M31_sub lives under a *different*
+    # parent (an expanded container). M31 must survive.
+    units = _apply_seestar_convention(
+        [("M31", ["/inc/M31/a.fit"]), ("M31_sub", ["/inc/MyWorks/M31_sub/b.fit"])],
+        parents=["/inc", "/inc/MyWorks"],
+    )
+    names = [n for n, _ in units]
+    assert "M31" in names  # root subs kept, not skipped as output
+    # Both fold to the same target "M31", so both units are named "M31".
+    assert names.count("M31") == 2
+
+
+def test_apply_seestar_convention_sibling_skip_fires_for_true_sibling():
+    """The same-parent output skip must still fire (no regression): a bare
+    ``<T>`` beside its ``<T>_sub`` under the same parent is the on-device output
+    and is skipped."""
+    units = _apply_seestar_convention(
+        [("M31_sub", ["/inc/M31_sub/a.fit"]), ("M31", ["/inc/M31/out.fit"])],
+        parents=["/inc", "/inc"],
+    )
+    # M31_sub -> "M31"; the sibling bare "M31" output is skipped.
+    assert [n for n, _ in units] == ["M31"]
+
+
 def test_classify_junk_video_by_target_name():
     """A target named '<T>_video' is a Seestar video capture — flagged as junk
     regardless of what its frames' source folders look like (no disk needed)."""
@@ -420,6 +449,47 @@ def test_scan_expands_a_whole_device_container_drop(tmp_path):
         assert by_name["M 31"].n_frames_added == 2             # subs, not the output
         assert by_name["NGC 7000 (mosaic)"].n_frames_added == 2
         assert {t.name for t in lib.list_targets()} == {"M 31", "NGC 7000 (mosaic)"}
+    finally:
+        lib.close()
+
+
+def test_scan_keeps_root_subs_when_container_has_same_named_sub(tmp_path):
+    """Regression: a root-level bare 'M 31/' folder of REAL subs must not be
+    dropped just because an unrelated whole-device container elsewhere in the
+    same drop contains an 'M 31_sub/' child. Before the sibling test was
+    parent-scoped, the container's 'M 31_sub' put 'm 31_sub' into one global name
+    set, so the root 'M 31/' was skipped as if it were on-device output and its
+    whole session vanished."""
+    scan_root = tmp_path / "incoming"
+    # Root-level real subs of M 31 (>2 frames, so not mistaken for a 1-image
+    # on-device output), with NO 'M 31_sub' sibling of their own at root.
+    (scan_root / "M 31").mkdir(parents=True)
+    for i in range(3):
+        write_seestar_fits(scan_root / "M 31" / f"Light_{i:03d}.fit", n_stars=5, seed=i)
+    # A separate whole-device container with an unrelated same-named M 31_sub.
+    works = scan_root / "MyWorks"
+    (works / "M 31_sub").mkdir(parents=True)
+    write_seestar_fits(works / "M 31_sub" / "Light_001.fit", n_stars=5, seed=50)
+    write_seestar_fits(works / "M 31_sub" / "Light_002.fit", n_stars=5, seed=51)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, scan_root)
+        entry = lib.find_target("M 31")
+        assert entry is not None
+        proj = lib.open_target(entry.safe_name)
+        try:
+            srcs = [f.source_path for f in proj.iter_frames()]
+            accepted = [f for f in proj.iter_frames() if f.accept]
+        finally:
+            proj.close()
+        # Both the 3 root subs and the 2 container subs land in the one M 31
+        # target, and the root subs are accepted (the output-reject size guard
+        # leaves a >2-frame folder alone).
+        root_subs = [s for s in srcs if "MyWorks" not in s]
+        assert len(root_subs) == 3, srcs
+        assert len(srcs) == 5, srcs
+        assert len(accepted) == 5
     finally:
         lib.close()
 

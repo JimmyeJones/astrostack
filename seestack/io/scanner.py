@@ -66,6 +66,7 @@ _VIDEO_SUFFIX = "_video"
 
 def _apply_seestar_convention(
     subdirs_with_fits: list[tuple[str, list[Path]]],
+    parents: list[str] | None = None,
 ) -> list[tuple[str, list[Path]]]:
     """
     Map raw scan folders to ``(target_name, files)`` units, honouring the
@@ -79,17 +80,34 @@ def _apply_seestar_convention(
       distinct from the single-field target so their differing footprints are
       never co-stacked or auto-merged).
     * ``<T>_sub`` → target ``"<T>"`` (a single field's raw subs).
-    * a bare ``<T>`` whose ``<T>_sub`` sibling is also present → skipped (it's
-      the Seestar's on-device stacked output, not raw subs).
+    * a bare ``<T>`` whose ``<T>_sub`` **sibling** is also present → skipped
+      (it's the Seestar's on-device stacked output, not raw subs).
     * any other bare folder → ingested unchanged (older / non-Seestar layouts
       whose subs live directly in a plainly-named folder).
+
+    ``parents`` is an optional list parallel to ``subdirs_with_fits`` giving each
+    folder's parent-directory key, so the "``<T>_sub`` sibling present" test is
+    scoped to folders that actually share a parent. This matters once the scanner
+    expands a whole-device container (``incoming/MyWorks/{M 31_sub, …}``) into the
+    same unit list as ordinary root-level folders (``incoming/M 31/``): without
+    parent scoping a bare ``incoming/M 31/`` of real subs is wrongly skipped as
+    "output" merely because an **unrelated** ``incoming/MyWorks/M 31_sub/`` exists
+    elsewhere in the drop, silently losing that session's frames. When ``parents``
+    is omitted, every folder is treated as a sibling of every other (the original
+    single-level behaviour), which is exactly right for a flat scan root.
 
     Order is preserved. Folder names are compared case-insensitively for the
     suffix tests, but the target name keeps the folder's original casing.
     """
-    names_lower = {name.lower() for name, _ in subdirs_with_fits}
+    if parents is None:
+        parents = [""] * len(subdirs_with_fits)
+    # (parent, lowercased-name) so the sibling test never matches across parents.
+    sibling_names = {
+        (parent, name.lower())
+        for (name, _), parent in zip(subdirs_with_fits, parents, strict=True)
+    }
     units: list[tuple[str, list[Path]]] = []
-    for name, files in subdirs_with_fits:
+    for (name, files), parent in zip(subdirs_with_fits, parents, strict=True):
         low = name.lower()
         if low.endswith(_VIDEO_SUFFIX):
             continue
@@ -101,9 +119,9 @@ def _apply_seestar_convention(
             base = name[: -len(_SUB_SUFFIX)].rstrip()
             units.append((base if base else name, files))
             continue
-        # A bare folder: skip it only when its raw-sub sibling is present (then
-        # it's the Seestar's own output). Otherwise ingest it as today.
-        if (low + _SUB_SUFFIX) in names_lower:
+        # A bare folder: skip it only when its raw-sub sibling (same parent) is
+        # present (then it's the Seestar's own output). Otherwise ingest it.
+        if (parent, low + _SUB_SUFFIX) in sibling_names:
             continue
         units.append((name, files))
     return units
@@ -419,6 +437,12 @@ def scan_and_organize(
     )
 
     subdirs_with_fits: list[tuple[str, list[Path]]] = []
+    # Parent-directory key for each entry above, so the convention's "<T>_sub
+    # sibling present" skip is scoped to folders that truly share a parent. A
+    # container-expanded child's parent is the container; a root-level folder's
+    # is the scan root. Without this a bare root-level "<T>/" of real subs is
+    # skipped merely because an unrelated container child happens to be "<T>_sub".
+    parents: list[str] = []
     for d in subdirs:
         # Whole-device drop: the Seestar share/SD card copied wholesale keeps a
         # container level (e.g. "MyWorks/") intact, so a subdir may hold no FITS
@@ -431,6 +455,7 @@ def scan_and_organize(
                 child_fits = find_fits_files(child, recursive=True)
                 if child_fits:
                     subdirs_with_fits.append((child.name, child_fits))
+                    parents.append(str(d))
             # Heal the OLD shape: before this expansion existed, a scan lumped the
             # whole container into ONE giant target named after it, mixing several
             # objects' subs with on-device outputs/videos — it keeps auto-stacking
@@ -443,9 +468,10 @@ def scan_and_organize(
         fits = find_fits_files(d, recursive=True)
         if fits:
             subdirs_with_fits.append((d.name, fits))
+            parents.append(str(root))
     # Fold the Seestar folder convention in (raw "_sub" folders → targets;
     # skip on-device outputs and videos) before turning folders into targets.
-    units = _apply_seestar_convention(subdirs_with_fits)
+    units = _apply_seestar_convention(subdirs_with_fits, parents)
     # Upgrade path: a library first scanned before v0.184.9 may already hold the
     # Seestar's on-device output inside a "<T>" target the raw "<T>_sub" subs now
     # map to — additively reject those output frames so they leave the stack pool.

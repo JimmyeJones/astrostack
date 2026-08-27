@@ -49,6 +49,48 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**🟠 WRONG-RESULT / DATA-LOSS (Scout QA audit 2026-08-27 #8, branch `claude/vigilant-knuth-gnif14`,
+  reproduced end-to-end) — the Seestar "skip a bare `<T>/` output folder when its `<T>_sub` sibling exists"
+  rule used a GLOBAL basename set, not a same-parent sibling test, so a root-level `incoming/<T>/` folder of
+  REAL subs was silently dropped whenever an UNRELATED container child `<T>_sub` existed elsewhere in the same
+  drop.**~~ — **FIXED v0.277.4** (this run). *(Severity: wrong-result — a whole session's frames never ingested,
+  not even re-acceptable; the trigger is conditional (needs a whole-device container drop + a same-named
+  root-level bare folder), which the container-expansion feature made reachable. Confidence: reproduced
+  end-to-end through `scan_and_organize`.)*
+
+  **Root cause (traced + reproduced).** `scan_and_organize` (`seestack/io/scanner.py`) builds one flat
+  `subdirs_with_fits` list that mixes container-expanded children (`incoming/MyWorks/M31_sub`, appended with
+  just `child.name`) with ordinary root-level folders (`incoming/M31`, appended with `d.name`) — parent context
+  discarded. `_apply_seestar_convention` then computed `names_lower = {name.lower() for name,_ in …}` as ONE
+  global set and skipped a bare `<T>` via `if (low + "_sub") in names_lower`. So a real `incoming/M31/` (3+ raw
+  subs, no `M31_sub` sibling of its own) was skipped as "on-device output" purely because `incoming/MyWorks/M31_sub`
+  contributed `m31_sub` to the global set. Repro: 3 subs in `incoming/M31/` + a container `MyWorks/M31_sub/` →
+  the M31 target ingested **only the 2 container subs; all 3 root subs vanished** (0 of 3). The output-reject
+  path (`reject_seestar_output_frames`) was NOT the culprit — it already matches the full parent *path* and has a
+  ≤2-frame size guard, so it never touched the 3-frame folder; the loss was purely the convention skip never
+  ingesting them.
+
+  **Fix.** `_apply_seestar_convention` grows an optional `parents` list parallel to `subdirs_with_fits`; the
+  sibling set is now `{(parent, name.lower())}` and the bare-folder skip tests `(parent, low + "_sub")`, so it
+  fires only for a true same-parent sibling. `scan_and_organize` passes each entry's parent (the container dir
+  for an expanded child, the scan root for a root-level folder). Omitting `parents` keeps the original
+  single-level behaviour (every folder a sibling), so the pure-function tests and a flat scan root are
+  unchanged. Both true-sibling skips (root-level `M 31`+`M 31_sub`, and container-internal `M31`+`M31_sub`)
+  still fire — verified.
+
+  **Upgrade-safe (§9):** pure in-memory scan-time logic; no config/schema/on-disk/API/default change, and
+  `incoming/` stays strictly read-only (the scanner only reads). **Tests (+3 in `tests/test_scanner.py`, the
+  data-loss E2E one fails before / passes after):** parent-scoped sibling skip keeps cross-parent root subs;
+  the same-parent output skip still fires (no regression); and the end-to-end `scan_and_organize` test proving
+  all 5 frames (3 root + 2 container) land accepted in the one M 31 target.
+
+  **Residual (narrow, non-destructive, NOT fixed here — noted for completeness):** if the colliding root
+  `<T>/` folder holds only **1–2** subs, `_seestar_output_bases` still registers `<T>` globally and
+  `reject_seestar_output_frames("<T>")`'s ≤2-frame guard would mark those 1–2 now-ingested frames
+  `accept=0` (recoverable — the user can re-accept). 1–2 frames in a bare `<T>/` is genuinely
+  indistinguishable from a Seestar single-image output, so this is defensible; parent-scoping
+  `_seestar_output_bases` too would close it if the owner ever hits it.
+
 - **🟡 BROKEN-UX / AUTONOMY (Scout QA audit 2026-08-26 #4, traced + verified end-to-end) — PARTIALLY FIXED
   (misleading-copy half shipped v0.272.2; optional behavioural half open) — the `astap_timeout_s` setting bounds
   ONE solve *attempt*, not one frame, so an unsolvable sub can burn up to 3× the configured seconds; the Settings
@@ -136,6 +178,63 @@ _(none — claim an item here with your branch name)_
     quiet timer (re-arm), mirroring the disappear-then-return path that already re-arms. Pure, clock-injectable — add a
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
+
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #8, branch `claude/vigilant-knuth-gnif14`) — rotated the lead QA onto
+  the still-un-swept-in-depth storage/config layer the #5–#7 notes flagged: the watcher-ingest-scanner path,
+  `webapp/config.py` load/save + `deps.py`, and both DB migration paths (`project.py`, `library.py`).
+  Result: found + FIXED one real WRONG-RESULT data-loss bug in the Seestar scanner (cross-parent `_sub` sibling
+  collision → v0.277.4, see Shipped at top of Bugs), plus two verified LOW-severity robustness gaps filed
+  below. The DB migrations, the config load path, and the render/preview path came back clean. Dogfood
+  end-to-end clean.** Baseline green before touching anything (**2900 passed, 2 skipped** — full headless
+  suite). What was traced (and, where a trigger was constructible, reproduced):
+  **scanner/ingest** — `incoming/` is strictly read-only (every mutation is `shutil.copy2` into the target
+  cache; no `unlink`/`rename`/`move`/truncate in `ingest.py`/`scanner.py`/`merge.py`/`watcher.py`); filename
+  traversal neutralised (`CacheManager.stage1_path_for` names files `frame_{id:06d}` and keeps only the
+  suffix); `_dedup_key` (realpath) symmetric so a re-scan can't double-add; `_same_capture` / `content_changed`
+  in-place-swap recovery (force re-copy, reset QC, clear stale WCS) correct. The one real bug was the folder-
+  *convention* sibling test being global rather than same-parent (fixed).
+  **config/deps** — the bounds added in `ee81acf` (`watch_*`, `astap_timeout_s`, `cpu_workers`, `seestar_*`)
+  are isolated by `_load_resilient`, which resets ONLY the out-of-bounds fields (verified: a legacy
+  `seestar_poll_interval_s=0` config keeps `auth_*`, `auto_stack`, `site_lat`, …); no field's own default is
+  self-rejecting; `open_target_project` resolves the client `safe` via a parameterised registry lookup +
+  DB-stored `safe_name`, so no raw client path reaches the filesystem.
+  **DB migrations** — drove a real oldest-layout (v1) in-memory `Project` through `_migrate_schema`: migrates
+  v1→current, the pre-existing frame row survives, every expected column is present, and a second run is
+  idempotent; every step is `ALTER TABLE ADD COLUMN` / `CREATE … IF NOT EXISTS` guarded by
+  `try/except OperationalError`, zero backfill `UPDATE`s (no ordering hazard), no `DROP`/`DELETE`/rewrite;
+  `library.py` additive columns all nullable and read-guarded with `in row.keys()`.
+  **render/preview** — every stretch/normalisation anchor is NaN-aware (`np.nanmin`/`nanpercentile`/`nanmax`;
+  autostretch writes only finite positions so gaps stay black); preview↔export use the same
+  `_autostretch_for_export`; `rotate_image_north_up`'s `np.rot90` snap matches `PIL.rotate(expand=True)`
+  (verified empirically); constant/flat/single-pixel images degrade to black rather than divide-by-zero.
+  **This audit's lead-worthy conclusion:** the storage layer had the one remaining reachable data-loss bug;
+  with it fixed, future runs can lead with `jobs.py` / `webapp/pipeline.py`'s remaining auto-orchestration
+  helpers, and re-audit the engine + routers only occasionally.
+
+- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #8, verified by reading — narrow trigger: untimely power loss
+  mid-write; not reachable in normal operation) — `SettingsStore.save()` writes `config.json` via
+  `tmp.write_text()` + `os.replace()` with NO `fsync` of the temp file or the containing directory, so a hard
+  crash in the window after the rename metadata persists but before the data blocks flush can leave a
+  zero-length / partial `config.json` — the exact "silently revert all settings to defaults on next boot" the
+  method's own comment says it prevents.** *(Severity: low — `os.replace` still makes the rename atomic, the
+  file is tiny so the window is narrow, and `_load_resilient` degrades to safe defaults rather than crashing;
+  but the atomic-write dance is incomplete. Confidence: traced against `webapp/config.py:359–368`.)*
+  **Fix direction (small, additive):** flush+`os.fsync()` the temp fd before `os.replace`, and `os.fsync()` the
+  directory fd after, so both the data and the rename are durable. Add a test that a `save()`→reload round-trips
+  (the fsync itself isn't observable in a unit test, but pin the write path). Cheap, upgrade-safe, no behaviour
+  change on a clean shutdown.
+
+- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #8, traced — possibly by-design; low confidence) — the folder
+  watcher's stability gate compares host wall-clock `now` to the source file's `mtime`
+  (`(now - mtime) >= quiet_period_s`, `webapp/watcher.py` ~line 94), so if the NAS/SMB source filesystem's clock
+  runs AHEAD of the host, completed files may never satisfy the age gate and never go stable → never ingested
+  until the host clock catches up.** *(Severity: low — needs a genuinely skewed source clock, and a manual
+  "Scan incoming" or app restart re-globs and picks the files up anyway; the mtime-age gate is a deliberate
+  "has the write finished settling" heuristic, so this may be acceptable as-is. Confidence: traced, not
+  reproduced; flagged so it isn't re-investigated.)* **If ever worth hardening:** gate on size-stability across
+  two polls (already tracked) rather than absolute mtime age, or clamp a negative `now - mtime` to "treat as
+  just-modified" so a skewed-ahead clock can't strand a file forever. Only worth doing if the owner reports
+  files that never ingest until a rescan.
 
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #7, branch `claude/vigilant-knuth-yeeeim`) — re-audited the stacking
   engine's weighting/photometric/pointing math + the un-swept-in-depth routers the #6 audit flagged
@@ -13154,6 +13253,19 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **IDEA / DATA-INTEGRITY FOLLOW-UP (Scout 2026-08-27 #8, the residual of the v0.277.4 scanner fix) —
+  parent-scope `_seestar_output_bases` + the output-reject so a 1–2-sub root-level `<T>/` colliding with an
+  unrelated container `<T>_sub` is never wrongly rejected.** *(Pillar: image quality / correctness — PRIORITY 4;
+  size S; low urgency — non-destructive and narrow.)* The v0.277.4 fix parent-scoped the *convention skip* so a
+  root `incoming/<T>/` of real subs is ingested even when an unrelated container child `<T>_sub` exists. But
+  `_seestar_output_bases` still builds its `<T>→<T>` output-reject map from a global basename set, and
+  `reject_seestar_output_frames("<T>")`'s ≤2-frame size guard means a root `<T>/` holding only 1–2 subs would
+  still be marked `accept=0` after ingest (recoverable, but surprising). Thread the same parent context into
+  `_seestar_output_bases` (only register `<T>` as an output base when a `<T>_sub` shares the bare folder's
+  parent), so the reject fires only for a true sibling output folder. Add a regression test: root `<T>/` with 2
+  subs + unrelated container `<T>_sub` → the 2 root subs stay accepted. Only worth doing if the owner actually
+  hits a mixed drop; the many-sub data-loss case (the real harm) is already fixed.
+
 - **IDEA / QA LEAD (Builder 2026-08-26, generalised from three fixes of the same bug) — sweep the rest of the
   engine for "compares a POSITION-DEPENDENT metric across a whole target".** *(Pillar: image quality /
   correctness — PRIORITY 4; size S to audit, unknown to fix; a good Scout run.)*
@@ -14458,6 +14570,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #8) — "Was my focus sharp last night?": a per-session focus / soft-star
+  flag that tells a beginner, in plain language, when a night's subs came out soft (a slipped-focus Seestar
+  autofocus — one of the most common beginner ruin-the-night mistakes) so they know to re-focus, not that they
+  did nothing wrong.** *(Pillar: understand + trust — PRIORITY 3. Size: M.)* Every sub already carries a measured
+  FWHM (used by QC, weighting, and the reference-frame pick), so the app *knows* when a night's stars are bloated
+  — but nothing surfaces that to the beginner. **The feature:** on the Target page (and in the "last night" recap),
+  when a session's **median FWHM is materially worse than this target's own best nights** (e.g. ≥1.4× the target's
+  best-quartile median, over a session of ≥N subs so a couple of gusts don't trigger it), show a calm one-liner
+  like *"Last night's stars came out soft (about 40% larger than your sharpest nights on this target) — worth
+  checking the Seestar refocused. These subs still stack, they just add less detail."* Compare a session against
+  the *same target's* history, never an absolute arcsec threshold — FWHM depends on pixel scale, focal length and
+  the object, so a per-target relative baseline is the only beginner-safe signal (mirrors how the moonlight and
+  transparency verdicts are all relative/explained). **Default:** informational only — never auto-rejects the
+  soft subs (they're still real signal); it's a "here's why, and how to do better next time" nudge, exactly the
+  beginner-education role the moon/transparency verdicts fill. **Data already there:** `Project.median_fwhm`,
+  per-frame `fwhm`, per-session grouping already exist; this is a read-only roll-up + one copy string + a card,
+  no engine change. Grep first — confirm no existing "soft stars" verdict before building.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #7) — "Was the Moon washing this out?": a retrospective moonlight
   verdict on a finished session/picture, so a beginner understands *why* a result looks flat and knows to
