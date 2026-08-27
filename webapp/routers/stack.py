@@ -830,6 +830,46 @@ def _png_width(png_data: bytes) -> int:
         return 0
 
 
+def _unrotated_preview_size(fits_path: str) -> tuple[int, int] | None:
+    """The ``(width, height)`` a run's preview had *before* any North-up turn.
+
+    ``save_stack_preview`` renders through ``render_stack_png`` at
+    :data:`~seestack.render.thumbnail.PREVIEW_MAX_WIDTH`, so the master's own
+    dimensions give that grid exactly. ``None`` when the master can't be read, so
+    the caller falls back to the stored PNG's size (which is the same thing for
+    every preview nobody saved North-up)."""
+    from seestack.io.wcs_io import celestial_wcs_from_fits
+    from seestack.render.thumbnail import preview_grid_size
+
+    try:
+        _wcs, full_w, full_h = celestial_wcs_from_fits(fits_path)
+    except Exception:  # noqa: BLE001 — an unreadable master just uses the stored size
+        return None
+    if full_w <= 0 or full_h <= 0:
+        return None
+    return preview_grid_size(full_w, full_h)
+
+
+def _unrotated_preview_width(png_data: bytes, fits_path: str | None,
+                             baked_north_up: float) -> int:
+    """The width of a run's preview **before** any North-up turn — what the scale
+    bar's stored fraction is a fraction *of*.
+
+    A rotate-with-expand grows the canvas without changing the pixel scale, so
+    measuring the bar against a preview a past save already rotated draws it the
+    wrong length. The stored bytes are the only thing on hand, so recover the
+    un-rotated grid the way it was made: ``save_stack_preview`` renders through
+    ``render_stack_png`` at :data:`~seestack.render.thumbnail.PREVIEW_MAX_WIDTH`,
+    so the master's own dimensions give it exactly. Falls back to the PNG's own
+    width — which is right for every un-rotated preview, i.e. all of them until
+    someone saves one North-up — whenever there is no baked rotation to undo or
+    no master to read it from."""
+    if not baked_north_up or not fits_path:
+        return _png_width(png_data)
+    flat = _unrotated_preview_size(fits_path)
+    return flat[0] if flat is not None else _png_width(png_data)
+
+
 def _sky_marks_for_run(fits_path: str | None, preview_width: int,
                        north_up_deg: float = 0.0):  # noqa: ANN202
     """The scale bar + North/East rose to bake onto a run's shared picture.
@@ -903,7 +943,9 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
 
     def work() -> dict[str, Any] | None:
         from seestack.framing import (
-            framing_result_verdict, recentre_nudge, recentre_outcome,
+            framing_result_verdict,
+            recentre_nudge,
+            recentre_outcome,
         )
         from seestack.io.wcs_io import celestial_wcs_from_fits
 
@@ -2048,27 +2090,46 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
         raise HTTPException(status_code=404, detail="No preview for this run")
 
     preview = Path(png_path).read_bytes()
+    # What the stored bytes already carry: History's "Adjust → North up → Save"
+    # overwrites the preview with a rotated render and records the angle. Both
+    # halves below map from the FITS grid, so neither may assume the stored
+    # preview is still on it.
+    baked_north_up = float(run.preview_north_up_deg or 0.0)
     # Locate the target in the preview grid from the run's own WCS; None → centre.
+    # `wallpaper_target_pixel` maps onto a *uniform downscale* of the master, so
+    # on a preview a past save rotated it has to be given that un-rotated grid and
+    # the answer turned by the same angle — otherwise the crop re-centres on the
+    # wrong spot even when North-up isn't asked for.
     target_px = None
     ra = entry.ra_deg if entry is not None else None
     dec = entry.dec_deg if entry is not None else None
-    if ra is not None and dec is not None and run.fits_path:
-        size = png_size(preview)
-        if size is not None:
-            target_px = wallpaper_target_pixel(run.fits_path, ra, dec, size[0], size[1])
+    flat_size = png_size(preview)
+    if baked_north_up and run.fits_path:
+        flat_size = _unrotated_preview_size(run.fits_path) or flat_size
+    if ra is not None and dec is not None and run.fits_path and flat_size is not None:
+        target_px = wallpaper_target_pixel(
+            run.fits_path, ra, dec, flat_size[0], flat_size[1])
+        if target_px is not None and baked_north_up:
+            target_px = rotate_point_north_up(
+                target_px[0], target_px[1], flat_size[0], flat_size[1],
+                baked_north_up)
 
     # North-up rotates the picture *and* moves the target pixel, so re-centre the
-    # crop on the rotated position. Only when a real WCS + more-than-trivial angle
-    # exists; otherwise the preview (and target pixel) are left untouched.
+    # crop on the rotated position. Only the rotation still *missing* from the
+    # stored bytes is applied — turning a preview a past save already oriented
+    # would share it 180° from the picture on screen.
     if north_up and run.fits_path and Path(run.fits_path).exists():
         try:
-            angle = stack_north_up_deg(run.fits_path)
-            if angle is not None and abs(angle) >= NORTH_UP_MIN_DEG:
+            total = stack_north_up_deg(run.fits_path)
+            total = 0.0 if total is None or abs(total) < NORTH_UP_MIN_DEG else total
+            remaining = total - baked_north_up
+            if abs(remaining) >= NORTH_UP_MIN_DEG:
                 size = png_size(preview)
-                preview = orient_preview_north_up(preview, run.fits_path)
+                preview = orient_preview_north_up(
+                    preview, run.fits_path, already_deg=baked_north_up)
                 if target_px is not None and size is not None:
                     target_px = rotate_point_north_up(
-                        target_px[0], target_px[1], size[0], size[1], angle)
+                        target_px[0], target_px[1], size[0], size[1], remaining)
         except Exception:  # noqa: BLE001 — a broken FITS just yields the un-oriented wallpaper
             pass
 
@@ -2105,35 +2166,47 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         if not png_path or not Path(png_path).exists():
             raise HTTPException(status_code=404, detail="No preview for this run")
         preview = Path(png_path).read_bytes()
+        # What the *stored bytes* already carry: History's "Adjust → North up →
+        # Save" overwrites the preview with a rotated render and records the
+        # angle. Everything below is measured against the FITS grid, so it has to
+        # start from this rather than assume the preview is the un-rotated one.
+        baked_north_up = float(run.preview_north_up_deg or 0.0)
         # The width the scale bar is measured against: the bar's length is a
-        # *fraction* of the picture's width, and a North-up rotate-with-expand
-        # grows the canvas without changing the pixel scale, so it has to be read
-        # before that. Only paid for when marks were actually asked for.
-        preview_width = _png_width(preview) if scale else 0
-        # How far the pixels were actually turned, so the rose can follow them.
-        applied_north_up = 0.0
+        # *fraction* of the picture's width, and a rotate-with-expand grows the
+        # canvas without changing the pixel scale, so it must be the width of the
+        # picture *before* any North-up turn — including one a past save baked in.
+        # Only paid for when marks were actually asked for.
+        preview_width = (
+            _unrotated_preview_width(preview, run.fits_path, baked_north_up)
+            if scale else 0
+        )
+        # How far the pixels the marks are drawn on sit from the FITS grid, so the
+        # rose can follow them. Not "how far this request turned them": a run
+        # saved North-up arrives already turned, and its rose was wrong even
+        # without `north_up` asked for.
+        applied_north_up = baked_north_up
         # north_up rotates the shared picture so celestial North points up (like
         # reference photos of the object), using the run's own WCS — a no-op (the
-        # bytes are returned untouched) when the run has no WCS or the correction
-        # is trivial, so the ordinary download is byte-for-byte unchanged.
+        # bytes are returned untouched) when the run has no WCS, when the
+        # correction is trivial, or when a past save already turned them exactly
+        # that far, so the ordinary download is byte-for-byte unchanged.
         if north_up:
             fits_path = run.fits_path
             if fits_path and Path(fits_path).exists():
-                from seestack.render.thumbnail import orient_preview_north_up
+                from seestack.render.thumbnail import (
+                    applied_north_up_deg,
+                    orient_preview_north_up,
+                    stack_north_up_deg,
+                )
                 try:
-                    before = preview
-                    preview = orient_preview_north_up(preview, fits_path)
-                    if preview is not before:
-                        from seestack.io.wcs_io import celestial_wcs_from_fits
-                        from seestack.render.orient import (
-                            applied_rotation_deg,
-                            north_up_rotation_deg,
-                        )
-
-                        wcs, w, h = celestial_wcs_from_fits(fits_path)
-                        angle = north_up_rotation_deg(wcs, w, h)
-                        if angle is not None:
-                            applied_north_up = applied_rotation_deg(angle)
+                    preview = orient_preview_north_up(
+                        preview, fits_path, already_deg=baked_north_up)
+                    # After that call the bytes sit at the run's *total* North-up
+                    # correction, however much of it a past save had already
+                    # baked in — unless there is no usable WCS to compute one, in
+                    # which case they keep exactly what the save left.
+                    if stack_north_up_deg(fits_path) is not None:
+                        applied_north_up = applied_north_up_deg(fits_path)
                 except Exception:  # noqa: BLE001 — a broken FITS just shares the un-oriented preview
                     pass
         # nameplate bakes the same tasteful acquisition footer the editor share
