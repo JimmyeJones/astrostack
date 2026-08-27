@@ -190,6 +190,103 @@ def test_bilinear_debayer_uint16_does_not_overflow():
     assert np.allclose(rgb_f32, 60000.0)
 
 
+def _reference_debayer(mosaic: np.ndarray, pattern: str) -> np.ndarray:
+    """An independent, deliberately slow reference bilinear debayer.
+
+    Written per-pixel from the definition — for each missing colour site, average
+    the values of the *nearest same-channel sample sites that exist on the frame* —
+    with sample sites identified purely by their Bayer position. It knows nothing
+    about sparse planes or shifted masks, so it can't share a bug with the
+    production vectorised path.
+    """
+    layouts = {
+        "RGGB": (("r", "g"), ("g", "b")),
+        "BGGR": (("b", "g"), ("g", "r")),
+        "GRBG": (("g", "r"), ("b", "g")),
+        "GBRG": (("g", "b"), ("r", "g")),
+    }
+    (tl, tr), (bl, br) = layouts[pattern]
+    site = {(0, 0): tl, (0, 1): tr, (1, 0): bl, (1, 1): br}
+    h, w = mosaic.shape
+    out = np.zeros((h, w, 3), dtype=np.float64)
+    for ci, ch in enumerate("rgb"):
+        # Every position that is a genuine sample site of this channel.
+        samples = {(y, x) for y in range(h) for x in range(w)
+                   if site[(y % 2, x % 2)] == ch}
+        for y in range(h):
+            for x in range(w):
+                if (y, x) in samples:
+                    out[y, x, ci] = mosaic[y, x]
+                    continue
+                # Nearest same-channel neighbours: cross for G, and for R/B the
+                # horizontal / vertical / diagonal pair depending on which axis is
+                # off the sample grid.
+                if ch == "g":
+                    offsets = ((1, 0), (-1, 0), (0, 1), (0, -1))
+                else:
+                    sy, sx = next(iter(
+                        p for p, c in site.items() if c == ch))
+                    on_row, on_col = (y % 2) == sy, (x % 2) == sx
+                    if on_row and not on_col:
+                        offsets = ((0, 1), (0, -1))
+                    elif on_col and not on_row:
+                        offsets = ((1, 0), (-1, 0))
+                    else:
+                        offsets = ((1, 1), (1, -1), (-1, 1), (-1, -1))
+                vals = [mosaic[y + dy, x + dx] for dy, dx in offsets
+                        if (y + dy, x + dx) in samples]
+                out[y, x, ci] = float(np.mean(vals)) if vals else 0.0
+    return out
+
+
+@pytest.mark.parametrize("pattern", ("RGGB", "BGGR", "GRBG", "GBRG"))
+def test_debayer_counts_a_genuine_zero_sample(pattern):
+    """A real sample whose value is exactly 0.0 is still a sample, and must be
+    counted in the neighbour average of every adjacent missing site.
+
+    The interpolators used to identify sample sites with a ``!= 0`` *value* test,
+    which conflated "not this channel's site" (correctly excluded) with "a genuine
+    datum that reads 0.0". Dropping those real zeros divided a smaller neighbour
+    sum by a smaller count, biasing the interpolated chroma of their neighbours
+    upward — reachable on the on-by-default hot path whenever dark subtraction with
+    an integer-valued master lands pixels exactly on zero. Checked against an
+    independent reference for every Bayer layout.
+    """
+    rng = np.random.default_rng(3)
+    mosaic = rng.uniform(0.0, 200.0, size=(12, 14)).astype(np.float32)
+    # Scatter genuine exact-zero samples the way an integer master dark does.
+    zeros = rng.random(mosaic.shape) < 0.15
+    mosaic[zeros] = 0.0
+    assert zeros.any()
+
+    got = bilinear_debayer(mosaic, pattern=pattern)
+    want = _reference_debayer(mosaic, pattern)
+    assert np.allclose(got, want, atol=1e-4), (
+        pattern, float(np.max(np.abs(got - want))))
+
+
+def test_debayer_unchanged_when_no_sample_is_exactly_zero():
+    """The positional sample mask must be *byte-for-byte* identical to the old
+    value test on any frame with no exact-0 sample — i.e. every ordinary frame,
+    including the float-averaged-master install. These hashes were taken from the
+    pre-fix implementation, so a drift here means the fix changed the common path.
+    """
+    import hashlib
+
+    rng = np.random.default_rng(7)
+    mosaic = rng.uniform(800.0, 1200.0, size=(34, 46)).astype(np.float32)
+    assert (mosaic != 0).all()
+    golden = {
+        "RGGB": "a0052065d576bd5a183b7de0c03fe8125246ff19040f901c62e74a13105dbc04",
+        "BGGR": "f9546824af89f43cf1d40b0de37b432bcb894d57f68724575560872cda7c27f3",
+        "GRBG": "6285901d1b7616d3d498eae6a5d7fb580a7f8092b99b78c1d715d98bc0ca5a59",
+        "GBRG": "601aa61145ae09d963ce06351297b9a23669fbab567e739ab1b6e55f204f3448",
+    }
+    for pattern, want in golden.items():
+        out = bilinear_debayer(mosaic, pattern=pattern)
+        assert hashlib.sha256(out.tobytes()).hexdigest() == want, pattern
+
+
 def test_fov_deg_from_header_s30(tmp_path):
     """An S30-shaped header (150 mm f.l., 2.9 µm pixels, 1920 px long edge) yields
     the true ~2.1° field — not the hardcoded 1.3° that silently fails an S30's
