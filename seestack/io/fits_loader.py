@@ -256,9 +256,16 @@ def bilinear_debayer(mosaic: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
     # Bilinear interpolation for the missing values in each plane.
     # R and B have a 50% sparse grid — interpolate from 4 nearest neighbours.
     # G has a 50% checkerboard — interpolate from 4 cross neighbours.
+    # G sample sites lie on one diagonal parity of the 2x2 cell — (y+x)%2 == 1 for
+    # RGGB/BGGR, == 0 for GRBG/GBRG. Derive it from the layout so _interp_g can use
+    # a positional (not value-based) sample mask.
+    g_parity = next((y + x) % 2
+                    for (y, x), c in (((0, 0), tl), ((0, 1), tr),
+                                      ((1, 0), bl), ((1, 1), br))
+                    if c == "g")
     r_full = _interp_rb(r, layouts[pattern], "r")
     b_full = _interp_rb(b, layouts[pattern], "b")
-    g_full = _interp_g(g)
+    g_full = _interp_g(g, g_parity)
 
     rgb = np.stack([r_full, g_full, b_full], axis=-1)
 
@@ -295,7 +302,7 @@ def _shift(a: np.ndarray, dy: int, dx: int) -> np.ndarray:
     return padded[y0:y0 + h, x0:x0 + w]
 
 
-def _interp_g(g_plane: np.ndarray) -> np.ndarray:
+def _interp_g(g_plane: np.ndarray, g_parity: int) -> np.ndarray:
     """
     Fill the missing G samples (R and B sites) by averaging the 4 cross
     neighbours of each missing site.
@@ -306,8 +313,18 @@ def _interp_g(g_plane: np.ndarray) -> np.ndarray:
     neighbours instead of being pulled toward 0 by the zero-filled off-frame
     contributor. Interior sites (all 4 neighbours present) are byte-for-byte
     unchanged.
+
+    The sample-site mask is *positional* — a G site is one whose ``(y+x)%2``
+    matches ``g_parity`` (1 for RGGB/BGGR, 0 for GRBG/GBRG) — not a ``!= 0`` value
+    test. A value test would drop a genuine sample that happens to read exactly
+    ``0.0`` (common after an integer master-dark subtraction lands a light pixel on
+    the dark value) from both its own site and its missing neighbours' averages,
+    biasing that neighbour chroma. The positional mask counts a real 0 correctly.
+    It is byte-for-byte identical to the old test wherever no sample is exactly 0.
     """
-    has_g = g_plane != 0
+    h, w = g_plane.shape
+    yy, xx = np.indices((h, w))
+    has_g = ((yy + xx) % 2) == g_parity
     m = has_g.astype(np.float32)
     # Sum of the 4 cross neighbours' values, and a matching count of how many were
     # real in-frame samples (off-frame contributors are zero-filled in both).
@@ -336,19 +353,16 @@ def _interp_rb(plane: np.ndarray, layout: tuple, channel: str) -> np.ndarray:
     0.5/0.25), so a site on the frame edge whose neighbour falls off the frame
     averages only the real in-frame sample(s) rather than being darkened toward 0
     by the zero-filled off-frame contributor. Interior sites are unchanged.
-    """
-    has = plane != 0
-    m = has.astype(np.float32)
-    h_avg = ((_shift(plane, 0, 1) + _shift(plane, 0, -1))
-             / np.maximum(_shift(m, 0, 1) + _shift(m, 0, -1), 1.0))
-    v_avg = ((_shift(plane, 1, 0) + _shift(plane, -1, 0))
-             / np.maximum(_shift(m, 1, 0) + _shift(m, -1, 0), 1.0))
-    d_num = (_shift(plane, 1, 1) + _shift(plane, 1, -1)
-             + _shift(plane, -1, 1) + _shift(plane, -1, -1))
-    d_den = (_shift(m, 1, 1) + _shift(m, 1, -1)
-             + _shift(m, -1, 1) + _shift(m, -1, -1))
-    d_avg = d_num / np.maximum(d_den, 1.0)
 
+    The sample-site mask is *positional* — ``on_sample_row & on_sample_col`` from
+    the channel's Bayer position — not a ``!= 0`` value test. A value test would
+    drop a genuine sample that reads exactly ``0.0`` (common after an integer
+    master-dark subtraction) from the neighbour averages of adjacent missing sites,
+    biasing their interpolated chroma; the positional mask counts a real 0
+    correctly. It is byte-for-byte identical to the old test wherever no sample is
+    exactly 0 (the ``out`` selection below is unchanged either way — an exact-0
+    sample site keeps its 0 via ``plane.copy()`` under both masks).
+    """
     h, w = plane.shape
     yy, xx = np.indices((h, w))
     (tl, tr), (bl, br) = layout
@@ -366,6 +380,18 @@ def _interp_rb(plane: np.ndarray, layout: tuple, channel: str) -> np.ndarray:
         return plane
     on_sample_row = (yy % 2) == py
     on_sample_col = (xx % 2) == px
+    has = on_sample_row & on_sample_col
+    m = has.astype(np.float32)
+    h_avg = ((_shift(plane, 0, 1) + _shift(plane, 0, -1))
+             / np.maximum(_shift(m, 0, 1) + _shift(m, 0, -1), 1.0))
+    v_avg = ((_shift(plane, 1, 0) + _shift(plane, -1, 0))
+             / np.maximum(_shift(m, 1, 0) + _shift(m, -1, 0), 1.0))
+    d_num = (_shift(plane, 1, 1) + _shift(plane, 1, -1)
+             + _shift(plane, -1, 1) + _shift(plane, -1, -1))
+    d_den = (_shift(m, 1, 1) + _shift(m, 1, -1)
+             + _shift(m, -1, 1) + _shift(m, -1, -1))
+    d_avg = d_num / np.maximum(d_den, 1.0)
+
     out = plane.copy()
     # Same row, different col → horizontal interp.
     out = np.where(~has & on_sample_row & ~on_sample_col, h_avg, out)
