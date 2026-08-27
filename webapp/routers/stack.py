@@ -901,7 +901,9 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
         return None
 
     def work() -> dict[str, Any] | None:
-        from seestack.framing import framing_result_verdict, recentre_outcome
+        from seestack.framing import (
+            framing_result_verdict, recentre_nudge, recentre_outcome,
+        )
         from seestack.io.wcs_io import celestial_wcs_from_fits
 
         wcs, width, height = celestial_wcs_from_fits(fits_path)
@@ -912,6 +914,14 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
             x_px, y_px = float(xs), float(ys)
         except Exception:  # noqa: BLE001 — a degenerate WCS just means "no verdict"
             return None
+        # Where this picture's middle actually pointed, so "re-centre it" can name
+        # a direction. Read from the same WCS, in sky coordinates — which is why
+        # it survives a rotated canvas without any orientation guesswork.
+        try:
+            cra, cdec = wcs.all_pix2world((width - 1) / 2.0, (height - 1) / 2.0, 0)
+            centre_ra, centre_dec = float(cra), float(cdec)
+        except Exception:  # noqa: BLE001 — no centre means no nudge, not no verdict
+            centre_ra = centre_dec = float("nan")
         scale = _arcsec_per_px(wcs)
         if scale is None:
             return None
@@ -932,11 +942,27 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
             arcsec_per_px=scale, size_arcmin=info.size_arcmin,
         ) if v.level == "off_centre" else None
         rc = outcome.crop if outcome else None
+        # "Re-centre it next session" is advice a beginner can't act on without
+        # knowing *which way*. Offered only for the two verdicts whose fix really
+        # is a better pointing — a well-centred picture needs nothing, and an
+        # object bigger than the frame needs mosaic mode, not a nudge.
+        nudge = recentre_nudge(
+            centre_ra_deg=centre_ra, centre_dec_deg=centre_dec,
+            object_ra_deg=info.ra_deg, object_dec_deg=info.dec_deg,
+        ) if v.level in ("off_centre", "clipped") else None
         return {
             "level": v.level,
             "text": v.text,
             "coverage": v.coverage,
             "off_centre": v.off_centre,
+            # Which way, and how far, to move the mount so it lands in the middle
+            # next time. `null` when the correction is too small to act on, or the
+            # verdict isn't one a re-point fixes.
+            "nudge": None if nudge is None else {
+                "direction": nudge.direction,
+                "degrees": nudge.degrees,
+                "text": nudge.text,
+            },
             # Fractional (0..1) crop bounds in the editor's own `geometry.crop`
             # convention, plus the fraction of the frame it keeps.
             "recentre": None if rc is None else {
