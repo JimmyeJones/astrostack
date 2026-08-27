@@ -8574,6 +8574,51 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-27, the gap left standing by the v0.287.0 non-drizzle memory lever) — a
+  walk-away stack that still *refuses* goes dark in complete silence: nothing on the Target page or the
+  Dashboard says the target stopped producing pictures, or why, or which single setting would fix it.**
+  *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: M. Confidence: verified this run — grepped
+  `Target.tsx` and `routers/targets.py`; the only failure reason either surfaces is `solve_failed`, and
+  neither reads a failed *stack job* at all.)*
+  **Why this is now the sharp edge.** v0.281.0 and v0.287.0 both rest on the same premise: *a refusal is the
+  right answer for a watching user and useless at 3 a.m.* Each took one lever the engine could apply itself.
+  What is left over is precisely the set the engine must **not** apply on its own — `reference_canvas` (it
+  crops a mosaic's field), and a canvas that even the cheapest configuration can't hold — and for those the
+  MemoryError is still raised into a job record nobody opens. The engine's own message is already excellent
+  (`_best_memory_fix` names the one lever and the GB it lands at, and `_memory_fix_sentence` words it), so the
+  work is not analysis: it is **carrying a sentence that already exists to a page the owner actually looks
+  at**.
+  **Shape.** The job record already holds the failure; a target-scoped read of "did this target's most recent
+  stack job fail, and with what?" turns it into a `Notice` on the Target page (the `NoticeBoard` primitive from
+  IA slice (a), at `warning`) and, when it is the only thing standing between the owner and a picture, a
+  Dashboard line. Word it as the engine does — *"Last night's stack of M 31 didn't run: the canvas needs
+  ~9.4 GB, over your ~6 GB budget. Switching Canvas mode to 'reference' would fit (~5.1 GB)."* — with a link
+  to the control, exactly like the existing "Fix in Settings" deep links (`/settings/stacking`). **Do NOT**
+  make it a one-click auto-apply for `reference_canvas`: that is the change v0.281.0 and v0.287.0 both
+  deliberately declined to make silently, and the owner clicking it *is* the point.
+  **Cautions.** Scope it to the *most recent* stack attempt per target, so a long-fixed failure from three
+  weeks ago never nags; self-hide the moment a later stack succeeds; and put it inside the notes board rather
+  than adding another always-on banner (the standing IA priority). **Grep first:** confirm no per-target job
+  failure surface has landed since this was filed, and check whether the auto-stack "attempt marker" machinery
+  from the v0.270.1 walk-away fix already records enough to answer the question without a new query.
+
+- **NEW IDEA (Builder 2026-08-27, spotted while fixing the v0.286.1 stack-time-crop sharpen bug) — the video
+  still's stack-time crop *knows* its box and then throws it away, so every later operation has to infer the
+  picture's shape from file sizes.** *(Pillar: trust / maintainability — PRIORITY 3. Size: S. Confidence:
+  certain — this is the code the bug lived in.)*
+  `_video_stack_body` computes `framing.box`, crops with it, and writes `crop_applied=True, crop_box=[]` —
+  the empty list meaning "the *stack* did this, not an in-place edit". That overload is what made the
+  v0.286.1 bug possible: two genuinely different on-disk shapes (a cropped soft backup vs a full-frame one)
+  both present as "cropped, no box", and the fix had to recover the distinction by comparing PNG dimensions.
+  That check is correct and now tested, but it is *inference where a fact was available*.
+  **Shape:** record the stack-time framing in its own additive field (e.g. `stack_crop_box`, defaulting to
+  `[]` so every existing `meta.json` reads exactly as it does today), leaving `crop_box` to mean only what it
+  has always meant. The size test stays as the fallback for the stills already on disk — this is not a
+  migration, it is making *new* stills self-describing. **Only worth doing alongside another change in
+  `webapp/video.py`**, and only if the field earns its keep: if nothing but a comment would read it, the
+  dimension check is already the honest answer and this should be closed rather than built. Explicitly do
+  **not** rewrite the four in-place operations around it.
+
 - ~~**NEW IDEA (Builder 2026-08-27, traced while independently building the same `unattended` posture that
   shipped as v0.281.0) — the *non-drizzle* memory levers still hard-refuse an unattended run, and one of them
   is a strictly invisible degrade the walk-away path should already be taking.**~~ — **SHIPPED v0.287.0**
