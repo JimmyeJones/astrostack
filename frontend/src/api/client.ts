@@ -1144,6 +1144,38 @@ export interface VideoStill {
   sharpen_editable?: boolean;
 }
 
+// "My life list" — one bundled catalog object and whether it has been captured.
+// Matched server-side against the library's plate-solved target centres, so a
+// captured tile can link straight to the picture.
+export interface LifeListItem {
+  catalog_id: string;
+  /** Popular name, or "" for the many catalog entries without one. */
+  name: string;
+  type: string;
+  con: string;
+  blurb: string;
+  size_arcmin: number | null;
+  captured: boolean;
+  safe_name: string | null;
+  target_name: string | null;
+  sep_deg: number | null;
+  /** null for an object never captured, and for one captured but not yet stacked. */
+  thumbnail_url: string | null;
+}
+
+export interface LifeListCounts {
+  messier_captured: number;
+  messier_total: number;
+  other_captured: number;
+  other_total: number;
+}
+
+export interface LifeList {
+  messier: LifeListItem[];
+  other: LifeListItem[];
+  counts: LifeListCounts;
+}
+
 export interface BestPicture {
   safe: string;
   target_name: string;
@@ -2113,6 +2145,12 @@ export const api = {
     req<BestTonight>(
       `/api/plan/best-tonight${limit != null ? `?limit=${limit}` : ""}`,
     ),
+
+  // life list
+  // The famous objects you've captured and the ones still to get. Read-only and
+  // offline: the catalog ships with the app and the match reads only the target
+  // registry, so it is cheap enough to ask on every visit.
+  getLifeList: () => req<LifeList>("/api/life-list"),
 
   // gallery
   // `videos` is additive — an older backend doesn't send it, so read it as `?? []`.
