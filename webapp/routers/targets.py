@@ -24,6 +24,7 @@ from webapp.schemas import (
     FocusTrendOut,
     FocusTrendPointOut,
     FramingHintOut,
+    GrainierDefaultOut,
     HealthNoteOut,
     IntegrationGoalOut,
     IntegrationGoalPatch,
@@ -434,6 +435,61 @@ def target_cleanest_shot(safe: str, request: Request) -> CleanestShotOut | None:
         n_frames_used=shot.n_frames_used,
         cover_n_frames_used=shot.cover_n_frames_used,
         timestamp_utc=shot.timestamp_utc,
+    )
+
+
+@router.get("/{safe}/grainier-default", response_model=GrainierDefaultOut | None)
+def target_grainier_default(safe: str, request: Request) -> GrainierDefaultOut | None:
+    """Offer to pin an earlier, cleaner stack when the *unpinned* cover has
+    silently moved to a grainier one, or ``null`` when there's nothing to say.
+
+    The mirror of ``cleanest-shot``, and the case it deliberately leaves out.
+    With nothing pinned the cover means "newest", so a restack through haze — or
+    one where auto-reject set a lot of subs aside — legitimately produces a newer
+    stack with materially more grain, and the Library tile, "My best pictures"
+    and the montage wall all switch to it with nothing said. That is a silent
+    quality regression on exactly the walk-away workflow the app exists to be
+    trusted with, so it gets said out loud, once, with the numbers.
+
+    Mutually exclusive with ``cleanest-shot`` by construction (that one needs a
+    pin, this one needs none), so the Target page can render both safely. It
+    never changes the cover by itself — taking the offer goes through the same
+    ``set-cover`` the History page already has. Read-only.
+    """
+    from seestack.covernudge import grainier_default
+    from webapp.pipeline import _stack_options_from_run_json
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        entry = lib.find_target(safe)
+        cover_id = entry.cover_stack_run_id if entry is not None else None
+        runs = [r for r in proj.iter_stack_runs()  # newest first
+                if _stack_options_from_run_json(r.options_json) is not None]
+    finally:
+        proj.close()
+        lib.close()
+    hit = grainier_default(runs, cover_id)
+    if hit is None:
+        return None
+    # Never offer a run whose picture is gone: pinning it would leave every
+    # showcase surface falling back to the newest stack anyway (see
+    # ``_cover_preview_path``), which makes the nudge look broken. Same guard,
+    # and same reason, as ``cleanest-shot``.
+    candidate = next((r for r in runs if r.id == hit.run_id), None)
+    if candidate is None or not candidate.preview_path:
+        return None
+    if not Path(candidate.preview_path).exists():
+        return None
+    return GrainierDefaultOut(
+        run_id=hit.run_id,
+        newest_run_id=hit.newest_run_id,
+        noise_sigma=hit.noise_sigma,
+        best_noise_sigma=hit.best_noise_sigma,
+        percent_grainier=hit.percent_grainier,
+        n_frames_used=hit.n_frames_used,
+        best_n_frames_used=hit.best_n_frames_used,
+        timestamp_utc=hit.timestamp_utc,
+        best_timestamp_utc=hit.best_timestamp_utc,
     )
 
 
