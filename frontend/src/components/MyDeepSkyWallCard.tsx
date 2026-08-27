@@ -1,5 +1,5 @@
 import { Button, Card, Group, Stack, Text } from "@mantine/core";
-import { IconDownload, IconLayoutGrid } from "@tabler/icons-react";
+import { IconDownload, IconFileZip, IconLayoutGrid } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 
@@ -53,7 +53,20 @@ export function MyDeepSkyWallCard() {
             component="a" href={api.galleryMontageUrl(WALL_TILES)} download>
             Download wall
           </Button>
+          {/* The other half of "get my pictures out": the full-size files
+              themselves. Sits in this card rather than adding a block to the
+              page — it's the same moment, one tap along. */}
+          <Button size="xs" variant="light" color="teal"
+            leftSection={<IconFileZip size={14} />}
+            component="a" href={api.galleryPicturesZipUrl()} download>
+            {`Download all ${heroes.length} pictures`}
+          </Button>
         </Group>
+        <Text size="xs" c="dimmed">
+          {"The wall is one image to post. \"Download all\" gives you the "}
+          {"full-size pictures themselves in a zip — one per target, named for "}
+          {"it — to back up or drop into a phone album."}
+        </Text>
       </Stack>
     </Card>
   );

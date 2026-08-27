@@ -376,6 +376,17 @@ _(none — claim an item here with your branch name)_
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
+- **⚪ AUDIT NOTE (Builder 2026-08-27, swept immediately after fixing the debayer bug — NON-finding, recorded so
+  nobody re-treads it) — "a `!= 0` / `> 0` value test standing in for a validity mask" is a bug *class*, and the
+  debayer was the only place in the engine where it was wrong.** The pattern is only a bug where **0 is a
+  legitimate datum**; everywhere else in `seestack/` it is used where 0 genuinely *means* "none", and is
+  correct. Swept and cleared: `drizzle_path.py:375` (`np.where(wht > 0, img, np.nan)` — `wht` is accumulated
+  deposit weight, so 0 really is no coverage); `bg/coverage_leveling.py:280` (`cov_int > 0` — a frame count);
+  `bg/per_frame.py:453` (`n > 0` — a bin population, paired with the same `np.maximum(n, 1.0)` normalisation);
+  `calibrate/masters.py:101` (`mad > 0` — a zero MAD legitimately means "no spread, clip nothing");
+  `stack/weighting.py` (`star_count > 0` — zero stars really is unusable). *(Confidence: read, not reproduced —
+  each was traced to why 0 means "none" there. Filed as a note, not a bug.)* If a future change makes any of
+  those quantities able to be a *measured* zero, this is the shape of the mistake to look for.
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #18, branch `claude/vigilant-knuth-qtz5h4`) — led with the stacking
   engine per the rotation, then fanned three parallel adversarial audits across less-recently-swept areas: the
   **background/gradient** subsystem (`seestack/bg/*`), the **calibration master build+apply**
@@ -443,10 +454,26 @@ _(none — claim an item here with your branch name)_
   std → tol=+inf keep-all for single-coverage edges); memory guard `_estimate_peak_bytes` matches the real plane
   counts; preview↔export share `_autostretch_for_export`; NaN→black consistently across FITS/TIFF/PNG.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #17, traced — cosmetic, harmless today) —
+- ~~**⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #17, traced — cosmetic, harmless today) —
   `_archive_existing_outputs` (`seestack/stack/output.py:612`) excludes only `("coverage", "progress_webp",
   "progress_apng")` from the repoint map, but **not** `"frame_coverage"` (`_framecov.fits`), which is the same
-  kind of basename-resolved artefact with no history column.** So on a re-stack that archives a prior
+  kind of basename-resolved artefact with no history column.**~~ — **FIXED v0.284.6** (Builder 2026-08-27,
+  branch `claude/compassionate-galileo-0wtz21`).
+
+  **Fixed as a rule, not a patched list.** Rather than adding `"frame_coverage"` to the exclusions — which
+  would have left the *next* basename-resolved artefact with the identical gap — the test is now an **allow-list**:
+  `_REPOINTABLE_ARTEFACTS = frozenset({"fits", "tiff", "preview"})`, the three kinds that actually have a
+  `stack_runs` column, and `if kind in _REPOINTABLE_ARTEFACTS`. So a new entry in `RUN_ARTEFACT_SUFFIXES`
+  defaults to *out* of the map (the safe direction) instead of silently landing in it. Behaviour is otherwise
+  identical: every artefact is still archived, and the map's three real entries are unchanged.
+
+  **Test (+1 in `tests/test_output_archive.py`, fails before / passes after):**
+  `test_repoint_map_holds_only_the_artefacts_with_a_history_column` lands the *whole* `RUN_ARTEFACT_SUFFIXES`
+  set on disk (framecov and both progress reels included — the existing archive tests never produced those, which
+  is why nothing caught this) and asserts the returned map is exactly the fits/tiff/preview entries, while every
+  canonical name is still vacated and every file still lands under the one shared archived basename.
+
+  Original note, for the record: So on a re-stack that archives a prior
   `_framecov.fits`, its `{orig: dst}` entry is added to the map returned to `repoint_stack_runs`. Harmless
   today: `repoint_stack_runs` (`project.py:1061`) only runs `UPDATE ... WHERE {col}=?` over
   `fits_path`/`tiff_path`/`preview_path`, and no row ever stores a framecov path in those columns, so the extra
@@ -8466,6 +8493,48 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-27, traced while building the v0.285.0 pictures zip) — the app has *two*
+  different answers to "which picture is this target's", and one of them can come up empty where the other
+  finds a picture. Make the fallback shared, not just the cover lookup.** *(Pillar: trust/consistency,
+  PRIORITY 3; size S; additive, read-only. Confidence: traced against the code — not yet reproduced through
+  the UI, so verify before treating it as a bug.)*
+  The **pinned-cover** half is properly shared (`targets._cover_preview_path`, used by the Library tile, the
+  montage wall and now the zip). The **fallback** is not. `/api/gallery/best` resolves it with
+  `_representative_run` → *the newest run whose `preview_path` still exists on disk*, walking the target's whole
+  run list; the montage (`_montage_tiles`) and the zip (`_library_pictures`) instead take the library's single
+  stamped `entry.last_stack_preview`. Those agree right up until the newest run's preview file is deleted or
+  pruned: `best` then quietly steps back to the previous run's picture and still shows the target, while the
+  wall and the zip see one dead path and drop the target entirely — so the same library reads as "8 finished
+  pictures" on one screen and "7" on another, with no explanation. Nobody has reported it; it is a
+  consistency/trust gap, not a data risk.
+  **Shape.** Give `targets.py` one shared "this target's current picture path" resolver — cover first (the
+  existing `_cover_preview_path`), then `last_stack_preview` if that file exists, then the newest run with a
+  preview on disk — and have all three callers use it. The extra project open only happens for targets whose
+  stamped path is missing, i.e. essentially never on a healthy library, so the montage's deliberate
+  "one project open per pinned cover" cost budget is preserved. **Test:** a target whose newest preview file
+  is deleted but whose earlier run's preview survives appears in `best`, the montage *and* the zip, with the
+  same picture in all three. **Grep first:** `/api/imaging-log` and the Dashboard tiles make the same choice —
+  check whether they take the third path too before deciding which is canonical.
+
+- **NEW IDEA (Builder 2026-08-27, the half deliberately left out of the v0.285.0 pictures zip) — let "Download
+  all my pictures" hand over the *edited, full-size* picture where one exists, not only the display preview.**
+  *(Pillar: get/share + trust, PRIORITY 3; size S–M; additive, read-only, opt-in by shape. Confidence: the gap
+  is certain; the right default is the open question.)*
+  v0.285.0 ships each target's **preview** — deliberately, because "what you download is what you saw" is the
+  honest default and it needs no re-render. But a beginner who spent an evening in the editor and exported a
+  full-res picture reasonably expects *that* file in their backup, and the app already knows where it is: the
+  editor's export path is recorded per run (the same marker `/api/gallery/unexported-edits` reads to tell a
+  target's saved edit from its exported one). A zip that silently holds only the small preview is the kind of
+  quiet shortfall that costs trust the first time someone tries to print from it.
+  **Shape.** Per target, prefer the run's **exported edit** if the file exists, else the TIFF/FITS if the user
+  asked for full-size, else the preview — surfaced as one plain-language choice next to the button (*"pictures
+  as shown"* vs *"full-size files"*), defaulting to the current behaviour so nothing changes for anyone who
+  doesn't ask. Keep the streaming shape exactly as it is (it is already size-blind), keep `_skipped.txt`, and
+  keep the `safe_name`-derived entry names. **Cautions:** full-size FITS of a big mosaic is hundreds of MB per
+  target, so the copy next to the option has to say roughly how big the download will be before someone taps it
+  on a phone; and the picker must never re-render or re-export anything — if there is no exported file, fall
+  back, don't build one.
+
 - **IMPROVEMENT IDEA (Scout QA audit 2026-08-27 #16, secondary finding — hardening, low severity) — `POST
   /api/scan` accepts a raw client-supplied filesystem `root` and scans/ingests from it unconfined, the one
   ingest endpoint that isn't confined to `incoming/`.** *(Pillar: friendliness / security posture — PRIORITY 3.
@@ -8504,6 +8573,18 @@ to **Shipped**.)_
   early** — a claim that only exists locally until the task is finished claims nothing. Cheap extra insurance
   for a small item: `git fetch` and re-read the entry right before you start writing code, not just at the top
   of the run.
+
+  **It happened again the same day — and this time the *rules worked*.** A Builder (`…-galileo-0wtz21`) and a
+  Scout (`…-knuth-qtz5h4`) both fixed the exact-0 debayer bug within an hour, arriving at functionally identical
+  positional-mask fixes. The Scout's landed on `main` first, so the Builder **took `main`'s implementation
+  wholesale** and dropped its own — no re-litigating whose was nicer, no near-duplicate code, and the version
+  number the Scout had already used (`v0.284.5`) was left alone. The one thing it kept was the piece that was
+  genuinely *different in kind*: a test checking every pixel of all three channels against an independent
+  per-pixel reference debayer, next to the Scout's single-pixel probe. **That's the general rule when you lose
+  this race: take what's on `main`, keep only what's additive, and say so in the merge.** Note also what neither
+  agent's *fix* cost — the loser here spent one commit, not a run, because the duplicate was noticed at the
+  pre-merge sync (§11) rather than after merging. Both halves of the lesson stand: claim the item early, *and*
+  make the sync cheap to lose.
 
 - **NEW IDEA (Scout 2026-08-27 #15) — close the loop when auto-grade *brings frames back*: a plain-language,
   self-hiding note telling the owner "N subs you'd set aside earlier turned out typical after all and are back in
@@ -15850,6 +15931,23 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #17) — "Was the Moon in your way?": a plain-language per-session
+  moonlight note.**~~ — **ALREADY SHIPPED; pruned by the Builder 2026-08-27** (branch
+  `claude/compassionate-galileo-0wtz21`) after doing exactly the grep the spec itself asked for. This exists
+  **end to end** and predates the idea: `seestack/nightplan.py` has `SessionMoon` + `session_moon()` (a
+  retrospective verdict at the session midpoint, reusing the planner's own `_moon_verdict` bands so the
+  after-the-fact note and tonight's warning grade the same sky the same way) and `_session_moon_text()` for the
+  sentence; `webapp/routers/targets.py::_session_moon_note` wires it into the **session recap** — the exact
+  surface the idea proposed; and it is covered by `tests/test_session_moon.py` plus
+  `tests/webapp/test_target_session_recap.py`. It is even *quieter* than the spec asked: `text` is `None` on
+  anything but a "poor" night, so it can never nag. The one deliberate difference is that the shipped version
+  uses the observer location it has to include Moon **altitude** ("it was below the horizon, so it can't have
+  hurt you"), which is strictly better than the location-free phase+separation the spec settled for. **Nothing
+  to build.** Filed here rather than deleted so a future run doesn't re-derive the same idea a third time —
+  this is the pattern AGENTS.md §1 warns about ("the Ideas list has repeatedly carried items that were already
+  shipped"). Original spec below.
+
+  *(Pillar: understand + plan, PRIORITY
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #18) — "Then vs now": a side-by-side slider that compares your
   target's newest deep stack against an earlier one, so a beginner can *see* their picture getting cleaner and
   deeper as the nights add up — and trust that another night out was worth it.** *(Pillar: understand + enjoy +
@@ -15908,9 +16006,46 @@ problems. Dogfood it every big-picture run and fix root causes.
   `(session_time, target_ra_dec)`, tested against a couple of known dates. **Grep first:** confirm no existing
   session-recap/planner card already surfaces Moon phase before building.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #16) — "Download all my pictures": one button that streams every
-  finished target picture in the library as a single `.zip`, so a beginner can back up or share a whole
-  season's work in one tap instead of visiting each target and downloading one at a time.** *(Pillar: get +
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #16) — "Download all my pictures": one button that streams every
+  finished target picture in the library as a single `.zip`.**~~ — **SHIPPED v0.285.0** (Builder 2026-08-27,
+  branch `claude/compassionate-galileo-0wtz21`).
+
+  **What shipped.** `GET /api/gallery/pictures.zip` streams one entry per target — that target's **current
+  picture**, resolved with the shared `_cover_preview_path` precedence (pinned cover, else newest stack
+  preview), the same one the Library tile, `/api/gallery/best` and the montage wall use — so the archive holds
+  the pictures the app has been showing all along. Entries are named from the target's `safe_name` (already
+  sanitised, so no display name can put a `/` or `..` into someone's extraction) with a `-2`/`-3` suffix on
+  collision. Byte-for-byte copies: nothing is re-rendered, and `ZIP_STORED` rather than deflate, because PNG/JPEG
+  previews are already compressed. In the UI it's a second button inside the existing **"My deep-sky wall"** card
+  — *"Download all N pictures"* — deliberately *not* a new always-on block (the standing IA priority): it's the
+  same "get my pictures out" moment, one tap along, with one line of copy distinguishing it from the montage.
+
+  **Bounded memory, which is what makes "all" honest.** The archive is built through a small
+  `_ZipStreamBuffer(io.RawIOBase)` that `zipfile` writes into and the response drains after every 1 MiB chunk,
+  so peak memory is one chunk plus a header regardless of library size — which is why the endpoint doesn't
+  inherit the `BEST_PICTURES_MAX` cap the spec suggested. A "download all" that silently gave you 24 of your
+  40 targets would be worse than not having it.
+
+  **Guardrails.** Read-only: it only opens existing result files and streams bytes out — `incoming/` is never
+  touched (§10) and nothing is written into the library (pinned by a test that diffs the whole library tree
+  across a download). Best-effort per picture, like the montage: a file gone at enumeration time just drops
+  that target, and one that vanishes *mid-stream* is skipped with a `_skipped.txt` member naming it, so a
+  short archive can never pass for a complete backup. 404 with a plain-language detail when nothing is
+  finished, so the offer self-hides.
+
+  **Upgrade-safe (§9):** one additive read-only GET endpoint and one additive button; no config, schema,
+  on-disk or default change, and no existing response shape touched.
+
+  **Tests (+7 backend in `tests/webapp/test_gallery_pictures_zip.py`, +1 frontend):** every target present and
+  byte-identical to disk; `testzip()` verifying the central directory a never-seeking writer produces; the
+  pinned cover beating a newer stack; a deleted preview dropping only its target; a mid-stream loss named in
+  `_skipped.txt` with the rest of the archive intact; the empty-library 404; and the library tree unchanged by
+  a download. Frontend: the button's count is the *whole* library (14), not the wall's 9, and it points at the
+  zip with `download`.
+
+  Original spec, for the record:
+
+  *(Pillar: get +
   share + trust/backup, PRIORITY 3; size S–M; fully offline, additive, read-only — stdlib `zipfile`, no new
   deps, no network, no schema/config change.)*
   **Why (real friction).** The library already has a **"My deep-sky wall"** montage (`GET /api/gallery/montage.jpg`,

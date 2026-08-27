@@ -565,6 +565,14 @@ RUN_ARTEFACT_SUFFIXES: dict[str, str] = {
     "progress_apng": "_progress.png",
 }
 
+# The artefacts that have a dedicated ``stack_runs`` column, i.e. the only ones a
+# repoint can actually move. Stated as an allow-list rather than a list of
+# exclusions so a *new* entry in ``RUN_ARTEFACT_SUFFIXES`` defaults to "not in the
+# map": every artefact added since the exclusions were written (the frame-coverage
+# sibling ``_framecov.fits``) resolves from the FITS basename like coverage does,
+# and an exclusion list silently let it into the map instead.
+_REPOINTABLE_ARTEFACTS = frozenset({"fits", "tiff", "preview"})
+
 
 def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str]:
     """Move an existing output set aside under a single timestamped *basename*.
@@ -607,9 +615,9 @@ def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str
         try:
             orig.rename(dst)
             log.info("archived previous %s → %s", orig.name, dst.name)
-            # coverage + progress reel resolve from the FITS basename (no
-            # dedicated history column), so they aren't in the repoint map.
-            if kind not in ("coverage", "progress_webp", "progress_apng"):
+            # coverage, frame-coverage + progress reel resolve from the FITS
+            # basename (no dedicated history column), so they aren't in the map.
+            if kind in _REPOINTABLE_ARTEFACTS:
                 mapping[str(orig)] = str(dst)
         except OSError as exc:
             log.warning("could not archive %s: %s", orig, exc)

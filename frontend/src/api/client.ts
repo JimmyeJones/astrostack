@@ -2294,6 +2294,11 @@ export const api = {
   recapPosterUrl: () => `/api/recap.jpg`,
   galleryMontageUrl: (limit?: number) =>
     `/api/gallery/montage.jpg${limit ? `?limit=${limit}` : ""}`,
+  // Download URL for "all my pictures" — every target's current picture (its
+  // pinned cover, else its newest stack) as one streamed .zip. Like the montage
+  // and the recap poster this is a href/download, not a fetch: the browser saves
+  // the archive, and nothing is written on the server.
+  galleryPicturesZipUrl: () => `/api/gallery/pictures.zip`,
 
   // "Try it with a sample image" onboarding demo
   getSampleStatus: () => req<SampleStatus>("/api/sample"),
