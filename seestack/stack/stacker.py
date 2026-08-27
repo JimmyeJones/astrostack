@@ -1063,6 +1063,7 @@ def _build_output_header_meta(
     n_unreadable: int = 0,
     drizzle_reject_declined: bool = False,
     drizzle_scale_requested: float | None = None,
+    min_max_reject_count_requested: int | None = None,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -1221,6 +1222,17 @@ def _build_output_header_meta(
                             "drizzle scale lowered to fit memory budget")
         meta["DRZSCLRQ"] = (round(float(drizzle_scale_requested), 4),
                             "drizzle scale originally requested")
+    # …and the same story for the *non-drizzle* lever: an unattended run whose
+    # extra outlier passes didn't fit, stepped back to the single min/max drop
+    # rather than refusing to make a picture. Nothing about the picture's size or
+    # shape changed, so this is quieter than DRZSCLAD — but a header that says so
+    # is how a REJMODE of "min/max ×1" on a run configured for ×3 explains itself
+    # long after the job log has rolled.
+    if min_max_reject_count_requested is not None:
+        meta["REJKAD"] = (int(options.min_max_reject_count),
+                          "extremes/side lowered to fit memory")
+        meta["REJKRQ"] = (int(min_max_reject_count_requested),
+                          "extremes/side originally requested")
     # Frame-accounting provenance: how many of the subs the stacker *attempted*
     # to combine actually made it in. ``frames`` here is the post-filter list the
     # passes iterated (after lucky-imaging selection and any gross plate-solve
@@ -1624,6 +1636,39 @@ def run_stack(
                     "slightly less zoomed-in, nothing else changes.",
                     drizzle_scale_requested, _need / 1e9, _budget / 1e9,
                     eff.drizzle_scale, _fix.peak_bytes / 1e9,
+                )
+    # …and the *non-drizzle* half of exactly the same asymmetry, which the block
+    # above deliberately left out. A plain stack's least-destructive lever is
+    # dropping the **extra** outlier passes — k>1 back to the proven single
+    # min/max drop — and that is even safer to take than the scale step above:
+    # same canvas, same pixel grid, same output file, just a little less
+    # multi-trail rejection. So a walk-away stack with k=3 on a tight budget need
+    # not go dark when k=1 would have made the picture. ``reference_canvas`` stays
+    # a refusal here for the same reason it does above — cropping a mosaic's field
+    # is a different order of change — and an attended run is untouched.
+    min_max_reject_count_requested: int | None = None
+    _mmr_charged = eff.min_max_reject and not options.drizzle and n >= 3
+    if eff.unattended and _mmr_charged and eff.min_max_reject_count > 1:
+        _arrays = _min_max_reject_arrays(eff.min_max_reject_count)
+        _need, _ = _estimate_peak_bytes(
+            dst_shape, drizzle=False, drizzle_scale=1.0, reject_arrays=_arrays)
+        _budget = int(_stack_memory_budget_bytes(memory_budget_gb))
+        if int(_need) > _budget:
+            _fix = _best_memory_fix(
+                dst_shape, ref_shape, is_mosaic=is_mosaic_canvas, drizzle=False,
+                drizzle_scale=1.0, drizzle_reject=False, reject_arrays=_arrays,
+                min_max_reject_count=eff.min_max_reject_count, budget=_budget)
+            if _fix is not None and _fix.kind == "reduce_outlier_passes":
+                min_max_reject_count_requested = int(eff.min_max_reject_count)
+                eff = replace(eff, min_max_reject_count=1)
+                log.warning(
+                    "Unattended stack: dropping %d outlier extremes per side would "
+                    "need ~%.1f GB of working memory, over the ~%.1f GB budget. "
+                    "Dropping 1 (~%.1f GB) instead of refusing the run — the "
+                    "picture is the same size and shape, with a little less "
+                    "multi-trail rejection.",
+                    min_max_reject_count_requested, _need / 1e9, _budget / 1e9,
+                    _fix.peak_bytes / 1e9,
                 )
     backend = "GPU (cupy)" if (
         (options.use_gpu is True) or (options.use_gpu is None and GPU_AVAILABLE)
@@ -2053,7 +2098,9 @@ def run_stack(
                                                 _drizzle_reject_wanted
                                                 and not eff.drizzle_reject),
                                             drizzle_scale_requested=(
-                                                drizzle_scale_requested))
+                                                drizzle_scale_requested),
+                                            min_max_reject_count_requested=(
+                                                min_max_reject_count_requested))
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     if stack_fwhm is not None:

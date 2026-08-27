@@ -8574,9 +8574,43 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-27, traced while independently building the same `unattended` posture that
+- ~~**NEW IDEA (Builder 2026-08-27, traced while independently building the same `unattended` posture that
   shipped as v0.281.0) — the *non-drizzle* memory levers still hard-refuse an unattended run, and one of them
-  is a strictly invisible degrade the walk-away path should already be taking.** *(Pillar: autonomy —
+  is a strictly invisible degrade the walk-away path should already be taking.**~~ — **SHIPPED v0.287.0**
+  (Builder 2026-08-27, branch `claude/compassionate-galileo-j38hmo`).
+
+  **What shipped — the filed shape exactly.** `run_stack` grew the non-drizzle sibling of the v0.281.0
+  drizzle-scale block, immediately beneath it: on an **unattended** run whose min/max canvas is over budget,
+  when `_best_memory_fix` returns `reduce_outlier_passes`, the run takes it (`min_max_reject_count` → 1),
+  logs a plain sentence saying what it did and why, and stacks — instead of raising a `MemoryError` at 3 a.m.
+  that nobody is there to read. An **attended** run is bit-for-bit untouched: it still gets the actionable
+  refusal naming the lever, which is the right answer when someone is sitting there to click it.
+
+  **Why this is the safest degrade the engine has.** Unlike the drizzle-scale step, *nothing the owner can see
+  about the picture changes* — same canvas, same pixel grid, same output file, just a little less multi-trail
+  rejection (k>1 → the proven single min/max drop). Pinned by a test that stacks the same frames at a healthy
+  budget with k=1 and asserts the degraded run's data shape matches.
+
+  **The boundary is deliberately as narrow as v0.281.0's.** `reference_canvas` is still **never** auto-applied
+  — cropping a mosaic's field is a different order of change — so a k=1 unattended run over budget still
+  refuses, and so does a run whose *single*-pass canvas doesn't fit either. Both pinned.
+
+  **Provenance.** `REJKAD`/`REJKRQ` are stamped beside `DRZSCLAD`/`DRZSCLRQ` ("extremes/side lowered to fit
+  memory" / "…originally requested"), so a REJMODE of min/max ×1 on a run configured for ×3 explains itself
+  long after the job log has rolled — with a test asserting the comments survive the 80-column FITS card
+  intact rather than being silently truncated (they didn't, first time round). The run record already persists
+  `eff`, so the count that ran is what a later reprocess rebuilds.
+
+  **Upgrade-safe (§9):** additive header cards and a branch reachable only when `unattended` is set (which the
+  Stack form never sets — only the walk-away chain does), on a run that would otherwise have *failed*. No
+  config, schema, on-disk, API or default change. **Tests (+5 in `tests/test_unattended_memory_lever.py`, 2
+  fail before / pass after):** the degrade itself end-to-end with both header cards and the persisted run
+  record; the same-shape guarantee; a healthy budget stamping nothing and keeping k=3; a canvas even k=1 can't
+  hold still refusing; and a k=1 unattended run over budget never quietly rescued by the canvas lever.
+
+  Original spec, for the record:
+
+  *(Pillar: autonomy —
   PRIORITY 2. Size: S. Confidence: traced.)* `_best_memory_fix` offers three levers. Drizzle runs now
   auto-take theirs (`drizzle_scale`, v0.281.0) when nobody is watching; a **non-drizzle** run still refuses
   outright, even when the lever it would advise is `reduce_outlier_passes` — dropping `min_max_reject_count`
@@ -16136,9 +16170,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   than a second definition of "a session" (AGENTS §-style single-source-of-truth, as `goals.py` documents for the
   integration goal).
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #18) — "Then vs now": a side-by-side slider that compares your
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #18) — "Then vs now": a side-by-side slider that compares your
   target's newest deep stack against an earlier one, so a beginner can *see* their picture getting cleaner and
-  deeper as the nights add up — and trust that another night out was worth it.** *(Pillar: understand + enjoy +
+  deeper as the nights add up — and trust that another night out was worth it.**~~ — **ALREADY SHIPPED; struck
+  through, not built** (Builder 2026-08-27, curation — grepped before starting it, exactly as the entry's own
+  "Builder: grep first" asks). **This exists in full.** `frontend/src/routes/Compare.tsx` is a bookmarkable
+  `/compare?a=<safe>:<run_id>&b=<safe>:<run_id>` route with **three** modes — side-by-side, a
+  drag-the-divider **split slider** (`components/editor/splitCompare.ts`) and blink — each side captioned with
+  its integration and date (`formatIntegration` / `formatStampDate`), which is the quantified caption the spec
+  asks for, plus plain-language verdicts it didn't ask for: `noiseComparison` ("34 % less grain") and
+  `panelComparison` for mosaics, alongside noise, haze, seam, calibration and rejection badges. Both entry
+  points exist too: **History** offers a compare link for each adjacent pair of a target's runs
+  (`historyCompareHref`, pinned in `History.test.tsx`) — which *is* the filed "latest vs previous" default, on
+  the page where a target's run list already lives — and **Gallery** builds one from any two selected pictures.
+  Covered by `Compare.test.tsx`. *(The one thing genuinely absent is a compare affordance on the **Target**
+  page itself. That is a one-link addition to the page the owner already calls too busy, not the feature
+  described here — if a future run finds that a beginner can't discover Compare, file that narrow question
+  instead of re-opening this.)*
+
+  Original spec, for the record:
+
+  *(Pillar: understand + enjoy +
   trust, PRIORITY 3 (with a 4 flavour — it builds trust in the result); size M; fully offline, additive,
   read-only — reuses the stack-run artifacts already on disk, no new deps, no schema/config change.)*
   **Why (real friction).** A target accumulates **multiple finished stack-runs** over nights: every re-stack
