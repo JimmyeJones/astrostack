@@ -73,6 +73,7 @@ from seestack.video.lucky import (
     normalize_for_display,
     stack_video,
 )
+from webapp.atomicio import write_text_durably
 from webapp.config import Settings
 from webapp.jobs import Job, JobManager
 
@@ -823,8 +824,22 @@ def restore_full_still(settings: Settings, capture_id: str) -> VideoStackMeta:
 
 
 def _write_meta(out_dir: Path, meta: VideoStackMeta) -> None:
-    (out_dir / META_NAME).write_text(
-        json.dumps(asdict(meta), indent=2), encoding="utf-8",
+    """Save a still's result metadata, atomically and durably.
+
+    This file is what makes a finished picture *findable*: without a readable
+    ``meta.json`` the still drops off the Moon & Sun page and out of the Gallery
+    even though ``stack.png`` and the 16-bit TIFF are sitting right beside it —
+    and the only way back is another multi-minute decode of a capture the owner
+    may already have cleared off the NAS. It is also rewritten in place every
+    time a crop or a re-sharpen changes the picture, so a crash lands in that
+    window far more often than the once-per-stack write suggests.
+
+    :func:`webapp.atomicio.write_text_durably` makes the swap atomic (a partial
+    write is never observable) and the contents durable before the rename
+    publishes them.
+    """
+    write_text_durably(
+        out_dir / META_NAME, json.dumps(asdict(meta), indent=2), suffix=".json.tmp",
     )
 
 
@@ -930,8 +945,10 @@ def _video_grade_body(
         source_size=source_size,
         source_mtime=source_mtime,
     )
-    (out_dir / GRADE_NAME).write_text(
-        json.dumps(asdict(meta), indent=2), encoding="utf-8",
+    # Same reasoning as ``_write_meta``: losing this to a half-write costs the
+    # owner the grade pass they waited a full decode for.
+    write_text_durably(
+        out_dir / GRADE_NAME, json.dumps(asdict(meta), indent=2), suffix=".json.tmp",
     )
     return {"capture_id": capture_id, "n_graded": graded.n_graded}
 

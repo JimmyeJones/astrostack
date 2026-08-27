@@ -314,6 +314,18 @@ _(none — claim an item here with your branch name)_
   `fsync`-refusing filesystem still saving, the historic temp name being reused, a `SettingsStore` round-trip
   through a fresh store (the upgrade contract), and the calibration registry + high-water round-trip.
 
+
+  **Follow-on, same run (v0.278.1):** with the helper in place, the grep for its siblings found one more file
+  worth it — a video still's `meta.json` (and the `grade.json` beside it) were written with a bare
+  `write_text()`, not even atomically. That file is what makes a finished picture *findable*: without a readable
+  one the still drops off the Moon & Sun page and out of the Gallery while `stack.png` and the 16-bit TIFF sit
+  right beside it, and the only way back is another multi-minute decode of a capture the owner may already have
+  cleared off the NAS. It is also rewritten **in place on every crop and every re-sharpen**, so the crash window
+  is far wider than once-per-stack. Both now go through `write_text_durably` (+1 test: a round-trip through the
+  in-place-edit rewrite leaving no temp behind). The remaining `write_text` state files were checked and
+  deliberately left alone — `edit/proxy.py`'s proxy meta and `render/thumbnail.py`'s sentinel are regenerable
+  caches, so a half-write costs a recompute, not data.
+
   Original spec, for the record:
 
     *(Severity: low — `os.replace` still makes the rename atomic, the
@@ -11698,6 +11710,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEW IDEA (Builder 2026-08-27, the obvious next slice of the "Was the Moon washing this out?" note shipped
+  in v0.278.0) — say it on the *Nights* card too, so a beginner can see *which* of their nights the Moon hurt,
+  not only the most recent one.** *(Pillar: understand + trust — PRIORITY 3. Size: S.)* v0.278.0 put the
+  retrospective verdict on the "Last session" card, which answers "why does my newest picture look flat?".
+  The question right behind it is "so which of my ten nights on this target were any good?" — and the Nights
+  card already lists every night with a one-word verdict (sharp / soft / hazy) it computes from stored metrics.
+  Adding the Moon level to each row is now cheap: `seestack.nightplan.session_moon` exists and is pure, each
+  night already carries `start_utc`/`end_utc`, and the target's position and the site are already resolved on
+  that endpoint's sibling. **Shape:** a small dimmed "bright Moon" marker on the rows whose verdict is `poor`,
+  never a sentence per row (ten sentences would be a wall), with the existing per-night verdict untouched.
+  **Care — the one real cost:** this is N ephemeris evaluations per page load rather than one. Measure it
+  before shipping; if a 30-night target is slow, compute the Moon level only for the rows actually rendered,
+  or memoise per (night, target) on the app the way the site lookup already is. **Do not** turn it into a
+  filter or an auto-reject: moonlit subs are still real signal, and the whole feature's voice is "here's why,
+  and how to do better next time".
+
+- **NEW IDEA (Builder 2026-08-27, spotted while fixing the two "dataclass tolerates, Pydantic doesn't" list
+  endpoints in v0.277.5) — a tiny test that pins the *rule* rather than the four instances: every list endpoint
+  that reads a per-item file off disk degrades per item.** *(Pillar: trust / maintainability — PRIORITY 3.
+  Size: S.)* v0.277.5 fixed the four boundaries that existed; nothing stops the fifth being written without a
+  guard. The cheap version is not a clever meta-test but a documented convention plus one shared helper —
+  e.g. a `degrade_per_item(items, build, what)` used by `/api/videos`, `/api/gallery` and the `stats.py`
+  roll-ups alike, so the guard comes for free with the helper and a reviewer can see at a glance which loops
+  have it. **Grep first:** the four fixed sites and the existing `stats.py` roll-ups are the population; if a
+  shared helper would only ever have five callers, a comment in the house-style notes may be the better
+  answer, and this idea should be closed rather than built. Explicitly *not* worth a framework.
+
 
 - **IMPROVEMENT IDEA (Scout 2026-08-27 #9, verified by dogfood + code) — with "Auto outlier removal" on (the
   default), the Stack form still shows "Sigma clipping" and "Min/max rejection" as live, editable toggles whose
