@@ -420,3 +420,86 @@ def test_catalog_minor_axes_are_sane():
             continue
         assert o.size_arcmin is not None, f"{o.id}: minor axis without a major one"
         assert 0 < o.size_minor_arcmin <= o.size_arcmin, o.id
+
+
+# ---- "which way do I nudge it?" -----------------------------------------
+
+def test_the_nudge_points_the_mount_at_the_object():
+    """Directions are read straight off the sky: the mount moves *toward* the
+    object, so an object east of where you pointed means "nudge east"."""
+    from seestack.framing import recentre_nudge
+
+    cases = {
+        "east": (10.5, 41.0),
+        "west": (9.5, 41.0),
+        "north": (10.0, 41.4),
+        "south": (10.0, 40.6),
+    }
+    for expected, (ra, dec) in cases.items():
+        n = recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=41.0,
+                           object_ra_deg=ra, object_dec_deg=dec)
+        assert n is not None
+        assert n.direction == expected
+        assert expected in n.text
+        assert "Seestar" in n.text
+
+
+def test_the_nudge_uses_the_eight_point_compass_for_a_diagonal():
+    from seestack.framing import recentre_nudge
+
+    n = recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=0.0,
+                       object_ra_deg=10.3, object_dec_deg=0.3)
+    assert n is not None and n.direction == "north-east"
+    n = recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=0.0,
+                       object_ra_deg=9.7, object_dec_deg=-0.3)
+    assert n is not None and n.direction == "south-west"
+
+
+def test_the_nudge_distance_is_the_true_angular_offset():
+    """RA degrees shrink toward the poles, so a 1° RA offset at Dec +60° is only
+    half a degree of sky — telling a beginner to move a whole degree would
+    overshoot."""
+    from seestack.framing import recentre_nudge
+
+    equator = recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=0.0,
+                             object_ra_deg=11.0, object_dec_deg=0.0)
+    high = recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=60.0,
+                          object_ra_deg=11.0, object_dec_deg=60.0)
+    assert equator is not None and high is not None
+    assert equator.degrees == pytest.approx(1.0, abs=1e-6)
+    assert high.degrees == pytest.approx(0.5, abs=0.01)
+
+
+def test_the_nudge_is_seam_safe_across_ra_zero():
+    from seestack.framing import recentre_nudge
+
+    n = recentre_nudge(centre_ra_deg=359.8, centre_dec_deg=0.0,
+                       object_ra_deg=0.2, object_dec_deg=0.0)
+    assert n is not None
+    assert n.direction == "east"
+    assert n.degrees == pytest.approx(0.4, abs=1e-6)
+
+
+def test_no_nudge_when_it_would_be_noise_or_a_guess():
+    from seestack.framing import NUDGE_MIN_DEG, recentre_nudge
+
+    # Below the floor → say nothing rather than "move it 0.0°".
+    assert recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=41.0,
+                          object_ra_deg=10.0,
+                          object_dec_deg=41.0 + NUDGE_MIN_DEG / 2) is None
+    # Non-finite inputs, and near the pole where "east" stops being useful.
+    assert recentre_nudge(centre_ra_deg=float("nan"), centre_dec_deg=41.0,
+                          object_ra_deg=10.0, object_dec_deg=41.5) is None
+    assert recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=89.9,
+                          object_ra_deg=40.0, object_dec_deg=89.6) is None
+
+
+def test_the_nudge_distance_reads_in_units_a_beginner_can_aim_by():
+    from seestack.framing import recentre_nudge
+
+    big = recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=0.0,
+                         object_ra_deg=11.2, object_dec_deg=0.0)
+    assert big is not None and "1.2°" in big.text
+    small = recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=0.0,
+                           object_ra_deg=10.08, object_dec_deg=0.0)
+    assert small is not None and "5'" in small.text

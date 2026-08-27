@@ -350,6 +350,57 @@ describe("HistoryView", () => {
     ).toBeInTheDocument();
   });
 
+  it("won't plot object pins on a picture a past save rotated North-up", async () => {
+    // The North-up toggle starts off on every page load, so a run whose *stored*
+    // preview was saved rotated used to get its pins and scale bar drawn on the
+    // un-rotated FITS grid — over a picture that had since turned.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, preview_north_up_deg: 90 }),
+    ]);
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600,
+      objects: [
+        { catalog_id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+          ra_deg: 10.68, dec_deg: 41.27, x_px: 500, y_px: 300 },
+      ],
+      scale_bar: null,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Identify"));
+
+    // The list is withheld, and the card says why in plain language.
+    await waitFor(() =>
+      expect(screen.getByText(/saved rotated so North is up/)).toBeInTheDocument());
+    expect(screen.queryByText(/In this picture —/)).not.toBeInTheDocument();
+  });
+
+  it("still plots object pins on a picture saved un-rotated", async () => {
+    // The no-regression half: an ordinary run (0 / absent) is unaffected.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, preview_north_up_deg: 0 }),
+    ]);
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600,
+      objects: [
+        { catalog_id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+          ra_deg: 10.68, dec_deg: 41.27, x_px: 500, y_px: 300 },
+      ],
+      scale_bar: null,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Identify"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/In this picture — 1 catalog object:/)).toBeInTheDocument());
+    expect(screen.queryByText(/saved rotated so North is up/)).not.toBeInTheDocument();
+  });
+
   it("says so plainly when no catalog objects fall in the field", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
     vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({

@@ -501,6 +501,12 @@ class StackRunOut(BaseModel):
     # pre-schema-14 runs or when too few stars to fit; lets the UI show a per-run
     # sharpness readout and compare a target's stacks.
     stack_fwhm_px: float | None = None
+    # The North-up rotation (degrees) baked into this run's *stored preview PNG*
+    # by History's "Adjust" save — 0.0/None when the picture was saved
+    # un-rotated. Anything that draws on top of those stored bytes (the object
+    # pins and the scale bar, whose coordinates are measured on the un-rotated
+    # FITS grid) needs to know, or it plots on a picture that has since turned.
+    preview_north_up_deg: float | None = None
     # How flat this *mosaic's* panel joins came out: the sky step still left
     # between coverage levels, in units of the picture's own grain (~0 = the
     # panels matched; around 1 is where a seam starts to show once stretched).

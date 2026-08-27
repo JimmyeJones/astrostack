@@ -164,10 +164,95 @@ _(none — claim an item here with your branch name)_
   (2) an unadjusted linear run and a display-space run are byte-for-byte unchanged (no regression). One-two
   files (`stack.py`, `thumbnail.py`) + tests. *(Found by the render/export-parity adversarial audit this run.)*
 
-- **🟡 BROKEN-UX / OVERLAY (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`, reproduced) —
-  the Sky-map coverage overlay places its transparency from the *un-rotated* FITS footprint against a preview
-  that was saved *north-up-rotated*, so an irregular-mosaic picture on the Sky map shows its covered/transparent
-  regions in the wrong place.** *(Severity: broken-UX / cosmetic — a Sky-map overlay footprint disagrees with
+- **🟠 WRONG-RESULT / SHARE (Builder 2026-08-27, branch `claude/compassionate-galileo-zixgdj`, REPRODUCED
+  end-to-end) — a share download asked for North-up **double-rotates** a preview a previous save already baked
+  the rotation into, so the picture the user shares is 180° from the one on screen.** *(Severity: wrong-result
+  on a share/export surface — the shared file is visibly upside-down; the stack and the stored preview are
+  fine. Confidence: reproduced end to end through the real endpoints.)*
+
+  **Root cause (traced + reproduced).** `download_stack_run(kind="jpeg", north_up=true)`
+  (`webapp/routers/stack.py`) reads the run's **stored preview bytes** and applies
+  `orient_preview_north_up(preview, fits_path)` — which derives the *full* correction from the FITS WCS and
+  knows nothing about what those bytes already are. History's "Adjust → North up → Save" writes a preview that
+  is **already** rotated by exactly that angle (and, as of v0.288.1, records it in
+  `stack_runs.preview_north_up_deg`). So the share applies the turn a second time. The `wallpaper` endpoint has
+  the same shape (`stack.py` ~2063, same `orient_preview_north_up` call on the stored preview), plus a
+  companion of its own: `wallpaper_target_pixel(fits_path, …)` measures the crop centre on the **FITS grid**
+  and applies it to a preview that may already be rotated, so the auto-crop re-centres on the wrong spot even
+  when `north_up` is *not* asked for.
+
+  **Reachability (honest).** Two steps from the UI, and neither is exotic: save the picture North-up in
+  History's Adjust (the whole point of the toggle), then reload and download/share with the North-up switch on.
+  The switch is `useState(false)` per page load, so it is genuinely easy to have a rotated stored preview and a
+  toggle that says "off" — the same blind spot that caused the v0.289.2 object-pin fix.
+
+  **Repro (reproduced this run, real endpoints):** a 30×40 master with a 90°-off canvas WCS. Save the preview
+  un-rotated → stored 30×40, `GET …/jpeg?north_up=true` → 40×30 (correct, one turn). Save it **North-up** →
+  stored 40×30 (= `rot90` of the first, correct), then `GET …/jpeg?north_up=true` → **30×40** — turned again,
+  i.e. 180° from the picture on screen.
+
+  **Fix direction.** `preview_north_up_deg` is already on the run (v0.288.1) and already on `StackRunOut`
+  (v0.289.2), so the missing fact is available: rotate by the **remainder** rather than the full angle — e.g.
+  give `orient_preview_north_up` an `already_deg` parameter and pass `run.preview_north_up_deg or 0.0` at every
+  site that re-orients *stored preview bytes* (a run saved at the same angle then becomes a clean no-op, and an
+  un-rotated run is byte-for-byte as today). The `applied_north_up` the scale/rose marks follow stays the
+  **total** (it is measured against the FITS, not against the stored bytes), so `_sky_marks_for_run` needs no
+  change. **Do this as its own run with a sweep, not a bolt-on:** grep every consumer of the stored preview
+  that derives geometry from the FITS (`orient_preview_north_up`, `rotate_point_north_up`,
+  `wallpaper_target_pixel`, the keepsake/nameplate/montage/reel paths) and decide each one explicitly — the
+  wallpaper's target-pixel bug above is a *separate* defect in the same family and should be fixed alongside.
+  **Tests:** a North-up-saved run's `?north_up=true` JPEG is byte-for-byte its stored preview (fails before /
+  passes after); an un-rotated run's North-up JPEG is unchanged; and the wallpaper crop centres on the object
+  for a rotated stored preview. *(Found while fixing the Sky-map overlay and the History object pins — third
+  instance of the same root class: a consumer of the stored preview bytes that assumes they are the un-rotated
+  FITS grid.)*
+
+- **✅ SHIPPED (Builder, v0.288.1, branch `claude/compassionate-galileo-zixgdj`) — ~~the Sky-map coverage
+  overlay places its transparency from the *un-rotated* FITS footprint against a preview that was saved
+  *north-up-rotated*, so an irregular-mosaic picture on the Sky map shows its covered/transparent regions in the
+  wrong place~~ — and, as the previous Builder's deferral note said, the tile's **placement** was wrong with
+  it. Both halves shipped together; the interim opaque-fallback was not needed.**
+
+  **What shipped.** The one missing fact — *that a stored preview was rotated, and by how much* — is now
+  recorded: an additive `stack_runs.preview_north_up_deg` column (`SCHEMA_VERSION` 15 → 16, additive
+  `ALTER TABLE`, older runs read `NULL` = "no rotation"), written by `save_stack_preview` on **every** save
+  (0.0 when the toggle is off, so a re-save without North-up clears an earlier angle rather than leaving the map
+  following a ghost). New `seestack.render.thumbnail.applied_north_up_deg` is the single answer to "what did the
+  render actually apply" — threshold *and* snap rule in one place, so the recorded angle cannot drift from the
+  renderer. With that recorded:
+  - `sky_overlay` takes the coverage mask through the same rotation (new
+    `seestack.render.orient.rotate_mask_north_up`, mirroring the picture's snap→`np.rot90` / PIL-`NEAREST`
+    split) before compositing, so the alpha footprint lands where the picture's data is.
+  - `sky.py` composes the rotation into **both** the tile's placement WCS and its on-sky extent, via new
+    `north_up_deg=` keywords on `wcs_dict_rescaled_to_preview` and `canvas_extent_from_fits`. The geometry is
+    exact rather than guessed: new `seestack.render.orient.north_up_pixel_transform` returns the affine
+    `p_in = M · p_out + t` that each rotation path really performs, and `_rotate_matrix_and_crpix` turns that
+    into `CD′ = CD · M`, `CRPIX′ = M⁻¹ · (CRPIX − t¹)`. Two traps were found and pinned by measurement: the
+    `np.rot90` path works in pixel-**centre** coordinates while `PIL.Image.rotate(expand=True)` rotates about
+    `n/2` on pixel **corners** — without the half-pixel correction the derived position is up to ~1.7 px out at
+    123°; with it the residual is pure nearest-neighbour rounding.
+  - A rotated run whose canvas WCS can't be read now emits **no** tile WCS rather than the `_tan_wcs`
+    extrapolation, so the map can never place a rotated picture confidently wrong.
+
+  **Upgrade-safe (§9):** additive column with an additive migration (tested from a hand-built v15 DB); every new
+  parameter defaults to "no rotation", and an ordinary run's overlay bytes, tile WCS and extent are unchanged
+  key-for-key. No on-disk, API-shape or default change (the endpoint gains fields; the frontend needed no
+  change — `saveStackPreview` already ignores extra response fields).
+
+  **Tests (+18, all new behaviour covered; the two that pin the bug fail before):**
+  `tests/test_orient.py` — the pixel transform is *exact* for every snapped angle and free of systematic offset
+  for off-axis ones (measured against PIL's own sampling), the rotated mask lands on the same pixels as the
+  rotated picture, and `applied_north_up_deg` agrees with the renderer. `tests/test_wcs_io.py` — a rotated
+  preview's WCS puts a known RA/Dec on the marker's actual rotated pixel (<1 px) while the un-rotated WCS is >5
+  px out, `north_up_deg=0.0` is key-for-key the old result, and the rotated extent is the grown bounding box at
+  one shared orientation. `tests/webapp/test_sky_north_up.py` — end to end: the angle is recorded and cleared,
+  the overlay's alpha equals `np.rot90(mask)` (numpy as ground truth) while the stale mask disagrees on >20% of
+  pixels, an ordinary run is unchanged, and `/api/sky` places the tile's centre on the rotated picture's centre
+  with its width/height swapped. `tests/test_history.py` — the v15 → v16 migration.
+
+  Original finding, for the record:
+
+  *(Severity: broken-UX / cosmetic — a Sky-map overlay footprint disagrees with
   the visible picture; the picture and data are fine. Confidence: reproduced — the mask/preview misalignment
   reproduced at 50% of pixels on a rotated L-shaped footprint; reachability traced end to end.)*
 
@@ -490,6 +575,35 @@ _(none — claim an item here with your branch name)_
   `accept=0` (recoverable — the user can re-accept). 1–2 frames in a bare `<T>/` is genuinely
   indistinguishable from a Seestar single-image output, so this is defensible; parent-scoping
   `_seestar_output_bases` too would close it if the owner ever hits it.
+
+- **✅ SHIPPED (Builder, v0.289.2, branch `claude/compassionate-galileo-zixgdj`) — ~~History draws its object
+  pins and scale bar on a picture a *past* save rotated North-up, using coordinates measured on the un-rotated
+  FITS grid — so every label lands in the wrong place.~~ Found while fixing the Sky-map overlay above: same
+  root class, second consumer.** *(Severity: broken-UX — the "what's in my picture?" labels and the scale bar
+  are visibly misplaced on the affected runs; the picture and data are fine. Confidence: traced end to end.)*
+
+  **Root cause.** `History.tsx` already knew the hazard and guarded it — `show={identify && !applyNorthUp}`,
+  with a note telling the user to turn the toggle off — but `applyNorthUp` is `useState(false)`, i.e. the
+  *live* toggle only. When the picture on screen is the **stored preview** (`adjust` closed, the ordinary
+  case), its rotation is whatever a previous "Adjust → North up → Save" baked in, which a fresh page load has
+  no memory of. So `applyNorthUp` is `false`, the pins are drawn, and they sit on a picture that has since
+  turned — the exact mis-plot the guard exists to prevent. Reachable from the UI in two steps (save North-up,
+  reload, tap Identify).
+
+  **Fix.** The `preview_north_up_deg` column added for the Sky-map fix is precisely the missing fact, so it is
+  now surfaced on `StackRunOut` (additive, `None` on every older run) and History asks *"is the picture on
+  screen North-up?"* rather than *"is the toggle on?"*: `imageIsNorthUp` is the saved angle when the stored
+  preview is being shown and the live toggle when the adjustable render is. The withheld-labels note gained a
+  second sentence for the saved case (it names what happened and how to undo it — open Adjust and save
+  un-rotated) instead of pointing at a toggle that isn't on. The save now also invalidates the `runs` query,
+  since it changes the very row the card reads.
+
+  **Upgrade-safe (§9):** one additive response field and frontend-only gating; no config/schema/on-disk change
+  beyond the column already shipped in v0.288.1, and a run saved un-rotated behaves exactly as before.
+
+  **Tests (+3):** the run listing reports the baked rotation and clears it on an un-rotated re-save; History
+  withholds the pins and says why for a run with a saved rotation (fails before / passes after); and the
+  no-regression half — an ordinary run still labels its objects.
 
 - **🟡 BROKEN-UX / AUTONOMY (Scout QA audit 2026-08-26 #4, traced + verified end-to-end) — PARTIALLY FIXED
   (misleading-copy half shipped v0.272.2; optional behavioural half open) — the `astap_timeout_s` setting bounds
@@ -15098,9 +15212,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   edge picks up a tint. Confidence: traced (single read; GPU path not executed). Do NOT blind-flip this on the
   hot path without a GPU repro.
 
-- **IDEA / DATA-INTEGRITY FOLLOW-UP (Scout 2026-08-27 #8, the residual of the v0.277.4 scanner fix) —
-  parent-scope `_seestar_output_bases` + the output-reject so a 1–2-sub root-level `<T>/` colliding with an
-  unrelated container `<T>_sub` is never wrongly rejected.** *(Pillar: image quality / correctness — PRIORITY 4;
+- **✅ SHIPPED (Builder, v0.289.1, branch `claude/compassionate-galileo-zixgdj`) — ~~parent-scope
+  `_seestar_output_bases` + the output-reject so a 1–2-sub root-level `<T>/` colliding with an unrelated
+  container `<T>_sub` is never wrongly rejected~~ — reproduced end-to-end first, then fixed.**
+
+  **Reproduced.** `incoming/M 31/` with **2** real subs plus an unrelated `incoming/MyWorks/M 31_sub/`: both
+  root subs came back `accept=0, reject_reason=auto:seestar_output`. (At 3 subs the size guard saves them,
+  which is why the existing v0.277.4 test — written with 3 — passed over this.)
+
+  **Fix.** `_seestar_output_bases` now takes the same optional `parents` list `_apply_seestar_convention` does,
+  and makes the *same* test the convention makes: a bare `<T>/` with no same-parent `<T>_sub` sibling is real
+  subs, so `<T>` is **not** registered as an output base — the reject can no longer turn round on the frames the
+  convention just ingested. Deliberately *not* the "only register when a same-parent `<T>_sub` exists" shape the
+  spec suggested: a base whose bare folder isn't in the drop at all still registers, so an already-migrated
+  library whose stale output folder has since been deleted keeps healing. A true same-parent output folder is
+  unchanged.
+
+  **Upgrade-safe (§9):** pure in-memory scan-time logic; `parents` defaults to `None` (every folder a sibling of
+  every other — the original single-level behaviour), no config/schema/on-disk/API/default change, and
+  `incoming/` stays strictly read-only.
+
+  **Tests (+3 in `tests/test_scanner.py`, 2 fail before / pass after):** the classifier leaves a base alone when
+  it is ingesting the bare folder, still registers it for a true same-parent output folder, and still registers
+  it when no bare folder is in the drop; the 2-sub root session survives a scan accepted end to end; and the
+  no-regression half — a genuine on-device output frame already registered in the target is still rejected on
+  the next scan.
+
+  Original spec, for the record:
+
+  *(Pillar: image quality / correctness — PRIORITY 4;
   size S; low urgency — non-destructive and narrow.)* The v0.277.4 fix parent-scoped the *convention skip* so a
   root `incoming/<T>/` of real subs is ingested even when an unrelated container child `<T>_sub` exists. But
   `_seestar_output_bases` still builds its `<T>→<T>` output-reject map from a global basename set, and
@@ -16416,6 +16556,25 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW BEGINNER FEATURE (Builder 2026-08-27, the natural next tap on the v0.289.0 framing nudge) — say the
+  nudge **before** the session, not only after it: carry "last time M 31 landed 1.0° south of centre — nudge
+  north before you start" onto the pre-shoot planning surface.** *(Pillar: understand + better-picture-next-time
+  + autonomy, PRIORITY 2–3; size S–M; additive, read-only, no new deps — every ingredient already exists.)*
+  **Why.** v0.289.0 made the post-stack framing verdict actionable ("Next time, nudge your Seestar about 1.0°
+  south…"), but it says so on the **History/Target card of a finished picture** — which a beginner reads the
+  morning after, and has entirely forgotten by the next clear night, standing outside with the tablet. The one
+  moment the advice is worth anything is *while they are pointing the scope*, and the app already has a
+  pre-shoot surface for exactly that (`/tonight`, the plan/suggest-targets cards). **Shape.** For a target whose
+  newest stack has a non-null `nudge` from `GET …/stack-runs/{id}/framing`, show that same one-liner on its
+  Tonight/plan row — verbatim, so there is one voice and one definition of the advice. Nothing new is computed;
+  it is the existing endpoint's `nudge.direction`/`nudge.degrees`/`nudge.text` surfaced a second time where it
+  can be acted on. **Beginner bar:** clears it — plain language, zero configuration, and it directly produces a
+  better-framed picture on the next clear night. **Cautions:** stay silent when there is no nudge (a centred
+  picture, an object bigger than the frame, or a target with no catalog size/WCS) — never a made-up direction;
+  and read the *newest* run so a stale verdict from three sessions ago can't contradict a re-pointed one.
+  **Builder: grep first** — reuse `api.stackFraming` / `useStackFraming` and `seestack.framing.recentre_nudge`
+  rather than a second definition of "which way".
+
 - **NEW IDEA (Builder 2026-08-27, traced while fixing the full-res-PNG stretch bug) — the picture a beginner
   actually *shares* is 1024 px wide, because every share export is built from the stored preview PNG rather
   than the master.** *(Pillar: enjoy + share + trust, PRIORITY 3; size S–M; additive, no new deps. Confidence:
@@ -16436,9 +16595,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   does, and leave the *gallery/History thumbnail* on the cheap stored preview — only the export grows. Keep
   the un-rotated/no-marks path byte-identical where it can be, or state plainly that it changed.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #21) — "Was I centred? — a plain-language framing check on the
-  finished stack that tells a beginner if their object is running off an edge and which way to nudge the Seestar
-  next session.** *(Pillar: understand + friendliness + better-picture-next-time, PRIORITY 3; size M; additive,
+- **✅ MOSTLY ALREADY SHIPPED — and the one genuine gap SHIPPED this run (Builder, v0.289.0, branch
+  `claude/compassionate-galileo-zixgdj`). Do NOT re-pick this as a new feature.** ~~"Was I centred?" — a
+  plain-language framing check on the finished stack~~ already existed when this was filed: `GET
+  …/stack-runs/{id}/framing` (`webapp/routers/stack.py`) projects the catalog object through the run's own
+  solved WCS and `seestack.framing.framing_result_verdict` returns the four-level verdict
+  (`centred`/`off_centre`/`clipped`/`partial`), rendered by
+  `frontend/src/components/target/FramingVerdictNote.tsx` — with a "Re-centre this picture" crop offer on top.
+  The Scout's grep looked for `centred`/`recenter`/`framing`-*feedback* wording and for a rung in
+  `nextBestMove`, and missed the card that already says it. *(Recorded at this length deliberately: this is the
+  second idea in a week that turned out to be shipped — grep for the **endpoint and the engine module**, not
+  just the copy.)*
+
+  **The one thing genuinely missing, now shipped:** the verdict said *"just re-centre it next session"* without
+  ever saying **which way** — advice a beginner can't act on. New pure `seestack.framing.recentre_nudge` answers
+  it from the two sky positions the endpoint already has (where the picture's middle actually pointed, from the
+  WCS; and the object's catalog RA/Dec), so the mount is pointed *toward* the object: one of eight plain compass
+  words plus the angular move, as *"Next time, nudge your Seestar about 1.0° south before you start, and it'll
+  sit in the middle."* Deliberately **spherical, not pixel-based** — working in RA/Dec sidesteps every
+  image-orientation sign hazard (rotated canvas, North-up-saved preview, CD-matrix parity), and the RA offset is
+  scaled by `cos(dec)` so a 1° RA gap at Dec +60° correctly reads as half a degree of sky rather than
+  overshooting. Offered only for the two verdicts a better pointing actually fixes (`off_centre`, `clipped`) —
+  a centred picture needs nothing and an oversized object needs mosaic mode — and silent below a 0.05° floor,
+  where "move it 0.0°" would be noise. Additive `nudge` field on the endpoint (older frontends ignore it),
+  one extra line in the existing card (no new banner — AGENTS §1 IA priority). Tests: +6 engine (each compass
+  direction points at the object, the eight-point diagonal, the `cos(dec)` distance, RA-seam safety at 0h, the
+  no-guess/no-noise refusals, and degrees-vs-arcminutes wording), +3 endpoint (a north-pointed clip says
+  "south", an east-pointed off-centre says "west", and centred/oversized pictures get none), +2 frontend.
+
+  Original spec, for the record:
+
+  *(Pillar: understand + friendliness + better-picture-next-time, PRIORITY 3; size M; additive,
   read-only, no new deps — uses the stack WCS + the target's catalog coords the app already resolves.
   Confidence for the gap: traced — `frontend/src/components/target/nextBestMove.ts` coaches on
   locate-subs / too-thin / soft-stars / short-integration / all-good, but has **no framing/centering lever**;
@@ -22841,6 +23028,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **QA LEAD (Builder 2026-08-27, generalised from three fixes of the same bug in one run) — sweep every
+  consumer of a run's *stored preview bytes* that derives geometry from the FITS.** *(Pillar: image quality /
+  correctness — PRIORITY 4; size S to audit, unknown to fix; a good Scout run.)* Three separate surfaces shipped
+  the identical mistake and each was found only because the previous fix made it obvious: the Sky-map overlay
+  (alpha + tile placement, v0.288.1), History's object pins and scale bar (v0.289.2), and the share JPEG /
+  wallpaper (filed as a verified bug at the top of "Bugs"). The shape is always the same — **the stored preview
+  PNG is not necessarily the un-rotated FITS grid**, because History's "Adjust → North up → Save" can bake a
+  rotation into it, and until v0.288.1 nothing recorded that. Anything that draws on those bytes, re-orients
+  them, or builds a WCS/pixel coordinate for them from the master FITS is suspect. **The fact now exists**
+  (`stack_runs.preview_north_up_deg`, exposed on `StackRunOut`), so the audit is mechanical: grep for readers of
+  `run.preview_path` and for `celestial_wcs_from_fits`/`wcs_dict_rescaled_to_preview`/`stack_coverage_mask`/
+  `wallpaper_target_pixel`/`objects_in_field`/`_scale_bar_from_wcs` used *alongside* a preview, and decide each
+  site explicitly (follow the rotation, or refuse). A structural answer worth considering while sweeping: one
+  helper that hands a caller "the geometry of the bytes you are about to draw on" (angle + size), so a future
+  consumer can't silently assume the FITS grid again.
 
 - **IDEA (Scout 2026-08-27 #21) — extract the shared "resolve frames → build mosaic canvas → drop
   gross-outlier subs" prologue that `estimate_stack` and `run_stack` each re-implement, so the two can't drift

@@ -209,6 +209,7 @@ def _flag_legacy_container_drop(library: Library, container_dir: Path) -> None:
 
 def _seestar_output_bases(
     subdirs_with_fits: list[tuple[str, list[Path]]],
+    parents: list[str] | None = None,
 ) -> dict[str, str]:
     """Map each single-field ``<T>_sub`` target name to the bare ``<T>`` folder
     basename whose already-registered frames (the Seestar's on-device stacked
@@ -220,7 +221,32 @@ def _seestar_output_bases(
     into the ``<T>`` target (both fold to the same safe name). See
     ``Project.reject_seestar_output_frames``. Mosaics are skipped here — their
     on-device output naming is device-specific and tracked as a separate bug.
+
+    ``parents`` is the same optional parallel list ``_apply_seestar_convention``
+    takes, and it is what keeps the two halves telling the same story. A bare
+    ``<T>/`` folder with no same-parent ``<T>_sub`` sibling is *real subs* — the
+    convention ingests it — so registering ``<T>`` as an output base would turn
+    round and reject the very frames that were just ingested. (Only 1–2 of them,
+    thanks to ``reject_seestar_output_frames``' size guard, but that is exactly
+    the small root-level session nobody would think to check.) So a base whose
+    bare folder this scan is *ingesting* is left out. A base whose bare folder is
+    skipped as output, or isn't in the drop at all, still registers — the healing
+    an already-migrated library depends on is untouched.
     """
+    if parents is None:
+        parents = [""] * len(subdirs_with_fits)
+    sibling_names = {
+        (parent, name.lower())
+        for (name, _), parent in zip(subdirs_with_fits, parents, strict=True)
+    }
+    # The bare folders this scan will ingest as real subs — the same test
+    # ``_apply_seestar_convention`` makes, so the two can't disagree.
+    ingested_bare = {
+        name.lower()
+        for (name, _), parent in zip(subdirs_with_fits, parents, strict=True)
+        if not name.lower().endswith((_VIDEO_SUFFIX, _SUB_SUFFIX))
+        and (parent, name.lower() + _SUB_SUFFIX) not in sibling_names
+    }
     bases: dict[str, str] = {}
     for name, _ in subdirs_with_fits:
         low = name.lower()
@@ -228,7 +254,7 @@ def _seestar_output_bases(
             continue
         if low.endswith(_SUB_SUFFIX):
             base = name[: -len(_SUB_SUFFIX)].rstrip()
-            if base:
+            if base and base.lower() not in ingested_bare:
                 bases[base] = base
     return bases
 
@@ -476,7 +502,7 @@ def scan_and_organize(
     # Upgrade path: a library first scanned before v0.184.9 may already hold the
     # Seestar's on-device output inside a "<T>" target the raw "<T>_sub" subs now
     # map to — additively reject those output frames so they leave the stack pool.
-    output_bases = _seestar_output_bases(subdirs_with_fits)
+    output_bases = _seestar_output_bases(subdirs_with_fits, parents)
     if loose:
         units.append((UNSORTED_TARGET_NAME, loose))
 

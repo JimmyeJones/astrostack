@@ -208,4 +208,34 @@ describe("FramingVerdictNote — the offer tells the truth", () => {
       vi.restoreAllMocks();
     }
   });
+  it("tells you which way to nudge the mount next time", async () => {
+    // "Re-centre it next session" on its own is advice a beginner can't act on;
+    // the direction and distance are what make it a thing you can do.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(verdict({
+      level: "clipped",
+      text: "runs off the edge of the frame — about 70% of it made it in.",
+      recentre: null,
+      nudge: {
+        direction: "south",
+        degrees: 1.0,
+        text: "Next time, nudge your Seestar about 1.0\u00b0 south before you "
+          + "start, and it'll sit in the middle.",
+      },
+    }));
+    renderNote();
+
+    expect(await screen.findByTestId("framing-nudge")).toHaveTextContent(
+      "Next time, nudge your Seestar about 1.0\u00b0 south before you start, "
+      + "and it'll sit in the middle.");
+  });
+
+  it("says nothing about nudging when there's nothing to nudge", async () => {
+    // A well-framed picture, and an older backend that doesn't send the field at
+    // all, both render the note without the extra line.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(verdict());
+    renderNote();
+
+    await screen.findByText("Nicely framed");
+    expect(screen.queryByTestId("framing-nudge")).not.toBeInTheDocument();
+  });
 });
