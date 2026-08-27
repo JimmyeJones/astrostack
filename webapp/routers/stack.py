@@ -326,7 +326,12 @@ def stack_estimate(
     over-budget fix offer "drop the extra passes". Returns 422 (not 500) when
     there's nothing solved to size yet, with the same guidance ``run_stack``
     gives."""
-    from seestack.stack.stacker import StackOptions, estimate_stack
+    from seestack.stack.stacker import (
+        StackOptions,
+        auto_reject_method,
+        auto_reject_switch_frames,
+        estimate_stack,
+    )
 
     settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
@@ -374,6 +379,22 @@ def stack_estimate(
                 "peak_gb": round(est.memory_fix.peak_bytes / 1e9, 2),
             }
             if est.memory_fix is not None
+            else None
+        ),
+        # What "Auto outlier removal" actually resolves to for this many frames.
+        # With it on, the engine *overrides* the sigma-clip / min-max toggles, so
+        # a form that still shows them as live tells the beginner the opposite of
+        # what will run. Answered here rather than re-derived in the browser so
+        # the form and the picker can never drift. ``null`` means the toggles
+        # below really are live — auto is off, or drizzle is on (drizzle has its
+        # own two-pass rejection and auto leaves the toggles alone).
+        "auto_reject_resolved": (
+            {
+                "method": auto_reject_method(options.sigma_kappa, est.n_frames),
+                "switch_at_frames": auto_reject_switch_frames(options.sigma_kappa),
+                "n_frames": est.n_frames,
+            }
+            if options.auto_reject and not options.drizzle
             else None
         ),
     }

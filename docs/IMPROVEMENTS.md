@@ -12323,28 +12323,69 @@ problems. Dogfood it every big-picture run and fix root causes.
   answer, and this idea should be closed rather than built. Explicitly *not* worth a framework.
 
 
-- **IMPROVEMENT IDEA (Scout 2026-08-27 #9, verified by dogfood + code) — with "Auto outlier removal" on (the
+- ~~**IMPROVEMENT IDEA (Scout 2026-08-27 #9, verified by dogfood + code) — with "Auto outlier removal" on (the
   default), the Stack form still shows "Sigma clipping" and "Min/max rejection" as live, editable toggles whose
   displayed state can be the opposite of what actually runs — so a beginner reading the form is misled about the
-  method.** *(Pillar: friendliness / trust — PRIORITY 3. Size: S. Confidence: verified against the code and seen
-  in the dogfood.)* `auto_reject`'s own help text says *"When on, it overrides the two options below"*, and the
-  engine's `_resolve_auto_reject` does exactly that — it picks min/max on a sub-11-frame stack and κ-σ on a
-  larger one, **ignoring** the `sigma_clip`/`min_max_reject` toggles. But those two fields carry no `depends_on`
-  (`webapp/schemas.py` ~599/604) and the form's `isDisabled` only greys a field on a `depends_on` miss
-  (`frontend/src/routes/Stack.tsx:286`), so both stay fully enabled and un-dimmed while `auto_reject` is on.
-  **Measured in the dogfood:** the sample showed *Auto outlier removal ON · Sigma clipping ON · Min/max OFF*, yet
-  the finished run was **MIN-MAX** (6 frames < 11) — the History `RejectionBadge` is honest ("Auto outlier
-  removal picked this from your number of subs"), so only the *form* misleads. A beginner glancing at "Sigma
-  clipping: ON" reasonably believes that is what will happen. **Shape (small, additive, frontend-only):** when
-  `values.auto_reject` is true, dim/disable the `sigma_clip`, `sigma_kappa`, `min_max_reject` and
-  `min_max_reject_count` controls and show one inline line stating the method auto *will* pick for the current
-  `solvedAccepted` count (reuse `kappa_min_frames`'s ~11-frame boundary the frontend already knows via
-  `MINMAX_SUGGEST_MAX_FRAMES`) — e.g. *"Auto will use min/max for these 6 subs (switches to sigma clipping at
-  ~11)."* No engine/behaviour change (the resolve already happens server-side); this only makes the form tell the
-  truth. `depends_on` is a *positive* dependency ("show when X on") and can't express "disable when auto_reject
-  on", so this needs a small explicit disable rule in `Stack.tsx`, not a new descriptor field. **Care:** keep the
-  toggles' stored values intact (don't zero them) so turning Auto *off* restores the user's prior manual pick;
-  test that the disable + the resolved-method line track `auto_reject` and the frame count.
+  method.**~~ — **SHIPPED v0.284.1** (Builder 2026-08-27, branch `agent/builder-run`).
+
+  **What shipped.** The form now says which method Auto will actually use, in the user's own numbers —
+  *"Auto outlier removal is on, so it picks the method from your frame count: with 6 accepted, solved subs it
+  will use min/max rejection… It switches to sigma clipping from about 11 subs"* — and greys the two switches
+  Auto overrides, with one line saying why and how to take the wheel back. No engine behaviour changed; the
+  form just stopped contradicting the run.
+
+  **The answer comes from the server, not from a second copy of the rule.** The Scout's shape had the frontend
+  re-derive the boundary from `MINMAX_SUGGEST_MAX_FRAMES = 11`, a hard-coded approximation of
+  `kappa_min_frames(κ)` that is only right at the default κ. Instead `stack-estimate` — which the form already
+  queries on every κ/auto change, and which already knows the real solved-accepted count — grew an additive
+  `auto_reject_resolved` (`method`, `switch_at_frames`, `n_frames`), computed from the engine's own picker. The
+  rule became two public functions (`auto_reject_method` / `auto_reject_switch_frames`) that
+  `_resolve_auto_reject` now calls, so there is exactly one definition and the form cannot drift from the
+  stack. `null` means the toggles really are live (Auto off, or drizzle on — drizzle keeps its own two-pass
+  rejection and Auto leaves the toggles alone).
+
+  **One deliberate deviation from the filed spec, because the code says otherwise.** The spec asked to dim four
+  controls; only **two** are dimmed. `_resolve_auto_reject` rewrites `sigma_clip`/`min_max_reject` and passes
+  `sigma_kappa`/`min_max_reject_count` through *untouched*, so whichever method Auto lands on still uses the
+  user's κ and k — grey those and the form tells the same lie in the other direction. Their `depends_on` gates
+  are now read against the **resolved** method too, so Auto picking κ-σ on a target whose stored `sigma_clip`
+  is false no longer greys out the very κ it is about to use.
+
+  **Went one step past the spec, same defect class:** four advisory hints (`sigmaClipWarning`,
+  `sigmaKappaLargeHint`, `minMaxKTooHighHint`, the streak-k nudge and the min/max-vs-weighting note) gated on
+  the *raw* toggles, so with Auto on they coached the user about a method that wasn't going to run. They now
+  read the effective method. Values are never cleared, so turning Auto off restores the manual pick intact.
+
+  **Upgrade-safe (§9):** one additive response field, two additive public engine functions, frontend-only
+  disable/copy. No config, schema, on-disk, default or API-shape change; no engine behaviour change (a test
+  pins that the resolved method still equals what `_resolve_auto_reject` writes, across the whole boundary at
+  five κ values). **Tests: +3.** 1 engine (`test_stack_pipeline.py` — the public rule swept against the picker
+  for every n around the switch at κ ∈ {1, 2, 2.5, 3, 5}, including that κ and k pass through), 1 API
+  (`test_stack_estimate.py` — null when off/drizzling, min/max at 3 frames, and the boundary moving with κ
+  rather than a hard-coded 11), 1+1 frontend (`Stack.test.tsx` — the sentence and both switches disabled with
+  Auto on; both live and no note with Auto off).
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness / trust — PRIORITY 3. Size: S. Confidence: verified against the code and seen
+    in the dogfood.)* `auto_reject`'s own help text says *"When on, it overrides the two options below"*, and the
+    engine's `_resolve_auto_reject` does exactly that — it picks min/max on a sub-11-frame stack and κ-σ on a
+    larger one, **ignoring** the `sigma_clip`/`min_max_reject` toggles. But those two fields carry no `depends_on`
+    (`webapp/schemas.py` ~599/604) and the form's `isDisabled` only greys a field on a `depends_on` miss
+    (`frontend/src/routes/Stack.tsx:286`), so both stay fully enabled and un-dimmed while `auto_reject` is on.
+    **Measured in the dogfood:** the sample showed *Auto outlier removal ON · Sigma clipping ON · Min/max OFF*, yet
+    the finished run was **MIN-MAX** (6 frames < 11) — the History `RejectionBadge` is honest ("Auto outlier
+    removal picked this from your number of subs"), so only the *form* misleads. A beginner glancing at "Sigma
+    clipping: ON" reasonably believes that is what will happen. **Shape (small, additive, frontend-only):** when
+    `values.auto_reject` is true, dim/disable the `sigma_clip`, `sigma_kappa`, `min_max_reject` and
+    `min_max_reject_count` controls and show one inline line stating the method auto *will* pick for the current
+    `solvedAccepted` count (reuse `kappa_min_frames`'s ~11-frame boundary the frontend already knows via
+    `MINMAX_SUGGEST_MAX_FRAMES`) — e.g. *"Auto will use min/max for these 6 subs (switches to sigma clipping at
+    ~11)."* No engine/behaviour change (the resolve already happens server-side); this only makes the form tell the
+    truth. `depends_on` is a *positive* dependency ("show when X on") and can't express "disable when auto_reject
+    on", so this needs a small explicit disable rule in `Stack.tsx`, not a new descriptor field. **Care:** keep the
+    toggles' stored values intact (don't zero them) so turning Auto *off* restores the user's prior manual pick;
+    test that the disable + the resolved-method line track `auto_reject` and the frame count.
 
 - **IMPROVEMENT IDEA (Scout 2026-08-27 #7, verified by grep) — a master dark/flat built from more than 64
   frames silently drops the extras, and the beginner is never told.** *(Pillar: friendliness + trust — PRIORITY
