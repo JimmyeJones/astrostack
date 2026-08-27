@@ -774,6 +774,59 @@ def _scale_bar_from_wcs(wcs, width: int, height: int):  # noqa: ANN001, ANN202
     return scale_bar_for(arcsec_per_px, width, height)
 
 
+def _png_width(png_data: bytes) -> int:
+    """The pixel width of an encoded PNG, or 0 when it can't be read (which
+    simply means "no scale bar" rather than a failed download)."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        with Image.open(BytesIO(png_data)) as img:
+            return int(img.size[0])
+    except Exception:  # noqa: BLE001 — an unreadable preview just gets no marks
+        return 0
+
+
+def _sky_marks_for_run(fits_path: str | None, preview_width: int,
+                       north_up_deg: float = 0.0):  # noqa: ANN202
+    """The scale bar + North/East rose to bake onto a run's shared picture.
+
+    Reads the run's own master-FITS WCS, turns its pixel scale into a round bar
+    (:func:`seestack.scalebar.scale_bar_for`) and asks the same WCS where North
+    and East point (:func:`seestack.skymarks.sky_directions`). ``preview_width``
+    is the width of the image the marks will be drawn on **before** any
+    North-up rotation, because the bar's length is stored as a fraction of the
+    picture's width and a rotate-with-expand changes the canvas without changing
+    the scale. ``north_up_deg`` is the rotation actually applied to those pixels,
+    so the rose follows them.
+
+    Always returns a :class:`~seestack.skymarks.SkyMarks` — an empty one (a
+    clean no-op when drawn) for a run with no FITS, no WCS or an unusable scale,
+    so the caller never has to special-case an older/edited run."""
+    from seestack.skymarks import SkyMarks, rotated, sky_directions
+
+    if not fits_path or not Path(fits_path).exists() or preview_width <= 0:
+        return SkyMarks()
+    from seestack.io.wcs_io import celestial_wcs_from_fits
+
+    try:
+        wcs, width, height = celestial_wcs_from_fits(fits_path)
+    except Exception:  # noqa: BLE001 — a broken FITS just means "no marks"
+        return SkyMarks()
+    if wcs is None:
+        return SkyMarks()
+    bar = _scale_bar_from_wcs(wcs, width, height)
+    directions = rotated(sky_directions(wcs, width, height), north_up_deg)
+    return SkyMarks(
+        bar_px=(bar.fraction * preview_width) if bar is not None else None,
+        # ASCII prime marks: the ′/″ in `bar.label` have no glyph in the
+        # bundled face and would bake a hollow box into the picture (v0.282.1).
+        bar_label=bar.ascii_label if bar is not None else "",
+        directions=directions,
+    )
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/framing")
 async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[str, Any] | None:
     """"Did I frame it well?" — a plain-language verdict on how this finished
@@ -1947,7 +2000,7 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/{kind}")
 def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
                        north_up: bool = False, nameplate: bool = False,
-                       keepsake: bool = False) -> Response:
+                       keepsake: bool = False, scale: bool = False) -> Response:
     # "jpeg" is a share-friendly transcode of the stored preview PNG (no separate
     # file on disk), served at the same resolution; the rest map to stored paths.
     if kind not in _KIND_FIELDS and kind != "jpeg":
@@ -1969,6 +2022,13 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         if not png_path or not Path(png_path).exists():
             raise HTTPException(status_code=404, detail="No preview for this run")
         preview = Path(png_path).read_bytes()
+        # The width the scale bar is measured against: the bar's length is a
+        # *fraction* of the picture's width, and a North-up rotate-with-expand
+        # grows the canvas without changing the pixel scale, so it has to be read
+        # before that. Only paid for when marks were actually asked for.
+        preview_width = _png_width(preview) if scale else 0
+        # How far the pixels were actually turned, so the rose can follow them.
+        applied_north_up = 0.0
         # north_up rotates the shared picture so celestial North points up (like
         # reference photos of the object), using the run's own WCS — a no-op (the
         # bytes are returned untouched) when the run has no WCS or the correction
@@ -1978,7 +2038,19 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
             if fits_path and Path(fits_path).exists():
                 from seestack.render.thumbnail import orient_preview_north_up
                 try:
+                    before = preview
                     preview = orient_preview_north_up(preview, fits_path)
+                    if preview is not before:
+                        from seestack.io.wcs_io import celestial_wcs_from_fits
+                        from seestack.render.orient import (
+                            applied_rotation_deg,
+                            north_up_rotation_deg,
+                        )
+
+                        wcs, w, h = celestial_wcs_from_fits(fits_path)
+                        angle = north_up_rotation_deg(wcs, w, h)
+                        if angle is not None:
+                            applied_north_up = applied_rotation_deg(angle)
                 except Exception:  # noqa: BLE001 — a broken FITS just shares the un-oriented preview
                     pass
         # nameplate bakes the same tasteful acquisition footer the editor share
@@ -1996,13 +2068,25 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         plate = None
         if nameplate or keepsake:
             plate = pipeline._nameplate_fields(run.fits_path or "", entry, run)
+        # scale bakes the two marks every published astrophoto carries — a scale
+        # bar and a North/East rose — along the *top* edge, from the run's own
+        # solved WCS. They layer under the caption variants above (the caption
+        # zone is the bottom edge), and a run with no usable WCS draws nothing,
+        # so the plain download stays byte-for-byte unchanged.
+        marks = None
+        if scale:
+            marks = _sky_marks_for_run(run.fits_path, preview_width,
+                                       applied_north_up)
         data = png_bytes_to_jpeg(
             preview,
             nameplate=plate if nameplate else None,
             keepsake=plate if keepsake else None,
+            sky_marks=marks,
         )
-        filename = (f"{run.output_basename}_keepsake.jpg" if keepsake
-                    else f"{run.output_basename}.jpg")
+        # Each baked-on variant carries its own filename so saving two of them
+        # can't have one silently overwrite the other in the downloads folder.
+        suffix = "_keepsake" if keepsake else ("_scale" if scale else "")
+        filename = f"{run.output_basename}{suffix}.jpg"
         return Response(
             content=data, media_type="image/jpeg",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
