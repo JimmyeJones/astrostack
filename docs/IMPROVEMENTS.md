@@ -179,6 +179,48 @@ _(none — claim an item here with your branch name)_
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #10, branch `claude/vigilant-knuth-nozq4i`) — led the rotation back
+  onto the stacking engine's per-frame geometry + the walk-away auto-orchestration layer the #8/#9 notes
+  pointed at, since the combine/reject core has now come back clean three audits running. Result: the engine
+  and the auto-stack helpers both came back CLEAN again; no verified bug this run. Baseline green before
+  touching anything (full headless suite). What was read adversarially and, where a trigger was
+  constructible, traced:**
+  **align.py** — `reproject_rgb_windowed`'s inset/valid mask keeps the GPU `cval=0.0` blend strictly inside
+  the trusted interior (valid requires `src ∈ [inset, N-1-inset]`, inset ≥3 for real frames, and the GPU
+  path only runs ≥1.5 MP so tiny inset-0 synthetic frames never reach it); the sub-pixel refine propagates
+  the NaN coverage ring with the *same* order-1 footprint (`cval=1.0`) so a darkened boundary pixel can't
+  survive as covered-but-dimmed; the `SUBPIXEL_SHIFT_CAP_PX` window-pad guard stops a near-cap shift clipping
+  real footprint-edge coverage. **mosaic.py** — the primary + iterative outlier passes both use the wrap-safe
+  circular-mean centre RA (`_circ_mean_ra_deg`), never a plain corner-RA median, so a frame straddling RA=0
+  can't be flung to ~180° and dropped as an outlier; the `max_excluded`/`n//2` caps keep a genuinely wide
+  mosaic intact; both the px-dimension and the megapixel budget fail fast with actionable errors. **pointings.py**
+  — the union-find single-linkage clusterer (path-halving `find`) is deterministic first-appearance labelled,
+  unit-vector wrap/pole safe; `pointing_groups` returns `None` (→ target-wide, today's behaviour) unless ≥2
+  substantial panels split, so a single field / unsolved / tightly-packed mosaic is byte-for-byte unchanged.
+  **weighting.py** — `_positional_medians` keys the per-panel medians on `f.id` only for id-bearing frames
+  (the loop skips `f.id is None` before indexing), falls back to the target-wide median per-metric for a thin
+  panel, and `combine_weights_with_photometric` returns the *same* dict object (no `1/s²` fold) when no scale
+  is active. **output.py / render/thumbnail.py** — preview↔export both route through `_autostretch_for_export`;
+  `already_display` skips the double-stretch on editor exports across FITS/TIFF/PNG; `load_stack_rgb`'s
+  memmap-per-channel NaN-aware area downscale keeps the RAM-bounded path and is bit-for-bit the old arithmetic;
+  `asinh_stretch`/`autostretch` degenerate-image guards (`hi<=lo`, all-NaN) return black rather than dividing
+  by zero; `_archive_existing_outputs` keeps coverage/preview siblings resolvable from one archived basename.
+  **drizzle_path.py** — `_clip_tolerance` gates rejection on the true unweighted frame count (`self._count`),
+  not the pixfrac-deflated weight, and disables it below the `_VAR_RESOLUTION_FACTOR·m²` cancellation floor
+  rather than punching NaN holes through a bright flat region; out-of-bounds pixmap pixels (set to -1) carry
+  zero weight and never double-count into the frame-coverage OR. **pipeline auto-orchestration** — the
+  frame-count trigger, readability preflight/recovery, calibration-recheck and degraded-heal markers each
+  fire once-per-situation, are written *before* the stack (crash-loop-safe) and cleared on a survivable
+  failure; `_auto_stack_frame_count` compares against the *max* prior coverage (never a tiny editor-export
+  run) and only retries a marked attempt when *fewer* subs are now unreadable. **scanner.py / project.py** —
+  re-verified the #8 fix: `_apply_seestar_convention`'s sibling test is parent-scoped, `incoming/` stays
+  strictly read-only (every mutation is `shutil.copy2` into the target cache), and
+  `reject_seestar_output_frames`'s per-folder ≤2-frame size guard protects a real ≥3-sub bare `<T>/` folder
+  (the documented 1–2-sub residual stays non-destructive and recoverable). **This audit's lead-worthy
+  conclusion:** the stacking engine and the walk-away orchestration are both hardened; the marginal QA value
+  has moved fully off them — future runs should lead with the routers (`stack.py`, `gallery.py`) and the
+  editor-reload / proxy render path, and re-audit the engine only occasionally.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #9, branch `claude/vigilant-knuth-um7mfa`) — adversarial re-sweep of the
   stacking engine's combine/reject core plus the auto-orchestration helpers the #8 note pointed at next. Result:
   the engine came back CLEAN again; found ONE verified §3 friendliness gap on the Stack form (filed under
@@ -7864,6 +7906,37 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Scout 2026-08-27 #10) — "This looks like M31": offline auto-identify an un-named / Unsorted
+  target from its solved centre against the bundled catalog, in the web app.** *(Pillar: autonomy +
+  friendliness — PRIORITY 2–3. Size: S–M.)* A beginner who drops loose FITS, or a folder the Seestar named
+  something un-obvious, ends up with a target tile reading `Unsorted` or a cryptic folder name — and no plain
+  hint of what it actually is. Once the target is plate-solved it *has* a centre (`TargetEntry.ra_deg/dec_deg`),
+  and we already ship the offline catalog, so we can say "This looks like **M31 (Andromeda Galaxy)** — rename?"
+  with zero network and one cheap lookup. Reduces a manual step (naming) and adds trust ("the app knows what I
+  shot").
+
+  **Distinct from what exists:** `seestack/post/target_id.py::identify_target` is **SIMBAD (network) and wired
+  only into the Qt desktop `main_window.py`** — it never runs in the headless web app, which is the only thing
+  the owner uses. The in-frame annotation (`seestack/annotate.py`, shipped v0.141.0) labels catalog objects
+  that fall *inside a finished stack's frame*; this identifies the **target itself** by its centre, before/
+  without a stack, and is what feeds a rename suggestion. Neither covers this.
+
+  **Grounding (machinery already present):** the closest-catalog-object-to-a-point match is the mirror of
+  `Library.find_target_within` (which finds the closest *target* to a point) — a pure
+  `nearest_catalog_object(ra_deg, dec_deg, catalog, *, max_sep_deg≈0.4)` over `load_catalog()` reusing
+  `_angular_separation_deg` gives `(CatalogObject, sep_deg) | None`. `CatalogObject` already carries the plain
+  name + `blurb` for the readout.
+
+  **Slices:** **(a) engine (S):** the pure `nearest_catalog_object` helper + unit tests (centre on an object →
+  that object; 2° away → None; RA-seam safe; closest of two nearby wins). **(b) backend (S):** fold the match
+  into the existing target detail / library response (or a tiny read-only `GET
+  /api/targets/{safe}/identify` → `{catalog_id, name, type, blurb, sep_deg}` or `null`), computed only for a
+  target that has a solved centre. **(c) frontend (S):** show a dimmed "This looks like **{name}** — use this
+  name?" chip on an `Unsorted`/folder-named target (one-click rename via the existing rename path; dismissible;
+  never auto-renames — the owner decides). Additive/offline/upgrade-safe; no schema/default/API-shape change.
+  **Beginner-bar:** instantly understood, sane default (only *suggests*, ≈0.4° radius so a nearby-but-different
+  object isn't falsely claimed), plain-language, and not a pro knob.
+
 - **⚠ READ THIS BEFORE PICKING UP THE DRIZZLE-SCALE AUTO-DEGRADE ITEM DIRECTLY BELOW (Builder 2026-08-27,
   found while sizing it; the item's premise is off by one) — `options.auto_reject` is NOT a reliable
   "unattended" signal, so the filed shape would silently change a *watching* user's output pixel grid.**
@@ -14627,6 +14700,54 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list": a Messier/catalog checklist that lights up
+  the famous objects you've already captured and shows the rest as a bucket list.** *(Pillar: friendliness /
+  autonomy + "understand / enjoy" — PRIORITY 3. Size: M.)* Every beginner astrophotographer knows the Messier
+  list — capturing all 110 is *the* classic milestone — yet the app has no "which have I got?" view. The
+  night planner ranks *tonight's* targets and each target has its own integration progress, but nothing shows
+  the beginner their **collection** at a glance: the 110 Messier objects (plus the popular NGC/IC we bundle)
+  as a grid, the ones they've already imaged lit up and linked to their result, the rest greyed as a
+  motivating to-shoot list. It turns a pile of targets into a *journey* — the single most beginner-delighting,
+  come-back-tomorrow feature astro apps have.
+
+  **Why it's essentially free to build (all the machinery exists):**
+  * The bundled catalog is already loaded offline — `seestack/nightplan.load_catalog()` → `CatalogObject`
+    (`id`, `name`, `ra_deg`, `dec_deg`, `type`, `con`, `size_arcmin`, `blurb`, `distance_ly`), 157 Messier +
+    curated NGC/IC. No network, no new data.
+  * Spatial matching already exists — `Library.find_target_within(ra_deg, dec_deg, radius_deg)` returns the
+    registered target whose stored centre is within a radius (the targets table carries `ra_deg`/`dec_deg`
+    from plate-solving, indexed `idx_targets_radec`). So "have I captured M31?" is one call per catalog object
+    against the library, no per-target open.
+  * The result surface, framing hint, object blurb, and share card already exist to link each captured tile to.
+
+  **Slices (each a shippable Builder run):**
+  * **(a) engine (S):** a pure `catalog_capture_status(catalog, targets)` helper (in `seestack/nightplan.py`
+    or a small new module) that, given the bundled catalog and the library's `(name, safe, ra, dec)` rows,
+    returns `[{catalog_id, name, type, con, captured: bool, safe_name|None, sep_deg|None}]` — matching each
+    catalog object to its closest target within a sensible radius (≈0.35°, well inside one Seestar FOV so a
+    nearby-but-different object isn't falsely claimed). Pure/offline/unit-testable: object at a target's
+    centre → captured with that safe_name; object 2° away → not captured; two library targets near one object
+    → the closer wins; RA-seam safe (reuse `_angular_separation_deg`). Deterministic order (Messier numeric,
+    then NGC/IC).
+  * **(b) backend (S):** read-only `GET /api/catalog/life-list` → `{messier: [...], other: [...], counts:
+    {messier_captured, messier_total, other_captured, other_total}}`, computed from the library in a
+    threadpool. Additive endpoint; no schema/config/default change.
+  * **(c) frontend (M):** a new `/life-list` route (grouped under the existing nav, keeps the IA clean per the
+    §1 standing priority) rendering a responsive grid of tiles — captured ones showing the object's stored
+    preview thumbnail (or a lit badge) and linking to the target/History run, uncaptured ones greyed with the
+    name + type — and a plain-language header ("You've captured **42 of 110** Messier objects — 68 to go").
+    A one-line filter (all / captured / to-shoot) and a per-constellation or type toggle are cheap follow-ups.
+  * **(d) follow-ups (S each):** surface the count as a small Dashboard stat ("42/110 Messier"); a "closest
+    to complete constellation" nudge tied into the night planner ("you're 1 object away from all of Orion —
+    M42 is up tonight"); an export/share of the completed grid as a keepsake.
+
+  **Beginner-bar check:** a non-expert Seestar OSC owner instantly understands "capture the Messier list", it
+  needs zero configuration, ships with a sane default radius + plain-language readout, is purely additive and
+  offline, and it makes them want to go out on the next clear night — exactly AGENTS.md §1's "plan / get /
+  understand / enjoy" pillars, and not a pro/mono/narrowband knob. Distinct from the night planner (ranks
+  *tonight*), per-target progress (one object's integration), and the "what's in this picture?" annotation
+  (labels objects *inside one frame*): this is the **collection-level** view none of them provide.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #9) — "See what stacking removed": a one-tap overlay on the finished
   picture that highlights the pixels rejection dropped, turning the abstract "rejection dropped ~X% of samples"
