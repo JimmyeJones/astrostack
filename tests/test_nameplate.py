@@ -4,6 +4,7 @@ import numpy as np
 
 from seestack.nameplate import (
     NameplateFields,
+    _load_font,
     draw_nameplate,
     format_acq_date,
     nameplate_line,
@@ -30,8 +31,57 @@ def test_nameplate_line_full():
         date_iso="2026-07-19T21:03:00", camera="ZWO Seestar S50",
     )
     assert nameplate_line(fields) == (
-        "M 31 · 4h 12m (505×30s) · 19 Jul 2026 · ZWO Seestar S50"
+        "M 31 · 4h 12m (505x30s) · 19 Jul 2026 · ZWO Seestar S50"
     )
+
+
+def test_every_caption_character_has_a_glyph_in_the_font_we_draw_with():
+    """Regression: the sub detail used to read ``(505×30s)`` with a *typographic*
+    multiplication sign, and Pillow's bundled Aileron face has no glyph for it —
+    so every nameplate the owner shared baked a hollow ``.notdef`` box into the
+    picture, right where the exposure should be.
+
+    Rather than pin one character, pin the rule: nothing a caption can produce
+    may be missing from the font that draws it. A future tidy-up that reaches for
+    ``×``, an em dash or a curly quote fails here instead of shipping a box into
+    someone's shared picture.
+    """
+    font = _load_font(32)
+    # A private-use codepoint no font defines, so what it renders *is* this
+    # font's .notdef box — the hollow rectangle a missing glyph shows as. Written
+    # as chr() rather than a literal: an invisible character in source is exactly
+    # the kind of thing a stray editor pass silently eats, and losing it would
+    # turn this assertion into one that can never fail.
+    notdef = np.asarray(font.getmask(chr(0xE000), mode="L"))
+    assert notdef.size, (
+        "the reference .notdef glyph came back empty, so this test could not "
+        "tell a missing glyph from a blank — re-pick the reference codepoint"
+    )
+
+    def has_glyph(ch: str) -> bool:
+        mask = np.asarray(font.getmask(ch, mode="L"))
+        return mask.shape != notdef.shape or not np.array_equal(mask, notdef)
+
+    # Every part a caption can carry: name, duration, sub detail, date, gear —
+    # plus the one-sub and count-only degradations of the sub detail.
+    captions = [
+        nameplate_line(NameplateFields(
+            target="M 31", integration_s=15150, n_frames=505, sub_exposure_s=30,
+            date_iso="2026-07-19T21:03:00", camera="ZWO Seestar S50")),
+        nameplate_line(NameplateFields(
+            target="NGC 7000", integration_s=11520, n_frames=152)),
+        nameplate_line(NameplateFields(target="M 42", n_frames=1)),
+        nameplate_line(NameplateFields(
+            integration_s=1.5, n_frames=3, sub_exposure_s=2.5,
+            date_iso="2026-01-05")),
+    ]
+    for caption in captions:
+        assert caption, "a caption with real data must not be empty"
+        missing = sorted({ch for ch in caption if not has_glyph(ch)})
+        assert not missing, (
+            f"{missing!r} has no glyph in the bundled font, so it bakes a "
+            f"hollow box into the shared picture: {caption!r}"
+        )
 
 
 def test_nameplate_line_folds_the_sub_detail_and_degrades_gracefully():
