@@ -49,6 +49,144 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🟠 BROKEN-UX / DATA-INTEGRITY (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`,
+  reproduced) — a returncode-0 ASTAP solve whose `.wcs` sidecar is readable but carries NO celestial WCS
+  (empty / truncated / partial-header) is persisted as a *solved* frame with a garbage `wcs_json` and a null
+  centre, then locked out of retry forever — the exact "malformed/partial sidecar" case the runner's own guard
+  was written to catch, and which it does not catch.** *(Severity: broken-UX / data-integrity — a frame is
+  marked solved-yet-unusable, never re-solved (so it can never contribute), and its celestial-less WCS passes
+  align's `is None` guard and is fed into reprojection instead of being cleanly skipped. Confidence: reproduced
+  — the truthy-but-useless `wcs_text`, the null centre, and the bypassed guard all reproduced against the real
+  code; downstream skip/align traced.)*
+
+  **Root cause (traced + reproduced).** `ASTAPSolver._solve_once` (`seestack/solve/astap.py:311`) sets
+  `solved = proc.returncode == 0 and wcs_sidecar.exists()` — **existence only, not validity**. `solve_one`
+  (`seestack/solve/runner.py:153`) then does `wcs_text = wcs_text_from_sidecar(...)`, and
+  `wcs_text_from_sidecar` (`seestack/io/wcs_io.py:76-91`) returns `str(Header.fromstring(raw))` for *any*
+  readable file — for an empty or celestial-less `.wcs` that is a **truthy** `"END…"` / `"SIMPLE=…"` blob, not
+  `None`. `apply_solve_result_to_db` (`runner.py:306`) guards only `if result.wcs_text is None:`, so the truthy
+  garbage blob bypasses the guard and the frame is stored `wcs_json="END…", ra/dec/pixscale/rotation=None`
+  (`runner.py:327-345`). Its own comment (`runner.py:307-322`) says the guard exists to catch "a
+  malformed/partial sidecar" and stop it "being re-offered" — but the check it uses (`is None`) only fires when
+  the sidecar can't even be *read*, never when it reads but holds no celestial WCS. Downstream:
+  `build_solve_arglist` skips any frame with a truthy `wcs_json` (`runner.py:214` `if f.wcs_json: continue`) →
+  **never retried**; and `align_one` (`stack/align.py:152-154`) rejects only `src_wcs is None`, but
+  `wcs_from_text("END…")` returns a **non-None, `has_celestial=False`, naxis-2** WCS (reproduced), so it passes
+  the guard and enters `reproject_rgb_windowed` with a garbage WCS rather than being dropped. **Same root class
+  in bootstrap:** `bootstrap_solve` gates on `not wcs_text` (`seestack/solve/bootstrap.py:399`), which the
+  truthy blob also passes, and `propagate_wcs` (`bootstrap.py:232`) then stamps every rescued member with a
+  celestial-less WCS.
+
+  **Reachability (honest).** A normal ASTAP success writes a complete `.wcs`, so this needs a returncode-0
+  solve *plus* a sidecar that reads but has no celestial keys: a write interrupted after the process returned,
+  a disk-full/zero-byte truncation, a stale partial sidecar, or a partial header. Uncommon — but it is exactly
+  the "empty/truncated `.wcs`" / "success with garbage-partial fields" case the guard was written for, and the
+  guard is demonstrably bypassable. Same narrow-but-real trigger class as the v0.276.5 watcher-rearm and
+  v0.284.4 mid-rewrite fixes.
+
+  **Repro (reproduced this run):**
+  ```
+  python -c '
+  from astropy.io.fits import Header
+  from seestack.io.wcs_io import wcs_text_from_sidecar, wcs_from_text, wcs_center_deg_from_text
+  import tempfile, pathlib
+  p = pathlib.Path(tempfile.mkdtemp())/"a.wcs"; p.write_bytes(b"")     # empty (truncated) sidecar
+  t = wcs_text_from_sidecar(p)
+  print("wcs_text is None?", t is None, "truthy?", bool(t))            # False, True -> bypasses guard
+  w = wcs_from_text(t)
+  print("wcs None?", w is None, "has_celestial?", w.has_celestial)     # False, False -> passes align guard
+  print("centre:", wcs_center_deg_from_text(t))'                       # None -> no usable solution
+  ```
+
+  **Fix direction (small, safe — gate on WCS *validity*, not `is None`).** In `apply_solve_result_to_db`, treat
+  a solve as unreadable when the `.wcs` carries no usable celestial reference — e.g. change the guard to
+  `if result.wcs_text is None or wcs_center_deg_from_text(result.wcs_text) is None:` (equivalently: a solved
+  result whose recovered `ra_center_deg`/`dec_center_deg` is still `None` — a genuine ASTAP solve *always* ends
+  with a centre, from the `.ini` or recovered from the valid `.wcs` at `runner.py:164`, so this rejects only the
+  garbage case and leaves every real solve untouched). Apply the same validity gate to the `bootstrap_solve`
+  branch (`bootstrap.py:399`) so a rescued member with a celestial-less base WCS is skipped rather than stamped.
+  **Tests:** (1) a returncode-0 solve with an empty / partial-header `.wcs` is recorded as an honest
+  `solve_failed:`-style "unreadable plate solution" (accept untouched) and *is* re-offered by
+  `build_solve_arglist` (fails before / passes after); (2) a normal valid-`.wcs` solve (with and without a
+  parseable `.ini`) still stores `wcs_json` + centre and is *not* re-offered (no regression); (3) the bootstrap
+  path skips a celestial-less base instead of propagating it. Two files (`runner.py`, `bootstrap.py`) + tests.
+  Left for the Builder to implement deliberately. *(Found by the plate-solve adversarial audit this run.)*
+
+- **🟡 BROKEN-UX (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`, reproduced) — after a
+  user tunes a run's look with the History "Adjust" (asinh stretch/black) sliders and saves, the "Download
+  full-res PNG" button silently reverts to the STF autostretch — so the one full-resolution download disagrees
+  with the thumbnail, the share-JPEG and the wallpaper, all of which show the saved asinh look.** *(Severity:
+  broken-UX — the user's saved processing choice is lost on exactly the export they'd frame or print; the FITS
+  is untouched, so not wrong-result. Confidence: reproduced — the two renders diverge on a synthetic linear
+  master; the missing forward-through traced end to end.)*
+
+  **Root cause (traced + reproduced).** The History Adjust save (`set_stack_preview`,
+  `webapp/routers/stack.py:1266-1296`) overwrites the run's stored `preview_path` with
+  `render_stack_png(stretch, black)` (the **asinh** curve) and records `preview_stretch`/`preview_black` on the
+  run. So after a save the baked preview PNG — and everything that reads its bytes (gallery/History thumbnail,
+  share-JPEG at `stack.py:2045`, wallpaper at `stack.py:1988`, the sub-reveal at `stack.py:1398`) — shows the
+  asinh look. But `download_full_res_png` (`stack.py:711-716`) only honours a full editor *recipe*
+  (`recipe_json`); with no recipe it calls `render_preview_png_full_res(fits_path)`
+  (`seestack/render/thumbnail.py:365`), which applies the **STF** `_autostretch_for_export` and has no
+  parameter to receive the saved asinh stretch/black. The frontend confirms it: `stackFullResPngUrl`
+  (`frontend/src/api/client.ts:2090`) forwards only `north_up`, and History's own download href
+  (`History.tsx:1054`) passes only `applyNorthUp` — never `dStretch`/`dBlack`. `render_preview_png_full_res`'s
+  docstring even states the broken invariant ("the very picture the user already sees, at full output
+  resolution") — true for an unadjusted run (baked preview is STF too → they match), false the moment Adjust
+  overwrites the baked preview with asinh.
+
+  **Repro (reproduced this run):** a synthetic linear `(3,H,W)` master, sky ≈ 0.02, one bright blob.
+  `render_stack_png(fp, stretch=0.7, black=0.5)` (what Adjust+Save writes) → sky `0.000`; `render_preview_png_
+  full_res(fp)` (what the button serves) → sky `0.055`. The saved dark-background choice is visibly gone in the
+  download.
+
+  **Fix direction (safe — carry the saved stretch through to the full-res render).** When a run has non-null
+  `preview_stretch`/`preview_black` and no editor recipe, `download_full_res_png` should render full-res through
+  the *same* asinh path the stored preview used — e.g. give `render_preview_png_full_res` optional
+  `stretch`/`black` params that route to `render_stack_png` (asinh) when supplied and keep STF when not, and
+  have the endpoint read `run.preview_stretch`/`run.preview_black` and pass them (the frontend needs no change —
+  the server already has the saved columns). A display-space run (columns NULL) keeps STF verbatim, unchanged.
+  **Tests:** (1) a run with saved asinh stretch/black downloads a full-res PNG whose sky/midtone match
+  `render_stack_png(stretch, black)` at full res, not `_autostretch_for_export` (fails before / passes after);
+  (2) an unadjusted linear run and a display-space run are byte-for-byte unchanged (no regression). One-two
+  files (`stack.py`, `thumbnail.py`) + tests. *(Found by the render/export-parity adversarial audit this run.)*
+
+- **🟡 BROKEN-UX / OVERLAY (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`, reproduced) —
+  the Sky-map coverage overlay places its transparency from the *un-rotated* FITS footprint against a preview
+  that was saved *north-up-rotated*, so an irregular-mosaic picture on the Sky map shows its covered/transparent
+  regions in the wrong place.** *(Severity: broken-UX / cosmetic — a Sky-map overlay footprint disagrees with
+  the visible picture; the picture and data are fine. Confidence: reproduced — the mask/preview misalignment
+  reproduced at 50% of pixels on a rotated L-shaped footprint; reachability traced end to end.)*
+
+  **Root cause (traced + reproduced).** The History Adjust save can write a **north-up-rotated** preview to the
+  run's `preview_path` (`set_stack_preview` renders `render_stack_png(..., north_up=north_up)` and the History
+  UI sends it — `History.tsx:741` `saveStackPreview(..., applyNorthUp)`). The Sky map fetches each target's
+  picture through `sky_overlay` (`webapp/routers/sky.py:181` → `stack.py:724-762`), which reads that (rotated)
+  preview and composites it against `stack_coverage_mask(fits_path)` — a mask read straight off the **unrotated**
+  FITS. `overlay_rgba_png` (`seestack/render/thumbnail.py:500`) only **resizes** (nearest) the mask to the
+  preview's dimensions; it never *rotates* it. So the alpha footprint is the un-rotated coverage stretched onto
+  a rotated picture — misaligned (and aspect-stretched when a 90° save swaps H↔W). The `sky_overlay` docstring's
+  premise ("Same pixel grid/dimensions as the preview, so the WCS built for the preview grid still places it")
+  is void once the preview is rotated — which also puts the tile's *placement* WCS at risk, a related concern to
+  check while fixing.
+
+  **Reachability (honest).** Harm is visible only when coverage is NOT full-frame — an irregular mosaic
+  footprint — AND the user saved that run's preview north-up AND views the Sky map. Narrow, but every link is
+  reachable from the UI (the North-up toggle + Save, then the Sky map).
+
+  **Repro (reproduced this run):** an L-shaped coverage mask (200×300); a preview of the same scene
+  `np.rot90`-rotated 90° (PIL size 200×300); feed the *unrotated* mask to `overlay_rgba_png` as `sky_overlay`
+  does → **50%** of pixels have their alpha (transparent/opaque) from the wrong place vs the visible footprint.
+
+  **Fix direction.** Reconcile orientation before compositing: either serve the coverage mask through the *same*
+  north-up transform the stored preview used (rotate/resample the mask to match), or record on the run whether
+  its stored preview is north-up and by how much, and apply that to the mask in `sky_overlay`. Simpler and
+  safer for a first slice: have `sky_overlay` derive the mask from the preview's own alpha where the preview is
+  a known transform of the FITS, or fall back to the opaque preview (no overlay) when the run's preview is
+  rotated and can't be reconciled — never a *misaligned* overlay. **Test:** a north-up-saved run's sky-overlay
+  alpha matches its visible footprint (or cleanly falls back to opaque), while an un-rotated run is unchanged.
+  Left for the Builder. *(Found by the render/export-parity adversarial audit this run.)*
+
 - ~~**🟠 BROKEN-UX (Scout QA audit 2026-08-27 #18, branch `claude/vigilant-knuth-qtz5h4`, reproduced end-to-end)
   — a Moon/Sun still stacked with BOTH `crop` and `sharpen>0` advertises its sharpen slider as editable
   (`sharpen_editable=True`) but EVERY attempt to change the sharpening is refused with a 400: *"This picture's
@@ -420,6 +558,32 @@ _(none — claim an item here with your branch name)_
   `stack/weighting.py` (`star_count > 0` — zero stars really is unusable). *(Confidence: read, not reproduced —
   each was traced to why 0 means "none" there. Filed as a note, not a bug.)* If a future change makes any of
   those quantities able to be a *measured* zero, this is the shape of the mistake to look for.
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`) — led with the stacking
+  engine per the rotation (my own adversarial read), then fanned three parallel audits across the
+  **less-recently-swept** subsystems: (1) plate-solve (`seestack/solve/astap.py`, `runner.py`, `bootstrap.py`);
+  (2) render / export-parity (`seestack/render/*`, `seestack/stack/output.py` + their `stack.py`/`pipeline.py`
+  callers); (3) webapp routers + pipeline auto-stack chain + the `incoming/` guardrail. Also dogfooded the live
+  app end to end (`scripts/agent-dogfood.sh`). Result: **THREE verified, reproduced bugs filed at the top of
+  this section** — the plate-solve garbage-`.wcs`-stored-as-solved (broken-UX/data-integrity), the full-res PNG
+  discarding a saved asinh Adjust (broken-UX), and the Sky-map overlay north-up misalignment (broken-UX/overlay).
+  The **stacking engine core stays clean** (10th consecutive sweep) and the **webapp router/pipeline layer +
+  `incoming/` read-only guardrail are clean** (independent re-confirmation of audit #19's verdict).**
+  **My own engine reads (all NON-findings, traced to guards):** `accumulator.py` — `WeightedSum`/`Welford`/
+  `MinMaxReject` all NaN-aware; the min/max k-set insertion sort maintains the k smallest/largest correctly and
+  the "full ≥2k+1 / single 3..2k / mean 1-2 / NaN 0" degradation bands are exact with no inf−inf; `frame_coverage`
+  counts any-channel contribution so per-channel κ-σ never under-counts. `stacker.py` — `_kappa_sigma_keep_mask`
+  widens to keep-all on both σ-unknown (NaN std → +inf tol) and mean-unknown (NaN mean → keep) so pass-2 data is
+  never turned into a NaN gap; the two-pass `n_used=min(p1,p2)` guard raises rather than writing a silent all-NaN
+  master, with the `not cancel()` clause protecting a routine cancel. `photometric.py` / `weighting.py` /
+  `pointings.py` — the mosaic per-panel split (position-dependent metrics judged per panel, seeing/tracking
+  target-wide) is sound; `combine_weights_with_photometric` folds the correct `1/s²` inverse-variance term and
+  returns the same object (byte-for-byte) when photometric is off; `cluster_pointings` single-linkage union-find
+  is wrap- and pole-safe on unit vectors. **Dogfood (happy path clean):** the Target-page IA refactor has landed
+  (picture + frames above the fold, banner wall behind a "1 more note" disclosure); Stack and Editor pages read
+  clearly with sane defaults and plain-language guidance; no console errors, no overflow, clean boot+stack in the
+  server log. Baseline stacking subset green before starting (`test_stack_pipeline`, `test_accumulator`,
+  `test_mosaic`, `test_drizzle`, `test_calibrate`, `test_fits_loader` — 218 passed).
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #19, branch `claude/vigilant-knuth-1azkk1`) — led with the stacking
   engine per the rotation, running **four** parallel adversarial audits plus my own read of the stack→result
   autonomy path and the preview↔export stretch. Areas: (1) stacker rejection math + reference pick
@@ -16166,6 +16330,50 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #20) — "Show and tell": a full-screen, auto-advancing slideshow of
+  your best pictures, each captioned with its object name and a one-line fact — a zero-config "just play" view a
+  beginner can put on a TV, tablet or laptop at a star party, in a classroom, or for family.** *(Pillar: enjoy +
+  share, PRIORITY 3; size M; fully offline, additive, read-only — reuses the previews the app already keeps and
+  the object facts `AnnotatedImage`/`target_id` already surface; no new deps, no schema/config change.
+  Confidence for the gap: grepped — no `slideshow`/`kiosk`/`carousel`/`present-mode` surface exists in
+  `frontend/src`, `seestack`, or `webapp/routers`.)* **Why (real friction, and the distinct value).** Every
+  existing "enjoy/share" surface is either a *single* artefact (share-JPEG, wallpaper, the Reveal zoom, print) or
+  a *static* composite (the "My deep-sky wall" montage poster, the gallery grid you have to click through). None
+  of them is a **hands-off, room-filling** way to show a whole body of work — the thing a proud beginner
+  actually wants when someone says "show me what you've shot." A slideshow is a genuinely new *surface*, not a
+  new knob: point a screen at it and it plays. **Shape (one route, sane default, no knobs).** A `/show` route
+  that pulls the same "best pictures" list the Gallery/`MyDeepSkyWallCard` already build (finished targets +
+  Moon/Sun stills), then cross-fades through them full-screen on a fixed interval (~8 s), each with a large,
+  legible caption — object name + the one-line "what is this?" fact the app already has (`target_id` /
+  `friendly_object_type`, the same copy `AnnotatedImage` shows) + a small acquisition line (date · integration).
+  Defaults: newest-or-best first, loop forever, gentle Ken-Burns-optional but off by default (keep it calm).
+  **Beginner bar:** clears it — a non-expert instantly understands "play my pictures on the big screen", it
+  needs zero configuration, and it directly serves enjoy/share. **Cautions / guardrails:** strictly read-only
+  (reads existing preview bytes + the facts already computed; never touches `incoming/`, never re-renders a
+  master); degrade cleanly to a friendly empty state when there are fewer than ~2 pictures; keep it a pure
+  frontend view over existing endpoints where possible (no new heavy backend). **Builder: grep first** — reuse
+  the Gallery's `heroes`/`videos` "best pictures" selection and the existing fact copy rather than a second
+  definition of either.
+
+- **NEW IDEA (Scout 2026-08-27 #20) — "What's in my picture?" object labels only appear in History, where most
+  beginners never look — surface them on the main Target picture and let them travel into a share.** *(Pillar:
+  understand + share, PRIORITY 3; size S; additive, reversible, no new deps. Confidence: traced — the
+  `AnnotatedImage` component and its `objectMarkerLayout` geometry already exist and are wired into exactly one
+  place, `frontend/src/routes/History.tsx:850`; grep found no other consumer.)* The app already has a complete,
+  tested "overlay named catalog objects on a finished stack" capability (`frontend/src/components/
+  AnnotatedImage.tsx`, driven by the field-objects the backend already computes) — but it lives only on the
+  History "Adjust" panel. A beginner who lands on the Target page, sees "Your picture", and never opens History
+  never discovers that their smudge is "the Running Man Nebula (NGC 1977)" or that the bright star is Rigel —
+  one of the most delightful, understand-it moments the app can offer, hidden behind a page they don't visit.
+  **Shape (small, reuse-only):** add a toggle-able "Label objects" overlay to the Target page's "Your picture"
+  card (the same `AnnotatedImage` component, same endpoint) — and, per the standing IA priority (AGENTS §1), put
+  it *inside* that existing card rather than as another always-on banner. A natural size-S follow-on: offer the
+  labelled version as a share export (bake the labels onto the JPEG the way the nameplate/scale bar already
+  bake), so the "here's what's in my shot" version is the one a beginner posts. **Cautions:** the labels are
+  placed from the stack's own WCS grid, so they must self-hide on an unsolved run and on a north-up-rotated
+  preview (History already hides them when `applyNorthUp` is on — mirror that). Reuse, don't re-implement, the
+  marker-layout geometry.
 
 - **NEW IDEA (Builder 2026-08-27, traced while reviewing the v0.285.0 pictures zip) — "Download all my
   pictures" leaves out the Moon and the Sun, which are most beginners' *first* good picture.** *(Pillar: get +
