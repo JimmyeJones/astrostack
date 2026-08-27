@@ -190,6 +190,96 @@ def test_bilinear_debayer_uint16_does_not_overflow():
     assert np.allclose(rgb_f32, 60000.0)
 
 
+# Red sample position (py, px) within the 2x2 cell for each Bayer layout.
+_R_POS = {"RGGB": (0, 0), "BGGR": (1, 1), "GRBG": (0, 1), "GBRG": (1, 0)}
+
+
+@pytest.mark.parametrize("pattern", ("RGGB", "BGGR", "GRBG", "GBRG"))
+def test_bilinear_debayer_counts_genuine_zero_sample(pattern):
+    """A genuine sample that reads exactly 0.0 must still count toward the
+    neighbour average of the adjacent missing sites of its own channel.
+
+    The interpolators used to mask sample sites with a ``!= 0`` *value* test, which
+    conflates "not this channel's site" (correctly excluded) with "a real datum that
+    happens to be 0" (which must be counted). That excluded a genuine 0 from the
+    normalized-convolution count, so a missing site next to it divided a smaller sum
+    by a smaller count and read too high. After the fix the mask is *positional*, so
+    the 0 is counted. Reachable on the hot path when an integer master-dark
+    subtraction lands a light pixel exactly on the dark value."""
+    py, px = _R_POS[pattern]
+    mosaic = np.full((8, 8), 100.0, dtype=np.float32)
+    zy, zx = py + 2, px + 2          # an interior R sample site
+    mosaic[zy, zx] = 0.0             # a genuine zero datum at an R site
+    r = bilinear_debayer(mosaic, pattern=pattern)[:, :, 0]
+    # The zeroed R sample site itself keeps its 0 (a real sample is never overwritten).
+    assert r[zy, zx] == 0.0, r[zy, zx]
+    # The missing R site one column right averages its two horizontal R neighbours,
+    # the zero and the 100 → 50. The old value-mask dropped the 0 and returned 100.
+    assert r[zy, zx + 1] == pytest.approx(50.0), r[zy, zx + 1]
+
+
+def _debayer_value_mask_reference(mosaic, pattern):
+    """Independent reference reproducing the *pre-fix* value-based sample mask, to
+    pin byte-for-byte equivalence on frames with no exact-0 sample (the common
+    path). Uses the module's own ``_shift`` so only the mask source differs."""
+    from seestack.io import fits_loader as fl
+
+    layouts = {
+        "RGGB": (("r", "g"), ("g", "b")), "BGGR": (("b", "g"), ("g", "r")),
+        "GRBG": (("g", "r"), ("b", "g")), "GBRG": (("g", "b"), ("r", "g")),
+    }
+    m = mosaic.astype(np.float32)
+    r = np.zeros_like(m)
+    g = np.zeros_like(m)
+    b = np.zeros_like(m)
+    (tl, tr), (bl, br) = layouts[pattern]
+    plane = {"r": r, "g": g, "b": b}
+    plane[tl][0::2, 0::2] = m[0::2, 0::2]
+    plane[tr][0::2, 1::2] = m[0::2, 1::2]
+    plane[bl][1::2, 0::2] = m[1::2, 0::2]
+    plane[br][1::2, 1::2] = m[1::2, 1::2]
+
+    def interp_g(gp):
+        has = (gp != 0).astype(np.float32)
+        num = fl._shift(gp, 1, 0) + fl._shift(gp, -1, 0) + fl._shift(gp, 0, 1) + fl._shift(gp, 0, -1)
+        den = fl._shift(has, 1, 0) + fl._shift(has, -1, 0) + fl._shift(has, 0, 1) + fl._shift(has, 0, -1)
+        return np.where(gp != 0, gp, num / np.maximum(den, 1.0))
+
+    def interp_rb(p, channel):
+        hm = (p != 0).astype(np.float32)
+        h_avg = (fl._shift(p, 0, 1) + fl._shift(p, 0, -1)) / np.maximum(fl._shift(hm, 0, 1) + fl._shift(hm, 0, -1), 1.0)
+        v_avg = (fl._shift(p, 1, 0) + fl._shift(p, -1, 0)) / np.maximum(fl._shift(hm, 1, 0) + fl._shift(hm, -1, 0), 1.0)
+        d_num = fl._shift(p, 1, 1) + fl._shift(p, 1, -1) + fl._shift(p, -1, 1) + fl._shift(p, -1, -1)
+        d_den = fl._shift(hm, 1, 1) + fl._shift(hm, 1, -1) + fl._shift(hm, -1, 1) + fl._shift(hm, -1, -1)
+        d_avg = d_num / np.maximum(d_den, 1.0)
+        h, w = p.shape
+        yy, xx = np.indices((h, w))
+        pos = {tl: (0, 0), tr: (0, 1), bl: (1, 0), br: (1, 1)}[channel]
+        osr = (yy % 2) == pos[0]
+        osc = (xx % 2) == pos[1]
+        has = p != 0
+        out = p.copy()
+        out = np.where(~has & osr & ~osc, h_avg, out)
+        out = np.where(~has & ~osr & osc, v_avg, out)
+        out = np.where(~has & ~osr & ~osc, d_avg, out)
+        return out
+
+    return np.stack([interp_rb(r, "r"), interp_g(g), interp_rb(b, "b")], axis=-1)
+
+
+@pytest.mark.parametrize("pattern", ("RGGB", "BGGR", "GRBG", "GBRG"))
+def test_bilinear_debayer_unchanged_when_no_zero_samples(pattern):
+    """The positional-mask fix must be byte-for-byte identical to the old value-mask
+    on any frame with no exact-0 sample — i.e. every real install with a proper
+    (float-averaged) master dark or no calibration at all. Guards the hot path
+    against an accidental behaviour change."""
+    rng = np.random.default_rng(7)
+    mosaic = (rng.random((48, 72)).astype(np.float32) * 1000.0 + 1.0)  # strictly > 0
+    got = bilinear_debayer(mosaic, pattern=pattern)
+    ref = _debayer_value_mask_reference(mosaic, pattern)
+    assert np.array_equal(got, ref), float(np.abs(got - ref).max())
+
+
 def _reference_debayer(mosaic: np.ndarray, pattern: str) -> np.ndarray:
     """An independent, deliberately slow reference bilinear debayer.
 
@@ -240,17 +330,15 @@ def _reference_debayer(mosaic: np.ndarray, pattern: str) -> np.ndarray:
 
 
 @pytest.mark.parametrize("pattern", ("RGGB", "BGGR", "GRBG", "GBRG"))
-def test_debayer_counts_a_genuine_zero_sample(pattern):
-    """A real sample whose value is exactly 0.0 is still a sample, and must be
-    counted in the neighbour average of every adjacent missing site.
+def test_debayer_matches_an_independent_reference_on_zero_samples(pattern):
+    """The whole-image companion to ``test_bilinear_debayer_counts_genuine_zero_sample``
+    above: instead of probing one interpolated pixel next to one planted zero, this
+    checks **every pixel of all three channels** against ``_reference_debayer`` on a
+    field densely scattered with genuine zeros, for all four layouts.
 
-    The interpolators used to identify sample sites with a ``!= 0`` *value* test,
-    which conflated "not this channel's site" (correctly excluded) with "a genuine
-    datum that reads 0.0". Dropping those real zeros divided a smaller neighbour
-    sum by a smaller count, biasing the interpolated chroma of their neighbours
-    upward — reachable on the on-by-default hot path whenever dark subtraction with
-    an integer-valued master lands pixels exactly on zero. Checked against an
-    independent reference for every Bayer layout.
+    Worth both: the probe states the rule readably, and this one would catch a mask
+    that got the *other* channel, the diagonal case, or one layout's parity wrong —
+    which is the failure mode that matters on a hot path every frame goes through.
     """
     rng = np.random.default_rng(3)
     mosaic = rng.uniform(0.0, 200.0, size=(12, 14)).astype(np.float32)
@@ -264,27 +352,6 @@ def test_debayer_counts_a_genuine_zero_sample(pattern):
     assert np.allclose(got, want, atol=1e-4), (
         pattern, float(np.max(np.abs(got - want))))
 
-
-def test_debayer_unchanged_when_no_sample_is_exactly_zero():
-    """The positional sample mask must be *byte-for-byte* identical to the old
-    value test on any frame with no exact-0 sample — i.e. every ordinary frame,
-    including the float-averaged-master install. These hashes were taken from the
-    pre-fix implementation, so a drift here means the fix changed the common path.
-    """
-    import hashlib
-
-    rng = np.random.default_rng(7)
-    mosaic = rng.uniform(800.0, 1200.0, size=(34, 46)).astype(np.float32)
-    assert (mosaic != 0).all()
-    golden = {
-        "RGGB": "a0052065d576bd5a183b7de0c03fe8125246ff19040f901c62e74a13105dbc04",
-        "BGGR": "f9546824af89f43cf1d40b0de37b432bcb894d57f68724575560872cda7c27f3",
-        "GRBG": "6285901d1b7616d3d498eae6a5d7fb580a7f8092b99b78c1d715d98bc0ca5a59",
-        "GBRG": "601aa61145ae09d963ce06351297b9a23669fbab567e739ab1b6e55f204f3448",
-    }
-    for pattern, want in golden.items():
-        out = bilinear_debayer(mosaic, pattern=pattern)
-        assert hashlib.sha256(out.tobytes()).hexdigest() == want, pattern
 
 
 def test_fov_deg_from_header_s30(tmp_path):

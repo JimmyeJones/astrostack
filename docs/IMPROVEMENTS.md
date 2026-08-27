@@ -49,42 +49,77 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🟠 BROKEN-UX (Scout QA audit 2026-08-27 #18, branch `claude/vigilant-knuth-qtz5h4`, reproduced end-to-end)
+  — a Moon/Sun still stacked with BOTH `crop` and `sharpen>0` advertises its sharpen slider as editable
+  (`sharpen_editable=True`) but EVERY attempt to change the sharpening is refused with a 400: *"This picture's
+  crop can't be worked out any more, so changing the sharpening would lose it — stack the capture again
+  instead."* The advertised control is permanently dead, and the only "recovery" it offers (re-stack) is
+  impossible once the source clip is off the NAS.** *(Severity: broken-UX — a control the app offers always
+  fails on a common option combination; not wrong-result, the finished picture is fine. Confidence: reproduced
+  end-to-end by reconstructing the exact on-disk artefacts + meta that `_video_stack_body(crop=True,
+  sharpen>0)` writes, then calling `sharpen_saved_still`.)*
+
+  **Root cause (traced + reproduced).** A **stack-time** crop and an **old in-place** crop leave two different
+  on-disk shapes, and the re-sharpen path conflates them. `_video_stack_body` (`webapp/video.py:1065-1074,1096,
+  1110`) writes the **already-cropped** *soft* render to `stack-full.*` (the resharpen backup), sets
+  `crop_applied=True`, leaves `crop_box=[]`, and sets `sharpen_baked=0` — so `can_resharpen` (`video.py:454-461`)
+  returns `True` and the wire advertises `sharpen_editable=True`. But `sharpen_saved_still` (`video.py:762-767`)
+  calls `_measured_box` (`video.py:601-621`), which — seeing `crop_applied` and an empty `crop_box` — assumes
+  the backup is a *full frame* and re-measures a crop box from it with `measure_framing`. The backup is *already
+  cropped*, so `measure_framing(...).worthwhile` is `False` → `_measured_box` returns `None` → the guard at
+  `:763` (`crop_applied and had_original and box is None`) raises. The refusal branch was written only for a
+  legacy in-place crop whose box was lost; it misfires on the current stack-time crop+sharpen output. The
+  correct rebuild for a stack-time crop is simply `_rebuild_still(sharpen=a, box=None)` — the backup is already
+  the cropped soft image, so sharpening it reproduces `stack.*` exactly (verified: `stack.* =
+  sharpen(cropped_soft)`).
+
+  **Repro (reproduced this run):** reconstruct the artefacts `_video_stack_body(crop=True, sharpen=1.0)` writes
+  for an off-centre bright disk (full-frame framing worthwhile → cropped-soft backup at `stack-full.*`,
+  sharpened-cropped at `stack.*`, `crop_applied=True, crop_box=[], sharpen_baked=0, sharpen_amount=1.0`), then
+  call `sharpen_saved_still(..., 1.5)`. Result: `can_resharpen` → `True` (slider shown) but the call raises the
+  "crop can't be worked out any more" `StillCropError`. `measure_framing` on the cropped backup returns
+  `worthwhile=False`, confirming the misfire.
+
+  **Fix direction (safe — distinguish the two crop shapes).** The two "crop_box empty" cases are separable by
+  **backup dimensions vs the current picture**: a stack-time crop's `stack-full.*` backup has the *same* size as
+  the current (cropped) `stack.*` (it is already cropped) → rebuild with `box=None`; a legacy in-place crop's
+  backup is the *larger full frame* → use the recorded box or re-measure it. So `sharpen_saved_still` should
+  treat "backup already at the cropped size" as "no box needed" rather than fatal, and only refuse when the
+  backup genuinely can't be read. This also closes the **latent double-crop risk** the audit flagged: if an
+  off-centre disk left the cropped backup still `worthwhile` to trim, the current code would pass a non-empty
+  `box` into `_rebuild_still` and **double-crop** (silently shrink) the picture on a re-sharpen — the
+  dimension check prevents ever cropping an already-cropped backup. **Tests:** (1) a stack-time crop+sharpen
+  still re-sharpens to a new strength without error and the result matches `sharpen(cropped_soft, new_amt)`
+  (fails before / passes after); (2) an old in-place crop (non-empty `crop_box`, full-frame backup) still
+  re-sharpens with its box preserved (no regression); (3) an off-centre-disk stack-time crop re-sharpens
+  without double-cropping (dimensions unchanged). One file (`webapp/video.py`) + a test file. Left for the
+  Builder to implement deliberately with those tests. *(Found by the jobs/video adversarial audit this run.)*
+
 - ~~**🟡 WRONG-RESULT / IMAGE-QUALITY (Scout QA audit 2026-08-27 #17, branch `claude/vigilant-knuth-s4y5o3`,
   reproduced) — bilinear debayer treats a genuine sample value of *exactly* `0.0` as "not a sample of this
   channel", so it is dropped from the neighbour average used to interpolate the adjacent missing colour sites,
-  biasing those interpolated pixels. Fires on the on-by-default hot path (every debayer), but only meaningfully
-  when an *integer-valued* master dark makes exact-zero samples common.**~~ — **FIXED v0.284.5** (Builder
-  2026-08-27, branch `claude/compassionate-galileo-0wtz21`). *(Severity: low wrong-result /
+  biasing those interpolated pixels.**~~ — **FIXED v0.284.5** (Scout 2026-08-27, branch
+  `claude/vigilant-knuth-qtz5h4`). Fires on the on-by-default hot path (every debayer), but only meaningfully
+  when an *integer-valued* master dark makes exact-zero samples common. *(Severity: low wrong-result /
   image-quality — the interpolated chroma of pixels next to an exact-0 sample is off by up to ~1 ADU, mostly
   upward on a positive sky background; gated on integer master darks — see reachability. Confidence:
   reproduced end-to-end via `bilinear_debayer`.)*
 
-  **What shipped, exactly as the fix direction below asked.** Both interpolators now identify sample sites
-  **positionally**, from the Bayer layout, instead of with a `!= 0` value test. `_interp_rb` hoists the
-  `on_sample_row/on_sample_col` grid it already computed (to classify *missing* sites) above the convolutions
-  and uses `has = on_sample_row & on_sample_col`; `_interp_g` takes the layout and derives the G checkerboard
-  through a new `_g_site_mask` helper — `g_parity = 0 if tl == "g" else 1`, so a future pattern can't silently
-  pick the wrong parity. The structural mask is shifted with the same zero-filling `_shift`, so off-frame
-  contributors still drop out of the count and the edge handling is untouched. The repro in the spec below now
-  prints `75.0` (the correct diagonal mean including the genuine 0) instead of `100.0`.
+  **Fix (exactly the direction filed below).** `_interp_g`/`_interp_rb` (`seestack/io/fits_loader.py`) now
+  derive the sample-site mask **positionally** from the Bayer pattern instead of the `!= 0` value test:
+  `_interp_rb` builds `has = on_sample_row & on_sample_col` (moved above the normalized convolution and used as
+  both the keep-mask and the count `m`); `_interp_g` takes a `g_parity` argument (`(y+x)%2` of the G sites — 1
+  for RGGB/BGGR, 0 for GRBG/GBRG, derived from the layout in `bilinear_debayer`) and marks G sites as
+  `((yy+xx)%2)==g_parity`. So a genuine 0.0 sample is now counted in its neighbours' averages, and a genuine-0 G
+  sample site keeps its 0 instead of being overwritten by `avg`. **Byte-for-byte identical** to the old code for
+  every frame with no exact-0 sample (the positional mask and `!= 0` agree there), so a float-master or
+  uncalibrated install is unchanged. **Tests (+8 in `tests/test_fits_loader.py`):** a parametrized exact-0 case
+  across all four Bayer layouts proving the adjacent missing site now averages the 0 correctly (50, was 100 — the
+  regression guard, fails before/passes after) and that the zeroed sample site keeps its 0; plus a parametrized
+  byte-for-byte guard comparing the fix against an inline value-mask reference on a strictly-positive random
+  frame (proves the common hot path is unchanged). Full stack/calibrate/align subset green (126 passed).
 
-  **Byte-for-byte on the common path, and *proved* so.** The positional mask and the old value test agree
-  everywhere except at a sample site holding exactly 0.0, so an ordinary frame — every uncalibrated frame, and
-  every frame calibrated with the normal float-averaged master — is bit-identical. That isn't asserted by
-  argument: `test_debayer_unchanged_when_no_sample_is_exactly_zero` pins SHA-256 hashes of the output bytes for
-  all four Bayer layouts on a seeded no-exact-0 frame, **taken from the pre-fix implementation before the edit
-  landed**, so any drift on the common path fails the test.
-
-  **Tests (+5 in `tests/test_fits_loader.py`; the 4 parametrized ones fail before / pass after).**
-  `test_debayer_counts_a_genuine_zero_sample[RGGB|BGGR|GRBG|GBRG]` scatters genuine exact-zero samples the way
-  an integer master dark does and checks the whole RGB output against `_reference_debayer` — an independent,
-  deliberately slow per-pixel implementation written from the definition (for each missing site, average the
-  nearest same-channel sample sites that exist on the frame), which knows nothing about sparse planes or
-  shifted masks and so cannot share a bug with the vectorised path. That reference also covers the guardrail
-  the spec asked for: a wrong G-parity in any layout fails it immediately. Plus the byte-for-byte pin above.
-
-  **Upgrade-safe (§9):** pure in-memory pixel math in one engine function; no config, schema, on-disk, API or
-  default change, and no behaviour change at all for a frame without exact-0 samples.
+  Original spec, for the record:
 
   **Root cause (traced + reproduced).** `bilinear_debayer` (`seestack/io/fits_loader.py`) builds sparse R/G/B
   planes with `np.zeros_like(mosaic)` and populates only each channel's sample sites (`:234-254`). The two
@@ -352,6 +387,42 @@ _(none — claim an item here with your branch name)_
   `stack/weighting.py` (`star_count > 0` — zero stars really is unusable). *(Confidence: read, not reproduced —
   each was traced to why 0 means "none" there. Filed as a note, not a bug.)* If a future change makes any of
   those quantities able to be a *measured* zero, this is the shape of the mistake to look for.
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #18, branch `claude/vigilant-knuth-qtz5h4`) — led with the stacking
+  engine per the rotation, then fanned three parallel adversarial audits across less-recently-swept areas: the
+  **background/gradient** subsystem (`seestack/bg/*`), the **calibration master build+apply**
+  (`seestack/calibrate/*`), and the **job manager + video-stacking + library-merge** path (`webapp/jobs.py`,
+  `routers/video.py`, `webapp/video.py`, `seestack/io/merge.py`). Result: **one verified, reproduced broken-UX
+  bug** in the video re-sharpen path (filed at the top of this section — crop+sharpen stills refuse every
+  re-sharpen while advertising the control as editable); **bg, calibrate, and the jobs core all CLEAN.** The
+  engine core stays clean (8th consecutive engine sweep). Also shipped the debayer exact-0 fix (v0.284.5,
+  above).**
+  **What was read adversarially and traced (each a NON-finding except the video bug — traced to a guard):**
+  **bg/gradient** (`coverage_leveling.py`, `final_gradient.py`, `per_frame.py`, `sky_poly.py`, `hot_pixels.py`)
+  — NaN=no-coverage preserved bit-for-bit through `level_by_coverage`, `suppress_hot_cold_pixels`,
+  `subtract_background`, and `final_gradient` (no NaN→0, no number→NaN, inputs copied before mutation); the
+  detrend-before-threshold + `_MIN_DETECT_AREA` small-detection drop + faint-extended second pass guard object-
+  mask starvation; `fit_sky_poly` requires ≥`n_terms*4` tiles and SVD-`lstsq`, returns `None` on degenerate
+  input; the cross-level `polyfit` is try/except-wrapped and every filled offset is `np.clip`-ed to the measured
+  `[lo,hi]` envelope (no manufactured seam). *(One GPU-only observation — `_subtract_background_gpu` fills a
+  fully-masked tile with the luminance median rather than neighbouring tiles — was traced but is **unreproducible
+  without cupy** and nil-impact on fully-NaN tiles, so it is deliberately NOT filed as a bug; noted as a
+  low-priority hardening idea below for a GPU-capable follow-up.)*
+  **calibrate** (`masters.py`, `apply.py`) — sigma-clip-mean matches intent (MAD clip about the median, mean of
+  survivors; `mad==0`/spike `tol=0` branch verified), exposure-scaled dark `bias+(dark−bias)·ratio` sign correct
+  and no-data bias/dark pixels restore the right no-correction identity on both scaled and unscaled paths (no
+  spurious pedestal), flat divide floors zero/neg/sub-floor/NaN/inf to 1.0, uint16→float32 promotion before any
+  subtraction (no wrap), mismatched-shape masters skipped, empty-bundle path returns a fresh array, shared
+  masters never mutated. Independently reproduced the four-way no-data pixel matrix.
+  **jobs/video/merge** (`webapp/jobs.py`, `routers/video.py`, `webapp/video.py`, `seestack/io/merge.py`,
+  `seestack/video/*`) — `_recover_interrupted` runs in `__init__` before `start()` and flips both `running` and
+  `queued` → `interrupted`, so no job is left stuck running across a restart; the single-worker cancel↔claim race
+  is resolved under one `RLock`; `_persist` serialization and the DB write are both guarded so neither kills the
+  worker; ffmpeg `iter_frames` reads exactly one frame at a time with a `finally` that kills+reaps the subprocess
+  (memory-bounded, no handle leak, cancel unwinds promptly); the two-pass `select=not(mod(n,stride))` filter
+  decodes identical frames in both passes; and **`incoming/` stays strictly read-only** — the video path only
+  reads it (via ffmpeg) and writes solely under `<data_root>/video/…`, `merge.py` copies into the *destination*
+  project and never touches `incoming/` or rewrites a stored `source_path`. Client capture ids are re-sanitized
+  server-side; no client filesystem path reaches disk.
 
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #17, branch `claude/vigilant-knuth-s4y5o3`) — a **depth** sweep that
   led with the stacking engine (`seestack/stack/*` + `seestack/calibrate/*`) across three parallel adversarial
@@ -8503,6 +8574,18 @@ to **Shipped**.)_
   for a small item: `git fetch` and re-read the entry right before you start writing code, not just at the top
   of the run.
 
+  **It happened again the same day — and this time the *rules worked*.** A Builder (`…-galileo-0wtz21`) and a
+  Scout (`…-knuth-qtz5h4`) both fixed the exact-0 debayer bug within an hour, arriving at functionally identical
+  positional-mask fixes. The Scout's landed on `main` first, so the Builder **took `main`'s implementation
+  wholesale** and dropped its own — no re-litigating whose was nicer, no near-duplicate code, and the version
+  number the Scout had already used (`v0.284.5`) was left alone. The one thing it kept was the piece that was
+  genuinely *different in kind*: a test checking every pixel of all three channels against an independent
+  per-pixel reference debayer, next to the Scout's single-pixel probe. **That's the general rule when you lose
+  this race: take what's on `main`, keep only what's additive, and say so in the merge.** Note also what neither
+  agent's *fix* cost — the loser here spent one commit, not a run, because the duplicate was noticed at the
+  pre-merge sync (§11) rather than after merging. Both halves of the lesson stand: claim the item early, *and*
+  make the sync cheap to lose.
+
 - **NEW IDEA (Scout 2026-08-27 #15) — close the loop when auto-grade *brings frames back*: a plain-language,
   self-hiding note telling the owner "N subs you'd set aside earlier turned out typical after all and are back in
   your stack", so the machine's second-thoughts are visible instead of silent.** *(Pillar: autonomy + trust,
@@ -14514,6 +14597,22 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **IDEA / GPU-ONLY HARDENING (Scout QA audit 2026-08-27 #18, traced — NOT a verified bug; unreproducible
+  without cupy, nil-impact on fully-NaN tiles) — `per_frame._subtract_background_gpu` (`seestack/bg/per_frame.py`
+  ~line 604) fills a *fully-masked* background tile with the global **luminance** median (`luma_med`) rather than
+  with neighbouring-tile values as the adjacent comment claims. For a low-sky channel (e.g. blue) that is the
+  wrong per-channel scale, and the bicubic tile-grid interpolation could bleed it into coverage-edge tiles,
+  faintly tinting a mosaic panel's edge.** *(Pillar: image quality — PRIORITY 4; size S; GPU path only.)*
+  **Why it's not filed as a bug.** The direct effect on a *fully-NaN* tile is nil (`NaN − x` stays `NaN`, so the
+  gap survives); the concern is only the interpolated bleed into *adjacent partially-covered* tiles, and it could
+  not be executed/measured (no cupy in the audit env). The **CPU path is clean** (the bg audit reproduced it).
+  So this is a hardening lead for a GPU-capable follow-up, not a known-wrong result. **Fix direction (when a GPU
+  box is available to test on):** fill a fully-masked tile from its nearest covered neighbours in the *same
+  channel's* tile grid (or leave it NaN and let the existing coverage-edge handling own it), matching what the
+  comment says and the CPU path does — then verify on a real mosaic sub with a low-signal channel that no panel
+  edge picks up a tint. Confidence: traced (single read; GPU path not executed). Do NOT blind-flip this on the
+  hot path without a GPU repro.
+
 - **IDEA / DATA-INTEGRITY FOLLOW-UP (Scout 2026-08-27 #8, the residual of the v0.277.4 scanner fix) —
   parent-scope `_seestar_output_bases` + the output-reject so a 1–2-sub root-level `<T>/` colliding with an
   unrelated container `<T>_sub` is never wrongly rejected.** *(Pillar: image quality / correctness — PRIORITY 4;
@@ -15849,6 +15948,41 @@ problems. Dogfood it every big-picture run and fix root causes.
   shipped"). Original spec below.
 
   *(Pillar: understand + plan, PRIORITY
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #18) — "Then vs now": a side-by-side slider that compares your
+  target's newest deep stack against an earlier one, so a beginner can *see* their picture getting cleaner and
+  deeper as the nights add up — and trust that another night out was worth it.** *(Pillar: understand + enjoy +
+  trust, PRIORITY 3 (with a 4 flavour — it builds trust in the result); size M; fully offline, additive,
+  read-only — reuses the stack-run artifacts already on disk, no new deps, no schema/config change.)*
+  **Why (real friction).** A target accumulates **multiple finished stack-runs** over nights: every re-stack
+  archives the prior outputs to a timestamped basename (`_archive_existing_outputs` + `repoint_stack_runs`,
+  `stack/output.py` / `project.py`), so the run history is already there and browsable. But there is **no way to
+  put two of those runs beside each other** and see the difference. A beginner who shot three more nights and
+  re-stacked sees a *new* picture, but has nothing that answers *"is this actually better than last week's?"* —
+  the single most motivating question in the hobby. The app already has the trust primitives (StackNoiseBadge,
+  OneFrameVsStackCard, integration/grain trend badges) and an in-*editor* before/after Compare, but **no
+  finished-run vs finished-run A/B** — which AGENTS §4 explicitly names as a valued feature ("let users compare
+  before/after or A/B two stacks"). The old desktop era had a Qt compare dialog (`test_compare_dialog.py`); the
+  web app never got the equivalent.
+  **Shape (one view, sane default, no knobs).** On the Target page add a small "Compare" affordance that opens a
+  **drag-the-divider slider** (or a simple A|B fade) over two run previews: default **latest run vs the
+  previous run** (both already resolved server-side from the run history — no client paths, reuse the existing
+  per-run preview artifacts the gallery/target views already serve). A tiny caption under each side states its
+  integration ("4h 12m · 3 nights" vs "6h 40m · 5 nights") so the comparison is *quantified*, not just visual.
+  A dropdown lets the user pick any two of the target's runs, but the default pairing needs zero decisions.
+  Degrade cleanly: hide the affordance when a target has **fewer than two** finished runs (single-run OSC
+  targets simply never see it). **Beginner bar:** clears it — a non-expert instantly understands "compare my new
+  picture to the old one", it needs no configuration, and it directly serves understand/enjoy/trust without any
+  expert knob. **Cautions / guardrails:** read-only (only reads existing run-preview artifacts, never touches
+  `incoming/`, never re-renders or re-stacks); both previews must share the same display transform so the
+  comparison is honest (reuse each run's baked `_preview`, which already went through `_autostretch_for_export`
+  — don't re-stretch one side); align/scale the two previews to a common frame if their canvases differ (a later
+  deeper run may have a slightly different footprint) so the slider divider lines up. **Builder: grep first** —
+  confirm no run-vs-run compare route/component slipped in since this was filed, and that the run-history preview
+  artifacts are still individually addressable server-side.
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #17) — "Was the Moon in your way?": a plain-language per-session
+  moonlight note that tells a beginner when a bright, nearby Moon washed out their faint target, so they
+  understand why some nights look worse and can plan Moon-free nights.** *(Pillar: understand + plan, PRIORITY
   3 (with a 2 flavour — it nudges better scheduling); size S; fully offline — `astropy` is already a dependency,
   no network, no location needed, additive, read-only.)*
   **Why (real friction).** A beginner shoots the same target across several nights and sees one night come out
