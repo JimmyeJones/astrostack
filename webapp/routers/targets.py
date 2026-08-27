@@ -24,6 +24,7 @@ from webapp.schemas import (
     FocusTrendOut,
     FocusTrendPointOut,
     FramingHintOut,
+    GrainierNewestOut,
     HealthNoteOut,
     IntegrationGoalOut,
     IntegrationGoalPatch,
@@ -434,6 +435,68 @@ def target_cleanest_shot(safe: str, request: Request) -> CleanestShotOut | None:
         n_frames_used=shot.n_frames_used,
         cover_n_frames_used=shot.cover_n_frames_used,
         timestamp_utc=shot.timestamp_utc,
+    )
+
+
+@router.get("/{safe}/grainier-newest", response_model=GrainierNewestOut | None)
+def target_grainier_newest(safe: str, request: Request) -> GrainierNewestOut | None:
+    """Offer to pin an earlier, cleaner stack when the newest one came out
+    materially grainier — or ``null`` when there's nothing to say.
+
+    The mirror of ``cleanest-shot``, for the state a beginner is actually in.
+    With nothing pinned the cover simply *follows* the newest stack, so a restack
+    through haze (or one that set a lot of subs aside) silently replaces a better
+    picture on the Library tile, "My best pictures" and the montage wall. This is
+    that silent regression, said once, with the same one-tap ``set-cover``. It
+    never pins anything by itself, and it can never speak at the same time as
+    ``cleanest-shot``: that one needs a pin, this one needs none.
+
+    Compares like with like — only *genuine* stack runs — and only offers a run
+    whose picture is actually on disk. Read-only.
+    """
+    from seestack.covernudge import grainier_newest
+    from webapp.pipeline import _stack_options_from_run_json
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        entry = lib.find_target(safe)
+        cover_id = entry.cover_stack_run_id if entry is not None else None
+        all_runs = list(proj.iter_stack_runs())  # newest first
+    finally:
+        proj.close()
+        lib.close()
+    runs = [r for r in all_runs
+            if _stack_options_from_run_json(r.options_json) is not None]
+    nudge = grainier_newest(runs, cover_id)
+    if nudge is None:
+        return None
+    # Only speak when the grainy newest stack is genuinely the picture on show.
+    # Unpinned, every showcase surface takes the newest run *with a preview* out
+    # of *all* runs, which can be an editor export rather than the newest genuine
+    # stack — and telling the owner their picture got grainier while a different
+    # image is on screen would just be wrong. Ask the same helper the wall does,
+    # so the two can't drift apart.
+    from webapp.routers.gallery import _representative_run
+
+    shown, _pinned = _representative_run(all_runs, cover_id)
+    if shown is None or shown.id != nudge.newest_run_id:
+        return None
+    # Never offer a cover whose picture is gone: pinning it would fall straight
+    # back to the newest stack anyway, which makes the nudge look broken.
+    better = next((r for r in runs if r.id == nudge.run_id), None)
+    if better is None or not better.preview_path:
+        return None
+    if not Path(better.preview_path).exists():
+        return None
+    return GrainierNewestOut(
+        run_id=nudge.run_id,
+        newest_run_id=nudge.newest_run_id,
+        noise_sigma=nudge.noise_sigma,
+        newest_noise_sigma=nudge.newest_noise_sigma,
+        percent_grainier=nudge.percent_grainier,
+        n_frames_used=nudge.n_frames_used,
+        newest_n_frames_used=nudge.newest_n_frames_used,
+        timestamp_utc=nudge.timestamp_utc,
     )
 
 

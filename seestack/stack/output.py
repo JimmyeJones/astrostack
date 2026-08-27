@@ -433,7 +433,8 @@ def write_share_jpeg(path: Path, rgb: np.ndarray, *, max_long_edge: int = 2048,
 
 
 def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
-                      nameplate: Any | None = None) -> bytes:
+                      nameplate: Any | None = None,
+                      keepsake: Any | None = None) -> bytes:
     """Transcode an already-rendered display PNG (e.g. the stored stack preview)
     to a smaller, more share-friendly JPEG at the **same** resolution.
 
@@ -448,7 +449,13 @@ def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
     tasteful acquisition footer the editor share export bakes on (target ·
     integration · date · gear) is drawn onto this download too — so the direct
     "Download JPEG" path can be as post-ready as the editor's. Passing ``None``
-    (the default) leaves the pixels exactly as before."""
+    (the default) leaves the pixels exactly as before.
+
+    ``keepsake`` takes the same fields and produces the *framed* variant instead:
+    the picture matted on a dark card with its name and acquisition data set
+    **beneath** it (:func:`seestack.keepsake.draw_keepsake`), for printing or
+    posting. The two are alternatives, not layers — a keepsake already carries
+    the caption, so it wins if both are passed rather than captioning twice."""
     from io import BytesIO
 
     from PIL import Image
@@ -461,7 +468,10 @@ def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
             img = flat
         else:
             img = src.convert("RGB")
-        if nameplate is not None:
+        if keepsake is not None:
+            from seestack.keepsake import draw_keepsake
+            img = draw_keepsake(img, keepsake)
+        elif nameplate is not None:
             from seestack.nameplate import draw_nameplate
             img = draw_nameplate(img, nameplate)
         buf = BytesIO()

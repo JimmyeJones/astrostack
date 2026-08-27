@@ -20,6 +20,7 @@ import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
 import { AutoStackHoldNote } from "../components/AutoStackHoldNote";
 import { CleanestShotNote } from "../components/CleanestShotNote";
+import { GrainierNewestNote } from "../components/GrainierNewestNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { InsightTabs } from "../components/InsightTabs";
@@ -40,7 +41,7 @@ import { SampleTourNote } from "../components/SampleTourNote";
 import { WallpaperMenuItems } from "../components/WallpaperMenu";
 import { SharePictureButton } from "../components/SharePictureButton";
 import { ScanToPhoneModal } from "../components/ScanToPhoneButton";
-import { sharePictureText } from "../share";
+import { keepsakeFilename, sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
 import { UnsolvedHelp } from "../components/target/UnsolvedHelp";
@@ -875,6 +876,12 @@ export function TargetView() {
               Only ever an offer, and only when a cover is pinned. Self-hides. */
           { key: "cleanest-shot", priority: NOTICE_PRIORITY.advisory,
             node: <CleanestShotNote safe={safe} /> },
+          /* The mirror case: with *nothing* pinned the cover follows the newest
+              stack, so a hazy restack can silently demote a better picture.
+              Mutually exclusive with the note above (that one needs a pin, this
+              one needs none), so the two can never both appear. Self-hides. */
+          { key: "grainier-newest", priority: NOTICE_PRIORITY.advisory,
+            node: <GrainierNewestNote safe={safe} /> },
           { key: "autostack-hold", priority: NOTICE_PRIORITY.warning,
             node: <AutoStackHoldNote safe={safe} /> },
           { key: "missing-files", priority: NOTICE_PRIORITY.warning, node: missingFiles !== null ? (
@@ -1250,6 +1257,19 @@ export function TargetView() {
                   component="a" href={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}>
                   JPEG (smaller — best for sharing)
                 </Menu.Item>
+                {/* The framed variant: the same picture matted on a dark card
+                    with its name, date and total exposure set *beneath* it, so
+                    the story travels with the file instead of living in a
+                    caption box that never leaves the app. */}
+                <Menu.Item leftSection={<IconPhotoDown size={16} />}
+                  component="a"
+                  href={api.stackArtifactUrl(
+                    safe, latestRun.id, "jpeg", false, false, true)}>
+                  Framed keepsake
+                  <span style={MENU_HINT}>
+                    Its name, date and exposure printed on the picture
+                  </span>
+                </Menu.Item>
                 <Menu.Divider />
                 <Menu.Label>Share</Menu.Label>
                 <SharePictureButton
@@ -1263,6 +1283,25 @@ export function TargetView() {
                     // and this text is what the owner posts publicly.
                     formatStampDate(latestRun.timestamp_utc),
                   )}
+                />
+                {/* Share the *framed* variant. This is the one that matters on
+                    Instagram or a printed 6×4: a share-sheet caption doesn't
+                    travel with the file, so the plain share above arrives as an
+                    unlabelled rectangle while this one carries its own story.
+                    Same caption, but `filename` overrides the spread's so the
+                    two shares can't land on top of each other in downloads. */}
+                <SharePictureButton
+                  asMenuItem
+                  label="Share the keepsake"
+                  ariaLabel="Share the framed keepsake"
+                  url={api.stackArtifactUrl(
+                    safe, latestRun.id, "jpeg", false, false, true)}
+                  {...sharePictureText(
+                    target.data?.name,
+                    formatStampDate(latestRun.timestamp_utc),
+                  )}
+                  filename={keepsakeFilename(
+                    sharePictureText(target.data?.name).filename)}
                 />
                 {/* The QR opens in a modal owned by the page, not a popover owned
                     by this item — a menu closes on click, which would unmount its

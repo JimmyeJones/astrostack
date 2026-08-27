@@ -20,6 +20,16 @@ Every field is best-effort: a line whose data is missing is simply omitted
 (never a dangling separator or a blank), so an older/edited run without full
 provenance still exports a tidy nameplate — or none at all, in which case the
 image is returned unchanged.
+
+**Keep the caption to characters the bundled font actually has.** Pillow's
+built-in face (Aileron) covers ASCII and the middot ``·`` we join with, but it
+has *no glyph* for a number of typographic characters that look fine in an
+editor — among them the multiplication sign ``×`` and the em dash ``—``, both of
+which render as a hollow ``.notdef`` box in the baked pixels. That is why the
+sub-count detail reads ``(505x30s)`` with a plain ASCII ``x``.
+``test_nameplate.py`` pins this: every character a full caption can produce is
+asserted to have a real glyph, so the next tidy-the-typography edit fails loudly
+here instead of silently shipping a box into someone's shared picture.
 """
 
 from __future__ import annotations
@@ -51,7 +61,7 @@ class NameplateFields:
 
 
 def _fmt_sub_exposure(seconds: float | None) -> str:
-    """A single sub's exposure for the ``"(505×30s)"`` detail — ``"30s"`` /
+    """A single sub's exposure for the ``"(505x30s)"`` detail — ``"30s"`` /
     ``"2.5s"``, trimming a trailing ``.0`` — or ``""`` when unknown."""
     if not seconds or seconds <= 0:
         return ""
@@ -77,25 +87,27 @@ def format_acq_date(date_iso: str | None) -> str:
     return f"{day} {_MONTHS[month - 1]} {year}"
 
 
-def nameplate_line(fields: NameplateFields) -> str:
-    """The single ``·``-joined caption baked onto the image, e.g.
-    ``"M 31 · 4h 12m (505×30s) · 19 Jul 2026 · ZWO Seestar S50"``.
+def acquisition_parts(fields: NameplateFields, *,
+                      include_target: bool = True) -> list[str]:
+    """The caption's parts, in order, skipping every one with nothing to say.
 
-    Each part is included only when it carries real information — the integration
-    part folds in the ``(N×exp)`` detail when both are known, degrading to just
-    the duration, just the sub count, or nothing — so a run missing any field
-    still yields a tidy line (never a dangling separator or a ``"0 subs"``)."""
+    Shared by the two ways the app captions a picture: :func:`nameplate_line`
+    joins them all into one footer bar drawn *over* the image, while
+    :mod:`seestack.keepsake` sets the target as a title and the rest as a
+    subtitle *beneath* it — hence ``include_target``. Splitting the parts out
+    keeps the two surfaces from drifting apart on wording, on which fields count
+    as "missing", or on which characters the bundled font can actually draw."""
     parts: list[str] = []
 
     name = (fields.target or "").strip()
-    if name:
+    if include_target and name:
         parts.append(name)
 
     integ = format_duration(fields.integration_s)
     sub_exp = _fmt_sub_exposure(fields.sub_exposure_s)
     n = fields.n_frames if (fields.n_frames and fields.n_frames > 0) else None
     if n and sub_exp:
-        detail = f"({n}×{sub_exp})"
+        detail = f"({n}x{sub_exp})"
     elif n:
         detail = "(1 sub)" if n == 1 else f"({n} subs)"
     else:
@@ -115,7 +127,18 @@ def nameplate_line(fields: NameplateFields) -> str:
     if camera:
         parts.append(camera)
 
-    return " · ".join(parts)
+    return parts
+
+
+def nameplate_line(fields: NameplateFields) -> str:
+    """The single ``·``-joined caption baked onto the image, e.g.
+    ``"M 31 · 4h 12m (505x30s) · 19 Jul 2026 · ZWO Seestar S50"``.
+
+    Each part is included only when it carries real information — the integration
+    part folds in the ``(N x exp)`` detail when both are known, degrading to just
+    the duration, just the sub count, or nothing — so a run missing any field
+    still yields a tidy line (never a dangling separator or a ``"0 subs"``)."""
+    return " · ".join(acquisition_parts(fields))
 
 
 def _load_font(size: int):

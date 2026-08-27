@@ -428,6 +428,23 @@ export interface CleanestShot {
   timestamp_utc: string;
 }
 
+/** The newest stack — which, with nothing pinned, *is* the cover — came out
+ * materially grainier than an earlier one this target already has
+ * (`GET /api/targets/{safe}/grainier-newest`; `null` when there's nothing to say
+ * — something is pinned, there's no earlier stack, or the newest is the cleanest).
+ * The mirror of `CleanestShot`, and mutually exclusive with it: one needs a pin,
+ * this one needs none. Purely a suggestion — the app never pins by itself. */
+export interface GrainierNewest {
+  run_id: number;
+  newest_run_id: number;
+  noise_sigma: number;
+  newest_noise_sigma: number;
+  percent_grainier: number;
+  n_frames_used: number;
+  newest_n_frames_used: number;
+  timestamp_utc: string;
+}
+
 export interface SessionRecap {
   n_frames: number;
   n_kept: number;
@@ -1828,6 +1845,8 @@ export const api = {
     req<AutoStackHold | null>(`/api/targets/${safe}/autostack-hold`),
   cleanestShot: (safe: string) =>
     req<CleanestShot | null>(`/api/targets/${safe}/cleanest-shot`),
+  grainierNewest: (safe: string) =>
+    req<GrainierNewest | null>(`/api/targets/${safe}/grainier-newest`),
   stackHealth: (safe: string, runId?: number) =>
     req<StackHealth | null>(
       `/api/targets/${safe}/stack-health` +
@@ -2006,15 +2025,18 @@ export const api = {
   },
   stackArtifactUrl: (
     safe: string, id: number, kind: "preview" | "jpeg" | "fits" | "tiff",
-    northUp = false, nameplate = false,
+    northUp = false, nameplate = false, keepsake = false,
   ) => {
     const base = `/api/targets/${safe}/stack-runs/${id}/${kind}`;
     if (kind !== "jpeg") return base;
-    // Only the share-friendly JPEG honours north_up (rotate so North is up) and
-    // nameplate (bake the acquisition-data caption footer).
+    // Only the share-friendly JPEG honours north_up (rotate so North is up),
+    // nameplate (bake the acquisition-data caption over the picture) and
+    // keepsake (mat the picture on a dark card with its name and acquisition
+    // data set beneath it, for printing or posting).
     const params: string[] = [];
     if (northUp) params.push("north_up=true");
     if (nameplate) params.push("nameplate=true");
+    if (keepsake) params.push("keepsake=true");
     return params.length ? `${base}?${params.join("&")}` : base;
   },
   // "Make it your wallpaper" — the finished preview cropped to a device aspect
