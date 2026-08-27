@@ -552,6 +552,19 @@ class _ZipSink:
         return out
 
 
+def _nonempty(chunk: bytes):
+    """Yield ``chunk`` only when it has bytes in it.
+
+    The sink is drained after every write, so most drains come back empty. An
+    empty body chunk is wasted work at best — and in HTTP/1.1 chunked encoding a
+    zero-length chunk is the *end-of-body* marker, so never handing one to the
+    server keeps the archive's framing our business rather than a detail we rely
+    on the server to guard.
+    """
+    if chunk:
+        yield chunk
+
+
 def _stream_pictures_zip(members: list[tuple[str, str]]):
     """Yield a ``.zip`` of ``(archive name, source path)`` pairs, one chunk at a
     time — never more than one read buffer plus the zip's own bookkeeping in
@@ -586,16 +599,16 @@ def _stream_pictures_zip(members: list[tuple[str, str]]):
                         if not data:
                             break
                         dst.write(data)
-                        yield sink.drain()
+                        yield from _nonempty(sink.drain())
             finally:
                 src.close()
-            yield sink.drain()
+            yield from _nonempty(sink.drain())
         if skipped:
             zf.writestr("_skipped.txt", (
                 "These pictures couldn't be read when this archive was made, so "
                 "they aren't in it:\n\n" + "\n".join(skipped) + "\n"))
-            yield sink.drain()
-    yield sink.drain()
+            yield from _nonempty(sink.drain())
+    yield from _nonempty(sink.drain())
 
 
 @router.get("/api/gallery/best.zip")
