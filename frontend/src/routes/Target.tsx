@@ -1261,6 +1261,21 @@ export function TargetView() {
                     Its name, date and exposure printed on the picture
                   </span>
                 </Menu.Item>
+                {/* The two marks every published astrophoto carries — how big a
+                    piece of sky this is, and which way round it is. The app
+                    already draws them on screen, but a browser overlay doesn't
+                    travel with the file, so the downloaded picture loses both.
+                    Drawn from this run's own solve; a run that was never solved
+                    simply gets the plain picture back. */}
+                <Menu.Item leftSection={<IconPhotoDown size={16} />}
+                  component="a"
+                  href={api.stackArtifactUrl(
+                    safe, latestRun.id, "jpeg", false, false, false, true)}>
+                  With scale &amp; compass
+                  <span style={MENU_HINT}>
+                    How big it is and which way is North, printed on the picture
+                  </span>
+                </Menu.Item>
                 <Menu.Divider />
                 <Menu.Label>Share</Menu.Label>
                 <SharePictureButton

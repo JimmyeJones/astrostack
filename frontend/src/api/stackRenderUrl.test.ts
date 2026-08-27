@@ -56,11 +56,28 @@ describe("stackArtifactUrl", () => {
       "/api/targets/M_31/stack-runs/5/fits");
   });
 
+  it("appends scale=true only for the JPEG, combining with north_up", () => {
+    expect(api.stackArtifactUrl("M_31", 5, "jpeg", false, false, false, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/jpeg?scale=true");
+    // The rose has to follow a North-up rotate, so the two combine.
+    expect(api.stackArtifactUrl("M_31", 5, "jpeg", true, false, false, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/jpeg?north_up=true&scale=true");
+    // …and the marks layer under the framed card rather than replacing it.
+    expect(api.stackArtifactUrl("M_31", 5, "jpeg", false, false, true, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/jpeg?keepsake=true&scale=true");
+    // Marks are for a picture, not for the science artifacts.
+    expect(api.stackArtifactUrl("M_31", 5, "fits", false, false, false, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/fits");
+  });
+
   it("leaves every existing caller byte-for-byte unchanged", () => {
-    // keepsake is the third optional flag, so no positional call written before
-    // it existed can start asking for a framed card by accident.
+    // keepsake and scale are the third and fourth optional flags, so no
+    // positional call written before they existed can start asking for a framed
+    // card or a marked picture by accident.
     expect(api.stackArtifactUrl("M_31", 5, "jpeg", true, true)).toBe(
       "/api/targets/M_31/stack-runs/5/jpeg?north_up=true&nameplate=true");
+    expect(api.stackArtifactUrl("M_31", 5, "jpeg", false, false, true)).toBe(
+      "/api/targets/M_31/stack-runs/5/jpeg?keepsake=true");
   });
 });
 

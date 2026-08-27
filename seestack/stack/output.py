@@ -434,7 +434,8 @@ def write_share_jpeg(path: Path, rgb: np.ndarray, *, max_long_edge: int = 2048,
 
 def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
                       nameplate: Any | None = None,
-                      keepsake: Any | None = None) -> bytes:
+                      keepsake: Any | None = None,
+                      sky_marks: Any | None = None) -> bytes:
     """Transcode an already-rendered display PNG (e.g. the stored stack preview)
     to a smaller, more share-friendly JPEG at the **same** resolution.
 
@@ -455,7 +456,14 @@ def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
     the picture matted on a dark card with its name and acquisition data set
     **beneath** it (:func:`seestack.keepsake.draw_keepsake`), for printing or
     posting. The two are alternatives, not layers — a keepsake already carries
-    the caption, so it wins if both are passed rather than captioning twice."""
+    the caption, so it wins if both are passed rather than captioning twice.
+
+    ``sky_marks`` is a :class:`seestack.skymarks.SkyMarks` and *does* layer: the
+    scale bar and North/East rose are drawn onto the picture **first**, so a
+    keepsake mats an already-marked picture and a nameplate's footer sits below
+    marks that live along the top edge. A ``SkyMarks`` with nothing to draw is a
+    clean no-op, so a run with no usable WCS is byte-for-byte the plain
+    download."""
     from io import BytesIO
 
     from PIL import Image
@@ -468,6 +476,9 @@ def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
             img = flat
         else:
             img = src.convert("RGB")
+        if sky_marks is not None:
+            from seestack.skymarks import draw_sky_marks
+            img = draw_sky_marks(img, sky_marks)
         if keepsake is not None:
             from seestack.keepsake import draw_keepsake
             img = draw_keepsake(img, keepsake)

@@ -15520,46 +15520,99 @@ problems. Dogfood it every big-picture run and fix root causes.
     a scale bar is the complete package) and the #13 curation note that `identify` already supplies the object's
     proper name. Additive/offline/upgrade-safe; new endpoint + one button, no schema/default/API removal.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
   intuitive units) plus a North/East compass baked into a shared/exported picture, so a beginner's shot reads
-  like a real astrophoto — "this is how big it is and which way is up" — with zero knowledge required.**
-  *(Pillar: enjoy / share + understand — PRIORITY 3. Size: S–M. Confidence the gap is real: grepped this run —
-  no scale-bar/compass overlay exists anywhere; `scale bar`/`compass` return nothing in code or backlog.)*
-  Every published astrophoto has a scale bar and a N/E rose; it's the single touch that makes a beginner's
-  picture look "proper" and quietly teaches them the sky. The app already knows both numbers exactly — the
-  finished stack stores its plate-solved output WCS (`stack_runs.wcs_json`), which carries the pixel scale (so a
-  bar of *N* pixels is a known angle) and the field rotation (so "up" on the sensor maps to a real sky
-  direction). Nothing surfaces either onto the picture.
-  **Why it's beginner-friendly, not a pro knob:** the bar is labelled in plain, intuitive units, defaulting to
-  the same "full-Moon widths" idiom the shipped *"How big is it, really?"* size-in-Moons feature (v0.277.0)
-  already uses — *"◄─── 1 full Moon ───►"* — with arcmin as a subtle secondary. The compass is a tiny N/E rose
-  in a corner. Both are **off by default on the raw picture** and only appear on an explicit *"Add scale &
-  compass"* export/share, so no existing surface changes and it can never clutter.
-  **Why it's cheap to build (all the machinery exists):**
-  * `seestack/annotate.py::objects_in_field` already turns a stack's output WCS + canvas size into pixel
-    positions (it's the "What's in this picture?" projector), and already tolerates a degenerate WCS by drawing
-    nothing — so the scale/compass module reuses the exact same WCS-in → pixel-overlay-out shape.
-    `astropy.wcs.utils.proj_plane_pixel_scales` (already used in `mosaic.py`) gives the arcsec/px; the CD-matrix
-    rotation gives the compass angle. `render/orient.py` already reasons about North-up orientation.
-  * compositing an overlay onto the finished PNG/JPEG is the montage/annotation pattern
-    (`seestack/montage.py`, the annotation renderer) — no new rendering stack.
-  **Slices (each a shippable Builder run):**
-  * **(a) engine (S):** a pure `scale_compass_overlay(wcs, shape, *, unit="moon"|"arcmin")` returning the bar
-    length in px + its label and the compass N/E angles (or `None` on a WCS with no usable scale/rotation).
-    Unit-testable on a synthetic WCS (known pixscale → known bar; known CROTA2 → known compass angle;
-    degenerate WCS → `None`). **Reuse the North-up rotation-sign work, and heed the open sky-atlas
-    `_tan_wcs` note in Bugs** — validate the compass direction against a real solved Seestar frame with known
-    field rotation before trusting the rotation sign (a synthetic can't settle ASTAP's CROTA2 sense).
-  * **(b) backend (S):** an export/share variant that composites (a) onto the stored preview
-    (`GET …/stack-runs/{id}/picture.jpg?annotate=scale`), 404/no-op when the run has no solved WCS. Additive,
-    read-only.
-  * **(c) frontend (S):** an "Add scale & compass" toggle in the existing Picture download / share menu
-    (`WallpaperMenu`/`SharePictureButton` neighbourhood), with a plain-language tooltip.
-  **Beginner-bar check:** instantly understood ("how big / which way is up"), needs zero config (auto-computed
-  from the solve, Moon-width default), plain-language, purely additive/offline, and it's the "enjoy/share +
-  understand" pillar — the finishing touch that makes a beginner proud to post their picture. Distinct from
-  size-in-Moons (a text stat, no overlay), North-up (rotates the whole image, no bar/rose), and the object
-  labels (identity, not scale/orientation).
+  like a real astrophoto — "this is how big it is and which way is up" — with zero knowledge required.**~~ —
+  **SHIPPED v0.284.0** (Builder 2026-08-27, branch `agent/builder-run`). Slices **(a)+(b)+(c) in one run**.
+
+  **What shipped.** New `seestack/skymarks.py` — pure, offline, no `webapp` imports — draws an angular scale
+  bar and a North/East rose **onto** a finished picture (the canvas size is unchanged; these are marks *on* the
+  photograph, not a frame around it). `GET …/stack-runs/{id}/jpeg?scale=true` serves it, composing with
+  `north_up` **and** with `keepsake` (the marks are drawn first, so a keepsake mats an already-marked picture),
+  and it is one tap from the **Target** page's "Save / share" menu and the **History** card's menu — inside the
+  grouping the IA slice already built, so nothing new appears on either page.
+
+  **The Scout's grep was half right, and the half it missed is the point.** A scale bar *does* already exist —
+  `seestack/scalebar.py` picks a round rung, and `AnnotatedImage.tsx` draws it over the History preview. But
+  that overlay is **SVG in the browser**, so it does not travel with the file: the moment the beginner
+  downloads or shares the picture, the bar is gone. The compass genuinely did not exist anywhere. So this slice
+  is the *baking*, plus the rose — and it reuses `scale_bar_for` rather than re-deriving the ladder.
+
+  **Two decisions worth keeping.** (1) **The marks live along the top edge.** The bottom of a shared picture is
+  already the app's caption zone (the nameplate draws its footer bar there; the keepsake sets its caption
+  beneath), so marks anywhere along the bottom would mean one covering the other. Along the top they compose
+  with both. (2) **The directions are derived numerically from the WCS** — step North (Dec+) and East (RA+) from
+  the image centre and see which way the pixels move — exactly as `render/orient.north_up_rotation_deg` does.
+  Nothing hand-rolls a `CROTA`/`CD` sign, so the East/West mirror hazard the sky-atlas overlay is still gated on
+  cannot creep in here, and a mirrored field is drawn mirrored because that is what the WCS says. `orient.py`
+  grew one public `applied_rotation_deg()` (the snap-to-90° rule it already used privately) so the rose follows
+  the pixels a North-up rotate *actually* applied rather than the angle that was asked for.
+
+  **Found and fixed on the way — the tofu trap, one module further on.** `ScaleBar.label` uses the typographic
+  primes `′`/`″`, which are correct in HTML and render fine on screen — and which Pillow's bundled Aileron face
+  has **no glyph for**. Baking the on-screen label would have put a hollow `.notdef` box exactly where the
+  number goes, the same defect v0.282.1 fixed in the nameplate, on the same day it was fixed. `ScaleBar` grew an
+  `ascii_label` property (`30"` / `15'` / `2°` — the degree sign *is* in the face) which the baked bar uses;
+  it's a property, not a field, so `to_dict()` and the API response are unchanged. `test_skymarks.py` pins the
+  rule across **every rung of the ladder** rather than the one label, with the reference `.notdef` glyph
+  asserted non-empty so the check can't quietly degrade into one that always passes.
+
+  **Upgrade-safe (§9):** a new opt-in query flag on an existing endpoint, a new pure module, one additive
+  property, two menu items; no config, schema, on-disk, default or API-shape change, and a test pins that the
+  plain JPEG download is byte-for-byte unchanged without the flag. A run with no solved WCS draws nothing at
+  all — the same graceful no-op `north_up` already has.
+
+  **Tests: +21.** 15 engine (`tests/test_skymarks.py` — the compass checked against **astropy itself** as
+  ground truth at four field rotations, the flipped-parity field drawn the other way round, the pole case where
+  a naive North step runs past the pole *and* East would need 57° of RA, the no-WCS/degenerate paths, the
+  rotate-follows-the-pixels helper, bar placement/length/clamping, the dark halo that keeps marks readable on a
+  bright core, a tiny picture, non-RGB input, and the glyph rule), 3 API (`tests/webapp/test_stack_render.py` —
+  the marked download and its filename, the no-WCS no-op, and the compose-with-north-up-and-keepsake case that
+  proves the rose turned with the picture), 3 frontend (`stackRenderUrl.test.ts` + `Target.test.tsx`).
+
+  **Follow-ups left open (each S):** draw the same rose in the *in-app* `AnnotatedImage` overlay beside the bar
+  it already shows (so screen and file match completely), and offer the marked variant on the **share** path,
+  not just the download.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy / share + understand — PRIORITY 3. Size: S–M. Confidence the gap is real: grepped this run —
+    no scale-bar/compass overlay exists anywhere; `scale bar`/`compass` return nothing in code or backlog.)*
+    Every published astrophoto has a scale bar and a N/E rose; it's the single touch that makes a beginner's
+    picture look "proper" and quietly teaches them the sky. The app already knows both numbers exactly — the
+    finished stack stores its plate-solved output WCS (`stack_runs.wcs_json`), which carries the pixel scale (so a
+    bar of *N* pixels is a known angle) and the field rotation (so "up" on the sensor maps to a real sky
+    direction). Nothing surfaces either onto the picture.
+    **Why it's beginner-friendly, not a pro knob:** the bar is labelled in plain, intuitive units, defaulting to
+    the same "full-Moon widths" idiom the shipped *"How big is it, really?"* size-in-Moons feature (v0.277.0)
+    already uses — *"◄─── 1 full Moon ───►"* — with arcmin as a subtle secondary. The compass is a tiny N/E rose
+    in a corner. Both are **off by default on the raw picture** and only appear on an explicit *"Add scale &
+    compass"* export/share, so no existing surface changes and it can never clutter.
+    **Why it's cheap to build (all the machinery exists):**
+    * `seestack/annotate.py::objects_in_field` already turns a stack's output WCS + canvas size into pixel
+      positions (it's the "What's in this picture?" projector), and already tolerates a degenerate WCS by drawing
+      nothing — so the scale/compass module reuses the exact same WCS-in → pixel-overlay-out shape.
+      `astropy.wcs.utils.proj_plane_pixel_scales` (already used in `mosaic.py`) gives the arcsec/px; the CD-matrix
+      rotation gives the compass angle. `render/orient.py` already reasons about North-up orientation.
+    * compositing an overlay onto the finished PNG/JPEG is the montage/annotation pattern
+      (`seestack/montage.py`, the annotation renderer) — no new rendering stack.
+    **Slices (each a shippable Builder run):**
+    * **(a) engine (S):** a pure `scale_compass_overlay(wcs, shape, *, unit="moon"|"arcmin")` returning the bar
+      length in px + its label and the compass N/E angles (or `None` on a WCS with no usable scale/rotation).
+      Unit-testable on a synthetic WCS (known pixscale → known bar; known CROTA2 → known compass angle;
+      degenerate WCS → `None`). **Reuse the North-up rotation-sign work, and heed the open sky-atlas
+      `_tan_wcs` note in Bugs** — validate the compass direction against a real solved Seestar frame with known
+      field rotation before trusting the rotation sign (a synthetic can't settle ASTAP's CROTA2 sense).
+    * **(b) backend (S):** an export/share variant that composites (a) onto the stored preview
+      (`GET …/stack-runs/{id}/picture.jpg?annotate=scale`), 404/no-op when the run has no solved WCS. Additive,
+      read-only.
+    * **(c) frontend (S):** an "Add scale & compass" toggle in the existing Picture download / share menu
+      (`WallpaperMenu`/`SharePictureButton` neighbourhood), with a plain-language tooltip.
+    **Beginner-bar check:** instantly understood ("how big / which way is up"), needs zero config (auto-computed
+    from the solve, Moon-width default), plain-language, purely additive/offline, and it's the "enjoy/share +
+    understand" pillar — the finishing touch that makes a beginner proud to post their picture. Distinct from
+    size-in-Moons (a text stat, no overlay), North-up (rotates the whole image, no bar/rose), and the object
+    labels (identity, not scale/orientation).
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list": a Messier/catalog checklist that lights up
   the famous objects you've already captured and shows the rest as a bucket list.**~~ — **SHIPPED v0.279.0**
