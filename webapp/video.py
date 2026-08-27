@@ -792,15 +792,18 @@ def sharpen_saved_still(
     # (with no original at all) the finished picture on disk, which is its own
     # original. Re-measuring a box in either of those cases would crop it twice.
     box = None
-    if meta.crop_applied and not _backup_is_already_framed(out_dir, meta):
-        if (out_dir / FULL_PNG_NAME).is_file():
-            box = _measured_box(out_dir, meta)
-            if box is None:
-                raise StillCropError(
-                    "This picture's crop can't be worked out any more, so "
-                    "changing the sharpening would lose it — stack the capture "
-                    "again instead."
-                )
+    needs_box = (
+        meta.crop_applied
+        and (out_dir / FULL_PNG_NAME).is_file()
+        and not _backup_is_already_framed(out_dir, meta)
+    )
+    if needs_box:
+        box = _measured_box(out_dir, meta)
+        if box is None:
+            raise StillCropError(
+                "This picture's crop can't be worked out any more, so changing "
+                "the sharpening would lose it — stack the capture again instead."
+            )
     _ensure_orig_backup(out_dir)
     height, width = _rebuild_still(out_dir, sharpen=a, box=box)
     updated = replace(
