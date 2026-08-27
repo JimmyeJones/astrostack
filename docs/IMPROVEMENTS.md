@@ -49,6 +49,53 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**🟠 WRONG-RESULT / DATA-THINNING (Scout QA audit 2026-08-27 #16, branch `claude/vigilant-knuth-vpqkm8`,
+  reproduced end-to-end) — a registered, solved frame observed *mid in-place rewrite* (0-byte or truncated)
+  was mistaken for a genuine content swap, so ingest dropped its plate solution and re-accepted it even when
+  it had been auto-rejected — the exact harm `_same_capture` guards on the size-*equal* path, left open on the
+  size-*changed* path.**~~ — **FIXED v0.284.1** (this run). *(Severity: wrong-result — a solved frame loses its
+  WCS (→ dropped from the stack until re-solved, permanently if no solver is configured) and an auto-rejected
+  streak/soft sub is silently re-accepted into any auto-stack that fires in the window; self-heals on a later
+  scan once the file settles, but the trigger is reachable on every scan. Confidence: reproduced end-to-end.)*
+
+  **Root cause (traced + reproduced).** In the already-registered branch of `ingest_files`
+  (`seestack/io/ingest.py`), a source whose `(size, mtime)` fingerprint changed is treated as a content swap
+  (`content_changed = fp_changed`). The one guard against a *false* swap — `_same_capture`, which re-reads the
+  header and confirms it's the same `DATE-OBS` — only applies to the **size-equal** case
+  (`if fp_changed and fp[0] == stored_fp[0] and _same_capture(...)`). A source momentarily observed at a
+  **different** size (0 bytes during a NAS re-sync / `rsync --inplace` / truncate-then-write) bypasses that
+  guard, so `content_changed` stays `True` and the destructive recovery fires: `reset_frame_qc` (nulls QC and,
+  for a non-user verdict, sets `accept=True, reject_reason=None` — re-admitting an auto-rejected sub) +
+  `_refresh_frame_metadata` → `reset_frame_solution` (drops `wcs_json`/centres). `_refresh_frame_metadata`
+  *tolerates* the header-read failure on a 0-byte file but clears the solution anyway. The stored fingerprint
+  is then advanced to the truncated `(0, mtime)`, so the file returning to full size trips a *second* reset.
+  **Reachability:** `scan_and_organize` (`seestack/io/scanner.py`) re-globs the whole `incoming/` tree with
+  `find_fits_files(recursive=True)` on *every* scan, independent of the watcher's stability gate — so a scan
+  fired by any other new frame can sweep in a registered frame mid-rewrite. Repro (`copy_to_cache=False`, the
+  webapp default): solve + auto-reject a frame, truncate its source to 0 bytes, re-scan → `wcs_json=None`,
+  `accept=True`, `reject_reason=None`, `star_count=None`, and the stored size advanced to 0. The Seestar itself
+  never overwrites in place (fresh `frame_NNNN` names), so this only bites an in-place NAS rewrite — the same
+  narrow-but-real trigger class as the v0.276.5 watcher-rearm fix.
+
+  **Fix.** A new `_source_incomplete(src)` helper — a full `load_seestar_raw` probe (0-byte → `OSError`,
+  truncated data section → reshape `ValueError`; astropy's truncation *warning* is silenced so a real transient
+  doesn't spam logs) — gates the recovery: `if content_changed and _source_incomplete(src)` yields a
+  `skipped=True, skip_reason="still copying (incomplete rewrite)"` result and `continue`s, touching **nothing**
+  (no QC/solution reset, no cache re-copy, no fingerprint advance), exactly like the new-file "still copying"
+  skip. So a transient is *deferred*, not *swallowed*: once the source settles, the next scan applies the
+  right outcome — a benign touch (same bytes → `_same_capture` preserves everything) or a genuine swap
+  (complete different capture → resets as before). Runs only on the rare fingerprint-changed *and*
+  content-changed path (a same-capture NAS re-sync that preserves sizes has `content_changed=False` and never
+  probes), so a healthy library and a mass benign re-sync are unaffected.
+
+  **Upgrade-safe (§9):** pure in-memory scan-time logic; no config/schema/on-disk/API/default change, and
+  `incoming/` stays strictly read-only (the probe only *reads*). **Tests (+3 in `tests/test_ingest.py`, all
+  fail before / pass after):** a parametrized transient truncation (0-byte and short) keeps a solved,
+  auto-rejected frame's WCS + QC verdict + fingerprint and settles cleanly when the file returns; and a
+  genuine truncated *swap* is deferred while incomplete but still resets QC/solution and re-reads the header
+  once the new capture finishes copying (proving the guard defers rather than swallows). Full suite green
+  (3068→3071 passed).
+
 - ~~**🟡 COSMETIC / SHARE-FACING (Builder 2026-08-27, found by rendering the caption rather than reading it) —
   the acquisition nameplate baked a hollow `.notdef` box into every shared picture, right where the exposure
   should be: `(505□30s)`.**~~ — **FIXED v0.282.1** (Builder 2026-08-27, branch
@@ -8218,6 +8265,22 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **IMPROVEMENT IDEA (Scout QA audit 2026-08-27 #16, secondary finding — hardening, low severity) — `POST
+  /api/scan` accepts a raw client-supplied filesystem `root` and scans/ingests from it unconfined, the one
+  ingest endpoint that isn't confined to `incoming/`.** *(Pillar: friendliness / security posture — PRIORITY 3.
+  Size: S — one confinement check + a test. Not a data-loss bug: the scan is read-only over the source and this
+  is a local single-user app, so severity is low; filed as defence-in-depth, not urgent.)*
+  **Where:** `webapp/routers/pipeline.py` (`/api/scan`) → `ScanRequest.root: str | None` (`webapp/schemas.py`)
+  is passed straight to `scan_and_organize(lib, scan_root, ...)`. Every *other* ingest/target endpoint resolves
+  through a DB `safe_name` lookup and is traversal-safe; this one takes an arbitrary server-readable directory,
+  so a client can point a scan at any path (registering its FITS into the library, and copying them if
+  `copy_to_cache` is on). **Fix direction:** confine `root` to live under `Settings.resolved_incoming_dir`
+  (resolve + `is_relative_to` check, 400 otherwise), mirroring how the upload router's `confined_dest`
+  re-confirms every path — or drop the field entirely and always scan the configured incoming dir (check the
+  frontend still has a use for a sub-path first). Keep `incoming/` strictly read-only either way. **Builder:
+  grep first** — confirm no caller passes a legitimately-out-of-tree `root` (e.g. a one-off import flow) before
+  tightening; if one exists, allow-list it rather than break it.
+
 - **NEW IDEA (Builder 2026-08-27, spotted while independently building the same nudge) — the v0.283.0
   grainier-restack note states its gap as a percentage, which stops reading as a quantity past a doubling.**
   *(Pillar: friendliness / trust — PRIORITY 3. Size: XS — one expression and one test in
@@ -15441,6 +15504,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #16) — "Download all my pictures": one button that streams every
+  finished target picture in the library as a single `.zip`, so a beginner can back up or share a whole
+  season's work in one tap instead of visiting each target and downloading one at a time.** *(Pillar: get +
+  share + trust/backup, PRIORITY 3; size S–M; fully offline, additive, read-only — stdlib `zipfile`, no new
+  deps, no network, no schema/config change.)*
+  **Why (real friction).** The library already has a **"My deep-sky wall"** montage (`GET /api/gallery/montage.jpg`,
+  one composite JPEG) and per-target export/share/print/keepsake — but there is **no way to grab the individual
+  full-res finished pictures in bulk.** A beginner with 20 targets shot over months who wants to back them up to
+  a hard drive, or drop them all into a phone album to post, has to open each target and download separately.
+  Bulk *upload* via `.zip` shipped long ago (v0.229.0); the symmetric bulk *download* of results is the gap.
+  **Shape (one endpoint + one button, sane default).** `GET /api/gallery/best.zip` (name TBD) reuses the
+  **existing** `/api/gallery/best` enumeration (it already resolves each target's current best/cover picture and
+  its artifact path server-side — no client paths) and streams a `zipfile` built from those files via a
+  `StreamingResponse`, one entry per target named `<Target>.<ext>` (de-duplicated on name collision). Default =
+  each target's **display-space finished picture** exactly as the gallery shows it (the baked `_preview`/cover
+  the "best" list already points at), so what you download is what you saw — no re-render, no editor recompute.
+  A small "Download all (N)" link on the gallery/best-pictures view. **Cautions / guardrails:** read-only
+  (never touches `incoming/`, never writes into the library — it only reads existing result files and streams
+  bytes out); skip-and-continue per target so one unreadable artifact can't sink the whole archive (mirror the
+  v0.277.6 gallery boundary), with a trailing `_skipped.txt` manifest if any were dropped; bound the archive by
+  the same per-target "best" cap the gallery already applies so a huge library can't build an unbounded
+  in-memory zip (stream member-by-member, don't buffer the whole thing). **Beginner bar:** clears it cleanly —
+  a non-expert instantly understands "download all my pictures", it needs zero configuration, and it serves the
+  get/share/back-up-my-work pillar without any expert knob. **Builder: grep first** — confirm no bulk-download
+  endpoint slipped in since this was filed, and that `/api/gallery/best` still exposes the artifact paths this
+  reuses.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready *cinematic zoom* of your
   finished picture — a short looping clip that glides from the whole frame into the target and back out, so a
