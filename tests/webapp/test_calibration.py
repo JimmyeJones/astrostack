@@ -90,6 +90,40 @@ def test_build_master_job_reports_zero_skipped_on_a_clean_set(client, tmp_path):
     assert body["state"] == "done"
     assert body["result"]["n_skipped"] == 0
     assert body["result"]["skipped_buckets"] == {}
+    # A small set is combined whole, so the supplied count matches — the Jobs
+    # page reads the two being equal as "nothing was dropped" and says nothing
+    # about sampling.
+    assert body["result"]["n_supplied"] == 3
+
+
+def test_build_master_job_reports_the_supplied_count_when_the_set_is_sampled(
+    client, tmp_path, monkeypatch,
+):
+    """A very large dark/flat set is evenly sampled down to a memory bound before
+    combining. That was only ever written to the log, so a beginner who dropped
+    200 darks read "built from 64 frames" with no way to tell whether 136 had
+    failed. The job result now carries how many they actually gave."""
+    from seestack.calibrate import masters as masters_mod
+
+    real_build = masters_mod.build_master
+
+    def small_bound(*args, **kwargs):
+        kwargs["max_frames"] = 2
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(masters_mod, "build_master", small_bound)
+
+    src = tmp_path / "many_darks"
+    _write_darks(src, n=5, shape=(8, 8))
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": str(src)})
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"])
+    assert body["state"] == "done"
+    result = body["result"]
+    assert result["n_supplied"] == 5      # what the user pointed at
+    assert result["n_frames"] == 2        # what the memory bound combined
+    assert result["n_skipped"] == 0       # sampling is not a skip
 
 
 def test_store_register_list_resolve_delete(tmp_path):
