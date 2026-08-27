@@ -287,18 +287,42 @@ _(none — claim an item here with your branch name)_
   with it fixed, future runs can lead with `jobs.py` / `webapp/pipeline.py`'s remaining auto-orchestration
   helpers, and re-audit the engine + routers only occasionally.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #8, verified by reading — narrow trigger: untimely power loss
-  mid-write; not reachable in normal operation) — `SettingsStore.save()` writes `config.json` via
+- ~~**⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #8) — `SettingsStore.save()` writes `config.json` via
   `tmp.write_text()` + `os.replace()` with NO `fsync` of the temp file or the containing directory, so a hard
   crash in the window after the rename metadata persists but before the data blocks flush can leave a
-  zero-length / partial `config.json` — the exact "silently revert all settings to defaults on next boot" the
-  method's own comment says it prevents.** *(Severity: low — `os.replace` still makes the rename atomic, the
-  file is tiny so the window is narrow, and `_load_resilient` degrades to safe defaults rather than crashing;
-  but the atomic-write dance is incomplete. Confidence: traced against `webapp/config.py:359–368`.)*
-  **Fix direction (small, additive):** flush+`os.fsync()` the temp fd before `os.replace`, and `os.fsync()` the
-  directory fd after, so both the data and the rename are durable. Add a test that a `save()`→reload round-trips
-  (the fsync itself isn't observable in a unit test, but pin the write path). Cheap, upgrade-safe, no behaviour
-  change on a clean shutdown.
+  zero-length / partial `config.json`.**~~ — **FIXED v0.277.7** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-4en6ua`), and applied to the calibration registry beside it.
+
+  **What shipped.** A new `webapp/atomicio.py` — `write_text_durably(path, text, *, suffix=".tmp")` — does the
+  full dance the note asked for: write the sibling temp, `flush()` + `os.fsync()` the temp fd so the *data* is
+  durable **before** anything points at it, `os.replace`, then `os.fsync` the containing **directory** so the
+  rename is durable too. A failed write unlinks its temp and re-raises, so a save that dies part-way leaves the
+  previous file intact and no litter beside it. Both `fsync`s are best-effort (`contextlib.suppress(OSError)` /
+  a guarded directory open): a platform or network mount that refuses to flush a directory still completes the
+  save, landing exactly where we were before rather than failing a save that could have succeeded.
+
+  **Applied at three call sites**, all tiny JSON/state files written only on a user action, never on the
+  ingest/stack hot path, and all carrying data the owner cannot reconstruct: `SettingsStore.save()`
+  (`config.json`), `_write_registry` (the calibration `masters.json` — losing it orphans every built master;
+  the FITS survive but nothing knows what they are), and `_write_id_high_water`. Each keeps its historic temp
+  filename via `suffix`, so an interrupted older version's leftover gets reused rather than accumulating.
+
+  **Upgrade-safe (§9):** no config/schema/on-disk/API/default change — the same bytes land at the same path,
+  just more durably; a clean shutdown is behaviourally identical. **Tests (+6 in the new
+  `tests/webapp/test_atomicio.py`):** the `fsync` itself isn't observable without pulling the power, so these
+  pin what is — replace-and-leave-no-temp, a failed write keeping the old contents *and* cleaning up, an
+  `fsync`-refusing filesystem still saving, the historic temp name being reused, a `SettingsStore` round-trip
+  through a fresh store (the upgrade contract), and the calibration registry + high-water round-trip.
+
+  Original spec, for the record:
+
+    *(Severity: low — `os.replace` still makes the rename atomic, the
+    file is tiny so the window is narrow, and `_load_resilient` degrades to safe defaults rather than crashing;
+    but the atomic-write dance is incomplete. Confidence: traced against `webapp/config.py:359–368`.)*
+    **Fix direction (small, additive):** flush+`os.fsync()` the temp fd before `os.replace`, and `os.fsync()` the
+    directory fd after, so both the data and the rename are durable. Add a test that a `save()`→reload round-trips
+    (the fsync itself isn't observable in a unit test, but pin the write path). Cheap, upgrade-safe, no behaviour
+    change on a clean shutdown.
 
 - **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #8, traced — possibly by-design; low confidence) — the folder
   watcher's stability gate compares host wall-clock `now` to the source file's `mtime`
