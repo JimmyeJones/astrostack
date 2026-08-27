@@ -51,7 +51,7 @@ _(none — claim an item here with your branch name)_
 
 - ~~**🟡 COSMETIC / SHARE-FACING (Builder 2026-08-27, found by rendering the caption rather than reading it) —
   the acquisition nameplate baked a hollow `.notdef` box into every shared picture, right where the exposure
-  should be: `(505□30s)`.**~~ — **FIXED v0.281.1** (Builder 2026-08-27, branch
+  should be: `(505□30s)`.**~~ — **FIXED v0.282.1** (Builder 2026-08-27, branch
   `claude/compassionate-galileo-z1yulm`). *(Severity: cosmetic, but it lands on the one artefact the owner
   shows other people — a share export that looks broken. Confidence: reproduced by rendering.)*
 
@@ -206,6 +206,52 @@ _(none — claim an item here with your branch name)_
     quiet timer (re-arm), mirroring the disappear-then-return path that already re-arms. Pure, clock-injectable — add a
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
+
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #14, branch `claude/vigilant-knuth-xgiykw`) — a **depth** sweep of the
+  stacking/calibration engine and the walk-away orchestration. Result: CLEAN — no verified bug this run, the
+  fifth consecutive clean engine sweep (#10–#14). Baseline green (full headless suite: **3021 passed, 2
+  skipped** in 12:40).**
+  **What was read adversarially and traced this run (every item below is a NON-finding — traced to a guard, not
+  a bug):**
+  **stack combine** (`accumulator.py`, `stacker.py`) — the `WeightedSumAccumulator` any-channel frame-count
+  (`covered = valid.any(axis=2)`) equals `valid[...,0]` in the all-or-nothing common case; the
+  `MinMaxRejectAccumulator` k-set insertion-sort keeps the true k smallest/largest and is tie-safe on a
+  saturated star core (each extreme *value* subtracted once); the κ-σ two-pass `_kappa_sigma_keep_mask` widens
+  to keep-all on both NaN-σ (single-coverage mosaic edge) and NaN-mean (pass-1/pass-2 coverage divergence), so
+  the clip can never turn real pass-2 data into a NaN hole; the pass-1 Welford accumulator is `del`-freed before
+  pass 2 allocates, so peak stays at the 4 canvas planes the OOM guard charges; `frame_cov=None` is handled by
+  every downstream consumer (min/max coverage is already an exact frame count).
+  **drizzle** (`drizzle_path.py`) — `_clip_tolerance` computes the variance in float64 to dodge the
+  catastrophic-cancellation trap on ~counts² operands, gates rejection on the true **frame count** (`self._count`,
+  not the pixfrac-deflated `out_wht`), and disables clipping below the float32 resolution floor so a bright flat
+  region can't be punched into NaN; the half-open `[-0.5, N-0.5]` bounds correctly admit edge-band pixel centres;
+  `result()` returns `out_img` directly (already a running weighted mean — dividing again would deflate flux).
+  **photometric** (`photometric.py`) — neutral-fallback everywhere (no/≤0 transparency → scale 1.0, <3 measured
+  frames → whole run neutral), each scale clipped to `[1/max_ratio, max_ratio]`, and mosaic panels normalised
+  against *their own* pointing-group median (not one target-wide median that would read intrinsic panel star-field
+  differences as haze).
+  **mosaic** (`mosaic.py`) — the wrap-safe circular-mean centre RA (`_circ_mean_ra_deg` via `atan2`) is used
+  consistently in both outlier passes, so a frame straddling RA=0 isn't flung to ~180° and wrongly rejected;
+  MAX_CANVAS_PX + megapixel budget + "never drop >half" guards all hold.
+  **calibrate/apply** (`apply.py`) — no-data dark/bias pixels are remembered *before* sanitising to 0 and
+  restored to "no correction" on the exposure-scaling path (`bias + (dark−bias)·ratio` never scales a sanitized 0
+  into a spurious pedestal); flat non-finite → NaN sentinel (floored to 1.0), never the dark's 0; `apply_raw`
+  honours the "returns a fresh array" contract even on the empty-bundle path; the exposure/temperature mismatch
+  advisories gate on the *same* `_dark_scaling_applies` predicate the scaling path uses.
+  **coverage leveling** (`bg/coverage_leveling.py`) — the per-level detrend-before-threshold, the level-local
+  rescue of a starved level's sky, the "too structured to be sky" refusal, and the gapped-extrapolation clamp to
+  the measured envelope are all correct; a single-coverage-level (ordinary single-field) stack is byte-for-byte
+  unchanged.
+  **walk-away orchestration** (`webapp/pipeline.py`) — `_auto_stack_readability_hold` holds (without stamping the
+  attempt) when stacking now would land below the min-frames floor *or* thinner than the target's best existing
+  stack, gated on `unreadable > 0` so a healthy install is untouched; the crash-loop marker is cleared on a
+  *recoverable* exception so a transient I/O error doesn't disable auto-stack forever.
+  **Also cross-checked with two independent adversarial subagents** over `align.py`/`pointings.py`/`reference.py`/
+  `weighting.py` and `solve/*`/`calibrate/masters.py`: both returned CLEAN with every flagged suspicion traced to
+  a real guard (CPU/GPU reproject `cval` parity via the valid-mask inset; union-find path-compression termination;
+  sky/ecc divide-by-zero guards; `mad==0` sigma-clip using `tol=0` not `+inf`; uint16→float32 promotion before
+  every combine; the `solved = returncode==0 and sidecar.exists()` stale-sidecar gate). Curation + new ideas
+  filed alongside (a new beginner feature + an improvement idea — see below).
 
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #13, branch `claude/vigilant-knuth-ns5hys`) — a **breadth** sweep:
   led with the stacking engine per the rotation, then fanned four independent adversarial audits across the
@@ -8130,7 +8176,7 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-27, the class of bug the v0.281.1 tofu-glyph fix belongs to) — nothing in the app
+- **NEW IDEA (Builder 2026-08-27, the class of bug the v0.282.1 tofu-glyph fix belongs to) — nothing in the app
   ever *looks at* the pixels it bakes text onto, so a whole family of "the picture is wrong but the string is
   right" defects is invisible to the suite.** *(Pillar: trust / image quality — PRIORITY 3–4. Size: S.
   Confidence: this run shipped a fix for exactly one instance of it, which had been live for months.)*
@@ -8146,7 +8192,7 @@ to **Shipped**.)_
   future Pillow that maps unmapped codepoints to a blank would silently turn the check into one that can never
   fail (that trap is already commented in `test_nameplate.py`).
 
-- **NEW IDEA (Builder 2026-08-27, the natural next tap on the v0.282.0 keepsake) — the keepsake titles itself
+- **NEW IDEA (Builder 2026-08-27, the natural next tap on the v0.283.0 keepsake) — the keepsake titles itself
   from the FITS `OBJECT` card, so an Unsorted or folder-named target gets a keepsake titled with a folder
   name.** *(Pillar: enjoy + share / friendliness — PRIORITY 3. Size: S — both halves already exist.)*
   `_nameplate_fields` takes the title from `OBJECT`, falling back to the library entry's name. For a beginner
@@ -8160,9 +8206,30 @@ to **Shipped**.)_
   name back to the target or the FITS without a tap; and keep the fallback chain honest, so a confident
   identification is the only thing that overrides what the user's own data says.
 
+- **NEW IDEA (Scout 2026-08-27 #14) — make the "keep shooting?" readiness verdict defer to the *measured* result
+  when a real stack exists, so the Target page can never tell a beginner "keep going" while their picture is
+  already visibly clean (or "plenty" while it's still grainy).** *(Pillar: friendliness + trust — PRIORITY 3.
+  Size: S. Confidence the gap is real: traced this run — `readiness.ts::integrationReadiness` judges *only*
+  integration hours against a per-type `GOAL_HOURS`, with no access to the stack's measured `noise_sigma`.)*
+  **The friction.** `integrationReadiness` is a good first-approximation steer *before* you've stacked, but once
+  a genuine stack exists the app has a strictly better signal — the picture's actual grain — and the two can
+  openly disagree in front of the beginner: the readiness card says "1.8 h of ~6 h — keep going" while the noise
+  badge right beside it shows an already-clean result (or vice versa). A beginner can't reconcile that, and the
+  generic time goal is the weaker of the two once real data is in.
+  **The fix (small, additive).** When the target has at least one genuine finished stack with a finite
+  `noise_sigma`, let the readiness verdict *acknowledge* the measured result rather than pretend it's still
+  pre-stack: soften "keep going" to "you can keep going for less grain, but it already looks clean" when the
+  measured grain is good, and keep "keep going" firm when it's still grainy — deferring to the same
+  `grainProjection` the new "Is more time worth it?" feature introduces (file them together; this is the
+  reconciliation half). No goal is *removed* — the time goal still shows for a target with no stack yet — so it's
+  purely additive and upgrade-safe. **Care:** only genuine stacks (skip edited/drizzle exports), and keep the
+  copy reassurance-shaped and never contradictory with the noise badge it sits next to. **Grep before building:**
+  confirm the Target page doesn't already cross-reference `noise_sigma` in the readiness card
+  (`LibraryProgressCard`/`readiness.ts` today read only the integration total).
+
 - ~~**NEW IDEA (Builder 2026-08-27, the mirror case the v0.279.1 cover nudge deliberately left out) — when
   *nothing* is pinned, the cover follows the newest stack, so a cloudy night's restack can silently replace a
-  better picture with a grainier one. Offer to pin the good one back.**~~ — **SHIPPED v0.281.0** (Builder
+  better picture with a grainier one. Offer to pin the good one back.**~~ — **SHIPPED v0.282.0** (Builder
   2026-08-27, branch `claude/compassionate-galileo-z1yulm`).
 
   **What shipped.** `seestack/covernudge.py` grew `grainier_newest(genuine_runs, cover_run_id)` — the exact
@@ -8396,52 +8463,103 @@ to **Shipped**.)_
   **Beginner-bar:** instantly understood, sane default (only *suggests*, ≈0.4° radius so a nearby-but-different
   object isn't falsely claimed), plain-language, and not a pro knob.
 
-- **⚠ READ THIS BEFORE PICKING UP THE DRIZZLE-SCALE AUTO-DEGRADE ITEM DIRECTLY BELOW (Builder 2026-08-27,
+- ~~**⚠ READ THIS BEFORE PICKING UP THE DRIZZLE-SCALE AUTO-DEGRADE ITEM DIRECTLY BELOW (Builder 2026-08-27,
   found while sizing it; the item's premise is off by one) — `options.auto_reject` is NOT a reliable
-  "unattended" signal, so the filed shape would silently change a *watching* user's output pixel grid.**
-  *(Pillar: autonomy — PRIORITY 2. Size: S as a prerequisite; do it before the M item below. Confidence:
-  traced.)* The item below reuses `auto_reject` as the "the user expressed no preference" flag, exactly as
-  `_afford_drizzle_reject` does. But `get_stack_defaults` (`webapp/routers/stack.py` ~203) also
-  `setdefault`s `auto_reject=True` **into the manual Stack form** for any *never-configured* target (no
-  per-target saved defaults and no global `default_stack_options`) — deliberately, so a beginner's first-light
-  stack gets sane rejection. So a watching beginner on a fresh target posts `auto_reject=True` too, and would
-  get a quietly rescaled picture instead of the actionable refusal (*"To fit, lower the drizzle scale to ×1.3
-  (~4.2 GB)"*) that they are sitting right there able to act on. That is a materially worse trade than the
-  rejection case, where the degrade is invisible in the output geometry — here it changes the output
-  resolution, and the item itself flags that a target's runs would stop being the same size.
-  **Fix direction (small, additive, upgrade-safe):** give `StackOptions` an explicit `unattended: bool = False`
-  set only by `_stack_target` on the walk-away path, add it to `NON_FORM_KEYS` (it is not a user knob — the
-  drift test in `schemas.py` enforces the choice), and gate the degrade on *that* rather than on `auto_reject`.
-  Then the two postures the whole design rests on — nobody is watching vs. someone is — are actually
-  distinguishable, and every future "degrade quietly rather than refuse" decision gets the right signal for
-  free. **Related, lower severity, filed rather than fixed:** the *shipped* `_afford_drizzle_reject` (v0.276.3)
-  has the same exposure — a watching user who explicitly ticks "Drizzle outlier rejection" on a
-  never-configured target has it silently dropped when it doesn't fit, though its docstring says an explicit
-  tick "refuses loudly instead". Outcome there is still a picture plus a `DRZREJSK` card History surfaces, so
-  it is a documented-intent divergence, not a wrong result — but it should switch to `unattended` in the same
-  change, so there is one definition of the posture rather than two.
+  "unattended" signal, so the filed shape would silently change a *watching* user's output pixel grid.**~~
+  — **SHIPPED v0.281.0** (Builder 2026-08-27, branch `claude/compassionate-galileo-i60em7`), exactly as the fix
+  direction below asked: `StackOptions.unattended: bool = False`, written by `_stack_target` **after every
+  option merge** (so a saved per-target default, a crafted POST body, the global config blob and the prior-run
+  options reprocess-all replays all lose theirs), added to `NON_FORM_KEYS`, and read by
+  `_afford_drizzle_reject` in place of `auto_reject`. The related lower-severity divergence flagged at the end
+  of this item shipped in the same change: a watching beginner who ticks "Drizzle outlier rejection" on a
+  never-configured target now gets the loud, actionable refusal the docstring always promised, and the
+  pre-submit estimate agrees with it. Off by default → every existing run record, config and desktop run is
+  byte-for-byte unchanged. Tests: `tests/webapp/test_auto_stack_defaults.py` (+2 — the posture is set only by
+  the walk-away path, and cannot be spoofed by any of the four routes an options dict arrives on) and
+  `tests/test_drizzle_reject.py` (`test_afford_reads_the_posture_not_auto_reject`, which fails on the old
+  signal).
 
-- **NEW IDEA (Builder 2026-08-26, spotted while shipping the drizzle-rejection affordability fix v0.276.3) —
+  Original spec, for the record:
+
+    *(Pillar: autonomy — PRIORITY 2. Size: S as a prerequisite; do it before the M item below. Confidence:
+    traced.)* The item below reuses `auto_reject` as the "the user expressed no preference" flag, exactly as
+    `_afford_drizzle_reject` does. But `get_stack_defaults` (`webapp/routers/stack.py` ~203) also
+    `setdefault`s `auto_reject=True` **into the manual Stack form** for any *never-configured* target (no
+    per-target saved defaults and no global `default_stack_options`) — deliberately, so a beginner's first-light
+    stack gets sane rejection. So a watching beginner on a fresh target posts `auto_reject=True` too, and would
+    get a quietly rescaled picture instead of the actionable refusal (*"To fit, lower the drizzle scale to ×1.3
+    (~4.2 GB)"*) that they are sitting right there able to act on. That is a materially worse trade than the
+    rejection case, where the degrade is invisible in the output geometry — here it changes the output
+    resolution, and the item itself flags that a target's runs would stop being the same size.
+    **Fix direction (small, additive, upgrade-safe):** give `StackOptions` an explicit `unattended: bool = False`
+    set only by `_stack_target` on the walk-away path, add it to `NON_FORM_KEYS` (it is not a user knob — the
+    drift test in `schemas.py` enforces the choice), and gate the degrade on *that* rather than on `auto_reject`.
+    Then the two postures the whole design rests on — nobody is watching vs. someone is — are actually
+    distinguishable, and every future "degrade quietly rather than refuse" decision gets the right signal for
+    free. **Related, lower severity, filed rather than fixed:** the *shipped* `_afford_drizzle_reject` (v0.276.3)
+    has the same exposure — a watching user who explicitly ticks "Drizzle outlier rejection" on a
+    never-configured target has it silently dropped when it doesn't fit, though its docstring says an explicit
+    tick "refuses loudly instead". Outcome there is still a picture plus a `DRZREJSK` card History surfaces, so
+    it is a documented-intent divergence, not a wrong result — but it should switch to `unattended` in the same
+    change, so there is one definition of the posture rather than two.
+
+- ~~**NEW IDEA (Builder 2026-08-26, spotted while shipping the drizzle-rejection affordability fix v0.276.3) —
   a walk-away stack whose *canvas* busts the memory budget still hard-refuses, even though the engine already
-  knows the exact one-line change that would make it fit.** *(Pillar: autonomy — PRIORITY 2. Size: M.)*
-  `_best_memory_fix` (`seestack/stack/stacker.py`) already computes the single least-destructive lever and the
-  memory it lands at — *"lower the drizzle scale to ×1.3 (~4.2 GB)"*, *"switch Canvas mode to 'reference'"*,
-  *"lower Extra outlier passes to 1"* — and both the pre-submit estimate and the run-time refusal quote it. That
-  is exactly right for a **watching** user: they read the advice and click the button. On the **walk-away** path
-  nobody reads it, so the target simply stops producing pictures until the owner next looks at the Jobs page.
-  v0.276.3 established the pattern for precisely this asymmetry on the rejection pass (auto-chosen ⇒ degrade
-  quietly; explicitly ticked ⇒ refuse loudly with the advice). **Shape:** on an unattended run only, when
-  `_best_memory_fix` returns a `drizzle_scale` fix, apply it instead of raising — log it plainly, stamp it in
-  provenance (a `DRZSCLAD`-style card beside `DRZREJSK`), and surface it once on the Target page's notes area
-  in the shipped voice (*"Last night's stack used ×1.3 super-resolution instead of ×1.5 — the bigger canvas
-  didn't fit in memory. Your picture is slightly less zoomed-in but nothing was lost."*). **Cautions:** a
-  *smaller drizzle scale changes the output pixel grid*, so a target's runs would no longer all be the same
-  size — decide deliberately whether that is acceptable (it probably is: a picture at ×1.3 beats no picture, and
-  the editor/History already handle per-run shapes). Do **not** auto-apply `reference_canvas` on a mosaic
-  unattended — silently cropping the field a user spent five nights building is a different order of change and
-  belongs behind the owner's sign-off. Reuse `auto_reject` as the "the user expressed no preference" signal, as
-  `_afford_drizzle_reject` does, so a manual stack is untouched. Testable purely against the estimator (a budget
-  that fits ×1.3 but not ×1.5 → the unattended run produces a ×1.3 picture; the manual one still raises).
+  knows the exact one-line change that would make it fit.**~~ — **SHIPPED v0.281.0** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-i60em7`), on top of the `unattended` posture above rather than on `auto_reject`,
+  as the prerequisite item demanded.
+
+  **What shipped.** In `run_stack`, once the real (for a mosaic, union) canvas is known and the rejection-pass
+  affordability has already been settled, an **unattended** drizzled run that is still over budget asks
+  `_best_memory_fix` for its one lever; when that lever is `drizzle_scale`, the run takes it instead of raising.
+  Everything downstream — the memory guard, the in-flight buffer cap and `DrizzleParams.scale` — switched from
+  `options.drizzle_scale` to `eff.drizzle_scale`, so the canvas the guard certifies is exactly the canvas the
+  drizzler builds. Deliberately narrow, as the cautions below asked: only the `drizzle_scale` lever is
+  auto-applied (never `reference_canvas` — cropping a five-night mosaic field is a different order of change),
+  only when drizzle is on, and never for an attended run, which still gets the actionable refusal.
+  A canvas even ×1.0 can't hold still refuses: there is no honest picture to make there.
+
+  **Where it shows up.** The finished FITS carries `DRZSCLAD` (the scale that ran) beside `DRZSCLRQ` (the one
+  asked for), the run record persists the *effective* options so a later reprocess rebuilds the same picture
+  instead of re-hitting the refusal, and `/stack-runs/{id}/info` grows a `drizzle_degraded` field the History
+  Info panel renders in the shipped voice — *"Super-resolution used ×1.3 instead of the ×1.5 it was set to — the
+  bigger canvas didn't fit in memory, so AstroStack made the picture at this size rather than skipping the
+  night. It's slightly less zoomed-in; none of your subs were left out."* Self-hiding: absent on every run that
+  fitted, which is all of them on a healthy box.
+
+  **Upgrade-safe (§9):** additive field + additive header cards + an added response key; no config, schema,
+  on-disk-layout, API-shape or default change, and the whole path is gated on `unattended` (off by default), so
+  an attended run and every existing record are byte-for-byte unchanged. `incoming/` untouched.
+
+  **Tests (+6 in `tests/test_drizzle_reject.py`, +2 in `tests/webapp/test_stack_render.py`, +5 vitest):** the
+  e2e degrade (a budget between ×1.0 and ×2.0 → the watched run raises with "lower the drizzle scale", the
+  unattended one produces a picture whose pixel dimensions *are* the applied scale, whose peak fits the budget,
+  and whose run record persists the scale that ran); a run that fits is untouched and stamps nothing; even-×1.0
+  -won't-fit still refuses; a non-drizzle unattended run is never rescaled; the info endpoint surfaces / omits
+  `drizzle_degraded`; and the plain-language note's wording, missing-`requested` fallback and nonsense-value
+  guards.
+
+  Original spec, for the record:
+
+    *(Pillar: autonomy — PRIORITY 2. Size: M.)*
+    `_best_memory_fix` (`seestack/stack/stacker.py`) already computes the single least-destructive lever and the
+    memory it lands at — *"lower the drizzle scale to ×1.3 (~4.2 GB)"*, *"switch Canvas mode to 'reference'"*,
+    *"lower Extra outlier passes to 1"* — and both the pre-submit estimate and the run-time refusal quote it. That
+    is exactly right for a **watching** user: they read the advice and click the button. On the **walk-away** path
+    nobody reads it, so the target simply stops producing pictures until the owner next looks at the Jobs page.
+    v0.276.3 established the pattern for precisely this asymmetry on the rejection pass (auto-chosen ⇒ degrade
+    quietly; explicitly ticked ⇒ refuse loudly with the advice). **Shape:** on an unattended run only, when
+    `_best_memory_fix` returns a `drizzle_scale` fix, apply it instead of raising — log it plainly, stamp it in
+    provenance (a `DRZSCLAD`-style card beside `DRZREJSK`), and surface it once on the Target page's notes area
+    in the shipped voice (*"Last night's stack used ×1.3 super-resolution instead of ×1.5 — the bigger canvas
+    didn't fit in memory. Your picture is slightly less zoomed-in but nothing was lost."*). **Cautions:** a
+    *smaller drizzle scale changes the output pixel grid*, so a target's runs would no longer all be the same
+    size — decide deliberately whether that is acceptable (it probably is: a picture at ×1.3 beats no picture, and
+    the editor/History already handle per-run shapes). Do **not** auto-apply `reference_canvas` on a mosaic
+    unattended — silently cropping the field a user spent five nights building is a different order of change and
+    belongs behind the owner's sign-off. Reuse `auto_reject` as the "the user expressed no preference" signal, as
+    `_afford_drizzle_reject` does, so a manual stack is untouched. Testable purely against the estimator (a budget
+    that fits ×1.3 but not ×1.5 → the unattended run produces a ×1.3 picture; the manual one still raises).
 
 - **NEW IDEA (Builder 2026-08-26, spotted while adding the "ran out of time being located" bucket v0.276.4) —
   the "why were some frames left out?" buckets give advice in prose but can't link to the thing they name, so
@@ -15188,9 +15306,43 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #14) — "Is more time worth it?": a plain-language, *measured* grain
+  projection that tells a beginner how much cleaner their picture would actually get with more light — from THIS
+  target's own result, not a generic rule of thumb.** *(Pillar: understand + plan ("get a good image") —
+  PRIORITY 2–3. Size: M. Confidence the gap is real: grep-verified this run — `readiness.ts` gives a *time* goal
+  by object type ("~4 h for a nebula"), and its own comment says the numbers are "a rough 'enough for a clean
+  image', **not a precise SNR target**"; nothing projects the target's *measured* noise forward.)*
+  **The gap.** The app already measures each finished stack's real background grain (`stack_runs.noise_sigma`,
+  surfaced by `NoiseBadge`/`StackNoiseBadge`) and knows the integration behind it (accepted-sub exposure total).
+  But the only "should I keep shooting?" answer a beginner gets is `integrationReadiness` — a fixed
+  `GOAL_HOURS` per object *type* (Galaxy 6 h, Nebula 4 h, …). That can contradict what the picture actually shows:
+  a bright cluster already clean at 30 min is still told "keep going to 1.5 h", and a faint galaxy still grainy at
+  6 h is told "plenty". The beginner's real question — *"is another hour of my clear-sky time actually going to
+  make this picture noticeably better?"* — goes unanswered.
+  **The feature.** Stacking noise falls as ≈1/√(integration), so from one measured `(integration, noise_sigma)`
+  point the app can project the curve and answer in plain words on the Target page: *"Your M13 is already clean
+  (grain 0.011). More time would help only a little."* / *"M101 is still grainy at 2 h — roughly **4× the light**
+  (about 6 more hours) would halve the grain."* Always the diminishing-returns law stated for a beginner: doubling
+  the total time cuts grain by ~30 %, quadrupling it halves it. No SNR jargon, no knob — one honest sentence tied
+  to their own numbers.
+  **Why it clears the beginner bar:** zero knowledge required, a sane default (the 1/√t law is fixed, not a
+  setting), plain-language, and it answers the single most common uncertainty on the stack→result path with the
+  user's *own* data instead of a type-average. Purely additive — a new read-only line/card next to the existing
+  readiness verdict; nothing removed or changed.
+  **Why it's cheap:** every input already exists and is already on the Target page — `noise_sigma` (the noise
+  badge reads it), the integration total (`readiness.ts` reads it), and the object type. A pure
+  `grainProjection(integrationSeconds, noiseSigma)` → `{verdict, moreLightFactor, hoursToHalve}` mirrors
+  `integrationReadiness`'s shape and is unit-testable on synthetic points (clean → "little to gain", grainy →
+  "~4× light"). **Slices:** (a) the pure projection fn + tests (S); (b) a small Target-page line/card beside the
+  readiness verdict, hidden until at least one genuine stack exists (S). **Care:** use only *genuine* finished
+  stacks with a finite `noise_sigma` (skip drizzle/edited exports whose grain isn't comparable), and clamp the
+  projection to sane bounds so a fluke-clean single-night estimate can't promise the impossible. **Pairs with**
+  the readiness improvement filed under Autonomy & friendliness this run (make the fixed time-goal defer to the
+  measured result so the two surfaces never contradict).
+
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #13) — "Framed keepsake": a one-tap, print-and-share-ready export of
   a finished picture with a tasteful matte border and the object's name, capture date, and total integration
-  time baked into the image itself.**~~ — **SHIPPED v0.282.0** (Builder 2026-08-27, branch
+  time baked into the image itself.**~~ — **SHIPPED v0.283.0** (Builder 2026-08-27, branch
   `claude/compassionate-galileo-z1yulm`).
 
   **What shipped.** `seestack/keepsake.py` — pure, offline, no `webapp` imports — mats a finished picture on a
@@ -15227,7 +15379,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   unchanged-without-the-flag guarantee), +3 in `frontend/src/api/stackRenderUrl.test.ts`, +4 in
   `share.test.ts`, +1 in `Target.test.tsx`.
 
-  **Found and fixed on the way (shipped separately, v0.281.1):** rendering the caption rather than reading it
+  **Found and fixed on the way (shipped separately, v0.282.1):** rendering the caption rather than reading it
   showed the *nameplate* had been baking a hollow `.notdef` box into every share — `(505□30s)` — because
   Pillow's bundled Aileron face has no glyph for `×`. See the Bugs section. Both modules now pin the rule that
   every character a caption can emit must have a real glyph.
@@ -21874,6 +22026,29 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.281.0** — Autonomy: **a walk-away stack whose drizzle canvas won't fit now makes a slightly smaller
+  picture instead of no picture.** `_best_memory_fix` has always computed the one lever that would fit
+  (*"lower the drizzle scale to ×1.3 (~4.2 GB)"*) and the run-time guard has always quoted it — perfect for a
+  watching user, useless at 3 a.m., where the refusal just stopped a target that made a picture yesterday. On
+  an **unattended** run only (the new `StackOptions.unattended`, below), when that lever is `drizzle_scale`
+  the engine takes it: the guard, the in-flight cap and `DrizzleParams` all switch to the effective scale, the
+  FITS carries `DRZSCLAD`/`DRZSCLRQ`, the run record persists the scale that *ran* (so a reprocess rebuilds the
+  same picture), and the History Info panel says it plainly — *"Super-resolution used ×1.3 instead of the ×1.5
+  it was set to … It's slightly less zoomed-in; none of your subs were left out."* Narrow on purpose: never
+  `reference_canvas` (cropping a five-night mosaic is a different order of change), never an attended run,
+  and a canvas even ×1.0 can't hold still refuses. Additive/self-hiding/upgrade-safe. Tests: +6
+  `tests/test_drizzle_reject.py`, +2 `tests/webapp/test_stack_render.py`, +5 vitest.
+- **v0.281.0** (same change, the half it rests on) — Correctness/autonomy: **`StackOptions.unattended` — one
+  honest answer to "is anybody watching this run?"** `_afford_drizzle_reject` had been reading `auto_reject` as
+  the proxy, but `get_stack_defaults`
+  seeds `auto_reject=True` into the *manual Stack form* for a never-configured target — so a beginner sitting
+  right there had their explicitly-ticked drizzle rejection quietly dropped instead of getting the actionable
+  refusal the docstring promised, and the pre-submit estimate disagreed with the run. The posture is now
+  explicit: `unattended: bool = False`, in `NON_FORM_KEYS` (no descriptor, never client-settable), written by
+  `_stack_target` **after every option merge**, so a saved per-target default, a POST body, the global config
+  blob and reprocess-all's replayed prior-run options can none of them spoof it. Off by default → existing run
+  records, configs and the desktop app are byte-for-byte unchanged. Tests: +2
+  `tests/webapp/test_auto_stack_defaults.py`, +1 `tests/test_drizzle_reject.py` (fails on the old signal).
 - **v0.280.0** — Beginner feature / friendliness (Builder, branch `claude/compassionate-galileo-4maz3z`):
   **"You're one away from finishing Lyra — and it's up tonight."** The life list says *how many* famous
   objects you have, which is a number you look at; this says what to point at **next**, which is what gets

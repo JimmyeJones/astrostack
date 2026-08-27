@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, roughlyAlignedNote, calibrationSummaryText } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import { SAMPLE_TOUR_COPY } from "../components/SampleTourNote";
@@ -1054,6 +1054,36 @@ describe("darkScalingSummaryText", () => {
   });
   it("tolerates missing exposures (mode only)", () => {
     expect(darkScalingSummaryText({ mode: "exposure" })).toBe("Dark scaled to sub exposure");
+  });
+});
+
+describe("drizzleDegradedNote", () => {
+  it("says nothing on a run that fitted (the healthy case)", () => {
+    expect(drizzleDegradedNote(null)).toBeNull();
+    expect(drizzleDegradedNote(undefined)).toBeNull();
+  });
+  it("names both scales and reassures that nothing was dropped", () => {
+    const s = drizzleDegradedNote({ reason: "memory", applied: 1.3, requested: 1.5 });
+    expect(s).toContain("×1.3");
+    expect(s).toContain("×1.5");
+    expect(s).toContain("none of your subs were left out");
+    // Never the user's fault, and never blames the picture quality.
+    expect(s).toContain("slightly less zoomed-in");
+  });
+  it("still reads sensibly when the requested scale wasn't recorded", () => {
+    const s = drizzleDegradedNote({ reason: "memory", applied: 1.25 });
+    expect(s).toContain("×1.25");
+    expect(s).not.toContain("instead of");
+  });
+  it("drops a nonsense or missing applied scale rather than inventing one", () => {
+    expect(drizzleDegradedNote({ reason: "memory" })).toBeNull();
+    expect(drizzleDegradedNote({ reason: "memory", applied: 0 })).toBeNull();
+    expect(drizzleDegradedNote({ reason: "memory", applied: Number.NaN })).toBeNull();
+  });
+  it("omits the comparison when the recorded request isn't larger", () => {
+    // Defensive: a bad/equal pair must not read "×1.5 instead of ×1.5".
+    const s = drizzleDegradedNote({ reason: "memory", applied: 1.5, requested: 1.5 });
+    expect(s).not.toContain("instead of");
   });
 });
 

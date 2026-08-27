@@ -9,7 +9,7 @@ import { notifications } from "@mantine/notifications";
 import { IconAdjustments, IconCheck, IconChevronDown, IconClipboardText, IconCopy, IconDeviceFloppy, IconDeviceMobile, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting } from "../api/client";
+import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded } from "../api/client";
 import { formatIntegration, formatStampDate } from "../format";
 import { postCaption, formatCaptionDate } from "../components/postCaption";
 import { HazyNightBadge } from "../components/HazyNightBadge";
@@ -329,6 +329,41 @@ export interface FrameAccountingNote {
 // Returns null when nothing's worth saying — no accounting recorded (older
 // master), or every attempted sub aligned (the "· N subs" integration line
 // already tells that happy story). Pure so it can be unit-tested.
+// "Why is last night's picture a different size?" — the one thing an unattended
+// run can change about the *shape* of the result without anyone watching.
+//
+// When a walk-away stack's drizzle canvas won't fit the memory budget, the engine
+// now lowers the super-resolution scale to the largest one that does, rather than
+// refusing outright with advice nobody is there to read (that refusal is still
+// what a *watching* user gets — they can click the fix). The trade is real but
+// small: the picture is slightly less zoomed-in and nothing else about it
+// changes. Since the decision was made at 3 a.m., this line is the only place the
+// owner can find out it happened, so it says what was asked for, what was used,
+// and — crucially — that no data was lost.
+//
+// Returns null on every run that fitted (all of them on a healthy box) and on
+// older masters that predate the cards. Pure so it can be unit-tested.
+export function drizzleDegradedNote(
+  dd: StackDrizzleDegraded | null | undefined,
+): string | null {
+  if (!dd) return null;
+  const applied = dd.applied;
+  if (typeof applied !== "number" || !Number.isFinite(applied) || applied <= 0) {
+    return null;
+  }
+  const fmt = (n: number) => `×${Number(n.toFixed(2))}`;
+  const requested = dd.requested;
+  const asked =
+    typeof requested === "number" && Number.isFinite(requested) && requested > applied
+      ? ` instead of the ${fmt(requested)} it was set to`
+      : "";
+  return (
+    `Super-resolution used ${fmt(applied)}${asked} — the bigger canvas didn't fit ` +
+    `in memory, so AstroStack made the picture at this size rather than skipping ` +
+    `the night. It's slightly less zoomed-in; none of your subs were left out.`
+  );
+}
+
 export function frameAccountingNote(
   fa: StackFrameAccounting | null | undefined,
 ): FrameAccountingNote | null {
@@ -512,6 +547,14 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
       {rejectionSummaryText(data.rejection) ? (
         <Text size="xs" c="dimmed">
           {rejectionSummaryText(data.rejection)}
+        </Text>
+      ) : null}
+      {/* An unattended run that made a slightly smaller picture rather than no
+          picture. Nobody saw the job decide it, so this is where the owner finds
+          out why last night's image isn't the size of the one before. */}
+      {drizzleDegradedNote(data.drizzle_degraded) ? (
+        <Text size="xs" c="dimmed">
+          {drizzleDegradedNote(data.drizzle_degraded)}
         </Text>
       ) : null}
       {(() => {

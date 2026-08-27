@@ -141,6 +141,67 @@ def test_global_default_calibration_paths_never_reach_the_stacker(
     assert captured["opts"].bias_path is None
 
 
+def test_unattended_posture_is_set_only_by_the_walk_away_path(
+        solved_library, monkeypatch):
+    """``StackOptions.unattended`` says "nobody is watching this run" and nothing
+    else. It must be True exactly when ``_stack_target`` was called with
+    ``auto=True`` (the watcher auto-stack / Process target), and False for the
+    manual Stack form and reprocess-all — the engine decides between "refuse with
+    a fix a human can click" and "degrade quietly and still make a picture" on it.
+    """
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = lib.list_targets()[0].safe_name
+        settings = Settings(data_root=str(solved_library))
+        pipeline._stack_target(settings, jm=_FakeJM(), job=Job(kind="pipeline"),
+                               lib=lib, safe=safe, auto=True)
+        assert captured["opts"].unattended is True
+        pipeline._stack_target(settings, jm=_FakeJM(), job=Job(kind="stack"),
+                               lib=lib, safe=safe, options={"sigma_kappa": 4.0})
+        assert captured["opts"].unattended is False
+    finally:
+        lib.close()
+
+
+def test_unattended_cannot_be_spoofed_by_stored_or_posted_options(
+        solved_library, monkeypatch):
+    """Only the server knows whether a human is watching, so every route a
+    ``StackOptions`` dict can arrive by must lose its ``unattended`` value: a
+    crafted POST body, a saved per-target default, the global config blob (which
+    ``strip_non_form_keys`` drops), and the prior-run option blob reprocess-all
+    replays. The posture is written last, so all four resolve to this run's own.
+    """
+    captured = _capture_opts(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = lib.list_targets()[0].safe_name
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(STACK_DEFAULTS_META_KEY,
+                          json.dumps({"unattended": True, "sigma_kappa": 2.25}))
+        finally:
+            proj.close()
+        settings = Settings(
+            data_root=str(solved_library),
+            default_stack_options={"unattended": True, "sigma_kappa": 2.5},
+        )
+        # Manual stack: a posted body and a poisoned saved default both lose.
+        pipeline._stack_target(settings, jm=_FakeJM(), job=Job(kind="stack"),
+                               lib=lib, safe=safe,
+                               options={"unattended": True, "sigma_kappa": 4.0})
+        assert captured["opts"].unattended is False
+        assert captured["opts"].sigma_kappa == 4.0   # the real knob still flows
+        # Auto-stack reading the poisoned per-target meta: still exactly the
+        # posture of *this* run, which here happens to agree.
+        pipeline._stack_target(settings, jm=_FakeJM(), job=Job(kind="pipeline"),
+                               lib=lib, safe=safe, auto=True)
+        assert captured["opts"].unattended is True
+        assert captured["opts"].sigma_kappa == 2.25
+    finally:
+        lib.close()
+
+
 class _FakeJM:
     """Minimal JobManager stand-in for progress flushing."""
 
