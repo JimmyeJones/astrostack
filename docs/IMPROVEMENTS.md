@@ -341,6 +341,18 @@ _(none — claim an item here with your branch name)_
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
+- **⚪ AUDIT NOTE (Builder 2026-08-27, swept immediately after fixing the debayer bug — NON-finding, recorded so
+  nobody re-treads it) — "a `!= 0` / `> 0` value test standing in for a validity mask" is a bug *class*, and the
+  debayer was the only place in the engine where it was wrong.** The pattern is only a bug where **0 is a
+  legitimate datum**; everywhere else in `seestack/` it is used where 0 genuinely *means* "none", and is
+  correct. Swept and cleared: `drizzle_path.py:375` (`np.where(wht > 0, img, np.nan)` — `wht` is accumulated
+  deposit weight, so 0 really is no coverage); `bg/coverage_leveling.py:280` (`cov_int > 0` — a frame count);
+  `bg/per_frame.py:453` (`n > 0` — a bin population, paired with the same `np.maximum(n, 1.0)` normalisation);
+  `calibrate/masters.py:101` (`mad > 0` — a zero MAD legitimately means "no spread, clip nothing");
+  `stack/weighting.py` (`star_count > 0` — zero stars really is unusable). *(Confidence: read, not reproduced —
+  each was traced to why 0 means "none" there. Filed as a note, not a bug.)* If a future change makes any of
+  those quantities able to be a *measured* zero, this is the shape of the mistake to look for.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #17, branch `claude/vigilant-knuth-s4y5o3`) — a **depth** sweep that
   led with the stacking engine (`seestack/stack/*` + `seestack/calibrate/*`) across three parallel adversarial
   traces, plus a live-app dogfood. Result: the engine core is clean for the **7th** consecutive sweep; one
@@ -8409,6 +8421,48 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **NEW IDEA (Builder 2026-08-27, traced while building the v0.285.0 pictures zip) — the app has *two*
+  different answers to "which picture is this target's", and one of them can come up empty where the other
+  finds a picture. Make the fallback shared, not just the cover lookup.** *(Pillar: trust/consistency,
+  PRIORITY 3; size S; additive, read-only. Confidence: traced against the code — not yet reproduced through
+  the UI, so verify before treating it as a bug.)*
+  The **pinned-cover** half is properly shared (`targets._cover_preview_path`, used by the Library tile, the
+  montage wall and now the zip). The **fallback** is not. `/api/gallery/best` resolves it with
+  `_representative_run` → *the newest run whose `preview_path` still exists on disk*, walking the target's whole
+  run list; the montage (`_montage_tiles`) and the zip (`_library_pictures`) instead take the library's single
+  stamped `entry.last_stack_preview`. Those agree right up until the newest run's preview file is deleted or
+  pruned: `best` then quietly steps back to the previous run's picture and still shows the target, while the
+  wall and the zip see one dead path and drop the target entirely — so the same library reads as "8 finished
+  pictures" on one screen and "7" on another, with no explanation. Nobody has reported it; it is a
+  consistency/trust gap, not a data risk.
+  **Shape.** Give `targets.py` one shared "this target's current picture path" resolver — cover first (the
+  existing `_cover_preview_path`), then `last_stack_preview` if that file exists, then the newest run with a
+  preview on disk — and have all three callers use it. The extra project open only happens for targets whose
+  stamped path is missing, i.e. essentially never on a healthy library, so the montage's deliberate
+  "one project open per pinned cover" cost budget is preserved. **Test:** a target whose newest preview file
+  is deleted but whose earlier run's preview survives appears in `best`, the montage *and* the zip, with the
+  same picture in all three. **Grep first:** `/api/imaging-log` and the Dashboard tiles make the same choice —
+  check whether they take the third path too before deciding which is canonical.
+
+- **NEW IDEA (Builder 2026-08-27, the half deliberately left out of the v0.285.0 pictures zip) — let "Download
+  all my pictures" hand over the *edited, full-size* picture where one exists, not only the display preview.**
+  *(Pillar: get/share + trust, PRIORITY 3; size S–M; additive, read-only, opt-in by shape. Confidence: the gap
+  is certain; the right default is the open question.)*
+  v0.285.0 ships each target's **preview** — deliberately, because "what you download is what you saw" is the
+  honest default and it needs no re-render. But a beginner who spent an evening in the editor and exported a
+  full-res picture reasonably expects *that* file in their backup, and the app already knows where it is: the
+  editor's export path is recorded per run (the same marker `/api/gallery/unexported-edits` reads to tell a
+  target's saved edit from its exported one). A zip that silently holds only the small preview is the kind of
+  quiet shortfall that costs trust the first time someone tries to print from it.
+  **Shape.** Per target, prefer the run's **exported edit** if the file exists, else the TIFF/FITS if the user
+  asked for full-size, else the preview — surfaced as one plain-language choice next to the button (*"pictures
+  as shown"* vs *"full-size files"*), defaulting to the current behaviour so nothing changes for anyone who
+  doesn't ask. Keep the streaming shape exactly as it is (it is already size-blind), keep `_skipped.txt`, and
+  keep the `safe_name`-derived entry names. **Cautions:** full-size FITS of a big mosaic is hundreds of MB per
+  target, so the copy next to the option has to say roughly how big the download will be before someone taps it
+  on a phone; and the picker must never re-render or re-export anything — if there is no exported file, fall
+  back, don't build one.
 
 - **IMPROVEMENT IDEA (Scout QA audit 2026-08-27 #16, secondary finding — hardening, low severity) — `POST
   /api/scan` accepts a raw client-supplied filesystem `root` and scans/ingests from it unconfined, the one
