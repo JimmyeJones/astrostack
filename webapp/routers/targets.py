@@ -11,6 +11,7 @@ from webapp import deps
 from webapp.goals import GOAL_META_KEY, MAX_GOAL_S, MIN_GOAL_S, read_goal_s
 from webapp.registry_cache import invalidate_registry_cache
 from webapp.schemas import (
+    AngularSizeOut,
     AutoStackHoldOut,
     BackgroundModeHintOut,
     BestFrameOut,
@@ -333,6 +334,10 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
                                      years=info.light_travel.years,
                                      text=info.light_travel.text)
                       if info.light_travel is not None else None),
+        angular_size=(AngularSizeOut(size_arcmin=info.angular_size.size_arcmin,
+                                     moons=info.angular_size.moons,
+                                     text=info.angular_size.text)
+                      if info.angular_size is not None else None),
     )
 
 
