@@ -12,6 +12,14 @@ import * as client from "./api/client";
 // removed*, so this frozen copy is what "nothing removed" is measured against.
 // Regrouping (moving a link between sections, or reordering within one) is fine
 // and only needs the set to match; losing or renaming a destination is not.
+//
+// *Adding* a destination is fine too — the owner's brief for the IA overhaul says
+// so explicitly ("even if they need to add pages, that is fine"), so this frozen
+// list is asserted as a **subset**, not an equality. An equality would have made
+// the guard mean "the sidebar may never grow", which is not the constraint it was
+// written for and would have to be relaxed by whoever shipped the next page. What
+// it must catch — a destination silently dropped or renamed — is caught either
+// way, by the per-entry check below.
 const FLAT_LINKS_BEFORE_SLICE_D = [
   { to: "/", label: "Dashboard" },
   { to: "/library", label: "Library" },
@@ -34,9 +42,23 @@ const byTo = (a: { to: string }, b: { to: string }) => a.to.localeCompare(b.to);
 
 describe("NAV_SECTIONS", () => {
   it("still carries every destination the flat list had, exactly once", () => {
-    expect(NAV_LINKS.map((l) => ({ to: l.to, label: l.label })).sort(byTo))
-      .toEqual([...FLAT_LINKS_BEFORE_SLICE_D].sort(byTo));
+    const present = NAV_LINKS.map((l) => ({ to: l.to, label: l.label })).sort(byTo);
+    // Every frozen destination is still there under its own label — a drop or a
+    // rename fails here, naming the entry that went missing.
+    for (const frozen of [...FLAT_LINKS_BEFORE_SLICE_D].sort(byTo)) {
+      expect(present).toContainEqual(frozen);
+    }
     expect(new Set(NAV_LINKS.map((l) => l.to)).size).toBe(NAV_LINKS.length);
+  });
+
+  it("keeps every added destination distinct from the frozen ones", () => {
+    // Growth is allowed, but a new page must be a genuinely new destination —
+    // not a second route quietly shadowing an existing one under a new label.
+    const frozenPaths = new Set(FLAT_LINKS_BEFORE_SLICE_D.map((l) => l.to));
+    const frozenLabels = new Set(FLAT_LINKS_BEFORE_SLICE_D.map((l) => l.label));
+    for (const added of NAV_LINKS.filter((l) => !frozenPaths.has(l.to))) {
+      expect(frozenLabels.has(added.label)).toBe(false);
+    }
   });
 
   it("keeps the Dashboard exact-match only, so it doesn't light up on every route", () => {
