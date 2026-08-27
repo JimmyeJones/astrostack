@@ -63,6 +63,14 @@ class LightTravelOut(BaseModel):
     text: str    # the ready-to-render sentence
 
 
+class AngularSizeOut(BaseModel):
+    """"How big is it, really?" — a matched target's span in full Moons."""
+
+    size_arcmin: float   # the catalog major axis this was built from
+    moons: float         # that size in full-Moon widths, unrounded
+    text: str            # the ready-to-render sentence
+
+
 class MosaicPlanOut(BaseModel):
     """"How big a mosaic?" — the panel grid a too-big target's span needs."""
 
@@ -143,6 +151,11 @@ class ObjectInfoOut(BaseModel):
     # the catalog's vetted distance. ``null`` for an object with no vetted
     # distance (old backends omit it — the UI shows nothing either way).
     light_travel: LightTravelOut | None = None
+    # "How big is it, really?" — the object's span in full Moons, the one
+    # angular yardstick a beginner already owns. ``null`` when the catalog has
+    # no vetted size, or the object is too small for the comparison to say
+    # anything (old backends omit it — the UI shows nothing either way).
+    angular_size: AngularSizeOut | None = None
 
 
 class IntegrationGoalOut(BaseModel):
