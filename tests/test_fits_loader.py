@@ -230,3 +230,159 @@ def test_fov_deg_from_header_rejects_nonphysical(tmp_path):
         focal_len_mm=0.0, pixel_size_um=2.9,
     )
     assert fov_deg_from_header(load_header(p)) is None
+
+
+# ---------------------------------------------------------------------------
+# Genuine 0.0 samples must be counted as samples (v0.285.2 regression).
+#
+# The sparse colour planes are zero-filled at every non-sample site, and the two
+# interpolators used to recover the sample sites with `plane != 0` — conflating
+# "structurally not this channel's site" with "a real datum that reads 0.0". A
+# true 0.0 sample was therefore dropped from the neighbour average of every
+# adjacent missing site of the same channel, biasing it upward on a positive sky
+# background. Exact zeros can't occur in the raw sensor domain (bias pedestal),
+# but the debayer runs *after* dark subtraction, so an integer-valued master dark
+# lands ~10% of pixels exactly on 0.
+# ---------------------------------------------------------------------------
+
+_LAYOUTS = {
+    "RGGB": (("r", "g"), ("g", "b")),
+    "BGGR": (("b", "g"), ("g", "r")),
+    "GRBG": (("g", "r"), ("b", "g")),
+    "GBRG": (("g", "b"), ("r", "g")),
+}
+# (dy, dx) offsets each channel interpolates a missing site from, by how the site
+# sits relative to that channel's 2x2 grid. Written out longhand so the reference
+# below owes nothing to the implementation it checks.
+_RB_NEIGHBOURS = {
+    (True, False): ((0, -1), (0, 1)),                    # same row, missing col
+    (False, True): ((-1, 0), (1, 0)),                    # same col, missing row
+    (False, False): ((-1, -1), (-1, 1), (1, -1), (1, 1)),  # both missing
+}
+
+
+def _reference_debayer(mosaic, pattern):
+    """A slow, obviously-correct bilinear debayer, written per-pixel.
+
+    Same contract as the vectorised one: a missing site is the mean of its
+    same-channel neighbours that are *on the frame* — every one of them, whatever
+    its value. Deliberately naive so it can't share a bug with the real thing.
+    """
+    h, w = mosaic.shape
+    (tl, tr), (bl, br) = _LAYOUTS[pattern]
+    site = {(0, 0): tl, (0, 1): tr, (1, 0): bl, (1, 1): br}
+    out = np.zeros((h, w, 3), dtype=np.float64)
+    for ci, ch in enumerate("rgb"):
+        # Every (y, x) this channel is actually sampled at.
+        samples = {(y, x) for y in range(h) for x in range(w)
+                   if site[(y % 2, x % 2)] == ch}
+        for y in range(h):
+            for x in range(w):
+                if (y, x) in samples:
+                    out[y, x, ci] = mosaic[y, x]
+                    continue
+                if ch == "g":
+                    offsets = ((-1, 0), (1, 0), (0, -1), (0, 1))
+                else:
+                    py, px = next(p for p, c in site.items() if c == ch)
+                    offsets = _RB_NEIGHBOURS[(y % 2 == py, x % 2 == px)]
+                vals = [mosaic[y + dy, x + dx] for dy, dx in offsets
+                        if 0 <= y + dy < h and 0 <= x + dx < w]
+                out[y, x, ci] = float(np.mean(vals)) if vals else 0.0
+    return out
+
+
+def _legacy_debayer(mosaic, pattern):
+    """The pre-v0.285.2 rule: sample sites recovered with a `!= 0` value test.
+
+    Kept in the test rather than the module so the "unchanged for an ordinary
+    frame" claim below is a *measured* byte-for-byte comparison against the old
+    behaviour, not an assertion about it.
+    """
+    from seestack.io.fits_loader import _shift
+
+    h, w = mosaic.shape
+    (tl, tr), (bl, br) = _LAYOUTS[pattern]
+    site = {(0, 0): tl, (0, 1): tr, (1, 0): bl, (1, 1): br}
+    yy, xx = np.indices((h, w))
+    out = np.zeros((h, w, 3), dtype=np.float32)
+    for ci, ch in enumerate("rgb"):
+        plane = np.zeros((h, w), dtype=np.float32)
+        for (py, px), c in site.items():
+            if c == ch:
+                plane[py::2, px::2] = mosaic[py::2, px::2]
+        has = plane != 0                      # <- the bug being pinned
+        m = has.astype(np.float32)
+        if ch == "g":
+            num = (_shift(plane, 1, 0) + _shift(plane, -1, 0)
+                   + _shift(plane, 0, 1) + _shift(plane, 0, -1))
+            den = (_shift(m, 1, 0) + _shift(m, -1, 0)
+                   + _shift(m, 0, 1) + _shift(m, 0, -1))
+            out[:, :, ci] = np.where(has, plane, num / np.maximum(den, 1.0))
+            continue
+        py, px = next(p for p, c in site.items() if c == ch)
+        h_avg = ((_shift(plane, 0, 1) + _shift(plane, 0, -1))
+                 / np.maximum(_shift(m, 0, 1) + _shift(m, 0, -1), 1.0))
+        v_avg = ((_shift(plane, 1, 0) + _shift(plane, -1, 0))
+                 / np.maximum(_shift(m, 1, 0) + _shift(m, -1, 0), 1.0))
+        d_num = (_shift(plane, 1, 1) + _shift(plane, 1, -1)
+                 + _shift(plane, -1, 1) + _shift(plane, -1, -1))
+        d_den = (_shift(m, 1, 1) + _shift(m, 1, -1)
+                 + _shift(m, -1, 1) + _shift(m, -1, -1))
+        row, col = (yy % 2) == py, (xx % 2) == px
+        chan = plane.copy()
+        chan = np.where(~has & row & ~col, h_avg, chan)
+        chan = np.where(~has & ~row & col, v_avg, chan)
+        chan = np.where(~has & ~row & ~col, d_num / np.maximum(d_den, 1.0), chan)
+        out[:, :, ci] = chan
+    return out
+
+
+def _dark_subtracted_frame(seed=11):
+    """A small sky-ish frame that has been dark-subtracted by an *integer* master
+    — the reachable trigger, where ~10% of pixels land exactly on 0."""
+    rng = np.random.default_rng(seed)
+    light = rng.integers(100, 140, size=(12, 16)).astype(np.float32)
+    dark = rng.integers(100, 130, size=(12, 16)).astype(np.float32)
+    return np.maximum(light - dark, 0.0).astype(np.float32)
+
+
+@pytest.mark.parametrize("pattern", ["RGGB", "BGGR", "GRBG", "GBRG"])
+def test_debayer_counts_a_genuine_zero_sample(pattern):
+    """A sample that reads exactly 0.0 is a datum, not an absent site: it must be
+    averaged into its neighbours' interpolation like any other value.
+
+    Fails before the fix on every one of the four Bayer layouts — a wrong parity
+    would corrupt every frame, so all four are pinned.
+    """
+    mosaic = _dark_subtracted_frame()
+    assert float((mosaic == 0).mean()) > 0.05, "the trigger must actually be present"
+    got = bilinear_debayer(mosaic, pattern=pattern)
+    want = _reference_debayer(mosaic, pattern)
+    assert np.allclose(got, want, atol=1e-4), (
+        pattern, float(np.abs(got - want).max()))
+    # And the old value-mask rule really did differ here — otherwise the test
+    # above would be pinning nothing.
+    assert not np.allclose(_legacy_debayer(mosaic, pattern), want, atol=1e-4)
+
+
+@pytest.mark.parametrize("pattern", ["RGGB", "BGGR", "GRBG", "GBRG"])
+def test_debayer_unchanged_on_an_ordinary_frame(pattern):
+    """The guardrail: this is the on-by-default hot path, so a frame with no
+    exact-0 samples — which is every frame a float-averaged master dark produces
+    — must come out **byte-for-byte** as it did before."""
+    rng = np.random.default_rng(3)
+    mosaic = rng.uniform(50.0, 4000.0, size=(12, 16)).astype(np.float32)
+    assert not (mosaic == 0).any()
+    got = bilinear_debayer(mosaic, pattern=pattern)
+    assert np.array_equal(got, _legacy_debayer(mosaic, pattern))
+    assert np.allclose(got, _reference_debayer(mosaic, pattern), atol=1e-3)
+
+
+def test_debayer_all_zero_frame_stays_zero():
+    """The degenerate end of the same change: a frame of genuine zeros (a fully
+    dark-subtracted flat patch) interpolates to zeros, not to a division-by-count
+    surprise."""
+    for pattern in ("RGGB", "BGGR", "GRBG", "GBRG"):
+        rgb = bilinear_debayer(np.zeros((8, 10), dtype=np.float32), pattern=pattern)
+        assert np.array_equal(rgb, np.zeros((8, 10, 3), dtype=np.float32))

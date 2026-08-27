@@ -14,7 +14,6 @@ import zipfile
 
 from seestack.io.library import Library
 from seestack.io.project import StackRunRow
-
 from webapp.routers.gallery import zip_entry_name
 
 # A tiny but genuinely valid PNG, so an archived member is real image bytes.

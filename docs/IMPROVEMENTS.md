@@ -49,11 +49,35 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟡 WRONG-RESULT / IMAGE-QUALITY (Scout QA audit 2026-08-27 #17, branch `claude/vigilant-knuth-s4y5o3`,
+- ~~**🟡 WRONG-RESULT / IMAGE-QUALITY (Scout QA audit 2026-08-27 #17, branch `claude/vigilant-knuth-s4y5o3`,
   reproduced) — bilinear debayer treats a genuine sample value of *exactly* `0.0` as "not a sample of this
   channel", so it is dropped from the neighbour average used to interpolate the adjacent missing colour sites,
   biasing those interpolated pixels. Fires on the on-by-default hot path (every debayer), but only meaningfully
-  when an *integer-valued* master dark makes exact-zero samples common.** *(Severity: low wrong-result /
+  when an *integer-valued* master dark makes exact-zero samples common.**~~ — **FIXED v0.285.2** (Builder
+  2026-08-27, branch `claude/compassionate-galileo-5du96e`), exactly along the fix direction below.
+
+  **What shipped.** A new `_sample_mask(shape, parities)` derives "this pixel is one of *this* channel's sample
+  sites" from the Bayer geometry alone. `_interp_rb` now builds `has` from its own `(py, px)` parity — the same
+  positional test the three case masks below it already used — and `_interp_g` takes the layout so it can mark
+  the G diagonal (`(0, g_parity)` + `(1, 1 - g_parity)`, with `g_parity` read off the layout's top-left corner
+  rather than re-listed per pattern). Both structural masks are still shifted with the existing zero-fill
+  `_shift`, so off-frame contributors drop out exactly as before and the edge handling is untouched. The repro
+  in the entry below now prints 75.0 (the correct diagonal mean including the genuine 0), not 100.0.
+
+  **Tests (+9 in `tests/test_fits_loader.py`).** Both guardrail halves the entry asked for, plus a degenerate
+  case. The suite carries a deliberately naive **per-pixel reference debayer** (written longhand from the Bayer
+  geometry, so it can't share a bug with the vectorised one) *and* the pre-fix **value-mask implementation**, so
+  the two claims are measured rather than asserted: (1) on a frame dark-subtracted by an integer master (>5 %
+  exact zeros) the real debayer now equals the reference for **all four** Bayer layouts — failing before the fix
+  on every one of them, since a wrong G-parity would corrupt every frame — and the legacy rule provably differed
+  there, so the test pins something; (2) on an ordinary frame with no exact-0 samples the output is
+  `np.array_equal` to the **legacy** result, i.e. byte-for-byte unchanged, which is every frame a float-averaged
+  master dark produces; (3) an all-zero frame stays all-zero.
+
+  **Upgrade-safe (§9):** pure in-memory pixel maths; no config/schema/on-disk/API/default change, and the common
+  case is bit-identical, so a healthy install's existing outputs are unaffected.
+
+  Original entry: *(Severity: low wrong-result /
   image-quality — the interpolated chroma of pixels next to an exact-0 sample is off by up to ~1 ADU, mostly
   upward on a positive sky background; gated on integer master darks — see reachability. Confidence:
   reproduced end-to-end via `bilinear_debayer`.)*
