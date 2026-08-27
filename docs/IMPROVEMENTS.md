@@ -49,14 +49,42 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟡 WRONG-RESULT / IMAGE-QUALITY (Scout QA audit 2026-08-27 #17, branch `claude/vigilant-knuth-s4y5o3`,
+- ~~**🟡 WRONG-RESULT / IMAGE-QUALITY (Scout QA audit 2026-08-27 #17, branch `claude/vigilant-knuth-s4y5o3`,
   reproduced) — bilinear debayer treats a genuine sample value of *exactly* `0.0` as "not a sample of this
   channel", so it is dropped from the neighbour average used to interpolate the adjacent missing colour sites,
   biasing those interpolated pixels. Fires on the on-by-default hot path (every debayer), but only meaningfully
-  when an *integer-valued* master dark makes exact-zero samples common.** *(Severity: low wrong-result /
+  when an *integer-valued* master dark makes exact-zero samples common.**~~ — **FIXED v0.284.5** (Builder
+  2026-08-27, branch `claude/compassionate-galileo-0wtz21`). *(Severity: low wrong-result /
   image-quality — the interpolated chroma of pixels next to an exact-0 sample is off by up to ~1 ADU, mostly
   upward on a positive sky background; gated on integer master darks — see reachability. Confidence:
   reproduced end-to-end via `bilinear_debayer`.)*
+
+  **What shipped, exactly as the fix direction below asked.** Both interpolators now identify sample sites
+  **positionally**, from the Bayer layout, instead of with a `!= 0` value test. `_interp_rb` hoists the
+  `on_sample_row/on_sample_col` grid it already computed (to classify *missing* sites) above the convolutions
+  and uses `has = on_sample_row & on_sample_col`; `_interp_g` takes the layout and derives the G checkerboard
+  through a new `_g_site_mask` helper — `g_parity = 0 if tl == "g" else 1`, so a future pattern can't silently
+  pick the wrong parity. The structural mask is shifted with the same zero-filling `_shift`, so off-frame
+  contributors still drop out of the count and the edge handling is untouched. The repro in the spec below now
+  prints `75.0` (the correct diagonal mean including the genuine 0) instead of `100.0`.
+
+  **Byte-for-byte on the common path, and *proved* so.** The positional mask and the old value test agree
+  everywhere except at a sample site holding exactly 0.0, so an ordinary frame — every uncalibrated frame, and
+  every frame calibrated with the normal float-averaged master — is bit-identical. That isn't asserted by
+  argument: `test_debayer_unchanged_when_no_sample_is_exactly_zero` pins SHA-256 hashes of the output bytes for
+  all four Bayer layouts on a seeded no-exact-0 frame, **taken from the pre-fix implementation before the edit
+  landed**, so any drift on the common path fails the test.
+
+  **Tests (+5 in `tests/test_fits_loader.py`; the 4 parametrized ones fail before / pass after).**
+  `test_debayer_counts_a_genuine_zero_sample[RGGB|BGGR|GRBG|GBRG]` scatters genuine exact-zero samples the way
+  an integer master dark does and checks the whole RGB output against `_reference_debayer` — an independent,
+  deliberately slow per-pixel implementation written from the definition (for each missing site, average the
+  nearest same-channel sample sites that exist on the frame), which knows nothing about sparse planes or
+  shifted masks and so cannot share a bug with the vectorised path. That reference also covers the guardrail
+  the spec asked for: a wrong G-parity in any layout fails it immediately. Plus the byte-for-byte pin above.
+
+  **Upgrade-safe (§9):** pure in-memory pixel math in one engine function; no config, schema, on-disk, API or
+  default change, and no behaviour change at all for a frame without exact-0 samples.
 
   **Root cause (traced + reproduced).** `bilinear_debayer` (`seestack/io/fits_loader.py`) builds sparse R/G/B
   planes with `np.zeros_like(mosaic)` and populates only each channel's sample sites (`:234-254`). The two
