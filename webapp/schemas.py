@@ -623,7 +623,8 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "group": "simple", "depends_on": "drizzle",
      "help": "Second drizzle pass that rejects satellites, plane trails and cosmic "
              "rays (single-pass drizzle keeps them). Uses Sigma κ; needs 4+ frames. "
-             "Takes roughly 2–3× as long."},
+             "Takes roughly 2–3× as long. Unattended stacks (auto-stack, Process "
+             "target) turn this on for themselves when there's memory for it."},
     {"key": "mono", "label": "Mono / filtered subs", "type": "bool", "group": "simple",
      "help": "Stack as single-channel luminance (no debayer). For mono cameras and "
              "L/R/G/B/narrowband subs. Combine channels later in Channel combine."},

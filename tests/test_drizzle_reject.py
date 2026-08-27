@@ -468,3 +468,167 @@ def test_e2e_reject_skipped_below_four_frames(tmp_path):
         imgs[True][:, 20:-20, 20:-20], imgs[False][:, 20:-20, 20:-20],
         rtol=1e-4, atol=0.5,
     )
+
+
+# --- affordability of an AUTO-enabled rejection --------------------------------
+#
+# The walk-away chain turns ``drizzle_reject`` on for the user (``_stack_target``,
+# alongside ``auto_reject``). The pass holds ~7 full-canvas planes against the
+# single pass's 4, so charging it unconditionally can push a large drizzled mosaic
+# — the owner's own setup — past the memory guard and turn a target that produced a
+# picture yesterday into a hard MemoryError refusal, unattended, with nobody there
+# to lower the drizzle scale. ``_afford_drizzle_reject`` declines a rejection the
+# budget can't take, so the run proceeds exactly as it did before the pass was ever
+# auto-enabled. An *explicit* tick still refuses loudly: that user is watching.
+
+
+def _budget_between_passes_gb(shape, scale=1.0):
+    """A budget (GB) that fits single-pass drizzle on ``shape`` but not two-pass."""
+    from seestack.stack import stacker as st
+
+    single, _ = st._estimate_peak_bytes(shape, drizzle=True, drizzle_scale=scale,
+                                        drizzle_reject=False)
+    two, _ = st._estimate_peak_bytes(shape, drizzle=True, drizzle_scale=scale,
+                                     drizzle_reject=True)
+    assert single < two
+    return (single + two) / 2 / 1e9
+
+
+def test_afford_declines_auto_reject_that_busts_the_budget():
+    from seestack.stack import stacker as st
+
+    shape = (2000, 3000)
+    auto = StackOptions(drizzle=True, drizzle_reject=True, auto_reject=True)
+    gb = _budget_between_passes_gb(shape)
+    assert st._afford_drizzle_reject(auto, 20, shape, gb) is False
+    # Room for both passes → the rejection is taken.
+    assert st._afford_drizzle_reject(auto, 20, shape, gb * 4) is True
+
+
+def test_afford_passes_an_explicit_tick_through_to_the_loud_refusal():
+    """An explicitly chosen rejection is never quietly downgraded — the user is
+    watching and the refusal names a fix they can act on."""
+    from seestack.stack import stacker as st
+
+    shape = (2000, 3000)
+    explicit = StackOptions(drizzle=True, drizzle_reject=True, auto_reject=False)
+    gb = _budget_between_passes_gb(shape)
+    assert st._afford_drizzle_reject(explicit, 20, shape, gb) is True
+    with pytest.raises(MemoryError, match="outlier rejection"):
+        st._guard_stack_memory(shape, drizzle=True, drizzle_scale=1.0,
+                               drizzle_reject=True, memory_budget_gb=gb)
+
+
+def test_afford_never_hides_a_canvas_that_does_not_fit_either():
+    """Only the extra rejection planes are forgiven. When even the single pass is
+    over budget the guard must still refuse — with the numbers of the run that
+    would actually be attempted."""
+    from seestack.stack import stacker as st
+
+    shape = (2000, 3000)
+    auto = StackOptions(drizzle=True, drizzle_reject=True, auto_reject=True)
+    single, _ = st._estimate_peak_bytes(shape, drizzle=True, drizzle_scale=1.0,
+                                        drizzle_reject=False)
+    tiny_gb = single / 2 / 1e9
+    assert st._afford_drizzle_reject(auto, 20, shape, tiny_gb) is False
+    with pytest.raises(MemoryError, match="working memory") as exc:
+        st._guard_stack_memory(shape, drizzle=True, drizzle_scale=1.0,
+                               drizzle_reject=False, memory_budget_gb=tiny_gb)
+    assert "outlier rejection" not in str(exc.value)
+
+
+def test_afford_folds_in_the_frame_floor_and_the_off_case():
+    from seestack.stack import stacker as st
+
+    shape = (100, 100)
+    auto = StackOptions(drizzle=True, drizzle_reject=True, auto_reject=True)
+    assert st._afford_drizzle_reject(auto, 3, shape, 64.0) is False   # n < 4
+    assert st._afford_drizzle_reject(auto, 4, shape, 64.0) is True
+    off = StackOptions(drizzle=True, drizzle_reject=False, auto_reject=True)
+    assert st._afford_drizzle_reject(off, 20, shape, 64.0) is False
+    no_drizzle = StackOptions(drizzle=False, drizzle_reject=True, auto_reject=True)
+    assert st._afford_drizzle_reject(no_drizzle, 20, shape, 64.0) is False
+
+
+def test_e2e_unattended_stack_still_produces_a_picture_when_reject_wont_fit(tmp_path):
+    """The bug this closes: a walk-away drizzled stack on a budget that fits the
+    single pass but not the two-pass one must still produce its picture, not raise
+    MemoryError — and must say in the header why it carries no REJMODE."""
+    from astropy.io import fits
+
+    from seestack.stack import stacker as st
+    from seestack.stack.stacker import estimate_stack
+
+    spec = [{"seed": 7, "noise_seed": 500 + i, "n_stars": 8} for i in range(8)]
+    base = dict(drizzle=True, drizzle_scale=1.0, drizzle_pixfrac=1.0,
+                background_flatten=False, suppress_hot_pixels=False,
+                max_workers=2, output_name="afford")
+
+    proj = _build_project(tmp_path / "afford", [dict(s) for s in spec])
+    try:
+        est = estimate_stack(proj, StackOptions(**base))
+        gb = _budget_between_passes_gb((est.canvas_h, est.canvas_w))
+        # An explicit tick on this budget is refused — that is today's behaviour
+        # and it stays, because the user who ticked it is watching.
+        with pytest.raises(MemoryError, match="outlier rejection"):
+            run_stack(proj, StackOptions(drizzle_reject=True, **base),
+                      memory_budget_gb=gb)
+        # The unattended shape of the same request (auto_reject on, as the
+        # walk-away chain sets it) produces the picture instead.
+        res = run_stack(
+            proj, StackOptions(drizzle_reject=True, auto_reject=True, **base),
+            memory_budget_gb=gb)
+        assert res.fits_path.exists()
+        assert res.n_frames_used == 8
+        with fits.open(res.fits_path) as hdul:
+            hdr = hdul[0].header
+        assert "REJMODE" not in hdr          # the pass genuinely didn't run…
+        assert hdr["DRZREJSK"] == "memory"   # …and the header says why
+        # The pre-run estimate agrees with what the run did: no phantom warning
+        # about planes the run would decline to allocate.
+        est_auto = estimate_stack(
+            proj, StackOptions(drizzle_reject=True, auto_reject=True, **base),
+            memory_budget_gb=gb)
+        assert est_auto.would_exceed is False
+        # …while the explicit request's estimate still warns, matching its refusal.
+        est_explicit = estimate_stack(
+            proj, StackOptions(drizzle_reject=True, **base), memory_budget_gb=gb)
+        assert est_explicit.would_exceed is True
+        # Sanity: the affordable budget really does run the pass.
+        big = st._estimate_peak_bytes(
+            (est.canvas_h, est.canvas_w), drizzle=True, drizzle_scale=1.0,
+            drizzle_reject=True)[0] * 4 / 1e9
+        res_ok = run_stack(
+            proj, StackOptions(drizzle_reject=True, auto_reject=True,
+                               **{**base, "output_name": "afford_ok"}),
+            memory_budget_gb=big)
+        with fits.open(res_ok.fits_path) as hdul:
+            assert hdul[0].header["REJMODE"] == "drizzle-reject"
+            assert "DRZREJSK" not in hdul[0].header
+    finally:
+        proj.close()
+
+
+def test_a_non_drizzle_run_carrying_drizzle_reject_is_left_alone(tmp_path):
+    """A saved default can hold `drizzle_reject` with drizzle *off* — the Stack
+    form hides the box, it doesn't clear the value. That combination has always
+    been an inert no-op, and must stay one: the drizzle-affordability check must
+    not fire on it at all, so there is no DRZREJSK card however tight the budget,
+    and the ordinary rejection path is untouched."""
+    from astropy.io import fits
+
+    spec = [{"seed": 7, "noise_seed": 600 + i, "n_stars": 8} for i in range(8)]
+    proj = _build_project(tmp_path / "nodrizzle", [dict(s) for s in spec])
+    try:
+        res = run_stack(proj, StackOptions(
+            drizzle=False, drizzle_reject=True, auto_reject=True,
+            background_flatten=False, suppress_hot_pixels=False,
+            max_workers=2, output_name="nodz",
+        ), memory_budget_gb=1.0)
+        with fits.open(res.fits_path) as hdul:
+            hdr = hdul[0].header
+        assert "DRZREJSK" not in hdr
+        assert hdr["STACKER"] != "drizzle"
+        assert hdr["REJMODE"]  # auto_reject still resolved to a real method
+    finally:
+        proj.close()

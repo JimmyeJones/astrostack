@@ -51,6 +51,11 @@ class StabilityTracker:
         self._time = time_fn
         self._pending: dict[str, _Pending] = {}
         self._stable: set[str] = set()
+        # The ``(size, mtime)`` each stable path had when it went stable, so a
+        # path that is later rewritten **in place** — same name, new content,
+        # never disappearing — can be told apart from one that is simply still
+        # sitting there. See :meth:`update`.
+        self._stable_stat: dict[str, tuple[int, float]] = {}
 
     def update(self, snapshot: dict[str, tuple[int, float]]) -> set[str]:
         """``snapshot`` maps path -> (size, mtime). Returns newly stable paths."""
@@ -60,7 +65,24 @@ class StabilityTracker:
 
         for path, (size, mtime) in snapshot.items():
             if path in self._stable:
-                continue
+                if self._stable_stat.get(path) == (size, mtime):
+                    continue
+                # Already stable, but its bytes changed under us: the same
+                # filename was rewritten **in place**, without ever
+                # disappearing. Only the disappear-then-return path used to
+                # re-arm a file, so this one was invisible — and with no other
+                # new file to trigger a scan, ingest's deliberate in-place-swap
+                # recovery (``_same_capture`` → refresh the stale WCS/QC so the
+                # frame isn't stacked at its old sky position) was unreachable
+                # via the watcher at all. Drop it back to pending so its quiet
+                # timer restarts and it re-fires once the rewrite settles.
+                # (The Seestar never overwrites — it writes fresh ``frame_NNNN``
+                # names — so on the normal path this branch never runs; it is a
+                # NAS-resync-in-place safety net. A benign ``touch`` that only
+                # moves the mtime costs one extra, idempotent scan: ingest
+                # recognises the identical capture and does nothing.)
+                self._stable.discard(path)
+                self._stable_stat.pop(path, None)
             prev = self._pending.get(path)
             if prev is None or prev.size != size or prev.mtime != mtime:
                 # New or still-changing: (re)start its quiet timer.
@@ -72,6 +94,7 @@ class StabilityTracker:
             mtime_old_enough = (now - mtime) >= self.quiet_period_s
             if quiet_long_enough and mtime_old_enough:
                 self._stable.add(path)
+                self._stable_stat[path] = (size, mtime)
                 self._pending.pop(path, None)
                 newly_stable.add(path)
 
@@ -79,6 +102,8 @@ class StabilityTracker:
         for gone in set(self._pending) - seen:
             self._pending.pop(gone, None)
         self._stable &= seen
+        self._stable_stat = {p: st for p, st in self._stable_stat.items()
+                             if p in self._stable}
         return newly_stable
 
 

@@ -2379,7 +2379,13 @@ def _stack_target(
     without this a drizzled walk-away stack combined with no outlier rejection at
     all, keeping every satellite, plane trail and cosmic ray that slipped past
     frame-level QC. Drizzle's own two-pass rejection is the equivalent, and this is
-    the same "the user chose nothing" guard the two above use.
+    the same "the user chose nothing" guard the two above use. Whether that pass is
+    *affordable* is settled later, in the engine: it holds ~7 canvas planes against
+    the single pass's 4, and only ``run_stack`` knows the real (for a mosaic, union)
+    canvas it would allocate them on. An auto-enabled rejection the memory budget
+    can't take is quietly skipped rather than refusing the run — see
+    ``stacker._afford_drizzle_reject``. An explicitly ticked one still refuses
+    loudly, because the user who ticked it is watching and can act on the advice.
     """
     from seestack.stack.stacker import run_stack
 

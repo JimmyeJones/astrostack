@@ -15,6 +15,8 @@ mapping can be reused anywhere the counts are known.
 
 from __future__ import annotations
 
+from seestack.solve.astap import SOLVE_FAILED_TIMEOUT
+
 # Ordered bucket definitions. Each raw ``reject_reason`` is matched by the first
 # rule (exact string or namespace prefix) that applies; the *order here* is also
 # the order buckets are presented to the user (most reassuring / most common
@@ -54,6 +56,11 @@ _BUCKETS: list[tuple[str, str, str]] = [
     ("unsolved", "Not located in the sky yet",
      "These frames were kept but haven't been matched to the star field yet, "
      "so they can't be added to the stack. Run Plate Solve to include them."),
+    ("solve_timeout", "Ran out of time being located",
+     "The star-matcher tried every strategy on these and ran out of time before "
+     "it found a match — often a hazy or star-poor sub. They'll be tried again "
+     "on the next scan; if it keeps happening, raise the ASTAP timeout in "
+     "Settings and run Plate Solve again."),
     ("removed", "You removed these",
      "Frames you rejected by hand."),
     ("error", "Couldn't be read or measured",
@@ -74,7 +81,12 @@ def _bucket_for(reason: str) -> str:
     if reason.startswith("qc_error"):
         return "error"
     if reason.startswith("solve_failed"):
-        return "solve_failed"
+        # "ran out of time" is the one solve failure with an obvious fix, so it
+        # gets its own bucket and advice rather than the generic "couldn't be
+        # matched to the star field".
+        return ("solve_timeout"
+                if reason == f"solve_failed:{SOLVE_FAILED_TIMEOUT}"
+                else "solve_failed")
     if reason == "user":
         return "removed"
     # auto:grade:<metric>, bulk:<worst-metric>, qc:<metric> — split by the
@@ -104,17 +116,27 @@ _DOMINANT_VERDICTS: dict[str, str] = {
                     "happening, check your subs aren't trailed or fogged.",
     "unsolved": "A lot of frames were left out — mostly subs that haven't been "
                 "located in the sky yet. Run Plate Solve so the rest can be added.",
+    "solve_timeout": "A lot of frames were left out — mostly subs the star-matcher "
+                     "ran out of time on. They'll be tried again on the next scan; "
+                     "if it keeps happening, raise the ASTAP timeout in Settings "
+                     "and run Plate Solve again.",
 }
 
 
 def _verdict(dropped: int, used: int, unsolved: int = 0,
-             grouped: dict[str, int] | None = None) -> dict[str, str]:
+             grouped: dict[str, int] | None = None,
+             solve_timeout: int = 0) -> dict[str, str]:
     """A single reassuring headline from the dropped fraction.
 
     ``unsolved`` (accepted-but-not-plate-solved frames) is the beginner's one
     *actionable* case — the frames aren't bad, they just haven't been located in
     the sky yet — so when they outnumber what actually stacked, lead with a
     plate-solve nudge rather than the generic "cloud or wind" copy.
+    ``solve_timeout`` is the same shape one step along: those subs *were* offered
+    to the solver, repeatedly, and it ran out of time — so re-running Plate Solve
+    alone would burn the same minutes again. When they dominate, name the knob
+    that would actually rescue them. Checked after the plate-solve nudge, which
+    is the cheaper fix, and inert (byte-for-byte today's wording) at 0.
 
     ``grouped`` is the by-bucket dropped tally. On a high-drop night, when one
     actionable bucket clearly dominates (strictly more than half the dropped
@@ -126,6 +148,11 @@ def _verdict(dropped: int, used: int, unsolved: int = 0,
                 "text": "Most of your subs haven't been located in the sky yet, "
                         "so only a few made the stack — it will look noisy. Run "
                         "Plate Solve so the rest can be added."}
+    if solve_timeout > 0 and solve_timeout > used:
+        return {"tone": "warn",
+                "text": "Most of your subs ran out of time being located in the "
+                        "sky, so only a few made the stack. Raise the ASTAP "
+                        "timeout in Settings and run Plate Solve again."}
     total = dropped + used
     frac = dropped / total if total > 0 else 0.0
     if frac < 0.10:
@@ -148,7 +175,7 @@ def _verdict(dropped: int, used: int, unsolved: int = 0,
 
 def summarize_rejections(
     counts: dict[str, int], n_accepted: int, n_unsolved: int = 0,
-    n_unreadable: int = 0,
+    n_unreadable: int = 0, n_solve_timeout: int = 0,
 ) -> dict:
     """Group a ``reject_reason`` tally into friendly buckets + a verdict.
 
@@ -163,7 +190,14 @@ def summarize_rejections(
     ``accept=1``): they never stack for a different reason — they couldn't be
     *read*, not merely located — so they're attributed to the "couldn't be read"
     bucket and excluded from the plate-solve nudge (telling a beginner to
-    plate-solve a corrupt file is wrong advice). Returns a JSON-safe dict::
+    plate-solve a corrupt file is wrong advice). ``n_solve_timeout`` is the other
+    such subset: subs the solver *did* try, on every rung of its ladder, until it
+    ran out of time (the canonical ``solve_failed:solve timed out`` reason). They
+    are not "not located yet" — re-running Plate Solve without giving the solver
+    longer just spends the same minutes again — so they get their own bucket and
+    their own advice. The two subsets are disjoint by construction (a
+    ``qc_error`` frame's reason is never overwritten by a solve failure) and are
+    clamped into ``n_unsolved`` defensively. Returns a JSON-safe dict::
 
         {
           "used": 412, "dropped": 88, "dropped_fraction": 0.176,
@@ -192,11 +226,14 @@ def summarize_rejections(
     # located-pending tally go negative.
     n_unsolved = max(0, int(n_unsolved))
     n_unreadable = min(max(0, int(n_unreadable)), n_unsolved)
-    n_located_pending = n_unsolved - n_unreadable
+    n_solve_timeout = min(max(0, int(n_solve_timeout)), n_unsolved - n_unreadable)
+    n_located_pending = n_unsolved - n_unreadable - n_solve_timeout
     if n_located_pending > 0:
         grouped["unsolved"] = grouped.get("unsolved", 0) + n_located_pending
     if n_unreadable > 0:
         grouped["error"] = grouped.get("error", 0) + n_unreadable
+    if n_solve_timeout > 0:
+        grouped["solve_timeout"] = grouped.get("solve_timeout", 0) + n_solve_timeout
 
     dropped = sum(grouped.values())
     used = max(0, int(n_accepted) - n_unsolved)
@@ -212,6 +249,7 @@ def summarize_rejections(
         "used": used,
         "dropped": dropped,
         "dropped_fraction": round(dropped / total, 4) if total > 0 else 0.0,
-        "verdict": _verdict(dropped, used, n_located_pending, grouped),
+        "verdict": _verdict(dropped, used, n_located_pending, grouped,
+                            n_solve_timeout),
         "buckets": buckets,
     }

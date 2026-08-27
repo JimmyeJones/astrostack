@@ -75,25 +75,67 @@ _(none — claim an item here with your branch name)_
   its name implies, without starving the coarse rescue rungs — needs a test that a hard frame still gets its rescue
   attempts and that total per-frame time is bounded. Only worth doing if the owner wants true per-frame bounding;
   the label fix above already removes the surprise.
+  **Builder 2026-08-26 — considered and deliberately DECLINED this run; read this before picking it up.** I sized
+  it against the real code and stopped, because every workable shape is a **blind threshold flip on the
+  on-by-default hot path**, which AGENTS.md §1 tells an agent not to do. The ladder cannot be given a true
+  per-frame bound without a per-rung floor (a shared deadline alone gives rungs 2–3 *nothing* on exactly the
+  frames a timeout means they exist to rescue), and the floor's size *is* the tradeoff: at 25 % of `timeout_s`
+  the worst case falls 3× → 1.5×, at 50 % it falls to 2×, and in both cases a hard frame that rung 3 would have
+  cracked in, say, 20 s is now abandoned. Which frames that loses is unmeasurable from the repo — it needs a real
+  cloudy night's subs, which no agent has. Meanwhile the cost of leaving it is now *bounded and honest*: the
+  Settings hint says "up to about 3×" (v0.272.2), and as of **v0.276.4** a sub that burned the whole ladder is
+  no longer silent — it lands in its own "Ran out of time being located" bucket on the Target page telling the
+  owner to raise the timeout. So the surprise and the invisibility are both gone; only the wasted minutes
+  remain. **Leave this for the owner to ask for**, and if they do, ship it with the floor as a named constant and
+  the measured before/after on their own data — not on a synthetic frame.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-26 #4, traced — narrow trigger, self-heals, does NOT fire on the
+- ~~**⚪ HARDENING NOTE (Scout QA audit 2026-08-26 #4, traced — narrow trigger, self-heals, does NOT fire on the
   normal Seestar path) — the folder watcher never re-arms a file that was already stable and is then overwritten
-  IN PLACE, so ingest's deliberate in-place-swap recovery is unreachable via the watcher alone.** *(Severity:
-  low — completeness/latency, not data corruption; the Seestar never overwrites (it writes fresh `frame_NNNN`
-  names), so this only bites an unusual NAS-resync-in-place. Confidence: traced.)*
-  `StabilityTracker.update` (`webapp/watcher.py`): a path already in `self._stable` is `continue`d **before** any
-  size/mtime comparison (~line 62), and `self._stable &= seen` (~line 81) only drops a path from `_stable` when it
-  *disappears* from the snapshot. So a sub that already went stable, then is overwritten in place (same filename, new
-  content, without vanishing) with **no other new file arriving**, is never re-detected as newly-stable → `update()`
-  returns `{}` → `on_batch_ready` isn't called → no scan → ingest's `content_changed` swap path
-  (`seestack/io/ingest.py` ~326, which refreshes the stale WCS/QC so the frame isn't stacked at its old sky
-  position) never runs. It **self-heals**: any *other* new file anywhere in the dataset, a manual "Scan incoming",
-  or an app restart (fresh `StabilityTracker`) triggers a full re-glob that re-ingests the swap and picks it up. So
-  it's a latency gap on a dormant target, not silent corruption. **Fix direction (small, additive):** when a path in
-  `_stable` reappears in the snapshot with a *changed* `(size, mtime)`, drop it from `_stable` and restart its
-  quiet timer (re-arm), mirroring the disappear-then-return path that already re-arms. Pure, clock-injectable — add a
-  `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
-  once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
+  IN PLACE, so ingest's deliberate in-place-swap recovery is unreachable via the watcher alone.**~~ —
+  **FIXED v0.276.5** (Builder 2026-08-26, branch `claude/compassionate-galileo-c8yo7r`). *(Autonomy /
+  completeness — the fix makes already-shipped recovery code reachable.)*
+
+  **What shipped, exactly as the fix direction below asked.** `StabilityTracker` now remembers the
+  `(size, mtime)` a path had **when it went stable** (`_stable_stat`), and a path that reappears in the snapshot
+  with a *different* stat is dropped back to pending so its quiet timer restarts and it fires again once the
+  rewrite settles — the same re-arm the disappear-then-return path already had, for the case where the file
+  never disappears. Pruned alongside `_stable`, so a path that vanishes leaves no stale stat behind and a later
+  file of the same name starts from scratch.
+
+  **Cost of the one false-positive shape, stated plainly:** a benign `touch` that moves only the mtime now costs
+  one extra scan. That scan is idempotent — ingest recognises the identical capture (`_same_capture`) and does
+  nothing — so the trade is one wasted glob against a frame that would otherwise stack at a stale sky position
+  forever.
+
+  **Upgrade-safe (§9):** one private in-memory dict on a per-process object; no config, schema, on-disk, API or
+  default change, and nothing persisted. Still strictly read-only over `incoming/` (§10) — the tracker only ever
+  *stats*.
+
+  **Tests (+3 in `tests/webapp/test_watcher.py`, 1 fails before):** the in-place rewrite re-arming and firing
+  once (then settling rather than re-firing every poll); the no-regression half — an untouched stable file
+  reported exactly once however many polls and neighbours go by; and a rewritten-then-deleted path leaving no
+  stale state. The *ingest* half the note asked to validate alongside was already pinned
+  (`tests/test_ingest.py` — the different-capture in-place swap dropping its stale WCS/QC, and the
+  benign-touch no-op), so the two halves are now covered end to end.
+
+  Original spec, for the record:
+
+    *(Severity:
+    low — completeness/latency, not data corruption; the Seestar never overwrites (it writes fresh `frame_NNNN`
+    names), so this only bites an unusual NAS-resync-in-place. Confidence: traced.)*
+    `StabilityTracker.update` (`webapp/watcher.py`): a path already in `self._stable` is `continue`d **before** any
+    size/mtime comparison (~line 62), and `self._stable &= seen` (~line 81) only drops a path from `_stable` when it
+    *disappears* from the snapshot. So a sub that already went stable, then is overwritten in place (same filename, new
+    content, without vanishing) with **no other new file arriving**, is never re-detected as newly-stable → `update()`
+    returns `{}` → `on_batch_ready` isn't called → no scan → ingest's `content_changed` swap path
+    (`seestack/io/ingest.py` ~326, which refreshes the stale WCS/QC so the frame isn't stacked at its old sky
+    position) never runs. It **self-heals**: any *other* new file anywhere in the dataset, a manual "Scan incoming",
+    or an app restart (fresh `StabilityTracker`) triggers a full re-glob that re-ingests the swap and picks it up. So
+    it's a latency gap on a dormant target, not silent corruption. **Fix direction (small, additive):** when a path in
+    `_stable` reappears in the snapshot with a *changed* `(size, mtime)`, drop it from `_stable` and restart its
+    quiet timer (re-arm), mirroring the disappear-then-return path that already re-arms. Pure, clock-injectable — add a
+    `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
+    once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26 #5, branch `claude/vigilant-knuth-t39r9x`) — led the rotation back
   through the stacking engine's remaining un-swept surface (the accumulators, mosaic-canvas sizing, the
@@ -724,33 +766,68 @@ _(none — claim an item here with your branch name)_
       `transparency_score` is byte-for-byte unchanged — the guard is safe on the no-data path. Size S (one guard
       + a provenance card + the measurement test).
 
-- **🟠 FOLLOW-ON TO THE v0.271.1 DRIZZLE AUTO-REJECT DIRECTLY BELOW — auto-enabling it at option-build time
+- ~~**🟠 FOLLOW-ON TO THE v0.271.1 DRIZZLE AUTO-REJECT DIRECTLY BELOW — auto-enabling it at option-build time
   can turn a large drizzled mosaic that produces a picture today into a hard MemoryError REFUSAL, and on the
-  walk-away path nobody is watching to act on the advice.** *(Severity: an unattended stack that silently
-  stops producing pictures — worse than the satellites it removes. Confidence: HIGH, traced + arithmetic, not
-  yet reproduced on a real canvas. Small fix.)*
-  *(Filed by the Builder who implemented the same feature concurrently, engine-side and budget-aware, and
-  reverted it in favour of the shipped pipeline version rather than stacking two implementations — branch
-  `agent/mosaic-photometric-per-panel`, commit "Revert the drizzle auto-reject fix". The version there is a
-  ready reference implementation.)*
-  **The arithmetic:** two-pass drizzle rejection holds `_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT = 7` full-canvas
-  RGB float32 arrays against the single pass's `_PEAK_CANVAS_ARRAYS = 4` (`seestack/stack/stacker.py` ~70) —
-  a **1.75× jump in the memory estimate**, charged by `_guard_stack_memory`, which *raises* rather than
-  degrading. `_stack_memory_budget_bytes` defaults to ~70% of available RAM, so whether an install crosses
-  the line depends entirely on its canvas and its box; the owner drizzles ×1.5 on a mosaic union canvas,
-  which is the largest canvas this app produces. Before v0.271.1 that guard was never charged on the
-  walk-away path, so this is a *new* way for an unattended run to fail.
-  **Why the pipeline can't fix it:** `_stack_target` builds the options **before** any canvas exists — the
-  union canvas is computed inside `run_stack` — so it cannot know whether the extra pass fits.
-  **Fix direction:** decide it in the engine, where the canvas is known, and make it **fail-safe**: when the
-  two-pass estimate exceeds the budget and the single pass fits, log it plainly and stack *without* the
-  rejection rather than refusing the run — the picture matters more than the pass. The reverted commit does
-  exactly this in `_auto_drizzle_reject`, with `run_stack`'s dispatch, memory guard and in-flight cap all
-  reading one resolved `eff.drizzle_reject` so the three can't disagree, plus `estimate_stack` mirroring it;
-  it also carries the test (a budget the single pass fits and the two-pass one doesn't → declines; room for
-  both → takes it). **Keep the distinction the revert had to give up:** an *explicitly* ticked
-  `drizzle_reject` on a manual stack should still refuse loudly with its actionable advice — the user is
-  watching and can drop the drizzle scale. Only the auto-enabled case should degrade quietly.
+  walk-away path nobody is watching to act on the advice.**~~ — **FIXED v0.276.3** (Builder 2026-08-26, branch
+  `claude/compassionate-galileo-c8yo7r`). *(Autonomy, priority 2 — an unattended stack that stops producing
+  pictures at all.)*
+
+  **What shipped.** `stacker._afford_drizzle_reject` answers, in the one place that can, whether the two-pass
+  rejection actually runs: it folds in the existing `n >= 4` floor, passes an **explicitly** ticked
+  `drizzle_reject` straight through (that user is watching, and the refusal names a fix — "lower the drizzle
+  scale to ×1.3" — they can act on), and for a rejection the app switched on *for* the user (`auto_reject`,
+  which is exactly what `_stack_target` sets alongside it) prices the two-pass canvas against the memory
+  budget and **declines it when it doesn't fit**. The run then proceeds precisely as it did before v0.271.1
+  ever auto-enabled the pass, instead of raising `MemoryError` at 3 a.m. with nobody there to lower the scale.
+
+  **Only the rejection is forgiven, never the canvas.** The helper returns the *single-pass* answer, so a
+  canvas that is over budget without the pass too is still refused by `_guard_stack_memory` — with the message
+  and the `_best_memory_fix` suggestion computed for the run that would actually be attempted, not for planes
+  it had already declined to allocate. `run_stack`'s dispatch, memory guard and in-flight cap now all read one
+  resolved `eff.drizzle_reject`, so the three can't disagree about which pass is running, and `estimate_stack`
+  mirrors it so the pre-submit estimate stops warning about a pass the run would decline.
+
+  **Surfaced, not silent:** a plainly-worded `log.warning` with both figures and how to get the pass back, plus
+  a `DRZREJSK = 'memory'` FITS card so the finished picture self-documents *why* it carries no `REJMODE` long
+  after the server log has rolled. The Stack form's help text now says unattended stacks turn the pass on for
+  themselves "when there's memory for it".
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API or default change, and no new `StackOptions` key —
+  `auto_reject` (engine default `False`, form default `False`) already carries the "I expressed no preference"
+  meaning this needs. Every explicit run, every non-drizzle run and every run that fits is byte-for-byte what
+  it was.
+
+  **Tests (+5 in `tests/test_drizzle_reject.py`, all fail before):** the auto decline on a budget that fits one
+  pass but not two and the take when there's room; an explicit tick still refusing loudly; the
+  never-hide-an-oversized-canvas rail (and that its message drops the "with outlier rejection" clause); the
+  `n < 4` / drizzle-off / reject-off folds; and the end-to-end proof — the same 8-sub drizzled stack on the
+  same budget raising `MemoryError` when ticked explicitly and **producing its picture** (with
+  `DRZREJSK`, without `REJMODE`) on the unattended shape, with `estimate_stack` agreeing in both directions.
+
+  Original spec, for the record:
+
+    *(Filed by the Builder who implemented the same feature concurrently, engine-side and budget-aware, and
+    reverted it in favour of the shipped pipeline version rather than stacking two implementations — branch
+    `agent/mosaic-photometric-per-panel`, commit "Revert the drizzle auto-reject fix". The version there is a
+    ready reference implementation.)*
+    **The arithmetic:** two-pass drizzle rejection holds `_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT = 7` full-canvas
+    RGB float32 arrays against the single pass's `_PEAK_CANVAS_ARRAYS = 4` (`seestack/stack/stacker.py` ~70) —
+    a **1.75× jump in the memory estimate**, charged by `_guard_stack_memory`, which *raises* rather than
+    degrading. `_stack_memory_budget_bytes` defaults to ~70% of available RAM, so whether an install crosses
+    the line depends entirely on its canvas and its box; the owner drizzles ×1.5 on a mosaic union canvas,
+    which is the largest canvas this app produces. Before v0.271.1 that guard was never charged on the
+    walk-away path, so this is a *new* way for an unattended run to fail.
+    **Why the pipeline can't fix it:** `_stack_target` builds the options **before** any canvas exists — the
+    union canvas is computed inside `run_stack` — so it cannot know whether the extra pass fits.
+    **Fix direction:** decide it in the engine, where the canvas is known, and make it **fail-safe**: when the
+    two-pass estimate exceeds the budget and the single pass fits, log it plainly and stack *without* the
+    rejection rather than refusing the run — the picture matters more than the pass. The reverted commit does
+    exactly this in `_auto_drizzle_reject`, with `run_stack`'s dispatch, memory guard and in-flight cap all
+    reading one resolved `eff.drizzle_reject` so the three can't disagree, plus `estimate_stack` mirroring it;
+    it also carries the test (a budget the single pass fits and the two-pass one doesn't → declines; room for
+    both → takes it). **Keep the distinction the revert had to give up:** an *explicitly* ticked
+    `drizzle_reject` on a manual stack should still refuse loudly with its actionable advice — the user is
+    watching and can drop the drizzle scale. Only the auto-enabled case should degrade quietly.
 
 - ~~**🟡 IMAGE QUALITY (found incidentally, 2026-08-17 audit; the core claim is now CONFIRMED by code trace, Scout
   2026-08-26) — the drizzle path runs with NO outlier rejection at all on walk-away stacks.**~~ —
@@ -7600,23 +7677,98 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Scout 2026-08-26 #4, grounded in the plate-solve audit) — when subs fail to plate-solve because
+- **NEW IDEA (Builder 2026-08-26, spotted while shipping the drizzle-rejection affordability fix v0.276.3) —
+  a walk-away stack whose *canvas* busts the memory budget still hard-refuses, even though the engine already
+  knows the exact one-line change that would make it fit.** *(Pillar: autonomy — PRIORITY 2. Size: M.)*
+  `_best_memory_fix` (`seestack/stack/stacker.py`) already computes the single least-destructive lever and the
+  memory it lands at — *"lower the drizzle scale to ×1.3 (~4.2 GB)"*, *"switch Canvas mode to 'reference'"*,
+  *"lower Extra outlier passes to 1"* — and both the pre-submit estimate and the run-time refusal quote it. That
+  is exactly right for a **watching** user: they read the advice and click the button. On the **walk-away** path
+  nobody reads it, so the target simply stops producing pictures until the owner next looks at the Jobs page.
+  v0.276.3 established the pattern for precisely this asymmetry on the rejection pass (auto-chosen ⇒ degrade
+  quietly; explicitly ticked ⇒ refuse loudly with the advice). **Shape:** on an unattended run only, when
+  `_best_memory_fix` returns a `drizzle_scale` fix, apply it instead of raising — log it plainly, stamp it in
+  provenance (a `DRZSCLAD`-style card beside `DRZREJSK`), and surface it once on the Target page's notes area
+  in the shipped voice (*"Last night's stack used ×1.3 super-resolution instead of ×1.5 — the bigger canvas
+  didn't fit in memory. Your picture is slightly less zoomed-in but nothing was lost."*). **Cautions:** a
+  *smaller drizzle scale changes the output pixel grid*, so a target's runs would no longer all be the same
+  size — decide deliberately whether that is acceptable (it probably is: a picture at ×1.3 beats no picture, and
+  the editor/History already handle per-run shapes). Do **not** auto-apply `reference_canvas` on a mosaic
+  unattended — silently cropping the field a user spent five nights building is a different order of change and
+  belongs behind the owner's sign-off. Reuse `auto_reject` as the "the user expressed no preference" signal, as
+  `_afford_drizzle_reject` does, so a manual stack is untouched. Testable purely against the estimator (a budget
+  that fits ×1.3 but not ×1.5 → the unattended run produces a ×1.3 picture; the manual one still raises).
+
+- **NEW IDEA (Builder 2026-08-26, spotted while adding the "ran out of time being located" bucket v0.276.4) —
+  the "why were some frames left out?" buckets give advice in prose but can't link to the thing they name, so
+  every piece of advice ends in a hunt.** *(Pillar: friendliness — PRIORITY 3. Size: S.)* The buckets now say
+  things like *"raise the ASTAP timeout in Settings and run Plate Solve again"* and *"Run Plate Solve to include
+  them"* — correct, plain-language, and entirely un-clickable: `RejectionBreakdown.tsx` renders label + count +
+  note as text. A beginner then has to find which of the Settings pages holds "ASTAP timeout". **Shape:** let a
+  bucket carry an optional `action: {label, to}` (a route, e.g. `/settings/solving`, or a same-page anchor)
+  built server-side beside the note, and have `RejectionBreakdown` render it as one small `Anchor`/`Button`
+  under the note when present. Purely additive to an existing response field, generic (every future bucket gets
+  it for free), and self-hiding on older backends that omit it. **Beginner bar:** it removes a navigation step
+  from advice the app already decided to give — no new concept, no new knob. Pairs with the existing
+  `solve_setup_problem` banner, which *does* already link, so the two would finally behave the same way.
+
+- ~~**NEW IDEA (Scout 2026-08-26 #4, grounded in the plate-solve audit) — when subs fail to plate-solve because
   ASTAP *timed out* (not because the database/ASTAP is missing), say so and offer the one obvious fix: raise the
-  timeout.** *(Pillar: autonomy + friendliness — PRIORITY 3. Size: S–M.)* The reject-summary already classifies
-  solve *setup* problems (ASTAP missing / no star database → a "install this" banner, `frames._solve_setup_problem`),
-  but a distinct, common failure — a marginal or star-poor sub that ASTAP simply couldn't crack within
-  `astap_timeout_s` before the ladder gave up — is today indistinguishable from "not located yet" in the UI, so a
-  beginner whose subs are genuinely solvable-but-slow (a hazy night, a big-radius blind search) gets no hint that
-  *raising the timeout* would rescue them. Since the timeout bug above shows an unsolvable frame can already burn
-  3× the setting, this is doubly worth surfacing. **Shape:** have the solver/runner record a distinct
-  `solve_failed:timeout` reason (the `ASTAPError` message already contains "timed out"; classify it the way
-  `classify_solve_setup_error` classifies the setup cases), tally it in `reject_summary`, and when it dominates the
-  unsolved bucket render one plain line on the Target "why were some frames left out?" card: *"N subs ran out of
-  solving time — they'll retry next scan. If this keeps happening on a hazy night, raise the ASTAP timeout in
-  Settings."* with a link. **Beginner bar / feasibility:** plain-language, actionable, self-hides unless timeouts
-  dominate; offline, additive (a new reason string + a summary bucket + one card line), read-only, unit-testable
-  (a tally of timeout reasons → the line; a tally without them → nothing). Pairs naturally with fixing the
-  `astap_timeout_s` label so the number the user then raises actually means what they think.
+  timeout.**~~ — **SHIPPED v0.276.4** (Builder 2026-08-26, branch `claude/compassionate-galileo-c8yo7r`).
+  *(Pillar: autonomy + friendliness — PRIORITY 2–3.)*
+
+  **What shipped, exactly as filed.** `ASTAPSolver.solve` now leads the error it raises when *every* rung of the
+  ladder ran out of time with a canonical `solve timed out` token (`SOLVE_FAILED_TIMEOUT`), and
+  `apply_solve_result_to_db` stores it as the stable reason `solve_failed:solve timed out` — the same
+  canonicalise-so-it-can-be-tallied trick the ASTAP-missing / no-star-database setup reasons already use, and for
+  the same reason: the raw log tail is per-frame text, truncated to 120 chars, that no tally can group.
+  `Project.count_accepted_unsolved_with_reason` counts them (a subset of `count_accepted_unsolved`, exactly like
+  `count_accepted_unreadable`), `reject_summary` passes the count, and `summarize_rejections` splits them out of
+  the *"Not located in the sky yet — run Plate Solve"* bucket into their own: **"Ran out of time being located"**
+  — *"The star-matcher tried every strategy on these and ran out of time before it found a match — often a hazy
+  or star-poor sub. They'll be tried again on the next scan; if it keeps happening, raise the ASTAP timeout in
+  Settings and run Plate Solve again."* Plus two headline verdicts: one when the timeouts dominate the dropped
+  frames, one when they outnumber what actually stacked.
+
+  **Narrow on purpose.** Only a frame where *every* rung timed out is classified: a rung that ran to completion
+  and reported no catalog match is an ordinary per-frame failure, and raising the timeout would not rescue it —
+  telling a beginner otherwise is wrong advice. A setup problem still wins over the timeout classification, so
+  the "install ASTAP / a star database" banner can never be displaced by a "raise the timeout" line that can't
+  help.
+
+  **No frontend work.** `RejectionBreakdown` renders whatever buckets the server sends (label + count + note), so
+  the new bucket and its advice reach the Target page with zero React changes — and self-hide (zero-count buckets
+  are omitted server-side) on every install that never times out.
+
+  **Upgrade-safe (§9):** additive only — a new constant, a new engine helper, an extra *keyword* argument
+  defaulted to 0, and one more optional bucket inside an existing response field. No config, schema, on-disk,
+  endpoint or default change; omitting the new count reproduces today's output byte-for-byte (pinned by a test),
+  and an older frontend renders the new bucket generically.
+
+  **Tests (+11, all fail before):** `test_rejection_summary.py` (the split; coexisting with unreadable subs; the
+  clamp; the backward-compatible default; the dominant verdict; the plate-solve nudge still winning when untried
+  subs dominate; a rejected timed-out frame bucketing the same way), `test_astap.py` (the canonical token on an
+  all-timeout ladder, a finished-but-unmatched rung *not* called a timeout, the classifier ignoring unrelated
+  text), `test_solve_runner.py` (the stored reason + its count; an ordinary failure keeping its raw reason; setup
+  winning over timeout) and `test_api.py` end to end through the endpoint.
+
+  Original spec, for the record:
+
+    *(Pillar: autonomy + friendliness — PRIORITY 3. Size: S–M.)* The reject-summary already classifies
+    solve *setup* problems (ASTAP missing / no star database → a "install this" banner, `frames._solve_setup_problem`),
+    but a distinct, common failure — a marginal or star-poor sub that ASTAP simply couldn't crack within
+    `astap_timeout_s` before the ladder gave up — is today indistinguishable from "not located yet" in the UI, so a
+    beginner whose subs are genuinely solvable-but-slow (a hazy night, a big-radius blind search) gets no hint that
+    *raising the timeout* would rescue them. Since the timeout bug above shows an unsolvable frame can already burn
+    3× the setting, this is doubly worth surfacing. **Shape:** have the solver/runner record a distinct
+    `solve_failed:timeout` reason (the `ASTAPError` message already contains "timed out"; classify it the way
+    `classify_solve_setup_error` classifies the setup cases), tally it in `reject_summary`, and when it dominates the
+    unsolved bucket render one plain line on the Target "why were some frames left out?" card: *"N subs ran out of
+    solving time — they'll retry next scan. If this keeps happening on a hazy night, raise the ASTAP timeout in
+    Settings."* with a link. **Beginner bar / feasibility:** plain-language, actionable, self-hides unless timeouts
+    dominate; offline, additive (a new reason string + a summary bucket + one card line), read-only, unit-testable
+    (a tally of timeout reasons → the line; a tally without them → nothing). Pairs naturally with fixing the
+    `astap_timeout_s` label so the number the user then raises actually means what they think.
 
 - ~~**NEW IDEA (Scout 2026-08-26, verified in code) — surface the walk-away "held back: some subs aren't
   readable" reason on the Target page (and Dashboard target card), not only on the Jobs page.**~~ —
