@@ -179,6 +179,47 @@ _(none — claim an item here with your branch name)_
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #13, branch `claude/vigilant-knuth-ns5hys`) — a **breadth** sweep:
+  led with the stacking engine per the rotation, then fanned four independent adversarial audits across the
+  areas due for rotation (render, QC, stack combine/weighting/output, and the guardrail-critical webapp
+  render/stack/gallery routers), and closed with a **live mixed-quality auto-stack dogfood**. Result: CLEAN
+  across the board — no verified bug this run, the fourth consecutive clean engine sweep (#10–#13). Baseline
+  green (full headless suite; see the run's commit). Also curated two Ideas entries that had shipped since they
+  were filed (see the Autonomy & friendliness section) and added a new beginner feature + two improvement
+  ideas.**
+  **What was read adversarially and traced (each finding below is a NON-finding — traced to a guard, not a bug):**
+  **render** (`thumbnail.py`, `deepening.py`, `orient.py`, `colormap.py`) — every stretch/percentile stat is
+  NaN-excluding (`np.nanmin`/`np.nanpercentile`/`_robust_median_sigma(finite)`), uncovered pixels only ever
+  become 0/black at the *final display* step (`np.nan_to_num`), never inside a reduction; `np.rot90(k)` verified
+  equivalent to `PIL.rotate(k·90)` for the 2×2 and negative-angle cases (no axis/sign error); MTF/asinh
+  midtones clamp away from their singularities so no clip/invert path; the baked `_preview.png` and
+  `render_preview_png_full_res` share `_autostretch_for_export`, so preview↔export match; the `_downsample_rgb`
+  NaN→`nanmin` floor is confirmed no-op on its only two callers (both feed a raw NaN-free sub) — matches the
+  latent-not-live note already in this file. **QC** (`streaks.py`, `noise_ratio.py`, `sky_quality.py`,
+  `metrics.py`, `runner.py`) — all four Bayer layouts map the two green sites correctly and `green_channel`
+  promotes to float32 *before* the add (no uint16 wrap); FWHM border check uses the right axis extents; every
+  median metric appends only finite fits so a NaN can't sort a frame to best/worst; streak accept/reject sign
+  correct and `detect_streaks` needs area≥8 ∧ major≥80px ∧ elongation≥4 (round stars can't qualify, stationary
+  extended targets are re-accepted by `reconcile_streak_rejections`); MAD-on-constant/empty → `None`, not a
+  divide. **stack combine/weighting/output** (`accumulator.py`, `weighting.py`, `photometric.py`,
+  `pointings.py`, `channel_combine.py`, `output.py`) — `WeightedSum` returns NaN wherever `_weight==0` (gap
+  survives), all five quality factors are `clip(min_weight,1)` so the geometric mean is provably in
+  `[min_weight,1]`, `combine_weights_with_photometric` folds `1/s²` only on a genuinely-applied scale
+  (`s>0 ∧ |s−1|>1e-9`, `s∈[0.5,2]`), photometric `scale=clip(ref/transparency,lo,hi)` guards both `ref>0` and
+  `transparency>0`, `pointing_groups` self-disables on a single field (byte-for-byte the OSC path), `_count` is
+  uint32 (no overflow), and float32 accumulation error is sub-0.1 ADU at realistic sub counts. **webapp routers**
+  (`stack.py`, `pipeline.py`, `gallery.py`) — `{safe}` resolves only through `Library.find_target` (404s an
+  unknown, never composes a path), all served artifact paths come from the run row not the client,
+  client `output_name` passes through `_sanitize_basename` (`../../etc/passwd`→`etc_passwd`), render query
+  params clamp via `_clamp`/typed ints (no NaN crash), every encoder `nan_to_num`+`clip` before uint8, the
+  auto-edit vs editor-export full-res render forks correctly (parity), and the gallery/best-pictures/video-stills
+  list endpoints all degrade per-item under `except…continue` (the v0.277.6 boundary holds).
+  **Live dogfood (the part code review can't do):** built a 14-sub dithered synthetic target (two satellite
+  streaks, one hazy sub, per-frame independent noise) and ran the real `run_stack(auto_reject=True,
+  quality_weighted=True, photometric_normalize=True)`. Result clean and trustworthy — auto-reject fired
+  (`REJFRAC≈0.016`, clipping the streaks), 96.9 % finite with the ragged dither corners correctly NaN, no
+  inf/garbage, sky-subtracted linear output centred near zero (median ≈ 2.2 ADU) with star cores preserved
+  (p99.9 ≈ 1146 ADU). The stack→result path is doing the right thing end to end.
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #12, branch `claude/vigilant-knuth-f9chv3`) — led with the stacking
   engine again, then rotated onto the data-integrity path the last real bug lived in (scanner + ingest), and
   **closed with a live end-to-end auto-stack dogfood** rather than pure code review. Result: CLEAN — no verified
@@ -8061,8 +8102,20 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Scout 2026-08-27 #12) — tell the owner *on the Target page* when a walk-away scan deliberately
-  held their picture back, so "why didn't last night refresh my image?" has a visible answer.** *(Pillar:
+- ~~**NEW IDEA (Scout 2026-08-27 #12) — tell the owner *on the Target page* when a walk-away scan deliberately
+  held their picture back.**~~ — **CORE SHIPPED (curated by Scout #13, 2026-08-27).** The *unreadable-hold* half
+  is live: `GET /api/targets/{safe}/autostack-hold` (`webapp/routers/targets.py:348`) reads the newest scan's
+  `auto_stack_held_unreadable` per-target, and `frontend/src/components/AutoStackHoldNote.tsx` (rendered in
+  `routes/Target.tsx`, tested in `AutoStackHoldNote.test.tsx`) shows the calm self-clearing one-liner exactly as
+  proposed. **Remaining open slice (re-scoped, Size: S):** the endpoint/note only surface the *unreadable* hold,
+  not the **held-thin** (`auto_stack_held_thin`) or **mixed-pointing** (`auto_stack_mixed_skipped`) cases, which
+  `webapp/pipeline.py` already computes into the same scan summary. Extend `target_autostack_hold` to fall back
+  to those two keys (with their own copy — "kept your existing picture because last night's frames were thinner /
+  from a different framing") so all three hold reasons have a Target-page answer, not just one. Grep-confirm they
+  aren't surfaced elsewhere first (`ambient/voicing.ts` and `mixedPointings.ts` mention thin/mixed but for other
+  surfaces). Original idea kept below for the record.
+
+    *(Pillar:
   autonomy + trust — PRIORITY 2–3. Size: S. Confidence the gap is real: traced this run — grep first, see the
   caveat.)* The v0.270.1 walk-away readability preflight (`_auto_stack_readability_hold`, `webapp/pipeline.py`)
   is exactly right to *not* publish a thinner, noisier stack when some of a target's accepted subs have no file
@@ -8120,9 +8173,21 @@ to **Shipped**.)_
   both runs carrying a finite `noise_sigma` (pre-schema-6 runs send `None` → no nudge). Read-only roll-up + one
   copy string + reuse of an existing mutation; no engine or schema change.
 
-- **NEW IDEA (Scout 2026-08-27 #10) — "This looks like M31": offline auto-identify an un-named / Unsorted
-  target from its solved centre against the bundled catalog, in the web app.** *(Pillar: autonomy +
-  friendliness — PRIORITY 2–3. Size: S–M.)* A beginner who drops loose FITS, or a folder the Seestar named
+- **NEW IDEA (Scout 2026-08-27 #10, PARTLY SHIPPED — re-scoped by Scout #13, 2026-08-27) — "This looks like M31":
+  offline auto-identify an un-named / Unsorted target from its solved centre against the bundled catalog, in the
+  web app.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size of the REMAINING slice: S.)*
+  **⚠ The engine + backend + read-only card already shipped since this was filed** — `GET
+  /api/targets/{safe}/identify` (`webapp/routers/targets.py:299`) calls `seestack.objectinfo.identify_object`,
+  which "matches by the target's name first, then by its plate-solved centre if one is known" and reports
+  `matched_by`; `frontend/src/components/ObjectInfoCard.tsx` renders it and even shows *"Identified from this
+  target's plate-solved position."* when `matched_by === "coords"`. So slices (a) engine + (b) backend are DONE.
+  **Remaining open slice:** the card *identifies* but never offers to **rename** an `Unsorted`/folder-named
+  target — there is no "use this name?" affordance wired to the existing rename path. Add just that: when the
+  target's stored name is generic/Unsorted and `identify` matched by coords with a confident separation, show a
+  dismissible one-click "Rename to **{name}**?" chip on the card (reuse the existing `PATCH /api/targets/{safe}`
+  rename; never auto-rename). Everything below is now historical context for that last chip.
+
+    A beginner who drops loose FITS, or a folder the Seestar named
   something un-obvious, ends up with a target tile reading `Unsorted` or a cryptic folder name — and no plain
   hint of what it actually is. Once the target is plate-solved it *has* a centre (`TargetEntry.ra_deg/dec_deg`),
   and we already ship the offline catalog, so we can say "This looks like **M31 (Andromeda Galaxy)** — rename?"
@@ -14942,6 +15007,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #13) — "Framed keepsake": a one-tap, print-and-share-ready export of
+  a finished picture with a tasteful matte border and the object's name, capture date, and total integration
+  time baked into the image itself.** *(Pillar: enjoy + share — PRIORITY 3. Size: M. Confidence the gap is real:
+  grepped this run — the share path shares the *raw* JPEG with only a share-sheet caption; nothing bakes a
+  titled/bordered keepsake into the pixels.)*
+  **The gap.** Today `SharePictureButton` (`frontend/src/components/SharePictureButton.tsx`) opens the OS share
+  sheet with the run's bare JPEG plus a pre-filled *text* caption (`sharePictureText`, `src/share.ts:106`). But
+  on Instagram / Messages / a printed 6×4, **the caption text doesn't travel with the picture** — the beginner
+  ends up with an unlabelled rectangle and no record of what it is or how much light it took. Every "proper"
+  astrophoto a beginner admires online is a *titled, framed* keepsake; we produce only the raw frame.
+  **The feature.** A *"Save as keepsake"* action (next to Share/Download) that composites the finished picture
+  onto a small matte with a caption strip: **object name** (from the target / the `identify` card that already
+  exists), **capture date**, and **total integration** (e.g. "2 h 14 m · 132 subs") — every field the app already
+  computes (`session-recap` / integration-goal machinery expose the integration total; the target carries name +
+  date). Output is one self-contained PNG/JPEG the user can post or print, with the story baked in.
+  **Why it clears the beginner bar:** zero knowledge required, a sane default layout (dark matte, small serif
+  caption, the app never asks the user to design anything), plain-language fields, and it is **purely additive** —
+  a new export artefact beside the existing ones; the raw picture, the FITS, and every current surface are
+  untouched. Not a pro knob.
+  **Why it's cheap:** the compositing is the montage/annotation pattern already in the codebase
+  (`seestack/montage.py`, the annotation renderer, and the recap-poster path `GET /api/recap.jpg` which *already*
+  renders a captioned hero image server-side — the keepsake is the same shape scoped to one run). Reuse
+  `write_share_jpeg`'s encode. **Pairs naturally with** the #12 "Scale & sky-compass" idea below (a keepsake with
+  a scale bar is the complete package) and the #13 curation note that `identify` already supplies the object's
+  proper name. Additive/offline/upgrade-safe; new endpoint + one button, no schema/default/API removal.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
   intuitive units) plus a North/East compass baked into a shared/exported picture, so a beginner's shot reads
