@@ -99,6 +99,13 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
       }
     >
       <Text size="sm">{`${v.object_name} ${v.text}`}</Text>
+      {/* "Re-centre it next session" is only advice you can act on once you know
+          which way. Absent on an older backend, or where a re-point isn't the fix. */}
+      {v.nudge ? (
+        <Text size="sm" mt={6} data-testid="framing-nudge">
+          {v.nudge.text}
+        </Text>
+      ) : null}
       {offerRecentre && recentre ? (
         <Text size="sm" mt={6}>
           <Anchor component={Link} to={`/targets/${safe}/edit/${runId}?recentre=1`}

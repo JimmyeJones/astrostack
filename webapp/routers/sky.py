@@ -131,6 +131,13 @@ def get_sky(request: Request) -> SkyResponse:
                 if run is None:
                     continue
                 pixscale, rotation = _representative_pixscale_rotation(proj)
+                # History's "Adjust" can save a preview rotated North-up. That
+                # picture is no longer a plain downscale of the canvas, so both
+                # the tile's geometry and its WCS have to be taken through the
+                # same rotation — otherwise the map places the un-rotated canvas
+                # under a rotated image. 0.0/NULL (every ordinary run) composes
+                # nothing and is unchanged.
+                north_up_deg = run.preview_north_up_deg or 0.0
                 # Prefer the stack's *stored* canvas WCS for the tile's size and
                 # rotation too — that is the true union-canvas geometry the pixels
                 # were reprojected onto, so a mosaic (or a rotated canvas) is sized
@@ -138,7 +145,10 @@ def get_sky(request: Request) -> SkyResponse:
                 # grid. Mirrors the `wcs`/Aladin path below (same fix, both viewers
                 # now agree). Fall back to the single-frame pixscale/rotation when
                 # the master FITS is missing/headerless (older/edited runs).
-                extent = canvas_extent_from_fits(run.fits_path) if run.fits_path else None
+                extent = (
+                    canvas_extent_from_fits(run.fits_path, north_up_deg=north_up_deg)
+                    if run.fits_path else None
+                )
                 if extent is not None:
                     width_deg, height_deg, rotation = extent
                 elif pixscale:
@@ -159,8 +169,9 @@ def get_sky(request: Request) -> SkyResponse:
                     if run.fits_path:
                         wcs = wcs_dict_rescaled_to_preview(
                             run.fits_path, size[0], size[1],
+                            north_up_deg=north_up_deg,
                         )
-                    if wcs is None:
+                    if wcs is None and not north_up_deg:
                         wcs = _tan_wcs(
                             float(t.ra_deg), float(t.dec_deg), width_deg,
                             size[0], size[1], rotation or 0.0,
@@ -177,7 +188,9 @@ def get_sky(request: Request) -> SkyResponse:
                     # so an irregular mosaic shows its true footprint on the sky,
                     # not the opaque black rectangle the plain `preview` PNG is.
                     # Same pixel grid as the preview, so `wcs` (built from the
-                    # preview size above) still places it correctly.
+                    # preview size above) still places it correctly — including
+                    # a North-up-saved preview, whose coverage mask the overlay
+                    # endpoint takes through the same rotation.
                     preview_url=f"/api/targets/{t.safe_name}/stack-runs/{run.id}/sky-overlay",
                     timestamp_utc=run.timestamp_utc,
                     run_id=run.id,

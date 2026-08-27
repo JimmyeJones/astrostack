@@ -468,6 +468,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             transparency_ratio=r.transparency_ratio,
             noise_sigma=r.noise_sigma,
             stack_fwhm_px=r.stack_fwhm_px,
+            preview_north_up_deg=r.preview_north_up_deg,
             seam_residual=r.seam_residual,
             seam_verdict=seam_verdict(r.seam_residual),
             calstat=r.calstat,
@@ -742,7 +743,12 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
     mask, so the mosaic shows its true shape. Same pixel grid/dimensions as the
     preview, so the WCS built for the preview grid still places it (unchanged
     placement). Falls back to the opaque preview when there's no FITS to derive
-    coverage from (older/edited runs), so it never regresses to a 404."""
+    coverage from (older/edited runs), so it never regresses to a 404.
+
+    When the stored preview was saved **North-up** (History's "Adjust"), the
+    coverage mask is taken through the same rotation before compositing — the mask
+    comes off the un-rotated FITS, so without that its transparent regions land
+    where the picture no longer is."""
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
@@ -755,14 +761,19 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
     if not preview_path or not Path(preview_path).exists():
         raise HTTPException(status_code=404, detail="No preview for this run")
     fits_path = run.fits_path
+    north_up_deg = run.preview_north_up_deg or 0.0
 
+    from seestack.render.orient import rotate_mask_north_up
     from seestack.render.thumbnail import overlay_rgba_png, stack_coverage_mask
 
     def work() -> bytes:
         preview = Path(preview_path).read_bytes()
         if fits_path and Path(fits_path).exists():
             try:
-                return overlay_rgba_png(preview, stack_coverage_mask(fits_path))
+                mask = stack_coverage_mask(fits_path)
+                if north_up_deg:
+                    mask = rotate_mask_north_up(mask, north_up_deg)
+                return overlay_rgba_png(preview, mask)
             except Exception:  # noqa: BLE001 — a broken FITS just serves the opaque preview
                 return preview
         return preview
@@ -891,7 +902,9 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
         return None
 
     def work() -> dict[str, Any] | None:
-        from seestack.framing import framing_result_verdict, recentre_outcome
+        from seestack.framing import (
+            framing_result_verdict, recentre_nudge, recentre_outcome,
+        )
         from seestack.io.wcs_io import celestial_wcs_from_fits
 
         wcs, width, height = celestial_wcs_from_fits(fits_path)
@@ -902,6 +915,14 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
             x_px, y_px = float(xs), float(ys)
         except Exception:  # noqa: BLE001 — a degenerate WCS just means "no verdict"
             return None
+        # Where this picture's middle actually pointed, so "re-centre it" can name
+        # a direction. Read from the same WCS, in sky coordinates — which is why
+        # it survives a rotated canvas without any orientation guesswork.
+        try:
+            cra, cdec = wcs.all_pix2world((width - 1) / 2.0, (height - 1) / 2.0, 0)
+            centre_ra, centre_dec = float(cra), float(cdec)
+        except Exception:  # noqa: BLE001 — no centre means no nudge, not no verdict
+            centre_ra = centre_dec = float("nan")
         scale = _arcsec_per_px(wcs)
         if scale is None:
             return None
@@ -922,11 +943,27 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
             arcsec_per_px=scale, size_arcmin=info.size_arcmin,
         ) if v.level == "off_centre" else None
         rc = outcome.crop if outcome else None
+        # "Re-centre it next session" is advice a beginner can't act on without
+        # knowing *which way*. Offered only for the two verdicts whose fix really
+        # is a better pointing — a well-centred picture needs nothing, and an
+        # object bigger than the frame needs mosaic mode, not a nudge.
+        nudge = recentre_nudge(
+            centre_ra_deg=centre_ra, centre_dec_deg=centre_dec,
+            object_ra_deg=info.ra_deg, object_dec_deg=info.dec_deg,
+        ) if v.level in ("off_centre", "clipped") else None
         return {
             "level": v.level,
             "text": v.text,
             "coverage": v.coverage,
             "off_centre": v.off_centre,
+            # Which way, and how far, to move the mount so it lands in the middle
+            # next time. `null` when the correction is too small to act on, or the
+            # verdict isn't one a re-point fixes.
+            "nudge": None if nudge is None else {
+                "direction": nudge.direction,
+                "degrees": nudge.degrees,
+                "text": nudge.text,
+            },
             # Fractional (0..1) crop bounds in the editor's own `geometry.crop`
             # convention, plus the fraction of the frame it keeps.
             "recentre": None if rc is None else {
@@ -1259,6 +1296,11 @@ async def save_stack_preview(
     rotates the saved image so celestial North points up, matching what the user
     sees on screen when they save while the History "North up" toggle is on — a
     no-op when the run has no usable WCS.
+
+    The rotation that was actually applied is recorded on the run, because the Sky
+    map has to follow these pixels: without it the map placed the *un-rotated*
+    canvas geometry (and an un-rotated coverage footprint) against a rotated
+    picture, tilting the tile and putting its transparent gaps in the wrong place.
     """
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -1281,13 +1323,21 @@ async def save_stack_preview(
                             detail=f"stretch/black must be numbers: {exc}") from exc
     north_up = bool(body.get("north_up", False))
 
-    from seestack.render.thumbnail import render_stack_png
+    from seestack.render.thumbnail import applied_north_up_deg, render_stack_png
     from seestack.stack.output import fits_is_display_space
     png = await run_in_threadpool(
         render_stack_png, run.fits_path,
         stretch=stretch, black=black, max_width=1024, north_up=north_up,
     )
     Path(run.preview_path).write_bytes(png)
+    # The rotation the render actually applied — 0.0 when the toggle was off, when
+    # the run has no WCS, or when the correction was sub-threshold. Always written
+    # (never left alone), so re-saving *without* North up clears a rotation an
+    # earlier save recorded rather than leaving the Sky map following a ghost.
+    north_up_deg = (
+        await run_in_threadpool(applied_north_up_deg, run.fits_path)
+        if north_up else 0.0
+    )
 
     # Record the saved stretch on the run so the "one frame vs your stack" reveal
     # renders its sub half through the *same* asinh curve (keeping the two halves
@@ -1301,10 +1351,12 @@ async def save_stack_preview(
             None if is_display else stretch,
             None if is_display else black,
         )
+        proj.set_stack_preview_north_up(run_id, north_up_deg)
     finally:
         proj.close()
         lib.close()
-    return {"ok": True, "stretch": stretch, "black": black, "north_up": north_up}
+    return {"ok": True, "stretch": stretch, "black": black, "north_up": north_up,
+            "north_up_deg": north_up_deg}
 
 
 _BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}

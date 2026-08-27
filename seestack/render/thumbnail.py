@@ -437,6 +437,25 @@ def stack_north_up_deg(fits_path: str | Path) -> float | None:
     return north_up_rotation_deg(wcs, w, h)
 
 
+def applied_north_up_deg(fits_path: str | Path) -> float:
+    """The rotation a ``north_up=True`` render of this stack **actually applies**
+    — ``0.0`` when the run has no usable WCS or the correction is below
+    :data:`~seestack.render.orient.NORTH_UP_MIN_DEG` (both leave the pixels
+    untouched), and the snapped angle otherwise.
+
+    Anything that has to *record* or *follow* the rotation — the Sky map, which
+    places a saved preview's tile and its coverage footprint on the sky — needs
+    this one answer rather than re-deriving the threshold-and-snap rules, so it
+    can never drift from what the renderer did.
+    """
+    from seestack.render.orient import NORTH_UP_MIN_DEG, applied_rotation_deg
+
+    angle = stack_north_up_deg(fits_path)
+    if angle is None or abs(angle) < NORTH_UP_MIN_DEG:
+        return 0.0
+    return applied_rotation_deg(angle)
+
+
 def _apply_north_up(disp: np.ndarray, fits_path: str | Path) -> np.ndarray:
     """Rotate a display image so North is up, using the FITS's own WCS. A missing
     WCS or a sub-threshold correction leaves the pixels unchanged, so the render

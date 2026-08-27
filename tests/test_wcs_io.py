@@ -250,3 +250,117 @@ def test_wcs_text_is_usable_separates_a_real_solution_from_a_readable_blob():
         # Truthy for most of these, and wcs_from_text returns an object for the
         # readable ones — but none of them locates the frame on the sky.
         assert wcs_text_is_usable(blob) is False
+
+
+# ---- North-up-saved previews (Sky-map placement) -------------------------
+
+def _north_up_master(tmp_path, *, rot_deg, full_w=200, full_h=140):
+    """A stack master whose canvas is tilted by ``rot_deg`` — the shape History's
+    "Adjust" North-up save exists for."""
+    import math
+
+    scale = 2.0 / 3600.0
+    th = math.radians(rot_deg)
+    c, s = math.cos(th), math.sin(th)
+    cd = [[-scale * c, scale * s], [scale * s, scale * c]]
+    path = tmp_path / f"master_{rot_deg}.fits"
+    _write_master_fits(path, full_w=full_w, full_h=full_h, cd=cd)
+    return path
+
+
+@pytest.mark.parametrize("rot_deg", [12.0, 33.0, 88.0, -60.0])
+def test_north_up_preview_wcs_places_the_rotated_pixels(tmp_path, rot_deg):
+    """A preview saved North-up is no longer a plain downscale of the canvas, so
+    its WCS must describe the *rotated* grid — otherwise the Sky map places the
+    picture at the wrong orientation (and, on a 90° save, the wrong aspect).
+
+    Ground truth is the rotation itself: rotate a marker pixel exactly the way
+    the preview render does, then ask the derived WCS where that marker's sky
+    position lands. It must be the marker's new pixel.
+    """
+    from astropy.io import fits as _fits
+
+    from seestack.io.wcs_io import celestial_wcs_from_fits
+    from seestack.render.orient import rotate_image_north_up
+    from seestack.render.thumbnail import applied_north_up_deg
+
+    fits_path = _north_up_master(tmp_path, rot_deg=rot_deg)
+    full_wcs, full_w, full_h = celestial_wcs_from_fits(fits_path)
+    applied = applied_north_up_deg(fits_path)
+    assert applied != 0.0                      # a real tilt to correct
+
+    blank = np.zeros((full_h, full_w, 3), np.float32)
+    rotated = rotate_image_north_up(blank, applied)
+    new_h, new_w = rotated.shape[:2]
+
+    d = wcs_dict_rescaled_to_preview(fits_path, new_w, new_h, north_up_deg=applied)
+    assert d is not None
+    assert (d["NAXIS1"], d["NAXIS2"]) == (new_w, new_h)
+    hdr = _fits.Header()
+    for k, v in d.items():
+        hdr[k] = v
+    rot_wcs = wcs_from_text(str(hdr))
+
+    # The same WCS built the way the map used to build it: from the un-rotated
+    # canvas. It is the "before" of this regression.
+    plain = wcs_dict_rescaled_to_preview(fits_path, new_w, new_h)
+    plain_hdr = _fits.Header()
+    for k, v in plain.items():
+        plain_hdr[k] = v
+    plain_wcs = wcs_from_text(str(plain_hdr))
+
+    worst_plain = 0.0
+    for px, py in [(30, 20), (150, 100), (full_w // 2, full_h // 2), (5, 130)]:
+        marker = np.zeros((full_h, full_w, 3), np.float32)
+        marker[py, px] = 1.0
+        out = rotate_image_north_up(marker, applied)
+        ys, xs = np.nonzero(out[:, :, 0] > 0.4)
+        assert len(xs) >= 1
+        ox, oy = float(xs.mean()), float(ys.mean())
+
+        ra, dec = (float(v) for v in full_wcs.all_pix2world(px, py, 0))
+        gx, gy = (float(v) for v in rot_wcs.all_world2pix(ra, dec, 0))
+        assert abs(gx - ox) < 1.0 and abs(gy - oy) < 1.0
+
+        bx, by = (float(v) for v in plain_wcs.all_world2pix(ra, dec, 0))
+        worst_plain = max(worst_plain, float(np.hypot(bx - ox, by - oy)))
+    # …and the un-rotated WCS really is visibly wrong (this is the bug).
+    assert worst_plain > 5.0
+
+
+def test_north_up_zero_leaves_the_preview_wcs_exactly_as_before(tmp_path):
+    """The default is the existing behaviour, key for key — an ordinary run (and
+    every run stacked before this column existed) is untouched."""
+    fits_path = _north_up_master(tmp_path, rot_deg=33.0)
+    assert (wcs_dict_rescaled_to_preview(fits_path, 100, 70, north_up_deg=0.0)
+            == wcs_dict_rescaled_to_preview(fits_path, 100, 70))
+    assert (canvas_extent_from_fits(fits_path, north_up_deg=0.0)
+            == canvas_extent_from_fits(fits_path))
+
+
+def test_north_up_extent_is_the_rotated_bounding_box_at_one_orientation(tmp_path):
+    """The 3D sky viewer sizes and orients its tile from the extent, so that has
+    to follow the rotation too: the box grows to the rotated bounding box, and
+    every North-up picture ends up at the *same* position angle whatever its
+    canvas started at — which is what "North is up" means."""
+    from seestack.render.thumbnail import applied_north_up_deg
+
+    angles = []
+    for rot_deg in (12.0, 33.0, -60.0):
+        fits_path = _north_up_master(tmp_path, rot_deg=rot_deg)
+        applied = applied_north_up_deg(fits_path)
+        plain = canvas_extent_from_fits(fits_path)
+        rotated = canvas_extent_from_fits(fits_path, north_up_deg=applied)
+        assert plain is not None and rotated is not None
+        # Rotating with `expand` can only grow the canvas.
+        assert rotated[0] >= plain[0] - 1e-9
+        assert rotated[1] >= plain[1] - 1e-9
+        angles.append(rotated[2])
+    for a in angles[1:]:
+        assert abs(((a - angles[0]) + 180.0) % 360.0 - 180.0) < 0.5
+
+
+def test_north_up_preview_wcs_still_returns_none_without_a_master(tmp_path):
+    assert wcs_dict_rescaled_to_preview(
+        tmp_path / "nope.fits", 100, 100, north_up_deg=90.0) is None
+    assert canvas_extent_from_fits(tmp_path / "nope.fits", north_up_deg=90.0) is None
