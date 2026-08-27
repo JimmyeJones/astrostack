@@ -1328,6 +1328,13 @@ export interface BestPicture {
   // stack, and is floated above the ranked tail so the automatic ranking can't
   // hide it. Absent from an older backend, which never pinned anything.
   pinned?: boolean;
+  // "What am I looking at?" — the offline catalog's plain-language type
+  // ("galaxy") and one-line blurb, so a surface that shows this picture away
+  // from its target page (the slideshow) can caption it in the app's own words.
+  // Optional: an older backend omits both, and the caption then just names the
+  // target.
+  object_type?: string;
+  blurb?: string;
 }
 
 export interface UnexportedEditItem {

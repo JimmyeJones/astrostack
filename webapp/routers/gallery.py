@@ -359,6 +359,17 @@ class BestPicture(BaseModel):
     # automatic ranking can never hide the favourite. False for an ordinary
     # auto-picked entry (and ignored outright by an older frontend).
     pinned: bool = False
+    # "What am I looking at?" — the offline catalog's plain-language type
+    # ("galaxy") and one-line blurb for this target, resolved exactly as the
+    # Target page's object card does (:func:`seestack.objectinfo.identify_object`
+    # over the bundled catalog — no network, no extra project read). Carried here
+    # so a surface that shows the picture *away from* its target page — the "Show
+    # and tell" slideshow — can caption it in the same words instead of inventing
+    # a second definition of "what is this". Additive and empty-by-default: a
+    # target the catalog doesn't know, and an older frontend, both read exactly
+    # as they did before.
+    object_type: str = ""
+    blurb: str = ""
 
 
 class BestPicturesResponse(BaseModel):
@@ -412,6 +423,8 @@ def get_best_pictures(
     pinned entry is also floated above the ranked tail, so the automatic ranking
     can never drop the one picture they said was their favourite."""
     from seestack.io.project import Project
+    from seestack.nightplan import load_catalog
+    from seestack.objectinfo import identify_object
     from seestack.portfolio import PortfolioEntry, rank_portfolio
 
     # One representative per target (pinned cover, else newest with a rendered
@@ -419,6 +432,11 @@ def get_best_pictures(
     # full record.
     by_key: dict[str, BestPicture] = {}
     entries: list[PortfolioEntry] = []
+    # Offline catalog, loaded once for the whole wall (``load_catalog`` is
+    # ``lru_cache``d and the match is a name/cone lookup over a few hundred
+    # objects) — the same resolution `stats.py`'s progress overview already does
+    # per target.
+    catalog = load_catalog()
 
     lib = deps.open_library(request)
     try:
@@ -440,6 +458,7 @@ def get_best_pictures(
                 if pick is None:
                     continue
                 key = f"{t.safe_name}:{pick.id}"
+                info = identify_object(t.name, t.ra_deg, t.dec_deg, catalog=catalog)
                 by_key[key] = BestPicture(
                     safe=t.safe_name,
                     target_name=t.name,
@@ -459,6 +478,8 @@ def get_best_pictures(
                     ),
                     score=0.0,  # filled in from the ranking below
                     pinned=pinned,
+                    object_type=info.type if info is not None else "",
+                    blurb=info.blurb if info is not None else "",
                 )
                 entries.append(PortfolioEntry(
                     key=key,
