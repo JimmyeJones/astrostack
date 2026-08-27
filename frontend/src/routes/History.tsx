@@ -741,6 +741,9 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     mutationFn: () => api.saveStackPreview(safe, run.id, dStretch, dBlack, applyNorthUp),
     onSuccess: () => {
       setCacheBust(Date.now());
+      // The save records the North-up rotation it baked in on the run itself, so
+      // the card's own row is stale the moment it lands.
+      qc.invalidateQueries({ queryKey: ["runs", safe] });
       qc.invalidateQueries({ queryKey: ["sky"] });
       qc.invalidateQueries({ queryKey: ["gallery"] });
       notifications.show({ message: "Preview updated", color: "teal" });
@@ -842,6 +845,13 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const imgSrc = adjust && run.has_fits && !suggestion.isLoading
     ? api.stackRenderUrl(safe, run.id, dStretch, dBlack, applyNorthUp)
     : previewSrc;
+  // Is the picture *on screen* North-up? Two ways it can be, and the toggle only
+  // knows one of them: the live adjustable render is rotating it now, or an
+  // earlier save baked the rotation into the stored preview — which a fresh page
+  // load has no memory of (`northUp` starts false). The pins and scale bar are
+  // measured on the un-rotated FITS grid, so both cases must suppress them.
+  const savedNorthUp = !!run.preview_north_up_deg;
+  const imageIsNorthUp = imgSrc === previewSrc ? savedNorthUp : applyNorthUp;
 
   return (
     <Card withBorder padding="md" radius="md">
@@ -851,8 +861,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             src={imgSrc} alt={run.output_basename}
             imgWidth={annotations.data?.width ?? run.canvas_w}
             imgHeight={annotations.data?.height ?? run.canvas_h}
-            objects={objects} show={identify && !applyNorthUp} height={180}
-            scaleBar={scaleBar} showScale={scale && !applyNorthUp}
+            objects={objects} show={identify && !imageIsNorthUp} height={180}
+            scaleBar={scaleBar} showScale={scale && !imageIsNorthUp}
             onClick={() => setLight(true)}
           />
         ) : (
@@ -860,17 +870,19 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         )}
       </Card.Section>
 
-      {applyNorthUp && (identify || scale) ? (
+      {imageIsNorthUp && (identify || scale) ? (
         // Object pins and the scale bar are computed on the un-rotated FITS grid,
         // so they'd land in the wrong place on the North-up-rotated render. Hide
-        // them (rather than mis-plot) and say why.
+        // them (rather than mis-plot) and say why — which differs depending on
+        // whether the rotation is the live toggle or one a past save baked in.
         <Text size="xs" c="dimmed" mt={6}>
-          Turn off “Rotate so North is up” to place object pins and the scale bar —
-          they’re measured on the un-rotated image.
+          {applyNorthUp
+            ? "Turn off “Rotate so North is up” to place object pins and the scale bar — they’re measured on the un-rotated image."
+            : "This picture was saved rotated so North is up, so object pins and the scale bar can’t be placed on it — they’re measured on the un-rotated image. Open Adjust and save it un-rotated to use them."}
         </Text>
       ) : null}
 
-      {identify && !applyNorthUp && !annotations.isLoading && annotations.isSuccess ? (
+      {identify && !imageIsNorthUp && !annotations.isLoading && annotations.isSuccess ? (
         objects.length ? (
           // Plain-language "what else is in this picture?" list — the friendly
           // read of the same objects the overlay labels on the image, so a
@@ -896,7 +908,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         )
       ) : null}
 
-      {scale && !applyNorthUp && !annotations.isLoading && annotations.isSuccess ? (
+      {scale && !imageIsNorthUp && !annotations.isLoading && annotations.isSuccess ? (
         <Text size="xs" c={scaleBar ? "grape.3" : "dimmed"} mt={6}>
           {scaleBar
             // Capitalise the plain-language Moon sentence for the caption.

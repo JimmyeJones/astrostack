@@ -229,3 +229,24 @@ def test_sky_places_a_north_up_tile_on_the_grid_it_actually_has(client, solved_l
     # — the old code reported the un-rotated canvas's box here.
     assert img["width_deg"] == pytest.approx(_H * 0.001, rel=1e-6)
     assert img["height_deg"] == pytest.approx(_W * 0.001, rel=1e-6)
+
+
+def test_the_run_listing_reports_the_baked_rotation(client, solved_library):
+    """History draws object pins and a scale bar on the *stored preview* bytes,
+    with coordinates measured on the un-rotated FITS grid — so it needs to know
+    the picture it is drawing on was saved turned. The run row carries it."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, _ = _make_lopsided_mosaic_run(solved_library, safe)
+
+    def row():
+        return next(r for r in client.get(f"/api/targets/{safe}/stack-runs").json()
+                    if r["id"] == int(run_id))
+
+    # Never saved → absent/None, which reads the same as "no rotation".
+    assert row()["preview_north_up_deg"] is None
+
+    assert _save_preview(client, safe, run_id, north_up=True).status_code == 200
+    assert row()["preview_north_up_deg"] == pytest.approx(90.0, abs=1e-6)
+
+    assert _save_preview(client, safe, run_id, north_up=False).status_code == 200
+    assert row()["preview_north_up_deg"] == 0.0

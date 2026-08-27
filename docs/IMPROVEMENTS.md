@@ -533,6 +533,35 @@ _(none — claim an item here with your branch name)_
   indistinguishable from a Seestar single-image output, so this is defensible; parent-scoping
   `_seestar_output_bases` too would close it if the owner ever hits it.
 
+- **✅ SHIPPED (Builder, v0.289.2, branch `claude/compassionate-galileo-zixgdj`) — ~~History draws its object
+  pins and scale bar on a picture a *past* save rotated North-up, using coordinates measured on the un-rotated
+  FITS grid — so every label lands in the wrong place.~~ Found while fixing the Sky-map overlay above: same
+  root class, second consumer.** *(Severity: broken-UX — the "what's in my picture?" labels and the scale bar
+  are visibly misplaced on the affected runs; the picture and data are fine. Confidence: traced end to end.)*
+
+  **Root cause.** `History.tsx` already knew the hazard and guarded it — `show={identify && !applyNorthUp}`,
+  with a note telling the user to turn the toggle off — but `applyNorthUp` is `useState(false)`, i.e. the
+  *live* toggle only. When the picture on screen is the **stored preview** (`adjust` closed, the ordinary
+  case), its rotation is whatever a previous "Adjust → North up → Save" baked in, which a fresh page load has
+  no memory of. So `applyNorthUp` is `false`, the pins are drawn, and they sit on a picture that has since
+  turned — the exact mis-plot the guard exists to prevent. Reachable from the UI in two steps (save North-up,
+  reload, tap Identify).
+
+  **Fix.** The `preview_north_up_deg` column added for the Sky-map fix is precisely the missing fact, so it is
+  now surfaced on `StackRunOut` (additive, `None` on every older run) and History asks *"is the picture on
+  screen North-up?"* rather than *"is the toggle on?"*: `imageIsNorthUp` is the saved angle when the stored
+  preview is being shown and the live toggle when the adjustable render is. The withheld-labels note gained a
+  second sentence for the saved case (it names what happened and how to undo it — open Adjust and save
+  un-rotated) instead of pointing at a toggle that isn't on. The save now also invalidates the `runs` query,
+  since it changes the very row the card reads.
+
+  **Upgrade-safe (§9):** one additive response field and frontend-only gating; no config/schema/on-disk change
+  beyond the column already shipped in v0.288.1, and a run saved un-rotated behaves exactly as before.
+
+  **Tests (+3):** the run listing reports the baked rotation and clears it on an un-rotated re-save; History
+  withholds the pins and says why for a run with a saved rotation (fails before / passes after); and the
+  no-regression half — an ordinary run still labels its objects.
+
 - **🟡 BROKEN-UX / AUTONOMY (Scout QA audit 2026-08-26 #4, traced + verified end-to-end) — PARTIALLY FIXED
   (misleading-copy half shipped v0.272.2; optional behavioural half open) — the `astap_timeout_s` setting bounds
   ONE solve *attempt*, not one frame, so an unsolvable sub can burn up to 3× the configured seconds; the Settings
