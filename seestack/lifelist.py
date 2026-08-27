@@ -139,6 +139,73 @@ def catalog_capture_status(
     return entries
 
 
+#: How many of a constellation's catalog objects may still be missing before we
+#: stop calling it "nearly finished".
+#:
+#: At 2 the nudge stays a genuine "one or two more and it's done"; at 3+ it turns
+#: into a to-do list, and a beginner who is told they're "close" to five separate
+#: constellations learns to ignore the line. One is the best version of the
+#: sentence ("you're one away from finishing Orion"), so the ranking below always
+#: puts the closest constellation first.
+MAX_MISSING_FOR_NEARLY = 2
+
+
+@dataclass(frozen=True)
+class ConstellationProgress:
+    """How far through one constellation's catalog objects the owner is."""
+
+    #: IAU three-letter abbreviation, as the catalog spells it ("Ori").
+    con: str
+    captured: int
+    total: int
+    #: The objects still to get, in catalog display order.
+    missing: tuple[LifeListEntry, ...]
+
+
+def nearly_complete_constellations(
+    entries: Sequence[LifeListEntry],
+    *,
+    max_missing: int = MAX_MISSING_FOR_NEARLY,
+    min_captured: int = 1,
+) -> list[ConstellationProgress]:
+    """Which constellations is the owner nearly finished with?
+
+    The life list answers "how many of the 110 have I got?", which is a number
+    you look at. This answers "what should I point at *next*?", which is a plan —
+    and "you're one object away from finishing Orion" is a far better reason to
+    go outside than "you're on 42 of 110".
+
+    Counts every bundled catalog object (Messier *and* the curated popular
+    NGC/IC) in each constellation, because a beginner reads "finishing Orion" as
+    the whole famous set, not the Messier subset. Constellations the owner has
+    not started (``captured < min_captured``) are excluded — those aren't
+    "nearly done", they're just unshot sky, which is what the existing "start
+    something new tonight" suggestions are for. Entries with no constellation
+    recorded are skipped rather than grouped under a blank name.
+
+    Returned closest-first: fewest missing, then most already captured, then
+    alphabetically so the order is stable run to run. Pure and offline.
+    """
+    by_con: dict[str, list[LifeListEntry]] = {}
+    for entry in entries:
+        con = (entry.con or "").strip()
+        if not con:
+            continue
+        by_con.setdefault(con, []).append(entry)
+
+    out: list[ConstellationProgress] = []
+    for con, group in by_con.items():
+        missing = tuple(e for e in group if not e.captured)
+        captured = len(group) - len(missing)
+        if captured < min_captured or not missing or len(missing) > max_missing:
+            continue
+        out.append(ConstellationProgress(
+            con=con, captured=captured, total=len(group), missing=missing,
+        ))
+    out.sort(key=lambda p: (len(p.missing), -p.captured, p.con))
+    return out
+
+
 def life_list_summary(entries: Sequence[LifeListEntry]) -> dict[str, int]:
     """Counts for the plain-language header ("You've captured 42 of 110…").
 

@@ -1192,6 +1192,35 @@ export interface LifeList {
   counts: LifeListCounts;
 }
 
+/** One object still missing from a nearly-finished constellation. The
+ *  observability fields are set only on the one that's best placed tonight
+ *  (`tonight_catalog_id`); every other row leaves them null. */
+export interface NearlyThereObject {
+  catalog_id: string;
+  name: string;
+  type: string;
+  blurb: string;
+  max_altitude_deg: number | null;
+  minutes_above_min_alt: number | null;
+  usable_start_utc: string | null;
+  usable_end_utc: string | null;
+}
+
+/** "You're one away from finishing Orion — and it's up tonight."
+ *  (`GET /api/life-list/nearly-there`; `null` when no constellation is close,
+ *  so the card self-hides.) */
+export interface NearlyThere {
+  con: string;
+  /** Full constellation name ("Orion"), or the abbreviation when unknown. */
+  constellation: string;
+  captured: number;
+  total: number;
+  missing: NearlyThereObject[];
+  tonight_catalog_id: string | null;
+  /** "settings" | "fits" | "none" — lets the card explain a missing tonight pick. */
+  location_source: string;
+}
+
 export interface BestPicture {
   safe: string;
   target_name: string;
@@ -2169,6 +2198,7 @@ export const api = {
   // offline: the catalog ships with the app and the match reads only the target
   // registry, so it is cheap enough to ask on every visit.
   getLifeList: () => req<LifeList>("/api/life-list"),
+  nearlyThere: () => req<NearlyThere | null>("/api/life-list/nearly-there"),
 
   // gallery
   // `videos` is additive — an older backend doesn't send it, so read it as `?? []`.

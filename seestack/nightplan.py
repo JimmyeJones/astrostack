@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -1219,10 +1220,6 @@ def suggest_targets(
     empty list when the Sun never sets, nothing clears the floor, or every
     showpiece is already in the library — so the UI simply self-hides.
     """
-    _configure_iers_offline()
-    window = _find_dark_window(observer, when_utc)
-    if window is None:
-        return []  # Sun never sets — nothing to plan.
     library_coords = library_coords or []
 
     def _covered(ra: float, dec: float) -> bool:
@@ -1232,17 +1229,52 @@ def suggest_targets(
     by_id = {obj.id: obj for obj in load_catalog()}
     candidates = [by_id[cid] for cid in _SHOWPIECE_IDS if cid in by_id]
     candidates = [o for o in candidates if not _covered(o.ra_deg, o.dec_deg)]
-    if not candidates:
+    return well_placed_tonight(
+        observer, when_utc, candidates,
+        min_altitude_deg=min_altitude_deg, limit=limit, horizon=horizon,
+        min_usable_minutes=min_usable_minutes,
+    )
+
+
+def well_placed_tonight(
+    observer: Observer,
+    when_utc: datetime,
+    objects: Sequence[CatalogObject],
+    *,
+    min_altitude_deg: float = 30.0,
+    limit: int | None = None,
+    horizon: HorizonProfile | None = None,
+    min_usable_minutes: float = 45.0,
+) -> list[SuggestedTarget]:
+    """Rank any set of catalog objects by how well-placed they are tonight.
+
+    The shared engine behind :func:`suggest_targets` (which feeds it the curated
+    showpieces the user hasn't shot) and any other surface that has *already*
+    chosen which objects it cares about and only needs "…and is one of them up
+    tonight?" — e.g. the objects missing from a nearly-finished constellation.
+
+    Keeps only objects genuinely usable in tonight's dark window (clearing
+    ``min_altitude_deg`` for at least ``min_usable_minutes``) and returns them
+    best-first by the same altitude/window/Moon blend every other planning card
+    uses. ``limit=None`` returns all of them. Purely offline and read-only;
+    returns an empty list when the Sun never sets, nothing clears the floor, or
+    ``objects`` is empty — so a caller's card simply self-hides.
+    """
+    _configure_iers_offline()
+    if not objects:
         return []
+    window = _find_dark_window(observer, when_utc)
+    if window is None:
+        return []  # Sun never sets — nothing to plan.
 
     illum = moon_illumination(when_utc)
     obs = _observability_batch(
-        [o.ra_deg for o in candidates], [o.dec_deg for o in candidates],
+        [o.ra_deg for o in objects], [o.dec_deg for o in objects],
         observer, window, min_altitude_deg, illum, horizon=horizon,
     )
 
     out: list[SuggestedTarget] = []
-    for obj, o in zip(candidates, obs, strict=True):
+    for obj, o in zip(objects, obs, strict=True):
         if o.minutes_above_min_alt < min_usable_minutes:
             continue  # not up long enough tonight to be worth suggesting
         out.append(SuggestedTarget(
@@ -1262,7 +1294,7 @@ def suggest_targets(
             difficulty=target_difficulty(obj.id, obj.type),
         ))
     out.sort(key=lambda s: (-s.score, -s.max_altitude_deg))
-    return out[:max(0, limit)]
+    return out if limit is None else out[:max(0, limit)]
 
 
 @dataclass(frozen=True)
