@@ -73,6 +73,22 @@ def wcs_center_deg_from_text(text: str | None) -> tuple[float, float] | None:
         return None
 
 
+def wcs_text_is_usable(text: str | None) -> bool:
+    """True when a WCS text blob carries a usable celestial (RA/Dec) solution.
+
+    ``wcs_from_text`` is deliberately permissive — it returns a WCS object for
+    *any* parseable FITS header, including one with no WCS keys at all (an empty
+    or truncated ASTAP ``.wcs`` sidecar reads as a bare ``"END"`` blob, which is
+    a **truthy** string and a non-``None``, ``has_celestial=False`` WCS). So
+    ``if wcs_text:`` / ``if wcs is None:`` are not enough to tell "solved" from
+    "the sidecar was there but said nothing": use this instead anywhere a stored
+    solution is about to be trusted (persisted, propagated, or reprojected
+    through). A genuine solve always ends with a celestial reference point, so
+    this rejects only the garbage case.
+    """
+    return wcs_center_deg_from_text(text) is not None
+
+
 def wcs_text_from_sidecar(wcs_path: str | Path) -> str | None:
     """Read an ASTAP ``.wcs`` sidecar file and return its FITS header as text."""
     wcs_path = Path(wcs_path)

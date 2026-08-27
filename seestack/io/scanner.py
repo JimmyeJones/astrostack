@@ -47,6 +47,7 @@ from seestack.core.cache import CacheManager
 from seestack.io.ingest import FITS_SUFFIXES, find_fits_files, ingest_files
 from seestack.io.library import UNSORTED_TARGET_NAME, Library
 from seestack.io.project import Project
+from seestack.io.wcs_io import wcs_text_is_usable
 
 log = logging.getLogger(__name__)
 
@@ -655,7 +656,7 @@ def run_qc_and_solve(
             phase="Solving", progress=progress, should_stop=should_stop,
         ):
             if result is not None:
-                if result.solved and result.wcs_text is not None:
+                if result.solved and wcs_text_is_usable(result.wcs_text):
                     solve_ok += 1
                 try:
                     apply_solve_result_to_db(project, result)
