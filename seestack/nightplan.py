@@ -38,7 +38,13 @@ from pathlib import Path
 
 import numpy as np
 
-from seestack.framing import FramingHint, MosaicPlan, framing_hint, mosaic_plan
+from seestack.framing import (
+    FramingHint,
+    MosaicPlan,
+    RecentreNudge,
+    framing_hint,
+    mosaic_plan,
+)
 from seestack.target_difficulty import DifficultyHint, target_difficulty
 
 log = logging.getLogger(__name__)
@@ -321,6 +327,14 @@ class PlannedTarget:
     # a verdict for; ``None`` otherwise (library rows and un-vetted objects carry
     # none). See :func:`seestack.target_difficulty.target_difficulty`.
     difficulty: DifficultyHint | None = None
+    # "Last time it landed off-centre — nudge about 1.0° south before you start."
+    # The framing advice from this target's newest finished picture, repeated
+    # here because this is the screen someone is looking at *while pointing the
+    # scope*, and the card that says it today is read the morning after.
+    # Library rows only, and only when that picture really needs a re-point;
+    # ``None`` otherwise and on an older backend. See
+    # :func:`seestack.framing.recentre_nudge`.
+    recentre_nudge: RecentreNudge | None = None
 
 
 @dataclass
@@ -929,6 +943,15 @@ class LibraryTarget:
     # ("~1 more night finishes this"), in the same words the Dashboard and the
     # Target page use. Purely annotation: it never affects scoring or ranking.
     recent_pace_s: float | None = None
+    # "Last time this landed off-centre — nudge a little south before you start."
+    # The framing advice from this target's newest finished picture. It exists
+    # today only on the card a beginner reads the morning after, by which point
+    # the next clear night is a week away and it has been forgotten; the moment
+    # it is worth anything is while they are pointing the scope. ``None`` for a
+    # target that framed well, has no stacked picture yet, or isn't confidently
+    # identified — never a guessed direction. Purely annotation: it never affects
+    # scoring or ranking.
+    recentre_nudge: RecentreNudge | None = None
 
 
 def plan_tonight(observer: Observer, when_utc: datetime, *,
@@ -1024,6 +1047,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 total_exposure_s=round(t.total_exposure_s, 1),
                 goal_s=t.goal_s,
                 recent_pace_s=t.recent_pace_s,
+                recentre_nudge=t.recentre_nudge,
             ))
         else:
             obj: CatalogObject = m["obj"]

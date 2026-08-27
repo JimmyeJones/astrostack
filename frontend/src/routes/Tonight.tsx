@@ -15,6 +15,7 @@ import { readinessRowBadge } from "../readiness";
 import { settingsLink } from "../settingsSections";
 import {
   difficultyRowBadge, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge, minAltOptions,
+  recentreNudgeRowBadge,
   moonCueForTarget, moonPhaseLabel, moonWindowNote, notUpTonightNote,
   partitionByUpTonight, planDateBounds, planNightLabel, scoreColor, splitTargets,
   typeFilterOptions, usableWindowNote,
@@ -54,6 +55,10 @@ function TargetRow({ t }: { t: PlannedTarget }) {
   // "How hard for a Seestar?" so a beginner sees difficulty while choosing, not
   // only after shooting. Catalog rows only; library/un-vetted rows carry none.
   const difficultyBadge = difficultyRowBadge(t.difficulty);
+  // "Nudge 1.0° south" — how this target's *last* picture was framed, said here
+  // because this is the screen you read while pointing the scope. The finished
+  // picture's own card says the same sentence, but the morning after.
+  const nudgeBadge = recentreNudgeRowBadge(t.recentre_nudge);
   return (
     <Table.Tr>
       <Table.Td>
@@ -90,6 +95,14 @@ function TargetRow({ t }: { t: PlannedTarget }) {
             <Badge mt={4} ml={(readyHint || difficultyBadge) ? 4 : 0} size="xs" variant="light"
               color={framingBadge.color}>
               {framingBadge.label}
+            </Badge>
+          </Tooltip>
+        ) : null}
+        {nudgeBadge ? (
+          <Tooltip label={nudgeBadge.tooltip} multiline w={260} withArrow>
+            <Badge mt={4} ml={(readyHint || difficultyBadge || framingBadge) ? 4 : 0}
+              size="xs" variant="light" color={nudgeBadge.color}>
+              {nudgeBadge.label}
             </Badge>
           </Tooltip>
         ) : null}

@@ -56,6 +56,12 @@ export interface PlannedTarget {
   // catalog candidates the vetted table/type-rule has a verdict for; absent on
   // library rows, un-vetted objects, and older backends (treat as "no verdict").
   difficulty?: DifficultyHint | null;
+  // "Last time it landed off-centre — nudge about 1.0° south before you start."
+  // The framing advice from this target's newest picture, brought forward to the
+  // screen you read while pointing the scope (the card that says it today is
+  // read the morning after). null/absent for a catalog row, for a picture that
+  // framed well, and on an older backend — never a guessed direction.
+  recentre_nudge?: StackRecentreNudge | null;
 }
 
 /** One of the user's own targets, judged as "worth pointing at right now". */
@@ -1071,11 +1077,14 @@ export interface StackFraming {
 
 /** "Next time, nudge your Seestar about 0.4° west…" — the actionable half of a
  *  re-centre verdict. `direction` is one of eight plain compass words and
- *  `degrees` the angular move; `text` is the ready-to-render sentence. */
+ *  `degrees` the angular move; `text` is the ready-to-render sentence, and
+ *  `short` the same move as a chip-sized phrase ("0.4° west") for a surface with
+ *  no room for it. Absent on an older backend. */
 export interface StackRecentreNudge {
   direction: string;
   degrees: number;
   text: string;
+  short?: string;
 }
 
 export interface StackRunInfo {
