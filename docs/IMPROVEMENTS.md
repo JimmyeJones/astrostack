@@ -49,6 +49,34 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- ~~**🟡 COSMETIC / SHARE-FACING (Builder 2026-08-27, found by rendering the caption rather than reading it) —
+  the acquisition nameplate baked a hollow `.notdef` box into every shared picture, right where the exposure
+  should be: `(505□30s)`.**~~ — **FIXED v0.281.1** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-z1yulm`). *(Severity: cosmetic, but it lands on the one artefact the owner
+  shows other people — a share export that looks broken. Confidence: reproduced by rendering.)*
+
+  **Root cause.** `nameplate_line` built the sub detail as `f"({n}×{sub_exp})"` with U+00D7, the typographic
+  multiplication sign. The nameplate is drawn with Pillow's *bundled* face (`ImageFont.load_default(size=…)`
+  → Aileron), which covers ASCII and the middot `·` we join parts with, but has **no glyph for `×`** — so
+  FreeType substituted the `.notdef` box. It fired on the common case (both `NFRAMES` and `EXPOSURE` stamped),
+  i.e. essentially every nameplate a healthy install produces. Nothing in the suite noticed, because every
+  existing assertion compared caption *strings*, and the string was always exactly what we intended — the
+  defect only exists once those characters meet the font.
+
+  **Fix.** The detail now reads `(505x30s)` with a plain ASCII `x`, which is the notation astrophotographers
+  write by hand anyway. Two characters of copy; the sole behavioural change.
+
+  **The test is the point.** Rather than pin the one character, `test_nameplate.py` pins the *rule*: it renders
+  every caption shape (full provenance, count-only, single sub, no target) and asserts no character's mask
+  matches the font's `.notdef` box — with the reference glyph itself asserted non-empty, so the check can't
+  quietly degrade into one that always passes. A future tidy-the-typography edit that reaches for `×`, an em
+  dash or a curly quote now fails here instead of shipping a box into someone's picture.
+
+  **Audited the neighbours while here (all clean, no change needed):** every other module that bakes text —
+  `montage.py`, `recap.py`, `render/deepening.py`, `sharecard.py` — was exercised through its real caption
+  builders and every character it can emit has a glyph. `·` is fine; `—` and `→` appear only in *comments and
+  docstrings*, never in drawn strings. The nameplate was the only one.
+
 - ~~**🟠 WRONG-RESULT / DATA-LOSS (Scout QA audit 2026-08-27 #8, branch `claude/vigilant-knuth-gnif14`,
   reproduced end-to-end) — the Seestar "skip a bare `<T>/` output folder when its `<T>_sub` sibling exists"
   rule used a GLOBAL basename set, not a same-parent sibling test, so a root-level `incoming/<T>/` folder of
