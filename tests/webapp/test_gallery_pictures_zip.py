@@ -267,3 +267,93 @@ def test_downloading_writes_nothing_anywhere_in_the_data_root(client, solved_lib
     before = snapshot()
     assert _open_zip(client.get("/api/gallery/pictures.zip")).testzip() is None
     assert snapshot() == before
+
+
+def _register_still(root: Path, capture_id: str, *, label: str, kind: str = "moon",
+                    created_utc: str = "2026-05-02T21:30:00Z",
+                    colour=(200, 200, 180)) -> Path:
+    """Write a finished Moon/Sun still into the video results store, the same
+    shape ``_video_stack_body`` leaves behind. Returns the PNG's path."""
+    from PIL import Image
+
+    out = root / "video" / capture_id
+    out.mkdir(parents=True, exist_ok=True)
+    png = out / "stack.png"
+    Image.new("RGB", (40, 30), colour).save(png)
+    (out / "meta.json").write_text(json.dumps({
+        "capture_id": capture_id, "label": label, "kind": kind,
+        "source_name": f"{capture_id}.mp4", "created_utc": created_utc,
+        "width": 40, "height": 30, "keep_percent": 30.0,
+        "n_graded": 100, "n_kept": 30, "n_stacked": 30, "n_align_failed": 0,
+        "stride": 1, "aligned": True, "sharpness_best": 1.0,
+        "sharpness_kept_median": 0.9, "sharpness_all_median": 0.5,
+        "warnings": [],
+    }), encoding="utf-8")
+    return png
+
+
+def test_zip_includes_finished_moon_and_sun_stills(client, solved_library):
+    """A lunar/solar still is not a library target — it lives in its own results
+    store with no project DB — so walking ``list_targets()`` missed every one of
+    them and the archive quietly left out what is very often a beginner's *first*
+    good picture.
+
+    Regression: the button says "all my pictures" and the Gallery shows the
+    stills, but the zip held deep-sky targets only.
+    """
+    safes = _safes(client)
+    for safe in safes:
+        _register_picture(solved_library, safe)
+    moon = _register_still(solved_library, "Lunar_video", label="Moon")
+    sun = _register_still(solved_library, "Solar_video", label="Sun", kind="sun",
+                          created_utc="2026-06-11T10:00:00Z")
+
+    zf = _open_zip(client.get("/api/gallery/pictures.zip"))
+    names = zf.namelist()
+    # Named for the object and the night it was caught, so a folder of them
+    # reads as pictures rather than capture ids.
+    assert "Moon_2026-05-02.png" in names
+    assert "Sun_2026-06-11.png" in names
+    # …alongside, not instead of, the deep-sky targets.
+    for safe in safes:
+        assert f"{safe}.png" in names
+    # Copied verbatim — the still is never re-rendered for the archive.
+    assert zf.read("Moon_2026-05-02.png") == moon.read_bytes()
+    assert zf.read("Sun_2026-06-11.png") == sun.read_bytes()
+
+
+def test_a_still_whose_name_collides_with_a_target_gets_its_own_entry(
+        client, solved_library):
+    """Two sources, one namespace: a still must never overwrite a target's entry
+    (or another still's). The ``-2`` suffix the target side already used now spans
+    both."""
+    safes = _safes(client)
+    for safe in safes:
+        _register_picture(solved_library, safe)
+    # A still whose sanitised name is exactly a target's entry name.
+    _register_still(solved_library, "clash_video", label=safes[0],
+                    created_utc="")
+
+    zf = _open_zip(client.get("/api/gallery/pictures.zip"))
+    names = zf.namelist()
+    assert len(names) == len(set(names)), "an entry was silently overwritten"
+    assert f"{safes[0]}.png" in names
+    assert f"{safes[0]}-2.png" in names
+
+
+def test_a_library_of_only_stills_still_downloads(client, data_root):
+    """Someone whose only pictures so far are Moon stills — a very common Seestar
+    first week — gets an archive instead of the "no finished pictures" 404."""
+    _register_still(data_root, "Lunar_video", label="Moon")
+
+    zf = _open_zip(client.get("/api/gallery/pictures.zip"))
+    assert zf.namelist() == ["Moon_2026-05-02.png"]
+
+
+def test_library_summary_counts_finished_stills(client, solved_library):
+    """The count the "Download all N pictures" button shows has to know about
+    stills, or it promises fewer files than the archive holds."""
+    assert client.get("/api/library/summary").json()["n_finished_stills"] == 0
+    _register_still(solved_library, "Lunar_video", label="Moon")
+    _register_still(solved_library, "Solar_video", label="Sun", kind="sun")
+    assert client.get("/api/library/summary").json()["n_finished_stills"] == 2

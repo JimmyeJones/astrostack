@@ -49,15 +49,25 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟠 BROKEN-UX / DATA-INTEGRITY (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`,
-  reproduced) — a returncode-0 ASTAP solve whose `.wcs` sidecar is readable but carries NO celestial WCS
-  (empty / truncated / partial-header) is persisted as a *solved* frame with a garbage `wcs_json` and a null
-  centre, then locked out of retry forever — the exact "malformed/partial sidecar" case the runner's own guard
-  was written to catch, and which it does not catch.** *(Severity: broken-UX / data-integrity — a frame is
-  marked solved-yet-unusable, never re-solved (so it can never contribute), and its celestial-less WCS passes
-  align's `is None` guard and is fed into reprojection instead of being cleanly skipped. Confidence: reproduced
-  — the truthy-but-useless `wcs_text`, the null centre, and the bypassed guard all reproduced against the real
-  code; downstream skip/align traced.)*
+- **✅ SHIPPED (Builder, v0.287.3, branch `claude/compassionate-galileo-pr7p04`) — ~~a returncode-0 ASTAP
+  solve whose `.wcs` sidecar is readable but carries NO celestial WCS is persisted as a *solved* frame with a
+  garbage `wcs_json` and a null centre, then locked out of retry forever.~~** Fixed exactly as specified, plus
+  two coherence fixes the trace implied. New `seestack/io/wcs_io.wcs_text_is_usable()` names the real question
+  ("does this blob carry a usable celestial reference point?") — the one truthiness and `is None` both get
+  wrong, because `Header.fromstring` turns an empty/truncated sidecar into a truthy `"END"` blob that
+  `wcs_from_text` happily returns a non-`None`, `has_celestial=False` WCS for. Four call sites now ask it
+  instead: `apply_solve_result_to_db` (`runner.py`) records an honest `solve_failed:unreadable plate solution`
+  and leaves the frame **retryable** rather than stamping the garbage; `bootstrap_solve` (`bootstrap.py:399`)
+  refuses to propagate a celestial-less base onto every rescued member; `run_qc_and_solve`'s `solve_ok` counter
+  (`io/scanner.py`) keeps using the *same* bar the DB write does, so the "located N frames" number can't
+  disagree with what was stored; and `align_one` (`stack/align.py`) now rejects a celestial-less src/dst WCS
+  outright — the backstop that heals an install already carrying such a row from before this fix, instead of
+  feeding it to `reproject_rgb_windowed`. A genuine ASTAP solve always ends with a centre, so a healthy install
+  is bit-for-bit unaffected. Tests: 5 new/extended regression tests across `tests/test_solve_runner.py`,
+  `tests/test_bootstrap_solve.py`, `tests/test_stack_align.py`, `tests/test_wcs_io.py` — all fail before,
+  pass after. (Four existing solve-runner tests had used a `"CRVAL1=1.0"` placeholder as their "successful
+  solve" fixture; that is now the shared `VALID_WCS_TEXT` built from `tests.synth.make_synth_wcs_text` —
+  a realistic solution blob, no assertion loosened.)
 
   **Root cause (traced + reproduced).** `ASTAPSolver._solve_once` (`seestack/solve/astap.py:311`) sets
   `solved = proc.returncode == 0 and wcs_sidecar.exists()` — **existence only, not validity**. `solve_one`
@@ -112,13 +122,16 @@ _(none — claim an item here with your branch name)_
   path skips a celestial-less base instead of propagating it. Two files (`runner.py`, `bootstrap.py`) + tests.
   Left for the Builder to implement deliberately. *(Found by the plate-solve adversarial audit this run.)*
 
-- **🟡 BROKEN-UX (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`, reproduced) — after a
-  user tunes a run's look with the History "Adjust" (asinh stretch/black) sliders and saves, the "Download
-  full-res PNG" button silently reverts to the STF autostretch — so the one full-resolution download disagrees
-  with the thumbnail, the share-JPEG and the wallpaper, all of which show the saved asinh look.** *(Severity:
-  broken-UX — the user's saved processing choice is lost on exactly the export they'd frame or print; the FITS
-  is untouched, so not wrong-result. Confidence: reproduced — the two renders diverge on a synthetic linear
-  master; the missing forward-through traced end to end.)*
+- **✅ SHIPPED (Builder, v0.287.4, branch `claude/compassionate-galileo-pr7p04`) — ~~after a user tunes a run's
+  look with the History "Adjust" (asinh stretch/black) sliders and saves, the "Download full-res PNG" button
+  silently reverts to the STF autostretch.~~** Fixed exactly as the direction below specifies:
+  `render_preview_png_full_res` takes optional `stretch`/`black` (routing to the same `asinh_stretch` the baked
+  preview used when both are supplied, STF when not — so an unadjusted run is byte-for-byte unchanged), and
+  `download_full_res_png` reads the run's saved `preview_stretch`/`preview_black` columns and passes them
+  through. No frontend change needed — the server already had the saved values. A display-space run keeps
+  rendering verbatim. Tests: `tests/webapp/test_full_res_png.py` +2 — the download now equals
+  `render_stack_png(stretch, black)` at full res and is visibly ≠ the STF (fails before / passes after), and
+  an unadjusted run's bytes are asserted identical to the plain STF render (no-regression guard).
 
   **Root cause (traced + reproduced).** The History Adjust save (`set_stack_preview`,
   `webapp/routers/stack.py:1266-1296`) overwrites the run's stored `preview_path` with
@@ -173,6 +186,25 @@ _(none — claim an item here with your branch name)_
   **Reachability (honest).** Harm is visible only when coverage is NOT full-frame — an irregular mosaic
   footprint — AND the user saved that run's preview north-up AND views the Sky map. Narrow, but every link is
   reachable from the UI (the North-up toggle + Save, then the Sky map).
+
+  **Builder 2026-08-27 (branch `claude/compassionate-galileo-pr7p04`) — sized it, DEFERRED, and enlarging the
+  scope: the alpha is the smaller half.** The tile's *placement* is wrong too, not just "a related concern to
+  check". `sky.py:158-163` builds each tile's WCS with `wcs_dict_rescaled_to_preview(run.fits_path, *preview
+  size)` — the master FITS geometry rescaled to the **preview's** grid. A north-up save rotates the preview
+  with expand, so its grid is no longer a uniform rescale of the FITS: the tile is placed at the wrong
+  orientation (and, on a 90° save, the wrong aspect) on the sky, with the misaligned alpha on top. So the two
+  halves have one cause — *nothing records that a stored preview was rotated* — and fixing only the mask would
+  leave a misplaced tile looking deliberate.
+  **What a correct fix needs (why it wasn't a same-run bolt-on).** Record the north-up angle actually applied
+  on the run (an additive `preview_north_up_deg` column beside `preview_stretch`/`preview_black`, which
+  `set_stack_preview` already knows), then in `sky_overlay` rotate the coverage mask by the same angle, and in
+  `sky.py` compose that rotation into the placement WCS (CD matrix **and** the CRPIX/canvas change
+  `rotate_image_north_up`'s expand introduces). That last step is the risky one — a wrong CD/CRPIX puts a
+  *confidently misplaced* picture on the sky map, which is worse than today's — so it wants its own run with a
+  round-trip test (rotate a synthetic footprint, re-derive the WCS, check a known RA/Dec lands on the same
+  pixel). **Safe interim if a run is short on time:** with the flag recorded, `sky_overlay` can serve the
+  *opaque* preview and `sky.py` can fall back to the `_tan_wcs` extrapolation for a rotated run — never a
+  confidently-wrong overlay. Do not ship the mask-only half on its own.
 
   **Repro (reproduced this run):** an L-shaped coverage mask (200×300); a preview of the same scene
   `np.rot90`-rotated 90° (PIL size 200×300); feed the *unrotated* mask to `overlay_rgba_png` as `sky_overlay`
@@ -16384,6 +16416,26 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW IDEA (Builder 2026-08-27, traced while fixing the full-res-PNG stretch bug) — the picture a beginner
+  actually *shares* is 1024 px wide, because every share export is built from the stored preview PNG rather
+  than the master.** *(Pillar: enjoy + share + trust, PRIORITY 3; size S–M; additive, no new deps. Confidence:
+  traced against the code.)* `_write_preview_png` caps the stored preview at **1024 px** wide
+  (`seestack/stack/output.py:366`), and the share JPEG (`stack.py`, `kind == "jpeg"`), the wallpaper
+  (`stack.py:1988`) and the sub-reveal all start from `run.preview_path` bytes. So the file a beginner posts,
+  sets as a phone background, or sends to family is 1024 px — soft on any modern phone, let alone a 1440p
+  screen — even though the master holds the full canvas and the "Download full-res PNG" button beside it
+  serves it. *(Note for whoever picks this up: an old Builder investigation elsewhere in this file describes
+  the share JPEG as having a "2048px cap". That is stale — it is the 1024 px preview, re-encoded.)*
+  **Why it is newly cheap:** the parity problem that made this awkward is gone. As of v0.287.4
+  `render_preview_png_full_res` takes the run's saved `stretch`/`black`, so a share render can reproduce the
+  *exact* look of the stored preview at any size — the share and the thumbnail can't drift.
+  **Shape:** render the share/wallpaper source at a share-sized cap (~2048–2560 px, and the actual screen size
+  for a wallpaper) through that same call, keeping every existing mark (nameplate, scale bar, North rose) —
+  they are all fractions of the picture width, so they scale with it. **Cautions:** this turns a byte-copy
+  into a real render on a RAM-capped NAS, so cap it, do it in the threadpool as the full-res download already
+  does, and leave the *gallery/History thumbnail* on the cheap stored preview — only the export grows. Keep
+  the un-rotated/no-marks path byte-identical where it can be, or state plainly that it changed.
+
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #21) — "Was I centred? — a plain-language framing check on the
   finished stack that tells a beginner if their object is running off an edge and which way to nudge the Seestar
   next session.** *(Pillar: understand + friendliness + better-picture-next-time, PRIORITY 3; size M; additive,
@@ -16460,8 +16512,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   preview (History already hides them when `applyNorthUp` is on — mirror that). Reuse, don't re-implement, the
   marker-layout geometry.
 
-- **NEW IDEA (Builder 2026-08-27, traced while reviewing the v0.285.0 pictures zip) — "Download all my
-  pictures" leaves out the Moon and the Sun, which are most beginners' *first* good picture.** *(Pillar: get +
+- **✅ SHIPPED (Builder, v0.288.0, branch `claude/compassionate-galileo-pr7p04`) — ~~"Download all my
+  pictures" leaves out the Moon and the Sun, which are most beginners' *first* good picture.~~**
+  Fixed with the shape filed below, and both cautions it named. `_video_still_pictures` walks the same
+  `video.iter_results` listing the Gallery's `videos` list already builds and appends each still's stored
+  `stack.png` bytes verbatim, named `<label>_<date>.png` (`Moon_2026-05-02.png`) through the library's own
+  `make_safe_name`. The `-2`/`-3` collision suffix moved into a shared `_unique_entry_name` and the tally is
+  now passed across both sources, so a still can never overwrite a target's entry. An unreadable video store
+  yields nothing rather than sinking the archive. **The button's count and its floor learned about stills
+  too:** `/api/library/summary` gained `n_finished_stills` (additive, defaults to 0, computed outside the
+  targets-keyed cache so a fresh Moon shows up immediately), the button now says "Download all *N* pictures"
+  for targets **+** stills, and the card no longer hides from someone whose only pictures are Moon stills —
+  it drops the wall half (the montage needs two *targets*) and keeps the download. Tests: +4
+  `tests/webapp/test_gallery_pictures_zip.py` (stills included byte-for-byte, cross-source name collision,
+  a stills-only library, and the summary count — all fail before), +2 vitest.
+
+  Original spec:
+
+  **~~NEW IDEA~~** *(Pillar: get +
   share + back-up, PRIORITY 3; size S; additive, read-only, no new deps. Confidence: traced against the code —
   `_library_pictures` walks `lib.list_targets()` only.)* A finished lunar/solar still is **not** a library
   target: it lives in its own video-results store (`webapp/video.py`, `result_dir()` + `stack.png` +
@@ -23640,6 +23708,31 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.288.0** — Share/back-up: **"Download all my pictures" now really means all of them.** The zip walked
+  library targets only, so it silently left out every finished Moon and Sun still — for a Seestar owner
+  usually the first picture they were proud of, and the one they'd most notice missing from a backup. The
+  archive now appends each still's stored `stack.png` verbatim as `Moon_2026-05-02.png`, sharing one
+  collision-suffix tally with the targets so nothing is overwritten. `/api/library/summary` gained an additive
+  `n_finished_stills`, so the button's count matches what the archive holds, and the card stops hiding from
+  someone whose only pictures so far are lunar ones. Tests: +4
+  `tests/webapp/test_gallery_pictures_zip.py`, +2 `MyDeepSkyWallCard.test.tsx`.
+- **v0.287.4** — Editor/export parity: **the full-res PNG download now keeps the look you saved.** Tuning a
+  run with History's "Adjust" sliders re-bakes the stored preview through the asinh curve — so the thumbnail,
+  the share-JPEG and the wallpaper all showed the tuned picture while the one export you'd frame or print
+  silently reverted to the STF autostretch. `render_preview_png_full_res` now accepts the saved
+  `stretch`/`black` and the download endpoint passes the run's stored values through; runs you never adjusted
+  (columns NULL) and display-space editor exports are byte-for-byte unchanged. Tests: +2
+  `tests/webapp/test_full_res_png.py`.
+- **v0.287.3** — Data-integrity: **a plate solve is only believed when its WCS actually locates the frame.**
+  ASTAP returning 0 with a readable-but-empty/truncated `.wcs` sidecar used to be persisted as a *solved*
+  frame carrying a garbage `wcs_json` and a null centre — never re-solved (the solve arglist skips any truthy
+  `wcs_json`), and its celestial-less WCS slipped past `align_one`'s `is None` guard into reprojection. New
+  `wcs_text_is_usable()` gates the four places a stored solution is trusted: the DB write (honest failure,
+  frame stays retryable), the stack-then-solve bootstrap (won't stamp a celestial-less base onto every rescued
+  member), the `solve_ok` "located N" counter (same bar as the DB write), and `align_one` (the backstop that
+  heals a row an older version already stored). A real solve always ends with a centre, so a healthy install
+  is unaffected. Tests: +5 regression tests across `test_solve_runner.py`, `test_bootstrap_solve.py`,
+  `test_stack_align.py`, `test_wcs_io.py`.
 - **v0.281.0** — Autonomy: **a walk-away stack whose drizzle canvas won't fit now makes a slightly smaller
   picture instead of no picture.** `_best_memory_fix` has always computed the one lever that would fit
   (*"lower the drizzle scale to ×1.3 (~4.2 GB)"*) and the run-time guard has always quoted it — perfect for a

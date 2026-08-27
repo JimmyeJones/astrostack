@@ -269,3 +269,33 @@ def test_bootstrap_clears_stale_solve_failed_reason_on_rescue(tmp_path):
         assert frame.reject_reason is None  # stale solve_failed cleared
     finally:
         proj.close()
+
+
+def test_bootstrap_does_not_propagate_a_celestialless_deep_solve(tmp_path):
+    """A "solved" deep image whose WCS text is readable but carries no celestial
+    keys must be treated as a failed solve — not stamped onto every member.
+
+    Regression: the gate was ``not wcs_text``, and an empty / truncated ASTAP
+    ``.wcs`` sidecar reads back as a truthy ``"END"`` blob. That passed the gate,
+    and ``propagate_wcs`` then gave every rescued sub a WCS that locates nothing —
+    far worse than not rescuing them, because a frame with a truthy ``wcs_json``
+    is never offered to the solver again.
+    """
+    proj, _ = _make_project_with_faint_subs(tmp_path, n=8)
+
+    def _celestialless_solver(*args, **kwargs):
+        return SolveResult(
+            frame_id=-1, fits_path="deep.fits", solved=True, wcs_text="END",
+            ra_center_deg=None, dec_center_deg=None, pixscale_arcsec=None,
+            rotation_deg=None, error=None,
+        )
+
+    try:
+        res = bootstrap_solve(proj, min_frames=4, deep_solver=_celestialless_solver)
+        assert res.engaged
+        assert not res.deep_solved
+        assert res.n_propagated == 0
+        # Nothing stamped → every sub stays unsolved and retryable.
+        assert all(f.wcs_json is None for f in proj.iter_frames())
+    finally:
+        proj.close()

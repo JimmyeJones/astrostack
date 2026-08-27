@@ -796,6 +796,67 @@ class _ZipStreamBuffer(io.RawIOBase):
         return chunk
 
 
+def _unique_entry_name(stem: str, suffix: str, used: dict[str, int]) -> str:
+    """``"<stem><suffix>"``, with a ``-2``/``-3`` suffix when that name is taken.
+
+    ``used`` is the caller's running tally, keyed case-insensitively so the
+    archive stays unambiguous on a case-insensitive filesystem (a Mac or Windows
+    unzip would otherwise silently overwrite one member with the other).
+    """
+    name = f"{stem}{suffix}"
+    seen = used.get(name.lower())
+    if seen:
+        used[name.lower()] = seen + 1
+        return f"{stem}-{seen + 1}{suffix}"
+    used[name.lower()] = 1
+    return name
+
+
+def _video_still_pictures(
+    request: Request, used: dict[str, int],
+) -> list[tuple[str, Path]]:
+    """``[(zip entry name, file path)]`` — every finished Moon/Sun still.
+
+    A lunar/solar still is not a library target: it lives in its own results
+    store (``<data_root>/video/<capture_id>/stack.png``) with no project DB and
+    no cover, so walking ``list_targets()`` misses every one of them. For a
+    Seestar owner the Moon is very often the *first* picture they were proud of,
+    and the one they would most notice missing from a backup that calls itself
+    "all my pictures".
+
+    Named ``<label>_<date>.png`` (``Moon_2026-05-02.png``) through the same
+    :func:`~seestack.io.library.make_safe_name` the target side leans on, so a
+    hand-edited ``meta.json`` label can't put a ``/`` or a ``..`` into the
+    archive, and shares the caller's ``used`` tally so a still can never collide
+    with a target's entry. The stored PNG bytes are copied verbatim — nothing is
+    re-rendered. A store that can't be read yields nothing rather than sinking
+    the download, exactly as it does for the Gallery page.
+    """
+    from seestack.io.library import make_safe_name
+    from webapp import video
+
+    settings = deps.get_settings(request)
+    try:
+        metas = video.iter_results(settings)
+    except Exception:  # noqa: BLE001 — a video-store problem must not 500 the download
+        log.warning("could not list video stills for pictures.zip", exc_info=True)
+        return []
+    picks: list[tuple[str, Path]] = []
+    for meta in metas:
+        path = video.result_dir(settings, meta.capture_id) / video.PNG_NAME
+        # ``iter_results`` only yields folders that have the PNG, but the file can
+        # still go away between the listing and the download; the streamer skips a
+        # missing member anyway, so this is just the cheap early-out.
+        if not path.is_file():
+            continue
+        # The date alone is what a human recognises ("the Moon I shot in May"),
+        # and it keeps two captures of the same object apart.
+        day = (meta.created_utc or "")[:10]
+        stem = make_safe_name(f"{meta.label} {day}".strip() or meta.capture_id)
+        picks.append((_unique_entry_name(stem, path.suffix, used), path))
+    return picks
+
+
 def _library_pictures(request: Request) -> list[tuple[str, Path]]:
     """``[(zip entry name, file path)]`` — one finished picture per target.
 
@@ -810,6 +871,11 @@ def _library_pictures(request: Request) -> list[tuple[str, Path]]:
     ``..`` into the archive for whoever unzips it. A name collision after the
     extension is appended gets a ``-2``/``-3`` suffix rather than silently
     overwriting a sibling entry.
+
+    Targets are only half the library's pictures: the finished Moon/Sun stills
+    live in their own store and are appended by :func:`_video_still_pictures`,
+    sharing this function's collision tally so the two sources can't produce two
+    members with one name.
     """
     from webapp.routers.targets import current_picture_path
 
@@ -826,16 +892,10 @@ def _library_pictures(request: Request) -> list[tuple[str, Path]]:
             if path is None:
                 continue
             stem = entry.safe_name or f"target-{entry.id}"
-            name = f"{stem}{path.suffix}"
-            seen = used.get(name.lower())
-            if seen:
-                used[name.lower()] = seen + 1
-                name = f"{stem}-{seen + 1}{path.suffix}"
-            else:
-                used[name.lower()] = 1
-            picks.append((name, path))
+            picks.append((_unique_entry_name(stem, path.suffix, used), path))
     finally:
         lib.close()
+    picks.extend(_video_still_pictures(request, used))
     return picks
 
 
@@ -850,8 +910,11 @@ def download_all_pictures(request: Request):
     in the app. This is the one tap that gets them out.
 
     What you get is what the app has been showing you: each target's current
-    picture (its pinned cover, else its newest stack), byte-for-byte as it
-    already exists on disk. Nothing is re-rendered and nothing is written — the
+    picture (its pinned cover, else its newest stack) **and every finished
+    Moon/Sun still** — for a Seestar owner the Moon is often the first picture
+    they were proud of, and the one they'd most notice missing from a backup
+    that calls itself "all my pictures". Byte-for-byte as it already exists on
+    disk. Nothing is re-rendered and nothing is written — the
     archive is built in memory and streamed member by member, so a big library
     costs one chunk of RAM rather than the whole zip. Stored, not deflated: PNG
     and JPEG previews are already compressed, so squeezing them again would burn

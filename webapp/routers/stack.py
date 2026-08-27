@@ -689,6 +689,9 @@ async def download_full_res_png(
                 status_code=404,
                 detail="No FITS for this run to render at full resolution")
         basename, fits_path = run.output_basename, run.fits_path
+        # The stretch History's "Adjust" save baked into the stored preview, if
+        # the user tuned one (NULL on an unadjusted or display-space run).
+        preview_stretch, preview_black = run.preview_stretch, run.preview_black
         recipe_json = None
         if _preview_is_display_space(run.options_json):
             recipe_json = proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
@@ -709,10 +712,17 @@ async def download_full_res_png(
             max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=bool(north_up),
         )
     else:
+        # A run the user tuned in History's "Adjust" has its stored preview baked
+        # through the *asinh* curve, not the STF — and the thumbnail, share-JPEG
+        # and wallpaper all serve those bytes. Carry the saved stretch/black into
+        # the full-res render so this download shows the same picture instead of
+        # silently reverting to the autostretch. An unadjusted run (columns NULL)
+        # keeps the STF exactly as before.
         from seestack.render.thumbnail import render_preview_png_full_res
         png = await run_in_threadpool(
             render_preview_png_full_res, fits_path,
             max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=bool(north_up),
+            stretch=preview_stretch, black=preview_black,
         )
     filename = f"{basename}_fullres.png"
     return Response(
