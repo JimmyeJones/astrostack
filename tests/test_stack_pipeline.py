@@ -1488,6 +1488,35 @@ def test_resolve_auto_reject_picks_by_frame_count():
     assert _resolve_auto_reject(driz, n=6) is driz
 
 
+def test_auto_reject_method_is_the_same_rule_the_picker_uses():
+    """The Stack form has to *say* which method auto will run, so the rule is
+    public — and it must be the very rule the picker applies, or the form and the
+    stack drift apart. Checked across the whole boundary, not one sample."""
+    from seestack.stack.stacker import (
+        _resolve_auto_reject,
+        auto_reject_method,
+        auto_reject_switch_frames,
+        kappa_min_frames,
+    )
+
+    for kappa in (1.0, 2.0, 2.5, 3.0, 5.0):
+        switch = auto_reject_switch_frames(kappa)
+        # Both floors folded in: κ-σ's own ≥4-frame dispatch and the κ crossover.
+        assert switch == max(4, kappa_min_frames(kappa))
+        base = StackOptions(auto_reject=True, sigma_kappa=kappa,
+                            sigma_clip=False, min_max_reject=False)
+        for n in range(1, switch + 4):
+            method = auto_reject_method(kappa, n)
+            assert method == ("sigma_clip" if n >= switch else "min_max")
+            resolved = _resolve_auto_reject(base, n=n)
+            assert resolved.sigma_clip == (method == "sigma_clip")
+            assert resolved.min_max_reject == (method == "min_max")
+            # κ and k are passed through untouched — auto only ever rewrites the
+            # two method flags, which is why the form leaves those two live.
+            assert resolved.sigma_kappa == base.sigma_kappa
+            assert resolved.min_max_reject_count == base.min_max_reject_count
+
+
 def test_auto_reject_small_stack_removes_a_lone_streak_via_min_max(tmp_path):
     """A 6-frame stack with a planted satellite streak: with only auto_reject on,
     the stacker picks min/max (κ-σ is mathematically blind to a lone outlier this

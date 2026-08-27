@@ -53,7 +53,7 @@ _(none — claim an item here with your branch name)_
   reproduced end-to-end) — a registered, solved frame observed *mid in-place rewrite* (0-byte or truncated)
   was mistaken for a genuine content swap, so ingest dropped its plate solution and re-accepted it even when
   it had been auto-rejected — the exact harm `_same_capture` guards on the size-*equal* path, left open on the
-  size-*changed* path.**~~ — **FIXED v0.284.1** (this run). *(Severity: wrong-result — a solved frame loses its
+  size-*changed* path.**~~ — **FIXED v0.284.4** (this run). *(Severity: wrong-result — a solved frame loses its
   WCS (→ dropped from the stack until re-solved, permanently if no solver is configured) and an auto-rejected
   streak/soft sub is silently re-accepted into any auto-stack that fires in the window; self-heals on a later
   scan once the file settles, but the trigger is reachable on every scan. Confidence: reproduced end-to-end.)*
@@ -12425,6 +12425,43 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-27, the parity gap the v0.284.0 "Scale & compass" feature just opened) — the
+  downloaded picture now carries a scale bar *and* a North/East rose, but the app's own on-screen overlay still
+  shows only the bar, and only on the History page. Screen and file should show the same two marks, and the
+  page a beginner actually lands on should show them at all.** *(Pillar: understand + friendliness — PRIORITY
+  3. Size: S–M. Confidence: certain — I built the baked half this run and read the overlay to match it.)*
+  **Two halves, either shippable alone.** (a) *The rose on screen.* `AnnotatedImage.tsx` already draws the
+  scale bar over a contain-fit preview via the pure `scaleBarLayout`; the compass needs the same treatment —
+  a pure `compassLayout(directions, …)` beside it and two short arms in the opposite corner. The **directions
+  already exist server-side** (`seestack.skymarks.sky_directions`, ground-truthed against astropy); the only
+  backend work is adding them to the `…/annotations` response beside `scale_bar` (additive, `null` for a run
+  with no usable WCS), which the History page already fetches. Note the one subtlety the baked version had to
+  solve: when the North-up toggle is on, the on-screen picture is rotated, so the arms must be turned by the
+  same angle (`seestack.render.orient.applied_rotation_deg`) — the existing code path already knows the angle.
+  (b) *On the Target page.* The overlay is wired only into History's picture card; the **Target page's latest
+  picture** — the screen a beginner lands on after a stack — offers neither the scale bar nor the object
+  labels, even though both are one query away and the Target page already fetches far more than this. Reuse
+  `AnnotatedImage` there behind the same quiet toggles History uses, inside the existing grouping rather than
+  as another always-on card (the standing IA priority). **Care:** keep both marks *off* by default on screen
+  exactly as they are today — this is about making them available and consistent, not about decorating the
+  picture for everyone.
+
+- **NEW IDEA (Builder 2026-08-27, the half deliberately left out of "Scale & compass" v0.284.0) — the marked
+  picture is a *download* only; the **share** sheet still sends the bare one.** *(Pillar: enjoy / share —
+  PRIORITY 3. Size: S.)* `?scale=true` composes with everything and is one query param, and
+  `SharePictureButton` already takes a `url` plus a `filename` override — the keepsake share is exactly this
+  shape (`keepsakeFilename`). But sharing is where the marks matter *most*: a picture posted with a scale bar
+  and a compass reads as a real astrophoto to whoever sees it, while the download is usually for the owner's
+  own archive. **Why it wasn't done in the same run:** the Target page's "Save / share" menu already carries
+  two share items and the owner's standing complaint is that pages are too busy, so a third needs either a
+  choice about *which* share is the default (marked? framed? both?) or a small rethink of that group rather
+  than one more line appended. **Shape:** most likely the right answer is that the *keepsake* share — the one
+  meant for other people — gains the marks, rather than adding a fourth item; that is a one-flag change
+  (`keepsake=true&scale=true`) plus a wording tweak, and it leaves the plain share untouched for anyone who
+  wants the naked picture. Confirm against a rendered keepsake first: the marks sit along the top of the
+  picture and the keepsake's caption sits beneath it, so they should compose, but it is worth *looking* at
+  rather than reasoning about — that is exactly how the v0.282.1 tofu box was found.
+
 - **NEW IDEA (Builder 2026-08-27, the obvious next slice of the "Was the Moon washing this out?" note shipped
   in v0.278.0) — say it on the *Nights* card too, so a beginner can see *which* of their nights the Moon hurt,
   not only the most recent one.** *(Pillar: understand + trust — PRIORITY 3. Size: S.)* v0.278.0 put the
@@ -12453,44 +12490,115 @@ problems. Dogfood it every big-picture run and fix root causes.
   answer, and this idea should be closed rather than built. Explicitly *not* worth a framework.
 
 
-- **IMPROVEMENT IDEA (Scout 2026-08-27 #9, verified by dogfood + code) — with "Auto outlier removal" on (the
+- ~~**IMPROVEMENT IDEA (Scout 2026-08-27 #9, verified by dogfood + code) — with "Auto outlier removal" on (the
   default), the Stack form still shows "Sigma clipping" and "Min/max rejection" as live, editable toggles whose
   displayed state can be the opposite of what actually runs — so a beginner reading the form is misled about the
-  method.** *(Pillar: friendliness / trust — PRIORITY 3. Size: S. Confidence: verified against the code and seen
-  in the dogfood.)* `auto_reject`'s own help text says *"When on, it overrides the two options below"*, and the
-  engine's `_resolve_auto_reject` does exactly that — it picks min/max on a sub-11-frame stack and κ-σ on a
-  larger one, **ignoring** the `sigma_clip`/`min_max_reject` toggles. But those two fields carry no `depends_on`
-  (`webapp/schemas.py` ~599/604) and the form's `isDisabled` only greys a field on a `depends_on` miss
-  (`frontend/src/routes/Stack.tsx:286`), so both stay fully enabled and un-dimmed while `auto_reject` is on.
-  **Measured in the dogfood:** the sample showed *Auto outlier removal ON · Sigma clipping ON · Min/max OFF*, yet
-  the finished run was **MIN-MAX** (6 frames < 11) — the History `RejectionBadge` is honest ("Auto outlier
-  removal picked this from your number of subs"), so only the *form* misleads. A beginner glancing at "Sigma
-  clipping: ON" reasonably believes that is what will happen. **Shape (small, additive, frontend-only):** when
-  `values.auto_reject` is true, dim/disable the `sigma_clip`, `sigma_kappa`, `min_max_reject` and
-  `min_max_reject_count` controls and show one inline line stating the method auto *will* pick for the current
-  `solvedAccepted` count (reuse `kappa_min_frames`'s ~11-frame boundary the frontend already knows via
-  `MINMAX_SUGGEST_MAX_FRAMES`) — e.g. *"Auto will use min/max for these 6 subs (switches to sigma clipping at
-  ~11)."* No engine/behaviour change (the resolve already happens server-side); this only makes the form tell the
-  truth. `depends_on` is a *positive* dependency ("show when X on") and can't express "disable when auto_reject
-  on", so this needs a small explicit disable rule in `Stack.tsx`, not a new descriptor field. **Care:** keep the
-  toggles' stored values intact (don't zero them) so turning Auto *off* restores the user's prior manual pick;
-  test that the disable + the resolved-method line track `auto_reject` and the frame count.
+  method.**~~ — **SHIPPED v0.284.2** (Builder 2026-08-27, branch `claude/compassionate-galileo-4a77og`).
 
-- **IMPROVEMENT IDEA (Scout 2026-08-27 #7, verified by grep) — a master dark/flat built from more than 64
-  frames silently drops the extras, and the beginner is never told.** *(Pillar: friendliness + trust — PRIORITY
-  3. Size: S.)* `build_master` (`seestack/calibrate/masters.py`) caps the frames actually combined at
-  `max_frames=64`, evenly sampling the input down to bound peak memory — a sound default — but the fact that it
-  sampled is **only written to the log** (`log.info("Master %s: sampling %d of %d frames", …)`); the Calibration
-  page's result (which already surfaces the `skipped` list of unusable frames) says nothing about it. A beginner
-  who drops 200 darks and gets a master "from 64 frames" may think 136 files failed, or that the app is broken.
-  **Verified genuinely un-surfaced (grepped this run):** `max_frames`/"sampling"/"sampled" appear nowhere in
-  `webapp/` or `frontend/src/` — only in the engine log. **Shape (small, additive):** thread the "used N of M
-  (evenly sampled — plenty for a clean master)" count out of `build_master` alongside the existing `skipped`
-  return, and render it as one reassuring plain line on the Calibration result — *"Built from 64 of your 200
-  darks (evenly sampled across the set — plenty for a clean master)."* No behaviour change, no new default; it
-  just explains a decision the app already makes. Testable at the helper (200 paths → reported used=64,
-  total=200) and the router (the line appears only when M > 64). **Care:** phrase it as *sufficiency*, never as
-  a loss — the beginner should come away reassured, not worried their frames were wasted.
+  **What shipped.** The form now says which method Auto will actually use, in the user's own numbers —
+  *"Auto outlier removal is on, so it picks the method from your frame count: with 6 accepted, solved subs it
+  will use min/max rejection… It switches to sigma clipping from about 11 subs"* — and greys the two switches
+  Auto overrides, with one line saying why and how to take the wheel back. No engine behaviour changed; the
+  form just stopped contradicting the run.
+
+  **The answer comes from the server, not from a second copy of the rule.** The Scout's shape had the frontend
+  re-derive the boundary from `MINMAX_SUGGEST_MAX_FRAMES = 11`, a hard-coded approximation of
+  `kappa_min_frames(κ)` that is only right at the default κ. Instead `stack-estimate` — which the form already
+  queries on every κ/auto change, and which already knows the real solved-accepted count — grew an additive
+  `auto_reject_resolved` (`method`, `switch_at_frames`, `n_frames`), computed from the engine's own picker. The
+  rule became two public functions (`auto_reject_method` / `auto_reject_switch_frames`) that
+  `_resolve_auto_reject` now calls, so there is exactly one definition and the form cannot drift from the
+  stack. `null` means the toggles really are live (Auto off, or drizzle on — drizzle keeps its own two-pass
+  rejection and Auto leaves the toggles alone).
+
+  **One deliberate deviation from the filed spec, because the code says otherwise.** The spec asked to dim four
+  controls; only **two** are dimmed. `_resolve_auto_reject` rewrites `sigma_clip`/`min_max_reject` and passes
+  `sigma_kappa`/`min_max_reject_count` through *untouched*, so whichever method Auto lands on still uses the
+  user's κ and k — grey those and the form tells the same lie in the other direction. Their `depends_on` gates
+  are now read against the **resolved** method too, so Auto picking κ-σ on a target whose stored `sigma_clip`
+  is false no longer greys out the very κ it is about to use.
+
+  **Went one step past the spec, same defect class:** four advisory hints (`sigmaClipWarning`,
+  `sigmaKappaLargeHint`, `minMaxKTooHighHint`, the streak-k nudge and the min/max-vs-weighting note) gated on
+  the *raw* toggles, so with Auto on they coached the user about a method that wasn't going to run. They now
+  read the effective method. Values are never cleared, so turning Auto off restores the manual pick intact.
+
+  **Upgrade-safe (§9):** one additive response field, two additive public engine functions, frontend-only
+  disable/copy. No config, schema, on-disk, default or API-shape change; no engine behaviour change (a test
+  pins that the resolved method still equals what `_resolve_auto_reject` writes, across the whole boundary at
+  five κ values). **Tests: +3.** 1 engine (`test_stack_pipeline.py` — the public rule swept against the picker
+  for every n around the switch at κ ∈ {1, 2, 2.5, 3, 5}, including that κ and k pass through), 1 API
+  (`test_stack_estimate.py` — null when off/drizzling, min/max at 3 frames, and the boundary moving with κ
+  rather than a hard-coded 11), 1+1 frontend (`Stack.test.tsx` — the sentence and both switches disabled with
+  Auto on; both live and no note with Auto off).
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness / trust — PRIORITY 3. Size: S. Confidence: verified against the code and seen
+    in the dogfood.)* `auto_reject`'s own help text says *"When on, it overrides the two options below"*, and the
+    engine's `_resolve_auto_reject` does exactly that — it picks min/max on a sub-11-frame stack and κ-σ on a
+    larger one, **ignoring** the `sigma_clip`/`min_max_reject` toggles. But those two fields carry no `depends_on`
+    (`webapp/schemas.py` ~599/604) and the form's `isDisabled` only greys a field on a `depends_on` miss
+    (`frontend/src/routes/Stack.tsx:286`), so both stay fully enabled and un-dimmed while `auto_reject` is on.
+    **Measured in the dogfood:** the sample showed *Auto outlier removal ON · Sigma clipping ON · Min/max OFF*, yet
+    the finished run was **MIN-MAX** (6 frames < 11) — the History `RejectionBadge` is honest ("Auto outlier
+    removal picked this from your number of subs"), so only the *form* misleads. A beginner glancing at "Sigma
+    clipping: ON" reasonably believes that is what will happen. **Shape (small, additive, frontend-only):** when
+    `values.auto_reject` is true, dim/disable the `sigma_clip`, `sigma_kappa`, `min_max_reject` and
+    `min_max_reject_count` controls and show one inline line stating the method auto *will* pick for the current
+    `solvedAccepted` count (reuse `kappa_min_frames`'s ~11-frame boundary the frontend already knows via
+    `MINMAX_SUGGEST_MAX_FRAMES`) — e.g. *"Auto will use min/max for these 6 subs (switches to sigma clipping at
+    ~11)."* No engine/behaviour change (the resolve already happens server-side); this only makes the form tell the
+    truth. `depends_on` is a *positive* dependency ("show when X on") and can't express "disable when auto_reject
+    on", so this needs a small explicit disable rule in `Stack.tsx`, not a new descriptor field. **Care:** keep the
+    toggles' stored values intact (don't zero them) so turning Auto *off* restores the user's prior manual pick;
+    test that the disable + the resolved-method line track `auto_reject` and the frame count.
+
+- ~~**IMPROVEMENT IDEA (Scout 2026-08-27 #7, verified by grep) — a master dark/flat built from more than 64
+  frames silently drops the extras, and the beginner is never told.**~~ — **SHIPPED v0.284.3** (Builder
+  2026-08-27, branch `claude/compassionate-galileo-4a77og`).
+
+  **What shipped, exactly as filed.** `MasterMeta` grew `n_supplied` (how many frames the caller actually
+  pointed at, recorded *before* the `max_frames` sampling), the build job returns it beside the existing
+  `n_skipped`/`skipped_buckets`, and `buildMasterSummary` says it in one line —
+  *"Built a master dark from 64 of the 200 frames you gave (evenly sampled across the whole set — plenty for a
+  clean master)."* Phrased as **sufficiency, never loss**, per the item's own caution: the 136 weren't wasted,
+  they weren't needed. No behaviour change — the sampling is unchanged and remains the right default.
+
+  **Self-hiding by construction, not by a flag.** The note appears only when `n_supplied > n_frames +
+  n_skipped`, i.e. when sampling genuinely happened; an ordinary set reads exactly as it did before, and a job
+  result from an older backend (no `n_supplied`) also reads exactly as before. Sampling is deliberately *not*
+  counted as a skip, so the existing "N frames set aside" accounting is untouched and the two can appear
+  together without contradicting each other.
+
+  **One decision worth knowing:** `n_supplied` is **not** written into the master's FITS header. It is a
+  build-time fact, not part of the master's identity, and stamping it would mean a master loaded back from disk
+  either lying or carrying a card older masters lack. A loaded `MasterMeta` reports `None` — pinned by a test.
+
+  **Upgrade-safe (§9):** one dataclass field with a `None` default (every positional construction in the suite
+  still works), one additive key in a job result, one frontend string. No config, schema, on-disk, API-shape or
+  default change; existing master FITS files and registry entries are untouched. **Tests: +6** — 2 engine
+  (`test_calibrate.py`: the sampled and un-sampled counts, and the header staying clean), 2 API
+  (`tests/webapp/test_calibration.py`: the supplied count on a clean set, and a build forced through a small
+  bound reporting supplied 5 / combined 2 / skipped 0), 2 frontend (`Jobs.test.tsx`: the sampled line, the
+  sampled-plus-set-aside line, and the two silent cases).
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness + trust — PRIORITY
+    3. Size: S.)* `build_master` (`seestack/calibrate/masters.py`) caps the frames actually combined at
+    `max_frames=64`, evenly sampling the input down to bound peak memory — a sound default — but the fact that it
+    sampled is **only written to the log** (`log.info("Master %s: sampling %d of %d frames", …)`); the Calibration
+    page's result (which already surfaces the `skipped` list of unusable frames) says nothing about it. A beginner
+    who drops 200 darks and gets a master "from 64 frames" may think 136 files failed, or that the app is broken.
+    **Verified genuinely un-surfaced (grepped this run):** `max_frames`/"sampling"/"sampled" appear nowhere in
+    `webapp/` or `frontend/src/` — only in the engine log. **Shape (small, additive):** thread the "used N of M
+    (evenly sampled — plenty for a clean master)" count out of `build_master` alongside the existing `skipped`
+    return, and render it as one reassuring plain line on the Calibration result — *"Built from 64 of your 200
+    darks (evenly sampled across the set — plenty for a clean master)."* No behaviour change, no new default; it
+    just explains a decision the app already makes. Testable at the helper (200 paths → reported used=64,
+    total=200) and the router (the line appears only when M > 64). **Care:** phrase it as *sufficiency*, never as
+    a loss — the beginner should come away reassured, not worried their frames were wasted.
 
 - ~~**IMPROVEMENT IDEA (Scout 2026-08-26 #5, measured this run) — the shipped "what am I looking at?" object
   card is SILENT for most real targets because the catalog `blurb` field is only half-populated.**~~ —
@@ -15736,46 +15844,99 @@ problems. Dogfood it every big-picture run and fix root causes.
     a scale bar is the complete package) and the #13 curation note that `identify` already supplies the object's
     proper name. Additive/offline/upgrade-safe; new endpoint + one button, no schema/default/API removal.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
   intuitive units) plus a North/East compass baked into a shared/exported picture, so a beginner's shot reads
-  like a real astrophoto — "this is how big it is and which way is up" — with zero knowledge required.**
-  *(Pillar: enjoy / share + understand — PRIORITY 3. Size: S–M. Confidence the gap is real: grepped this run —
-  no scale-bar/compass overlay exists anywhere; `scale bar`/`compass` return nothing in code or backlog.)*
-  Every published astrophoto has a scale bar and a N/E rose; it's the single touch that makes a beginner's
-  picture look "proper" and quietly teaches them the sky. The app already knows both numbers exactly — the
-  finished stack stores its plate-solved output WCS (`stack_runs.wcs_json`), which carries the pixel scale (so a
-  bar of *N* pixels is a known angle) and the field rotation (so "up" on the sensor maps to a real sky
-  direction). Nothing surfaces either onto the picture.
-  **Why it's beginner-friendly, not a pro knob:** the bar is labelled in plain, intuitive units, defaulting to
-  the same "full-Moon widths" idiom the shipped *"How big is it, really?"* size-in-Moons feature (v0.277.0)
-  already uses — *"◄─── 1 full Moon ───►"* — with arcmin as a subtle secondary. The compass is a tiny N/E rose
-  in a corner. Both are **off by default on the raw picture** and only appear on an explicit *"Add scale &
-  compass"* export/share, so no existing surface changes and it can never clutter.
-  **Why it's cheap to build (all the machinery exists):**
-  * `seestack/annotate.py::objects_in_field` already turns a stack's output WCS + canvas size into pixel
-    positions (it's the "What's in this picture?" projector), and already tolerates a degenerate WCS by drawing
-    nothing — so the scale/compass module reuses the exact same WCS-in → pixel-overlay-out shape.
-    `astropy.wcs.utils.proj_plane_pixel_scales` (already used in `mosaic.py`) gives the arcsec/px; the CD-matrix
-    rotation gives the compass angle. `render/orient.py` already reasons about North-up orientation.
-  * compositing an overlay onto the finished PNG/JPEG is the montage/annotation pattern
-    (`seestack/montage.py`, the annotation renderer) — no new rendering stack.
-  **Slices (each a shippable Builder run):**
-  * **(a) engine (S):** a pure `scale_compass_overlay(wcs, shape, *, unit="moon"|"arcmin")` returning the bar
-    length in px + its label and the compass N/E angles (or `None` on a WCS with no usable scale/rotation).
-    Unit-testable on a synthetic WCS (known pixscale → known bar; known CROTA2 → known compass angle;
-    degenerate WCS → `None`). **Reuse the North-up rotation-sign work, and heed the open sky-atlas
-    `_tan_wcs` note in Bugs** — validate the compass direction against a real solved Seestar frame with known
-    field rotation before trusting the rotation sign (a synthetic can't settle ASTAP's CROTA2 sense).
-  * **(b) backend (S):** an export/share variant that composites (a) onto the stored preview
-    (`GET …/stack-runs/{id}/picture.jpg?annotate=scale`), 404/no-op when the run has no solved WCS. Additive,
-    read-only.
-  * **(c) frontend (S):** an "Add scale & compass" toggle in the existing Picture download / share menu
-    (`WallpaperMenu`/`SharePictureButton` neighbourhood), with a plain-language tooltip.
-  **Beginner-bar check:** instantly understood ("how big / which way is up"), needs zero config (auto-computed
-  from the solve, Moon-width default), plain-language, purely additive/offline, and it's the "enjoy/share +
-  understand" pillar — the finishing touch that makes a beginner proud to post their picture. Distinct from
-  size-in-Moons (a text stat, no overlay), North-up (rotates the whole image, no bar/rose), and the object
-  labels (identity, not scale/orientation).
+  like a real astrophoto — "this is how big it is and which way is up" — with zero knowledge required.**~~ —
+  **SHIPPED v0.284.1** (Builder 2026-08-27, branch `claude/compassionate-galileo-4a77og`). Slices **(a)+(b)+(c) in one run**.
+
+  **What shipped.** New `seestack/skymarks.py` — pure, offline, no `webapp` imports — draws an angular scale
+  bar and a North/East rose **onto** a finished picture (the canvas size is unchanged; these are marks *on* the
+  photograph, not a frame around it). `GET …/stack-runs/{id}/jpeg?scale=true` serves it, composing with
+  `north_up` **and** with `keepsake` (the marks are drawn first, so a keepsake mats an already-marked picture),
+  and it is one tap from the **Target** page's "Save / share" menu and the **History** card's menu — inside the
+  grouping the IA slice already built, so nothing new appears on either page.
+
+  **The Scout's grep was half right, and the half it missed is the point.** A scale bar *does* already exist —
+  `seestack/scalebar.py` picks a round rung, and `AnnotatedImage.tsx` draws it over the History preview. But
+  that overlay is **SVG in the browser**, so it does not travel with the file: the moment the beginner
+  downloads or shares the picture, the bar is gone. The compass genuinely did not exist anywhere. So this slice
+  is the *baking*, plus the rose — and it reuses `scale_bar_for` rather than re-deriving the ladder.
+
+  **Two decisions worth keeping.** (1) **The marks live along the top edge.** The bottom of a shared picture is
+  already the app's caption zone (the nameplate draws its footer bar there; the keepsake sets its caption
+  beneath), so marks anywhere along the bottom would mean one covering the other. Along the top they compose
+  with both. (2) **The directions are derived numerically from the WCS** — step North (Dec+) and East (RA+) from
+  the image centre and see which way the pixels move — exactly as `render/orient.north_up_rotation_deg` does.
+  Nothing hand-rolls a `CROTA`/`CD` sign, so the East/West mirror hazard the sky-atlas overlay is still gated on
+  cannot creep in here, and a mirrored field is drawn mirrored because that is what the WCS says. `orient.py`
+  grew one public `applied_rotation_deg()` (the snap-to-90° rule it already used privately) so the rose follows
+  the pixels a North-up rotate *actually* applied rather than the angle that was asked for.
+
+  **Found and fixed on the way — the tofu trap, one module further on.** `ScaleBar.label` uses the typographic
+  primes `′`/`″`, which are correct in HTML and render fine on screen — and which Pillow's bundled Aileron face
+  has **no glyph for**. Baking the on-screen label would have put a hollow `.notdef` box exactly where the
+  number goes, the same defect v0.282.1 fixed in the nameplate, on the same day it was fixed. `ScaleBar` grew an
+  `ascii_label` property (`30"` / `15'` / `2°` — the degree sign *is* in the face) which the baked bar uses;
+  it's a property, not a field, so `to_dict()` and the API response are unchanged. `test_skymarks.py` pins the
+  rule across **every rung of the ladder** rather than the one label, with the reference `.notdef` glyph
+  asserted non-empty so the check can't quietly degrade into one that always passes.
+
+  **Upgrade-safe (§9):** a new opt-in query flag on an existing endpoint, a new pure module, one additive
+  property, two menu items; no config, schema, on-disk, default or API-shape change, and a test pins that the
+  plain JPEG download is byte-for-byte unchanged without the flag. A run with no solved WCS draws nothing at
+  all — the same graceful no-op `north_up` already has.
+
+  **Tests: +21.** 15 engine (`tests/test_skymarks.py` — the compass checked against **astropy itself** as
+  ground truth at four field rotations, the flipped-parity field drawn the other way round, the pole case where
+  a naive North step runs past the pole *and* East would need 57° of RA, the no-WCS/degenerate paths, the
+  rotate-follows-the-pixels helper, bar placement/length/clamping, the dark halo that keeps marks readable on a
+  bright core, a tiny picture, non-RGB input, and the glyph rule), 3 API (`tests/webapp/test_stack_render.py` —
+  the marked download and its filename, the no-WCS no-op, and the compose-with-north-up-and-keepsake case that
+  proves the rose turned with the picture), 3 frontend (`stackRenderUrl.test.ts` + `Target.test.tsx`).
+
+  **Follow-ups left open (each S):** draw the same rose in the *in-app* `AnnotatedImage` overlay beside the bar
+  it already shows (so screen and file match completely), and offer the marked variant on the **share** path,
+  not just the download.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy / share + understand — PRIORITY 3. Size: S–M. Confidence the gap is real: grepped this run —
+    no scale-bar/compass overlay exists anywhere; `scale bar`/`compass` return nothing in code or backlog.)*
+    Every published astrophoto has a scale bar and a N/E rose; it's the single touch that makes a beginner's
+    picture look "proper" and quietly teaches them the sky. The app already knows both numbers exactly — the
+    finished stack stores its plate-solved output WCS (`stack_runs.wcs_json`), which carries the pixel scale (so a
+    bar of *N* pixels is a known angle) and the field rotation (so "up" on the sensor maps to a real sky
+    direction). Nothing surfaces either onto the picture.
+    **Why it's beginner-friendly, not a pro knob:** the bar is labelled in plain, intuitive units, defaulting to
+    the same "full-Moon widths" idiom the shipped *"How big is it, really?"* size-in-Moons feature (v0.277.0)
+    already uses — *"◄─── 1 full Moon ───►"* — with arcmin as a subtle secondary. The compass is a tiny N/E rose
+    in a corner. Both are **off by default on the raw picture** and only appear on an explicit *"Add scale &
+    compass"* export/share, so no existing surface changes and it can never clutter.
+    **Why it's cheap to build (all the machinery exists):**
+    * `seestack/annotate.py::objects_in_field` already turns a stack's output WCS + canvas size into pixel
+      positions (it's the "What's in this picture?" projector), and already tolerates a degenerate WCS by drawing
+      nothing — so the scale/compass module reuses the exact same WCS-in → pixel-overlay-out shape.
+      `astropy.wcs.utils.proj_plane_pixel_scales` (already used in `mosaic.py`) gives the arcsec/px; the CD-matrix
+      rotation gives the compass angle. `render/orient.py` already reasons about North-up orientation.
+    * compositing an overlay onto the finished PNG/JPEG is the montage/annotation pattern
+      (`seestack/montage.py`, the annotation renderer) — no new rendering stack.
+    **Slices (each a shippable Builder run):**
+    * **(a) engine (S):** a pure `scale_compass_overlay(wcs, shape, *, unit="moon"|"arcmin")` returning the bar
+      length in px + its label and the compass N/E angles (or `None` on a WCS with no usable scale/rotation).
+      Unit-testable on a synthetic WCS (known pixscale → known bar; known CROTA2 → known compass angle;
+      degenerate WCS → `None`). **Reuse the North-up rotation-sign work, and heed the open sky-atlas
+      `_tan_wcs` note in Bugs** — validate the compass direction against a real solved Seestar frame with known
+      field rotation before trusting the rotation sign (a synthetic can't settle ASTAP's CROTA2 sense).
+    * **(b) backend (S):** an export/share variant that composites (a) onto the stored preview
+      (`GET …/stack-runs/{id}/picture.jpg?annotate=scale`), 404/no-op when the run has no solved WCS. Additive,
+      read-only.
+    * **(c) frontend (S):** an "Add scale & compass" toggle in the existing Picture download / share menu
+      (`WallpaperMenu`/`SharePictureButton` neighbourhood), with a plain-language tooltip.
+    **Beginner-bar check:** instantly understood ("how big / which way is up"), needs zero config (auto-computed
+    from the solve, Moon-width default), plain-language, purely additive/offline, and it's the "enjoy/share +
+    understand" pillar — the finishing touch that makes a beginner proud to post their picture. Distinct from
+    size-in-Moons (a text stat, no overlay), North-up (rotates the whole image, no bar/rose), and the object
+    labels (identity, not scale/orientation).
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list": a Messier/catalog checklist that lights up
   the famous objects you've already captured and shows the rest as a bucket list.**~~ — **SHIPPED v0.279.0**

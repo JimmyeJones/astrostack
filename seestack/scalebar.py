@@ -53,6 +53,19 @@ class ScaleBar:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    @property
+    def ascii_label(self) -> str:
+        """The same length, written with characters the *bundled* font can draw.
+
+        :attr:`label` uses the typographic primes ``′``/``″``, which are correct
+        in HTML (the in-app overlay renders them fine) but have **no glyph** in
+        Pillow's built-in Aileron face — baking one into a picture leaves a
+        hollow ``.notdef`` box where the number should be, exactly the defect
+        v0.282.1 fixed in the nameplate. So anything drawn onto pixels
+        (:mod:`seestack.skymarks`) asks for this ASCII form instead: ``30'`` /
+        ``15"`` / ``2°`` (the degree sign *is* in the face)."""
+        return _format_length_ascii(self.arcsec)
+
 
 def _format_length(arcsec: float) -> str:
     """A friendly label for a ladder length: seconds, arcminutes, or degrees.
@@ -64,6 +77,16 @@ def _format_length(arcsec: float) -> str:
     if arcsec < 3600:
         return f"{int(round(arcsec / 60))}′"      # arcminutes ′
     return f"{int(round(arcsec / 3600))}°"        # degrees °
+
+
+def _format_length_ascii(arcsec: float) -> str:
+    """:func:`_format_length` with ASCII prime marks — see
+    :attr:`ScaleBar.ascii_label` for why anything drawn onto pixels needs it."""
+    if arcsec < 60:
+        return f"{int(round(arcsec))}\""      # arcseconds
+    if arcsec < 3600:
+        return f"{int(round(arcsec / 60))}'"  # arcminutes
+    return f"{int(round(arcsec / 3600))}°"    # degrees (in the bundled face)
 
 
 def _moon_comparison(frame_arcsec: float) -> str:

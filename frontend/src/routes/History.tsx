@@ -1088,6 +1088,23 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                     </span>
                   </Menu.Item>
                 )}
+                {run.has_preview && (
+                  /* The scale bar and compass this page already draws *on
+                     screen*, baked into the downloaded pixels — a browser
+                     overlay doesn't travel with the file. Follows the North-up
+                     toggle, so the rose points where the saved picture does. */
+                  <Menu.Item
+                    leftSection={<IconPhotoDown size={16} />}
+                    component="a"
+                    href={api.stackArtifactUrl(
+                      safe, run.id, "jpeg", applyNorthUp, false, false, true)}
+                  >
+                    With scale &amp; compass
+                    <span style={MENU_HINT}>
+                      How big it is and which way is North, printed on the picture
+                    </span>
+                  </Menu.Item>
+                )}
                 {run.has_fits && (
                   <Menu.Item
                     leftSection={<IconDownload size={16} />}

@@ -76,6 +76,19 @@ def north_up_rotation_deg(wcs, width: int, height: int) -> float | None:
         return None
 
 
+def applied_rotation_deg(angle_deg: float) -> float:
+    """The rotation :func:`rotate_image_north_up` will *actually* apply.
+
+    Near-orthogonal angles are snapped to an exact 90° step so the common case
+    stays lossless, which leaves the pixels up to :data:`_SNAP_TOL_DEG` away
+    from the requested angle. Anything that has to follow the pixels — the
+    North/East rose baked on by :mod:`seestack.skymarks`, say — needs the angle
+    that was applied, not the one that was asked for, so both read it here
+    rather than each re-deriving the snap rule."""
+    snapped = round(angle_deg / 90.0) * 90.0
+    return snapped if abs(angle_deg - snapped) <= _SNAP_TOL_DEG else angle_deg
+
+
 def rotate_image_north_up(rgb: np.ndarray, angle_deg: float) -> np.ndarray:
     """Rotate an ``(H, W, 3)`` display image CCW by ``angle_deg`` so North is up.
 
@@ -92,7 +105,9 @@ def rotate_image_north_up(rgb: np.ndarray, angle_deg: float) -> np.ndarray:
     if arr.ndim == 2:
         arr = np.stack([arr, arr, arr], axis=-1)
 
-    # Snap near-orthogonal angles to an exact 90° step for a lossless rotate.
+    # Snap near-orthogonal angles to an exact 90° step for a lossless rotate
+    # (`applied_rotation_deg` states the same rule for callers that must follow
+    # the pixels — keep the two in step).
     snapped = round(angle_deg / 90.0) * 90.0
     k = int(snapped / 90.0) % 4
     if abs(angle_deg - snapped) <= _SNAP_TOL_DEG:
