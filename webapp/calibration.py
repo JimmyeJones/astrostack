@@ -22,11 +22,12 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from webapp.atomicio import write_text_durably
 
 log = logging.getLogger(__name__)
 
@@ -42,8 +43,8 @@ REGISTRY_NAME = "masters.json"
 # file, so a downgrade loses no masters — it only reverts to the old id policy).
 NEXT_ID_NAME = "masters_next_id"
 
-# The registry is a small JSON file mutated by a read-modify-write. The atomic
-# ``os.replace`` in ``_write_registry`` makes each *write* atomic, but not the
+# The registry is a small JSON file mutated by a read-modify-write. The durable
+# atomic replace in ``_write_registry`` makes each *write* atomic, but not the
 # read→mutate→write *sequence*: a build job (`register_master`, on the job
 # worker) and a delete (`delete_master`, on the Starlette threadpool) can
 # interleave so one clobbers the other's change — a just-built master vanishes
@@ -78,9 +79,10 @@ def _read_registry(library_root: str | Path) -> list[dict[str, Any]]:
 def _write_registry(library_root: str | Path, entries: list[dict[str, Any]]) -> None:
     path = _registry_path(library_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(entries, indent=2))
-    os.replace(tmp, path)
+    # Durable as well as atomic — losing this file to a power cut orphans every
+    # built master (the FITS survive, but nothing knows what they are). See
+    # webapp.atomicio.
+    write_text_durably(path, json.dumps(entries, indent=2), suffix=".json.tmp")
 
 
 def _read_id_high_water(library_root: str | Path) -> int:
@@ -100,9 +102,7 @@ def _read_id_high_water(library_root: str | Path) -> int:
 def _write_id_high_water(library_root: str | Path, value: int) -> None:
     path = calibration_dir(library_root) / NEXT_ID_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(str(int(value)))
-    os.replace(tmp, path)
+    write_text_durably(path, str(int(value)))
 
 
 def list_masters(library_root: str | Path) -> list[dict[str, Any]]:

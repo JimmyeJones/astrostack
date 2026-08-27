@@ -24,6 +24,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from webapp.atomicio import write_text_durably
+
 log = logging.getLogger(__name__)
 
 CONFIG_FILENAME = "config.json"
@@ -361,8 +363,9 @@ class SettingsStore:
             self._settings.state_dir.mkdir(parents=True, exist_ok=True)
             path = self._settings.config_path
             payload = json.dumps(json.loads(self._settings.model_dump_json()), indent=2)
-            # Atomic write: a crash mid-write must not corrupt config.json (which
-            # would silently revert all settings to defaults on next boot).
-            tmp = path.with_suffix(".json.tmp")
-            tmp.write_text(payload)
-            os.replace(tmp, path)
+            # Atomic *and* durable: a crash mid-write must not corrupt
+            # config.json (which would silently revert all settings to defaults
+            # on next boot), and neither must a power loss in the window between
+            # the rename landing and the bytes behind it reaching the disk — see
+            # webapp.atomicio.
+            write_text_durably(path, payload, suffix=".json.tmp")
