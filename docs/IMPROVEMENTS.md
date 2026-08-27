@@ -12430,7 +12430,7 @@ problems. Dogfood it every big-picture run and fix root causes.
 - ~~**IMPROVEMENT IDEA (Scout 2026-08-27 #9, verified by dogfood + code) — with "Auto outlier removal" on (the
   default), the Stack form still shows "Sigma clipping" and "Min/max rejection" as live, editable toggles whose
   displayed state can be the opposite of what actually runs — so a beginner reading the form is misled about the
-  method.**~~ — **SHIPPED v0.284.2** (Builder 2026-08-27, branch `agent/builder-run`).
+  method.**~~ — **SHIPPED v0.284.2** (Builder 2026-08-27, branch `claude/compassionate-galileo-4a77og`).
 
   **What shipped.** The form now says which method Auto will actually use, in the user's own numbers —
   *"Auto outlier removal is on, so it picks the method from your frame count: with 6 accepted, solved subs it
@@ -12493,7 +12493,7 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 - ~~**IMPROVEMENT IDEA (Scout 2026-08-27 #7, verified by grep) — a master dark/flat built from more than 64
   frames silently drops the extras, and the beginner is never told.**~~ — **SHIPPED v0.284.3** (Builder
-  2026-08-27, branch `agent/builder-run`).
+  2026-08-27, branch `claude/compassionate-galileo-4a77og`).
 
   **What shipped, exactly as filed.** `MasterMeta` grew `n_supplied` (how many frames the caller actually
   pointed at, recorded *before* the `max_frames` sampling), the build job returns it beside the existing
@@ -15757,7 +15757,7 @@ problems. Dogfood it every big-picture run and fix root causes.
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
   intuitive units) plus a North/East compass baked into a shared/exported picture, so a beginner's shot reads
   like a real astrophoto — "this is how big it is and which way is up" — with zero knowledge required.**~~ —
-  **SHIPPED v0.284.1** (Builder 2026-08-27, branch `agent/builder-run`). Slices **(a)+(b)+(c) in one run**.
+  **SHIPPED v0.284.1** (Builder 2026-08-27, branch `claude/compassionate-galileo-4a77og`). Slices **(a)+(b)+(c) in one run**.
 
   **What shipped.** New `seestack/skymarks.py` — pure, offline, no `webapp` imports — draws an angular scale
   bar and a North/East rose **onto** a finished picture (the canvas size is unchanged; these are marks *on* the
