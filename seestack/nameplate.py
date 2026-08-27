@@ -87,18 +87,20 @@ def format_acq_date(date_iso: str | None) -> str:
     return f"{day} {_MONTHS[month - 1]} {year}"
 
 
-def nameplate_line(fields: NameplateFields) -> str:
-    """The single ``·``-joined caption baked onto the image, e.g.
-    ``"M 31 · 4h 12m (505x30s) · 19 Jul 2026 · ZWO Seestar S50"``.
+def acquisition_parts(fields: NameplateFields, *,
+                      include_target: bool = True) -> list[str]:
+    """The caption's parts, in order, skipping every one with nothing to say.
 
-    Each part is included only when it carries real information — the integration
-    part folds in the ``(N x exp)`` detail when both are known, degrading to just
-    the duration, just the sub count, or nothing — so a run missing any field
-    still yields a tidy line (never a dangling separator or a ``"0 subs"``)."""
+    Shared by the two ways the app captions a picture: :func:`nameplate_line`
+    joins them all into one footer bar drawn *over* the image, while
+    :mod:`seestack.keepsake` sets the target as a title and the rest as a
+    subtitle *beneath* it — hence ``include_target``. Splitting the parts out
+    keeps the two surfaces from drifting apart on wording, on which fields count
+    as "missing", or on which characters the bundled font can actually draw."""
     parts: list[str] = []
 
     name = (fields.target or "").strip()
-    if name:
+    if include_target and name:
         parts.append(name)
 
     integ = format_duration(fields.integration_s)
@@ -125,7 +127,18 @@ def nameplate_line(fields: NameplateFields) -> str:
     if camera:
         parts.append(camera)
 
-    return " · ".join(parts)
+    return parts
+
+
+def nameplate_line(fields: NameplateFields) -> str:
+    """The single ``·``-joined caption baked onto the image, e.g.
+    ``"M 31 · 4h 12m (505x30s) · 19 Jul 2026 · ZWO Seestar S50"``.
+
+    Each part is included only when it carries real information — the integration
+    part folds in the ``(N x exp)`` detail when both are known, degrading to just
+    the duration, just the sub count, or nothing — so a run missing any field
+    still yields a tidy line (never a dangling separator or a ``"0 subs"``)."""
+    return " · ".join(acquisition_parts(fields))
 
 
 def _load_font(size: int):
