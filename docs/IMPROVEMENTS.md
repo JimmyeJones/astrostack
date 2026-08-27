@@ -8148,26 +8148,48 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Scout 2026-08-27 #14) — make the "keep shooting?" readiness verdict defer to the *measured* result
-  when a real stack exists, so the Target page can never tell a beginner "keep going" while their picture is
-  already visibly clean (or "plenty" while it's still grainy).** *(Pillar: friendliness + trust — PRIORITY 3.
-  Size: S. Confidence the gap is real: traced this run — `readiness.ts::integrationReadiness` judges *only*
-  integration hours against a per-type `GOAL_HOURS`, with no access to the stack's measured `noise_sigma`.)*
-  **The friction.** `integrationReadiness` is a good first-approximation steer *before* you've stacked, but once
-  a genuine stack exists the app has a strictly better signal — the picture's actual grain — and the two can
-  openly disagree in front of the beginner: the readiness card says "1.8 h of ~6 h — keep going" while the noise
-  badge right beside it shows an already-clean result (or vice versa). A beginner can't reconcile that, and the
-  generic time goal is the weaker of the two once real data is in.
-  **The fix (small, additive).** When the target has at least one genuine finished stack with a finite
-  `noise_sigma`, let the readiness verdict *acknowledge* the measured result rather than pretend it's still
-  pre-stack: soften "keep going" to "you can keep going for less grain, but it already looks clean" when the
-  measured grain is good, and keep "keep going" firm when it's still grainy — deferring to the same
-  `grainProjection` the new "Is more time worth it?" feature introduces (file them together; this is the
-  reconciliation half). No goal is *removed* — the time goal still shows for a target with no stack yet — so it's
-  purely additive and upgrade-safe. **Care:** only genuine stacks (skip edited/drizzle exports), and keep the
-  copy reassurance-shaped and never contradictory with the noise badge it sits next to. **Grep before building:**
-  confirm the Target page doesn't already cross-reference `noise_sigma` in the readiness card
-  (`LibraryProgressCard`/`readiness.ts` today read only the integration total).
+- ~~**NEW IDEA (Scout 2026-08-27 #14) — make the "keep shooting?" readiness verdict defer to the *measured*
+  result when a real stack exists, so the Target page can never tell a beginner "keep going" while their
+  picture is already visibly clean (or "plenty" while it's still grainy).**~~ — **SHIPPED v0.282.0**
+  (Builder 2026-08-27, branch `claude/compassionate-galileo-c43ksl`) — folded into the "Is more time worth
+  it?" feature it was filed to pair with, rather than shipped as a second surface. *(Pillar: friendliness +
+  trust — PRIORITY 3.)*
+
+  **Resolved by copy, not by mutating `integrationReadiness`** — which turned out to be the right call for a
+  reason the idea didn't anticipate: low grain is **not** the same claim as "you have enough integration".
+  More time also pulls out fainter detail, which is exactly what the per-type time goal is about, so softening
+  "keep going" on the strength of a clean σ would have been *worse* advice on a half-shot faint galaxy, not
+  better. So `integrationReadiness` is untouched (and every existing caller — `continueTonight`,
+  `libraryProgress`, the planner-row badges — is bit-for-bit unchanged), and the reconciliation lives in the
+  measured line that now sits directly beneath the verdict: on a clean stack it says more time buys **fainter
+  detail** rather than a visibly cleaner picture, which *agrees* with "keep going to pull out fainter detail"
+  instead of contradicting it. The other direction — the goal saying "plenty" over a still-grainy picture — is
+  corrected outright, with the light this target actually still needs. Both directions are pinned by
+  Target-page render tests. See the shipped entry under "Features that serve real workflows".
+
+  Original spec, for the record:
+
+
+  - **NEW IDEA (Scout 2026-08-27 #14) — make the "keep shooting?" readiness verdict defer to the *measured* result
+    when a real stack exists, so the Target page can never tell a beginner "keep going" while their picture is
+    already visibly clean (or "plenty" while it's still grainy).** *(Pillar: friendliness + trust — PRIORITY 3.
+    Size: S. Confidence the gap is real: traced this run — `readiness.ts::integrationReadiness` judges *only*
+    integration hours against a per-type `GOAL_HOURS`, with no access to the stack's measured `noise_sigma`.)*
+    **The friction.** `integrationReadiness` is a good first-approximation steer *before* you've stacked, but once
+    a genuine stack exists the app has a strictly better signal — the picture's actual grain — and the two can
+    openly disagree in front of the beginner: the readiness card says "1.8 h of ~6 h — keep going" while the noise
+    badge right beside it shows an already-clean result (or vice versa). A beginner can't reconcile that, and the
+    generic time goal is the weaker of the two once real data is in.
+    **The fix (small, additive).** When the target has at least one genuine finished stack with a finite
+    `noise_sigma`, let the readiness verdict *acknowledge* the measured result rather than pretend it's still
+    pre-stack: soften "keep going" to "you can keep going for less grain, but it already looks clean" when the
+    measured grain is good, and keep "keep going" firm when it's still grainy — deferring to the same
+    `grainProjection` the new "Is more time worth it?" feature introduces (file them together; this is the
+    reconciliation half). No goal is *removed* — the time goal still shows for a target with no stack yet — so it's
+    purely additive and upgrade-safe. **Care:** only genuine stacks (skip edited/drizzle exports), and keep the
+    copy reassurance-shaped and never contradictory with the noise badge it sits next to. **Grep before building:**
+    confirm the Target page doesn't already cross-reference `noise_sigma` in the readiness card
+    (`LibraryProgressCard`/`readiness.ts` today read only the integration total).
 
 - **NEW IDEA (Builder 2026-08-27, the mirror case the v0.279.1 cover nudge deliberately left out) — when
   *nothing* is pinned, the cover follows the newest stack, so a cloudy night's restack can silently replace a
@@ -8213,6 +8235,28 @@ to **Shipped**.)_
   from a different framing") so all three hold reasons have a Target-page answer, not just one. Grep-confirm they
   aren't surfaced elsewhere first (`ambient/voicing.ts` and `mixedPointings.ts` mention thin/mixed but for other
   surfaces). Original idea kept below for the record.
+
+  **⛔ Builder 2026-08-27 — DID the grep this slice asks for, BUILT it, then REVERTED it and closed the slice.
+  Do not re-pick it: both remaining kinds are already on the Target page, from better data.** I implemented the
+  whole thing (endpoint `kind` discriminator + `frames`/`min_frames`, three-branch `holdCopy`, 11 backend + 7
+  frontend tests, all green) before checking what the *rendered page* already shows, and it is a duplicate:
+  - **held-thin** → `routes/Target.tsx` `heldForSolve` (~line 489) already renders **"Auto-stack is waiting for
+    more of your subs to be located"** whenever Auto-stack is on, the target's solved-accepted count is under
+    `auto_stack_min_frames`, subs are still unsolved, and no healthy stack exists — pinned by the Target.test
+    case of the same name.
+  - **mixed-pointing** → the `"mixed-pointings"` NoticeBoard entry (~line 914) already renders **"This batch
+    looks like N different targets"** with the majority/minority counts, the separation in degrees, *and* a
+    one-click "reject the minority pointing" button.
+
+  Both are computed from the **live frames list**, which is strictly better than replaying the last scan's
+  summary: they are current rather than "what the scan thought at 02:00", they show for a manual stacker who
+  has Auto-stack off entirely, and the mixed one comes with the fix attached. A scan-summary note would say
+  the same thing a beat later with no action on it. Adding two more always-on banners to the page whose
+  standing owner complaint is *"there are like 30 different things on the top of some of the pages"* is a
+  straight negative. The `unreadable` kind remains the one hold with no live-data equivalent (the app cannot
+  know a file is missing without trying to read it), and it is already shipped — so this entry is **done**,
+  not open. Cost of learning this the expensive way: grep the *route file's rendered output*, not just the
+  helper modules the caveat named.
 
     *(Pillar: autonomy + trust — PRIORITY 2–3. Size: S. Confidence the gap is real: traced this run — grep first, see the
   caveat.)* The v0.270.1 walk-away readability preflight (`_auto_stack_readability_hold`, `webapp/pipeline.py`)
@@ -15194,39 +15238,98 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #14) — "Is more time worth it?": a plain-language, *measured* grain
-  projection that tells a beginner how much cleaner their picture would actually get with more light — from THIS
-  target's own result, not a generic rule of thumb.** *(Pillar: understand + plan ("get a good image") —
-  PRIORITY 2–3. Size: M. Confidence the gap is real: grep-verified this run — `readiness.ts` gives a *time* goal
-  by object type ("~4 h for a nebula"), and its own comment says the numbers are "a rough 'enough for a clean
-  image', **not a precise SNR target**"; nothing projects the target's *measured* noise forward.)*
-  **The gap.** The app already measures each finished stack's real background grain (`stack_runs.noise_sigma`,
-  surfaced by `NoiseBadge`/`StackNoiseBadge`) and knows the integration behind it (accepted-sub exposure total).
-  But the only "should I keep shooting?" answer a beginner gets is `integrationReadiness` — a fixed
-  `GOAL_HOURS` per object *type* (Galaxy 6 h, Nebula 4 h, …). That can contradict what the picture actually shows:
-  a bright cluster already clean at 30 min is still told "keep going to 1.5 h", and a faint galaxy still grainy at
-  6 h is told "plenty". The beginner's real question — *"is another hour of my clear-sky time actually going to
-  make this picture noticeably better?"* — goes unanswered.
-  **The feature.** Stacking noise falls as ≈1/√(integration), so from one measured `(integration, noise_sigma)`
-  point the app can project the curve and answer in plain words on the Target page: *"Your M13 is already clean
-  (grain 0.011). More time would help only a little."* / *"M101 is still grainy at 2 h — roughly **4× the light**
-  (about 6 more hours) would halve the grain."* Always the diminishing-returns law stated for a beginner: doubling
-  the total time cuts grain by ~30 %, quadrupling it halves it. No SNR jargon, no knob — one honest sentence tied
-  to their own numbers.
-  **Why it clears the beginner bar:** zero knowledge required, a sane default (the 1/√t law is fixed, not a
-  setting), plain-language, and it answers the single most common uncertainty on the stack→result path with the
-  user's *own* data instead of a type-average. Purely additive — a new read-only line/card next to the existing
-  readiness verdict; nothing removed or changed.
-  **Why it's cheap:** every input already exists and is already on the Target page — `noise_sigma` (the noise
-  badge reads it), the integration total (`readiness.ts` reads it), and the object type. A pure
-  `grainProjection(integrationSeconds, noiseSigma)` → `{verdict, moreLightFactor, hoursToHalve}` mirrors
-  `integrationReadiness`'s shape and is unit-testable on synthetic points (clean → "little to gain", grainy →
-  "~4× light"). **Slices:** (a) the pure projection fn + tests (S); (b) a small Target-page line/card beside the
-  readiness verdict, hidden until at least one genuine stack exists (S). **Care:** use only *genuine* finished
-  stacks with a finite `noise_sigma` (skip drizzle/edited exports whose grain isn't comparable), and clamp the
-  projection to sane bounds so a fluke-clean single-night estimate can't promise the impossible. **Pairs with**
-  the readiness improvement filed under Autonomy & friendliness this run (make the fixed time-goal defer to the
-  measured result so the two surfaces never contradict).
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #14) — "Is more time worth it?": a plain-language, *measured*
+  grain projection that tells a beginner how much cleaner their picture would actually get with more light —
+  from THIS target's own result, not a generic rule of thumb.**~~ — **SHIPPED v0.282.0** (Builder 2026-08-27,
+  branch `claude/compassionate-galileo-c43ksl`). *(Pillar: understand + plan — PRIORITY 2–3.)*
+
+  **What shipped.** `frontend/src/components/target/grainProjection.ts` — a pure
+  `grainProjection(runs)` that reads the **deepest genuine** stack's `(total_exposure_s, noise_sigma)` and
+  projects the σ ∝ 1/√t curve forward into one plain sentence, rendered as the last line of the Target page's
+  existing "Is it enough yet?" card (`data-testid="grain-projection"`). Deepest rather than newest on purpose:
+  a later shallow re-stack of a subset isn't the picture the user is judging. Editor-export / combine runs
+  (`reusable === false`) are excluded — their σ isn't measured on the same kind of image — and a run from a
+  backend too old to carry the flag is treated as genuine, as every other consumer of these rows does.
+
+  **It supersedes the weaker line rather than adding a third one.** The card used to end on
+  `noiseReductionHint`, the goal-*independent* √N figure computed from integration time alone. Once a genuine
+  measured stack exists, the measured answer is strictly better, so it takes that slot; with no stack (or no
+  measured σ) the card renders exactly what it rendered before. Nothing was removed, and no other surface moved.
+
+  **The bars are anchored, not invented** (the part that needed care — `noise_sigma` is normalised to the
+  picture's own robust signal range, so it has no absolute magnitude). `CLEAN_SIGMA = 0.02` comes from the
+  owner's **own real deep stacks** — the 271–787-frame runs in the 2026-08 walk-away investigation at the top
+  of this file measured 0.015–0.020, and those were good pictures. `GRAINY_SIGMA = 0.05` is exactly
+  `seestack/edit/noise._SIGMA_FULL`, the σ at which the app's own denoise advisor already asks for its
+  *strongest* cut. Neither threshold touches any processing — they only choose which sentence is printed.
+
+  **It reconciles with the goal verdict instead of contradicting it** (the paired Autonomy & friendliness idea
+  filed by Scout #14, folded in here rather than shipped separately). Low grain is *not* the same claim as
+  "you have enough integration" — more time also pulls out fainter detail, which is what the per-type goal is
+  really about — so the clean-verdict copy says more time now buys **fainter detail** rather than a visibly
+  cleaner background. It never tells a beginner to abandon a half-shot galaxy, and it reads as agreement with
+  the "keep going to pull out fainter detail" directly above it. In the other direction it does the correcting
+  the idea asked for: a cluster past its 1.5 h goal reading "plenty for a clean image" now gets *"it's still
+  grainy at 3.0 h (grain 0.050) — about 6.3× the light, roughly 16 h more, would bring it down"* beneath it.
+
+  **`cardGrainProjection` defers to a measured trend.** Where two or more stacks span a real integration
+  increase, `integrationTrend` fits the *actual* falloff exponent, and a fitted curve beats an assumed one —
+  so when that verdict is `"plateaued"` (sky-limited) the projection goes silent rather than promising "4× the
+  light would clean this up" a few centimetres from the `IntegrationTrendBadge` saying more subs won't help.
+  The `"improving"`/`"slowing"` verdicts agree with the projection, so it speaks there as normal.
+
+  **Honesty clamp:** past `MAX_HONEST_EXTRA_HOURS` (60 h) of extra light it stops quoting a figure and says so
+  in words — gated on the *hours*, not the light multiple, because 25× the light off a 20-minute first attempt
+  is one long evening and deserves a number, while 36× off an already-deep 6 h stack is 210 h and reads as a
+  taunt.
+
+  **Upgrade-safe (§9):** frontend-only, read-only, no config/schema/on-disk/API change and no new request — it
+  reads the `listStackRuns` rows the page already had.
+
+  **Tests (+18: 15 in `grainProjection.test.ts`, 2 in `Target.test.tsx`, and the existing √N-line assertion
+  left untouched to pin the no-stack fallback):** the null cases (no runs, no σ, no integration, NaN, zero);
+  export/combine runs skipped and an older no-flag run accepted; deepest-not-newest; the owner's own 0.016
+  reading called clean *and* still saying "fainter detail"; the 4×-light middling case; the full-strength-bar
+  grainy case with its 6.3× figure; both thresholds pinned exactly; the short-base big-multiple case still
+  quoted; the beyond-reach case quoting no figure at all; the plateau deferral (and that it *would* have
+  spoken); and the two Target-page renders proving the measured line replaces the √N one and that the goal
+  verdict beside it is left untouched.
+
+  Original spec, for the record:
+
+  - **NEW BEGINNER FEATURE (Scout 2026-08-27 #14) — "Is more time worth it?": a plain-language, *measured* grain
+    projection that tells a beginner how much cleaner their picture would actually get with more light — from THIS
+    target's own result, not a generic rule of thumb.** *(Pillar: understand + plan ("get a good image") —
+    PRIORITY 2–3. Size: M. Confidence the gap is real: grep-verified this run — `readiness.ts` gives a *time* goal
+    by object type ("~4 h for a nebula"), and its own comment says the numbers are "a rough 'enough for a clean
+    image', **not a precise SNR target**"; nothing projects the target's *measured* noise forward.)*
+    **The gap.** The app already measures each finished stack's real background grain (`stack_runs.noise_sigma`,
+    surfaced by `NoiseBadge`/`StackNoiseBadge`) and knows the integration behind it (accepted-sub exposure total).
+    But the only "should I keep shooting?" answer a beginner gets is `integrationReadiness` — a fixed
+    `GOAL_HOURS` per object *type* (Galaxy 6 h, Nebula 4 h, …). That can contradict what the picture actually shows:
+    a bright cluster already clean at 30 min is still told "keep going to 1.5 h", and a faint galaxy still grainy at
+    6 h is told "plenty". The beginner's real question — *"is another hour of my clear-sky time actually going to
+    make this picture noticeably better?"* — goes unanswered.
+    **The feature.** Stacking noise falls as ≈1/√(integration), so from one measured `(integration, noise_sigma)`
+    point the app can project the curve and answer in plain words on the Target page: *"Your M13 is already clean
+    (grain 0.011). More time would help only a little."* / *"M101 is still grainy at 2 h — roughly **4× the light**
+    (about 6 more hours) would halve the grain."* Always the diminishing-returns law stated for a beginner: doubling
+    the total time cuts grain by ~30 %, quadrupling it halves it. No SNR jargon, no knob — one honest sentence tied
+    to their own numbers.
+    **Why it clears the beginner bar:** zero knowledge required, a sane default (the 1/√t law is fixed, not a
+    setting), plain-language, and it answers the single most common uncertainty on the stack→result path with the
+    user's *own* data instead of a type-average. Purely additive — a new read-only line/card next to the existing
+    readiness verdict; nothing removed or changed.
+    **Why it's cheap:** every input already exists and is already on the Target page — `noise_sigma` (the noise
+    badge reads it), the integration total (`readiness.ts` reads it), and the object type. A pure
+    `grainProjection(integrationSeconds, noiseSigma)` → `{verdict, moreLightFactor, hoursToHalve}` mirrors
+    `integrationReadiness`'s shape and is unit-testable on synthetic points (clean → "little to gain", grainy →
+    "~4× light"). **Slices:** (a) the pure projection fn + tests (S); (b) a small Target-page line/card beside the
+    readiness verdict, hidden until at least one genuine stack exists (S). **Care:** use only *genuine* finished
+    stacks with a finite `noise_sigma` (skip drizzle/edited exports whose grain isn't comparable), and clamp the
+    projection to sane bounds so a fluke-clean single-night estimate can't promise the impossible. **Pairs with**
+    the readiness improvement filed under Autonomy & friendliness this run (make the fixed time-goal defer to the
+    measured result so the two surfaces never contradict).
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #13) — "Framed keepsake": a one-tap, print-and-share-ready export of
   a finished picture with a tasteful matte border and the object's name, capture date, and total integration
