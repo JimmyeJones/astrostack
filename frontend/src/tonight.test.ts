@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compassPoint, difficultyRowBadge, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge,
+  recentreNudgeRowBadge,
   isoDate, minAltOptions, MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel,
   moonWindowNote, notUpTonightNote, objectTypeBucket, partitionByUpTonight,
   planDateBounds, planNightLabel, scoreColor, splitTargets, typeFilterOptions,
@@ -395,5 +396,27 @@ describe("filterByTypeBucket", () => {
   it("returns everything for All or a stale/unknown selection", () => {
     expect(filterByTypeBucket(targets, "All")).toHaveLength(3);
     expect(filterByTypeBucket(targets, "Nonexistent")).toHaveLength(3);
+  });
+});
+
+describe("recentreNudgeRowBadge", () => {
+  it("says which way to move the scope, with the full sentence on hover", () => {
+    const b = recentreNudgeRowBadge({
+      direction: "south", degrees: 1.0, short: "1.0° south",
+      text: "Next time, nudge your Seestar about 1.0° south before you start, "
+        + "and it'll sit in the middle.",
+    });
+    expect(b).not.toBeNull();
+    expect(b!.label).toBe("Nudge 1.0° south");
+    expect(b!.tooltip).toContain("1.0° south");
+  });
+
+  it("stays silent with nothing to say, and never re-rounds the move itself", () => {
+    expect(recentreNudgeRowBadge(null)).toBeNull();
+    expect(recentreNudgeRowBadge(undefined)).toBeNull();
+    // An older backend sends no `short`: rather than inventing a rounding that
+    // could disagree with the sentence, the badge simply doesn't appear.
+    expect(recentreNudgeRowBadge(
+      { direction: "west", degrees: 0.42, text: "…about 0.4° west…" })).toBeNull();
   });
 });
