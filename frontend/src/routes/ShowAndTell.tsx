@@ -1,0 +1,207 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActionIcon, Anchor, Box, Button, Center, Group, Loader, Stack, Text, Title, Tooltip,
+} from "@mantine/core";
+import {
+  IconArrowsMaximize, IconChevronLeft, IconChevronRight, IconPlayerPause,
+  IconPlayerPlay, IconSparkles, IconX,
+} from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { api } from "../api/client";
+import { QueryError } from "../components/QueryError";
+import { SLIDE_MS, buildSlides, nextIndex } from "../showAndTell";
+
+/**
+ * "Show and tell" — a hands-off, room-filling slideshow of your best pictures.
+ *
+ * Everything else the app offers for *enjoying* a finished picture is either one
+ * artefact at a time (share JPEG, wallpaper, print) or a grid you have to click
+ * through. This is the thing a proud beginner actually wants when someone says
+ * "show me what you've shot": point a screen at it and it plays — big picture,
+ * big caption, no configuration, forever.
+ *
+ * Read-only over endpoints that already exist (the ranked "My best pictures"
+ * wall and the finished Moon/Sun stills), so it renders no masters and touches
+ * nothing on disk. It paints a fixed full-viewport layer over the app shell
+ * rather than living inside it, because a slideshow with a sidebar isn't one.
+ *
+ * Only the picture on screen is ever mounted, so a big library doesn't pull
+ * thirty previews at once; the next one is warmed in a hidden preloader so the
+ * dissolve never lands on a blank frame.
+ */
+export function ShowAndTellView() {
+  const best = useQuery({ queryKey: ["galleryBest"], queryFn: () => api.getGalleryBest() });
+  const gallery = useQuery({ queryKey: ["gallery"], queryFn: api.getGallery });
+
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  const slides = buildSlides(best.data?.items, gallery.data?.videos);
+  const count = slides.length;
+
+  const go = useCallback((step: number) => {
+    setIndex((i) => nextIndex(i, count, step));
+  }, [count]);
+
+  // Auto-advance. A single picture simply rests — there is nothing to cross-fade
+  // to, and a one-slide "show" that flickered would look broken.
+  useEffect(() => {
+    if (paused || count < 2) return undefined;
+    const t = setInterval(() => go(1), SLIDE_MS);
+    return () => clearInterval(t);
+  }, [paused, count, go]);
+
+  // Keyboard: the controls a room expects without hunting for a button.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === " " || e.key === "k") {
+        e.preventDefault();
+        setPaused((p) => !p);
+      } else if (e.key === "ArrowRight") {
+        go(1);
+      } else if (e.key === "ArrowLeft") {
+        go(-1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [go]);
+
+  const goFullscreen = () => {
+    const el = rootRef.current;
+    // Guarded: not every browser (and no test DOM) has the Fullscreen API, and a
+    // slideshow that throws on the way to the TV is worse than one that doesn't
+    // offer the button.
+    if (el && typeof el.requestFullscreen === "function") void el.requestFullscreen();
+  };
+
+  if (best.isError && !best.data && gallery.isError && !gallery.data) {
+    return <QueryError error={best.error} onRetry={() => { void best.refetch(); void gallery.refetch(); }} />;
+  }
+  if (best.isLoading || gallery.isLoading) {
+    return <Center h={300}><Loader /></Center>;
+  }
+
+  if (count === 0) {
+    return (
+      <Stack>
+        <Group gap="xs">
+          <IconSparkles size={24} />
+          <Title order={2}>Show and tell</Title>
+        </Group>
+        <Text c="dimmed">
+          Nothing to show yet. Once you&apos;ve finished stacking a target — or
+          made a Moon or Sun picture — this plays them full-screen, one after
+          another, with their names on. It&apos;s the easy way to show someone
+          what you&apos;ve been shooting.
+        </Text>
+        <Group>
+          <Button component={Link} to="/library" variant="light">Go to your library</Button>
+        </Group>
+      </Stack>
+    );
+  }
+
+  // A background refetch can shrink the list under us (a preview deleted, a
+  // target pruned), so never index past the end — the show just lands on the
+  // last picture instead of crashing on an undefined slide.
+  const at = Math.min(index, count - 1);
+  const current = slides[at];
+  const upcoming = count > 1 ? slides[nextIndex(at, count, 1)] : null;
+
+  return (
+    <Box
+      ref={rootRef}
+      data-testid="show-and-tell"
+      style={{
+        position: "fixed", inset: 0, zIndex: 300, background: "#000",
+        display: "flex", flexDirection: "column",
+      }}
+    >
+      {/* One picture at a time, dissolving in from the black behind it. Keyed on
+          the slide so the animation re-runs on every change. */}
+      <style>
+        {"@keyframes astrostack-show-fade{from{opacity:0}to{opacity:1}}"}
+      </style>
+      <Box style={{ position: "relative", flex: 1, minHeight: 0 }}>
+        <img
+          key={current.key}
+          src={current.src}
+          alt={current.title}
+          style={{
+            position: "absolute", inset: 0, width: "100%", height: "100%",
+            objectFit: "contain",
+            animation: "astrostack-show-fade 1.2s ease",
+          }}
+        />
+        {/* Warm the next picture so the dissolve never lands on a blank. */}
+        {upcoming && upcoming.key !== current.key ? (
+          <img src={upcoming.src} alt="" aria-hidden style={{ display: "none" }} />
+        ) : null}
+      </Box>
+
+      <Box px="lg" pb="md" pt="xs" style={{ background: "#000", color: "#fff" }}>
+        <Title order={2} c="#fff">{current.title}</Title>
+        {current.fact ? (
+          <Text size="lg" c="#dfd8ff" mt={4}>{current.fact}</Text>
+        ) : null}
+        <Group justify="space-between" mt="xs" wrap="nowrap" gap="sm">
+          <Text size="sm" c="dimmed">
+            {current.meta}
+            {count > 1 ? `${current.meta ? "  ·  " : ""}${at + 1} of ${count}` : ""}
+          </Text>
+          <Group gap={4} wrap="nowrap">
+            {current.href ? (
+              <Anchor component={Link} to={current.href} size="sm" c="#dfd8ff">
+                About this picture
+              </Anchor>
+            ) : null}
+            <Tooltip label="Previous">
+              <ActionIcon
+                variant="subtle" color="gray" aria-label="Previous picture"
+                onClick={() => go(-1)} disabled={count < 2}
+              >
+                <IconChevronLeft size={18} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label={paused ? "Play" : "Pause"}>
+              <ActionIcon
+                variant="subtle" color="gray"
+                aria-label={paused ? "Play slideshow" : "Pause slideshow"}
+                onClick={() => setPaused((p) => !p)} disabled={count < 2}
+              >
+                {paused ? <IconPlayerPlay size={18} /> : <IconPlayerPause size={18} />}
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Next">
+              <ActionIcon
+                variant="subtle" color="gray" aria-label="Next picture"
+                onClick={() => go(1)} disabled={count < 2}
+              >
+                <IconChevronRight size={18} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Full screen">
+              <ActionIcon
+                variant="subtle" color="gray" aria-label="Full screen"
+                onClick={goFullscreen}
+              >
+                <IconArrowsMaximize size={18} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Close the slideshow">
+              <ActionIcon
+                variant="subtle" color="gray" aria-label="Close the slideshow"
+                component={Link} to="/best"
+              >
+                <IconX size={18} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+        </Group>
+      </Box>
+    </Box>
+  );
+}
