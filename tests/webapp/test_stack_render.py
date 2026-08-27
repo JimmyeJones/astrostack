@@ -562,6 +562,67 @@ def test_jpeg_download_nameplate_bakes_the_acquisition_footer(client, solved_lib
     assert captioned.content != plain.content
 
 
+def test_jpeg_download_keepsake_frames_the_picture_on_a_matte(client, solved_library):
+    """keepsake=true mats the picture on a dark card with its name and
+    acquisition data set *beneath* it — so unlike the nameplate, which draws over
+    the picture, the framed card is strictly larger than the plain JPEG."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35}).status_code == 200
+
+    plain = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg")
+    framed = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg?keepsake=true")
+    assert plain.status_code == framed.status_code == 200
+    assert framed.headers["content-type"] == "image/jpeg"
+    assert framed.content[:2] == b"\xff\xd8"
+
+    with Image.open(BytesIO(plain.content)) as bare, \
+            Image.open(BytesIO(framed.content)) as card:
+        assert card.size[0] > bare.size[0] and card.size[1] > bare.size[1]
+        # The foot is deeper than the head: that's where the caption lives.
+        assert (card.size[1] - bare.size[1]) > (card.size[0] - bare.size[0])
+
+    # Its own filename, so saving both can't have one overwrite the other.
+    assert "_keepsake.jpg" in framed.headers["content-disposition"]
+    assert "_keepsake.jpg" not in plain.headers["content-disposition"]
+
+
+def test_jpeg_download_keepsake_wins_over_nameplate_so_nothing_captions_twice(
+    client, solved_library,
+):
+    """A keepsake already carries the acquisition line under the picture, so
+    asking for both must not also stamp a bar across the sky."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35}).status_code == 200
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/jpeg"
+    only = client.get(f"{url}?keepsake=true")
+    both = client.get(f"{url}?keepsake=true&nameplate=true")
+    assert only.status_code == both.status_code == 200
+    assert both.content == only.content
+
+
+def test_jpeg_download_is_byte_for_byte_unchanged_without_the_new_flag(
+    client, solved_library,
+):
+    """Upgrade safety: keepsake is opt-in, so every existing caller — and every
+    bookmarked URL — gets exactly the bytes it got before this existed."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    assert client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                       json={"stretch": 0.5, "black": 0.35}).status_code == 200
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/jpeg"
+    assert client.get(url).content == client.get(f"{url}?keepsake=false").content
+
+
 def test_stack_info_reads_provenance_cards(client, solved_library):
     """The info endpoint surfaces the provenance header cards (integration time,
     frame count, method) from the run's master FITS."""

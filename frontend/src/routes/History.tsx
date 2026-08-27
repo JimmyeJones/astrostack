@@ -1028,6 +1028,23 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                     </span>
                   </Menu.Item>
                 )}
+                {run.has_preview && (
+                  /* The framed variant: matted on a dark card with this run's
+                     name, date and total exposure set *beneath* the picture. It
+                     carries its own caption, so it ignores the nameplate toggle
+                     above rather than captioning the same facts twice. */
+                  <Menu.Item
+                    leftSection={<IconPhotoDown size={16} />}
+                    component="a"
+                    href={api.stackArtifactUrl(
+                      safe, run.id, "jpeg", applyNorthUp, false, true)}
+                  >
+                    Framed keepsake
+                    <span style={MENU_HINT}>
+                      Its name, date and exposure printed on the picture
+                    </span>
+                  </Menu.Item>
+                )}
                 {run.has_fits && (
                   <Menu.Item
                     leftSection={<IconDownload size={16} />}

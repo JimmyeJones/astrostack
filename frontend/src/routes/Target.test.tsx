@@ -239,6 +239,27 @@ describe("TargetView latest-picture download", () => {
       "href", client.api.stackArtifactUrl("M_42", 9, "jpeg"));
   });
 
+  it("offers the framed keepsake beside the plain downloads", async () => {
+    // A share-sheet caption doesn't travel with the file, so the plain JPEG
+    // arrives on Instagram (or a printed 6x4) as an unlabelled rectangle. The
+    // keepsake is the same picture with its story baked into the pixels.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await openSaveShare();
+    const keepsake = await screen.findByText("Framed keepsake");
+    expect(keepsake.closest("a")).toHaveAttribute(
+      "href",
+      client.api.stackArtifactUrl("M_42", 9, "jpeg", false, false, true),
+    );
+    // Plain language, no jargon: it says what you get, not how it's made.
+    expect(screen.getByText(
+      "Its name, date and exposure printed on the picture")).toBeInTheDocument();
+  });
+
   it("offers a wallpaper download of the latest stack's picture", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);

@@ -8130,6 +8130,36 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-27, the class of bug the v0.281.1 tofu-glyph fix belongs to) — nothing in the app
+  ever *looks at* the pixels it bakes text onto, so a whole family of "the picture is wrong but the string is
+  right" defects is invisible to the suite.** *(Pillar: trust / image quality — PRIORITY 3–4. Size: S.
+  Confidence: this run shipped a fix for exactly one instance of it, which had been live for months.)*
+  The nameplate shipped `(505×30s)` into every share export for months; every assertion in the suite compared
+  the caption *string*, which was always exactly right — the defect only existed once the characters met
+  Pillow's bundled Aileron face, which has no glyph for `×`. `tests/test_nameplate.py` and
+  `tests/test_keepsake.py` now pin the glyph rule for those two modules, but the same blind spot covers
+  **every** module that draws text: `montage.py`, `recap.py`, `render/deepening.py`, `sharecard.py` (all
+  audited clean by hand this run — but by hand, not by a test that stays true). **The idea:** one shared test
+  helper (`assert_drawable(text)`, comparing each character's mask to the font's `.notdef` box) plus a small
+  parametrised test that walks *every* caption builder in the codebase through it. Cheap, permanent, and it
+  turns a hand-audit into a guarantee. **Care:** the reference glyph must itself be asserted non-empty — a
+  future Pillow that maps unmapped codepoints to a blank would silently turn the check into one that can never
+  fail (that trap is already commented in `test_nameplate.py`).
+
+- **NEW IDEA (Builder 2026-08-27, the natural next tap on the v0.282.0 keepsake) — the keepsake titles itself
+  from the FITS `OBJECT` card, so an Unsorted or folder-named target gets a keepsake titled with a folder
+  name.** *(Pillar: enjoy + share / friendliness — PRIORITY 3. Size: S — both halves already exist.)*
+  `_nameplate_fields` takes the title from `OBJECT`, falling back to the library entry's name. For a beginner
+  who dropped loose FITS, that is `Unsorted` or `MyWorks_2026-08-14` — printed, in serif, under the picture
+  they were about to post. Meanwhile `GET /api/targets/{safe}/identify` already resolves the proper catalog
+  name from the plate-solved centre (`seestack.objectinfo.identify_object`, `matched_by == "coords"`), and the
+  `ObjectInfoCard` already *shows* it. Wire the one to the other: when the stored name is generic and
+  `identify` matched by coordinates with a confident separation, title the keepsake with the catalog name.
+  **Pairs with** the still-open "Rename to {name}?" chip in this section — same signal, two surfaces — and
+  either could ship first. **Care:** keep it to the *keepsake caption* (a display-time render), never write the
+  name back to the target or the FITS without a tap; and keep the fallback chain honest, so a confident
+  identification is the only thing that overrides what the user's own data says.
+
 - ~~**NEW IDEA (Builder 2026-08-27, the mirror case the v0.279.1 cover nudge deliberately left out) — when
   *nothing* is pinned, the cover follows the newest stack, so a cloudy night's restack can silently replace a
   better picture with a grainier one. Offer to pin the good one back.**~~ — **SHIPPED v0.281.0** (Builder
@@ -8209,7 +8239,25 @@ to **Shipped**.)_
   to those two keys (with their own copy — "kept your existing picture because last night's frames were thinner /
   from a different framing") so all three hold reasons have a Target-page answer, not just one. Grep-confirm they
   aren't surfaced elsewhere first (`ambient/voicing.ts` and `mixedPointings.ts` mention thin/mixed but for other
-  surfaces). Original idea kept below for the record.
+  surfaces).
+
+  _(**Builder 2026-08-27 — did that grep, and the remaining slice is now mostly REDUNDANT. Read this before
+  picking it up; I considered it and deliberately did not build it.**_ Both leftover cases already have a
+  Target-page voice, and adding a second one would be exactly the banner-piling the standing IA item forbids:
+  * **mixed-pointing** — `routes/Target.tsx` already renders *"This batch looks like N different targets"*
+    (`detectMixedPointings`, computed client-side from the frames) **with a one-tap "Reject the N odd-target
+    frames" button**. That is strictly more useful than a passive hold note, because it offers the fix.
+  * **held-thin** — `routes/Target.tsx` already computes `heldForSolve` from the live settings
+    (`auto_stack` + `auto_stack_min_frames`) against the target's own solved-accepted count, and says so with
+    the plate-solve next step; `thinStackWarning` covers the after-the-fact half. Between them the beginner is
+    told.
+  **The one genuinely uncovered sliver**, if anyone wants it: `heldForSolve` requires `unsolvedCount > 0` (it is
+  framed as "waiting to be located"), so a target sitting below the floor with *nothing left to solve* — e.g. 2
+  accepted frames, both solved — gets no note. That is also the case where the beginner can plainly see they
+  have two frames, so the value is small. If it is ever built, extend the **existing** `heldForSolve` branch
+  rather than adding a third banner, and prefer the server's recorded fact over the client-side guess.)_
+
+  Original idea kept below for the record.
 
     *(Pillar: autonomy + trust — PRIORITY 2–3. Size: S. Confidence the gap is real: traced this run — grep first, see the
   caveat.)* The v0.270.1 walk-away readability preflight (`_auto_stack_readability_hold`, `webapp/pipeline.py`)
@@ -15140,31 +15188,75 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #13) — "Framed keepsake": a one-tap, print-and-share-ready export of
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #13) — "Framed keepsake": a one-tap, print-and-share-ready export of
   a finished picture with a tasteful matte border and the object's name, capture date, and total integration
-  time baked into the image itself.** *(Pillar: enjoy + share — PRIORITY 3. Size: M. Confidence the gap is real:
-  grepped this run — the share path shares the *raw* JPEG with only a share-sheet caption; nothing bakes a
-  titled/bordered keepsake into the pixels.)*
-  **The gap.** Today `SharePictureButton` (`frontend/src/components/SharePictureButton.tsx`) opens the OS share
-  sheet with the run's bare JPEG plus a pre-filled *text* caption (`sharePictureText`, `src/share.ts:106`). But
-  on Instagram / Messages / a printed 6×4, **the caption text doesn't travel with the picture** — the beginner
-  ends up with an unlabelled rectangle and no record of what it is or how much light it took. Every "proper"
-  astrophoto a beginner admires online is a *titled, framed* keepsake; we produce only the raw frame.
-  **The feature.** A *"Save as keepsake"* action (next to Share/Download) that composites the finished picture
-  onto a small matte with a caption strip: **object name** (from the target / the `identify` card that already
-  exists), **capture date**, and **total integration** (e.g. "2 h 14 m · 132 subs") — every field the app already
-  computes (`session-recap` / integration-goal machinery expose the integration total; the target carries name +
-  date). Output is one self-contained PNG/JPEG the user can post or print, with the story baked in.
-  **Why it clears the beginner bar:** zero knowledge required, a sane default layout (dark matte, small serif
-  caption, the app never asks the user to design anything), plain-language fields, and it is **purely additive** —
-  a new export artefact beside the existing ones; the raw picture, the FITS, and every current surface are
-  untouched. Not a pro knob.
-  **Why it's cheap:** the compositing is the montage/annotation pattern already in the codebase
-  (`seestack/montage.py`, the annotation renderer, and the recap-poster path `GET /api/recap.jpg` which *already*
-  renders a captioned hero image server-side — the keepsake is the same shape scoped to one run). Reuse
-  `write_share_jpeg`'s encode. **Pairs naturally with** the #12 "Scale & sky-compass" idea below (a keepsake with
-  a scale bar is the complete package) and the #13 curation note that `identify` already supplies the object's
-  proper name. Additive/offline/upgrade-safe; new endpoint + one button, no schema/default/API removal.
+  time baked into the image itself.**~~ — **SHIPPED v0.282.0** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-z1yulm`).
+
+  **What shipped.** `seestack/keepsake.py` — pure, offline, no `webapp` imports — mats a finished picture on a
+  dark card and sets its **name as a title** and its **acquisition data as a subtitle beneath it**:
+  *"M 31" / "2h 14m (132x30s) · 26 Aug 2026 · ZWO Seestar S50"*. `GET
+  …/stack-runs/{id}/jpeg?keepsake=true` serves it (composing with `north_up`), and it is one tap from the
+  **Target** page's existing "Save / share" menu — as a download *and* as a **share**, which is the tap that
+  actually matters — plus the **History** card's menu for older runs. Nothing new appears on the page: both
+  live inside the grouping the IA slice already built.
+
+  **How it relates to the nameplate, which the Scout's grep didn't spot.** `seestack/nameplate.py` already
+  existed and already bakes these facts — but as a translucent bar drawn *over* the picture, reachable only
+  from an Editor-export checkbox a beginner never finds. So the keepsake is deliberately its **sibling, not a
+  duplicate**: a nameplate covers sky and keeps the frame's shape (still a wallpaper); a keepsake adds a mount
+  and covers nothing (a print). Both read the same `NameplateFields` and now share one
+  `nameplate.acquisition_parts()` — an additive refactor with `nameplate_line` byte-identical — so the two can
+  never drift on wording or on which fields count as missing. `png_bytes_to_jpeg` takes both, and a keepsake
+  **wins** if somehow both are asked for, so nothing is ever captioned twice.
+
+  **Design decisions worth keeping.** The matte is near-black but *not* black (a picture's own NaN corners are
+  black and would bleed into the mount), with a hairline just outside the picture so a dark sky still reads as
+  a framed photograph rather than a hole in the card. Mount and type sizes scale with the picture's **short**
+  side, so a wide mosaic and a square crop get proportionally the same frame; the caption shrinks to fit rather
+  than overflowing. No provenance at all is a clean **no-op** — an empty mount is worse than no mount. The
+  keepsake carries its own filename (`…_keepsake.jpg`, and `keepsakeFilename()` on the share side) so saving
+  both can't have one silently overwrite the other.
+
+  **Upgrade-safe (§9):** a new opt-in query flag on an existing endpoint, a new pure module, and two menu items;
+  no config, schema, on-disk, default or API-shape change, and a test pins that the plain JPEG download is
+  **byte-for-byte unchanged** without the flag. **Tests:** +12 in `tests/test_keepsake.py` (caption split and
+  its degradations, the picture's pixels untouched, mount geometry and the deep foot, the hairline, the no-op,
+  short-side scaling, a long caption on a tiny card, non-RGB input, and the glyph rule), +3 in
+  `tests/webapp/test_stack_render.py` (the framed download and its filename, keepsake-beats-nameplate, and the
+  unchanged-without-the-flag guarantee), +3 in `frontend/src/api/stackRenderUrl.test.ts`, +4 in
+  `share.test.ts`, +1 in `Target.test.tsx`.
+
+  **Found and fixed on the way (shipped separately, v0.281.1):** rendering the caption rather than reading it
+  showed the *nameplate* had been baking a hollow `.notdef` box into every share — `(505□30s)` — because
+  Pillow's bundled Aileron face has no glyph for `×`. See the Bugs section. Both modules now pin the rule that
+  every character a caption can emit must have a real glyph.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy + share — PRIORITY 3. Size: M. Confidence the gap is real:
+    grepped this run — the share path shares the *raw* JPEG with only a share-sheet caption; nothing bakes a
+    titled/bordered keepsake into the pixels.)*
+    **The gap.** Today `SharePictureButton` (`frontend/src/components/SharePictureButton.tsx`) opens the OS share
+    sheet with the run's bare JPEG plus a pre-filled *text* caption (`sharePictureText`, `src/share.ts:106`). But
+    on Instagram / Messages / a printed 6×4, **the caption text doesn't travel with the picture** — the beginner
+    ends up with an unlabelled rectangle and no record of what it is or how much light it took. Every "proper"
+    astrophoto a beginner admires online is a *titled, framed* keepsake; we produce only the raw frame.
+    **The feature.** A *"Save as keepsake"* action (next to Share/Download) that composites the finished picture
+    onto a small matte with a caption strip: **object name** (from the target / the `identify` card that already
+    exists), **capture date**, and **total integration** (e.g. "2 h 14 m · 132 subs") — every field the app already
+    computes (`session-recap` / integration-goal machinery expose the integration total; the target carries name +
+    date). Output is one self-contained PNG/JPEG the user can post or print, with the story baked in.
+    **Why it clears the beginner bar:** zero knowledge required, a sane default layout (dark matte, small serif
+    caption, the app never asks the user to design anything), plain-language fields, and it is **purely additive** —
+    a new export artefact beside the existing ones; the raw picture, the FITS, and every current surface are
+    untouched. Not a pro knob.
+    **Why it's cheap:** the compositing is the montage/annotation pattern already in the codebase
+    (`seestack/montage.py`, the annotation renderer, and the recap-poster path `GET /api/recap.jpg` which *already*
+    renders a captioned hero image server-side — the keepsake is the same shape scoped to one run). Reuse
+    `write_share_jpeg`'s encode. **Pairs naturally with** the #12 "Scale & sky-compass" idea below (a keepsake with
+    a scale bar is the complete package) and the #13 curation note that `identify` already supplies the object's
+    proper name. Additive/offline/upgrade-safe; new endpoint + one button, no schema/default/API removal.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
   intuitive units) plus a North/East compass baked into a shared/exported picture, so a beginner's shot reads
