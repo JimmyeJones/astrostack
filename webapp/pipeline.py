@@ -1484,6 +1484,86 @@ def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int
     return jm.submit("editor_png", body, target=safe)
 
 
+def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: int,
+                        recipe_dict: dict, *, size_name: str | None = None,
+                        nameplate: bool = False) -> Job:
+    """Render an editor recipe to a **print-ready** JPEG: fitted onto a standard
+    paper size and tagged with the DPI it should be printed at, so a photo lab
+    prints it at the size the app promised instead of guessing from the pixel
+    count. The file path, the chosen size and its DPI come back in the job result.
+
+    ``size_name`` picks one of :data:`seestack.printexport.PAPER_SIZES` by name;
+    omit it (the beginner default) to take the **largest size this picture can
+    fill sharply**. A name the picture can't print sharply is refused rather than
+    quietly upscaled — a soft A3 is exactly the surprise this feature exists to
+    prevent. When ``nameplate`` is set, the same acquisition footer the share
+    export bakes on is drawn onto the print, at the print's own resolution."""
+    def body(job: Job) -> dict[str, Any]:
+        from datetime import UTC, datetime
+
+        from seestack.io.project import Project
+        from seestack.printexport import print_advice, print_options, render_print
+        from seestack.stack.output import safe_basename
+
+        lib = Library.open_or_create(settings.resolved_library_root)
+        try:
+            entry = lib.find_target(safe)
+            if entry is None:
+                raise FileNotFoundError(f"no target '{safe}'")
+            proj = Project.open(lib.target_dir(entry))
+            try:
+                run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+                if run is None or not run.fits_path or not Path(run.fits_path).exists():
+                    raise FileNotFoundError(f"run {run_id} has no FITS")
+                op_errors: list[str] = []
+                out, _recipe = _render_recipe_fullres(
+                    run.fits_path, recipe_dict, _progress(jm, job),
+                    errors=op_errors)
+                h, w = out.shape[0], out.shape[1]
+                options = print_options(w, h)
+                if not options:
+                    raise ValueError(
+                        "This picture doesn't have enough detail for a sharp "
+                        "print yet — another night or two of subs will get it "
+                        "there.")
+                if size_name:
+                    option = next((o for o in options if o.name == size_name), None)
+                    if option is None:
+                        raise ValueError(
+                            f"{size_name} would have to be enlarged from this "
+                            f"picture and would print soft. "
+                            f"{print_advice(options)}")
+                else:
+                    option = options[0]
+                img = render_print(out, option)
+                if nameplate:
+                    plate = _nameplate_fields(run.fits_path, entry, run)
+                    if plate is not None:
+                        from seestack.nameplate import draw_nameplate
+                        img = draw_nameplate(img, plate)
+                ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+                slug = option.name.replace("×", "x").replace(" ", "")
+                jpeg = (Path(proj.project_dir) / "output"
+                        / f"{safe_basename(run.output_basename)}_print_{slug}_{ts}.jpg")
+                jpeg.parent.mkdir(parents=True, exist_ok=True)
+                # The DPI tag is the whole point: without it a lab sizes the print
+                # from the pixel count alone, which is how a 20-inch enlargement of
+                # a 6-inch picture happens.
+                img.save(jpeg, format="JPEG", quality=95, optimize=True,
+                         dpi=(option.dpi, option.dpi))
+            finally:
+                proj.close()
+            return {"safe": safe, "run_id": run_id,
+                    "jpeg_path": str(jpeg), "filename": jpeg.name,
+                    "size_name": option.name, "dpi": option.dpi,
+                    "width_px": option.width_px, "height_px": option.height_px,
+                    "advice": print_advice(options), "op_errors": op_errors}
+        finally:
+            lib.close()
+
+    return jm.submit("editor_print", body, target=safe)
+
+
 def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: int,
                         recipe_dict: dict, *, nameplate: bool = False) -> Job:
     """Render an editor recipe to a social-ready JPEG (long edge ≤ 2048 px) of the
