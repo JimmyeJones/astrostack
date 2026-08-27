@@ -280,6 +280,80 @@ def test_bilinear_debayer_unchanged_when_no_zero_samples(pattern):
     assert np.array_equal(got, ref), float(np.abs(got - ref).max())
 
 
+def _reference_debayer(mosaic: np.ndarray, pattern: str) -> np.ndarray:
+    """An independent, deliberately slow reference bilinear debayer.
+
+    Written per-pixel from the definition — for each missing colour site, average
+    the values of the *nearest same-channel sample sites that exist on the frame* —
+    with sample sites identified purely by their Bayer position. It knows nothing
+    about sparse planes or shifted masks, so it can't share a bug with the
+    production vectorised path.
+    """
+    layouts = {
+        "RGGB": (("r", "g"), ("g", "b")),
+        "BGGR": (("b", "g"), ("g", "r")),
+        "GRBG": (("g", "r"), ("b", "g")),
+        "GBRG": (("g", "b"), ("r", "g")),
+    }
+    (tl, tr), (bl, br) = layouts[pattern]
+    site = {(0, 0): tl, (0, 1): tr, (1, 0): bl, (1, 1): br}
+    h, w = mosaic.shape
+    out = np.zeros((h, w, 3), dtype=np.float64)
+    for ci, ch in enumerate("rgb"):
+        # Every position that is a genuine sample site of this channel.
+        samples = {(y, x) for y in range(h) for x in range(w)
+                   if site[(y % 2, x % 2)] == ch}
+        for y in range(h):
+            for x in range(w):
+                if (y, x) in samples:
+                    out[y, x, ci] = mosaic[y, x]
+                    continue
+                # Nearest same-channel neighbours: cross for G, and for R/B the
+                # horizontal / vertical / diagonal pair depending on which axis is
+                # off the sample grid.
+                if ch == "g":
+                    offsets = ((1, 0), (-1, 0), (0, 1), (0, -1))
+                else:
+                    sy, sx = next(iter(
+                        p for p, c in site.items() if c == ch))
+                    on_row, on_col = (y % 2) == sy, (x % 2) == sx
+                    if on_row and not on_col:
+                        offsets = ((0, 1), (0, -1))
+                    elif on_col and not on_row:
+                        offsets = ((1, 0), (-1, 0))
+                    else:
+                        offsets = ((1, 1), (1, -1), (-1, 1), (-1, -1))
+                vals = [mosaic[y + dy, x + dx] for dy, dx in offsets
+                        if (y + dy, x + dx) in samples]
+                out[y, x, ci] = float(np.mean(vals)) if vals else 0.0
+    return out
+
+
+@pytest.mark.parametrize("pattern", ("RGGB", "BGGR", "GRBG", "GBRG"))
+def test_debayer_matches_an_independent_reference_on_zero_samples(pattern):
+    """The whole-image companion to ``test_bilinear_debayer_counts_genuine_zero_sample``
+    above: instead of probing one interpolated pixel next to one planted zero, this
+    checks **every pixel of all three channels** against ``_reference_debayer`` on a
+    field densely scattered with genuine zeros, for all four layouts.
+
+    Worth both: the probe states the rule readably, and this one would catch a mask
+    that got the *other* channel, the diagonal case, or one layout's parity wrong —
+    which is the failure mode that matters on a hot path every frame goes through.
+    """
+    rng = np.random.default_rng(3)
+    mosaic = rng.uniform(0.0, 200.0, size=(12, 14)).astype(np.float32)
+    # Scatter genuine exact-zero samples the way an integer master dark does.
+    zeros = rng.random(mosaic.shape) < 0.15
+    mosaic[zeros] = 0.0
+    assert zeros.any()
+
+    got = bilinear_debayer(mosaic, pattern=pattern)
+    want = _reference_debayer(mosaic, pattern)
+    assert np.allclose(got, want, atol=1e-4), (
+        pattern, float(np.max(np.abs(got - want))))
+
+
+
 def test_fov_deg_from_header_s30(tmp_path):
     """An S30-shaped header (150 mm f.l., 2.9 µm pixels, 1920 px long edge) yields
     the true ~2.1° field — not the hardcoded 1.3° that silently fails an S30's

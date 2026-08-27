@@ -8,8 +8,10 @@ as a browsable grid where each image can show exactly how it was stacked.
 
 from __future__ import annotations
 
+import io
 import json
 import logging
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -745,4 +747,160 @@ def get_gallery_montage(request: Request, limit: int = MONTAGE_DEFAULT_TILES):
         content=buf.getvalue(),
         media_type="image/jpeg",
         headers={"Content-Disposition": 'attachment; filename="my-deep-sky-wall.jpg"'},
+    )
+
+
+# ---- "Download all my pictures" ----------------------------------------
+
+# The zip's per-member read size. Big enough that a 20 MB preview isn't a
+# thousand round trips through the generator, small enough that the response
+# never holds more than a chunk plus a zip header in memory however many
+# pictures the library has.
+_ZIP_CHUNK = 1 << 20  # 1 MiB
+
+
+class _ZipStreamBuffer(io.RawIOBase):
+    """A write-only sink ``zipfile`` can write into that we drain as we go.
+
+    ``ZipFile`` normally needs a seekable file. Given one that isn't, it falls
+    back to data descriptors and never rewinds — which is exactly what lets the
+    archive be produced as a stream. Everything written since the last
+    :meth:`drain` is handed to the response and dropped, so peak memory is one
+    chunk, not one library.
+    """
+
+    def __init__(self) -> None:
+        self._buf = bytearray()
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, b) -> int:  # noqa: ANN001
+        self._buf += b
+        return len(b)
+
+    def drain(self) -> bytes:
+        chunk = bytes(self._buf)
+        self._buf.clear()
+        return chunk
+
+
+def _library_pictures(request: Request) -> list[tuple[str, Path]]:
+    """``[(zip entry name, file path)]`` — one finished picture per target.
+
+    The picture is the run the user **pinned as its cover** when there is one and
+    its preview still exists, otherwise the target's newest stack preview — the
+    same precedence the Library tile, ``/api/gallery/best`` and the montage wall
+    already use, so the archive holds the pictures the app has been showing all
+    along rather than a differently-chosen set.
+
+    Entry names come from the target's ``safe_name`` (already sanitised for the
+    filesystem), so nothing in a target's display name can put a ``/`` or a
+    ``..`` into the archive for whoever unzips it. A name collision after the
+    extension is appended gets a ``-2``/``-3`` suffix rather than silently
+    overwriting a sibling entry.
+    """
+    from webapp.routers.targets import _cover_preview_path
+
+    lib = deps.open_library(request)
+    try:
+        entries = list(lib.list_targets())
+        picks: list[tuple[str, Path]] = []
+        used: dict[str, int] = {}
+        for entry in entries:
+            cover = _cover_preview_path(lib, entry)
+            raw = cover if cover is not None else entry.last_stack_preview
+            if not raw:
+                continue
+            path = Path(raw)
+            try:
+                if not path.is_file():
+                    continue
+            except OSError:  # noqa: PERF203 — an unreachable mount must not 500
+                continue
+            stem = entry.safe_name or f"target-{entry.id}"
+            name = f"{stem}{path.suffix}"
+            seen = used.get(name.lower())
+            if seen:
+                used[name.lower()] = seen + 1
+                name = f"{stem}-{seen + 1}{path.suffix}"
+            else:
+                used[name.lower()] = 1
+            picks.append((name, path))
+    finally:
+        lib.close()
+    return picks
+
+
+@router.get("/api/gallery/pictures.zip")
+def download_all_pictures(request: Request):
+    """Download every target's finished picture as one ``.zip``.
+
+    Bulk *upload* has been there for ages; the symmetric bulk *download* was the
+    gap. Someone with twenty targets shot over a season who wants to back the
+    results up to a hard drive, or drop them all into a phone album, had to open
+    each target and download one at a time — so in practice the pictures stayed
+    in the app. This is the one tap that gets them out.
+
+    What you get is what the app has been showing you: each target's current
+    picture (its pinned cover, else its newest stack), byte-for-byte as it
+    already exists on disk. Nothing is re-rendered and nothing is written — the
+    archive is built in memory and streamed member by member, so a big library
+    costs one chunk of RAM rather than the whole zip. Stored, not deflated: PNG
+    and JPEG previews are already compressed, so squeezing them again would burn
+    CPU to save nothing.
+
+    Best-effort per picture, like the montage wall: a file that has since been
+    deleted or can't be read is skipped and the rest of the archive still
+    arrives, with a ``_skipped.txt`` note inside naming what was missed so the
+    archive never quietly claims to be complete. 404s when the library has no
+    finished picture at all, so the offer can self-hide.
+    """
+    from fastapi.responses import StreamingResponse
+
+    picks = _library_pictures(request)
+    if not picks:
+        raise HTTPException(
+            status_code=404,
+            detail="You don't have any finished pictures to download yet.")
+
+    def _stream():  # noqa: ANN202
+        buf = _ZipStreamBuffer()
+        skipped: list[str] = []
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+            for name, path in picks:
+                try:
+                    with open(path, "rb") as src, zf.open(name, "w") as dst:
+                        while True:
+                            chunk = src.read(_ZIP_CHUNK)
+                            if not chunk:
+                                break
+                            dst.write(chunk)
+                            out = buf.drain()
+                            if out:
+                                yield out
+                except OSError as exc:
+                    # Deleted, unreadable, or a mount that went away mid-archive.
+                    log.warning("skipping %s in pictures.zip: %s", path, exc)
+                    skipped.append(f"{name} — could not be read ({exc.strerror or exc})")
+                out = buf.drain()
+                if out:
+                    yield out
+            if skipped:
+                zf.writestr(
+                    "_skipped.txt",
+                    "These pictures could not be added to the archive:\n\n"
+                    + "\n".join(skipped) + "\n",
+                )
+                out = buf.drain()
+                if out:
+                    yield out
+        yield buf.drain()
+
+    return StreamingResponse(
+        _stream(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="my-astrostack-pictures.zip"',
+        },
     )

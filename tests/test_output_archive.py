@@ -70,6 +70,43 @@ def test_write_archives_existing_set_to_one_basename(tmp_path):
     assert coverage_path_for(second["fits"]).exists()
 
 
+def test_repoint_map_holds_only_the_artefacts_with_a_history_column(tmp_path):
+    """Every artefact is archived, but only the three with a ``stack_runs`` column
+    may enter the repoint map.
+
+    The exclusion list this used to be named ``coverage`` and the two progress
+    reels, and was never extended when the frame-coverage sibling
+    (``_framecov.fits``) was added — so a re-stack that archived one put an entry
+    in the map that no history row could ever match. Harmless (``UPDATE … WHERE
+    path=?`` simply hit zero rows) but wrong, and the next basename-resolved
+    artefact would have inherited the same gap. This pins the rule instead of the
+    exclusions: the map holds exactly the repointable kinds, whatever else exists.
+    """
+    from seestack.stack.output import (
+        RUN_ARTEFACT_SUFFIXES,
+        _archive_existing_outputs,
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    # Land the *whole* artefact set on disk, framecov and progress reels included.
+    for suffix in RUN_ARTEFACT_SUFFIXES.values():
+        (out_dir / f"master{suffix}").write_bytes(b"x")
+
+    mapping = _archive_existing_outputs(out_dir, "master")
+
+    assert set(mapping) == {
+        str(out_dir / f"master{RUN_ARTEFACT_SUFFIXES[k]}")
+        for k in ("fits", "tiff", "preview")
+    }
+    # …and everything was still moved aside: no canonical name is left behind, and
+    # each archived file exists under the one shared new basename.
+    for suffix in RUN_ARTEFACT_SUFFIXES.values():
+        assert not (out_dir / f"master{suffix}").exists()
+    archived = sorted(p.name for p in out_dir.iterdir())
+    assert len(archived) == len(RUN_ARTEFACT_SUFFIXES)
+
+
 def test_repoint_stack_runs_moves_old_row_to_archived_files(tmp_path):
     """The previous run's row is repointed at the archived files; the new run keeps
     the canonical paths. Regression: before the fix the old row kept pointing at
