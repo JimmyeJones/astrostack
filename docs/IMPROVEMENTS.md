@@ -179,6 +179,42 @@ _(none — claim an item here with your branch name)_
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #12, branch `claude/vigilant-knuth-f9chv3`) — led with the stacking
+  engine again, then rotated onto the data-integrity path the last real bug lived in (scanner + ingest), and
+  **closed with a live end-to-end auto-stack dogfood** rather than pure code review. Result: CLEAN — no verified
+  bug this run. Baseline green: full headless suite **2965 passed, 2 skipped** (822 s), and a 208-test targeted
+  re-run over the audited engine areas (accumulator, quality-weighting, photometric-normalize, qc-grading,
+  mosaic, drizzle, drizzle-reject, calibrate) passed in 58 s.
+  **What was read adversarially and traced:**
+  **weighting.py** — the geometric-mean-of-factors keeps every weight in `[min_weight, 1]`; the
+  per-panel positional-median split (`group_by_pointing`) self-disables on a single field so an OSC target is
+  byte-for-byte unchanged; `combine_weights_with_photometric` folds the `1/s²` inverse-variance correction only
+  on a genuinely-applied scale (`|s−1|>1e-9`) and returns the *same object* when photometric is off.
+  **photometric.py / pointings.py** — `_pointing_references` normalises each mosaic panel against itself and
+  returns `None` (one target-wide reference) unless ≥2 groups each carry `min_frames`; single-linkage
+  clustering on unit vectors is wrap/pole-safe. **accumulator.py** — `WeightedSum`/`MinMaxReject`/`Welford`
+  all keep NaN = "no coverage" (uncovered → NaN, not 0/0), the min/max k-set sums each side's ±inf identities
+  *before* combining so an uncovered pixel can't form inf−inf, and `frame_coverage` counts a frame on **any**
+  channel so per-channel κ-σ never under-counts. **mosaic.py** — wrap-safe circular-mean centres, MAD outlier
+  drop capped at ½ the frames, and both the pixel-dimension and megapixel budgets fail fast. **drizzle_path.py**
+  — the reject gate reads the true `frame_coverage`, not the pixfrac-deflated weight, and the float64
+  catastrophic-cancellation floor disables clipping where variance is below ULP(m²). **calibrate/apply.py** —
+  no-data dark/bias/flat pixels sanitize to the correct "no correction" identity on both the plain and
+  exposure-scaling paths; `apply_raw` honours its "returns a fresh array" contract even on the empty-bundle
+  path. **qc/grading.py** — per-panel yardstick fallback to target-wide is sound; the reconsider pass is a
+  fixed point over the invariant combined set; the per-panel *and* global reject caps are deterministic.
+  **io/scanner.py + io/ingest.py** — the v0.277.4 parent-scoped sibling skip holds; the in-place content-swap
+  recovery (`_same_capture` requires a *positive* DATE-OBS match, else conservatively "changed") and the
+  fingerprint backfill are correct, and `incoming/` stays strictly read-only (copy, never move). **nightplan
+  `session_moon`** — midpoint eval, `end<start` swap, and the shared `_moon_geometry` are consistent with the
+  forward-looking warning.
+  **Live dogfood (the part code review can't do):** built a 20-sub dithered synthetic target (one satellite
+  streak, per-frame independent noise) and ran the real `run_stack(auto_reject, quality_weighted,
+  photometric_normalize)`. The result was clean and trustworthy — auto-reject resolved to κ-σ and clipped the
+  streak (`rejection_fraction≈0.016`), coverage/NaN handled exactly as designed (97.6 % finite; the ragged
+  dither-edge corners are NaN, `coverage_min=0` at the extreme corner, `coverage_max=20`), sky-subtracted
+  linear output centred near zero (median ≈ 1.4 ADU), no inf/garbage. The stack→result path is doing the right
+  thing end to end.
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #11, branch `claude/vigilant-knuth-bsx6dh`) — led the rotation with the
   stacking engine's combine/reject + calibrate + auto-reject resolution, then swept the guardrail-critical
   routers the #10 note pointed at (gallery, stack, **upload**) and the render/proxy path. Result: the engine,
@@ -8057,6 +8093,40 @@ to **Shipped**.)_
   actually returned" or a widening of that whitelist with the same care about arbitrary ids. Don't just remove
   the check.
 
+- **NEW IDEA (Scout 2026-08-27 #12) — tell the owner *on the Target page* when a walk-away scan deliberately
+  held their picture back, so "why didn't last night refresh my image?" has a visible answer.** *(Pillar:
+  autonomy + trust — PRIORITY 2–3. Size: S. Confidence the gap is real: traced this run — grep first, see the
+  caveat.)* The v0.270.1 walk-away readability preflight (`_auto_stack_readability_hold`, `webapp/pipeline.py`)
+  is exactly right to *not* publish a thinner, noisier stack when some of a target's accepted subs have no file
+  on disk right now — and to hold *without* stamping the attempt so the next scan stacks it the moment the files
+  return. But its verdict currently only reaches the **scan job's summary dict**
+  (`summary["auto_stack_held_unreadable"]`, alongside `auto_stack_held_thin` / `auto_stack_mixed_skipped`) —
+  i.e. the scan-job result/log, not the surface a beginner actually looks at. So the owner whose exact workflow
+  this protects (walk away, come back to the picture) sees their image simply *not update* after a night of
+  subs, with no on-page explanation — the very "concluded my gear/editing was at fault" trap the retrospective
+  Moon note (v0.278.0) was built to avoid, but for a storage hiccup instead of the sky.
+  **The feature:** when the most recent scan held this target back (unreadable-hold, held-thin, or
+  mixed-pointing), show a calm, dismissible one-liner on the Target page — *"Last night's frames are here, but
+  some of this target's subs weren't readable just then, so AstroStack kept your existing picture instead of
+  publishing a thinner one. It'll re-stack automatically once the files are back."* — plus the concrete numbers
+  it already has (`frames` attempted vs `min`, or thin-vs-best). Reassurance-shaped, never the user's fault,
+  and it self-hides on every normal night (nothing was held). **Grounding:** the hold reasons are already
+  computed and structured (`held_unreadable`/`held_thin`/`mixed_skipped` carry per-target dicts); this is a
+  read-only surfacing, no new engine logic. **⚠ Grep before building:** confirm the Target page (or session
+  recap / a target-status endpoint) doesn't *already* read one of these summary keys — the backlog has carried
+  "surface X" items that a later run had already wired. Additive/offline/upgrade-safe; no schema/default/API
+  removal, only an added optional field.
+
+  _(Builder 2026-08-27 — **did the grep the caveat asked for; the unreadable-hold half is ALREADY SHIPPED.**
+  `frontend/src/components/AutoStackHoldNote.tsx` reads `GET /api/targets/{safe}/autostack-hold`, which walks
+  the newest finished scan's `auto_stack_held_unreadable` and renders exactly the reassurance this entry
+  describes — "…so it was left alone… the next scan will stack the full set automatically — nothing has been
+  lost" — inside the Target page's NoticeBoard, self-clearing with no dismissal state. So **don't rebuild it.**
+  What is genuinely still unsurfaced is the *other two* verdicts the entry lists: `auto_stack_held_thin` and
+  `auto_stack_mixed_skipped` have no Target-page voice. That is the remaining slice, and it is smaller than
+  the entry implies — extend the existing endpoint with those two shapes and add the branches to the existing
+  component, rather than adding a third note.)_
+
 - **NEW IDEA (Builder 2026-08-27, the follow-ups the life list v0.279.0 deliberately left out) — three small
   slices that turn the life list from a page you visit into something that finds you.** *(Pillar: friendliness
   / "enjoy + come back tomorrow" — PRIORITY 3. Size: S each, independent — pick one, they don't stack.)*
@@ -14941,6 +15011,47 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
+  intuitive units) plus a North/East compass baked into a shared/exported picture, so a beginner's shot reads
+  like a real astrophoto — "this is how big it is and which way is up" — with zero knowledge required.**
+  *(Pillar: enjoy / share + understand — PRIORITY 3. Size: S–M. Confidence the gap is real: grepped this run —
+  no scale-bar/compass overlay exists anywhere; `scale bar`/`compass` return nothing in code or backlog.)*
+  Every published astrophoto has a scale bar and a N/E rose; it's the single touch that makes a beginner's
+  picture look "proper" and quietly teaches them the sky. The app already knows both numbers exactly — the
+  finished stack stores its plate-solved output WCS (`stack_runs.wcs_json`), which carries the pixel scale (so a
+  bar of *N* pixels is a known angle) and the field rotation (so "up" on the sensor maps to a real sky
+  direction). Nothing surfaces either onto the picture.
+  **Why it's beginner-friendly, not a pro knob:** the bar is labelled in plain, intuitive units, defaulting to
+  the same "full-Moon widths" idiom the shipped *"How big is it, really?"* size-in-Moons feature (v0.277.0)
+  already uses — *"◄─── 1 full Moon ───►"* — with arcmin as a subtle secondary. The compass is a tiny N/E rose
+  in a corner. Both are **off by default on the raw picture** and only appear on an explicit *"Add scale &
+  compass"* export/share, so no existing surface changes and it can never clutter.
+  **Why it's cheap to build (all the machinery exists):**
+  * `seestack/annotate.py::objects_in_field` already turns a stack's output WCS + canvas size into pixel
+    positions (it's the "What's in this picture?" projector), and already tolerates a degenerate WCS by drawing
+    nothing — so the scale/compass module reuses the exact same WCS-in → pixel-overlay-out shape.
+    `astropy.wcs.utils.proj_plane_pixel_scales` (already used in `mosaic.py`) gives the arcsec/px; the CD-matrix
+    rotation gives the compass angle. `render/orient.py` already reasons about North-up orientation.
+  * compositing an overlay onto the finished PNG/JPEG is the montage/annotation pattern
+    (`seestack/montage.py`, the annotation renderer) — no new rendering stack.
+  **Slices (each a shippable Builder run):**
+  * **(a) engine (S):** a pure `scale_compass_overlay(wcs, shape, *, unit="moon"|"arcmin")` returning the bar
+    length in px + its label and the compass N/E angles (or `None` on a WCS with no usable scale/rotation).
+    Unit-testable on a synthetic WCS (known pixscale → known bar; known CROTA2 → known compass angle;
+    degenerate WCS → `None`). **Reuse the North-up rotation-sign work, and heed the open sky-atlas
+    `_tan_wcs` note in Bugs** — validate the compass direction against a real solved Seestar frame with known
+    field rotation before trusting the rotation sign (a synthetic can't settle ASTAP's CROTA2 sense).
+  * **(b) backend (S):** an export/share variant that composites (a) onto the stored preview
+    (`GET …/stack-runs/{id}/picture.jpg?annotate=scale`), 404/no-op when the run has no solved WCS. Additive,
+    read-only.
+  * **(c) frontend (S):** an "Add scale & compass" toggle in the existing Picture download / share menu
+    (`WallpaperMenu`/`SharePictureButton` neighbourhood), with a plain-language tooltip.
+  **Beginner-bar check:** instantly understood ("how big / which way is up"), needs zero config (auto-computed
+  from the solve, Moon-width default), plain-language, purely additive/offline, and it's the "enjoy/share +
+  understand" pillar — the finishing touch that makes a beginner proud to post their picture. Distinct from
+  size-in-Moons (a text stat, no overlay), North-up (rotates the whole image, no bar/rose), and the object
+  labels (identity, not scale/orientation).
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list": a Messier/catalog checklist that lights up
   the famous objects you've already captured and shows the rest as a bucket list.**~~ — **SHIPPED v0.279.0**
