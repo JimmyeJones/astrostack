@@ -1547,6 +1547,73 @@ def download_share(safe: str, run_id: int, job_id: str, request: Request) -> Fil
     return FileResponse(jpeg_path, media_type="image/jpeg", filename=filename)
 
 
+class PrintRequest(PngRequest):
+    # Which standard paper size to fit onto. Omitted (the beginner default) means
+    # "the largest size this picture can fill sharply".
+    size_name: str | None = None
+    # Bake the acquisition footer on, exactly as the share export can.
+    nameplate: bool = False
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/print-sizes")
+def print_sizes(safe: str, run_id: int, request: Request) -> dict:
+    """Which standard print sizes this picture can fill **sharply**, largest
+    first, plus one plain-language line recommending the biggest.
+
+    Sized from the run's own canvas, so it costs nothing (no render, no FITS
+    read) and the menu can offer only sizes that will actually look good. A
+    recipe that *crops* makes this a little optimistic — the export itself
+    re-checks against the real rendered pixels and refuses with a clear message
+    rather than printing something soft.
+    """
+    from seestack.printexport import print_advice, print_options
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+    finally:
+        proj.close()
+        lib.close()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    options = print_options(int(run.canvas_w or 0), int(run.canvas_h or 0))
+    return {
+        "sizes": [{"name": o.name, "dpi": o.dpi, "label": o.label,
+                   "width_in": o.width_in, "height_in": o.height_in}
+                  for o in options],
+        "advice": print_advice(options),
+    }
+
+
+@router.post("/api/targets/{safe}/stack-runs/{run_id}/editor/print")
+def export_print(safe: str, run_id: int, body: PrintRequest, request: Request) -> dict:
+    """Kick off a print-ready render (fitted to a paper size, DPI-tagged) of the
+    recipe. Poll the job, then GET .../editor/print/{job_id} to download it."""
+    from webapp import pipeline
+
+    settings = deps.get_settings(request)
+    jm = deps.get_job_manager(request)
+    job = pipeline.submit_editor_print(settings, jm, safe, run_id, body.recipe or {},
+                                       size_name=body.size_name,
+                                       nameplate=body.nameplate)
+    return {"job_id": job.id}
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/print/{job_id}")
+def download_print(safe: str, run_id: int, job_id: str, request: Request) -> FileResponse:
+    jm = deps.get_job_manager(request)
+    job = jm.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="No such job")
+    if job.state != "done" or not job.result:
+        raise HTTPException(status_code=409, detail=f"Print not ready (job {job.state})")
+    jpeg_path = job.result.get("jpeg_path")
+    if not jpeg_path or not Path(jpeg_path).exists():
+        raise HTTPException(status_code=404, detail="Print not found")
+    filename = job.result.get("filename") or Path(jpeg_path).name
+    return FileResponse(jpeg_path, media_type="image/jpeg", filename=filename)
+
+
 class BatchRequest(BaseModel):
     items: list[dict]                 # [{"safe": ..., "run_id": ...}, ...]
     recipe: dict | None = None
