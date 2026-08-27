@@ -43,7 +43,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+- **Builder, branch `claude/compassionate-galileo-xhognz`** — the 🟠 share/wallpaper **double-rotation** bug at the top of "Bugs" (a North-up download of a preview a past save already rotated turns it a second time), taken with the sweep the entry asks for: every consumer of the *stored preview bytes* that derives its geometry from the FITS, including the wallpaper's `wallpaper_target_pixel` crop centre.
 
 ---
 
