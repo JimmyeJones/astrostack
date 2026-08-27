@@ -122,13 +122,16 @@ _(none — claim an item here with your branch name)_
   path skips a celestial-less base instead of propagating it. Two files (`runner.py`, `bootstrap.py`) + tests.
   Left for the Builder to implement deliberately. *(Found by the plate-solve adversarial audit this run.)*
 
-- **🟡 BROKEN-UX (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`, reproduced) — after a
-  user tunes a run's look with the History "Adjust" (asinh stretch/black) sliders and saves, the "Download
-  full-res PNG" button silently reverts to the STF autostretch — so the one full-resolution download disagrees
-  with the thumbnail, the share-JPEG and the wallpaper, all of which show the saved asinh look.** *(Severity:
-  broken-UX — the user's saved processing choice is lost on exactly the export they'd frame or print; the FITS
-  is untouched, so not wrong-result. Confidence: reproduced — the two renders diverge on a synthetic linear
-  master; the missing forward-through traced end to end.)*
+- **✅ SHIPPED (Builder, v0.287.4, branch `claude/compassionate-galileo-pr7p04`) — ~~after a user tunes a run's
+  look with the History "Adjust" (asinh stretch/black) sliders and saves, the "Download full-res PNG" button
+  silently reverts to the STF autostretch.~~** Fixed exactly as the direction below specifies:
+  `render_preview_png_full_res` takes optional `stretch`/`black` (routing to the same `asinh_stretch` the baked
+  preview used when both are supplied, STF when not — so an unadjusted run is byte-for-byte unchanged), and
+  `download_full_res_png` reads the run's saved `preview_stretch`/`preview_black` columns and passes them
+  through. No frontend change needed — the server already had the saved values. A display-space run keeps
+  rendering verbatim. Tests: `tests/webapp/test_full_res_png.py` +2 — the download now equals
+  `render_stack_png(stretch, black)` at full res and is visibly ≠ the STF (fails before / passes after), and
+  an unadjusted run's bytes are asserted identical to the plain STF render (no-regression guard).
 
   **Root cause (traced + reproduced).** The History Adjust save (`set_stack_preview`,
   `webapp/routers/stack.py:1266-1296`) overwrites the run's stored `preview_path` with
@@ -23650,6 +23653,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.287.4** — Editor/export parity: **the full-res PNG download now keeps the look you saved.** Tuning a
+  run with History's "Adjust" sliders re-bakes the stored preview through the asinh curve — so the thumbnail,
+  the share-JPEG and the wallpaper all showed the tuned picture while the one export you'd frame or print
+  silently reverted to the STF autostretch. `render_preview_png_full_res` now accepts the saved
+  `stretch`/`black` and the download endpoint passes the run's stored values through; runs you never adjusted
+  (columns NULL) and display-space editor exports are byte-for-byte unchanged. Tests: +2
+  `tests/webapp/test_full_res_png.py`.
 - **v0.287.3** — Data-integrity: **a plate solve is only believed when its WCS actually locates the frame.**
   ASTAP returning 0 with a readable-but-empty/truncated `.wcs` sidecar used to be persisted as a *solved*
   frame carrying a garbage `wcs_json` and a null centre — never re-solved (the solve arglist skips any truthy
