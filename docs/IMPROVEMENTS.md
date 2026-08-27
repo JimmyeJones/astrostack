@@ -210,6 +210,19 @@ _(none — claim an item here with your branch name)_
   measurement is forced to say "worth trimming" (so the guarantee doesn't rest on scene luck); and `uncrop`
   refuses with a sentence instead of pretending. Existing crop/sharpen suites unchanged (51 passed).
 
+  **Builder 2026-08-27 (branch `claude/compassionate-galileo-j38hmo`) — stood down on a duplicate.** I built
+  and tested the same fix concurrently, reaching the same conclusion by the same route (the kept original's
+  size is what separates the two crop shapes), and found this one already on `main` when I synced to merge.
+  Theirs landed first, so I took it wholesale — `webapp/video.py` and
+  `tests/webapp/test_video_sharpen_still.py` on my branch are byte-for-byte `main`'s — rather than merge two
+  implementations of one bug fix. Recorded because the *convergence* is the useful signal: two independent
+  reads of this code reached the same helper, which says the size test really is the natural answer here.
+  Theirs is also the stronger of the two on the double-crop guarantee — it forces `measure_framing` to say
+  "worth trimming" rather than relying on a scene that happens to, a trap my own off-centre-disk test turned
+  out not to spring. *(Second such collision in two days — see the process note in "Autonomy & friendliness".
+  The claim-it-in-**In progress**-first rule in AGENTS §11 is what would have caught it, and neither of us
+  did it.)*
+
   Original spec, for the record:
 
   *(Severity: broken-UX — a control the app offers always
@@ -8727,9 +8740,88 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-27, traced while independently building the same `unattended` posture that
+- **NEW IDEA (Builder 2026-08-27, the gap left standing by the v0.287.0 non-drizzle memory lever) — a
+  walk-away stack that still *refuses* goes dark in complete silence: nothing on the Target page or the
+  Dashboard says the target stopped producing pictures, or why, or which single setting would fix it.**
+  *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: M. Confidence: verified this run — grepped
+  `Target.tsx` and `routers/targets.py`; the only failure reason either surfaces is `solve_failed`, and
+  neither reads a failed *stack job* at all.)*
+  **Why this is now the sharp edge.** v0.281.0 and v0.287.0 both rest on the same premise: *a refusal is the
+  right answer for a watching user and useless at 3 a.m.* Each took one lever the engine could apply itself.
+  What is left over is precisely the set the engine must **not** apply on its own — `reference_canvas` (it
+  crops a mosaic's field), and a canvas that even the cheapest configuration can't hold — and for those the
+  MemoryError is still raised into a job record nobody opens. The engine's own message is already excellent
+  (`_best_memory_fix` names the one lever and the GB it lands at, and `_memory_fix_sentence` words it), so the
+  work is not analysis: it is **carrying a sentence that already exists to a page the owner actually looks
+  at**.
+  **Shape.** The job record already holds the failure; a target-scoped read of "did this target's most recent
+  stack job fail, and with what?" turns it into a `Notice` on the Target page (the `NoticeBoard` primitive from
+  IA slice (a), at `warning`) and, when it is the only thing standing between the owner and a picture, a
+  Dashboard line. Word it as the engine does — *"Last night's stack of M 31 didn't run: the canvas needs
+  ~9.4 GB, over your ~6 GB budget. Switching Canvas mode to 'reference' would fit (~5.1 GB)."* — with a link
+  to the control, exactly like the existing "Fix in Settings" deep links (`/settings/stacking`). **Do NOT**
+  make it a one-click auto-apply for `reference_canvas`: that is the change v0.281.0 and v0.287.0 both
+  deliberately declined to make silently, and the owner clicking it *is* the point.
+  **Cautions.** Scope it to the *most recent* stack attempt per target, so a long-fixed failure from three
+  weeks ago never nags; self-hide the moment a later stack succeeds; and put it inside the notes board rather
+  than adding another always-on banner (the standing IA priority). **Grep first:** confirm no per-target job
+  failure surface has landed since this was filed, and check whether the auto-stack "attempt marker" machinery
+  from the v0.270.1 walk-away fix already records enough to answer the question without a new query.
+
+- **NEW IDEA (Builder 2026-08-27, spotted while fixing the v0.286.1 stack-time-crop sharpen bug) — the video
+  still's stack-time crop *knows* its box and then throws it away, so every later operation has to infer the
+  picture's shape from file sizes.** *(Pillar: trust / maintainability — PRIORITY 3. Size: S. Confidence:
+  certain — this is the code the bug lived in.)*
+  `_video_stack_body` computes `framing.box`, crops with it, and writes `crop_applied=True, crop_box=[]` —
+  the empty list meaning "the *stack* did this, not an in-place edit". That overload is what made the
+  v0.286.1 bug possible: two genuinely different on-disk shapes (a cropped soft backup vs a full-frame one)
+  both present as "cropped, no box", and the fix had to recover the distinction by comparing PNG dimensions.
+  That check is correct and now tested, but it is *inference where a fact was available*.
+  **Shape:** record the stack-time framing in its own additive field (e.g. `stack_crop_box`, defaulting to
+  `[]` so every existing `meta.json` reads exactly as it does today), leaving `crop_box` to mean only what it
+  has always meant. The size test stays as the fallback for the stills already on disk — this is not a
+  migration, it is making *new* stills self-describing. **Only worth doing alongside another change in
+  `webapp/video.py`**, and only if the field earns its keep: if nothing but a comment would read it, the
+  dimension check is already the honest answer and this should be closed rather than built. Explicitly do
+  **not** rewrite the four in-place operations around it.
+
+- ~~**NEW IDEA (Builder 2026-08-27, traced while independently building the same `unattended` posture that
   shipped as v0.281.0) — the *non-drizzle* memory levers still hard-refuse an unattended run, and one of them
-  is a strictly invisible degrade the walk-away path should already be taking.** *(Pillar: autonomy —
+  is a strictly invisible degrade the walk-away path should already be taking.**~~ — **SHIPPED v0.287.0**
+  (Builder 2026-08-27, branch `claude/compassionate-galileo-j38hmo`).
+
+  **What shipped — the filed shape exactly.** `run_stack` grew the non-drizzle sibling of the v0.281.0
+  drizzle-scale block, immediately beneath it: on an **unattended** run whose min/max canvas is over budget,
+  when `_best_memory_fix` returns `reduce_outlier_passes`, the run takes it (`min_max_reject_count` → 1),
+  logs a plain sentence saying what it did and why, and stacks — instead of raising a `MemoryError` at 3 a.m.
+  that nobody is there to read. An **attended** run is bit-for-bit untouched: it still gets the actionable
+  refusal naming the lever, which is the right answer when someone is sitting there to click it.
+
+  **Why this is the safest degrade the engine has.** Unlike the drizzle-scale step, *nothing the owner can see
+  about the picture changes* — same canvas, same pixel grid, same output file, just a little less multi-trail
+  rejection (k>1 → the proven single min/max drop). Pinned by a test that stacks the same frames at a healthy
+  budget with k=1 and asserts the degraded run's data shape matches.
+
+  **The boundary is deliberately as narrow as v0.281.0's.** `reference_canvas` is still **never** auto-applied
+  — cropping a mosaic's field is a different order of change — so a k=1 unattended run over budget still
+  refuses, and so does a run whose *single*-pass canvas doesn't fit either. Both pinned.
+
+  **Provenance.** `REJKAD`/`REJKRQ` are stamped beside `DRZSCLAD`/`DRZSCLRQ` ("extremes/side lowered to fit
+  memory" / "…originally requested"), so a REJMODE of min/max ×1 on a run configured for ×3 explains itself
+  long after the job log has rolled — with a test asserting the comments survive the 80-column FITS card
+  intact rather than being silently truncated (they didn't, first time round). The run record already persists
+  `eff`, so the count that ran is what a later reprocess rebuilds.
+
+  **Upgrade-safe (§9):** additive header cards and a branch reachable only when `unattended` is set (which the
+  Stack form never sets — only the walk-away chain does), on a run that would otherwise have *failed*. No
+  config, schema, on-disk, API or default change. **Tests (+5 in `tests/test_unattended_memory_lever.py`, 2
+  fail before / pass after):** the degrade itself end-to-end with both header cards and the persisted run
+  record; the same-shape guarantee; a healthy budget stamping nothing and keeping k=3; a canvas even k=1 can't
+  hold still refusing; and a k=1 unattended run over budget never quietly rescued by the canvas lever.
+
+  Original spec, for the record:
+
+  *(Pillar: autonomy —
   PRIORITY 2. Size: S. Confidence: traced.)* `_best_memory_fix` offers three levers. Drizzle runs now
   auto-take theirs (`drizzle_scale`, v0.281.0) when nobody is watching; a **non-drizzle** run still refuses
   outright, even when the lever it would advise is `reduce_outlier_passes` — dropping `min_max_reject_count`
@@ -8746,9 +8838,45 @@ to **Shipped**.)_
   field is the template for saying it out loud, though this one arguably needs no note at all: nothing about
   the picture the user can see has changed.
 
-- **NEW IDEA (Builder 2026-08-27, traced while building the v0.285.0 pictures zip) — the app has *two*
+- ~~**NEW IDEA (Builder 2026-08-27, traced while building the v0.285.0 pictures zip) — the app has *two*
   different answers to "which picture is this target's", and one of them can come up empty where the other
-  finds a picture. Make the fallback shared, not just the cover lookup.** *(Pillar: trust/consistency,
+  finds a picture. Make the fallback shared, not just the cover lookup.**~~ — **SHIPPED v0.287.1**
+  (Builder 2026-08-27, branch `claude/compassionate-galileo-j38hmo`). **Reproduced first, as the entry asked:**
+  registering an older picture and a newer one, then deleting the newer one's preview file (which is exactly
+  what deleting that run does — `storage.purge_stack_run` unlinks `preview_path`, and the library's stamp
+  update is `COALESCE(?, last_stack_preview)`, so it never clears), leaves `/api/gallery/best` showing the
+  target and the wall, the archive and the thumbnail dropping it.
+
+  **What shipped.** `targets.current_picture_path(lib, entry)` is now the one answer, in the order the app has
+  always meant: pinned cover → the stamped `last_stack_preview` **if its file is there** → the newest run that
+  still has a preview on disk. `_montage_tiles`, `_library_pictures` and `GET /api/targets/{safe}/thumbnail`
+  all use it; `/api/gallery/best` keeps its own `_representative_run` (it already walked the run list, and
+  works from runs already loaded).
+
+  **The second stop the trace missed.** The wall doesn't only look up a tile — `summarize_library`'s own hero
+  filter tests `last_stack_preview` too, so a stale-stamped target was dropped *there*, before the tile lookup
+  could fall back. `_montage_tiles` now resolves every target once and hands `summarize_library` rows carrying
+  the **resolved** path, which keeps that function pure and unchanged.
+
+  **Cost, which is why it stays off the list endpoints.** Step three costs one project open, and only for a
+  target whose stamp is stale — essentially never on a healthy library (pinned by a test that counts
+  `Library.open_target` calls across a whole `pictures.zip` and asserts **zero**). That is affordable on a
+  deliberate one-tap download; it would not be on a page render, so `TargetOut.has_preview`, the life-list and
+  the Dashboard tiles deliberately still stop at the stamped path — the resolver's docstring says so.
+  **Residual, filed rather than built:** those list endpoints can therefore still say "no picture" for a target
+  the wall and the archive now include. Closing it needs a *cheaper* boolean (one that skips the cover open,
+  which `current_picture_path` does first), not this resolver — worth doing only if the owner ever notices.
+
+  **Upgrade-safe (§9):** read-time resolution over files that already exist; no config, schema, on-disk, API
+  shape or default change, and the resolver is strictly a *superset* of what each caller found before.
+  **Tests (+4 in `tests/webapp/test_current_picture_fallback.py`, 1 fails before / passes after):** all four
+  surfaces answering with the same surviving picture (and the zip's count matching `best`'s); a pinned cover
+  still beating the surviving older run; a target with *no* surviving preview still dropping out of all three
+  (the fallback finds a picture, it must not invent one); and the zero-project-opens cost guard.
+
+  Original spec, for the record:
+
+  *(Pillar: trust/consistency,
   PRIORITY 3; size S; additive, read-only. Confidence: traced against the code — not yet reproduced through
   the UI, so verify before treating it as a bug.)*
   The **pinned-cover** half is properly shared (`targets._cover_preview_path`, used by the Library tile, the
@@ -16367,6 +16495,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   it up should build that link and nothing else, and per the standing IA priority (AGENTS §1) put it inside an
   existing group on that page rather than adding one more always-on control.
 
+  **Independently confirmed the same run (Builder 2026-08-27, branch `claude/compassionate-galileo-j38hmo`).**
+  I did this grep separately, before starting the feature, and reached the identical conclusion — the route,
+  the split slider, the captions and both entry points all exist, and the Target-page link is the only gap.
+  Two independent reads agreeing is about as settled as a "was this already built?" question gets: treat the
+  size-S link above as the whole of the remaining work.
+
   Original spec, for the record (its "why" still reads true; its "there is no way to" does not):
 
   *(Pillar: understand + enjoy +
@@ -22554,6 +22688,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **⚪ HARNESS PAPERCUT (Builder 2026-08-27, tripped over it and verified it on pristine `main` — recorded so
+  the next agent doesn't spend the time I did) — naming `tests/webapp/…` and `tests/…` files in the *same*
+  `pytest` command line makes `tests/webapp/conftest.py`'s fixtures vanish: every webapp test errors with
+  `fixture 'client' not found`.** *(Not a bug in the app, and **not** a real failure — the plain
+  `pytest -q` full run is unaffected, and either directory on its own is fine. Size: S, or close it as
+  documentation. Confidence: reproduced on `origin/main` with no local changes:
+  `pytest tests/webapp/test_gallery.py tests/test_stack_memory_guard.py tests/webapp/test_video_sharpen_still.py`
+  → `39 passed, 22 errors`, all "fixture not found".)*
+  **Why it matters at all:** an agent verifying "did I break anything?" naturally reaches for exactly this
+  shape — the handful of files around a change, which routinely straddle both directories — and reads 26
+  errors as its own regression. That is a wasted diagnosis every time it happens.
+  **Two honest options, in order of preference.** (a) *Document it*: one line in AGENTS.md §7 next to the
+  existing run recipes — "verify subsets one directory at a time, or just run the whole suite" — which costs
+  nothing and is the whole of the fix from an agent's point of view. (b) *Understand and remove it*: it is an
+  import-mode / rootdir interaction (`tests/` has no `__init__.py` in the mix, and the suite is imported as
+  the `tests` package by `tests/synth.py` consumers), so a `consider_namespace_packages` or `importmode`
+  setting in `pyproject.toml` may well close it — **but do not change either setting speculatively**: they
+  affect how the *whole* suite is imported, and a green run is the only thing standing between this project
+  and a bad merge. Only worth (b) if someone can show the setting change with the full suite green
+  before and after.
 
 - **NEW IDEA (Builder 2026-08-26, found the hard way while rendering the first montage) — one shared guard
   that burned-in text stays inside Pillow's built-in font's glyph coverage.** *(Pillar: friendliness / trust —
