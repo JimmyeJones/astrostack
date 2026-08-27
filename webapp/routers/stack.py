@@ -742,7 +742,12 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
     mask, so the mosaic shows its true shape. Same pixel grid/dimensions as the
     preview, so the WCS built for the preview grid still places it (unchanged
     placement). Falls back to the opaque preview when there's no FITS to derive
-    coverage from (older/edited runs), so it never regresses to a 404."""
+    coverage from (older/edited runs), so it never regresses to a 404.
+
+    When the stored preview was saved **North-up** (History's "Adjust"), the
+    coverage mask is taken through the same rotation before compositing — the mask
+    comes off the un-rotated FITS, so without that its transparent regions land
+    where the picture no longer is."""
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
@@ -755,14 +760,19 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
     if not preview_path or not Path(preview_path).exists():
         raise HTTPException(status_code=404, detail="No preview for this run")
     fits_path = run.fits_path
+    north_up_deg = run.preview_north_up_deg or 0.0
 
+    from seestack.render.orient import rotate_mask_north_up
     from seestack.render.thumbnail import overlay_rgba_png, stack_coverage_mask
 
     def work() -> bytes:
         preview = Path(preview_path).read_bytes()
         if fits_path and Path(fits_path).exists():
             try:
-                return overlay_rgba_png(preview, stack_coverage_mask(fits_path))
+                mask = stack_coverage_mask(fits_path)
+                if north_up_deg:
+                    mask = rotate_mask_north_up(mask, north_up_deg)
+                return overlay_rgba_png(preview, mask)
             except Exception:  # noqa: BLE001 — a broken FITS just serves the opaque preview
                 return preview
         return preview
@@ -1259,6 +1269,11 @@ async def save_stack_preview(
     rotates the saved image so celestial North points up, matching what the user
     sees on screen when they save while the History "North up" toggle is on — a
     no-op when the run has no usable WCS.
+
+    The rotation that was actually applied is recorded on the run, because the Sky
+    map has to follow these pixels: without it the map placed the *un-rotated*
+    canvas geometry (and an un-rotated coverage footprint) against a rotated
+    picture, tilting the tile and putting its transparent gaps in the wrong place.
     """
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -1281,13 +1296,21 @@ async def save_stack_preview(
                             detail=f"stretch/black must be numbers: {exc}") from exc
     north_up = bool(body.get("north_up", False))
 
-    from seestack.render.thumbnail import render_stack_png
+    from seestack.render.thumbnail import applied_north_up_deg, render_stack_png
     from seestack.stack.output import fits_is_display_space
     png = await run_in_threadpool(
         render_stack_png, run.fits_path,
         stretch=stretch, black=black, max_width=1024, north_up=north_up,
     )
     Path(run.preview_path).write_bytes(png)
+    # The rotation the render actually applied — 0.0 when the toggle was off, when
+    # the run has no WCS, or when the correction was sub-threshold. Always written
+    # (never left alone), so re-saving *without* North up clears a rotation an
+    # earlier save recorded rather than leaving the Sky map following a ghost.
+    north_up_deg = (
+        await run_in_threadpool(applied_north_up_deg, run.fits_path)
+        if north_up else 0.0
+    )
 
     # Record the saved stretch on the run so the "one frame vs your stack" reveal
     # renders its sub half through the *same* asinh curve (keeping the two halves
@@ -1301,10 +1324,12 @@ async def save_stack_preview(
             None if is_display else stretch,
             None if is_display else black,
         )
+        proj.set_stack_preview_north_up(run_id, north_up_deg)
     finally:
         proj.close()
         lib.close()
-    return {"ok": True, "stretch": stretch, "black": black, "north_up": north_up}
+    return {"ok": True, "stretch": stretch, "black": black, "north_up": north_up,
+            "north_up_deg": north_up_deg}
 
 
 _BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}

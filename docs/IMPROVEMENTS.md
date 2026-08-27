@@ -164,10 +164,52 @@ _(none — claim an item here with your branch name)_
   (2) an unadjusted linear run and a display-space run are byte-for-byte unchanged (no regression). One-two
   files (`stack.py`, `thumbnail.py`) + tests. *(Found by the render/export-parity adversarial audit this run.)*
 
-- **🟡 BROKEN-UX / OVERLAY (Scout QA audit 2026-08-27 #20, branch `claude/vigilant-knuth-upgplg`, reproduced) —
-  the Sky-map coverage overlay places its transparency from the *un-rotated* FITS footprint against a preview
-  that was saved *north-up-rotated*, so an irregular-mosaic picture on the Sky map shows its covered/transparent
-  regions in the wrong place.** *(Severity: broken-UX / cosmetic — a Sky-map overlay footprint disagrees with
+- **✅ SHIPPED (Builder, v0.288.1, branch `claude/compassionate-galileo-zixgdj`) — ~~the Sky-map coverage
+  overlay places its transparency from the *un-rotated* FITS footprint against a preview that was saved
+  *north-up-rotated*, so an irregular-mosaic picture on the Sky map shows its covered/transparent regions in the
+  wrong place~~ — and, as the previous Builder's deferral note said, the tile's **placement** was wrong with
+  it. Both halves shipped together; the interim opaque-fallback was not needed.**
+
+  **What shipped.** The one missing fact — *that a stored preview was rotated, and by how much* — is now
+  recorded: an additive `stack_runs.preview_north_up_deg` column (`SCHEMA_VERSION` 15 → 16, additive
+  `ALTER TABLE`, older runs read `NULL` = "no rotation"), written by `save_stack_preview` on **every** save
+  (0.0 when the toggle is off, so a re-save without North-up clears an earlier angle rather than leaving the map
+  following a ghost). New `seestack.render.thumbnail.applied_north_up_deg` is the single answer to "what did the
+  render actually apply" — threshold *and* snap rule in one place, so the recorded angle cannot drift from the
+  renderer. With that recorded:
+  - `sky_overlay` takes the coverage mask through the same rotation (new
+    `seestack.render.orient.rotate_mask_north_up`, mirroring the picture's snap→`np.rot90` / PIL-`NEAREST`
+    split) before compositing, so the alpha footprint lands where the picture's data is.
+  - `sky.py` composes the rotation into **both** the tile's placement WCS and its on-sky extent, via new
+    `north_up_deg=` keywords on `wcs_dict_rescaled_to_preview` and `canvas_extent_from_fits`. The geometry is
+    exact rather than guessed: new `seestack.render.orient.north_up_pixel_transform` returns the affine
+    `p_in = M · p_out + t` that each rotation path really performs, and `_rotate_matrix_and_crpix` turns that
+    into `CD′ = CD · M`, `CRPIX′ = M⁻¹ · (CRPIX − t¹)`. Two traps were found and pinned by measurement: the
+    `np.rot90` path works in pixel-**centre** coordinates while `PIL.Image.rotate(expand=True)` rotates about
+    `n/2` on pixel **corners** — without the half-pixel correction the derived position is up to ~1.7 px out at
+    123°; with it the residual is pure nearest-neighbour rounding.
+  - A rotated run whose canvas WCS can't be read now emits **no** tile WCS rather than the `_tan_wcs`
+    extrapolation, so the map can never place a rotated picture confidently wrong.
+
+  **Upgrade-safe (§9):** additive column with an additive migration (tested from a hand-built v15 DB); every new
+  parameter defaults to "no rotation", and an ordinary run's overlay bytes, tile WCS and extent are unchanged
+  key-for-key. No on-disk, API-shape or default change (the endpoint gains fields; the frontend needed no
+  change — `saveStackPreview` already ignores extra response fields).
+
+  **Tests (+18, all new behaviour covered; the two that pin the bug fail before):**
+  `tests/test_orient.py` — the pixel transform is *exact* for every snapped angle and free of systematic offset
+  for off-axis ones (measured against PIL's own sampling), the rotated mask lands on the same pixels as the
+  rotated picture, and `applied_north_up_deg` agrees with the renderer. `tests/test_wcs_io.py` — a rotated
+  preview's WCS puts a known RA/Dec on the marker's actual rotated pixel (<1 px) while the un-rotated WCS is >5
+  px out, `north_up_deg=0.0` is key-for-key the old result, and the rotated extent is the grown bounding box at
+  one shared orientation. `tests/webapp/test_sky_north_up.py` — end to end: the angle is recorded and cleared,
+  the overlay's alpha equals `np.rot90(mask)` (numpy as ground truth) while the stale mask disagrees on >20% of
+  pixels, an ordinary run is unchanged, and `/api/sky` places the tile's centre on the rotated picture's centre
+  with its width/height swapped. `tests/test_history.py` — the v15 → v16 migration.
+
+  Original finding, for the record:
+
+  *(Severity: broken-UX / cosmetic — a Sky-map overlay footprint disagrees with
   the visible picture; the picture and data are fine. Confidence: reproduced — the mask/preview misalignment
   reproduced at 50% of pixels on a rotated L-shaped footprint; reachability traced end to end.)*
 

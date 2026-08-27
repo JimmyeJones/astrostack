@@ -30,7 +30,7 @@ from typing import Any, Iterable, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     preview_black REAL,
     n_roughly_aligned INTEGER,
     stack_fwhm_px REAL,
-    seam_residual REAL
+    seam_residual REAL,
+    preview_north_up_deg REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -560,6 +561,18 @@ class Project:
                     "ALTER TABLE stack_runs ADD COLUMN seam_residual REAL")
             except sqlite3.OperationalError:
                 pass  # already present
+        if from_version < 16:
+            # Recorded the North-up rotation (degrees) baked into this run's
+            # stored preview PNG by History's "Adjust" save. Nothing used to
+            # record it, so the Sky map placed the *un-rotated* canvas geometry
+            # and coverage footprint against a rotated picture. Additive; older
+            # runs — and every preview saved without the North-up toggle — stay
+            # NULL, which means exactly what 0.0 means (no rotation applied).
+            try:
+                self._conn.execute(
+                    "ALTER TABLE stack_runs ADD COLUMN preview_north_up_deg REAL")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -1016,6 +1029,10 @@ class Project:
                     row["seam_residual"]
                     if "seam_residual" in row.keys() else None
                 ),
+                preview_north_up_deg=(
+                    row["preview_north_up_deg"]
+                    if "preview_north_up_deg" in row.keys() else None
+                ),
             )
 
     def stack_run_options(self, run_ids: Iterable[int]) -> dict[int, tuple[str, str]]:
@@ -1089,6 +1106,18 @@ class Project:
             "UPDATE stack_runs SET preview_stretch = ?, preview_black = ? "
             "WHERE id = ?",
             (stretch, black, run_id))
+        return cur.rowcount > 0
+
+    def set_stack_preview_north_up(self, run_id: int, degrees: float | None) -> bool:
+        """Record the North-up rotation baked into this run's stored preview PNG
+        (``None``/``0.0`` = none), so anything that has to follow those pixels —
+        the Sky map's tile placement and its coverage overlay — rotates with them
+        instead of describing the un-rotated canvas. Returns True if a row was
+        updated, False if no run with ``run_id`` exists."""
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "UPDATE stack_runs SET preview_north_up_deg = ? WHERE id = ?",
+            (degrees, run_id))
         return cur.rowcount > 0
 
     def set_run_preview_display_space(self, run_id: int, value: bool = True) -> bool:
@@ -1184,6 +1213,7 @@ class StackRunRow:
     # half through this same curve so the two halves stay honestly comparable.
     preview_stretch: float | None = None
     preview_black: float | None = None
+    preview_north_up_deg: float | None = None
     # How many contributing subs sub-pixel refine had to leave *only roughly
     # aligned* (its measured shift exceeded the cap, so the frame stacked
     # unshifted → possibly soft/doubled stars). None when refine was off, not

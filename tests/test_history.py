@@ -596,3 +596,71 @@ def test_current_version_but_missing_column_self_heals(tmp_path):
         assert "transparency_score" in cols and "user_override" in cols
     finally:
         proj.close()
+
+
+def test_v15_schema_migrates_to_v16_adds_preview_north_up_deg(tmp_path):
+    """A v15 stack_runs table (no ``preview_north_up_deg``) migrates additively:
+    the pre-existing run survives and reads the new column as None — which means
+    exactly what 0.0 means, no rotation baked into its stored preview — and a
+    fresh save can record and clear an angle."""
+    import sqlite3
+
+    db_path = tmp_path / "old.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        PRAGMA user_version = 15;
+        CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE frames (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_path TEXT NOT NULL UNIQUE,
+            accept INTEGER NOT NULL DEFAULT 1,
+            ra_hint_deg REAL, dec_hint_deg REAL
+        );
+        CREATE TABLE stack_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_utc TEXT NOT NULL, output_basename TEXT NOT NULL,
+            fits_path TEXT, tiff_path TEXT, preview_path TEXT,
+            n_frames_used INTEGER NOT NULL, canvas_h INTEGER NOT NULL,
+            canvas_w INTEGER NOT NULL, coverage_min INTEGER NOT NULL DEFAULT 0,
+            coverage_max INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL,
+            notes TEXT, total_exposure_s REAL, transparency_ratio REAL,
+            noise_sigma REAL, calstat TEXT, is_mosaic INTEGER,
+            engine_version TEXT, rejection_fraction REAL, rejection_mode TEXT,
+            preview_stretch REAL, preview_black REAL, n_roughly_aligned INTEGER,
+            stack_fwhm_px REAL, seam_residual REAL
+        );
+        INSERT INTO project_meta(key, value) VALUES('name', 'OldProject');
+        INSERT INTO stack_runs(timestamp_utc, output_basename, n_frames_used,
+            canvas_h, canvas_w, options_json, preview_stretch, preview_black)
+            VALUES('2026-01-01T00:00:00+00:00', 'old_run', 42, 320, 480, '{}',
+                   0.72, 0.44);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    proj = Project(tmp_path)
+    proj.db_path = db_path
+    proj._open()
+    proj._check_schema()
+    try:
+        from seestack.io.project import SCHEMA_VERSION
+        assert proj._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        cols = {r[1] for r in proj._conn.execute("PRAGMA table_info(stack_runs)")}
+        assert "preview_north_up_deg" in cols
+        rows = {r.output_basename: r for r in proj.iter_stack_runs()}
+        old = rows["old_run"]
+        assert old.n_frames_used == 42
+        assert old.preview_stretch == 0.72 and old.preview_black == 0.44
+        assert old.preview_north_up_deg is None
+
+        assert proj.set_stack_preview_north_up(old.id, 90.0) is True
+        again = {r.output_basename: r for r in proj.iter_stack_runs()}["old_run"]
+        assert again.preview_north_up_deg == 90.0
+        assert proj.set_stack_preview_north_up(old.id, 0.0) is True
+        assert {r.output_basename: r for r in proj.iter_stack_runs()}[
+            "old_run"].preview_north_up_deg == 0.0
+        assert proj.set_stack_preview_north_up(999999, 90.0) is False
+    finally:
+        proj.close()
