@@ -1,8 +1,9 @@
 import { useState } from "react";
 import {
-  Badge, Card, Center, Group, Image, Loader, SimpleGrid, Stack, Text, Title, Tooltip,
+  Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid, Stack, Text, Title,
+  Tooltip,
 } from "@mantine/core";
-import { IconSparkles, IconStarFilled } from "@tabler/icons-react";
+import { IconPlayerPlay, IconSparkles, IconStarFilled } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type BestPicture } from "../api/client";
@@ -92,6 +93,15 @@ export function BestPicturesView() {
             <Badge variant="light">{items.length}</Badge>
           </Tooltip>
         ) : null}
+        {/* The entry point to the slideshow. It lives here rather than as a
+            sixteenth sidebar link: this is the page you're already on when you
+            want to show someone your pictures. */}
+        <Button
+          component={Link} to="/show" size="xs" variant="light" ml="auto"
+          leftSection={<IconPlayerPlay size={14} />}
+        >
+          Play slideshow
+        </Button>
       </Group>
 
       {items.length === 0 ? (
