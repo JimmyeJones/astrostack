@@ -1692,6 +1692,23 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 rejection[k] = float(header[hk])
 
+    # "Your picture came out slightly less zoomed-in" — an unattended run whose
+    # drizzle canvas didn't fit the memory budget and was stepped down to the
+    # largest super-resolution scale that did, instead of refusing to make a
+    # picture at all (``stacker`` stamps DRZSCLAD/DRZSCLRQ). Nobody was watching
+    # the job that decided it, so this is the only place the owner can learn why
+    # last night's image is a different size from the one before. Absent — and the
+    # line omitted — on every run that fitted, which is all of them on a healthy
+    # box.
+    drizzle_degraded: dict[str, Any] | None = None
+    if "DRZSCLAD" in header:
+        drizzle_degraded = {"reason": "memory"}
+        for hk, k in (("DRZSCLAD", "applied"), ("DRZSCLRQ", "requested")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                drizzle_degraded[k] = float(header[hk])
+        if "applied" not in drizzle_degraded:
+            drizzle_degraded = None
+
     # Frame-accounting summary (present on stacks recorded once the stacker began
     # stamping it): how many subs it attempted to combine and how many couldn't be
     # aligned. Lets the panel honestly report "1,850 of 2,000 subs combined; 150
@@ -1754,6 +1771,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             "weighting_skipped": weighting_skipped,
             "photometric": photometric, "dark_scaling": dark_scaling,
             "rejection": rejection, "frame_accounting": frame_accounting,
+            "drizzle_degraded": drizzle_degraded,
             "auto_edit": auto_edit, "sky_cast": sky_cast,
             "color_cal": color_cal,
             "calibration_advice": calibration_advice,

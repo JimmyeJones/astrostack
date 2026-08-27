@@ -8284,52 +8284,103 @@ to **Shipped**.)_
   **Beginner-bar:** instantly understood, sane default (only *suggests*, ≈0.4° radius so a nearby-but-different
   object isn't falsely claimed), plain-language, and not a pro knob.
 
-- **⚠ READ THIS BEFORE PICKING UP THE DRIZZLE-SCALE AUTO-DEGRADE ITEM DIRECTLY BELOW (Builder 2026-08-27,
+- ~~**⚠ READ THIS BEFORE PICKING UP THE DRIZZLE-SCALE AUTO-DEGRADE ITEM DIRECTLY BELOW (Builder 2026-08-27,
   found while sizing it; the item's premise is off by one) — `options.auto_reject` is NOT a reliable
-  "unattended" signal, so the filed shape would silently change a *watching* user's output pixel grid.**
-  *(Pillar: autonomy — PRIORITY 2. Size: S as a prerequisite; do it before the M item below. Confidence:
-  traced.)* The item below reuses `auto_reject` as the "the user expressed no preference" flag, exactly as
-  `_afford_drizzle_reject` does. But `get_stack_defaults` (`webapp/routers/stack.py` ~203) also
-  `setdefault`s `auto_reject=True` **into the manual Stack form** for any *never-configured* target (no
-  per-target saved defaults and no global `default_stack_options`) — deliberately, so a beginner's first-light
-  stack gets sane rejection. So a watching beginner on a fresh target posts `auto_reject=True` too, and would
-  get a quietly rescaled picture instead of the actionable refusal (*"To fit, lower the drizzle scale to ×1.3
-  (~4.2 GB)"*) that they are sitting right there able to act on. That is a materially worse trade than the
-  rejection case, where the degrade is invisible in the output geometry — here it changes the output
-  resolution, and the item itself flags that a target's runs would stop being the same size.
-  **Fix direction (small, additive, upgrade-safe):** give `StackOptions` an explicit `unattended: bool = False`
-  set only by `_stack_target` on the walk-away path, add it to `NON_FORM_KEYS` (it is not a user knob — the
-  drift test in `schemas.py` enforces the choice), and gate the degrade on *that* rather than on `auto_reject`.
-  Then the two postures the whole design rests on — nobody is watching vs. someone is — are actually
-  distinguishable, and every future "degrade quietly rather than refuse" decision gets the right signal for
-  free. **Related, lower severity, filed rather than fixed:** the *shipped* `_afford_drizzle_reject` (v0.276.3)
-  has the same exposure — a watching user who explicitly ticks "Drizzle outlier rejection" on a
-  never-configured target has it silently dropped when it doesn't fit, though its docstring says an explicit
-  tick "refuses loudly instead". Outcome there is still a picture plus a `DRZREJSK` card History surfaces, so
-  it is a documented-intent divergence, not a wrong result — but it should switch to `unattended` in the same
-  change, so there is one definition of the posture rather than two.
+  "unattended" signal, so the filed shape would silently change a *watching* user's output pixel grid.**~~
+  — **SHIPPED v0.281.0** (Builder 2026-08-27, branch `claude/compassionate-galileo-i60em7`), exactly as the fix
+  direction below asked: `StackOptions.unattended: bool = False`, written by `_stack_target` **after every
+  option merge** (so a saved per-target default, a crafted POST body, the global config blob and the prior-run
+  options reprocess-all replays all lose theirs), added to `NON_FORM_KEYS`, and read by
+  `_afford_drizzle_reject` in place of `auto_reject`. The related lower-severity divergence flagged at the end
+  of this item shipped in the same change: a watching beginner who ticks "Drizzle outlier rejection" on a
+  never-configured target now gets the loud, actionable refusal the docstring always promised, and the
+  pre-submit estimate agrees with it. Off by default → every existing run record, config and desktop run is
+  byte-for-byte unchanged. Tests: `tests/webapp/test_auto_stack_defaults.py` (+2 — the posture is set only by
+  the walk-away path, and cannot be spoofed by any of the four routes an options dict arrives on) and
+  `tests/test_drizzle_reject.py` (`test_afford_reads_the_posture_not_auto_reject`, which fails on the old
+  signal).
 
-- **NEW IDEA (Builder 2026-08-26, spotted while shipping the drizzle-rejection affordability fix v0.276.3) —
+  Original spec, for the record:
+
+    *(Pillar: autonomy — PRIORITY 2. Size: S as a prerequisite; do it before the M item below. Confidence:
+    traced.)* The item below reuses `auto_reject` as the "the user expressed no preference" flag, exactly as
+    `_afford_drizzle_reject` does. But `get_stack_defaults` (`webapp/routers/stack.py` ~203) also
+    `setdefault`s `auto_reject=True` **into the manual Stack form** for any *never-configured* target (no
+    per-target saved defaults and no global `default_stack_options`) — deliberately, so a beginner's first-light
+    stack gets sane rejection. So a watching beginner on a fresh target posts `auto_reject=True` too, and would
+    get a quietly rescaled picture instead of the actionable refusal (*"To fit, lower the drizzle scale to ×1.3
+    (~4.2 GB)"*) that they are sitting right there able to act on. That is a materially worse trade than the
+    rejection case, where the degrade is invisible in the output geometry — here it changes the output
+    resolution, and the item itself flags that a target's runs would stop being the same size.
+    **Fix direction (small, additive, upgrade-safe):** give `StackOptions` an explicit `unattended: bool = False`
+    set only by `_stack_target` on the walk-away path, add it to `NON_FORM_KEYS` (it is not a user knob — the
+    drift test in `schemas.py` enforces the choice), and gate the degrade on *that* rather than on `auto_reject`.
+    Then the two postures the whole design rests on — nobody is watching vs. someone is — are actually
+    distinguishable, and every future "degrade quietly rather than refuse" decision gets the right signal for
+    free. **Related, lower severity, filed rather than fixed:** the *shipped* `_afford_drizzle_reject` (v0.276.3)
+    has the same exposure — a watching user who explicitly ticks "Drizzle outlier rejection" on a
+    never-configured target has it silently dropped when it doesn't fit, though its docstring says an explicit
+    tick "refuses loudly instead". Outcome there is still a picture plus a `DRZREJSK` card History surfaces, so
+    it is a documented-intent divergence, not a wrong result — but it should switch to `unattended` in the same
+    change, so there is one definition of the posture rather than two.
+
+- ~~**NEW IDEA (Builder 2026-08-26, spotted while shipping the drizzle-rejection affordability fix v0.276.3) —
   a walk-away stack whose *canvas* busts the memory budget still hard-refuses, even though the engine already
-  knows the exact one-line change that would make it fit.** *(Pillar: autonomy — PRIORITY 2. Size: M.)*
-  `_best_memory_fix` (`seestack/stack/stacker.py`) already computes the single least-destructive lever and the
-  memory it lands at — *"lower the drizzle scale to ×1.3 (~4.2 GB)"*, *"switch Canvas mode to 'reference'"*,
-  *"lower Extra outlier passes to 1"* — and both the pre-submit estimate and the run-time refusal quote it. That
-  is exactly right for a **watching** user: they read the advice and click the button. On the **walk-away** path
-  nobody reads it, so the target simply stops producing pictures until the owner next looks at the Jobs page.
-  v0.276.3 established the pattern for precisely this asymmetry on the rejection pass (auto-chosen ⇒ degrade
-  quietly; explicitly ticked ⇒ refuse loudly with the advice). **Shape:** on an unattended run only, when
-  `_best_memory_fix` returns a `drizzle_scale` fix, apply it instead of raising — log it plainly, stamp it in
-  provenance (a `DRZSCLAD`-style card beside `DRZREJSK`), and surface it once on the Target page's notes area
-  in the shipped voice (*"Last night's stack used ×1.3 super-resolution instead of ×1.5 — the bigger canvas
-  didn't fit in memory. Your picture is slightly less zoomed-in but nothing was lost."*). **Cautions:** a
-  *smaller drizzle scale changes the output pixel grid*, so a target's runs would no longer all be the same
-  size — decide deliberately whether that is acceptable (it probably is: a picture at ×1.3 beats no picture, and
-  the editor/History already handle per-run shapes). Do **not** auto-apply `reference_canvas` on a mosaic
-  unattended — silently cropping the field a user spent five nights building is a different order of change and
-  belongs behind the owner's sign-off. Reuse `auto_reject` as the "the user expressed no preference" signal, as
-  `_afford_drizzle_reject` does, so a manual stack is untouched. Testable purely against the estimator (a budget
-  that fits ×1.3 but not ×1.5 → the unattended run produces a ×1.3 picture; the manual one still raises).
+  knows the exact one-line change that would make it fit.**~~ — **SHIPPED v0.281.0** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-i60em7`), on top of the `unattended` posture above rather than on `auto_reject`,
+  as the prerequisite item demanded.
+
+  **What shipped.** In `run_stack`, once the real (for a mosaic, union) canvas is known and the rejection-pass
+  affordability has already been settled, an **unattended** drizzled run that is still over budget asks
+  `_best_memory_fix` for its one lever; when that lever is `drizzle_scale`, the run takes it instead of raising.
+  Everything downstream — the memory guard, the in-flight buffer cap and `DrizzleParams.scale` — switched from
+  `options.drizzle_scale` to `eff.drizzle_scale`, so the canvas the guard certifies is exactly the canvas the
+  drizzler builds. Deliberately narrow, as the cautions below asked: only the `drizzle_scale` lever is
+  auto-applied (never `reference_canvas` — cropping a five-night mosaic field is a different order of change),
+  only when drizzle is on, and never for an attended run, which still gets the actionable refusal.
+  A canvas even ×1.0 can't hold still refuses: there is no honest picture to make there.
+
+  **Where it shows up.** The finished FITS carries `DRZSCLAD` (the scale that ran) beside `DRZSCLRQ` (the one
+  asked for), the run record persists the *effective* options so a later reprocess rebuilds the same picture
+  instead of re-hitting the refusal, and `/stack-runs/{id}/info` grows a `drizzle_degraded` field the History
+  Info panel renders in the shipped voice — *"Super-resolution used ×1.3 instead of the ×1.5 it was set to — the
+  bigger canvas didn't fit in memory, so AstroStack made the picture at this size rather than skipping the
+  night. It's slightly less zoomed-in; none of your subs were left out."* Self-hiding: absent on every run that
+  fitted, which is all of them on a healthy box.
+
+  **Upgrade-safe (§9):** additive field + additive header cards + an added response key; no config, schema,
+  on-disk-layout, API-shape or default change, and the whole path is gated on `unattended` (off by default), so
+  an attended run and every existing record are byte-for-byte unchanged. `incoming/` untouched.
+
+  **Tests (+6 in `tests/test_drizzle_reject.py`, +2 in `tests/webapp/test_stack_render.py`, +5 vitest):** the
+  e2e degrade (a budget between ×1.0 and ×2.0 → the watched run raises with "lower the drizzle scale", the
+  unattended one produces a picture whose pixel dimensions *are* the applied scale, whose peak fits the budget,
+  and whose run record persists the scale that ran); a run that fits is untouched and stamps nothing; even-×1.0
+  -won't-fit still refuses; a non-drizzle unattended run is never rescaled; the info endpoint surfaces / omits
+  `drizzle_degraded`; and the plain-language note's wording, missing-`requested` fallback and nonsense-value
+  guards.
+
+  Original spec, for the record:
+
+    *(Pillar: autonomy — PRIORITY 2. Size: M.)*
+    `_best_memory_fix` (`seestack/stack/stacker.py`) already computes the single least-destructive lever and the
+    memory it lands at — *"lower the drizzle scale to ×1.3 (~4.2 GB)"*, *"switch Canvas mode to 'reference'"*,
+    *"lower Extra outlier passes to 1"* — and both the pre-submit estimate and the run-time refusal quote it. That
+    is exactly right for a **watching** user: they read the advice and click the button. On the **walk-away** path
+    nobody reads it, so the target simply stops producing pictures until the owner next looks at the Jobs page.
+    v0.276.3 established the pattern for precisely this asymmetry on the rejection pass (auto-chosen ⇒ degrade
+    quietly; explicitly ticked ⇒ refuse loudly with the advice). **Shape:** on an unattended run only, when
+    `_best_memory_fix` returns a `drizzle_scale` fix, apply it instead of raising — log it plainly, stamp it in
+    provenance (a `DRZSCLAD`-style card beside `DRZREJSK`), and surface it once on the Target page's notes area
+    in the shipped voice (*"Last night's stack used ×1.3 super-resolution instead of ×1.5 — the bigger canvas
+    didn't fit in memory. Your picture is slightly less zoomed-in but nothing was lost."*). **Cautions:** a
+    *smaller drizzle scale changes the output pixel grid*, so a target's runs would no longer all be the same
+    size — decide deliberately whether that is acceptable (it probably is: a picture at ×1.3 beats no picture, and
+    the editor/History already handle per-run shapes). Do **not** auto-apply `reference_canvas` on a mosaic
+    unattended — silently cropping the field a user spent five nights building is a different order of change and
+    belongs behind the owner's sign-off. Reuse `auto_reject` as the "the user expressed no preference" signal, as
+    `_afford_drizzle_reject` does, so a manual stack is untouched. Testable purely against the estimator (a budget
+    that fits ×1.3 but not ×1.5 → the unattended run produces a ×1.3 picture; the manual one still raises).
 
 - **NEW IDEA (Builder 2026-08-26, spotted while adding the "ran out of time being located" bucket v0.276.4) —
   the "why were some frames left out?" buckets give advice in prose but can't link to the thing they name, so
@@ -21718,6 +21769,29 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.281.0** — Autonomy: **a walk-away stack whose drizzle canvas won't fit now makes a slightly smaller
+  picture instead of no picture.** `_best_memory_fix` has always computed the one lever that would fit
+  (*"lower the drizzle scale to ×1.3 (~4.2 GB)"*) and the run-time guard has always quoted it — perfect for a
+  watching user, useless at 3 a.m., where the refusal just stopped a target that made a picture yesterday. On
+  an **unattended** run only (the new `StackOptions.unattended`, below), when that lever is `drizzle_scale`
+  the engine takes it: the guard, the in-flight cap and `DrizzleParams` all switch to the effective scale, the
+  FITS carries `DRZSCLAD`/`DRZSCLRQ`, the run record persists the scale that *ran* (so a reprocess rebuilds the
+  same picture), and the History Info panel says it plainly — *"Super-resolution used ×1.3 instead of the ×1.5
+  it was set to … It's slightly less zoomed-in; none of your subs were left out."* Narrow on purpose: never
+  `reference_canvas` (cropping a five-night mosaic is a different order of change), never an attended run,
+  and a canvas even ×1.0 can't hold still refuses. Additive/self-hiding/upgrade-safe. Tests: +6
+  `tests/test_drizzle_reject.py`, +2 `tests/webapp/test_stack_render.py`, +5 vitest.
+- **v0.281.0** (same change, the half it rests on) — Correctness/autonomy: **`StackOptions.unattended` — one
+  honest answer to "is anybody watching this run?"** `_afford_drizzle_reject` had been reading `auto_reject` as
+  the proxy, but `get_stack_defaults`
+  seeds `auto_reject=True` into the *manual Stack form* for a never-configured target — so a beginner sitting
+  right there had their explicitly-ticked drizzle rejection quietly dropped instead of getting the actionable
+  refusal the docstring promised, and the pre-submit estimate disagreed with the run. The posture is now
+  explicit: `unattended: bool = False`, in `NON_FORM_KEYS` (no descriptor, never client-settable), written by
+  `_stack_target` **after every option merge**, so a saved per-target default, a POST body, the global config
+  blob and reprocess-all's replayed prior-run options can none of them spoof it. Off by default → existing run
+  records, configs and the desktop app are byte-for-byte unchanged. Tests: +2
+  `tests/webapp/test_auto_stack_defaults.py`, +1 `tests/test_drizzle_reject.py` (fails on the old signal).
 - **v0.280.0** — Beginner feature / friendliness (Builder, branch `claude/compassionate-galileo-4maz3z`):
   **"You're one away from finishing Lyra — and it's up tonight."** The life list says *how many* famous
   objects you have, which is a number you look at; this says what to point at **next**, which is what gets
