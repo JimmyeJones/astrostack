@@ -89,6 +89,94 @@ def applied_rotation_deg(angle_deg: float) -> float:
     return snapped if abs(angle_deg - snapped) <= _SNAP_TOL_DEG else angle_deg
 
 
+def north_up_pixel_transform(
+    width: int, height: int, angle_deg: float,
+) -> tuple[np.ndarray, np.ndarray, int, int] | None:
+    """The exact pixel-grid geometry :func:`rotate_image_north_up` produces.
+
+    Returns ``(M, t, new_w, new_h)`` where ``p_in = M @ p_out + t`` maps a pixel
+    of the **rotated** image back to the pixel of the original it came from (both
+    0-based ``(x, y)`` indices), and ``(new_w, new_h)`` is the rotated image's
+    size. ``None`` for a degenerate size.
+
+    Anything that has to follow the rotated pixels *analytically* — placing the
+    rotated picture on the sky, say — needs this rather than re-deriving it, and
+    the two rotation paths are genuinely different: the lossless ``np.rot90`` snap
+    works in pixel-**centre** coordinates (``(n−1)/2``), while ``PIL.Image.rotate``
+    with ``expand=True`` rotates about ``n/2`` and sizes the canvas from a
+    ``ceil``/``floor`` bounding box. Both are replicated here exactly, so a caller
+    is never half a pixel — or a whole flipped axis — out.
+    """
+    if width <= 0 or height <= 0:
+        return None
+    snapped = round(angle_deg / 90.0) * 90.0
+    if abs(angle_deg - snapped) <= _SNAP_TOL_DEG:
+        # np.rot90 CCW by k·90°, about the image's pixel-centre midpoint.
+        k = int(snapped / 90.0) % 4
+        alpha = math.radians(90.0 * k)
+        m = np.array([[math.cos(alpha), -math.sin(alpha)],
+                      [math.sin(alpha), math.cos(alpha)]], dtype=float)
+        new_w, new_h = (height, width) if k % 2 else (width, height)
+        c_in = np.array([(width - 1) / 2.0, (height - 1) / 2.0])
+        c_out = np.array([(new_w - 1) / 2.0, (new_h - 1) / 2.0])
+        return m, c_in - m @ c_out, int(new_w), int(new_h)
+
+    # PIL.Image.rotate(angle, expand=True): an affine that maps *output* pixel
+    # indices to input ones, built about (w/2, h/2), then re-centred on a
+    # ceil/floor bounding box. Replicated statement-for-statement so the WCS a
+    # caller derives lands on the same pixels the image actually has.
+    alpha = math.radians(angle_deg)
+    cos_a, sin_a = math.cos(alpha), math.sin(alpha)
+    a, b, d, e = cos_a, -sin_a, sin_a, cos_a
+    cx, cy = width / 2.0, height / 2.0
+    c = -a * cx - b * cy + cx
+    f = -d * cx - e * cy + cy
+    xs, ys = [], []
+    for x, y in ((0.0, 0.0), (width, 0.0), (width, height), (0.0, height)):
+        xs.append(a * x + b * y + c)
+        ys.append(d * x + e * y + f)
+    new_w = int(math.ceil(max(xs)) - math.floor(min(xs)))
+    new_h = int(math.ceil(max(ys)) - math.floor(min(ys)))
+    shift_x, shift_y = -(new_w - width) / 2.0, -(new_h - height) / 2.0
+    c, f = a * shift_x + b * shift_y + c, d * shift_x + e * shift_y + f
+    # PIL's affine is evaluated on pixel *corners* (it maps output index → input
+    # index and truncates), so re-expressing it centre-to-centre — which is what
+    # a 1-based FITS CRPIX means by "pixel" — shifts it by half a pixel each way:
+    # p_in + ½ = M·(p_out + ½) + (c, f). Measured: without this the derived
+    # position is up to ~1.7 px out at 123°, with it the residual is pure
+    # nearest-neighbour rounding.
+    m = np.array([[a, b], [d, e]], dtype=float)
+    half = np.array([0.5, 0.5])
+    return m, np.array([c, f], dtype=float) + m @ half - half, new_w, new_h
+
+
+def rotate_mask_north_up(mask: np.ndarray, angle_deg: float) -> np.ndarray:
+    """Rotate a boolean ``(H, W)`` mask exactly the way
+    :func:`rotate_image_north_up` rotates the picture it belongs to.
+
+    The Sky-map overlay keys a stored preview's alpha off the stack's coverage
+    mask; when that preview was saved North-up the mask has to make the same
+    journey or the transparent footprint lands somewhere the picture isn't.
+    Exposed corners fill with ``False`` (uncovered), matching the black the
+    picture's own corners fill with. Uses the same snap→``np.rot90`` /
+    ``PIL``-rotate split, with nearest resampling so the result stays a hard
+    1-bit footprint.
+    """
+    from PIL import Image
+
+    arr = np.asarray(mask, dtype=bool)
+    if arr.ndim != 2:
+        raise ValueError("mask must be 2-D")
+
+    snapped = round(angle_deg / 90.0) * 90.0
+    if abs(angle_deg - snapped) <= _SNAP_TOL_DEG:
+        return np.ascontiguousarray(np.rot90(arr, k=int(snapped / 90.0) % 4))
+
+    img = Image.fromarray(arr.astype(np.uint8) * 255, mode="L").rotate(
+        angle_deg, resample=Image.NEAREST, expand=True, fillcolor=0)
+    return np.asarray(img, dtype=np.uint8) > 127
+
+
 def rotate_image_north_up(rgb: np.ndarray, angle_deg: float) -> np.ndarray:
     """Rotate an ``(H, W, 3)`` display image CCW by ``angle_deg`` so North is up.
 

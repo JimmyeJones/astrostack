@@ -140,8 +140,37 @@ def celestial_wcs_from_fits(fits_path: str | Path):  # noqa: ANN201 — returns 
         return None, 0, 0
 
 
+def _rotate_matrix_and_crpix(m, crpix, width: int, height: int, north_up_deg: float):  # noqa: ANN001,ANN202
+    """Re-express a canvas's ``(CD, CRPIX, NAXIS)`` on the grid that
+    :func:`seestack.render.orient.rotate_image_north_up` produces from it.
+
+    Returns ``(cd, crpix, new_w, new_h)`` — or ``None`` when the rotation's pixel
+    geometry is degenerate. The rotation maps rotated-image pixels back to
+    original ones as ``p_in = M · p_out + t`` (0-based indices), so in FITS
+    1-based terms ``p_in¹ = M · p_out¹ + t¹`` with ``t¹ = t + (1,1) − M·(1,1)``.
+    Substituting into ``world = CD · (p¹ − CRPIX)`` gives ``CD′ = CD · M`` and
+    ``CRPIX′ = M⁻¹ · (CRPIX − t¹)`` — exact for the linear part of the WCS, which
+    is all a rigid rotation of the pixel grid can touch (``CRVAL``/``CTYPE`` are
+    untouched, so the tangent point stays where it is).
+    """
+    import numpy as np
+
+    from seestack.render.orient import north_up_pixel_transform
+
+    xf = north_up_pixel_transform(width, height, north_up_deg)
+    if xf is None:
+        return None
+    rot, t, new_w, new_h = xf
+    one = np.array([1.0, 1.0])
+    t1 = t + one - rot @ one
+    cd = np.asarray(m, dtype=float) @ rot
+    crpix_new = np.linalg.solve(rot, np.asarray(crpix, dtype=float) - t1)
+    return cd, crpix_new, new_w, new_h
+
+
 def wcs_dict_rescaled_to_preview(
     fits_path: str | Path, preview_w: int, preview_h: int,
+    *, north_up_deg: float = 0.0,
 ) -> dict | None:
     """The stack's **stored** celestial WCS, rescaled to a downscaled preview PNG.
 
@@ -161,6 +190,15 @@ def wcs_dict_rescaled_to_preview(
     keywords in the same shape :func:`webapp.routers.sky._tan_wcs` produces, or
     ``None`` when the master FITS is missing/headerless/carries no celestial WCS (the
     caller then falls back to the frame-0 extrapolation).
+
+    ``north_up_deg`` is for the one preview that is **not** a plain downscale of the
+    canvas: History's "Adjust" can save the preview rotated so celestial North points
+    up. Pass the rotation that was applied and the canvas WCS is rotated onto the same
+    grid before the rescale, so the tile is placed at the orientation the stored
+    picture actually has. (Rotation and a uniform downscale commute, so composing them
+    in this order matches what the render did to within the sub-pixel rounding of the
+    rotated canvas's bounding box.) The default ``0.0`` leaves every existing call
+    bit-for-bit unchanged.
     """
     if preview_w <= 0 or preview_h <= 0:
         return None
@@ -168,13 +206,18 @@ def wcs_dict_rescaled_to_preview(
     if wcs is None or full_w <= 0 or full_h <= 0:
         return None
     try:
+        m = wcs.pixel_scale_matrix  # 2×2 CD matrix (deg/px), includes sign + rotation
+        crpix = wcs.wcs.crpix
+        if north_up_deg:
+            rotated = _rotate_matrix_and_crpix(m, crpix, full_w, full_h, north_up_deg)
+            if rotated is None:
+                return None
+            m, crpix, full_w, full_h = rotated
         s_x = full_w / preview_w
         s_y = full_h / preview_h
-        m = wcs.pixel_scale_matrix  # 2×2 CD matrix (deg/px), includes sign + rotation
         cd = m.copy()
         cd[:, 0] *= s_x
         cd[:, 1] *= s_y
-        crpix = wcs.wcs.crpix
         crval = wcs.wcs.crval
         ctype = list(wcs.wcs.ctype)
         return {
@@ -218,7 +261,7 @@ def _extent_from_scale_matrix(
 
 
 def canvas_extent_from_fits(
-    fits_path: str | Path,
+    fits_path: str | Path, *, north_up_deg: float = 0.0,
 ) -> tuple[float, float, float] | None:
     """A stack canvas's on-sky (width_deg, height_deg, rotation_deg) from its
     **stored** WCS, or ``None`` when the master FITS is missing/headerless.
@@ -230,12 +273,25 @@ def canvas_extent_from_fits(
     does — instead of extrapolating from a single representative frame. Returns
     ``None`` (caller falls back to the frame-0 pixscale/rotation) when no
     celestial WCS is present. See :func:`_extent_from_scale_matrix`.
+
+    ``north_up_deg`` describes a stored preview that was saved rotated so North
+    points up (History's "Adjust"); pass it and the extent describes that rotated
+    grid instead — a bigger bounding box, and a position angle of ~0 because the
+    picture now *is* North-up. The default ``0.0`` is the unrotated canvas exactly
+    as before.
     """
     wcs, full_w, full_h = celestial_wcs_from_fits(fits_path)
     if wcs is None or full_w <= 0 or full_h <= 0:
         return None
     try:
-        return _extent_from_scale_matrix(wcs.pixel_scale_matrix, full_w, full_h)
+        m = wcs.pixel_scale_matrix
+        if north_up_deg:
+            rotated = _rotate_matrix_and_crpix(
+                m, wcs.wcs.crpix, full_w, full_h, north_up_deg)
+            if rotated is None:
+                return None
+            m, _crpix, full_w, full_h = rotated
+        return _extent_from_scale_matrix(m, full_w, full_h)
     except Exception as exc:  # noqa: BLE001 — a malformed WCS just means "fall back"
         log.warning("WCS extent from FITS failed (%s): %s", fits_path, exc)
         return None
