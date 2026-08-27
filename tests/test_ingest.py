@@ -461,6 +461,102 @@ def test_ingest_same_size_swap_still_resets_after_the_touch_fix(tmp_path):
         proj.close()
 
 
+@pytest.mark.parametrize("truncate_to", [0, 12000])
+def test_ingest_transient_truncation_keeps_solution_and_qc(tmp_path, truncate_to):
+    """A registered, solved, auto-rejected frame observed *mid in-place rewrite*
+    (0-byte or truncated) must NOT be treated as a content swap.
+
+    Regression: the pipeline re-globs the whole ``incoming/`` tree on every scan
+    (independent of the watcher's stability gate), so a scan fired by another new
+    file can sweep in a registered frame during a NAS re-sync / ``rsync
+    --inplace`` / truncate-then-write. Judged by ``(size, mtime)`` alone the
+    transient short read looked like a "different content" swap, so ingest dropped
+    the frame's plate solution, re-accepted the auto-rejected sub, and even
+    advanced the stored fingerprint to the truncated size — guaranteeing a second
+    reset when the file returned. The incompleteness guard now defers instead."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    frame_file = src / "frame_0001.fit"
+    write_seestar_fits(frame_file, seed=3, width=480, height=320)
+    good_bytes = frame_file.read_bytes()
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        first = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        frame_id = first[0].frame_id
+        proj.update_frame(
+            frame_id,
+            wcs_json='{"CRVAL1": 10.0}', ra_center_deg=10.0, dec_center_deg=20.0,
+            pixscale_arcsec=5.0, star_count=180,
+            accept=False, reject_reason="auto:streak", streak_detected=True,
+        )
+        good_fp = proj.get_frame(frame_id).source_size_bytes
+
+        # A scan catches the source mid-rewrite (0 bytes, or short/truncated).
+        frame_file.write_bytes(good_bytes[:truncate_to])
+        mid = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert mid[0].skipped is True
+        assert mid[0].refreshed is False  # fail-before: True (a bogus content swap)
+
+        row = proj.get_frame(frame_id)
+        # Nothing destroyed by the transient (fail-before: all wiped).
+        assert row.wcs_json == '{"CRVAL1": 10.0}'
+        assert row.ra_center_deg == 10.0 and row.pixscale_arcsec == 5.0
+        assert row.accept is False and row.reject_reason == "auto:streak"
+        assert row.star_count == 180
+        # Fingerprint NOT advanced to the truncated size (fail-before: it was).
+        assert row.source_size_bytes == good_fp
+
+        # The rewrite completes with the same bytes → a benign re-scan preserves
+        # everything (the deferred re-check lands on a whole file).
+        frame_file.write_bytes(good_bytes)
+        third = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert third[0].refreshed is False
+        row = proj.get_frame(frame_id)
+        assert row.wcs_json == '{"CRVAL1": 10.0}'
+        assert row.accept is False and row.reject_reason == "auto:streak"
+    finally:
+        proj.close()
+
+
+def test_ingest_truncated_swap_defers_until_the_new_capture_completes(tmp_path):
+    """The incompleteness guard must *defer*, not *swallow*, a genuine swap: a
+    different capture written in place still resets QC and the solution — just on
+    the scan where the new file is complete, not on one that caught it truncated."""
+    src = tmp_path / "raws"
+    src.mkdir()
+    frame_file = src / "a.fit"
+    write_seestar_fits(frame_file, seed=3, width=480, height=320,
+                       date_obs="2024-09-12T03:14:55.123")
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        first = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        frame_id = first[0].frame_id
+        proj.update_frame(frame_id, wcs_json='{"CRVAL1": 10.0}', ra_center_deg=10.0)
+
+        # A different capture starts overwriting the path but is caught truncated.
+        new_full = write_seestar_fits(tmp_path / "new.fit", seed=99, width=640,
+                                      height=320, date_obs="2024-09-13T22:01:02.0")
+        new_bytes = Path(new_full).read_bytes()
+        frame_file.write_bytes(new_bytes[:15000])  # mid-copy
+        mid = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert mid[0].refreshed is False  # deferred, not yet applied
+        assert proj.get_frame(frame_id).wcs_json == '{"CRVAL1": 10.0}'  # untouched
+
+        # The new capture finishes copying → the swap is now applied.
+        frame_file.write_bytes(new_bytes)
+        done = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert done[0].refreshed is True
+        row = proj.get_frame(frame_id)
+        assert row.wcs_json is None  # stale solution finally dropped
+        assert row.width_px == 640  # header re-read from the new capture
+    finally:
+        proj.close()
+
+
 def test_ingest_touch_of_a_frame_with_no_recorded_timestamp_stays_conservative(
     tmp_path,
 ):
