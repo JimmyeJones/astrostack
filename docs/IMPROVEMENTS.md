@@ -179,6 +179,63 @@ _(none — claim an item here with your branch name)_
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #11, branch `claude/vigilant-knuth-bsx6dh`) — led the rotation with the
+  stacking engine's combine/reject + calibrate + auto-reject resolution, then swept the guardrail-critical
+  routers the #10 note pointed at (gallery, stack, **upload**) and the render/proxy path. Result: the engine,
+  calibration, routers and render all came back CLEAN again; no verified bug this run. Environment healthy — a
+  219-test targeted subset across the audited areas passed (`test_accumulator`, `test_qc_grading`, `test_scanner`,
+  `test_stack_pipeline`, `test_gallery`, `test_autostack_hold`, `test_one_sub_vs_stack`; 141 s), and a full
+  headless run was green through 50 % (0 failures) before the container reclaimed the background runner twice —
+  a resource/harness limit, not a test failure. What was read adversarially and, where a trigger was
+  constructible, traced:**
+  **accumulator.py** — the `MinMaxRejectAccumulator` k-set insertion keeps `_mins` ascending / `_maxs` descending
+  (traced insertion of 5→3→4 at k=2 stays sorted), so `_mins[0]`/`_maxs[0]` are the true extremes the degrade
+  bands rely on; the ±inf identities at uncovered slots are summed *per side before combining* so an uncovered
+  pixel can't form an inf−inf NaN; the three-band schedule (`≥2k+1` full k-trim / `3≤cnt<2k+1` single min/max /
+  `1–2` plain mean / `0` NaN) and the any-channel `frame_coverage` count (so per-channel κ-σ never under-counts a
+  frame) are correct; `WelfordAccumulator.variance` is NaN for n<2 — the keep-single-coverage signal the clip
+  widens on. **reference.py** — candidate RAs are unwrapped *before* the median/distance/span, so an RA=0
+  straddler isn't flung ~180° and passed over for an edge frame; a no-wrap target is untouched. **stacker.py** —
+  `_resolve_auto_reject` explicitly forces min/max below 4 frames so the reachable small-κ case
+  (`sigma_kappa≲1.155` → `kappa_min_frames`=3) can't pick κ-σ and then silently fall through its `n≥4` gate to
+  *no* rejection despite `auto_reject`; `_afford_drizzle_reject` forgives only the reject *pass* on the walk-away
+  path (never the canvas — a canvas that doesn't fit is still refused with a named fix) and passes an explicit
+  user tick straight through to refuse loudly. **calibrate/apply.py** — `_effective_dark` restores the plain dark
+  at genuinely-no-data *bias* pixels and 0 at no-data *dark* pixels, so exposure-scaling can never inject a
+  spurious `bias·(1−ratio)` pedestal into every calibrated light; `_bias_applies` / `_dark_scaling_applies` gate
+  consistently across `validate`, `calibration_warnings` and `dark_scaling_provenance` (a wrong-shaped bias
+  silences neither the warning nor scaling incorrectly); `apply_raw` honours the "returns a fresh array" contract
+  even on the empty-bundle path so a caller can't mutate the shared source frame. **qc/metrics.py** —
+  `green_channel` promotes to float32 *before* averaging the two green Bayer pixels, so summing two bright 16-bit
+  greens can't wrap mod-2¹⁶ and corrupt exactly the stars QC needs; all four Bayer layouts map G correctly.
+  **qc/grading.py** — the per-panel reject rail plus the deterministic `(-worst_z, frame_id)` total order make the
+  `reconsider` pass a genuine fixed point (no reject↔re-accept churn at the cap boundary); `re_accept` reads the
+  *post-cap* list on purpose. **solve/astap.py** — the 3-rung ladder falls through on a per-rung timeout (each rung
+  gets the full `timeout_s`, the documented ≤3× cost the #4 note already tracks) and surfaces the tally-able
+  `SOLVE_FAILED_TIMEOUT` only when *every* rung timed out; `_parse_astap_ini`'s hard `CRVAL*`/`CDELT2` key access
+  sits inside the solved-only guard and its `KeyError` is caught → `solved=True` with null coords, handled
+  downstream. **render/thumbnail.py + edit/proxy.py** — preview↔export both route through the STF /
+  `_autostretch_for_export`; a display-space editor export is rendered verbatim (a second asinh would
+  double-process it); `_nan_aware_area_downscale_plane` keeps a fully-uncovered block as NaN and reads each
+  big-endian plane one at a time to stay RAM-bounded on a giant mosaic; the proxy cache is keyed on
+  `src_mtime`+`PROXY_VERSION` and returns a writable copy off the memmap. **routers/upload.py** (guardrail-
+  critical, §10) — traversal is refused twice (`safe_relpath` per-segment + `confined_dest` symlink-escape
+  re-confirm), an *absolute* zip member is refused rather than silently de-slashed, the per-member write is capped
+  at the archive's declared `file_size` (which is what makes the pre-write free-space guard *binding* against a
+  zip bomb), `zipfile` CRC-verifies each member at EOF, every stream lands as a unique `.part` (concurrent
+  same-name POSTs can't interleave) atomically renamed only when complete, and a final-flush ENOSPC still unlinks
+  the temp — `incoming/` stays strictly create-new/read. **routers/gallery.py + stack.py** — every cross-target
+  read degrades per-item (one corrupt project / bad run / unusable video meta costs one card, never the page); the
+  noise-ratio measure slices the memmap window before the float cast (46 MB→0 MB peak); `full-res-png` renders the
+  *saved recipe* for a display-space run so the download matches the clicked preview. **pipeline walk-away** —
+  `_auto_stack_frame_count` compares against the *max* prior coverage and retries a marked attempt only when
+  *fewer* subs are unreadable than last time; `_auto_stack_readability_hold` holds without stamping the marker;
+  `_solved_accepted_count` and `_solved_accepted_unreadable` share the identical solved+accepted filter, so
+  `readable = offered − unreadable` is exact. **This audit's conclusion:** the stacking engine, calibration,
+  routers (upload included) and render are all hardened; the marginal QA value has moved off them — future runs
+  should lead with the **editor-reload ↔ proxy-render interaction** and a **running-app dogfood** of the Target /
+  Stack information architecture (the standing §1 friendliness priority), and re-audit the engine only occasionally.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #10, branch `claude/vigilant-knuth-nozq4i`) — led the rotation back
   onto the stacking engine's per-frame geometry + the walk-away auto-orchestration layer the #8/#9 notes
   pointed at, since the combine/reject core has now come back clean three audits running. Result: the engine
@@ -7985,6 +8042,24 @@ to **Shipped**.)_
     renders a keepsake; a "my Messier grid so far" image is the same shape and is the single most
     shareable artefact the app could produce. Largest of the three; do it last.
 
+- **NEW IDEA (Scout 2026-08-27 #11) — "Your cleanest shot so far": when a fresh stack of a target measures
+  *cleaner* than the picture currently standing as its cover, offer a one-tap "make this the cover" nudge (never
+  auto-swap).** *(Pillar: autonomy + trust — PRIORITY 2–3. Size: S.)* The app already stores a normalized
+  background-noise σ per run (`StackRunRow.noise_sigma`, `_compute_noise_sigma`) and already lets a user pin a
+  run as its target's cover ("Set as cover" in History → `cover_stack_run_id`, honoured by the Library tile,
+  `/api/gallery/best`, the montage wall and `_representative_run`). But the two never talk: a beginner who keeps
+  adding subs gets steadily cleaner stacks, yet the cover stays whatever they once pinned — so the wall and
+  Library tile can silently show an *older, noisier* picture than the target's own best. **The nudge:** on the
+  Target/History surface, when the newest genuine stack's `noise_sigma` is materially lower (e.g. ≤0.85×) than the
+  current cover's — and it isn't already the cover — show a calm one-liner *"This stack is your cleanest of M31 yet
+  (about 20 % less background grain than your cover) — make it the cover?"* with a one-tap apply. **Why a nudge,
+  not an auto-swap:** cover choice is deliberately the user's (they may have pinned a favourite framing / a
+  hand-edited version), and §9/§10 say new behaviour is opt-in — so this only ever *suggests*, reusing the exact
+  `set-cover` path they already have. **Care:** compare like with like — genuine full stacks only (reuse
+  `_newest_genuine_stack_run`, skip channel-combine / editor-export runs whose σ isn't comparable), and gate on
+  both runs carrying a finite `noise_sigma` (pre-schema-6 runs send `None` → no nudge). Read-only roll-up + one
+  copy string + reuse of an existing mutation; no engine or schema change.
+
 - **NEW IDEA (Scout 2026-08-27 #10) — "This looks like M31": offline auto-identify an un-named / Unsorted
   target from its solved centre against the bundled catalog, in the web app.** *(Pillar: autonomy +
   friendliness — PRIORITY 2–3. Size: S–M.)* A beginner who drops loose FITS, or a folder the Seestar named
@@ -14869,6 +14944,48 @@ problems. Dogfood it every big-picture run and fix root causes.
   grid as a keepsake. Filed as a fresh idea below.
 
   *(Original spec, kept for context.)* *(Pillar: friendliness /
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #11) — "Share your glow-up": a one-tap download that composes the
+  representative single raw sub next to the finished stack into one labelled before/after image, so a beginner can
+  post the single most impressive thing stacking does — *"1 photo → 500 photos stacked"* — without a screenshot or
+  an editor.** *(Pillar: share / enjoy + trust — PRIORITY 3. Size: S–M. Confidence the gap is real: grepped this
+  run — the `one-sub-vs-stack` reveal exists **in-app only** (`OneFrameVsStackCard.tsx`, the `/one-sub-vs-stack`
+  info + `/reference-sub` PNG + `/noise` endpoints); there is no *downloadable* composed before/after image
+  anywhere.)*
+  **Why it's beginner-gold:** the reveal card already shows a beginner what stacking bought them, and it delights
+  every time — but it lives behind a click on the Target page and can't leave the app. The one picture a
+  non-astro friend actually *gets* is "this grainy single frame → this clean deep-sky photo, from the same little
+  telescope", and right now there's no way to send it. This turns the existing in-app reveal into a shareable
+  artefact, exactly like the montage wall and recap poster already do for their surfaces.
+  **Why it's nearly free to build (all the pieces exist):**
+  * `_pick_reference_sub(proj)` already chooses an *honest* representative sub (sharpest accepted, deterministic),
+    and `/stack-runs/{id}/reference-sub` already renders it **stretched to match the stack preview** — so the two
+    halves are already tone-matched (the hard part of an honest before/after).
+  * the finished preview PNG is on disk per run; the `one-sub-vs-stack` info endpoint already yields the caption
+    numbers (`n_frames`, `sub_exposure_s`, `integration_s`) and already returns `available:false` for a
+    display-space editor export (no honest raw-sub match), so the offer self-hides on exactly the right runs.
+  * composing two PNGs into one labelled JPEG with a caption bar is the montage/recap pattern (`seestack/montage.py`
+    → `build_montage`, `png_bytes_to_jpeg`) — no new rendering machinery.
+  **Slices (each a shippable Builder run):**
+  * **(a) engine (S):** a pure `before_after_card(before_png, after_png, *, caption)` in a small module (or beside
+    `montage.py`) that lays the two images side by side at a common height with a thin divider and a one-line
+    caption bar (*"One 10 s frame  →  500 frames stacked (83 min)"*), returns JPEG bytes. Unit-testable on two
+    synthetic PNGs; deterministic; RA/'×'-seam-free (it's pure layout).
+  * **(b) backend (S):** `GET /api/targets/{safe}/stack-runs/{id}/before-after.jpg` — reuse `_pick_reference_sub`
+    + the existing reference-sub render + the stored preview, compose via (a), 404 when the run is a display-space
+    export / has no preview / has no frame (mirroring the reveal's `available` gate), computed in a threadpool.
+    Additive, read-only; no schema/config/default change.
+  * **(c) frontend (S):** a "Share before/after" download button on the existing `OneFrameVsStackCard` (and the
+    History run card / Gallery lightbox), sitting right where the reveal already is. Plain-language tooltip
+    explaining what the picture shows.
+  **Beginner-bar check:** a non-expert instantly understands "one raw frame vs my finished picture", it needs zero
+  config, ships tone-matched-by-default + a plain caption, is purely additive/offline, and it's the single most
+  shareable proof of what the app did for them — the "enjoy / share" pillar of §1, not a pro knob. Distinct from
+  the in-app reveal (this is the *portable* artefact), the montage wall (many targets, one grid) and the recap
+  poster (a night's stats): this is the *one target's before→after*, the thing people actually post.
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list": a Messier/catalog checklist that lights up
+  the famous objects you've already captured and shows the rest as a bucket list.** *(Pillar: friendliness /
   autonomy + "understand / enjoy" — PRIORITY 3. Size: M.)* Every beginner astrophotographer knows the Messier
   list — capturing all 110 is *the* classic milestone — yet the app has no "which have I got?" view. The
   night planner ranks *tonight's* targets and each target has its own integration progress, but nothing shows
