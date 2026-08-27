@@ -1839,6 +1839,92 @@ def test_export_share_jpeg_download_and_blurb(client, solved_library):
     assert max(img.size) == 2048  # downscaled from the 2500 px native width
 
 
+def test_print_sizes_offers_only_what_the_picture_can_print_sharply(client, solved_library):
+    """The print menu is a promise: every size listed is one this picture has the
+    detail to fill without being upscaled. A small stack therefore gets a short
+    list (or none), and never a soft A3."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    big = _make_run(solved_library, safe, basename="big", h=2000, w=3000)
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{big}/editor/print-sizes").json()
+    names = [s["name"] for s in body["sizes"]]
+    assert names, "a 6 MP picture must print at something"
+    assert names[0] == "A3"          # largest it can fill sharply, and it leads
+    assert all(s["dpi"] >= 150 for s in body["sizes"])
+    assert "A3" in body["advice"]
+    assert all("label" in s and s["name"] in s["label"] for s in body["sizes"])
+
+    tiny = _make_run(solved_library, safe, basename="tiny", h=80, w=100)
+    small_body = client.get(
+        f"/api/targets/{safe}/stack-runs/{tiny}/editor/print-sizes").json()
+    assert small_body["sizes"] == []
+    # …and says why, rather than leaving an empty menu with no explanation.
+    assert "another night" in small_body["advice"]
+
+
+def test_print_sizes_404s_for_a_run_that_does_not_exist(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    r = client.get(f"/api/targets/{safe}/stack-runs/99999/editor/print-sizes")
+    assert r.status_code == 404
+
+
+def test_export_print_is_fitted_to_the_paper_and_carries_its_dpi(client, solved_library):
+    """The point of the whole feature: the downloaded file is the paper's exact
+    pixel canvas *and* carries the DPI tag, so a lab prints it at the size the
+    app promised instead of sizing it from the pixel count."""
+    import io
+
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="printable", h=2000, w=3000)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}]}
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/print",
+                    json={"recipe": recipe})
+    assert r.status_code == 200
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job
+    assert job["result"]["size_name"] == "A3"      # the default is the biggest
+    dpi = job["result"]["dpi"]
+    assert dpi >= 150
+
+    dl = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/print/{r.json()['job_id']}")
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith("image/jpeg")
+    assert "attachment" in dl.headers.get("content-disposition", "")
+    img = Image.open(io.BytesIO(dl.content))
+    assert img.size == (job["result"]["width_px"], job["result"]["height_px"])
+    # Landscape picture → landscape paper, and the canvas is A3 at that DPI.
+    assert img.size[0] > img.size[1]
+    assert img.info["dpi"][0] == pytest.approx(dpi, abs=1)
+    # Never upscaled: the print canvas fits inside the picture's own pixels.
+    assert img.size[0] <= 3000 and img.size[1] <= 2000
+
+
+def test_export_print_honours_a_smaller_size_and_refuses_one_that_would_be_soft(
+        client, solved_library):
+    """A user may want a small print of a big picture — that's fine. Asking for a
+    size the picture can't fill is refused with advice, never silently upscaled."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # 1200x800 prints 6x4 and 7x5 sharply but not 10x8 or bigger.
+    rid = _make_run(solved_library, safe, basename="chosen", h=800, w=1200)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}]}
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/print",
+                    json={"recipe": recipe, "size_name": "6\u00d74 in"})
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job
+    assert job["result"]["size_name"] == "6\u00d74 in"
+
+    bad = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/print",
+                      json={"recipe": recipe, "size_name": "A3"})
+    bad_job = _wait_job(client, bad.json()["job_id"])
+    assert bad_job["state"] == "error"
+    assert "print soft" in (bad_job.get("error") or "")
+
+
 def test_export_share_bakes_the_nameplate_when_requested(client, solved_library):
     """With ``nameplate=true`` the share JPEG carries a baked-on acquisition footer
     (built from the run's own metadata); without it the pixels are unchanged."""

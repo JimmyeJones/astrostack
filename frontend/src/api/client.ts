@@ -936,6 +936,25 @@ export interface StackRejectionSummary {
   fraction?: number;
 }
 
+export interface PrintSize {
+  // The paper size, e.g. "A4" or "10×8 in" — what the user picks.
+  name: string;
+  // The DPI this picture would actually be printed at on that paper.
+  dpi: number;
+  // "A4 · 240 DPI", built server-side so one voice describes it everywhere.
+  label: string;
+  width_in: number;
+  height_in: number;
+}
+
+export interface PrintSizes {
+  // Largest first, so the head of the list is the recommended print.
+  sizes: PrintSize[];
+  // One plain-language line: "Best print size for this picture: up to A4 at
+  // 240 DPI." — or, for a picture too small to print well, why not yet.
+  advice: string;
+}
+
 /** An unattended run that lowered its drizzle scale to fit the memory budget. */
 export interface StackDrizzleDegraded {
   reason: string;
@@ -2432,6 +2451,21 @@ export const api = {
     }),
   editShareUrl: (safe: string, runId: number, jobId: string) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/share/${jobId}`,
+  /** Which standard paper sizes this picture can print *sharply*, largest first,
+   *  plus one plain-language recommendation. Cheap (sized from the run's canvas,
+   *  no render), so the menu can offer only sizes that will look good. */
+  printSizes: (safe: string, runId: number) =>
+    req<PrintSizes>(`/api/targets/${safe}/stack-runs/${runId}/editor/print-sizes`),
+  /** Render a print-ready, DPI-tagged JPEG fitted to `sizeName` (omit it for the
+   *  largest size this picture can fill sharply). */
+  exportPrint: (safe: string, runId: number, recipe: Recipe,
+                sizeName?: string, nameplate = false) =>
+    req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/print`, {
+      method: "POST",
+      body: JSON.stringify({ recipe, size_name: sizeName ?? null, nameplate }),
+    }),
+  editPrintUrl: (safe: string, runId: number, jobId: string) =>
+    `/api/targets/${safe}/stack-runs/${runId}/editor/print/${jobId}`,
   exportRun: (safe: string, runId: number, recipe: Recipe, outputName: string, tiffMode: string) =>
     req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/export`, {
       method: "POST",
