@@ -168,6 +168,29 @@ def _rotate_matrix_and_crpix(m, crpix, width: int, height: int, north_up_deg: fl
     return cd, crpix_new, new_w, new_h
 
 
+def arcsec_per_px(wcs) -> float | None:  # noqa: ANN001
+    """The local plate scale (arcsec/px) of a stack's celestial WCS — the mean of
+    the two axis scales, which is exact for the square, unrotated Seestar grid
+    and a sane average for a mosaic canvas. ``None`` when there is no usable WCS
+    or the scale can't be measured, so every caller can omit its answer cleanly
+    rather than working from a made-up number.
+
+    Lives here rather than beside any one caller because several surfaces ask the
+    same question of the same header — the scale bar baked onto a share, the
+    "did I frame it well?" verdict, the annotation overlay — and they must not
+    drift into two definitions of the picture's scale."""
+    if wcs is None:
+        return None
+    try:
+        from astropy.wcs.utils import proj_plane_pixel_scales
+
+        scales_deg = proj_plane_pixel_scales(wcs)  # deg/px per axis
+        scale = float(sum(scales_deg) / len(scales_deg)) * 3600.0
+    except Exception:  # noqa: BLE001 — a degenerate WCS just means "no answer"
+        return None
+    return scale if scale > 0 else None
+
+
 def wcs_dict_rescaled_to_preview(
     fits_path: str | Path, preview_w: int, preview_h: int,
     *, north_up_deg: float = 0.0,

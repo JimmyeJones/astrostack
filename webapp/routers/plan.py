@@ -144,6 +144,7 @@ def _annotate_library_targets(lib, targets) -> list[LibraryTarget]:  # noqa: ANN
     """Build the annotated 'already targeted' rows (see :func:`_library_targets`)."""
     from seestack.objectinfo import identify_object
     from seestack.session_recap import recent_night_pace_s
+    from webapp.framing_advice import newest_picture_nudge
 
     catalog = load_catalog()
     out: list[LibraryTarget] = []
@@ -154,11 +155,18 @@ def _annotate_library_targets(lib, targets) -> list[LibraryTarget]:  # noqa: ANN
                                catalog=catalog)
         goal_s: float | None = None
         pace_s: float | None = None
+        nudge = None
         proj = None
         try:
             proj = lib.open_target(t.safe_name)
             goal_s = read_goal_s(proj)
             pace_s = recent_night_pace_s(proj)
+            # "Nudge a little south before you start" — the framing advice from
+            # this target's newest picture, brought forward from the morning-after
+            # card to the screen someone reads while pointing the scope. One more
+            # FITS header read per already-shot target, which is why it sits
+            # inside the same registry-signature cache as the pace read above.
+            nudge = newest_picture_nudge(proj, info)
         except Exception:  # noqa: BLE001 — a broken project must not 500 the plan
             pass
         finally:
@@ -173,6 +181,7 @@ def _annotate_library_targets(lib, targets) -> list[LibraryTarget]:  # noqa: ANN
             con=info.constellation_abbr if info is not None else "",
             goal_s=goal_s,
             recent_pace_s=pace_s,
+            recentre_nudge=nudge,
         ))
     return out
 

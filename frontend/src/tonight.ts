@@ -1,7 +1,25 @@
 // Pure helpers for the 'Tonight' night-planner page — kept out of the component
 // so they're easy to unit-test without rendering.
 
-import type { DifficultyHint, FramingHint, MosaicPlan, NightPlan, PlannedTarget } from "./api/client";
+import type {
+  DifficultyHint, FramingHint, MosaicPlan, NightPlan, PlannedTarget, StackRecentreNudge,
+} from "./api/client";
+
+// "Nudge 1.0° south" — the framing advice from a target's newest picture, on the
+// one screen someone reads *while pointing the scope*. The same sentence already
+// appears on the finished picture's card, but that is read the morning after and
+// forgotten by the next clear night; here it is still actionable. The chip
+// carries the backend's own short phrase ("1.0° south") rather than re-rounding
+// the number here, so the badge and the sentence can never disagree; the full
+// sentence is the tooltip. Null whenever the backend sent no nudge — a
+// well-framed picture, no picture yet, an unidentified target — and on an older
+// backend that sends no `short`, so it never guesses a direction.
+export function recentreNudgeRowBadge(
+  nudge: StackRecentreNudge | null | undefined,
+): { label: string; color: string; tooltip: string } | null {
+  if (!nudge || !nudge.short) return null;
+  return { label: `Nudge ${nudge.short}`, color: "grape", tooltip: nudge.text };
+}
 
 // A compact "will it fit in one frame?" table badge for a catalog planner row —
 // a pre-capture nudge so a beginner picks mosaic mode *before* pointing at an

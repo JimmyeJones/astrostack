@@ -503,3 +503,23 @@ def test_the_nudge_distance_reads_in_units_a_beginner_can_aim_by():
     small = recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=0.0,
                            object_ra_deg=10.08, object_dec_deg=0.0)
     assert small is not None and "5'" in small.text
+
+
+def test_the_nudge_carries_a_chip_sized_phrase_of_the_same_move():
+    """The night planner's target row has no room for the sentence, so the nudge
+    also carries the move as a phrase. It has to be the *same* rounding — a chip
+    reading "0.9° south" beside a sentence saying "1.0° south" would look like
+    two different pieces of advice."""
+    from seestack.framing import recentre_nudge
+
+    big = recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=0.0,
+                         object_ra_deg=11.2, object_dec_deg=0.0)
+    assert big is not None
+    assert big.short == "1.2° east"
+    assert big.short in big.text          # one rounding, quoted twice
+
+    small = recentre_nudge(centre_ra_deg=10.0, centre_dec_deg=0.0,
+                           object_ra_deg=10.08, object_dec_deg=0.0)
+    assert small is not None
+    assert small.short == "5' east"
+    assert small.short in small.text

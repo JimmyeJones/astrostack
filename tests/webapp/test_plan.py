@@ -6,6 +6,8 @@ from datetime import date as _date
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from webapp.site_location import parse_angle as _parse_angle
 from webapp.site_location import site_from_header as _site_from_header
 
@@ -732,3 +734,117 @@ def test_best_tonight_goes_quiet_when_nothing_is_up(client, solved_library):
     body = client.get("/api/plan/best-tonight",
                       params={"when": JAN_MIDNIGHT, "min_alt": 80}).json()
     assert body["picks"] == []
+
+
+# --- "Nudge it this way, before you start" ---------------------------------- #
+#
+# The framing verdict on a finished picture already says *which way* to move the
+# scope next time — but on the card you read the morning after. The planner is
+# the screen you read while pointing, so the nudge is repeated there.
+
+def _add_stack_run(data_root, safe: str, *, ra: float, dec: float,
+                   w: int = 4000, h: int = 3000, arcsec_per_px: float = 3.0,
+                   when: str = "2026-05-01T00:00:00Z") -> int:
+    """Register a stack run whose master FITS carries a TAN WCS centred on
+    (ra, dec) — the geometry the framing verdict reads, as in production."""
+    import numpy as np
+    from astropy.io import fits
+
+    from seestack.io.library import Library
+    from seestack.io.project import StackRunRow
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        tdir = Path(lib.target_dir(lib.find_target(safe)))
+        fits_path = tdir / f"plan_framing_{ra}_{dec}_{when[:10]}.fits"
+        hdu = fits.PrimaryHDU(data=np.zeros((3, h, w), dtype=np.float32))
+        hdr = hdu.header
+        hdr["CTYPE1"] = "RA---TAN"
+        hdr["CTYPE2"] = "DEC--TAN"
+        hdr["CRPIX1"] = w / 2 + 0.5
+        hdr["CRPIX2"] = h / 2 + 0.5
+        hdr["CRVAL1"] = ra
+        hdr["CRVAL2"] = dec
+        hdr["CD1_1"] = -arcsec_per_px / 3600.0
+        hdr["CD1_2"] = 0.0
+        hdr["CD2_1"] = 0.0
+        hdr["CD2_2"] = arcsec_per_px / 3600.0
+        hdu.writeto(fits_path, overwrite=True)
+
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc=when,
+                output_basename=f"master_{when[:10]}", fits_path=str(fits_path),
+                tiff_path=None, preview_path=None, n_frames_used=3,
+                canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=3,
+                options_json="{}",
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        return run_id
+    finally:
+        lib.close()
+
+
+def _tonight_rows(client) -> dict:
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    return {t["target_safe"]: t for t in body["targets"] if t["already_targeted"]}
+
+
+def test_tonight_row_says_which_way_to_nudge_after_a_badly_framed_picture(
+    client, solved_library
+):
+    """M 42's last picture was pointed 1° north of it, so half the nebula ran off
+    the bottom. The planner row now says to move south *before* the next session,
+    in the same words the finished picture's card uses."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    run_id = _add_stack_run(solved_library, "M_42", ra=83.822, dec=-5.391 + 1.0)
+
+    row = _tonight_rows(client)["M_42"]
+    nudge = row["recentre_nudge"]
+    assert nudge is not None
+    assert nudge["direction"] == "south"
+    assert nudge["degrees"] == pytest.approx(1.0, abs=0.05)
+    assert nudge["short"] == "1.0° south"
+    assert "nudge your Seestar about 1.0° south" in nudge["text"]
+
+    # …and it is *the same* advice the picture's own card gives, so the two
+    # screens can never disagree about which way to move the scope.
+    card = client.get(f"/api/targets/M_42/stack-runs/{run_id}/framing").json()
+    assert card["nudge"] == nudge
+
+
+def test_tonight_row_stays_silent_when_the_last_picture_was_well_framed(
+    client, solved_library
+):
+    """A centred picture needs no advice, and a target with no picture at all has
+    nothing to go on — both say nothing rather than inventing a direction."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    _add_stack_run(solved_library, "M_42", ra=83.822, dec=-5.391)
+
+    rows = _tonight_rows(client)
+    assert rows["M_42"]["recentre_nudge"] is None
+    assert rows["NGC_7000"]["recentre_nudge"] is None       # never stacked
+    catalog_row = next(
+        t for t in client.get("/api/plan/tonight",
+                              params={"when": JAN_EVENING}).json()["targets"]
+        if not t["already_targeted"])
+    assert catalog_row["recentre_nudge"] is None
+
+
+def test_tonight_row_follows_the_newest_picture_not_an_old_one(
+    client, solved_library
+):
+    """A verdict from three sessions ago must never contradict a re-pointed one:
+    once the scope has been moved and a well-framed picture stacked, the row goes
+    quiet even though the badly-framed run is still in the history."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    _add_stack_run(solved_library, "M_42", ra=83.822, dec=-5.391 + 1.0,
+                   when="2026-05-01T00:00:00Z")
+    assert _tonight_rows(client)["M_42"]["recentre_nudge"] is not None
+
+    _add_stack_run(solved_library, "M_42", ra=83.822, dec=-5.391,
+                   when="2026-06-01T00:00:00Z")
+    assert _tonight_rows(client)["M_42"]["recentre_nudge"] is None

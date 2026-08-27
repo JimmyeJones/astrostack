@@ -475,12 +475,16 @@ class RecentreNudge:
     middle next session.
 
     ``direction`` is one of eight plain compass words; ``degrees`` is the angular
-    move; ``text`` is the ready-to-render sentence.
+    move; ``text`` is the ready-to-render sentence. ``short`` is the same move as
+    a chip-sized phrase ("1.0° south") for surfaces with no room for the
+    sentence — the night planner's dense target row — so the two never drift into
+    two roundings of one number.
     """
 
     direction: str
     degrees: float
     text: str
+    short: str = ""
 
 
 def _friendly_degrees(deg: float) -> str:
@@ -541,4 +545,5 @@ def recentre_nudge(
         degrees,
         f"Next time, nudge your Seestar about {_friendly_degrees(degrees)} "
         f"{direction} before you start, and it'll sit in the middle.",
+        f"{_friendly_degrees(degrees)} {direction}",
     )
