@@ -14853,32 +14853,83 @@ problems. Dogfood it every big-picture run and fix root causes.
   per-frame `fwhm`, per-session grouping already exist; this is a read-only roll-up + one copy string + a card,
   no engine change. Grep first — confirm no existing "soft stars" verdict before building.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #7) — "Was the Moon washing this out?": a retrospective moonlight
-  verdict on a finished session/picture, so a beginner understands *why* a result looks flat and knows to
-  re-shoot on a dark-Moon night — not that they did something wrong.** *(Pillar: understand + trust — PRIORITY
-  3. Size: M.)* The planner already warns *before* a night (`nightplan.moon_context` → a good/ok/poor verdict
-  with copy like *"A bright 92%-lit Moon is only ~15° from this target — faint nebulosity will be washed out"*),
-  but **nothing tells the beginner this *after* the fact.** A newcomer who stacks a faint nebula shot under a
-  full Moon sees a flat, low-contrast picture and assumes their gear or their editing is at fault; the real
-  cause was the sky, and the fix is "wait for a darker night", which the app never says. **Verified genuinely
-  new (grepped this run):** `moon_context` and its verdict are used only on the *forward-looking* Tonight/plan
-  path; no code applies moon illumination/separation to a *completed* session or renders it on a result/History
-  card. **Shape:** the session's capture time is already stored (frame timestamps / the "Last session — 15 Nov
-  2024" roll-up) and the target's RA/Dec is solved, so recompute the same `moon_context` for the session's
-  midpoint and, **only when the verdict is "poor"** (bright *and* near), render one plain reassuring line on the
-  result/"Is it enough yet?" card: *"This session was shot under a bright Moon close to the target, so the
-  background is brighter and faint detail is harder to pull out — it's the sky, not your setup. A dark-Moon night
-  would give a cleaner result."* Self-hides on a "good"/"ok" night (the common case) so it never nags. **Beginner
-  bar:** clears it cleanly — instantly understandable, plain language, no knob, a sane default (silent unless the
-  Moon genuinely hurt this session), and it's pure *understand + trust*, not pro tooling; it turns a
-  discouraging "my picture is bad" into an actionable "shoot it again when the Moon's away." **Feasibility:**
-  offline, additive, read-only, reuses the existing `moon_context` helper and data the app already has (session
-  time + solved position); pure → unit-testable (full Moon 10° away on a nebula → poor → line shown; new-Moon or
-  Moon-down → None; a cluster/galaxy where moonlight matters less → the verdict's own leniency governs). **Slices
-  —** (a) a pure `session_moon_note(session_time, ra, dec, obs_site) -> str | None` wrapping `moon_context` for a
-  past instant + tests (shippable on its own); (b) wire it onto the result card (frontend, gated on presence).
-  **Care:** trust is the whole point, so bias toward silence — only a *clearly* Moon-hit session earns the line,
-  and never phrase it as the user's fault.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #7) — "Was the Moon washing this out?": a retrospective
+  moonlight verdict on a finished session, so a beginner understands *why* a result looks flat.**~~ —
+  **SHIPPED v0.278.0** (Builder 2026-08-27, branch `claude/compassionate-galileo-4en6ua`) — **both
+  filed slices, (a) and (b).**
+  *(Pillar: understand + trust — PRIORITY 3.)*
+
+  **(a) The pure helper.** `seestack/nightplan.session_moon(observer, ra, dec, start_utc, end_utc=None)`
+  returning a frozen `SessionMoon(illumination, moon_altitude_deg, separation_deg, level, text, at_utc)`
+  rather than the filed bare `str | None` — same reasoning as the `AngularSize` precedent: it matches the shape
+  every sibling readout uses (`MoonInterference` right beside it), a caller that wants its own copy has the
+  numbers, and `text` is the finished sentence so no consumer ever does astronomy. `text` is `None` on anything
+  but a **"poor"** night, which is the silence the entry asked for.
+
+  **Evaluated at the session's midpoint.** A Seestar session runs for hours and the Moon moves; no single
+  sample is the whole truth, but the verdict bands (bright / up / within 90°) are coarse enough that a couple
+  of degrees never flips them, so the midpoint is the honest one-number summary. `end_utc < start_utc` (which
+  a frames table can hand you) is taken as written rather than as an error.
+
+  **One geometry helper, so the two halves can never disagree.** `moon_interference` (tonight's warning) and
+  `session_moon` (the retrospective note) now both go through a new `_moon_geometry(observer, ra, dec, at)` and
+  the *same* `_moon_verdict` table — the forward-looking path is otherwise byte-for-byte what it was, and its
+  dark-window search is untouched.
+
+  **The sentence**, deliberately reassurance-shaped: *"A bright 99%-lit Moon was only ~20° from this target
+  while you were shooting, so the sky background is brighter and faint detail is harder to pull out. That's the
+  sky, not your setup — the same target on a dark-Moon night will come out cleaner."* It names the cause,
+  absolves the user, and points at the one thing they can act on.
+
+  **(b) Wired onto the "Last session" card** — the surface that already knows the session and its dates —
+  as an additive optional `moon_note` on `GET /api/targets/{safe}/session-recap`. The router resolves the site
+  with the same precedence every planning surface uses (explicit Settings location, else the site sniffed from a
+  solved frame's header, which is the common Seestar case), via a new `site_location.detect_site_cached` that
+  shares the existing memo `resolve_site_lon` already keyed on the target set. **Everything degrades to
+  silence, never to a failure:** no site, no solved position, an undatable session, or an ephemeris hiccup all
+  leave `moon_note` null and the rest of the card untouched. Rendered dimmed, not in a warning colour —
+  nothing went wrong.
+
+  **Upgrade-safe (§9):** one optional response field (an older frontend ignores it) and one new engine function;
+  no config/schema/on-disk/default change, and the feature is invisible unless the sky actually earned it.
+
+  **Tests (+11 engine, +5 webapp, +2 frontend):** `tests/test_session_moon.py` pins the note on a bright, high,
+  ~20°-away Moon; silence on the same Moon 180° away, on a new Moon, and on a bright Moon that had already set
+  (altitude gates everything); the midpoint being what's reported; a backwards session giving the same answer;
+  a non-UTC aware time landing right; the numbers always being present even when the sentence isn't; and the
+  level agreeing with `_moon_verdict` on the same instant. `tests/webapp/test_target_session_recap.py` pins the
+  end-to-end note on a fixed real sky (2026-01-02 22:00 UTC over London, M 42 ~34° from a ~100%-lit Moon), the
+  router's sentence being *exactly* the engine's, silence on a dark-Moon session, and an unknown site / an
+  unsolved target each costing the note and not the card. `SessionRecapCard.test.tsx` pins the line rendering
+  and, on an ordinary night, no mention of the Moon at all.
+
+  Original spec, for the record:
+
+    verdict on a finished session/picture, so a beginner understands *why* a result looks flat and knows to
+    re-shoot on a dark-Moon night — not that they did something wrong.** *(Pillar: understand + trust — PRIORITY
+    3. Size: M.)* The planner already warns *before* a night (`nightplan.moon_context` → a good/ok/poor verdict
+    with copy like *"A bright 92%-lit Moon is only ~15° from this target — faint nebulosity will be washed out"*),
+    but **nothing tells the beginner this *after* the fact.** A newcomer who stacks a faint nebula shot under a
+    full Moon sees a flat, low-contrast picture and assumes their gear or their editing is at fault; the real
+    cause was the sky, and the fix is "wait for a darker night", which the app never says. **Verified genuinely
+    new (grepped this run):** `moon_context` and its verdict are used only on the *forward-looking* Tonight/plan
+    path; no code applies moon illumination/separation to a *completed* session or renders it on a result/History
+    card. **Shape:** the session's capture time is already stored (frame timestamps / the "Last session — 15 Nov
+    2024" roll-up) and the target's RA/Dec is solved, so recompute the same `moon_context` for the session's
+    midpoint and, **only when the verdict is "poor"** (bright *and* near), render one plain reassuring line on the
+    result/"Is it enough yet?" card: *"This session was shot under a bright Moon close to the target, so the
+    background is brighter and faint detail is harder to pull out — it's the sky, not your setup. A dark-Moon night
+    would give a cleaner result."* Self-hides on a "good"/"ok" night (the common case) so it never nags. **Beginner
+    bar:** clears it cleanly — instantly understandable, plain language, no knob, a sane default (silent unless the
+    Moon genuinely hurt this session), and it's pure *understand + trust*, not pro tooling; it turns a
+    discouraging "my picture is bad" into an actionable "shoot it again when the Moon's away." **Feasibility:**
+    offline, additive, read-only, reuses the existing `moon_context` helper and data the app already has (session
+    time + solved position); pure → unit-testable (full Moon 10° away on a nebula → poor → line shown; new-Moon or
+    Moon-down → None; a cluster/galaxy where moonlight matters less → the verdict's own leniency governs). **Slices
+    —** (a) a pure `session_moon_note(session_time, ra, dec, obs_site) -> str | None` wrapping `moon_context` for a
+    past instant + tests (shippable on its own); (b) wire it onto the result card (frontend, gated on presence).
+    **Care:** trust is the whole point, so bias toward silence — only a *clearly* Moon-hit session earns the line,
+    and never phrase it as the user's fault.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #6) — "Finish what you started": a Dashboard nudge that ranks the
   targets you *already have data on* by how much one more clear night would improve them, so the beginner's

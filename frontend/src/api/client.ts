@@ -424,6 +424,11 @@ export interface SessionRecap {
   night_date?: string | null;
   reject_buckets: Record<string, number>;
   quality_drift: SessionQualityDrift | null;
+  /** "Was the Moon washing this out?" — one plain-language sentence, present only
+   *  when a bright Moon was genuinely up and close to this target while it was
+   *  being shot. Null/absent on every other night (and on an older backend), so
+   *  the card simply doesn't show the line. */
+  moon_note?: string | null;
 }
 
 export interface HealthNote {

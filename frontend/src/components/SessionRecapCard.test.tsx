@@ -168,6 +168,25 @@ describe("SessionRecapCard", () => {
     expect(screen.queryByText(/worth checking focus/)).toBeNull();
   });
 
+  it("explains a Moon-washed session when the backend says so", async () => {
+    const note =
+      "A bright 99%-lit Moon was only ~20\u00b0 from this target while you were " +
+      "shooting, so the sky background is brighter and faint detail is harder to " +
+      "pull out. That's the sky, not your setup \u2014 the same target on a " +
+      "dark-Moon night will come out cleaner.";
+    vi.spyOn(client.api, "sessionRecap").mockResolvedValue(recap({ moon_note: note }));
+    renderCard();
+    await waitFor(() => expect(screen.getByText(note)).toBeInTheDocument());
+  });
+
+  it("says nothing about the Moon on an ordinary night", async () => {
+    vi.spyOn(client.api, "sessionRecap").mockResolvedValue(recap());
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByText("Last session \u2014 8 Jul 2026")).toBeInTheDocument());
+    expect(screen.queryByText(/Moon/)).toBeNull();
+  });
+
   it("renders nothing when there's nothing datable to report", async () => {
     vi.spyOn(client.api, "sessionRecap").mockResolvedValue(null);
     const { container } = renderCard();
