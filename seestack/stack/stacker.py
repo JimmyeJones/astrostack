@@ -794,6 +794,14 @@ def estimate_stack(project: Project, options: StackOptions,
             log.warning("Mosaic canvas estimate failed (%s); "
                         "using reference-frame canvas", exc)
             canvas = None
+        if canvas is not None and canvas.excluded_frame_ids:
+            # Mirror run_stack: gross plate-solve outliers dropped during canvas
+            # sizing don't reach the stacker, so they must not inflate the
+            # estimate's frame count (or, where n straddles the n>=4 κ-σ / n>=3
+            # min/max reject-method gate, its method and peak). Read-only here —
+            # unlike run_stack this estimate never flags them rejected in the DB.
+            bad = set(canvas.excluded_frame_ids)
+            frames = [f for f in frames if getattr(f, "id", None) not in bad]
         if canvas is not None and (options.mosaic_canvas == "union"
                                    or canvas.is_mosaic):
             dst_shape = canvas.shape
