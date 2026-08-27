@@ -150,42 +150,6 @@ def north_up_pixel_transform(
     return m, np.array([c, f], dtype=float) + m @ half - half, new_w, new_h
 
 
-def canvas_width_in_preview_px(
-    canvas_w: int, canvas_h: int, preview_w: int, preview_h: int,
-    angle_deg: float,
-) -> float | None:
-    """How many pixels of a *rotated* preview the stack canvas's **width** spans.
-
-    A preview is normally a uniform downscale of the canvas, so its own width is
-    that span — but History's "Adjust → North up → Save" rotates it with expand,
-    after which the picture's width is a bounding box, not the canvas width. Any
-    length held as a fraction of the canvas width — the scale bar's, which
-    :func:`seestack.scalebar.scale_bar_for` measures against the FITS grid — has
-    to be scaled by this instead, or the bar comes out wrong (on a 90° save it is
-    drawn against the canvas's *height*).
-
-    The canvas's own aspect is what makes this well-conditioned: the un-rotated
-    preview is ``(canvas_w, canvas_h)`` over one unknown downscale ``k``, and
-    ``preview_w = (canvas_w·|cos| + canvas_h·|sin|) / k`` pins it with no
-    ill-conditioned inversion. Exact for the lossless snapped case (a pure axis
-    swap); elsewhere right to within the expand box's own ``ceil``/``floor``
-    pixel. ``None`` for a degenerate size, so the caller can keep the width it
-    has rather than work from a made-up number.
-    """
-    if min(canvas_w, canvas_h, preview_w, preview_h) <= 0:
-        return None
-    snapped = round(angle_deg / 90.0) * 90.0
-    if abs(angle_deg - snapped) <= _SNAP_TOL_DEG:
-        # A quarter-turn swaps the axes, so the canvas width is the preview's
-        # height; a half-turn (or none) leaves it as the preview's width.
-        return float(preview_h if int(snapped / 90.0) % 2 else preview_w)
-    alpha = math.radians(angle_deg)
-    span = canvas_w * abs(math.cos(alpha)) + canvas_h * abs(math.sin(alpha))
-    if span <= 0:
-        return None
-    return canvas_w * preview_w / span
-
-
 def rotate_mask_north_up(mask: np.ndarray, angle_deg: float) -> np.ndarray:
     """Rotate a boolean ``(H, W)`` mask exactly the way
     :func:`rotate_image_north_up` rotates the picture it belongs to.

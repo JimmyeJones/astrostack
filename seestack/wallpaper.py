@@ -80,7 +80,7 @@ def wallpaper_crop_box(
 
 def wallpaper_target_pixel(
     fits_path: str | Path, ra_deg: float | None, dec_deg: float | None,
-    preview_w: int, preview_h: int, *, north_up_deg: float = 0.0,
+    preview_w: int, preview_h: int,
 ) -> tuple[float, float] | None:
     """Where the target sits in the **preview PNG's** pixel grid, from the stack's
     stored celestial WCS and the target's RA/Dec.
@@ -90,19 +90,9 @@ def wallpaper_target_pixel(
     convention, matching :func:`seestack.io.wcs_io.wcs_dict_rescaled_to_preview`).
     Returns ``None`` — so the caller centres on the image instead — when there's no
     WCS, no target position, or the mapping fails.
-
-    ``north_up_deg`` is for the one preview that is **not** a plain downscale of
-    the canvas: History's "Adjust" can save it rotated so North points up. Pass
-    the rotation those stored bytes carry and the position is read off the
-    canvas WCS taken through the same turn, so the crop still centres on the
-    object rather than on where it used to be. The default ``0.0`` keeps the
-    exact arithmetic every existing call already used.
     """
     if ra_deg is None or dec_deg is None or preview_w <= 0 or preview_h <= 0:
         return None
-    if north_up_deg:
-        return _rotated_target_pixel(
-            fits_path, ra_deg, dec_deg, preview_w, preview_h, north_up_deg)
     from seestack.io.wcs_io import celestial_wcs_from_fits
 
     wcs, full_w, full_h = celestial_wcs_from_fits(fits_path)
@@ -123,38 +113,6 @@ def wallpaper_target_pixel(
     tx = (px + 0.5) / s_x - 0.5
     ty = (py + 0.5) / s_y - 0.5
     return (tx, ty)
-
-
-def _rotated_target_pixel(
-    fits_path: str | Path, ra_deg: float, dec_deg: float,
-    preview_w: int, preview_h: int, north_up_deg: float,
-) -> tuple[float, float] | None:
-    """:func:`wallpaper_target_pixel` for a stored preview that was saved
-    North-up: ask the *rotated, preview-grid* WCS where the target is.
-
-    :func:`seestack.io.wcs_io.wcs_dict_rescaled_to_preview` already composes the
-    rotation into the canvas WCS and rescales it to the stored preview's grid
-    (that is what places the Sky map's tile), so reusing it here keeps the
-    wallpaper crop and the sky map agreeing on one piece of geometry instead of
-    each deriving its own.
-    """
-    from astropy.wcs import WCS
-
-    from seestack.io.wcs_io import wcs_dict_rescaled_to_preview
-
-    header = wcs_dict_rescaled_to_preview(
-        fits_path, preview_w, preview_h, north_up_deg=north_up_deg)
-    if header is None:
-        return None
-    try:
-        px, py = WCS(header).world_to_pixel_values(float(ra_deg), float(dec_deg))
-        px = float(px)
-        py = float(py)
-    except Exception:  # noqa: BLE001 — a malformed WCS just means "no target pixel"
-        return None
-    if not (_finite(px) and _finite(py)):
-        return None
-    return (px, py)
 
 
 def rotate_point_north_up(

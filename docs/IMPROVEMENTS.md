@@ -164,52 +164,73 @@ _(none — claim an item here with your branch name)_
   (2) an unadjusted linear run and a display-space run are byte-for-byte unchanged (no regression). One-two
   files (`stack.py`, `thumbnail.py`) + tests. *(Found by the render/export-parity adversarial audit this run.)*
 
-- **✅ SHIPPED (Builder, v0.290.1, branch `claude/compassionate-galileo-ex0t6z`) — ~~a share download asked for
-  North-up **double-rotates** a preview a previous save already baked the rotation into, so the picture the
-  user shares is 180° from the one on screen.~~ Fixed with the sweep the entry asked for: all four consumers of
-  the stored preview that derive geometry from the FITS were decided explicitly, and two more defects in the
-  same family were found and fixed alongside.**
+- **✅ SHIPPED (Builder, v0.290.1, branch `claude/compassionate-galileo-xhognz`) — ~~a share download asked
+  for North-up **double-rotates** a preview a previous save already baked the rotation into, so the picture the
+  user shares is 180° from the one on screen.~~** Fixed exactly as the direction below specifies, **with the
+  sweep it asked for** — which turned up three more instances of the same root class, all fixed here.
 
-  **What shipped.** The missing fact was already on the run (`preview_north_up_deg`, v0.288.1); what was
-  missing was anything *asking* for it. New `seestack.render.thumbnail.pending_north_up_deg(fits, already_deg)`
-  is the one answer to "how much further must these bytes turn?", and `orient_preview_north_up` grew an
-  `already_deg=` keyword that routes through it — so a picture already North-up comes back **untouched**
-  instead of turned again. With the default `already_deg=0.0` the applied angle is `applied_rotation_deg(raw)`,
-  which `rotate_image_north_up` snaps to the identical pixels, so an un-rotated preview is **byte-for-byte** as
-  before. Then, per consumer:
-  - **share JPEG** (`download_stack_run(kind="jpeg")`) and **wallpaper** (`download_wallpaper`) pass the saved
-    angle and apply only the remainder. The wallpaper's target pixel follows the *pending* angle, not the full
-    one.
-  - **the wallpaper's crop centre** — the companion defect the entry named, wrong even with `north_up` *off*:
-    `wallpaper_target_pixel` gained `north_up_deg=` and, when set, reads the position off
-    `wcs_dict_rescaled_to_preview(..., north_up_deg=…)` — the same rotated preview-grid WCS that places the Sky
-    map's tile, so the two surfaces agree on one piece of geometry rather than each deriving its own.
-  - **the North/East rose** (found by the sweep): `applied_north_up` was `0.0` on any download that did not ask
-    for a rotation, so on a North-up-*saved* picture the rose pointed at the canvas's North, not the screen's.
-    It is now the total the picture carries — the saved angle plus whatever this download adds.
-  - **the scale bar** (found by the sweep): its length is held as a fraction of the **canvas** width, and a
-    90° save makes the stored preview's width the canvas's *height* — a bar a quarter too short. New
-    `seestack.render.orient.canvas_width_in_preview_px` converts back, using the canvas's own aspect as the
-    extra constraint so there is no ill-conditioned inversion of the expand bounding box (exact on the snapped
-    case, <0.1 % on a real 1024 px preview, including at 45°).
-  - **the Sky-map overlay + tile** were already correct (v0.288.1); **History's object pins** already withhold
-    (v0.289.2). Nothing else consumes the stored preview with FITS-derived geometry.
+  **The fix.** `orient_preview_north_up` grows an `already_deg` keyword and applies only the **remainder**
+  (`total − already`); a run saved at the same angle is then a clean no-op whose bytes are never resampled a
+  second time, and `already_deg=0.0` — every un-rotated run, i.e. every run nobody has saved North-up — is
+  byte-for-byte the old behaviour. Both sites that re-orient *stored preview bytes* pass
+  `run.preview_north_up_deg`: the share JPEG and the wallpaper. A run with no usable WCS keeps whatever the
+  save left rather than being "un-rotated" on a guess — we can't recompute a correction we can't read.
 
-  **Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change — every new parameter defaults
-  to "no saved rotation", which is what every older run reads. `_png_width` became `_png_size` (a private
-  router helper with one caller).
+  **What the sweep found (same root class: a consumer of the stored bytes assuming they are the un-rotated
+  FITS grid).**
+  1. **The wallpaper's crop centre**, called out in the entry: `wallpaper_target_pixel` maps the target's
+     RA/Dec onto a *uniform downscale* of the master, which a rotated stored preview is not. It is now given
+     the un-rotated grid and its answer turned by the baked angle — so the crop finds the object even when
+     North-up **isn't** asked for, which is where this one bit.
+  2. **The baked North/East rose** (`?scale=true`): its angle was "how far *this request* turned the pixels",
+     which is zero for a picture the save had already turned. It is now the rotation the bytes actually carry
+     (the baked angle, or the run's total once a North-up request completes it).
+  3. **The scale bar's length**: measured as a fraction of the stored PNG's width, which a rotate-with-expand
+     has changed without changing the pixel scale. New `_unrotated_preview_width` recovers the pre-turn grid
+     from the master's own dimensions (`save_stack_preview` renders at `PREVIEW_MAX_WIDTH`, now a named
+     constant beside `preview_grid_size`), falling back to the stored width — which is the same number for
+     every preview nobody saved North-up.
+  4. **A stale recorded angle.** "Process target"'s auto-edit rewrites the stored preview from the master's own
+     un-rotated grid, so an earlier North-up save's rotation is *gone* — but the column still said 90°. A stale
+     angle is worse than none (every reader then corrects for a turn that isn't there), so the rewrite now
+     clears it. This one would have quietly broken the Sky map's tile and the fix above.
 
-  **Tests (+9 in `tests/webapp/test_share_north_up.py`, +6 in `tests/test_orient.py`; 5 of the webapp ones fail
-  before / pass after):** a 90°-saved run's `?north_up=true` JPEG is byte-identical to its plain one and keeps
-  the saved shape; the **half-turn** case, where the size *doesn't* change so nothing looks wrong and the file
-  is simply upside down, is pinned by comparing against `rot90(k=2)`; a run re-saved un-rotated still gets the
-  full turn and is byte-identical to the old code's render; an already-North-up field is untouched on both
-  downloads; the rose reports the saved angle on a no-rotation download and the bar keeps *exactly* the pixel
-  length it has on the same run saved un-rotated; the wallpaper isn't double-turned, and its crop now contains
-  the object the un-rotated pixel cropped out entirely. Plus the round-trip, snapped-exactness,
-  preview-downscale and degenerate-input properties of the new span helper.
+  **Checked and deliberately unchanged:** the nameplate/keepsake captions (bottom-edge text, no FITS geometry),
+  the montage tiles (decode bytes only), `sky_overlay` and the History object pins (already fixed, v0.288.1 /
+  v0.289.2), and `stack_run_framing` (works in FITS pixels, never touches the preview).
 
-  Original finding, for the record:
+  **Upgrade-safe (§9):** no schema, config, on-disk-layout, default or API-shape change — one new keyword with
+  a no-rotation default and one column write that already existed. Every run whose preview has never been saved
+  North-up takes byte-for-byte the path it took before, pinned by three no-regression tests.
+
+  **Tests (+7 in `tests/webapp/test_share_north_up_double_rotation.py`, 4 fail before):** the filed repro end to
+  end (saved North-up, `?north_up=true` stays landscape and equals the stored picture transcoded, where before
+  it came back portrait); an un-rotated run's North-up share equal to
+  `png_bytes_to_jpeg(orient_preview_north_up(stored, fits))` and its plain share untouched; a no-WCS run served
+  as stored; the rose + bar measured against the un-rotated grid and visibly different from the stale ones; the
+  wallpaper no-op plus its crop centred on the turned target pixel (and *not* on the old one); an un-rotated
+  wallpaper equal to the old computation on both paths; and the auto-edit clearing the angle it rendered away.
+
+
+  **Builder 2026-08-27 (branch `claude/compassionate-galileo-ex0t6z`) — stood down on a duplicate; took this
+  implementation wholesale.** I built and tested the same fix concurrently, reaching the same five conclusions
+  by the same route (remainder-only rotation via an `already_deg` keyword; the wallpaper's crop centre; the
+  rose's angle; the bar's canvas width; and the auto-edit's stale recorded angle), and found this one already
+  on `main` when I synced to merge. Theirs landed first, so `seestack/render/thumbnail.py`,
+  `seestack/render/orient.py`, `seestack/wallpaper.py`, `webapp/pipeline.py`, `webapp/routers/stack.py` and my
+  own `tests/webapp/test_share_north_up.py` on my branch are byte-for-byte `main`'s — merging two
+  implementations of one bug fix would be worse than either. **Recorded because the convergence is the useful
+  signal:** two independent sweeps of this code found the *same four* extra consumers and no fifth, which is
+  decent evidence the sweep is now complete for rotation. The two implementations differ in one place worth
+  noting for whoever touches it next: theirs recovers the pre-turn width from the master's dimensions and the
+  named `PREVIEW_MAX_WIDTH` cap (simple, and exactly right while that cap is what rendered the preview); mine
+  derived it from the canvas *aspect* (`canvas_w · preview_w / (canvas_w·|cos| + canvas_h·|sin|)`), which needs
+  no knowledge of the cap and stays well-conditioned at 45°. If the share export ever stops rendering at
+  `PREVIEW_MAX_WIDTH` (see the 1024 px share-resolution idea under "Features"), the aspect form is the one that
+  keeps working. *(Third such collision in three days — the claim-it-in-**In progress**-first rule in AGENTS
+  §11 is what would have caught it, and neither of us did it. Worth the Scout enforcing.)*
+
+  Original spec, for the record:
 
   *(Severity: wrong-result
   on a share/export surface — the shared file is visibly upside-down; the stack and the stored preview are
@@ -651,7 +672,7 @@ _(none — claim an item here with your branch name)_
   no-regression half — an ordinary run still labels its objects.
 
 - **🟠 WRONG-RESULT / BROKEN-UX (Builder 2026-08-27, traced end to end while sweeping the North-up family;
-  NOT yet reproduced — needs a repro before a fix) — the same root class as the whole v0.288.1→v0.290.3 chain,
+  NOT yet reproduced — needs a repro before a fix) — the same root class as the whole v0.288.1→v0.290.1 chain,
   but for **crop** instead of rotation: an auto-edited run's stored preview is a `geometry.crop` of the canvas,
   and *nothing records that*, so every consumer that treats the preview as a uniform downscale of the FITS
   places its geometry wrong.** *(Severity: wrong-result on the Sky map — a picture is placed at the wrong
@@ -693,7 +714,7 @@ _(none — claim an item here with your branch name)_
   **Suggested shape (do NOT bolt this on; give it its own run).** Mirror the rotation fix exactly: record what
   the stored preview *is* relative to the canvas. An additive `stack_runs.preview_crop_json` (or four
   fractional bounds) written wherever the preview is rewritten through a recipe — the writer's-half invariant
-  v0.290.3 just established — then have each consumer compose it, the way `wcs_dict_rescaled_to_preview`
+  v0.290.1 just established — then have each consumer compose it, the way `wcs_dict_rescaled_to_preview`
   already composes `north_up_deg`. **Sequencing matters:** the rotation work landed the *placement* WCS last
   and deliberately, because a confidently-misplaced tile is worse than none; do the same here (a run whose
   preview geometry can't be reconciled should fall back to no tile WCS rather than a guess).
@@ -703,31 +724,6 @@ _(none — claim an item here with your branch name)_
   centre lands on the cropped picture's actual centre; an uncropped run is unchanged key-for-key.
   *(Found by tracing the crop analogue of the North-up family this run; left for a run of its own because the
   placement half is the risky part.)*
-
-- **⚪ HARDENING (Builder 2026-08-27, v0.290.3, branch `claude/compassionate-galileo-ex0t6z`) — the
-  Process-target auto-edit rewrites a run's preview PNG from the FITS grid but left
-  `stack_runs.preview_north_up_deg` alone, so a rotation an earlier "Adjust → North up → Save" recorded would
-  survive as a *ghost*. NOT reachable today — fixed anyway, as the writer's half of an invariant three
-  consumers have already been broken by.** *(Severity: none in production — every one of the three call sites
-  (`_auto_edit_process_run` from the auto-stack chain, the one-click Process, and reprocess-all) passes a
-  **fresh** `run_id` whose column is still `NULL`. Confidence: traced end to end; the fix is one line and the
-  test pins the invariant directly rather than a live symptom.)*
-
-  **Why it is worth a line anyway.** The whole v0.288.1 → v0.290.0 chain of bugs has one shape: *something
-  rewrote or re-oriented the stored preview, and nothing recorded what those bytes now are.* Three separate
-  consumers were misled by it (the Sky map's coverage alpha and tile placement, History's object pins, and the
-  share/wallpaper double-rotation with its rose and scale bar). Recording the angle fixed the readers; this
-  fixes the *writer* side, so the invariant — **whoever rewrites a run's preview bytes owns the angle recorded
-  beside them** — holds structurally rather than by nobody having written that caller yet. If a future feature
-  auto-edits an *existing* run (a "re-finish this picture" action, say), the ghost would be live: the Sky map
-  would turn a mask and a tile the picture no longer carries, History would withhold its pins for a rotation
-  that isn't there, and the share download's "North up" would quietly do nothing.
-
-  **Fix.** `webapp/pipeline.py` writes `proj.set_stack_preview_north_up(run_id, 0.0)` beside the existing
-  `set_run_preview_display_space(run_id)`, immediately after `_write_preview_png` — unconditionally, exactly as
-  the manual save writes `0.0` when the toggle is off. **Test** (+1 in `tests/webapp/test_pipeline.py`): stamp
-  a 90° rotation on a processed run, re-run `_auto_edit_process_run` on that same run, and assert the column
-  came back `0.0` (fails before / passes after). Upgrade-safe: no config/schema/on-disk/API/default change.
 
 - **🟡 BROKEN-UX / AUTONOMY (Scout QA audit 2026-08-26 #4, traced + verified end-to-end) — PARTIALLY FIXED
   (misleading-copy half shipped v0.272.2; optional behavioural half open) — the `astap_timeout_s` setting bounds
@@ -16822,12 +16818,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Builder note (2026-08-27, after the v0.290.1 North-up sweep):** this got *simpler*, not just more
   worthwhile. A full-res render from the FITS is on the canvas grid by construction, so it takes
   `north_up=True` directly and the whole "how much has this preview already been turned?" bookkeeping
-  (`preview_north_up_deg`, `pending_north_up_deg`, `already_deg=`) drops out of the export path entirely — the
+  (`preview_north_up_deg`, the `already_deg=` keyword) drops out of the export path entirely — the
   share stops being a *consumer of the stored preview*, which is the single class of bug that has now bitten
   four surfaces (Sky-map alpha and tile, History pins, the share double-rotation, the rose and scale bar; and
   the open crop entry in "Bugs" is a fifth). The marks get easier too: measured against the canvas and drawn on
-  a canvas-grid render, so no `canvas_width_in_preview_px` conversion is needed. Worth doing partly *for* that
-  simplification.
+  a canvas-grid render, so `_unrotated_preview_width` and the whole `already_deg` bookkeeping fall away. Worth
+  doing partly *for* that simplification.
 
 - **✅ MOSTLY ALREADY SHIPPED — and the one genuine gap SHIPPED this run (Builder, v0.289.0, branch
   `claude/compassionate-galileo-zixgdj`). Do NOT re-pick this as a new feature.** ~~"Was I centred?" — a
