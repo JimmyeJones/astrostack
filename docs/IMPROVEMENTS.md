@@ -387,6 +387,56 @@ _(none — claim an item here with your branch name)_
   `stack/weighting.py` (`star_count > 0` — zero stars really is unusable). *(Confidence: read, not reproduced —
   each was traced to why 0 means "none" there. Filed as a note, not a bug.)* If a future change makes any of
   those quantities able to be a *measured* zero, this is the shape of the mistake to look for.
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #19, branch `claude/vigilant-knuth-1azkk1`) — led with the stacking
+  engine per the rotation, running **four** parallel adversarial audits plus my own read of the stack→result
+  autonomy path and the preview↔export stretch. Areas: (1) stacker rejection math + reference pick
+  (`stacker.py`, `reference.py` — κ-σ two-pass, per-channel rejection, weight×photometric folding, NaN/coverage,
+  memory bounds, dtype); (2) drizzle + mosaic + pointings + output (`drizzle_path.py`, `mosaic.py`,
+  `pointings.py`, `output.py` — kernel weight/coverage normalisation, WCS→pixel scaling, seam/bbox, gap=NaN);
+  (3) calibrate + align (`calibrate/apply.py`, `masters.py`, `stack/align.py` — sigma-clip master build, dark
+  exposure-scaling, flat divide-by-zero, raw-Bayer domain, GPU/CPU cval parity); (4) watcher + ingest + scanner
+  + QC (`watcher.py`, `io/ingest.py`, `io/scanner.py`, `qc/*` — stability re-arm, mid-write/0-byte/truncated
+  fingerprint, the `incoming/` read-only guardrail, streak/auto-grade reconcile). **Result: the engine and the
+  hot path are CLEAN on the corruption axis — no new verified wrong-result or data-loss bug (9th consecutive
+  engine sweep).** The `incoming/` read-only contract holds: the only filesystem write touching an incoming path
+  anywhere in the four ingest/watcher files is the `shutil.copy2(src, cached)` in ingest's stage-1 copy (source =
+  read, destination = library cache) — no `unlink`/`move`/`rename`/`truncate`/`replace`/`open('w')` resolves into
+  `incoming/`. Baseline stacking-subset green before starting (`test_accumulator`, `test_stack_pipeline`,
+  `test_mosaic`, `test_drizzle{,_reject}`, `test_calibrate`, `test_windowed_stack`, `test_photometric_stack` —
+  225 passed).
+  **Two low-severity observations, TRACED but deliberately NOT filed as verified bugs** (recorded so a future
+  audit doesn't re-tread them):
+  1. **κ-σ `n_frames_used` can be *undercounted* (never over) when pass 2 aligns more frames than pass 1.**
+     `stacker.py:1893` sets `n_used = min(n_used_p1, n_used_p2)`, surfaced as `n_frames_used` (`:2187`) and
+     `n_align_failed` (`:2195`). A frame that throws a transient load error in pass 1 but succeeds in pass 2
+     (the exact NAS-blip case the `mean`-unknown keep-guard in `_kappa_sigma_keep_mask` was added to support)
+     *does* contribute pixels to the final image (kept where only it covers, via the NaN-mean widening), yet
+     `min()` credits only the smaller pass-1 count — so History's NFRAMES / integration time reads slightly low.
+     **Not filed because:** the pixels are correct (no corruption); `min()` is the *right* conservative choice
+     for the more consequential reverse case (a frame that aligned in pass 1 but failed pass 2 contributed only
+     to the reference, not the final image, and `min()` correctly excludes it); the trigger is a rare cross-pass
+     I/O race, not reachable by frame content or config; and the error direction is always fail-safe
+     (understates, never overstates, integration time). A tidy fix would count `wsum.frame_coverage.max()` (the
+     true per-pixel contributing-frame count) instead of `min(p1,p2)`, but that is a hot-path semantics change
+     for a cosmetic gain — left for a Builder to weigh, not urgent. Distinct from the v0.136.4 empty-guard fix on
+     the same line (that raised on `n_used==0`; this is about the *value* when both are >0). Confidence: traced.
+  2. **Streak self-heal re-accepts a still-streaked `auto:streak` frame when streak auto-reject is *off*.**
+     `qc/runner.py:115-127`: the `elif prior_reason == "auto:streak"` branch re-accepts on any non-override
+     re-QC without also checking `not m.streak_detected`, though its docstring says it fires only when the frame
+     is "now clean". Because it's an `elif` under `if auto_reject and m.streak_detected`, it is **unreachable for
+     a still-streaked frame on the default path** (`auto_reject_streaks=True`, `scanner.py:562` — the first `if`
+     wins). It only differs when a user has *disabled* streak auto-reject, and there re-accepting a previously
+     auto:streak frame is arguably the intended semantics (the user opted out of streak rejection, and the
+     stack's own per-pixel κ-σ/drizzle rejection still cleans any real trail). **Judged by-design, not a bug**;
+     if anything the docstring could add "(or streak auto-reject is now off)". Confidence: traced, low.
+  My own reads (all NON-findings): the walk-away auto-stack chain (`pipeline.py` — `_auto_stack_frame_count`,
+  `_auto_stack_readability_hold`, `_readability_recovered`, `_auto_stack_degraded_recheck`,
+  `_auto_stack_calibration_recheck`) traces correct — the readability preflight holds without stamping, the
+  degraded-heal fingerprint fires once and won't re-fire on a heal that comes out thin, and every crash-loop
+  marker is cleared on a survivable failure; and the preview↔export stretch (`output._autostretch_for_export` →
+  `thumbnail.autostretch`, `_to_uint16_linear`) is NaN-aware everywhere, computes stats over covered pixels only,
+  and clamps the MTF midtone — a mosaic's no-data gaps can't skew the black point.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #18, branch `claude/vigilant-knuth-qtz5h4`) — led with the stacking
   engine per the rotation, then fanned three parallel adversarial audits across less-recently-swept areas: the
   **background/gradient** subsystem (`seestack/bg/*`), the **calibration master build+apply**
@@ -14616,6 +14666,25 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **IDEA / TRUST-ACCURACY (Scout QA audit 2026-08-27 #19, traced) — report the *true* contributing-frame count in
+  a κ-σ run's History / integration time, not the conservative `min(pass1, pass2)`.** *(Pillar: image quality /
+  trust — PRIORITY 4 (with a friendliness flavour — it's an honest-number fix); size S; additive, no default/
+  schema change.)*
+  **Why.** `stacker.py:1893` records `n_frames_used = min(n_used_p1, n_used_p2)` (surfaced as NFRAMES and
+  integration time, `:2187`, and as `n_align_failed`, `:2195`). When a frame throws a transient load error in
+  pass 1 but succeeds in pass 2 — the exact NAS-blip case the `mean`-unknown keep-guard in
+  `_kappa_sigma_keep_mask` was built for — that frame *does* contribute pixels to the final image (kept where only
+  it covers), yet `min()` credits only the smaller pass-1 count, so History under-reports the integration the
+  owner actually banked. The error is always fail-safe (understates, never overstates), which is why the QA note
+  above didn't file it as a bug — but the *right* number is knowable: `wsum.frame_coverage.max()` is the true
+  per-pixel contributing-frame count the accumulator already holds. **Shape.** Use `frame_coverage.max()` (or an
+  explicit "frames that reached pass-2 combine" tally) for `n_frames_used` on the κ-σ path; keep `min()`'s
+  fail-safe intent for the reverse case (pass-1-only frames must still be excluded — they only fed the reference,
+  not the image). **Caution — hot path (§1):** NFRAMES feeds integration-time and the noise/√N badges, so this
+  needs a test that an ordinary run (p1==p2) is byte-for-byte unchanged and only the cross-pass-divergence case
+  moves, plus a check it never *over*-counts. Small and well-contained; grep for other readers of
+  `n_frames_used` first (the noise-ratio badge anchors on √N).
+
 - **IDEA / GPU-ONLY HARDENING (Scout QA audit 2026-08-27 #18, traced — NOT a verified bug; unreproducible
   without cupy, nil-impact on fully-NaN tiles) — `per_frame._subtract_background_gpu` (`seestack/bg/per_frame.py`
   ~line 604) fills a *fully-masked* background tile with the global **luminance** median (`luma_med`) rather than
@@ -15987,7 +16056,55 @@ problems. Dogfood it every big-picture run and fix root causes.
   this is the pattern AGENTS.md §1 warns about ("the Ideas list has repeatedly carried items that were already
   shipped"). Original spec below.
 
-  *(Pillar: understand + plan, PRIORITY
+    *(Pillar: understand + plan, PRIORITY 3 (with a 2 flavour — it nudges better scheduling); size S; fully
+    offline — `astropy` is already a dependency, no network, no location needed, additive, read-only.)*
+    **Why (real friction).** A beginner shoots the same target across several nights and sees one night come out
+    noticeably brighter/greyer with less faint detail, with no idea why. The usual culprit is the **Moon** — a
+    bright Moon near the target floods the sky with scattered light. The app already knows everything it needs:
+    each session's **date/time** (from the frames) and the target's **RA/Dec centre** (from the plate solve). So
+    it can compute, per session, the Moon's **illuminated fraction** (phase — needs only the time) and the
+    **geocentric angular separation** between the Moon and the target — both from `astropy`, with **no observer
+    location required**. Surface it on the existing **session recap** as a note (not a verdict): never reject
+    frames or change a stack from it. Frame it around **phase + separation** (both location-free and exact); a
+    short threshold table decides whether to speak at all. Degrade cleanly (no note) when the session has no
+    solved centre or timestamp. *(Shipped as `nightplan.session_moon()` + `_session_moon_note`; see the pruned
+    headline above for the end-to-end wiring.)*
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #19) — "Tonight, live": a mobile-friendly capture-night monitor that
+  shows a target's *in-progress* session filling up as the Seestar drops subs — count kept vs set-aside so far,
+  minutes of integration, the latest thumbnail, and a plain "how it's going" line — so a beginner sitting outside
+  in the cold knows it's working and roughly when they've got enough to stop.** *(Pillar: understand + get +
+  autonomy, PRIORITY 2–3; size M; fully offline, additive, read-only — reuses the frames the watcher already
+  ingested + QC'd, the session-clustering in `session_recap`, and the integration goal in `webapp/goals.py`; no
+  new deps, no schema/config change.)*
+  **Why (real friction).** Every session view the app has is either *predictive* (`Tonight` = what's up) or
+  *retrospective* (`session_recap` = "what did last night give me?", explicitly "on return"). There is **no live
+  view of the session happening right now.** A beginner outside with the Seestar has two recurring questions —
+  *"is this actually working?"* and *"have I got enough to go inside?"* — and today the only answer is to open the
+  Jobs page (transient, per-job, not per-target) or wait until morning. The app already knows, live, everything
+  needed: the watcher ingests + QC's each sub as it lands, so within a minute or two of a frame hitting
+  `incoming/` the app knows its FWHM / star count / accept verdict / plate-solve — data the **Seestar's own screen
+  never shows**. That is the differentiated value: not a duplicate of the Seestar preview, but the app's QC
+  intelligence answering "your last 20 min have been soft — 15/20 subs trailed" and "you've now passed your 6 h
+  goal for M 31 — you can stop."
+  **Shape (one page, sane default, no knobs).** A read-only endpoint aggregates the *trailing* frame cluster for
+  a target — the same gap-based "last session" clustering `session_recap` uses, but including subs that arrived in
+  the last N minutes so it reflects an *ongoing* night — and returns: subs this session, kept vs set-aside (by
+  plain bucket, reusing the recap's buckets), integration minutes, newest accepted thumbnail, and a live grade of
+  recent conditions (rolling accept-rate / median FWHM of the last ~20 subs). A mobile-first page polls it
+  (`refetchInterval`, like Jobs) and renders one plain-language headline: *"143 subs tonight · 118 kept · 1 h 58 m
+  · conditions good"* or *"the last 20 min have been cloudy — 4 of 20 kept"*, plus a goal line when a goal is set
+  (*"6 h 12 m of your 6 h goal — you can call it a night"*). **Beginner bar:** clears it — a non-expert instantly
+  understands "how's tonight going?", it needs zero configuration, and it directly serves understand/get/autonomy
+  (it answers the stop/keep-going decision the app is uniquely positioned to make). Degrade cleanly: if no subs
+  arrived in the ongoing window, show the normal recap / "no session in progress" empty state — it self-hides on a
+  quiet night. **Cautions / guardrails:** strictly read-only (only reads existing frame rows + preview artifacts,
+  never touches `incoming/`, never triggers a stack); "ongoing" is a pure time-window over `timestamp_utc` +
+  ingest time, unit-testable with injected clocks; never *nag* — it's a status page, never a push. **Builder: grep
+  first** — confirm no live per-target session endpoint slipped in, and reuse `session_recap`'s clustering rather
+  than a second definition of "a session" (AGENTS §-style single-source-of-truth, as `goals.py` documents for the
+  integration goal).
+
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #18) — "Then vs now": a side-by-side slider that compares your
   target's newest deep stack against an earlier one, so a beginner can *see* their picture getting cleaner and
   deeper as the nights add up — and trust that another night out was worth it.** *(Pillar: understand + enjoy +
@@ -16019,32 +16136,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   deeper run may have a slightly different footprint) so the slider divider lines up. **Builder: grep first** —
   confirm no run-vs-run compare route/component slipped in since this was filed, and that the run-history preview
   artifacts are still individually addressable server-side.
-
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #17) — "Was the Moon in your way?": a plain-language per-session
-  moonlight note that tells a beginner when a bright, nearby Moon washed out their faint target, so they
-  understand why some nights look worse and can plan Moon-free nights.** *(Pillar: understand + plan, PRIORITY
-  3 (with a 2 flavour — it nudges better scheduling); size S; fully offline — `astropy` is already a dependency,
-  no network, no location needed, additive, read-only.)*
-  **Why (real friction).** A beginner shoots the same target across several nights and sees one night come out
-  noticeably brighter/greyer with less faint detail, with no idea why. The usual culprit is the **Moon** — a
-  bright Moon near the target floods the sky with scattered light. The app already knows everything it needs:
-  each session's **date/time** (from the frames) and the target's **RA/Dec centre** (from the plate solve). So
-  it can compute, per session, the Moon's **illuminated fraction** (phase — needs only the time) and the
-  **geocentric angular separation** between the Moon and the target — both from `astropy`
-  (`get_body('moon', Time)` + the Sun for phase), with **no observer location required** (the topocentric
-  parallax is <1° and irrelevant to a plain-language "the Moon was bright and close" note). Surface it on the
-  existing **session recap** (`seestack/qc` / the Overview tab's "Last session" card): e.g. *"The Moon was 89%
-  full and 34° from Orion Nebula during your 15 Nov session — that's why the background looks brighter and faint
-  detail is harder. Your darker, Moon-free nights on this target will go deeper."* Keep it a **note, not a
-  verdict**: never reject frames or change a stack from this — it's pure understanding + planning. Degrade
-  cleanly (no note) when the session has no solved centre or no timestamp.
-  **Honest bar.** Frame it around **phase + separation** (both location-free and exact); do **not** claim Moon
-  *altitude* / "was it up" (that needs the observer location the headless app doesn't reliably have). A short
-  threshold table decides whether to speak at all — e.g. only note it when illuminated-fraction ≳ 40% **and**
-  separation ≲ 60°, so a thin crescent or a Moon on the far side of the sky stays silent. Pure/unit-testable:
-  the phase+separation math and the "should we say anything, and in what words" logic are pure functions over
-  `(session_time, target_ra_dec)`, tested against a couple of known dates. **Grep first:** confirm no existing
-  session-recap/planner card already surfaces Moon phase before building.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #16) — "Download all my pictures": one button that streams every
   finished target picture in the library as a single `.zip`.**~~ — **SHIPPED v0.285.0** (Builder 2026-08-27,
