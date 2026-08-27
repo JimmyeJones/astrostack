@@ -22689,6 +22689,27 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Infra / maintainability
 
+- **⚪ HARNESS PAPERCUT (Builder 2026-08-27, tripped over it and verified it on pristine `main` — recorded so
+  the next agent doesn't spend the time I did) — naming `tests/webapp/…` and `tests/…` files in the *same*
+  `pytest` command line makes `tests/webapp/conftest.py`'s fixtures vanish: every webapp test errors with
+  `fixture 'client' not found`.** *(Not a bug in the app, and **not** a real failure — the plain
+  `pytest -q` full run is unaffected, and either directory on its own is fine. Size: S, or close it as
+  documentation. Confidence: reproduced on `origin/main` with no local changes:
+  `pytest tests/webapp/test_gallery.py tests/test_stack_memory_guard.py tests/webapp/test_video_sharpen_still.py`
+  → `39 passed, 22 errors`, all "fixture not found".)*
+  **Why it matters at all:** an agent verifying "did I break anything?" naturally reaches for exactly this
+  shape — the handful of files around a change, which routinely straddle both directories — and reads 26
+  errors as its own regression. That is a wasted diagnosis every time it happens.
+  **Two honest options, in order of preference.** (a) *Document it*: one line in AGENTS.md §7 next to the
+  existing run recipes — "verify subsets one directory at a time, or just run the whole suite" — which costs
+  nothing and is the whole of the fix from an agent's point of view. (b) *Understand and remove it*: it is an
+  import-mode / rootdir interaction (`tests/` has no `__init__.py` in the mix, and the suite is imported as
+  the `tests` package by `tests/synth.py` consumers), so a `consider_namespace_packages` or `importmode`
+  setting in `pyproject.toml` may well close it — **but do not change either setting speculatively**: they
+  affect how the *whole* suite is imported, and a green run is the only thing standing between this project
+  and a bad merge. Only worth (b) if someone can show the setting change with the full suite green
+  before and after.
+
 - **NEW IDEA (Builder 2026-08-26, found the hard way while rendering the first montage) — one shared guard
   that burned-in text stays inside Pillow's built-in font's glyph coverage.** *(Pillar: friendliness / trust —
   PRIORITY 3. Size: S.)* Every server-rendered shareable — the recap poster, the deepening reel's frame
