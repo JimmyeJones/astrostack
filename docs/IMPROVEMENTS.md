@@ -179,6 +179,40 @@ _(none — claim an item here with your branch name)_
     `StabilityTracker` unit test: stable → same-name new `(size, mtime)` with nothing else new → the file re-fires
     once quiet. Do it only alongside the in-place-swap ingest tests so the two halves are validated together.
 
+- **⚪ QA AUDIT RESULT (Scout 2026-08-27 #9, branch `claude/vigilant-knuth-um7mfa`) — adversarial re-sweep of the
+  stacking engine's combine/reject core plus the auto-orchestration helpers the #8 note pointed at next. Result:
+  the engine came back CLEAN again; found ONE verified §3 friendliness gap on the Stack form (filed under
+  Friendliness, not here — it is not a wrong-result). Baseline green before touching anything (**2935 passed, 2
+  skipped** — full headless suite) and the `agent-dogfood.sh` boot+stack+probe pass was clean (no overflow, no
+  console errors; the sample stacked to a min/max 6-frame master exactly as `_resolve_auto_reject` predicts for a
+  sub-11-frame stack).** What was read adversarially and, where a trigger was constructible, traced:
+  **accumulators** (`accumulator.py`) — `WeightedSumAccumulator` any-channel frame count vs Σ-weight coverage
+  split is correct; `MinMaxRejectAccumulator`'s k-set insertion sort + the three-band degrade schedule
+  (`≥2k+1` / `3≤cnt<2k+1` / `1–2`) subtract each extreme *value* once (tie-safe) and never form an inf−inf NaN
+  at an uncovered pixel; `WelfordAccumulator` variance is NaN for n<2 (the keep-single-coverage signal).
+  **drizzle** (`drizzle_path.py`) — the `neff`-gated clip tolerance reads the true unweighted frame count (not
+  the pixfrac-deflated weight), the `_VAR_RESOLUTION_FACTOR·m²` cancellation floor disables rejection on bright
+  flats rather than punching NaN holes, and `result()` returns the library's running weighted mean un-re-divided.
+  **κ-σ two-pass** (`stacker.py`) — `_kappa_sigma_keep_mask` widens to keep-all on both "no reference" cases
+  (σ-unknown → +inf tol, mean-unknown → keep), pass 1 frees the Welford buffers before pass 2 (the 4-array peak
+  the OOM guard charges), and `photometric_scales` is threaded into **both** passes so mean/σ and the clip test
+  live in the same scaled domain. **calibrate/apply** — no-data dark/bias pedestals stay "no correction" on both
+  the unscaled and exposure-scaled paths; `_bias_applies`/`_dark_scaling_applies` gate shape-mismatched masters
+  consistently across `validate`, the warnings, and the provenance stamp. **weighting/photometric** — the
+  per-panel-vs-target-wide median split (`group_by_pointing`) and the `1/s²` inverse-variance fold compose
+  orthogonally; the geometric-mean weight stays in `[min_weight, 1.0]`. **output.py** — preview↔export both go
+  through `_autostretch_for_export`; `already_display` skips the double-stretch on editor exports; the archive
+  dance keeps coverage/preview siblings resolvable. **pipeline auto-orchestration** — the frame-count trigger,
+  readability preflight/recovery, calibration-recheck and degraded-heal markers each fire once-per-situation and
+  clear on a survivable failure (crash-loop-safe); `_stack_target`'s "user chose nothing" guards apply
+  `auto_reject`/`quality_weighted`/`drizzle_reject` only when the merged options carry no explicit key.
+  **qc** — `grade_frames`'s reconsider set is a fixed point (invariant combined set, deterministic total order,
+  per-panel + global caps); `reconcile_streak_rejections`/`apply_qc_result_to_db` only ever *un*-reject an
+  `auto:streak`/`qc_error` reason and never touch a `user_override`. **This audit's lead-worthy conclusion:** the
+  combine/reject core and the auto-orchestration layer are both hardened; the marginal value has moved off the
+  engine — future runs can lead with the render/proxy/editor-reload path and the routers (`stack.py`,
+  `gallery.py`), and re-audit the engine only occasionally.
+
 - **⚪ QA AUDIT RESULT (Scout 2026-08-27 #8, branch `claude/vigilant-knuth-gnif14`) — rotated the lead QA onto
   the still-un-swept-in-depth storage/config layer the #5–#7 notes flagged: the watcher-ingest-scanner path,
   `webapp/config.py` load/save + `deps.py`, and both DB migration paths (`project.py`, `library.py`).
@@ -11542,6 +11576,29 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **IMPROVEMENT IDEA (Scout 2026-08-27 #9, verified by dogfood + code) — with "Auto outlier removal" on (the
+  default), the Stack form still shows "Sigma clipping" and "Min/max rejection" as live, editable toggles whose
+  displayed state can be the opposite of what actually runs — so a beginner reading the form is misled about the
+  method.** *(Pillar: friendliness / trust — PRIORITY 3. Size: S. Confidence: verified against the code and seen
+  in the dogfood.)* `auto_reject`'s own help text says *"When on, it overrides the two options below"*, and the
+  engine's `_resolve_auto_reject` does exactly that — it picks min/max on a sub-11-frame stack and κ-σ on a
+  larger one, **ignoring** the `sigma_clip`/`min_max_reject` toggles. But those two fields carry no `depends_on`
+  (`webapp/schemas.py` ~599/604) and the form's `isDisabled` only greys a field on a `depends_on` miss
+  (`frontend/src/routes/Stack.tsx:286`), so both stay fully enabled and un-dimmed while `auto_reject` is on.
+  **Measured in the dogfood:** the sample showed *Auto outlier removal ON · Sigma clipping ON · Min/max OFF*, yet
+  the finished run was **MIN-MAX** (6 frames < 11) — the History `RejectionBadge` is honest ("Auto outlier
+  removal picked this from your number of subs"), so only the *form* misleads. A beginner glancing at "Sigma
+  clipping: ON" reasonably believes that is what will happen. **Shape (small, additive, frontend-only):** when
+  `values.auto_reject` is true, dim/disable the `sigma_clip`, `sigma_kappa`, `min_max_reject` and
+  `min_max_reject_count` controls and show one inline line stating the method auto *will* pick for the current
+  `solvedAccepted` count (reuse `kappa_min_frames`'s ~11-frame boundary the frontend already knows via
+  `MINMAX_SUGGEST_MAX_FRAMES`) — e.g. *"Auto will use min/max for these 6 subs (switches to sigma clipping at
+  ~11)."* No engine/behaviour change (the resolve already happens server-side); this only makes the form tell the
+  truth. `depends_on` is a *positive* dependency ("show when X on") and can't express "disable when auto_reject
+  on", so this needs a small explicit disable rule in `Stack.tsx`, not a new descriptor field. **Care:** keep the
+  toggles' stored values intact (don't zero them) so turning Auto *off* restores the user's prior manual pick;
+  test that the disable + the resolved-method line track `auto_reject` and the frame count.
+
 - **IMPROVEMENT IDEA (Scout 2026-08-27 #7, verified by grep) — a master dark/flat built from more than 64
   frames silently drops the extras, and the beginner is never told.** *(Pillar: friendliness + trust — PRIORITY
   3. Size: S.)* `build_master` (`seestack/calibrate/masters.py`) caps the frames actually combined at
@@ -14570,6 +14627,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-27 #9) — "See what stacking removed": a one-tap overlay on the finished
+  picture that highlights the pixels rejection dropped, turning the abstract "rejection dropped ~X% of samples"
+  trust line into a visible "here's the satellite trail we caught and cleaned out for you."** *(Pillar: trust /
+  understand — PRIORITY 3–4. Size: M–L, memory-sensitive. Confidence the gap is real: grepped this run — no
+  "rejection overlay"/"what was removed" surface is filed or built; only the `RejectionBadge` count exists.)*
+  **Why it's beginner-gold:** the single most reassuring thing a stacker does is quietly delete the satellite
+  trains, plane trails and cosmic rays that would otherwise ruin a sub — and right now the beginner only gets a
+  number ("sigma clipping dropped 0.3% of samples"). Letting them *see* the exact streaks the app removed, laid
+  over their own picture, is a delightful, confidence-building proof that leaving the frames in and trusting the
+  stack was the right call — it directly answers "did it actually work?" on the stack→result path this app's
+  owner cares most about. It also teaches *why* more subs + rejection beats hand-culling. **What exists to build
+  on:** the stacker already computes the per-pixel keep/drop decision in every rejection path
+  (`_kappa_sigma_keep_mask` in the κ-σ pass-2, `MinMaxRejectAccumulator`'s extreme drops, the drizzle two-pass
+  zero-weighting) and already sums a scalar `RejectionStats(n_contributed, n_rejected)`. What's missing is a
+  *spatial* record of *where* the drops happened. **Feasibility / the one real constraint — memory (§10 OOM
+  history):** a full per-pixel rejection-count canvas is one extra plane, which the OOM guard
+  (`_guard_stack_memory` / `_estimate_peak_bytes`) must price in, so it **must be opt-in and budgeted**, never
+  on by default. Shape it so a healthy default install is byte-for-byte unchanged:
+  **(a) engine (M):** an optional `record_rejection_map=False` on `StackOptions`; when on, each rejecting
+  accumulator also accumulates a 2-D `uint16` per-pixel drop count (κ-σ: `valid & ~keep`; min/max: derivable
+  from the count bands it already computes; drizzle: the `rejected & contributing` mask it already forms), and
+  `write_stack_outputs` writes it as a new sibling `{base}_rejected.fits` (mirrors the `_framecov.fits`
+  precedent — additive, absent on every existing run, consumers fall back to "no overlay available"). Charge the
+  extra plane through the existing guard so a canvas that no longer fits is refused with the usual named fix
+  (or the pass is simply not recorded, as `_afford_drizzle_reject` already does for the reject pass itself on the
+  walk-away path).
+  **(b) backend (S):** a read-only `GET /api/targets/{safe}/stack-runs/{id}/rejection-map` that returns a small
+  downsized PNG/mask of the drop map from the sibling FITS (empty/none when the run has no sibling), computed in
+  a threadpool — same shape as the existing coverage/annotations endpoints.
+  **(c) frontend (S):** a "Show what was removed" toggle on the History run card / Gallery lightbox that
+  overlays the mask (tinted, semi-transparent) on the result image, with a plain readout — *"Stacking removed N
+  streak/hot-pixel spots across your subs — that's the satellites and cosmic rays cleaned out for you."* Reuse
+  the `AnnotatedImage` contain-fit layout so the overlay lands pixel-true at any box size. **Care:** default OFF
+  end-to-end; never let the recording change the *pixels* of the stack (it only observes the same keep/drop the
+  combine already applied); and phrase the readout as protection delivered, not as "N% of your data thrown away."
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-27 #8) — "Was my focus sharp last night?": a per-session focus / soft-star
   flag that tells a beginner, in plain language, when a night's subs came out soft (a slipped-focus Seestar
