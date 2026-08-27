@@ -2754,6 +2754,14 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                 # of comparing a raw STF sub / anchoring an asinh curve to this
                 # recipe-toned thumbnail (they already do for a display-space export).
                 proj.set_run_preview_display_space(run_id)
+                # …and clear any North-up rotation an earlier "Adjust → North up →
+                # Save" recorded for those bytes: the render above is on the FITS
+                # grid, so the recorded angle would otherwise be a ghost that the
+                # Sky map, the History object pins and the share downloads all
+                # follow (turning a mask, a tile and a JPEG that were never
+                # turned). Written unconditionally, exactly as the manual save
+                # writes 0.0 when the toggle is off.
+                proj.set_stack_preview_north_up(run_id, 0.0)
                 # Stamp which colour-calibration (white-balance) path Auto actually
                 # ran and on how many stars — star-based, the v0.107.9
                 # background-neutral fallback, or a no-op — so the History Info panel

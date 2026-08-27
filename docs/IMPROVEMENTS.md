@@ -650,6 +650,31 @@ _(none — claim an item here with your branch name)_
   withholds the pins and says why for a run with a saved rotation (fails before / passes after); and the
   no-regression half — an ordinary run still labels its objects.
 
+- **⚪ HARDENING (Builder 2026-08-27, v0.290.1, branch `claude/compassionate-galileo-ex0t6z`) — the
+  Process-target auto-edit rewrites a run's preview PNG from the FITS grid but left
+  `stack_runs.preview_north_up_deg` alone, so a rotation an earlier "Adjust → North up → Save" recorded would
+  survive as a *ghost*. NOT reachable today — fixed anyway, as the writer's half of an invariant three
+  consumers have already been broken by.** *(Severity: none in production — every one of the three call sites
+  (`_auto_edit_process_run` from the auto-stack chain, the one-click Process, and reprocess-all) passes a
+  **fresh** `run_id` whose column is still `NULL`. Confidence: traced end to end; the fix is one line and the
+  test pins the invariant directly rather than a live symptom.)*
+
+  **Why it is worth a line anyway.** The whole v0.288.1 → v0.290.0 chain of bugs has one shape: *something
+  rewrote or re-oriented the stored preview, and nothing recorded what those bytes now are.* Three separate
+  consumers were misled by it (the Sky map's coverage alpha and tile placement, History's object pins, and the
+  share/wallpaper double-rotation with its rose and scale bar). Recording the angle fixed the readers; this
+  fixes the *writer* side, so the invariant — **whoever rewrites a run's preview bytes owns the angle recorded
+  beside them** — holds structurally rather than by nobody having written that caller yet. If a future feature
+  auto-edits an *existing* run (a "re-finish this picture" action, say), the ghost would be live: the Sky map
+  would turn a mask and a tile the picture no longer carries, History would withhold its pins for a rotation
+  that isn't there, and the share download's "North up" would quietly do nothing.
+
+  **Fix.** `webapp/pipeline.py` writes `proj.set_stack_preview_north_up(run_id, 0.0)` beside the existing
+  `set_run_preview_display_space(run_id)`, immediately after `_write_preview_png` — unconditionally, exactly as
+  the manual save writes `0.0` when the toggle is off. **Test** (+1 in `tests/webapp/test_pipeline.py`): stamp
+  a 90° rotation on a processed run, re-run `_auto_edit_process_run` on that same run, and assert the column
+  came back `0.0` (fails before / passes after). Upgrade-safe: no config/schema/on-disk/API/default change.
+
 - **🟡 BROKEN-UX / AUTONOMY (Scout QA audit 2026-08-26 #4, traced + verified end-to-end) — PARTIALLY FIXED
   (misleading-copy half shipped v0.272.2; optional behavioural half open) — the `astap_timeout_s` setting bounds
   ONE solve *attempt*, not one frame, so an unsolvable sub can burn up to 3× the configured seconds; the Settings
