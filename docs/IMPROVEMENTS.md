@@ -164,7 +164,7 @@ _(none — claim an item here with your branch name)_
   (2) an unadjusted linear run and a display-space run are byte-for-byte unchanged (no regression). One-two
   files (`stack.py`, `thumbnail.py`) + tests. *(Found by the render/export-parity adversarial audit this run.)*
 
-- **✅ SHIPPED (Builder, v0.289.3, branch `claude/compassionate-galileo-ex0t6z`) — ~~a share download asked for
+- **✅ SHIPPED (Builder, v0.290.1, branch `claude/compassionate-galileo-ex0t6z`) — ~~a share download asked for
   North-up **double-rotates** a preview a previous save already baked the rotation into, so the picture the
   user shares is 180° from the one on screen.~~ Fixed with the sweep the entry asked for: all four consumers of
   the stored preview that derive geometry from the FITS were decided explicitly, and two more defects in the
@@ -650,7 +650,7 @@ _(none — claim an item here with your branch name)_
   withholds the pins and says why for a run with a saved rotation (fails before / passes after); and the
   no-regression half — an ordinary run still labels its objects.
 
-- **⚪ HARDENING (Builder 2026-08-27, v0.290.1, branch `claude/compassionate-galileo-ex0t6z`) — the
+- **⚪ HARDENING (Builder 2026-08-27, v0.290.3, branch `claude/compassionate-galileo-ex0t6z`) — the
   Process-target auto-edit rewrites a run's preview PNG from the FITS grid but left
   `stack_runs.preview_north_up_deg` alone, so a rotation an earlier "Adjust → North up → Save" recorded would
   survive as a *ghost*. NOT reachable today — fixed anyway, as the writer's half of an invariant three
@@ -9009,6 +9009,59 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **⚪ PROCESS NOTE + TWO FOLLOW-ONS (Builder 2026-08-27, branch `claude/compassionate-galileo-xhognz`) — I
+  built the v0.289.0 Sky-map North-up fix concurrently and STOOD DOWN on it when I synced to merge; recorded
+  because the convergence is the useful signal, and because two small things I had are not in what shipped.**
+  *(Third such collision in three days — see the same note under the video-crop entry. The claim-it-in-**In
+  progress**-first rule in AGENTS §11 is what would have caught it, and neither of us did it.)*
+  Two independent reads reached the *same* design down to the function names: an additive
+  `preview_north_up_deg` column, an `applied_north_up_deg` helper folding the threshold + 90° snap into one
+  number, `rotate_mask_north_up` mirroring the picture's `np.rot90`/PIL split, and a derived affine composed
+  into the tile's CD/CRPIX — both pinned by the same round-trip (mark a pixel, rotate for real, check a known
+  RA/Dec lands on it; mine measured 0.10 px worst error over 8 angles × 4 positions, theirs ~1 px against
+  nearest-neighbour rounding). When one bug's fix is re-derived identically twice, the shape really is the
+  natural one. Theirs landed first, so I dropped mine wholesale rather than merge two implementations of one
+  fix; what follows is only what mine had that theirs does not.
+
+  **(a) A preview saved North-up *before* the column existed is still misplaced, and it need not be.** The
+  shipped reader treats `preview_north_up_deg IS NULL` as "no rotation", so an install upgrading onto this
+  build keeps drawing an old North-up-saved run at the master's orientation until someone happens to re-save
+  it. That is *guessable-free*: the only thing that ever rotates a stored preview is this save, and its angle
+  is a deterministic function of the run's own WCS (`applied_north_up_deg`), so a reader can **check** rather
+  than guess — compute the un-rotated preview grid from the master's dimensions (the 1024 px cap rule in
+  `load_stack_rgb`), and believe the rotation only if the stored PNG's dimensions are
+  `north_up_pixel_transform`'s output size for that angle. *(Size S. An exact-180° legacy save is the one case
+  that can't be told apart — it leaves the dimensions alone — and must read as un-rotated, i.e. exactly what
+  the code does today; anything else whose size can't be accounted for must too, so an unrecognised run is
+  never placed **more** wrongly than it already is.)* **Test:** a run with rotated pixels and a NULL angle gets
+  an alpha matching its visible footprint; an ordinary run is byte-for-byte unchanged.
+
+  **(b) The coverage mask is rotated at full canvas resolution, and could be decimated first.** `sky_overlay`
+  now does `rotate_mask_north_up(stack_coverage_mask(fits), angle)` — a whole-canvas rotate whose output is
+  then resized down to the ~1024 px preview grid inside `overlay_rgba_png` anyway. On a nine-figure-pixel
+  mosaic that is a couple of extra full-footprint allocations on the RAM-capped box the stack path is
+  memory-bounded for. Decimating to the preview grid *first* (the order the render itself uses — downscale,
+  then rotate) removes them. **Gate it on a measurement, and be honest that it is not free:** NEAREST
+  resample-then-rotate is not bit-identical to rotate-then-resample, so this moves alpha edges by up to a
+  pixel. Only worth doing if the peak-RSS win measures real on a big master — otherwise close it. *(Size S.)*
+
+- **NEW IDEA (Builder 2026-08-27, the two things I deliberately left out of the v0.289.0 "Show and tell"
+  slideshow) — the show can't keep the screen awake, and you can't start it on the picture you're looking at.**
+  *(Pillar: enjoy + share — PRIORITY 3. Size: S. Confidence: certain — this is the code I just wrote; both were
+  scoped out to keep the first slice honest, not because they're hard.)*
+  **(a) Keep-awake.** The whole point of the feature is "point a screen at it and walk away", and a tablet or
+  laptop will dim and sleep partway through the show — the one failure mode that makes it feel broken in the
+  room. `navigator.wakeLock.request("screen")` while the show is playing, released on unmount and re-requested
+  on `visibilitychange` (browsers drop the lock when the tab is hidden). **Guardrails:** the API is absent on
+  some browsers and rejects when the page isn't visible, so every call needs a `try`/no-op — a slideshow that
+  throws on the way to the TV is worse than one that lets the screen dim. Nothing to configure, nothing to
+  persist.
+  **(b) "Start the show here".** From the Gallery / My best pictures lightbox, "show me this one" should open
+  `/show?from=<safe>:<run_id>` (or `video:<capture_id>`) and start on that slide, still looping through
+  everything after it. `buildSlides` already returns a stable `key` per slide, so this is one `useSearchParams`
+  read and an initial index — no data change. **Grep first:** the slide keys are `run:<safe>:<run_id>` /
+  `video:<capture_id>` in `frontend/src/showAndTell.ts`; reuse them rather than inventing a second identifier.
+
 - **NEW IDEA (Builder 2026-08-27, the gap left standing by the v0.287.0 non-drizzle memory lever) — a
   walk-away stack that still *refuses* goes dark in complete silence: nothing on the Target page or the
   Dashboard says the target stopped producing pictures, or why, or which single setting would fix it.**
@@ -16626,7 +16679,7 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **✅ SHIPPED (Builder, v0.290.0, branch `claude/compassionate-galileo-ex0t6z`) — ~~say the nudge **before**
+- **✅ SHIPPED (Builder, v0.290.2, branch `claude/compassionate-galileo-ex0t6z`) — ~~say the nudge **before**
   the session, not only after it: carry "last time M 31 landed 1.0° south of centre — nudge north before you
   start" onto the pre-shoot planning surface.~~ Built exactly as specced, including both cautions.**
 
@@ -16758,7 +16811,50 @@ problems. Dogfood it every big-picture run and fix root causes.
   first** — reuse the object/coords lookup that already backs the labels overlay and slot the logic into
   `nextBestMove` rather than a parallel definition of "which object is this."
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #20) — "Show and tell": a full-screen, auto-advancing slideshow of
+- **✅ SHIPPED (Builder, v0.290.0, branch `claude/compassionate-galileo-xhognz`) — ~~"Show and tell": a
+  full-screen, auto-advancing slideshow of your best pictures, each captioned with its object name and a
+  one-line fact.~~** Built as filed, reuse-only.
+
+  **What shipped.** A `/show` route (`frontend/src/routes/ShowAndTell.tsx`) that paints a fixed full-viewport
+  layer over the app shell — a slideshow with a sidebar isn't one — and cross-dissolves through the pictures on
+  a fixed 8 s beat, forever. Each slide carries a big name, the app's own "what am I looking at?" line, and an
+  acquisition line (date · integration · frames). Transport: pause/play, prev/next, a Fullscreen-API button for
+  the TV, and Space / ← / → for a room with a remote. The running order is the **ranked** "My best pictures"
+  wall (so a pinned cover leads, exactly as it does on that page) followed by the Moon/Sun stills newest-first —
+  one fixed, explainable order rather than a clever interleave, and it loops anyway.
+
+  **The data half is pure and reuse-only** (`frontend/src/showAndTell.ts`): `buildSlides` flattens the two
+  existing endpoints (`/api/gallery/best` + the gallery's `videos`) into captioned slides, skipping a picture
+  with no preview rather than showing a broken frame, and dropping any caption clause an old run never recorded
+  rather than printing a blank. Moon and Sun get their one-liners here because they have no catalog entry at
+  all — they aren't targets, they're video captures.
+
+  **One additive backend field pair, so there is still only one definition of "what is this":**
+  `/api/gallery/best` now carries `object_type` + `blurb`, resolved offline by the same
+  `identify_object(...)` over the same bundled catalog the Target page's object card uses (`load_catalog` is
+  `lru_cache`d; the same resolution `stats.py` already does per target). Empty strings for a target the catalog
+  doesn't know — and for an older backend, which an optional-typed frontend reads as "just name the picture".
+
+  **Entry point, not a sixteenth sidebar link** (the standing IA priority, AGENTS §1): a "Play slideshow"
+  button on *My best pictures*, which is the page you are already on when someone says "show me what you've
+  shot". `/show` stays bookmarkable.
+
+  **Read-only and additive throughout:** no schema, config, on-disk or default change; nothing is re-rendered
+  and nothing outside the existing endpoints is read. Only the picture on screen is mounted (the next one is
+  warmed in a hidden preloader), so a thirty-target library doesn't pull thirty previews at once. A library with
+  nothing in it gets a friendly empty state; a library with exactly one picture **rests on it** rather than
+  flickering against itself — kinder than hiding their only picture behind a "not enough yet".
+
+  **Tests (+20):** `frontend/src/showAndTell.test.ts` (11 — caption precedence blurb→type→silence with the
+  right article, every degraded acquisition line, the running order, Moon/Sun copy, the no-preview skip, the
+  empty/older-backend shapes, and the loop arithmetic), `frontend/src/routes/ShowAndTell.test.tsx` (7 — first
+  slide, auto-advance and loop under fake timers, pause/resume, manual stepping, a Moon-only library, the
+  one-picture rest, and the empty state), and `tests/webapp/test_gallery_best.py` (+2 — the new copy travels
+  with each entry, and an unidentifiable target still ranks with empty strings rather than a guess or a 500).
+
+  Original spec, for the record:
+
+  *(the filed spec)* **"Show and tell": a full-screen, auto-advancing slideshow of
   your best pictures, each captioned with its object name and a one-line fact — a zero-config "just play" view a
   beginner can put on a TV, tablet or laptop at a star party, in a classroom, or for family.** *(Pillar: enjoy +
   share, PRIORITY 3; size M; fully offline, additive, read-only — reuses the previews the app already keeps and
@@ -22953,6 +23049,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY 3; Builder-filed 2026-07-16.)*
 
 ### Performance (only with a measurement)
+- **NEW IDEA (Builder 2026-08-27, traced while fixing the Sky-map north-up overlay; TRACED, NOT MEASURED —
+  measure before building, per this section's own rule) — every visit to the Sky map re-derives each target's
+  coverage mask by reading its whole master FITS, and the response forbids caching, so the work repeats on
+  every visit and every reload.** *(Pillar: friendliness / performance — PRIORITY 3. Size: S–M. Confidence for
+  the mechanism: traced end to end; the cost is unmeasured and that is the first task.)*
+  `sky_overlay` (`webapp/routers/stack.py`) calls `stack_coverage_mask(fits_path)`, which opens the master and
+  runs `np.isfinite` over **every plane of the full canvas** to build the alpha — memory-frugal (it reduces
+  straight off the memmap, deliberately), but it still touches the whole cube. The response then ships
+  `Cache-Control: no-store`, so a library of N targets does that N times per Sky-map visit, again on every
+  reload. On the owner's box the masters are on a NAS and a mosaic canvas can be nine figures of pixels, so this
+  is the kind of thing that makes a page feel slow for reasons a user can't see.
+  **Shape (additive, reversible):** the answer is fully determined by two files' mtimes (the preview PNG and the
+  master FITS), so either (a) serve a strong `ETag` built from those two stats and honour `If-None-Match` — tiny
+  change, still re-reads on a cold request but makes reloads free — or (b) cache the composed RGBA beside the
+  preview in the target's own cache area, keyed by the same pair, and rebuild on mismatch. (a) first; (b) only
+  if the cold cost measures badly. **Do not** widen this into a general artefact cache.
+  **Measure first (the gate):** time `sky_overlay` on a realistic mosaic master (and a single-field one) and
+  report the per-tile cost and the N-target total before writing either. If a 1080p single-field tile costs a
+  couple of milliseconds, close this rather than build it. **Caution:** `no-store` is presumably there because
+  a History "Adjust" save rewrites the preview in place — whatever replaces it must invalidate on that write,
+  which the preview's mtime does; the run's `preview_north_up_deg` is part of the answer too, so fold the run
+  row's identity into the key or a North-up re-save could serve a stale overlay.
 - ~~**NEW IDEA (Builder 2026-08-07, spotted while adversarially reading `accumulator.py`; TRACED, NOT MEASURED) —
   `MinMaxRejectAccumulator._add_into` writes its whole k-plane extremes buffer back over itself once per frame,
   for nothing.**~~ — **CLOSED, NOT BUILT: measured, and the memcpy this is premised on does not happen**

@@ -278,3 +278,60 @@ def test_a_cover_pointing_at_a_deleted_run_falls_back_to_the_newest_picture(
     assert len(a_items) == 1
     assert a_items[0]["output_basename"] == "only"
     assert a_items[0]["pinned"] is False
+
+
+def test_best_carries_what_each_picture_is_so_a_slideshow_can_say_it(
+        client, solved_library):
+    """Each entry carries the offline catalog's plain-language type and one-line
+    blurb for its target — the "what am I looking at?" copy the Target page's
+    object card already shows.
+
+    "Show and tell" plays these pictures *away from* their target pages, so the
+    caption has to travel with the picture; resolving it here (offline, from the
+    bundled catalog, once per wall) keeps one definition of "what is this"
+    instead of a second one in the frontend."""
+    targets = client.get("/api/targets").json()
+    m42 = next(t["safe_name"] for t in targets if "42" in t["name"])
+    other = next(t["safe_name"] for t in targets if t["safe_name"] != m42)
+    _register_preview_run(solved_library, m42, basename="orion",
+                          n_frames=500, exposure_s=15000, noise_sigma=0.01,
+                          coverage_max=500)
+    _register_preview_run(solved_library, other, basename="veil",
+                          n_frames=20, exposure_s=600, noise_sigma=0.09,
+                          coverage_max=20)
+
+    items = client.get("/api/gallery/best").json()["items"]
+    orion = next(i for i in items if i["safe"] == m42)
+    # M42 is in the bundled catalog, so both fields are real copy.
+    assert orion["object_type"]
+    assert orion["blurb"]
+    # Every entry carries the keys (never omitted), so the caption code has one
+    # shape to read — an unknown target simply carries empty strings.
+    for item in items:
+        assert isinstance(item["object_type"], str)
+        assert isinstance(item["blurb"], str)
+
+
+def test_best_still_ranks_a_target_the_catalog_has_never_heard_of(
+        client, solved_library, monkeypatch):
+    """A target the offline catalog can't identify (a custom name, an odd patch of
+    sky) must still appear on the wall — with empty copy rather than a guess, and
+    never a 500. That is also exactly what an install whose catalog matches
+    nothing looks like."""
+    import seestack.objectinfo as objectinfo
+
+    # The router resolves the name through this at call time (a function-local
+    # import, like every other cross-target read here), so patching the source
+    # is what actually exercises the "catalog knows nothing" branch.
+    monkeypatch.setattr(objectinfo, "identify_object", lambda *a, **k: None)
+    targets = client.get("/api/targets").json()
+    a, b = targets[0]["safe_name"], targets[1]["safe_name"]
+    _register_preview_run(solved_library, a, basename="one",
+                          n_frames=50, exposure_s=1500, noise_sigma=0.05,
+                          coverage_max=50)
+    _register_preview_run(solved_library, b, basename="two",
+                          n_frames=60, exposure_s=1800, noise_sigma=0.04,
+                          coverage_max=60)
+    items = client.get("/api/gallery/best").json()["items"]
+    assert len(items) == 2
+    assert all(i["object_type"] == "" and i["blurb"] == "" for i in items)
