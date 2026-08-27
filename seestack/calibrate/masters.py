@@ -19,8 +19,12 @@ Memory
 ------
 Combining needs the frames stacked in RAM (median/clip aren't single-pass), so
 we cap the number actually loaded (``max_frames``, evenly sampled) to bound
-peak memory. For Seestar-sized mosaics (~8 MB/frame as float32) 64 frames is
-~0.5 GB — fine for a one-off calibration job.
+peak memory. The combine holds one contiguous ``(N, H, W)`` float32 stack (the
+per-frame arrays are dropped once it's built) and masks non-finite samples in
+that same buffer, so peak is roughly one stack plus transients — for
+Seestar-sized frames (~8 MB/frame as float32) 64 frames is ~0.5 GB of stack
+(~1 GB peak with the isfinite/reduction transients), fine for a one-off
+calibration job.
 """
 
 from __future__ import annotations
@@ -233,7 +237,16 @@ def build_master(
         log.info("master %s: build cancelled before combine", kind)
         return None
     progress("Combining", 0, 1)
-    stack = np.stack(arrays, axis=0)  # (N, H, W)
+    n_frames = len(arrays)
+    stack = np.stack(arrays, axis=0)  # (N, H, W) — a fresh, owned copy
+    # ``np.stack`` copied every frame into ``stack``, so the per-frame arrays held
+    # by ``arrays``/``loaded`` are now redundant. Drop them before the combine so
+    # the peak isn't three live copies of the frame set (the two lists + ``stack``
+    # + the finite-masked copy below): on a 64-frame Seestar-sized set that is the
+    # difference between ~1.6 GB and ~1.0 GB of peak RAM. ``arrays`` isn't touched
+    # again (``n_frames`` is captured above), and the small metadata lists
+    # (exposures/gains/…) were already extracted.
+    del arrays, loaded
     # NaN-aware combine (the engine invariant: a non-finite sample is "no data",
     # don't fold it into a value). Real Seestar raws are finite integer readouts
     # cast to float32, so masking is a no-op and this is byte-for-byte identical to
@@ -242,7 +255,13 @@ def build_master(
     # thence every calibrated light). Treat NaN *and* inf uniformly (nanmean ignores
     # NaN but not inf), mirroring the `sigma_mean` path and the flat build. An
     # all-non-finite pixel (no finite sample anywhere) stays NaN = genuinely no data.
-    finite_stack = np.where(np.isfinite(stack), stack, np.nan)
+    # Mask **in place** — we exclusively own ``stack`` (just built by ``np.stack``,
+    # source frames dropped) — rather than allocating a second full N×H×W copy.
+    nonfinite = ~np.isfinite(stack)
+    if nonfinite.any():
+        stack[nonfinite] = np.nan
+    del nonfinite
+    finite_stack = stack
     with np.errstate(invalid="ignore"), warnings.catch_warnings():
         # An all-non-finite pixel legitimately reduces to NaN ("no data"); numpy
         # warns "Mean/Median of empty slice" there — expected, not an error.
@@ -259,7 +278,7 @@ def build_master(
     h, w = ref_shape
     meta = MasterMeta(
         kind=kind,
-        n_frames=len(arrays),
+        n_frames=n_frames,
         width_px=int(w),
         height_px=int(h),
         method=method,
