@@ -135,3 +135,22 @@ export function shareClipText(
   const filename = `${slugify(clean) || "astrophoto"}-progress.${ext}`;
   return { title, text, filename };
 }
+
+/**
+ * The keepsake variant of a shared picture's filename — `m-31.jpg` becomes
+ * `m-31-keepsake.jpg`, whatever the extension.
+ *
+ * The framed keepsake and the plain picture share one caption (they *are* the
+ * same photograph), but they must not share a filename: a beginner who saves
+ * both ends up with one silently overwriting the other, or with two identically
+ * named files and no way to tell which is which. Pure, so the naming rule is
+ * pinned in one place rather than re-spelled at each share button.
+ */
+export function keepsakeFilename(filename: string): string {
+  const name = (filename ?? "").trim();
+  if (!name) return "astrophoto-keepsake.jpg";
+  const dot = name.lastIndexOf(".");
+  // No extension (or a leading-dot name like ".jpg") — just append.
+  if (dot <= 0) return `${name}-keepsake`;
+  return `${name.slice(0, dot)}-keepsake${name.slice(dot)}`;
+}

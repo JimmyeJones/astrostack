@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   canSharePictureFiles,
   sharePicture,
+  keepsakeFilename,
   sharePictureText,
   shareClipText,
 } from "./share";
@@ -185,5 +186,28 @@ describe("shareClipText", () => {
     const { title, filename } = shareClipText("", "webp");
     expect(title).toBe("My astrophoto coming together");
     expect(filename).toBe("my-astrophoto-progress.webp");
+  });
+});
+
+describe("keepsakeFilename", () => {
+  it("marks the framed variant so it can't overwrite the plain picture", () => {
+    expect(keepsakeFilename("m-31.jpg")).toBe("m-31-keepsake.jpg");
+    expect(keepsakeFilename(sharePictureText("NGC 7000").filename))
+      .toBe("ngc-7000-keepsake.jpg");
+  });
+
+  it("keeps whatever extension it was handed", () => {
+    expect(keepsakeFilename("moon.png")).toBe("moon-keepsake.png");
+  });
+
+  it("copes with a name that has no usable extension", () => {
+    expect(keepsakeFilename("astrophoto")).toBe("astrophoto-keepsake");
+    // A leading dot is the whole name, not an extension to split on.
+    expect(keepsakeFilename(".jpg")).toBe(".jpg-keepsake");
+  });
+
+  it("never returns an empty or extension-less filename for junk input", () => {
+    expect(keepsakeFilename("")).toBe("astrophoto-keepsake.jpg");
+    expect(keepsakeFilename("   ")).toBe("astrophoto-keepsake.jpg");
   });
 });
