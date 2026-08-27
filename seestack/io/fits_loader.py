@@ -256,9 +256,16 @@ def bilinear_debayer(mosaic: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
     # Bilinear interpolation for the missing values in each plane.
     # R and B have a 50% sparse grid — interpolate from 4 nearest neighbours.
     # G has a 50% checkerboard — interpolate from 4 cross neighbours.
+    # G sample sites lie on one diagonal parity of the 2x2 cell — (y+x)%2 == 1 for
+    # RGGB/BGGR, == 0 for GRBG/GBRG. Derive it from the layout so _interp_g can use
+    # a positional (not value-based) sample mask.
+    g_parity = next((y + x) % 2
+                    for (y, x), c in (((0, 0), tl), ((0, 1), tr),
+                                      ((1, 0), bl), ((1, 1), br))
+                    if c == "g")
     r_full = _interp_rb(r, layouts[pattern], "r")
     b_full = _interp_rb(b, layouts[pattern], "b")
-    g_full = _interp_g(g, layouts[pattern])
+    g_full = _interp_g(g, g_parity)
 
     rgb = np.stack([r_full, g_full, b_full], axis=-1)
 
@@ -295,22 +302,7 @@ def _shift(a: np.ndarray, dy: int, dx: int) -> np.ndarray:
     return padded[y0:y0 + h, x0:x0 + w]
 
 
-def _g_site_mask(shape: tuple[int, int], layout: tuple) -> np.ndarray:
-    """Boolean mask of the G *sample sites* for a Bayer ``layout``.
-
-    G sits on a checkerboard: for RGGB/BGGR the top-left of each 2x2 is R or B, so
-    G is where ``(y + x)`` is odd; for GRBG/GBRG the top-left *is* G, so G is where
-    ``(y + x)`` is even. Derived from the layout rather than hard-coded so a new
-    pattern can't silently pick the wrong parity.
-    """
-    (tl, _tr), (_bl, _br) = layout
-    g_parity = 0 if tl == "g" else 1
-    h, w = shape
-    yy, xx = np.indices((h, w))
-    return ((yy + xx) % 2) == g_parity
-
-
-def _interp_g(g_plane: np.ndarray, layout: tuple) -> np.ndarray:
+def _interp_g(g_plane: np.ndarray, g_parity: int) -> np.ndarray:
     """
     Fill the missing G samples (R and B sites) by averaging the 4 cross
     neighbours of each missing site.
@@ -322,16 +314,17 @@ def _interp_g(g_plane: np.ndarray, layout: tuple) -> np.ndarray:
     contributor. Interior sites (all 4 neighbours present) are byte-for-byte
     unchanged.
 
-    The sample mask is **positional** (derived from the Bayer layout), not a
-    ``!= 0`` value test. A value test conflates "not this channel's site" (correct
-    to exclude) with "a genuine sample that happens to read 0.0" — and after dark
-    subtraction with an integer-valued master dark, exact zeros are common (~10 %
-    of background pixels measured). Excluding those real samples biased every
-    adjacent interpolated pixel upward, because the average then divided a smaller
-    sum by a smaller count. Identical to the old value test for any frame with no
-    exact-0 samples, so the ordinary float-master path is byte-for-byte unchanged.
+    The sample-site mask is *positional* — a G site is one whose ``(y+x)%2``
+    matches ``g_parity`` (1 for RGGB/BGGR, 0 for GRBG/GBRG) — not a ``!= 0`` value
+    test. A value test would drop a genuine sample that happens to read exactly
+    ``0.0`` (common after an integer master-dark subtraction lands a light pixel on
+    the dark value) from both its own site and its missing neighbours' averages,
+    biasing that neighbour chroma. The positional mask counts a real 0 correctly.
+    It is byte-for-byte identical to the old test wherever no sample is exactly 0.
     """
-    has_g = _g_site_mask(g_plane.shape, layout)
+    h, w = g_plane.shape
+    yy, xx = np.indices((h, w))
+    has_g = ((yy + xx) % 2) == g_parity
     m = has_g.astype(np.float32)
     # Sum of the 4 cross neighbours' values, and a matching count of how many were
     # real in-frame samples (off-frame contributors are zero-filled in both).
@@ -361,9 +354,14 @@ def _interp_rb(plane: np.ndarray, layout: tuple, channel: str) -> np.ndarray:
     averages only the real in-frame sample(s) rather than being darkened toward 0
     by the zero-filled off-frame contributor. Interior sites are unchanged.
 
-    The sample mask is **positional** (the same ``on_sample_row/col`` grid this
-    function already used to classify missing sites), not a ``!= 0`` value test —
-    see ``_interp_g`` for why a genuine 0.0 sample must still count as a sample.
+    The sample-site mask is *positional* — ``on_sample_row & on_sample_col`` from
+    the channel's Bayer position — not a ``!= 0`` value test. A value test would
+    drop a genuine sample that reads exactly ``0.0`` (common after an integer
+    master-dark subtraction) from the neighbour averages of adjacent missing sites,
+    biasing their interpolated chroma; the positional mask counts a real 0
+    correctly. It is byte-for-byte identical to the old test wherever no sample is
+    exactly 0 (the ``out`` selection below is unchanged either way — an exact-0
+    sample site keeps its 0 via ``plane.copy()`` under both masks).
     """
     h, w = plane.shape
     yy, xx = np.indices((h, w))
@@ -382,7 +380,6 @@ def _interp_rb(plane: np.ndarray, layout: tuple, channel: str) -> np.ndarray:
         return plane
     on_sample_row = (yy % 2) == py
     on_sample_col = (xx % 2) == px
-
     has = on_sample_row & on_sample_col
     m = has.astype(np.float32)
     h_avg = ((_shift(plane, 0, 1) + _shift(plane, 0, -1))
