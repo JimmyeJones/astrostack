@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -41,7 +43,9 @@ from webapp.schemas import (
     TransparencyTrendOut,
     TransparencyTrendPointOut,
 )
-from webapp.site_location import resolve_site_lon
+from webapp.site_location import detect_site_cached, resolve_site_lon
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/targets", tags=["targets"])
 
@@ -381,6 +385,58 @@ def target_autostack_hold(safe: str, request: Request) -> AutoStackHoldOut | Non
     return None
 
 
+def _recap_observer(request: Request, lib, settings):  # noqa: ANN001, ANN202
+    """Where the telescope is, for the retrospective Moon note — or ``None``.
+
+    Same precedence every planning surface uses (``plan.py``'s
+    ``_resolve_observer``): an explicit Settings location wins, else the site
+    sniffed from a solved frame's header, which is the common Seestar case
+    because a beginner rarely configures one. ``None`` when neither is known, and
+    the note simply doesn't appear — an unknown site must never cost the card.
+    """
+    from seestack.nightplan import Observer
+
+    if settings.site_lat is not None and settings.site_lon is not None:
+        return Observer(lat_deg=float(settings.site_lat),
+                        lon_deg=float(settings.site_lon),
+                        elevation_m=float(settings.site_elevation_m or 0.0))
+    site = detect_site_cached(request, lib)
+    if site is None:
+        return None
+    return Observer(lat_deg=site[0], lon_deg=site[1],
+                    elevation_m=float(settings.site_elevation_m or 0.0))
+
+
+def _session_moon_note(observer, target_pos, start_utc: str | None,  # noqa: ANN001
+                       end_utc: str | None) -> str | None:
+    """"Was the Moon washing this out?" for one finished session, or ``None``.
+
+    Quiet by design — it returns a sentence only when the Moon was bright, up and
+    close while this target was being shot, which is the one case where a
+    beginner's disappointing picture has a sky-side explanation they can act on
+    ("shoot it again on a dark-Moon night"). Everything else — a good or merely
+    passable night, no site, no solved position, an undatable session, or an
+    ephemeris that won't compute — reads as "nothing worth saying", so the card
+    stays clean.
+    """
+    ra, dec = target_pos
+    if observer is None or ra is None or dec is None or not start_utc:
+        return None
+    from seestack.nightplan import session_moon
+
+    try:
+        start = datetime.fromisoformat(start_utc)
+        end = datetime.fromisoformat(end_utc) if end_utc else start
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        return session_moon(observer, float(ra), float(dec), start, end).text
+    except Exception:  # noqa: BLE001 — an ephemeris hiccup must not cost the card
+        log.debug("session Moon note unavailable", exc_info=True)
+        return None
+
+
 @router.get("/{safe}/session-recap", response_model=SessionRecapOut | None)
 def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
     """A friendly, plain-language recap of the target's most recent capture
@@ -394,6 +450,12 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
     imaging calendar), so a beginner reading "27 subs kept" can tell whether that
     was last night or three weeks ago — and so the two cards can never name the
     same session's night differently.
+
+    ...and, when a bright Moon was genuinely up and close to this target while it
+    was being shot, one plain-language ``moon_note`` saying so. The planner warns
+    about the Moon *before* a night; nothing said it afterwards, so a beginner who
+    shot a faint nebula under a full Moon saw a flat picture and blamed their gear
+    or their editing. Silent on every other night (see :func:`_session_moon_note`).
     """
     from seestack.activity_calendar import night_date_of
     from seestack.session_recap import session_recap
@@ -403,12 +465,16 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
     try:
         recap = session_recap(proj)
         lon = resolve_site_lon(request, lib, settings.site_lon)
+        entry = lib.find_target(safe)
+        observer = _recap_observer(request, lib, settings)
+        target_pos = (entry.ra_deg, entry.dec_deg) if entry is not None else (None, None)
     finally:
         proj.close()
         lib.close()
     if recap is None:
         return None
     night = night_date_of(recap.start_utc, lon) if recap.start_utc else None
+    moon_note = _session_moon_note(observer, target_pos, recap.start_utc, recap.end_utc)
     drift = recap.quality_drift
     return SessionRecapOut(
         n_frames=recap.n_frames,
@@ -420,6 +486,7 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
         start_utc=recap.start_utc,
         end_utc=recap.end_utc,
         night_date=night.isoformat() if night is not None else None,
+        moon_note=moon_note,
         reject_buckets=recap.reject_buckets,
         quality_drift=(
             SessionQualityDriftOut(

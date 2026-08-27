@@ -153,3 +153,89 @@ def test_session_recap_night_follows_the_configured_longitude(
     # +150° (~UTC+10) → 15:00 local, i.e. the afternoon *of* the 9th's night.
     client.put("/api/settings", json={"site_lon": 150.0})
     assert client.get("/api/targets/M_42/session-recap").json()["night_date"] == "2026-07-09"
+
+
+# ---------------------------------------------------------------------------
+# "Was the Moon washing this out?" — the retrospective moonlight note
+# ---------------------------------------------------------------------------
+
+# 2026-01-02 22:00 UTC: a ~100%-lit Moon, high over London and ~34° from M 42 —
+# the exact "bright, up and close" case the note exists for. Fixed rather than
+# searched so the test says what sky it is describing.
+_MOON_HIT_UTC = "2026-01-02T22:0{}:00+00:00"
+_LONDON = {"site_lat": 51.5, "site_lon": -0.1}
+
+
+def _shoot_at(data_root, stamps: list[str]) -> None:
+    _stamp(data_root, "M_42", {i: {"timestamp_utc": s} for i, s in enumerate(stamps)})
+
+
+def test_a_moon_hit_session_is_told_so_in_plain_language(
+    client, solved_library, data_root
+):
+    """The whole point: a flat picture gets a sky-side explanation, not silence.
+
+    A beginner who shot a faint target under a bright nearby Moon otherwise
+    concludes their gear or their editing is at fault.
+    """
+    client.put("/api/settings", json=_LONDON)
+    _shoot_at(data_root, [_MOON_HIT_UTC.format(i) for i in (0, 3, 6)])
+
+    note = client.get("/api/targets/M_42/session-recap").json()["moon_note"]
+    assert note is not None
+    assert "Moon" in note
+    assert "not your setup" in note
+    assert "dark-Moon night" in note
+
+
+def test_the_note_matches_the_engine_verdict_for_the_same_sky(
+    client, solved_library, data_root
+):
+    """The router must not re-derive the astronomy — one helper, one sentence."""
+    from datetime import datetime
+
+    from seestack.nightplan import Observer, session_moon
+
+    client.put("/api/settings", json=_LONDON)
+    _shoot_at(data_root, [_MOON_HIT_UTC.format(i) for i in (0, 3, 6)])
+
+    target = next(t for t in client.get("/api/targets").json()
+                  if t["safe_name"] == "M_42")
+    expected = session_moon(
+        Observer(lat_deg=51.5, lon_deg=-0.1),
+        target["ra_deg"], target["dec_deg"],
+        datetime.fromisoformat(_MOON_HIT_UTC.format(0)),
+        datetime.fromisoformat(_MOON_HIT_UTC.format(6)),
+    ).text
+    assert client.get("/api/targets/M_42/session-recap").json()["moon_note"] == expected
+
+
+def test_a_dark_moon_session_says_nothing_at_all(client, solved_library, data_root):
+    """Silence on a good night is the design, not a gap — this must never nag."""
+    client.put("/api/settings", json=_LONDON)
+    # 2026-01-18: new Moon, and below the horizon at this hour besides.
+    _shoot_at(data_root, [f"2026-01-18T22:0{i}:00+00:00" for i in (0, 3, 6)])
+    assert client.get("/api/targets/M_42/session-recap").json()["moon_note"] is None
+
+
+def test_an_unknown_site_costs_the_note_not_the_card(
+    client, solved_library, data_root, monkeypatch
+):
+    """No configured location and nothing in the headers → the rest still renders."""
+    import webapp.site_location as site_location
+
+    monkeypatch.setattr(site_location, "detect_site_from_library", lambda lib, **k: None)
+    _shoot_at(data_root, [_MOON_HIT_UTC.format(i) for i in (0, 3, 6)])
+
+    recap = client.get("/api/targets/M_42/session-recap").json()
+    assert recap["moon_note"] is None
+    assert recap["n_frames"] == 3          # the card itself is untouched
+
+
+def test_an_unsolved_target_costs_the_note_not_the_card(client, built_library):
+    """`built_library` is ingested but never plate-solved, so there is no position
+    to measure a separation from — and the recap still works."""
+    client.put("/api/settings", json=_LONDON)
+    recap = client.get("/api/targets/M_42/session-recap").json()
+    assert recap["moon_note"] is None
+    assert recap["n_frames"] == 3

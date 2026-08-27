@@ -629,6 +629,107 @@ def _moon_verdict(illum: float, moon_alt_deg: float, sep_deg: float) -> tuple[st
                     "double star would show much better.")
 
 
+def _moon_geometry(observer: Observer, ra_deg: float, dec_deg: float,
+                   at: datetime) -> tuple[float, float, float]:
+    """``(illuminated fraction, Moon altitude °, target separation °)`` at ``at``.
+
+    The one place the Moon's position is turned into the three numbers every
+    verdict is built from, so the forward-looking "tonight" readout and the
+    backward-looking "was the Moon washing this out?" note can never disagree
+    about the same instant. ``at`` must already be timezone-aware UTC."""
+    _configure_iers_offline()
+    from astropy import units as u
+    from astropy.coordinates import AltAz, SkyCoord, get_body
+    from astropy.time import Time
+
+    illum = moon_illumination(at)
+    location = observer.earth_location()
+    t = Time(at.replace(tzinfo=None), scale="utc")
+    moon = get_body("moon", t, location)
+    moon_alt = float(moon.transform_to(AltAz(obstime=t, location=location)).alt.deg)
+    # Transform the Moon into the target's ICRS frame before measuring separation,
+    # so astropy doesn't warn about a direction-dependent transform (as the batch
+    # observability path does).
+    target = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs")
+    sep = float(target.separation(moon.icrs).deg)
+    return illum, moon_alt, sep
+
+
+@dataclass(frozen=True)
+class SessionMoon:
+    """"Was the Moon washing this out?" — a *retrospective* moonlight verdict.
+
+    The planner already warns about the Moon **before** a night. Nothing told the
+    beginner afterwards, so someone who shot a faint nebula under a full Moon saw
+    a flat, low-contrast picture and concluded their gear or their editing was at
+    fault. The real cause was the sky, and the fix — "shoot it again on a
+    dark-Moon night" — is something the app knows and never said.
+
+    Deliberately quiet: ``text`` is a finished sentence **only** when the Moon
+    genuinely hurt this session (bright, up, and close). On a good or merely
+    passable night it is ``None`` and the surface hides itself, so this can never
+    become a nag. Never phrased as the user's fault."""
+
+    # Illuminated fraction of the Moon's disk (0..1) at the session's midpoint.
+    illumination: float
+    # Topocentric Moon altitude then (deg); < 0 = below the horizon, so it can't
+    # have affected the shot however bright it was.
+    moon_altitude_deg: float
+    # Angular separation between the Moon and the target then (deg).
+    separation_deg: float
+    # Coarse verdict, from the same table the forward-looking readout uses:
+    # "good" | "ok" | "poor".
+    level: str
+    # The plain-language sentence, or None on anything but a "poor" night.
+    text: str | None
+    # The instant the readout describes (UTC ISO) — the session's midpoint.
+    at_utc: str
+
+
+def session_moon(observer: Observer, ra_deg: float, dec_deg: float,
+                 start_utc: datetime, end_utc: datetime | None = None) -> SessionMoon:
+    """How much the Moon washed out a session that has already been shot.
+
+    Evaluated at the session's **midpoint** (``end_utc`` defaults to
+    ``start_utc``, i.e. a single instant). A Seestar session runs for hours and
+    the Moon moves ~0.5°/hour plus the sky's rotation, so no single sample is the
+    whole truth — the midpoint is the honest one-number summary, and the verdict
+    bands are coarse enough (bright/up/within 90°) that a couple of degrees never
+    flips them.
+
+    Pure apart from the ephemeris, offline, and deterministic, like the rest of
+    the planner. Reuses :func:`_moon_verdict` so the retrospective note and
+    tonight's warning grade the same sky the same way."""
+    start = start_utc.astimezone(timezone.utc)
+    end = (end_utc or start_utc).astimezone(timezone.utc)
+    if end < start:
+        start, end = end, start
+    at = start + (end - start) / 2
+
+    illum, moon_alt, sep = _moon_geometry(observer, ra_deg, dec_deg, at)
+    level, _ = _moon_verdict(illum, moon_alt, sep)
+    return SessionMoon(
+        illumination=round(illum, 3),
+        moon_altitude_deg=round(moon_alt, 1),
+        separation_deg=round(sep, 1),
+        level=level,
+        text=_session_moon_text(illum, sep) if level == "poor" else None,
+        at_utc=at.isoformat(),
+    )
+
+
+def _session_moon_text(illum: float, sep_deg: float) -> str:
+    """The one sentence a Moon-hit session earns. Reassurance, not a verdict on
+    the user: it names the cause, says it wasn't their setup, and points at the
+    thing they can actually do about it."""
+    return (
+        f"A bright {round(illum * 100)}%-lit Moon was only ~{round(sep_deg)}° from "
+        "this target while you were shooting, so the sky background is brighter and "
+        "faint detail is harder to pull out. That's the sky, not your setup — the "
+        "same target on a dark-Moon night will come out cleaner."
+    )
+
+
 def moon_interference(observer: Observer, ra_deg: float, dec_deg: float,
                       when_utc: datetime) -> MoonInterference:
     """How much the Moon will interfere with imaging ``(ra_deg, dec_deg)`` tonight.
@@ -639,27 +740,12 @@ def moon_interference(observer: Observer, ra_deg: float, dec_deg: float,
     in, not the Moon's daytime position when the page happens to load. Falls back to
     ``when_utc`` itself when no dark window can be found (e.g. polar day). Offline
     and deterministic, like the rest of the planner."""
-    _configure_iers_offline()
-    from astropy import units as u
-    from astropy.coordinates import AltAz, SkyCoord, get_body
-    from astropy.time import Time
-
     window = _find_dark_window(observer, when_utc)
     at = (window.start + (window.end - window.start) / 2) if window is not None else when_utc
     at = at.astimezone(timezone.utc)
 
-    illum = moon_illumination(at)
+    illum, moon_alt, sep = _moon_geometry(observer, ra_deg, dec_deg, at)
     waxing = moon_is_waxing(at)
-
-    location = observer.earth_location()
-    t = Time(at.replace(tzinfo=None), scale="utc")
-    moon = get_body("moon", t, location)
-    moon_alt = float(moon.transform_to(AltAz(obstime=t, location=location)).alt.deg)
-    # Transform the Moon into the target's ICRS frame before measuring separation,
-    # so astropy doesn't warn about a direction-dependent transform (as the batch
-    # observability path does).
-    target = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs")
-    sep = float(target.separation(moon.icrs).deg)
 
     level, text = _moon_verdict(illum, moon_alt, sep)
     return MoonInterference(

@@ -287,18 +287,54 @@ _(none — claim an item here with your branch name)_
   with it fixed, future runs can lead with `jobs.py` / `webapp/pipeline.py`'s remaining auto-orchestration
   helpers, and re-audit the engine + routers only occasionally.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #8, verified by reading — narrow trigger: untimely power loss
-  mid-write; not reachable in normal operation) — `SettingsStore.save()` writes `config.json` via
+- ~~**⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #8) — `SettingsStore.save()` writes `config.json` via
   `tmp.write_text()` + `os.replace()` with NO `fsync` of the temp file or the containing directory, so a hard
   crash in the window after the rename metadata persists but before the data blocks flush can leave a
-  zero-length / partial `config.json` — the exact "silently revert all settings to defaults on next boot" the
-  method's own comment says it prevents.** *(Severity: low — `os.replace` still makes the rename atomic, the
-  file is tiny so the window is narrow, and `_load_resilient` degrades to safe defaults rather than crashing;
-  but the atomic-write dance is incomplete. Confidence: traced against `webapp/config.py:359–368`.)*
-  **Fix direction (small, additive):** flush+`os.fsync()` the temp fd before `os.replace`, and `os.fsync()` the
-  directory fd after, so both the data and the rename are durable. Add a test that a `save()`→reload round-trips
-  (the fsync itself isn't observable in a unit test, but pin the write path). Cheap, upgrade-safe, no behaviour
-  change on a clean shutdown.
+  zero-length / partial `config.json`.**~~ — **FIXED v0.277.7** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-4en6ua`), and applied to the calibration registry beside it.
+
+  **What shipped.** A new `webapp/atomicio.py` — `write_text_durably(path, text, *, suffix=".tmp")` — does the
+  full dance the note asked for: write the sibling temp, `flush()` + `os.fsync()` the temp fd so the *data* is
+  durable **before** anything points at it, `os.replace`, then `os.fsync` the containing **directory** so the
+  rename is durable too. A failed write unlinks its temp and re-raises, so a save that dies part-way leaves the
+  previous file intact and no litter beside it. Both `fsync`s are best-effort (`contextlib.suppress(OSError)` /
+  a guarded directory open): a platform or network mount that refuses to flush a directory still completes the
+  save, landing exactly where we were before rather than failing a save that could have succeeded.
+
+  **Applied at three call sites**, all tiny JSON/state files written only on a user action, never on the
+  ingest/stack hot path, and all carrying data the owner cannot reconstruct: `SettingsStore.save()`
+  (`config.json`), `_write_registry` (the calibration `masters.json` — losing it orphans every built master;
+  the FITS survive but nothing knows what they are), and `_write_id_high_water`. Each keeps its historic temp
+  filename via `suffix`, so an interrupted older version's leftover gets reused rather than accumulating.
+
+  **Upgrade-safe (§9):** no config/schema/on-disk/API/default change — the same bytes land at the same path,
+  just more durably; a clean shutdown is behaviourally identical. **Tests (+6 in the new
+  `tests/webapp/test_atomicio.py`):** the `fsync` itself isn't observable without pulling the power, so these
+  pin what is — replace-and-leave-no-temp, a failed write keeping the old contents *and* cleaning up, an
+  `fsync`-refusing filesystem still saving, the historic temp name being reused, a `SettingsStore` round-trip
+  through a fresh store (the upgrade contract), and the calibration registry + high-water round-trip.
+
+
+  **Follow-on, same run (v0.278.1):** with the helper in place, the grep for its siblings found one more file
+  worth it — a video still's `meta.json` (and the `grade.json` beside it) were written with a bare
+  `write_text()`, not even atomically. That file is what makes a finished picture *findable*: without a readable
+  one the still drops off the Moon & Sun page and out of the Gallery while `stack.png` and the 16-bit TIFF sit
+  right beside it, and the only way back is another multi-minute decode of a capture the owner may already have
+  cleared off the NAS. It is also rewritten **in place on every crop and every re-sharpen**, so the crash window
+  is far wider than once-per-stack. Both now go through `write_text_durably` (+1 test: a round-trip through the
+  in-place-edit rewrite leaving no temp behind). The remaining `write_text` state files were checked and
+  deliberately left alone — `edit/proxy.py`'s proxy meta and `render/thumbnail.py`'s sentinel are regenerable
+  caches, so a half-write costs a recompute, not data.
+
+  Original spec, for the record:
+
+    *(Severity: low — `os.replace` still makes the rename atomic, the
+    file is tiny so the window is narrow, and `_load_resilient` degrades to safe defaults rather than crashing;
+    but the atomic-write dance is incomplete. Confidence: traced against `webapp/config.py:359–368`.)*
+    **Fix direction (small, additive):** flush+`os.fsync()` the temp fd before `os.replace`, and `os.fsync()` the
+    directory fd after, so both the data and the rename are durable. Add a test that a `save()`→reload round-trips
+    (the fsync itself isn't observable in a unit test, but pin the write path). Cheap, upgrade-safe, no behaviour
+    change on a clean shutdown.
 
 - **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #8, traced — possibly by-design; low confidence) — the folder
   watcher's stability gate compares host wall-clock `now` to the source file's `mtime`
@@ -335,36 +371,62 @@ _(none — claim an item here with your branch name)_
   the seventh consecutive essentially-clean engine-side audit.** Future runs can lead with the watcher-ingest
   storage layer / `deps.py` / `config.py` load path, or re-audit the engine only occasionally.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #7, traced — not reachable through the app's own writers;
-  needs a hand-edited / partially-foreign result file on a live install) — a JSON-valid but *wrong-typed* field
-  in a video capture's `meta.json` 500s the WHOLE `/api/videos` list instead of degrading to "no result", in
-  breach of `read_meta`'s own "reads as no result rather than breaking the page" contract.** *(Severity: low —
-  broken-UX, and video/Moon-Sun is a niche path; the app only ever writes well-typed meta, and a partial write
-  yields `JSONDecodeError` which is already caught. Confidence: traced, not reproduced with an app-written
-  file.)* `read_meta` / `iter_results` (`webapp/video.py` ~174/310) catch `OSError`/`JSONDecodeError`/`TypeError`
-  and filter to known dataclass fields, but a plain `@dataclass` does no type enforcement, so a value like
-  `source_name: null` or a non-numeric `width` survives the dataclass build and only blows up later in the
-  Pydantic `_result_out` construction — an uncaught `ValidationError` that fails the entire list endpoint, not
-  just the one bad capture. **This is the same class the project has chosen to fix before** (the non-dict
-  `web_stack_defaults` meta row, v0.276.2): a legacy / hand-edited / foreign-version file on an in-place-upgraded
-  install (§9) is the trigger. **Fix direction (small, additive):** wrap the per-capture `_result_out` build in
-  a try/except that logs-and-skips one bad capture (mirroring the per-target `except Exception: continue` the
-  stats roll-ups already use), and add a `test_videos_list_degrades_on_wrong_typed_meta` regression. Do it
-  alongside a quick grep for any sibling list endpoint with the same "dataclass tolerates, Pydantic doesn't"
-  shape.
+- ~~**⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #7) — a JSON-valid but *wrong-typed* field in a video
+  capture's `meta.json` 500s the WHOLE `/api/videos` list instead of degrading to "no result"; and
+  `get_gallery`'s per-run loop had no per-item `except` either.**~~ — **FIXED v0.277.6** (Builder 2026-08-27,
+  branch `claude/compassionate-galileo-4en6ua`), as the paired "list endpoints degrade per-item" pass the
+  second note below asked for. Four boundaries now honour the degrade-don't-500 contract, each with the reason
+  written where it is enforced:
+  **(1)** `_result_out` (`webapp/routers/video.py`) builds its `VideoResultOut` inside a try/except — one
+  unusable `meta.json` reads as "never stacked", exactly what `read_meta`'s docstring already promises.
+  **(2)** `_grade_panels` got the same guard, found by the "grep for a sibling with the same shape" the note
+  asked for: `read_grade` checks field *names* too, so a wrong-typed `grade.json` (`"scores": "abc"`) blew up
+  identically — it now reads as "never checked" and the *Check this capture first* button comes back.
+  **(3)** `_video_stills` (`webapp/routers/gallery.py`) wraps its `VideoStillItem` build, so the Gallery's
+  stills strip loses the one bad still rather than all of them (its existing try only covered the framing
+  backfill, not the model build).
+  **(4)** `get_gallery`'s per-run loop: the card build moved into a `_gallery_item` helper called under
+  `except Exception: continue` with a debug log — the same shape `stats.py`'s roll-ups use, and no behaviour
+  change on a healthy install.
+  **Upgrade-safe (§9):** pure read-path error handling; no config/schema/on-disk/API/default change, and a
+  well-typed file takes exactly the path it did before. **Tests (+7 in the new
+  `tests/webapp/test_list_endpoints_degrade.py`, all 7 fail before / pass after):** a wrong-typed `meta.json`
+  and a wrong-typed `grade.json` each degrading while the healthy capture beside them keeps its panels; the
+  Gallery stills strip dropping only the bad still; a forced-to-raise gallery run being skipped with the rest
+  intact; and a 3-way parametrised "neither page ever 500s" over the shapes a hand-edited file actually takes.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #7, traced — no constructed trigger; a house-pattern deviation)
-  — `get_gallery`'s per-run item-construction loop (`webapp/routers/gallery.py` ~196–234) is wrapped in
-  `try/…finally` with NO `except`, so if any single `GalleryItem` build ever raised mid-loop the whole
-  `/api/gallery` would 500, whereas the equivalent roll-up loops in `stats.py` (`_rollup_stacks`,
-  `_collect_last_night`, …) catch `Exception` per target and skip the bad one.** *(Severity: low — every required
-  `GalleryItem` field is `NOT NULL` and the optional-field helpers (`seam_verdict`, `_parse_options`,
-  `_unexported_edit`) are all None-tolerant, so no concrete input was found that throws; this is a robustness
-  asymmetry, not a live bug. Confidence: deviation confirmed, failure not traced.)* **Fix direction:** give the
-  gallery loop the same per-item `except Exception: continue` (with a debug log) the stats roll-ups use, so a
-  future field addition that can raise can't take down the whole gallery. Cheap and matches the house
-  degrade-don't-500 pattern; pair with the video note above in one small "list endpoints degrade per-item"
-  Builder pass.
+  Original spec, for the record:
+
+    *(Severity: low —
+    broken-UX, and video/Moon-Sun is a niche path; the app only ever writes well-typed meta, and a partial write
+    yields `JSONDecodeError` which is already caught. Confidence: traced, not reproduced with an app-written
+    file.)* `read_meta` / `iter_results` (`webapp/video.py` ~174/310) catch `OSError`/`JSONDecodeError`/`TypeError`
+    and filter to known dataclass fields, but a plain `@dataclass` does no type enforcement, so a value like
+    `source_name: null` or a non-numeric `width` survives the dataclass build and only blows up later in the
+    Pydantic `_result_out` construction — an uncaught `ValidationError` that fails the entire list endpoint, not
+    just the one bad capture. **This is the same class the project has chosen to fix before** (the non-dict
+    `web_stack_defaults` meta row, v0.276.2): a legacy / hand-edited / foreign-version file on an in-place-upgraded
+    install (§9) is the trigger. **Fix direction (small, additive):** wrap the per-capture `_result_out` build in
+    a try/except that logs-and-skips one bad capture (mirroring the per-target `except Exception: continue` the
+    stats roll-ups already use), and add a `test_videos_list_degrades_on_wrong_typed_meta` regression. Do it
+    alongside a quick grep for any sibling list endpoint with the same "dataclass tolerates, Pydantic doesn't"
+    shape.
+
+- ~~**⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #7) — `get_gallery`'s per-run item-construction loop is
+  wrapped in `try/…finally` with NO `except`, so a single raising `GalleryItem` build would 500 the whole
+  `/api/gallery`.**~~ — **FIXED v0.277.6** (Builder 2026-08-27), shipped together with the video note above
+  as the single "list endpoints degrade per-item" pass this entry asked for. See that entry for what landed.
+
+  Original spec, for the record:
+
+    *(Severity: low — every required
+    `GalleryItem` field is `NOT NULL` and the optional-field helpers (`seam_verdict`, `_parse_options`,
+    `_unexported_edit`) are all None-tolerant, so no concrete input was found that throws; this is a robustness
+    asymmetry, not a live bug. Confidence: deviation confirmed, failure not traced.)* **Fix direction:** give the
+    gallery loop the same per-item `except Exception: continue` (with a debug log) the stats roll-ups use, so a
+    future field addition that can raise can't take down the whole gallery. Cheap and matches the house
+    degrade-don't-500 pattern; pair with the video note above in one small "list endpoints degrade per-item"
+    Builder pass.
 
 - **⚪ QA AUDIT RESULT (Scout 2026-08-26 #5, branch `claude/vigilant-knuth-t39r9x`) — led the rotation back
   through the stacking engine's remaining un-swept surface (the accumulators, mosaic-canvas sizing, the
@@ -11649,6 +11711,34 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-27, the obvious next slice of the "Was the Moon washing this out?" note shipped
+  in v0.278.0) — say it on the *Nights* card too, so a beginner can see *which* of their nights the Moon hurt,
+  not only the most recent one.** *(Pillar: understand + trust — PRIORITY 3. Size: S.)* v0.278.0 put the
+  retrospective verdict on the "Last session" card, which answers "why does my newest picture look flat?".
+  The question right behind it is "so which of my ten nights on this target were any good?" — and the Nights
+  card already lists every night with a one-word verdict (sharp / soft / hazy) it computes from stored metrics.
+  Adding the Moon level to each row is now cheap: `seestack.nightplan.session_moon` exists and is pure, each
+  night already carries `start_utc`/`end_utc`, and the target's position and the site are already resolved on
+  that endpoint's sibling. **Shape:** a small dimmed "bright Moon" marker on the rows whose verdict is `poor`,
+  never a sentence per row (ten sentences would be a wall), with the existing per-night verdict untouched.
+  **Care — the one real cost:** this is N ephemeris evaluations per page load rather than one. Measure it
+  before shipping; if a 30-night target is slow, compute the Moon level only for the rows actually rendered,
+  or memoise per (night, target) on the app the way the site lookup already is. **Do not** turn it into a
+  filter or an auto-reject: moonlit subs are still real signal, and the whole feature's voice is "here's why,
+  and how to do better next time".
+
+- **NEW IDEA (Builder 2026-08-27, spotted while fixing the two "dataclass tolerates, Pydantic doesn't" list
+  endpoints in v0.277.5) — a tiny test that pins the *rule* rather than the four instances: every list endpoint
+  that reads a per-item file off disk degrades per item.** *(Pillar: trust / maintainability — PRIORITY 3.
+  Size: S.)* v0.277.5 fixed the four boundaries that existed; nothing stops the fifth being written without a
+  guard. The cheap version is not a clever meta-test but a documented convention plus one shared helper —
+  e.g. a `degrade_per_item(items, build, what)` used by `/api/videos`, `/api/gallery` and the `stats.py`
+  roll-ups alike, so the guard comes for free with the helper and a reviewer can see at a glance which loops
+  have it. **Grep first:** the four fixed sites and the existing `stats.py` roll-ups are the population; if a
+  shared helper would only ever have five callers, a comment in the house-style notes may be the better
+  answer, and this idea should be closed rather than built. Explicitly *not* worth a framework.
+
+
 - **IMPROVEMENT IDEA (Scout 2026-08-27 #9, verified by dogfood + code) — with "Auto outlier removal" on (the
   default), the Stack form still shows "Sigma clipping" and "Min/max rejection" as live, editable toggles whose
   displayed state can be the opposite of what actually runs — so a beginner reading the form is misled about the
@@ -14803,32 +14893,83 @@ problems. Dogfood it every big-picture run and fix root causes.
   per-frame `fwhm`, per-session grouping already exist; this is a read-only roll-up + one copy string + a card,
   no engine change. Grep first — confirm no existing "soft stars" verdict before building.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #7) — "Was the Moon washing this out?": a retrospective moonlight
-  verdict on a finished session/picture, so a beginner understands *why* a result looks flat and knows to
-  re-shoot on a dark-Moon night — not that they did something wrong.** *(Pillar: understand + trust — PRIORITY
-  3. Size: M.)* The planner already warns *before* a night (`nightplan.moon_context` → a good/ok/poor verdict
-  with copy like *"A bright 92%-lit Moon is only ~15° from this target — faint nebulosity will be washed out"*),
-  but **nothing tells the beginner this *after* the fact.** A newcomer who stacks a faint nebula shot under a
-  full Moon sees a flat, low-contrast picture and assumes their gear or their editing is at fault; the real
-  cause was the sky, and the fix is "wait for a darker night", which the app never says. **Verified genuinely
-  new (grepped this run):** `moon_context` and its verdict are used only on the *forward-looking* Tonight/plan
-  path; no code applies moon illumination/separation to a *completed* session or renders it on a result/History
-  card. **Shape:** the session's capture time is already stored (frame timestamps / the "Last session — 15 Nov
-  2024" roll-up) and the target's RA/Dec is solved, so recompute the same `moon_context` for the session's
-  midpoint and, **only when the verdict is "poor"** (bright *and* near), render one plain reassuring line on the
-  result/"Is it enough yet?" card: *"This session was shot under a bright Moon close to the target, so the
-  background is brighter and faint detail is harder to pull out — it's the sky, not your setup. A dark-Moon night
-  would give a cleaner result."* Self-hides on a "good"/"ok" night (the common case) so it never nags. **Beginner
-  bar:** clears it cleanly — instantly understandable, plain language, no knob, a sane default (silent unless the
-  Moon genuinely hurt this session), and it's pure *understand + trust*, not pro tooling; it turns a
-  discouraging "my picture is bad" into an actionable "shoot it again when the Moon's away." **Feasibility:**
-  offline, additive, read-only, reuses the existing `moon_context` helper and data the app already has (session
-  time + solved position); pure → unit-testable (full Moon 10° away on a nebula → poor → line shown; new-Moon or
-  Moon-down → None; a cluster/galaxy where moonlight matters less → the verdict's own leniency governs). **Slices
-  —** (a) a pure `session_moon_note(session_time, ra, dec, obs_site) -> str | None` wrapping `moon_context` for a
-  past instant + tests (shippable on its own); (b) wire it onto the result card (frontend, gated on presence).
-  **Care:** trust is the whole point, so bias toward silence — only a *clearly* Moon-hit session earns the line,
-  and never phrase it as the user's fault.
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #7) — "Was the Moon washing this out?": a retrospective
+  moonlight verdict on a finished session, so a beginner understands *why* a result looks flat.**~~ —
+  **SHIPPED v0.278.0** (Builder 2026-08-27, branch `claude/compassionate-galileo-4en6ua`) — **both
+  filed slices, (a) and (b).**
+  *(Pillar: understand + trust — PRIORITY 3.)*
+
+  **(a) The pure helper.** `seestack/nightplan.session_moon(observer, ra, dec, start_utc, end_utc=None)`
+  returning a frozen `SessionMoon(illumination, moon_altitude_deg, separation_deg, level, text, at_utc)`
+  rather than the filed bare `str | None` — same reasoning as the `AngularSize` precedent: it matches the shape
+  every sibling readout uses (`MoonInterference` right beside it), a caller that wants its own copy has the
+  numbers, and `text` is the finished sentence so no consumer ever does astronomy. `text` is `None` on anything
+  but a **"poor"** night, which is the silence the entry asked for.
+
+  **Evaluated at the session's midpoint.** A Seestar session runs for hours and the Moon moves; no single
+  sample is the whole truth, but the verdict bands (bright / up / within 90°) are coarse enough that a couple
+  of degrees never flips them, so the midpoint is the honest one-number summary. `end_utc < start_utc` (which
+  a frames table can hand you) is taken as written rather than as an error.
+
+  **One geometry helper, so the two halves can never disagree.** `moon_interference` (tonight's warning) and
+  `session_moon` (the retrospective note) now both go through a new `_moon_geometry(observer, ra, dec, at)` and
+  the *same* `_moon_verdict` table — the forward-looking path is otherwise byte-for-byte what it was, and its
+  dark-window search is untouched.
+
+  **The sentence**, deliberately reassurance-shaped: *"A bright 99%-lit Moon was only ~20° from this target
+  while you were shooting, so the sky background is brighter and faint detail is harder to pull out. That's the
+  sky, not your setup — the same target on a dark-Moon night will come out cleaner."* It names the cause,
+  absolves the user, and points at the one thing they can act on.
+
+  **(b) Wired onto the "Last session" card** — the surface that already knows the session and its dates —
+  as an additive optional `moon_note` on `GET /api/targets/{safe}/session-recap`. The router resolves the site
+  with the same precedence every planning surface uses (explicit Settings location, else the site sniffed from a
+  solved frame's header, which is the common Seestar case), via a new `site_location.detect_site_cached` that
+  shares the existing memo `resolve_site_lon` already keyed on the target set. **Everything degrades to
+  silence, never to a failure:** no site, no solved position, an undatable session, or an ephemeris hiccup all
+  leave `moon_note` null and the rest of the card untouched. Rendered dimmed, not in a warning colour —
+  nothing went wrong.
+
+  **Upgrade-safe (§9):** one optional response field (an older frontend ignores it) and one new engine function;
+  no config/schema/on-disk/default change, and the feature is invisible unless the sky actually earned it.
+
+  **Tests (+11 engine, +5 webapp, +2 frontend):** `tests/test_session_moon.py` pins the note on a bright, high,
+  ~20°-away Moon; silence on the same Moon 180° away, on a new Moon, and on a bright Moon that had already set
+  (altitude gates everything); the midpoint being what's reported; a backwards session giving the same answer;
+  a non-UTC aware time landing right; the numbers always being present even when the sentence isn't; and the
+  level agreeing with `_moon_verdict` on the same instant. `tests/webapp/test_target_session_recap.py` pins the
+  end-to-end note on a fixed real sky (2026-01-02 22:00 UTC over London, M 42 ~34° from a ~100%-lit Moon), the
+  router's sentence being *exactly* the engine's, silence on a dark-Moon session, and an unknown site / an
+  unsolved target each costing the note and not the card. `SessionRecapCard.test.tsx` pins the line rendering
+  and, on an ordinary night, no mention of the Moon at all.
+
+  Original spec, for the record:
+
+    verdict on a finished session/picture, so a beginner understands *why* a result looks flat and knows to
+    re-shoot on a dark-Moon night — not that they did something wrong.** *(Pillar: understand + trust — PRIORITY
+    3. Size: M.)* The planner already warns *before* a night (`nightplan.moon_context` → a good/ok/poor verdict
+    with copy like *"A bright 92%-lit Moon is only ~15° from this target — faint nebulosity will be washed out"*),
+    but **nothing tells the beginner this *after* the fact.** A newcomer who stacks a faint nebula shot under a
+    full Moon sees a flat, low-contrast picture and assumes their gear or their editing is at fault; the real
+    cause was the sky, and the fix is "wait for a darker night", which the app never says. **Verified genuinely
+    new (grepped this run):** `moon_context` and its verdict are used only on the *forward-looking* Tonight/plan
+    path; no code applies moon illumination/separation to a *completed* session or renders it on a result/History
+    card. **Shape:** the session's capture time is already stored (frame timestamps / the "Last session — 15 Nov
+    2024" roll-up) and the target's RA/Dec is solved, so recompute the same `moon_context` for the session's
+    midpoint and, **only when the verdict is "poor"** (bright *and* near), render one plain reassuring line on the
+    result/"Is it enough yet?" card: *"This session was shot under a bright Moon close to the target, so the
+    background is brighter and faint detail is harder to pull out — it's the sky, not your setup. A dark-Moon night
+    would give a cleaner result."* Self-hides on a "good"/"ok" night (the common case) so it never nags. **Beginner
+    bar:** clears it cleanly — instantly understandable, plain language, no knob, a sane default (silent unless the
+    Moon genuinely hurt this session), and it's pure *understand + trust*, not pro tooling; it turns a
+    discouraging "my picture is bad" into an actionable "shoot it again when the Moon's away." **Feasibility:**
+    offline, additive, read-only, reuses the existing `moon_context` helper and data the app already has (session
+    time + solved position); pure → unit-testable (full Moon 10° away on a nebula → poor → line shown; new-Moon or
+    Moon-down → None; a cluster/galaxy where moonlight matters less → the verdict's own leniency governs). **Slices
+    —** (a) a pure `session_moon_note(session_time, ra, dec, obs_site) -> str | None` wrapping `moon_context` for a
+    past instant + tests (shippable on its own); (b) wire it onto the result card (frontend, gated on presence).
+    **Care:** trust is the whole point, so bias toward silence — only a *clearly* Moon-hit session earns the line,
+    and never phrase it as the user's fault.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #6) — "Finish what you started": a Dashboard nudge that ranks the
   targets you *already have data on* by how much one more clear night would improve them, so the beginner's
