@@ -8025,6 +8025,38 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-27, the mirror case the v0.279.1 cover nudge deliberately left out) — when
+  *nothing* is pinned, the cover follows the newest stack, so a cloudy night's restack can silently replace a
+  better picture with a grainier one. Offer to pin the good one back.** *(Pillar: autonomy + trust —
+  PRIORITY 2–3. Size: S — the machinery already exists.)* `seestack/covernudge.py` answers "is the newest
+  stack cleaner than the **pinned** cover?"; with no pin there is nothing to compare against, so it stays
+  silent by design — but that is exactly the state a beginner is in, and it is the state where the *default*
+  can go backwards. A restack through haze, or one where a lot of subs were set aside, produces a legitimately
+  newer stack with a materially **higher** `noise_sigma` than one the target already has, and because the
+  unpinned cover means "newest", the Library tile, "My best pictures" and the montage wall all switch to it
+  with nothing said. **The nudge:** when nothing is pinned and the newest genuine stack is materially noisier
+  (the same `CLEANER_RATIO` in reverse) than the best earlier genuine stack, say so once — *"Last night's
+  stack came out grainier than your 14 May one (about 30 % more background grain) — it was probably hazy.
+  Show the better one instead?"* — with a one-tap pin of the earlier run, reusing `set-cover` exactly as the
+  cleaner-shot note does. **Why it is worth a run:** it turns a silent quality regression into an explained
+  one, which is the trust half of the app's promise, and it is the case a beginner (who never pins anything)
+  actually hits. **Care:** genuine stacks only, both σ finite, and the *earlier* run must still have its
+  preview on disk; keep it to one nudge, and make sure it and the v0.279.1 note can never both speak (they are
+  mutually exclusive by construction — one needs a pin, the other needs none — but pin a test on that).
+
+- **NEW IDEA (Builder 2026-08-27, the obvious next tap on the v0.280.0 "nearly there" card) — the constellation
+  nudge names the object that's up tonight but gives no way to act on it.** *(Pillar: friendliness /
+  autonomy — PRIORITY 3. Size: S.)* `GET /api/life-list/nearly-there` already returns the missing object's
+  `usable_start_utc` / `usable_end_utc`, and `/api/plan/suggest/{catalog_id}/calendar.ics` already renders a
+  one-tap "Add to calendar" `.ics` for a catalog object — but the two don't meet, so the card ends on a
+  sentence rather than an action. Wire the tonight pick's badge to the same `.ics` download the
+  `SuggestTargetsCard` offers (and/or a link into the Tonight table row for it). **Care before building:** the
+  `.ics` route is deliberately restricted to `_SHOWPIECE_IDS` (see `_catalog_object` — "a bogus id is a 404,
+  not a way to calendar arbitrary catalog rows"), and a missing object from a nearly-finished constellation is
+  often *not* a showpiece, so this needs either a second route scoped to "objects the nearly-there endpoint
+  actually returned" or a widening of that whitelist with the same care about arbitrary ids. Don't just remove
+  the check.
+
 - **NEW IDEA (Builder 2026-08-27, the follow-ups the life list v0.279.0 deliberately left out) — three small
   slices that turn the life list from a page you visit into something that finds you.** *(Pillar: friendliness
   / "enjoy + come back tomorrow" — PRIORITY 3. Size: S each, independent — pick one, they don't stack.)*
@@ -8033,11 +8065,20 @@ to **Shipped**.)_
     The one place a beginner sees every session, and the number is the whole hook. Careful: the Dashboard is
     the *other* page the owner called "extremely busy", so this must go **inside** an existing group, not as
     another always-on banner — see the standing IA item under Friendliness before adding it.
-  * **(ii) "One away from Orion" — tie the list into the night planner.** `catalog_capture_status` already
-    returns `con`, so "which constellation are you closest to completing, and is one of its missing objects up
-    tonight?" is a group-by plus a lookup against the existing `rank_targets_now`. That is the line that
-    actually gets someone outside on a clear night, and it needs no new data. Keep it to one nudge and only
-    when a constellation is genuinely close (≥1 captured, ≤2 missing), or it becomes noise.
+  * ~~**(ii) "One away from Orion" — tie the list into the night planner.**~~ — **SHIPPED v0.280.0** (Builder
+    2026-08-27, branch `claude/compassionate-galileo-4maz3z`), to the letter of the brief below: one nudge,
+    only when a constellation is genuinely close (≥1 captured, ≤2 missing — `MAX_MISSING_FOR_NEARLY`).
+    `nearly_complete_constellations` (pure, in `seestack/lifelist.py`) groups the life-list entries by `con`
+    and ranks fewest-missing → most-captured → alphabetically; `GET /api/life-list/nearly-there` then walks
+    the top 4 candidates and prefers the closest one that has a missing object genuinely **up tonight**, so
+    the nudge is actionable rather than a to-do note. It falls back to the closest constellation with no
+    "tonight" half when nothing is up or no site is set (and says which, via `location_source`). The
+    observability is one batched pass, not one per constellation — `suggest_targets` was refactored to share
+    its engine as the new public `nightplan.well_placed_tonight(observer, when, objects, …)`, behaviour
+    unchanged (the existing suggest suite passes untouched). `NearlyThereCard` renders it on the **Tonight**
+    page, above the tables, self-hiding until a constellation is close. Tests: 6 engine, 7 endpoint (a `when`
+    query param, like `/api/plan/suggest`, keeps the "is it up?" assertions off the wall-clock), 5 component.
+    *(Still open: (i) the Dashboard stat and (iii) share the grid.)*
   * **(iii) Share the grid.** The existing share-card machinery (`ShareYourSkyCard` / `sharePictureText`)
     renders a keepsake; a "my Messier grid so far" image is the same shape and is the single most
     shareable artefact the app could produce. Largest of the three; do it last.
@@ -21476,6 +21517,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.280.0** — Beginner feature / friendliness (Builder, branch `claude/compassionate-galileo-4maz3z`):
+  **"You're one away from finishing Lyra — and it's up tonight."** The life list says *how many* famous
+  objects you have, which is a number you look at; this says what to point at **next**, which is what gets
+  someone outside. New pure `nearly_complete_constellations` (`seestack/lifelist.py`) finds the constellation
+  the owner is closest to completing (≥1 captured, ≤2 missing); `GET /api/life-list/nearly-there` prefers the
+  closest candidate that has a missing object genuinely well-placed in tonight's dark window, in one batched
+  observability pass via the newly-public `nightplan.well_placed_tonight` (extracted from `suggest_targets`,
+  behaviour unchanged). `NearlyThereCard` shows it on the Tonight page and self-hides until a constellation is
+  close, so a fresh install never sees it. No new data, network or settings — read-only, additive, and
+  upgrade-safe.
 - **v0.279.1** — Autonomy/trust (Builder, branch `claude/compassionate-galileo-4maz3z`): **"Your cleanest shot
   so far"** — a pinned cover never changes on its own, so a beginner who keeps adding subs can have every
   showcase surface (Library tile, "My best pictures", the montage wall) showing an older, grainier picture than
