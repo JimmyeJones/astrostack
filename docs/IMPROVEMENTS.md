@@ -14439,20 +14439,46 @@ problems. Dogfood it every big-picture run and fix root causes.
   toward silence — a single wrong "your colour is off" on a genuinely fine picture is worse than ten correct
   reassurances are good.
 
-- **NEW IDEA (Builder 2026-08-26, the obvious next step after shipping "My deep-sky wall" v0.275.0) — let the
-  wall use each target's **pinned cover**, not just its newest stack's preview.** *(Pillar: friendliness /
-  enjoy + share — PRIORITY 3. Size: S.)* The montage draws one picture per target from the library's
-  `last_stack_preview`, which is whatever that target stacked *most recently*. But the app already has a
-  feature for exactly this question — **"Set as cover"** (v0.145.0) — where the user has said, in as many
-  words, *which picture of this target is the good one*. On a target whose newest run is a linear master or a
-  quick restack, the wall currently shows that instead of the finished picture the owner chose, which is the
-  one thing the wall exists to show. **Shape:** in `_montage_tiles` (`webapp/routers/gallery.py`), prefer the
-  target's cover run's preview when one is pinned and readable, falling back to `last_stack_preview` exactly as
-  today — a few lines, no new endpoint, no engine change (`build_montage` neither knows nor cares where a tile
-  came from). **Care:** the library registry stamps `last_stack_preview` but the cover is a per-target
-  `cover_run_id`, so this costs one project open per hero — acceptable on a deliberate one-tap download, not on
-  a page render, which is the same trade `/api/imaging-log` already makes. Testable: a target with a pinned
-  cover puts *that* picture on the wall; one without is unchanged.
+- ~~**NEW IDEA (Builder 2026-08-26, the obvious next step after shipping "My deep-sky wall" v0.275.0) — let
+  the wall use each target's **pinned cover**, not just its newest stack's preview.**~~ — **SHIPPED v0.277.1**
+  (Builder 2026-08-27, branch `claude/compassionate-galileo-g1g813`). *(Pillar: friendliness / enjoy + share —
+  PRIORITY 3.)*
+
+  **What shipped, exactly as filed.** `_montage_tiles` (`webapp/routers/gallery.py`) now prefers the target's
+  pinned cover preview and falls back to `last_stack_preview` when nothing is pinned, the pinned run was pruned,
+  or its preview file has gone. It reuses `targets._cover_preview_path` rather than re-deriving the precedence:
+  that helper (and its run-level twin `gallery._representative_run`, which `/api/gallery/best` already uses) were
+  the two existing copies, and a third would have been the copy that eventually disagreed. So the wall, the
+  Library tile, the Dashboard tile and the best-pictures wall now all answer "which picture *is* this target?"
+  the same way.
+
+  **Cost, as the filed Care note priced it:** resolving a cover opens that target's project, so it happens only
+  for targets that actually have one pinned (the helper returns `None` on a null `cover_stack_run_id` before
+  opening anything). That is the same trade `/api/imaging-log` makes, and it is on a deliberate one-tap
+  download, never a page render.
+
+  **Upgrade-safe (§9):** read-only, no config/schema/on-disk/API/default change; a library with no pinned covers
+  renders a bit-for-bit identical wall. **Tests (+2 in `tests/webapp/test_gallery_montage.py`, 1 fails before):**
+  a target given a good picture *and* a later scrappy restack puts the restack on the wall until its owner pins
+  the good one, then puts the pinned one there and not the restack (asserted on the rendered JPEG's own pixels);
+  and a pinned cover whose file has since been deleted degrades to the newest picture rather than dropping the
+  target off the wall.
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: S.)* The montage draws one picture per target
+    from the library's
+    `last_stack_preview`, which is whatever that target stacked *most recently*. But the app already has a
+    feature for exactly this question — **"Set as cover"** (v0.145.0) — where the user has said, in as many
+    words, *which picture of this target is the good one*. On a target whose newest run is a linear master or a
+    quick restack, the wall currently shows that instead of the finished picture the owner chose, which is the
+    one thing the wall exists to show. **Shape:** in `_montage_tiles` (`webapp/routers/gallery.py`), prefer the
+    target's cover run's preview when one is pinned and readable, falling back to `last_stack_preview` exactly as
+    today — a few lines, no new endpoint, no engine change (`build_montage` neither knows nor cares where a tile
+    came from). **Care:** the library registry stamps `last_stack_preview` but the cover is a per-target
+    `cover_run_id`, so this costs one project open per hero — acceptable on a deliberate one-tap download, not on
+    a page render, which is the same trade `/api/imaging-log` already makes. Testable: a target with a pinned
+    cover puts *that* picture on the wall; one without is unchanged.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #3) — "Print it": a print-ready export sized and DPI-tagged for a
   frame on the wall.** *(Pillar: enjoy + share — PRIORITY 3. Size: M.)* A beginner who finally gets a
