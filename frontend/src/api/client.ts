@@ -1117,6 +1117,18 @@ export interface StackEstimate {
     peak_bytes: number;
     peak_gb: number;
   } | null;
+  // What "Auto outlier removal" resolves to for this many frames — the engine
+  // overrides the sigma-clip / min-max toggles when it's on, so the form reads
+  // the truth from here rather than re-deriving the rule. null means those
+  // toggles really are live (auto off, or drizzle on — drizzle keeps its own
+  // two-pass rejection and auto leaves the toggles alone).
+  auto_reject_resolved: {
+    method: "sigma_clip" | "min_max";
+    // The frame count at which auto switches from min/max to sigma clipping.
+    switch_at_frames: number;
+    // The accepted+solved frames this answer was computed for.
+    n_frames: number;
+  } | null;
 }
 
 export interface GalleryItem {

@@ -616,6 +616,31 @@ def kappa_min_frames(kappa: float) -> int:
     return max(3, int(math.ceil(u * u)))
 
 
+def auto_reject_method(kappa: float, n: int) -> str:
+    """Which concrete method ``auto_reject`` picks for an ``n``-frame stack:
+    ``"sigma_clip"`` or ``"min_max"``.
+
+    Public because the Stack form has to be able to *say* which one will run —
+    with "Auto outlier removal" on, the sigma-clip / min-max toggles below it
+    are overridden, and a form that still shows them as live tells a beginner
+    the opposite of what happens. One definition, read by both the picker
+    (:func:`_resolve_auto_reject`) and the form, so they cannot disagree.
+
+    ``auto_reject_switch_frames`` is the smallest ``n`` this returns
+    ``"sigma_clip"`` at — the number the form quotes as "switches at ~N"."""
+    use_kappa = n >= kappa_min_frames(kappa)
+    # κ-σ's own dispatch needs ≥4 frames (see :func:`_resolve_auto_reject`).
+    if use_kappa and n < 4:
+        use_kappa = False
+    return "sigma_clip" if use_kappa else "min_max"
+
+
+def auto_reject_switch_frames(kappa: float) -> int:
+    """The frame count at which :func:`auto_reject_method` switches from
+    ``min_max`` to ``sigma_clip`` — both of its floors folded into one number."""
+    return max(4, kappa_min_frames(kappa))
+
+
 def _resolve_auto_reject(options: StackOptions, n: int) -> StackOptions:
     """Resolve ``auto_reject`` into concrete ``sigma_clip``/``min_max_reject``.
 
@@ -627,16 +652,15 @@ def _resolve_auto_reject(options: StackOptions, n: int) -> StackOptions:
     rejection), so a run that doesn't opt in is byte-for-byte identical."""
     if not options.auto_reject or options.drizzle:
         return options
-    use_kappa = n >= kappa_min_frames(options.sigma_kappa)
-    # κ-σ's own dispatch needs ≥4 frames (its pass-2 clip branch gates on
-    # ``n >= 4``); ``kappa_min_frames`` floors at 3 for the min/max side, so at a
-    # small κ (``sigma_kappa`` ≲ 1.155, reachable via the webapp's min of 1.0)
+    # The ≥4-frame floor inside :func:`auto_reject_method` is κ-σ's own dispatch
+    # requirement (its pass-2 clip branch gates on ``n >= 4``);
+    # ``kappa_min_frames`` floors at 3 for the min/max side, so at a small κ
+    # (``sigma_kappa`` ≲ 1.155, reachable via the webapp's min of 1.0)
     # ``kappa_min_frames`` returns 3 and a 3-frame stack would pick κ-σ — which
     # then never runs, silently falling through to a plain mean with NO rejection
     # despite ``auto_reject``. Below 4 frames, use the order-statistic min/max drop
     # (which rejects a lone extreme at n≥3) so the user's rejection intent is met.
-    if use_kappa and n < 4:
-        use_kappa = False
+    use_kappa = auto_reject_method(options.sigma_kappa, n) == "sigma_clip"
     return replace(options, sigma_clip=use_kappa, min_max_reject=not use_kappa)
 
 
