@@ -9,6 +9,8 @@ properties: trails are rejected, star cores are NOT eaten under dithering,
 low-coverage pixels are never clipped, and NaN/coverage semantics hold.
 """
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -470,7 +472,7 @@ def test_e2e_reject_skipped_below_four_frames(tmp_path):
     )
 
 
-# --- affordability of an AUTO-enabled rejection --------------------------------
+# --- affordability of an UNATTENDED rejection ----------------------------------
 #
 # The walk-away chain turns ``drizzle_reject`` on for the user (``_stack_target``,
 # alongside ``auto_reject``). The pass holds ~7 full-canvas planes against the
@@ -479,7 +481,11 @@ def test_e2e_reject_skipped_below_four_frames(tmp_path):
 # picture yesterday into a hard MemoryError refusal, unattended, with nobody there
 # to lower the drizzle scale. ``_afford_drizzle_reject`` declines a rejection the
 # budget can't take, so the run proceeds exactly as it did before the pass was ever
-# auto-enabled. An *explicit* tick still refuses loudly: that user is watching.
+# auto-enabled. A run somebody is *watching* still refuses loudly.
+#
+# The posture is ``options.unattended`` (v0.281.0), not ``auto_reject``: the Stack
+# form seeds ``auto_reject=True`` for a never-configured target, so reading it as
+# "unattended" quietly degraded a beginner who was sitting right there.
 
 
 def _budget_between_passes_gb(shape, scale=1.0):
@@ -494,20 +500,21 @@ def _budget_between_passes_gb(shape, scale=1.0):
     return (single + two) / 2 / 1e9
 
 
-def test_afford_declines_auto_reject_that_busts_the_budget():
+def test_afford_declines_an_unattended_reject_that_busts_the_budget():
     from seestack.stack import stacker as st
 
     shape = (2000, 3000)
-    auto = StackOptions(drizzle=True, drizzle_reject=True, auto_reject=True)
+    auto = StackOptions(drizzle=True, drizzle_reject=True, auto_reject=True,
+                        unattended=True)
     gb = _budget_between_passes_gb(shape)
     assert st._afford_drizzle_reject(auto, 20, shape, gb) is False
     # Room for both passes → the rejection is taken.
     assert st._afford_drizzle_reject(auto, 20, shape, gb * 4) is True
 
 
-def test_afford_passes_an_explicit_tick_through_to_the_loud_refusal():
-    """An explicitly chosen rejection is never quietly downgraded — the user is
-    watching and the refusal names a fix they can act on."""
+def test_afford_passes_a_watched_run_through_to_the_loud_refusal():
+    """A run somebody is watching is never quietly downgraded — they can act on
+    the fix the refusal names."""
     from seestack.stack import stacker as st
 
     shape = (2000, 3000)
@@ -519,6 +526,25 @@ def test_afford_passes_an_explicit_tick_through_to_the_loud_refusal():
                                drizzle_reject=True, memory_budget_gb=gb)
 
 
+def test_afford_reads_the_posture_not_auto_reject():
+    """The divergence this closes: ``get_stack_defaults`` seeds ``auto_reject=True``
+    into the *manual* Stack form for a never-configured target, so a beginner
+    sitting right there posts it. Reading ``auto_reject`` as "nobody is watching"
+    silently dropped the rejection they explicitly ticked, instead of handing them
+    the one-line fix. The posture — and only the posture — decides."""
+    from seestack.stack import stacker as st
+
+    shape = (2000, 3000)
+    gb = _budget_between_passes_gb(shape)
+    watched = StackOptions(drizzle=True, drizzle_reject=True, auto_reject=True)
+    assert watched.unattended is False           # the form never sets it
+    assert st._afford_drizzle_reject(watched, 20, shape, gb) is True
+    # …and the walk-away run, which sets no rejection preference of its own
+    # beyond what the chain merged, is the one that degrades.
+    walk_away = replace(watched, unattended=True)
+    assert st._afford_drizzle_reject(walk_away, 20, shape, gb) is False
+
+
 def test_afford_never_hides_a_canvas_that_does_not_fit_either():
     """Only the extra rejection planes are forgiven. When even the single pass is
     over budget the guard must still refuse — with the numbers of the run that
@@ -526,7 +552,7 @@ def test_afford_never_hides_a_canvas_that_does_not_fit_either():
     from seestack.stack import stacker as st
 
     shape = (2000, 3000)
-    auto = StackOptions(drizzle=True, drizzle_reject=True, auto_reject=True)
+    auto = StackOptions(drizzle=True, drizzle_reject=True, unattended=True)
     single, _ = st._estimate_peak_bytes(shape, drizzle=True, drizzle_scale=1.0,
                                         drizzle_reject=False)
     tiny_gb = single / 2 / 1e9
@@ -541,12 +567,12 @@ def test_afford_folds_in_the_frame_floor_and_the_off_case():
     from seestack.stack import stacker as st
 
     shape = (100, 100)
-    auto = StackOptions(drizzle=True, drizzle_reject=True, auto_reject=True)
+    auto = StackOptions(drizzle=True, drizzle_reject=True, unattended=True)
     assert st._afford_drizzle_reject(auto, 3, shape, 64.0) is False   # n < 4
     assert st._afford_drizzle_reject(auto, 4, shape, 64.0) is True
-    off = StackOptions(drizzle=True, drizzle_reject=False, auto_reject=True)
+    off = StackOptions(drizzle=True, drizzle_reject=False, unattended=True)
     assert st._afford_drizzle_reject(off, 20, shape, 64.0) is False
-    no_drizzle = StackOptions(drizzle=False, drizzle_reject=True, auto_reject=True)
+    no_drizzle = StackOptions(drizzle=False, drizzle_reject=True, unattended=True)
     assert st._afford_drizzle_reject(no_drizzle, 20, shape, 64.0) is False
 
 
@@ -568,15 +594,19 @@ def test_e2e_unattended_stack_still_produces_a_picture_when_reject_wont_fit(tmp_
     try:
         est = estimate_stack(proj, StackOptions(**base))
         gb = _budget_between_passes_gb((est.canvas_h, est.canvas_w))
-        # An explicit tick on this budget is refused — that is today's behaviour
-        # and it stays, because the user who ticked it is watching.
+        # A watched run on this budget is refused — that is today's behaviour and
+        # it stays, because the user who submitted it can act on the advice. This
+        # is the *manual Stack form* shape: the seeded ``auto_reject=True`` a
+        # never-configured target posts must NOT buy it a silent degrade.
         with pytest.raises(MemoryError, match="outlier rejection"):
-            run_stack(proj, StackOptions(drizzle_reject=True, **base),
+            run_stack(proj, StackOptions(drizzle_reject=True, auto_reject=True,
+                                         **base),
                       memory_budget_gb=gb)
-        # The unattended shape of the same request (auto_reject on, as the
-        # walk-away chain sets it) produces the picture instead.
+        # The unattended shape of the same request (as the walk-away chain sets
+        # it) produces the picture instead.
         res = run_stack(
-            proj, StackOptions(drizzle_reject=True, auto_reject=True, **base),
+            proj, StackOptions(drizzle_reject=True, auto_reject=True,
+                               unattended=True, **base),
             memory_budget_gb=gb)
         assert res.fits_path.exists()
         assert res.n_frames_used == 8
@@ -587,12 +617,16 @@ def test_e2e_unattended_stack_still_produces_a_picture_when_reject_wont_fit(tmp_
         # The pre-run estimate agrees with what the run did: no phantom warning
         # about planes the run would decline to allocate.
         est_auto = estimate_stack(
-            proj, StackOptions(drizzle_reject=True, auto_reject=True, **base),
+            proj, StackOptions(drizzle_reject=True, auto_reject=True,
+                               unattended=True, **base),
             memory_budget_gb=gb)
         assert est_auto.would_exceed is False
-        # …while the explicit request's estimate still warns, matching its refusal.
+        # …while the watched request's estimate still warns, matching its refusal
+        # — so the Stack form's pre-submit warning and the run now agree for the
+        # beginner whose form carries the seeded ``auto_reject``.
         est_explicit = estimate_stack(
-            proj, StackOptions(drizzle_reject=True, **base), memory_budget_gb=gb)
+            proj, StackOptions(drizzle_reject=True, auto_reject=True, **base),
+            memory_budget_gb=gb)
         assert est_explicit.would_exceed is True
         # Sanity: the affordable budget really does run the pass.
         big = st._estimate_peak_bytes(
@@ -600,6 +634,7 @@ def test_e2e_unattended_stack_still_produces_a_picture_when_reject_wont_fit(tmp_
             drizzle_reject=True)[0] * 4 / 1e9
         res_ok = run_stack(
             proj, StackOptions(drizzle_reject=True, auto_reject=True,
+                               unattended=True,
                                **{**base, "output_name": "afford_ok"}),
             memory_budget_gb=big)
         with fits.open(res_ok.fits_path) as hdul:
@@ -622,6 +657,7 @@ def test_a_non_drizzle_run_carrying_drizzle_reject_is_left_alone(tmp_path):
     try:
         res = run_stack(proj, StackOptions(
             drizzle=False, drizzle_reject=True, auto_reject=True,
+            unattended=True,
             background_flatten=False, suppress_hot_pixels=False,
             max_workers=2, output_name="nodz",
         ), memory_budget_gb=1.0)
@@ -630,5 +666,161 @@ def test_a_non_drizzle_run_carrying_drizzle_reject_is_left_alone(tmp_path):
         assert "DRZREJSK" not in hdr
         assert hdr["STACKER"] != "drizzle"
         assert hdr["REJMODE"]  # auto_reject still resolved to a real method
+    finally:
+        proj.close()
+
+
+# --- an unattended run whose CANVAS won't fit ----------------------------------
+#
+# Declining the rejection pass above only frees its extra planes. When even the
+# single pass's canvas busts the budget, the guard refuses the whole run. That is
+# right for a watching user — the refusal names the one lever that would fit and
+# they click it — but at 3 a.m. nobody reads it, so a target that made a picture
+# yesterday just stops. On an unattended run the engine now takes the lever it
+# already computed: a smaller super-resolution scale. A picture at ×1.3 beats no
+# picture, and the header says what it did.
+
+
+def _budget_between_scales_gb(shape, low, high):
+    """A budget (GB) fitting single-pass drizzle at ``low`` but not at ``high``."""
+    from seestack.stack import stacker as st
+
+    lo, _ = st._estimate_peak_bytes(shape, drizzle=True, drizzle_scale=low,
+                                    drizzle_reject=False)
+    hi, _ = st._estimate_peak_bytes(shape, drizzle=True, drizzle_scale=high,
+                                    drizzle_reject=False)
+    assert lo < hi
+    return (lo + hi) / 2 / 1e9
+
+
+def test_e2e_unattended_stack_lowers_the_drizzle_scale_instead_of_refusing(tmp_path):
+    """The gap this closes: an over-budget *canvas* on the walk-away path used to
+    raise MemoryError with advice nobody was there to read, so the target silently
+    stopped producing pictures. It must now produce one at the largest scale that
+    fits — and a watched run must still get the actionable refusal."""
+    from astropy.io import fits
+
+    from seestack.stack.stacker import estimate_stack
+
+    spec = [{"seed": 7, "noise_seed": 700 + i, "n_stars": 8} for i in range(6)]
+    base = dict(drizzle=True, drizzle_pixfrac=1.0, background_flatten=False,
+                suppress_hot_pixels=False, max_workers=2)
+
+    proj = _build_project(tmp_path / "degrade", [dict(s) for s in spec])
+    try:
+        est = estimate_stack(proj, StackOptions(drizzle_scale=1.0, **base))
+        shape = (est.canvas_h, est.canvas_w)
+        gb = _budget_between_scales_gb(shape, 1.0, 2.0)
+
+        # Watched: refused, with the concrete lever named. Unchanged behaviour.
+        with pytest.raises(MemoryError, match="lower the drizzle scale"):
+            run_stack(proj, StackOptions(drizzle_scale=2.0, output_name="watched",
+                                         **base),
+                      memory_budget_gb=gb)
+
+        # Unattended: a picture instead, at a scale that fits.
+        res = run_stack(
+            proj, StackOptions(drizzle_scale=2.0, unattended=True,
+                               output_name="walkaway", **base),
+            memory_budget_gb=gb)
+        assert res.fits_path.exists()
+        assert res.n_frames_used == 6
+        with fits.open(res.fits_path) as hdul:
+            hdr = hdul[0].header
+            data = hdul[0].data
+        applied = float(hdr["DRZSCLAD"])
+        assert hdr["DRZSCLRQ"] == pytest.approx(2.0)   # what was asked for
+        assert 1.0 <= applied < 2.0                    # …and what actually ran
+        # The picture really is at the applied scale, not the requested one.
+        assert data.shape[-2:] == (round(shape[0] * applied),
+                                   round(shape[1] * applied))
+        # …and it genuinely fits the budget it was degraded to fit.
+        from seestack.stack import stacker as st
+        need, _ = st._estimate_peak_bytes(shape, drizzle=True,
+                                          drizzle_scale=applied,
+                                          drizzle_reject=False)
+        assert need <= gb * 1e9
+        # The run record persists the scale that ran, so a later reprocess
+        # rebuilds the same picture rather than re-hitting the same refusal.
+        for run in proj.iter_stack_runs():
+            if run.output_basename == "walkaway":
+                import json as _json
+                assert _json.loads(run.options_json)["drizzle_scale"] == applied
+                break
+        else:  # pragma: no cover — the run must be there
+            raise AssertionError("no stack run recorded for the walk-away stack")
+    finally:
+        proj.close()
+
+
+def test_a_run_that_fits_is_never_degraded_and_stamps_nothing(tmp_path):
+    """The self-hiding half: on a healthy budget an unattended run must be
+    byte-for-byte the run it is today — the requested scale, and no card."""
+    from astropy.io import fits
+
+    spec = [{"seed": 7, "noise_seed": 800 + i, "n_stars": 8} for i in range(6)]
+    proj = _build_project(tmp_path / "fits_fine", [dict(s) for s in spec])
+    try:
+        res = run_stack(proj, StackOptions(
+            drizzle=True, drizzle_scale=1.0, drizzle_pixfrac=1.0,
+            unattended=True, background_flatten=False,
+            suppress_hot_pixels=False, max_workers=2, output_name="fine",
+        ), memory_budget_gb=64.0)
+        with fits.open(res.fits_path) as hdul:
+            hdr = hdul[0].header
+        assert "DRZSCLAD" not in hdr
+        assert "DRZSCLRQ" not in hdr
+    finally:
+        proj.close()
+
+
+def test_unattended_still_refuses_when_even_unity_scale_will_not_fit(tmp_path):
+    """Only a canvas a *smaller scale* can rescue is degraded. When even ×1.0 is
+    over budget there is no honest picture to make, so the guard must still refuse
+    rather than quietly producing something the box cannot hold."""
+    spec = [{"seed": 7, "noise_seed": 900 + i, "n_stars": 8} for i in range(4)]
+    proj = _build_project(tmp_path / "hopeless", [dict(s) for s in spec])
+    try:
+        from seestack.stack.stacker import estimate_stack
+
+        est = estimate_stack(proj, StackOptions(
+            drizzle=True, drizzle_scale=1.0, drizzle_pixfrac=1.0,
+            background_flatten=False, suppress_hot_pixels=False,
+            max_workers=2, output_name="hopeless"))
+        from seestack.stack import stacker as st
+        unity, _ = st._estimate_peak_bytes((est.canvas_h, est.canvas_w),
+                                           drizzle=True, drizzle_scale=1.0,
+                                           drizzle_reject=False)
+        with pytest.raises(MemoryError, match="working memory"):
+            run_stack(proj, StackOptions(
+                drizzle=True, drizzle_scale=1.5, drizzle_pixfrac=1.0,
+                unattended=True, background_flatten=False,
+                suppress_hot_pixels=False, max_workers=2,
+                output_name="hopeless",
+            ), memory_budget_gb=unity / 2 / 1e9)
+    finally:
+        proj.close()
+
+
+def test_a_non_drizzle_unattended_run_is_never_rescaled(tmp_path):
+    """The degrade is a drizzle-only lever. A non-drizzle unattended run over
+    budget must still refuse (its fixes are different levers), and a healthy one
+    must carry no card."""
+    spec = [{"seed": 7, "noise_seed": 950 + i, "n_stars": 8} for i in range(4)]
+    proj = _build_project(tmp_path / "nodz_unattended", [dict(s) for s in spec])
+    try:
+        from astropy.io import fits
+
+        res = run_stack(proj, StackOptions(
+            drizzle=False, unattended=True, background_flatten=False,
+            suppress_hot_pixels=False, max_workers=2, output_name="plain",
+        ), memory_budget_gb=64.0)
+        with fits.open(res.fits_path) as hdul:
+            assert "DRZSCLAD" not in hdul[0].header
+        with pytest.raises(MemoryError, match="working memory"):
+            run_stack(proj, StackOptions(
+                drizzle=False, unattended=True, background_flatten=False,
+                suppress_hot_pixels=False, max_workers=2, output_name="plain2",
+            ), memory_budget_gb=0.000001)
     finally:
         proj.close()
