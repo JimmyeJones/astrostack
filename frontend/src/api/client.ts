@@ -2294,6 +2294,11 @@ export const api = {
   recapPosterUrl: () => `/api/recap.jpg`,
   galleryMontageUrl: (limit?: number) =>
     `/api/gallery/montage.jpg${limit ? `?limit=${limit}` : ""}`,
+  // "Download all my pictures": every finished target picture as one .zip —
+  // the same wall `getGalleryBest` lists, as files. A href/download, not a
+  // fetch, so the browser streams it straight to disk.
+  galleryBestZipUrl: (limit?: number) =>
+    `/api/gallery/best.zip${limit != null ? `?limit=${limit}` : ""}`,
 
   // "Try it with a sample image" onboarding demo
   getSampleStatus: () => req<SampleStatus>("/api/sample"),

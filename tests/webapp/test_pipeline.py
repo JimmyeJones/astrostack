@@ -461,3 +461,54 @@ def test_auto_edit_crops_by_default_on_an_unchanged_install(
     body = _wait_job(client, r.json()["job_id"], timeout=120)
     assert body["state"] == "done", body
     assert seen == [True], seen
+
+
+# --------------------------------------------------------------------------
+# `POST /api/scan` confines its client-supplied root to the incoming folder.
+# --------------------------------------------------------------------------
+
+def test_scan_rejects_a_root_outside_the_incoming_folder(client, tmp_path):
+    """The one ingest endpoint that took a raw filesystem path now confines it.
+
+    Every other ingest/target route resolves server-side (a DB ``safe_name``
+    lookup, or the upload router's ``confined_dest``); this one handed
+    ``ScanRequest.root`` straight to the scanner, so a client could register any
+    server-readable directory's FITS into the Library. Defence in depth — the
+    scan only reads — but the posture should be uniform.
+    """
+    outside = tmp_path / "somewhere-else"
+    outside.mkdir()
+    r = client.post("/api/scan", json={"root": str(outside)})
+    assert r.status_code == 400
+    assert "incoming" in r.json()["detail"].lower()
+
+    # ...and traversal back out of the incoming folder is caught too, since the
+    # check is on the *resolved* path rather than the string.
+    r = client.post("/api/scan", json={"root": "../../etc"})
+    assert r.status_code == 400
+
+
+def test_scan_still_accepts_a_folder_inside_incoming(client, data_root):
+    """The legitimate use — rescan just one drop folder — keeps working, and a
+    relative root is read as relative to the incoming folder."""
+    from synth import write_seestar_fits
+
+    drop = data_root / "incoming" / "night1" / "M_99"
+    drop.mkdir(parents=True)
+    for i in range(3):
+        write_seestar_fits(
+            drop / f"frame_{i:03d}.fit", width=480, height=320, n_stars=30,
+            seed=300 + i, add_wcs=True, ra_center_deg=83.6, dec_center_deg=-5.0)
+
+    # Absolute path under incoming/ → accepted, and only that drop is ingested.
+    r = client.post("/api/scan", json={"root": str(data_root / "incoming" / "night1")})
+    assert r.status_code == 200
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+    names = {t["safe_name"] for t in client.get("/api/targets").json()}
+    assert "M_99" in names and "M_42" not in names
+
+    # ...and a relative root means "inside incoming/", not the server's cwd.
+    r = client.post("/api/scan", json={"root": "M_42"})
+    assert r.status_code == 200
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+    assert client.get("/api/targets/Unsorted/frames").json()

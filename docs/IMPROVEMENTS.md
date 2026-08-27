@@ -8265,11 +8265,28 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **IMPROVEMENT IDEA (Scout QA audit 2026-08-27 #16, secondary finding — hardening, low severity) — `POST
+- ~~**IMPROVEMENT IDEA (Scout QA audit 2026-08-27 #16, secondary finding — hardening, low severity) — `POST
   /api/scan` accepts a raw client-supplied filesystem `root` and scans/ingests from it unconfined, the one
-  ingest endpoint that isn't confined to `incoming/`.** *(Pillar: friendliness / security posture — PRIORITY 3.
-  Size: S — one confinement check + a test. Not a data-loss bug: the scan is read-only over the source and this
-  is a local single-user app, so severity is low; filed as defence-in-depth, not urgent.)*
+  ingest endpoint that isn't confined to `incoming/`.**~~ — **SHIPPED v0.284.5** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-5du96e`). *(Pillar: friendliness / security posture — PRIORITY 3.)*
+
+  **What shipped.** A new `confined_scan_root(settings, root)` in `webapp/routers/pipeline.py` resolves a
+  client-supplied `root` and confirms it stays inside `Settings.resolved_incoming_dir` (equal to it, or under
+  it), raising a plain-language 400 otherwise — so the posture now matches every other ingest path. Two details
+  worth knowing: the check is on the **resolved** path, so a traversal string (`../../etc`) is caught along with
+  an absolute one; and a **relative** root is now read as relative to the incoming folder rather than the
+  server's working directory, which is the only tree it could legally name anyway. **Grepped first, as the entry
+  asked:** the only caller in the app is `api.scan()` in `frontend/src/api/client.ts`, which posts `{}` and never
+  sends a `root` — so nothing legitimate was passing an out-of-tree path and no allow-list was needed. Omitting
+  `root` still means "all of incoming/", unchanged.
+
+  **Upgrade-safe (§9):** no config/schema/on-disk/API-shape change (the field still exists and still accepts
+  every path it could legitimately name); `incoming/` stays strictly read-only. **Tests (+2 in
+  `tests/webapp/test_pipeline.py`, the rejection one fails before / passes after):** an out-of-tree root and a
+  traversal string are both 400s; a real sub-folder of `incoming/` still scans and ingests only that drop, and a
+  relative root resolves inside incoming rather than the cwd.
+
+  Original entry:
   **Where:** `webapp/routers/pipeline.py` (`/api/scan`) → `ScanRequest.root: str | None` (`webapp/schemas.py`)
   is passed straight to `scan_and_organize(lib, scan_root, ...)`. Every *other* ingest/target endpoint resolves
   through a DB `safe_name` lookup and is traversal-safe; this one takes an arbitrary server-readable directory,

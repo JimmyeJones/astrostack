@@ -1,8 +1,9 @@
 import { useState } from "react";
 import {
-  Badge, Card, Center, Group, Image, Loader, SimpleGrid, Stack, Text, Title, Tooltip,
+  Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid, Stack, Text, Title,
+  Tooltip,
 } from "@mantine/core";
-import { IconSparkles, IconStarFilled } from "@tabler/icons-react";
+import { IconDownload, IconSparkles, IconStarFilled } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type BestPicture } from "../api/client";
@@ -90,6 +91,25 @@ export function BestPicturesView() {
         {items.length > 0 ? (
           <Tooltip label="Your finest finished stacks across every target, picked automatically by total integration time, cleanliness, and frame count.">
             <Badge variant="light">{items.length}</Badge>
+          </Tooltip>
+        ) : null}
+        {/* The whole wall as files, in one tap. Until now the only way to get
+            these pictures out was to open each target and download it, which is
+            twenty presses for one season — so backing the collection up, or
+            dropping it into a phone album, was more work than it should be. */}
+        {items.length > 0 ? (
+          <Tooltip
+            label={`Saves all ${items.length} pictures as one .zip, each named after `
+              + "its target — handy for backing them up or posting a batch."}
+            multiline w={280}
+          >
+            <Button
+              size="xs" variant="light" ml="auto"
+              leftSection={<IconDownload size={14} />}
+              component="a" href={api.galleryBestZipUrl()} download
+            >
+              {`Download all (${items.length})`}
+            </Button>
           </Tooltip>
         ) : null}
       </Group>

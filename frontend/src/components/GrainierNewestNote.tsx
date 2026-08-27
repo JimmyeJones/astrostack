@@ -4,6 +4,7 @@ import { IconCloud, IconStarFilled } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { formatStampDate } from "../format";
+import { grainierGap } from "./grainierNewest";
 
 /**
  * "Last night's stack came out grainier than an earlier one — show that instead?"
@@ -63,12 +64,13 @@ export function GrainierNewestNote({ safe }: { safe: string }) {
   // Say *why* only when the frame counts actually explain it; otherwise the
   // honest answer is "the sky was probably worse", not a number we don't have.
   const thinner = g.newest_n_frames_used < g.n_frames_used;
+  const gap = grainierGap(g.percent_grainier);
   return (
     <Alert color="yellow" variant="light" icon={<IconCloud size={18} />}
       title="Your newest stack came out grainier than an earlier one"
       data-testid="grainier-newest-note">
       <Text size="sm">
-        {`It has about ${g.percent_grainier}% more background grain than your `}
+        {`It has ${gap.amount} ${gap.joiner} your `}
         {when ? `${when} ` : "earlier "}
         {"stack"}
         {thinner

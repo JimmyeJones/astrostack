@@ -81,4 +81,19 @@ describe("GrainierNewestNote", () => {
     await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(screen.queryByTestId("grainier-newest-note")).toBeNull();
   });
+  it("says a huge gap as a multiple, so the sentence still reads as a quantity",
+     async () => {
+    // A manual restack of a handful of subs against a 500-sub master. "about
+    // 2400% more grain" is arithmetically right and reads as a bug — in a note
+    // whose whole job is to look trustworthy when the picture got worse.
+    vi.spyOn(client.api, "grainierNewest")
+      .mockResolvedValue({ ...NUDGE, percent_grainier: 2400 });
+    renderNote();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("grainier-newest-note")).toBeInTheDocument());
+    expect(screen.getByText(/about 25.0× as much background grain as your/))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/2400%/)).toBeNull();
+  });
 });

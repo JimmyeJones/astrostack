@@ -78,4 +78,21 @@ describe("BestPicturesView", () => {
     await waitFor(() => expect(screen.getByText("M42")).toBeInTheDocument());
     expect(screen.queryByText("Pinned")).not.toBeInTheDocument();
   });
+  it("offers the whole wall as one download, and hides it when empty", async () => {
+    vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
+      items: [pic({ safe: "m31", run_id: 1 }), pic({ safe: "m42", target_name: "M42", run_id: 2 })],
+    });
+    renderWall();
+    const link = await screen.findByRole("link", { name: /download all \(2\)/i });
+    expect(link).toHaveAttribute("href", "/api/gallery/best.zip");
+    expect(link).toHaveAttribute("download");
+  });
+
+  it("offers no bulk download when there are no pictures yet", async () => {
+    vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({ items: [] });
+    renderWall();
+    await waitFor(() =>
+      expect(screen.getByText(/your best pictures will gather here/i)).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /download all/i })).not.toBeInTheDocument();
+  });
 });

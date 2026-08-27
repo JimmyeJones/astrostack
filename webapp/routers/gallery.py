@@ -390,25 +390,15 @@ def _representative_run(runs: list[Any], cover_run_id: int | None) -> tuple[Any,
     return next((r for r in runs if _run_has_preview(r)), None), False
 
 
-@router.get("/api/gallery/best", response_model=BestPicturesResponse)
-def get_best_pictures(
-    request: Request,
-    limit: int = Query(BEST_PICTURES_MAX, ge=1, le=BEST_PICTURES_MAX),
-) -> BestPicturesResponse:
-    """Auto-curated cross-target portfolio: one *finished* stack per target,
-    ranked best-first by the transparent quality blend
-    (:func:`seestack.portfolio.rank_portfolio`). Read-only aggregation over the
-    Library — no schema/state change. Self-hides (empty list) until at least
-    :data:`BEST_PICTURES_MIN` targets have a finished picture, so a brand-new
-    install shows nothing rather than a wall of one.
+def _collect_best_pictures(
+    request: Request, limit: int,
+) -> list[tuple[BestPicture, str]]:
+    """The ranked wall, each entry paired with its preview file's path on disk.
 
-    A target's representative is the run the user **pinned as its cover** ("Set as
-    cover" in History) when there is one and its preview still exists, otherwise
-    its newest run with a preview — the same precedence the Library/Dashboard tile
-    already uses, so the picture someone chose to represent a target represents it
-    on this wall too instead of being silently replaced by the newest stack. A
-    pinned entry is also floated above the ranked tail, so the automatic ranking
-    can never drop the one picture they said was their favourite."""
+    Split out of :func:`get_best_pictures` so the bulk `.zip` download can archive
+    **exactly** the pictures the wall shows, from one definition of "this target's
+    picture" — the path never leaves the server (the JSON response drops it).
+    """
     from seestack.io.project import Project
     from seestack.portfolio import PortfolioEntry, rank_portfolio
 
@@ -416,6 +406,7 @@ def get_best_pictures(
     # preview on disk), keyed so the ranker's result maps straight back to the
     # full record.
     by_key: dict[str, BestPicture] = {}
+    paths: dict[str, str] = {}
     entries: list[PortfolioEntry] = []
 
     lib = deps.open_library(request)
@@ -458,6 +449,7 @@ def get_best_pictures(
                     score=0.0,  # filled in from the ranking below
                     pinned=pinned,
                 )
+                paths[key] = str(pick.preview_path)
                 entries.append(PortfolioEntry(
                     key=key,
                     n_frames_used=pick.n_frames_used,
@@ -474,14 +466,184 @@ def get_best_pictures(
 
     # Not enough finished pictures to curate → self-hide.
     if len(by_key) < BEST_PICTURES_MIN:
-        return BestPicturesResponse(items=[])
+        return []
 
     ranked = rank_portfolio(entries, limit=limit)
-    items: list[BestPicture] = []
-    for r in ranked:
-        pic = by_key[r.key]
-        items.append(pic.model_copy(update={"score": r.score}))
-    return BestPicturesResponse(items=items)
+    return [
+        (by_key[r.key].model_copy(update={"score": r.score}), paths[r.key])
+        for r in ranked
+    ]
+
+
+@router.get("/api/gallery/best", response_model=BestPicturesResponse)
+def get_best_pictures(
+    request: Request,
+    limit: int = Query(BEST_PICTURES_MAX, ge=1, le=BEST_PICTURES_MAX),
+) -> BestPicturesResponse:
+    """Auto-curated cross-target portfolio: one *finished* stack per target,
+    ranked best-first by the transparent quality blend
+    (:func:`seestack.portfolio.rank_portfolio`). Read-only aggregation over the
+    Library — no schema/state change. Self-hides (empty list) until at least
+    :data:`BEST_PICTURES_MIN` targets have a finished picture, so a brand-new
+    install shows nothing rather than a wall of one.
+
+    A target's representative is the run the user **pinned as its cover** ("Set as
+    cover" in History) when there is one and its preview still exists, otherwise
+    its newest run with a preview — the same precedence the Library/Dashboard tile
+    already uses, so the picture someone chose to represent a target represents it
+    on this wall too instead of being silently replaced by the newest stack. A
+    pinned entry is also floated above the ranked tail, so the automatic ranking
+    can never drop the one picture they said was their favourite."""
+    return BestPicturesResponse(
+        items=[pic for pic, _ in _collect_best_pictures(request, limit)])
+
+
+# Characters an archive member name may keep. Everything else becomes "_", so a
+# target called "M 42 / Orion" can't write outside the folder it's unzipped into,
+# on any operating system.
+_ZIP_NAME_OK = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,-_()+'")
+
+
+def zip_entry_name(target_name: str, suffix: str, taken: set[str]) -> str:
+    """A friendly, safe, unique archive member name for one target's picture.
+
+    Named for the *target*, not the run — an archive of "M 42.png, NGC 7000.png"
+    is the one a beginner can drop straight into a phone album, where
+    "M_42_20260814_213355.png" is not. Kept ASCII-safe and separator-free so
+    unzipping can never write outside the destination folder, and de-duplicated
+    (``… (2)``) so two targets that sanitise to the same name can't have one
+    silently overwrite the other. ``taken`` is updated in place.
+    """
+    cleaned = "".join(c if c in _ZIP_NAME_OK else "_" for c in target_name).strip()
+    # A name that is only dots (or empty) is not a filename on any platform.
+    base = cleaned.strip(".") or "picture"
+    name = f"{base}{suffix}"
+    n = 2
+    while name.lower() in taken:
+        name = f"{base} ({n}){suffix}"
+        n += 1
+    taken.add(name.lower())
+    return name
+
+
+class _ZipSink:
+    """A write-only file object :mod:`zipfile` can stream into.
+
+    ``ZipFile`` supports an unseekable output stream (it falls back to data
+    descriptors), so the archive can be handed out chunk by chunk instead of
+    being built in memory or spooled to disk first — which matters here because
+    the members are full-resolution previews and a library can hold dozens.
+    """
+
+    def __init__(self) -> None:
+        self._buf = bytearray()
+
+    def write(self, data) -> int:
+        self._buf += data
+        return len(data)
+
+    def flush(self) -> None:  # pragma: no cover — required by the file protocol
+        pass
+
+    def drain(self) -> bytes:
+        out = bytes(self._buf)
+        del self._buf[:]
+        return out
+
+
+def _stream_pictures_zip(members: list[tuple[str, str]]):
+    """Yield a ``.zip`` of ``(archive name, source path)`` pairs, one chunk at a
+    time — never more than one read buffer plus the zip's own bookkeeping in
+    memory.
+
+    Stored, not deflated: every member is an already-compressed PNG, so
+    compressing again costs CPU on a NAS for no size win. A picture that can't be
+    read is skipped and named in a trailing ``_skipped.txt`` rather than sinking
+    the whole archive — the same boundary the gallery draws around one bad
+    preview.
+    """
+    import zipfile
+
+    chunk = 1 << 18
+    skipped: list[str] = []
+    sink = _ZipSink()
+    with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED) as zf:
+        for name, path in members:
+            try:
+                src = open(path, "rb")  # noqa: SIM115 — closed in the finally below
+            except OSError:
+                skipped.append(f"{name} — the picture file could not be opened")
+                continue
+            try:
+                with zf.open(name, "w") as dst:
+                    while True:
+                        try:
+                            data = src.read(chunk)
+                        except OSError:
+                            skipped.append(f"{name} — only partly readable")
+                            break
+                        if not data:
+                            break
+                        dst.write(data)
+                        yield sink.drain()
+            finally:
+                src.close()
+            yield sink.drain()
+        if skipped:
+            zf.writestr("_skipped.txt", (
+                "These pictures couldn't be read when this archive was made, so "
+                "they aren't in it:\n\n" + "\n".join(skipped) + "\n"))
+            yield sink.drain()
+    yield sink.drain()
+
+
+@router.get("/api/gallery/best.zip")
+def download_best_pictures_zip(
+    request: Request,
+    limit: int = Query(BEST_PICTURES_MAX, ge=1, le=BEST_PICTURES_MAX),
+):
+    """Download **every** finished picture in the library as one ``.zip``.
+
+    The app could already show the whole collection (the best-pictures wall) and
+    post it as one image (the montage), but the only way to actually *get* the
+    pictures was one target at a time — so backing a season's work up to a hard
+    drive, or dropping it all into a phone album, meant visiting twenty targets
+    and pressing download twenty times. Bulk *upload* has existed since v0.229.0;
+    this is the symmetric bulk download.
+
+    Exactly the wall's contents, from the same enumeration: one picture per
+    target (the pinned cover when there is one, else the newest finished stack),
+    ranked, capped at :data:`BEST_PICTURES_MAX`. Each member is the stored
+    display-space preview PNG — what you saw is what you get, with no re-render
+    and no editor recompute — named after its target.
+
+    Read-only: it opens existing result files and streams bytes out. Nothing is
+    written to the library, and ``incoming/`` is never touched. 404s (rather than
+    serving an archive of one) on a library too young for the wall, so the offer
+    self-hides exactly when the wall does.
+    """
+    from fastapi.responses import StreamingResponse
+
+    picks = _collect_best_pictures(request, limit)
+    if not picks:
+        raise HTTPException(
+            status_code=404,
+            detail="You need finished pictures of at least two targets to download.")
+
+    taken: set[str] = set()
+    members = [
+        (zip_entry_name(pic.target_name, Path(path).suffix or ".png", taken), path)
+        for pic, path in picks
+    ]
+    return StreamingResponse(
+        _stream_pictures_zip(members),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition":
+                'attachment; filename="my-astrostack-pictures.zip"',
+        },
+    )
 
 
 class UnexportedEditItem(BaseModel):
