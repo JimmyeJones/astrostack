@@ -8627,9 +8627,45 @@ to **Shipped**.)_
   field is the template for saying it out loud, though this one arguably needs no note at all: nothing about
   the picture the user can see has changed.
 
-- **NEW IDEA (Builder 2026-08-27, traced while building the v0.285.0 pictures zip) — the app has *two*
+- ~~**NEW IDEA (Builder 2026-08-27, traced while building the v0.285.0 pictures zip) — the app has *two*
   different answers to "which picture is this target's", and one of them can come up empty where the other
-  finds a picture. Make the fallback shared, not just the cover lookup.** *(Pillar: trust/consistency,
+  finds a picture. Make the fallback shared, not just the cover lookup.**~~ — **SHIPPED v0.287.1**
+  (Builder 2026-08-27, branch `claude/compassionate-galileo-j38hmo`). **Reproduced first, as the entry asked:**
+  registering an older picture and a newer one, then deleting the newer one's preview file (which is exactly
+  what deleting that run does — `storage.purge_stack_run` unlinks `preview_path`, and the library's stamp
+  update is `COALESCE(?, last_stack_preview)`, so it never clears), leaves `/api/gallery/best` showing the
+  target and the wall, the archive and the thumbnail dropping it.
+
+  **What shipped.** `targets.current_picture_path(lib, entry)` is now the one answer, in the order the app has
+  always meant: pinned cover → the stamped `last_stack_preview` **if its file is there** → the newest run that
+  still has a preview on disk. `_montage_tiles`, `_library_pictures` and `GET /api/targets/{safe}/thumbnail`
+  all use it; `/api/gallery/best` keeps its own `_representative_run` (it already walked the run list, and
+  works from runs already loaded).
+
+  **The second stop the trace missed.** The wall doesn't only look up a tile — `summarize_library`'s own hero
+  filter tests `last_stack_preview` too, so a stale-stamped target was dropped *there*, before the tile lookup
+  could fall back. `_montage_tiles` now resolves every target once and hands `summarize_library` rows carrying
+  the **resolved** path, which keeps that function pure and unchanged.
+
+  **Cost, which is why it stays off the list endpoints.** Step three costs one project open, and only for a
+  target whose stamp is stale — essentially never on a healthy library (pinned by a test that counts
+  `Library.open_target` calls across a whole `pictures.zip` and asserts **zero**). That is affordable on a
+  deliberate one-tap download; it would not be on a page render, so `TargetOut.has_preview`, the life-list and
+  the Dashboard tiles deliberately still stop at the stamped path — the resolver's docstring says so.
+  **Residual, filed rather than built:** those list endpoints can therefore still say "no picture" for a target
+  the wall and the archive now include. Closing it needs a *cheaper* boolean (one that skips the cover open,
+  which `current_picture_path` does first), not this resolver — worth doing only if the owner ever notices.
+
+  **Upgrade-safe (§9):** read-time resolution over files that already exist; no config, schema, on-disk, API
+  shape or default change, and the resolver is strictly a *superset* of what each caller found before.
+  **Tests (+4 in `tests/webapp/test_current_picture_fallback.py`, 1 fails before / passes after):** all four
+  surfaces answering with the same surviving picture (and the zip's count matching `best`'s); a pinned cover
+  still beating the surviving older run; a target with *no* surviving preview still dropping out of all three
+  (the fallback finds a picture, it must not invent one); and the zero-project-opens cost guard.
+
+  Original spec, for the record:
+
+  *(Pillar: trust/consistency,
   PRIORITY 3; size S; additive, read-only. Confidence: traced against the code — not yet reproduced through
   the UI, so verify before treating it as a bug.)*
   The **pinned-cover** half is properly shared (`targets._cover_preview_path`, used by the Library tile, the

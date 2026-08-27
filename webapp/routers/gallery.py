@@ -673,6 +673,8 @@ def _montage_tiles(request: Request, limit: int) -> tuple[list, float]:
     fine on a deliberate one-tap download (it is the same one ``/api/imaging-log``
     makes) and would not be on a page render.
     """
+    from dataclasses import replace as _replace
+
     from PIL import Image
 
     from seestack.library_summary import summarize_library
@@ -680,24 +682,32 @@ def _montage_tiles(request: Request, limit: int) -> tuple[list, float]:
 
     # Package-private helper, shared rather than re-implemented so the wall can
     # never disagree with the Library tile about which picture is a target's.
-    from webapp.routers.targets import _cover_preview_path
+    from webapp.routers.targets import current_picture_path
 
     lib = deps.open_library(request)
     try:
-        targets = list(lib.list_targets())
+        # Resolve each target's current picture once, then hand ``summarize_library``
+        # rows carrying the *resolved* path. Its hero filter tests
+        # ``last_stack_preview`` itself, so without this a target whose stamp has
+        # gone stale would be dropped there — before the lookup below ever got the
+        # chance to fall back — and the wall would disagree with the archive about
+        # which targets have a picture.
+        raw = list(lib.list_targets())
+        resolved = {t.safe_name: current_picture_path(lib, t) for t in raw}
+        targets = [
+            _replace(t, last_stack_preview=(
+                str(resolved[t.safe_name]) if resolved[t.safe_name] else None))
+            for t in raw
+        ]
         summary = summarize_library(
             targets, preview_exists=lambda p: bool(p) and Path(p).exists())
-        by_safe = {t.safe_name: t for t in targets}
         tiles: list[MontageTile] = []
         shown_s = 0.0
         for hero in summary.heroes:
             if len(tiles) >= limit:
                 break
-            entry = by_safe.get(hero.safe)
-            cover = _cover_preview_path(lib, entry) if entry is not None else None
-            path = cover if cover is not None else (
-                getattr(entry, "last_stack_preview", None) if entry else None)
-            if not path:
+            path = resolved.get(hero.safe)
+            if path is None:
                 continue
             try:
                 with Image.open(path) as img:
@@ -800,7 +810,7 @@ def _library_pictures(request: Request) -> list[tuple[str, Path]]:
     extension is appended gets a ``-2``/``-3`` suffix rather than silently
     overwriting a sibling entry.
     """
-    from webapp.routers.targets import _cover_preview_path
+    from webapp.routers.targets import current_picture_path
 
     lib = deps.open_library(request)
     try:
@@ -808,15 +818,11 @@ def _library_pictures(request: Request) -> list[tuple[str, Path]]:
         picks: list[tuple[str, Path]] = []
         used: dict[str, int] = {}
         for entry in entries:
-            cover = _cover_preview_path(lib, entry)
-            raw = cover if cover is not None else entry.last_stack_preview
-            if not raw:
-                continue
-            path = Path(raw)
-            try:
-                if not path.is_file():
-                    continue
-            except OSError:  # noqa: PERF203 — an unreachable mount must not 500
+            # Resolves the cover, then the stamped preview, then the newest run
+            # that still has one on disk — and swallows the unreachable-mount
+            # OSError that must never 500 a download.
+            path = current_picture_path(lib, entry)
+            if path is None:
                 continue
             stem = entry.safe_name or f"target-{entry.id}"
             name = f"{stem}{path.suffix}"

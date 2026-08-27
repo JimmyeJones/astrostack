@@ -911,6 +911,67 @@ def _cover_preview_path(lib, entry) -> Path | None:  # noqa: ANN001
     return path if path.exists() else None
 
 
+def _readable_file(raw: str | Path | None) -> Path | None:
+    """``raw`` as a path that is really there, or ``None``.
+
+    An unreachable mount raises rather than answering, and "I can't tell" has to
+    read as "not this one" here — every caller is choosing between candidates.
+    """
+    if not raw:
+        return None
+    path = Path(raw)
+    try:
+        return path if path.is_file() else None
+    except OSError:
+        return None
+
+
+def current_picture_path(lib, entry) -> Path | None:  # noqa: ANN001
+    """The one picture that **is** this target's, right now — or ``None``.
+
+    Three steps, in the order the app has always meant them: the run the user
+    pinned as the cover, then the library's stamped newest-stack preview, then —
+    only when that file is gone — the newest run that still has a preview on
+    disk.
+
+    That third step is the one that used to be missing from everything except
+    ``/api/gallery/best``. The stamped path can outlive its file (deleting a
+    target's newest run removes its preview and leaves the stamp behind), and a
+    caller that stopped at step two then dropped the target entirely while
+    ``best`` quietly stepped back to the previous run and still showed it — so
+    the same library read as N pictures on one screen and N−1 on another, with
+    nothing to explain the difference.
+
+    Costs one project open per target that needs step three, i.e. essentially
+    never on a healthy library — which is what makes it affordable on the
+    deliberate one-tap downloads that use it. It is deliberately *not* wired into
+    the per-render list endpoints for that reason (see ``TargetOut.has_preview``):
+    there, a library where many stamps went stale would pay N opens per page.
+    """
+    if entry is None:
+        return None
+    cover = _cover_preview_path(lib, entry)
+    if cover is not None:
+        return cover
+    stamped = _readable_file(getattr(entry, "last_stack_preview", None))
+    if stamped is not None:
+        return stamped
+    try:
+        proj = lib.open_target(entry.safe_name)
+    except Exception:  # noqa: BLE001 — a missing/broken project is just no picture
+        return None
+    try:
+        for run in proj.iter_stack_runs():  # newest first
+            found = _readable_file(getattr(run, "preview_path", None))
+            if found is not None:
+                return found
+    except Exception:  # noqa: BLE001 — an unreadable run list must not 500 a wall
+        return None
+    finally:
+        proj.close()
+    return None
+
+
 @router.get("/{safe}/thumbnail")
 def target_thumbnail(safe: str, request: Request) -> FileResponse:
     lib = deps.open_library(request)
@@ -918,13 +979,12 @@ def target_thumbnail(safe: str, request: Request) -> FileResponse:
         entry = lib.find_target(safe)
         if entry is None:
             raise HTTPException(status_code=404, detail="No preview")
-        # A pinned cover wins; otherwise show the newest stack's preview.
-        path = _cover_preview_path(lib, entry)
+        # A pinned cover wins; otherwise the newest stack's preview, and if that
+        # file has gone, the newest run that still has one — so deleting a
+        # target's newest run leaves a slightly older thumbnail rather than a
+        # broken image.
+        path = current_picture_path(lib, entry)
         if path is None:
-            if not entry.last_stack_preview:
-                raise HTTPException(status_code=404, detail="No preview")
-            path = Path(entry.last_stack_preview)
-        if not path.exists():
             raise HTTPException(status_code=404, detail="No preview")
         return FileResponse(path, media_type="image/png")
     finally:
