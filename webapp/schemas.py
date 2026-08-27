@@ -222,6 +222,28 @@ class CleanestShotOut(BaseModel):
     timestamp_utc: str
 
 
+class GrainierNewestOut(BaseModel):
+    """The newest stack — which, with nothing pinned, *is* the cover — came out
+    materially grainier than an earlier one the target already has.
+
+    The mirror of :class:`CleanestShotOut`, for the state a beginner is actually
+    in: nothing pinned, so the cover follows the newest stack and a hazy night's
+    restack silently demotes a better picture everywhere. Same one-tap
+    ``set-cover``, offering the earlier run instead; it never pins anything by
+    itself. ``null`` whenever there's nothing to say (see
+    :func:`seestack.covernudge.grainier_newest`).
+    """
+
+    run_id: int
+    newest_run_id: int
+    noise_sigma: float
+    newest_noise_sigma: float
+    percent_grainier: int
+    n_frames_used: int
+    newest_n_frames_used: int
+    timestamp_utc: str
+
+
 class SessionRecapOut(BaseModel):
     """Plain-language recap of a target's most recent capture session."""
 

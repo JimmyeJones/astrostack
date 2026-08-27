@@ -18,6 +18,14 @@ stack is *materially* cleaner than the cover — and by how much. It only ever
 same ``set-cover`` path they already have (AGENTS.md §9/§10: new behaviour is
 opt-in, never an auto-swap of something the user chose).
 
+:func:`grainier_newest` is the **mirror case**, for the state a beginner is
+actually in: with *nothing* pinned the cover simply follows the newest stack, so
+a hazy night's restack silently replaces a better picture with a grainier one on
+every showcase surface, with nothing said. Same shape, same one-tap ``set-cover``
+— it just offers the *earlier*, cleaner run instead. The two are mutually
+exclusive by construction (one needs a pin, the other needs none), so they can
+never both speak.
+
 Read-only and side-effect free, so it is safe to call on every page load.
 """
 
@@ -129,4 +137,97 @@ def cleanest_shot(
         n_frames_used=newest.n_frames_used,
         cover_n_frames_used=cover.n_frames_used,
         timestamp_utc=newest.timestamp_utc,
+    )
+
+
+@dataclass(frozen=True)
+class GrainierNewest:
+    """The newest stack — which, unpinned, *is* the cover — came out materially
+    grainier than an earlier one the target already has."""
+
+    #: The earlier, cleaner run we're offering to pin (the better picture).
+    run_id: int
+    #: The newest run, i.e. what every showcase surface is showing right now.
+    newest_run_id: int
+    #: Both runs' normalized background-noise σ (lower = cleaner).
+    noise_sigma: float
+    newest_noise_sigma: float
+    #: How much *more* background grain the newest one has, as a whole percent of
+    #: the better run's σ (e.g. 30 for "about 30 % more grain"). Always ≥ 1.
+    percent_grainier: int
+    #: How many frames each combined, so the UI can say *why* without guessing.
+    n_frames_used: int
+    newest_n_frames_used: int
+    #: When the better run was stacked (ISO UTC), for "your 14 May one".
+    timestamp_utc: str
+
+
+def grainier_newest(
+    genuine_runs: Sequence[StackRunRow],
+    cover_run_id: int | None,
+    *,
+    ratio: float = CLEANER_RATIO,
+) -> GrainierNewest | None:
+    """Should we offer to pin an earlier, cleaner stack as the cover?
+
+    The mirror of :func:`cleanest_shot`. With **nothing pinned** the cover follows
+    the newest stack, so a restack through haze — or one where auto-reject set a
+    lot of subs aside — quietly demotes a better picture on the Library tile, "My
+    best pictures" and the montage wall, and the app never mentions it. This spots
+    exactly that, and offers the same one-tap ``set-cover`` in the other
+    direction. It never pins anything by itself.
+
+    ``genuine_runs`` is the target's *genuine* stack runs, newest first (the
+    caller filters out editor-export / channel-combine runs, whose σ isn't
+    measured on the same kind of image). The run offered is the **cleanest**
+    earlier one, not merely the previous one.
+
+    Returns ``None`` — say nothing — whenever any of these hold:
+
+    * something *is* pinned (``cover_run_id`` is not ``None``): the cover is the
+      user's own choice and can't drift, which is :func:`cleanest_shot`'s case,
+      not this one;
+    * there is no earlier genuine run to fall back to;
+    * either run has no usable σ (pre-schema-6 runs, or a degenerate measure);
+    * the newest stack isn't materially grainier (the best earlier σ is above
+      ``ratio`` × the newest's) — including the common, happy case where the
+      newest is the cleanest the target has.
+    """
+    if cover_run_id is not None or not genuine_runs:
+        return None
+    newest = genuine_runs[0]
+    if newest.id is None:
+        return None
+    new_sigma = _usable_sigma(newest)
+    if new_sigma is None:
+        return None
+    # The best earlier run wins ties by recency: `min` keeps the first of equal
+    # sigmas and the list is newest-first, so a beginner is offered the most
+    # recent of two equally-clean pictures rather than the oldest.
+    best: StackRunRow | None = None
+    best_sigma: float | None = None
+    for run in genuine_runs[1:]:
+        if run.id is None or run.id == newest.id:
+            continue
+        sigma = _usable_sigma(run)
+        if sigma is None:
+            continue
+        if best_sigma is None or sigma < best_sigma:
+            best, best_sigma = run, sigma
+    if best is None or best_sigma is None or best.id is None:
+        return None
+    if best_sigma > new_sigma * ratio:
+        return None
+    # Round *down* so the headline never overstates how much worse it got, and
+    # floor at 1 % so a nudge that fired can't claim "0 % grainier".
+    percent = max(1, int((new_sigma / best_sigma - 1.0) * 100.0))
+    return GrainierNewest(
+        run_id=best.id,
+        newest_run_id=newest.id,
+        noise_sigma=best_sigma,
+        newest_noise_sigma=new_sigma,
+        percent_grainier=percent,
+        n_frames_used=best.n_frames_used,
+        newest_n_frames_used=newest.n_frames_used,
+        timestamp_utc=best.timestamp_utc,
     )

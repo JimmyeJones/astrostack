@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from seestack.covernudge import CLEANER_RATIO, cleanest_shot
+from seestack.covernudge import CLEANER_RATIO, cleanest_shot, grainier_newest
 from seestack.io.project import StackRunRow
 
 
@@ -100,3 +100,92 @@ def test_percent_never_reports_zero():
     shot = cleanest_shot([_run(2, sigma=0.01 * CLEANER_RATIO), _run(1, sigma=0.01)],
                          cover_run_id=1)
     assert shot is not None and shot.percent_cleaner >= 1
+
+
+# --- grainier_newest: the mirror case, where *nothing* is pinned -------------
+
+
+def test_grainier_newest_offers_the_cleanest_earlier_run():
+    """Unpinned, the cover follows the newest stack — so a hazy restack demotes a
+    better picture everywhere with nothing said. Say it, and offer the best
+    earlier run (not merely the previous one)."""
+    newest = _run(3, sigma=0.013, ts="2026-05-20T00:00:00Z", n_frames=22)
+    middling = _run(2, sigma=0.011, ts="2026-05-14T00:00:00Z", n_frames=40)
+    best = _run(1, sigma=0.010, ts="2026-05-01T00:00:00Z", n_frames=55)
+    nudge = grainier_newest([newest, middling, best], cover_run_id=None)
+    assert nudge is not None
+    assert nudge.run_id == 1 and nudge.newest_run_id == 3
+    assert nudge.n_frames_used == 55 and nudge.newest_n_frames_used == 22
+    assert nudge.timestamp_utc == "2026-05-01T00:00:00Z"
+    # 0.013/0.010 = 1.2999… → 29 % more grain: rounded DOWN, so the headline can
+    # only ever understate how much worse the newest picture got.
+    assert nudge.percent_grainier == 29
+
+
+def test_grainier_newest_is_silent_when_a_cover_is_pinned():
+    """A pinned cover is the user's own choice and cannot drift — that is
+    `cleanest_shot`'s case. The two must never both speak."""
+    runs = [_run(2, sigma=0.02), _run(1, sigma=0.01)]
+    assert grainier_newest(runs, cover_run_id=1) is None
+    assert cleanest_shot(runs, cover_run_id=None) is None
+
+
+def test_grainier_newest_is_silent_when_the_newest_is_the_cleanest():
+    """The happy, ordinary night: more subs, less grain, nothing to say."""
+    assert grainier_newest([_run(2, sigma=0.008), _run(1, sigma=0.011)],
+                           cover_run_id=None) is None
+
+
+def test_grainier_newest_ignores_a_marginally_grainier_night():
+    """A few percent is noise about noise; the threshold is the same one the
+    cleaner nudge uses, applied in the other direction."""
+    newest = _run(2, sigma=0.0105)
+    earlier = _run(1, sigma=0.0100)
+    assert grainier_newest([newest, earlier], cover_run_id=None) is None
+    # Exactly at the threshold fires; a hair under it does not.
+    at = _run(2, sigma=0.0100 / CLEANER_RATIO)
+    assert grainier_newest([at, earlier], cover_run_id=None) is not None
+    just_under = _run(2, sigma=0.0100 / CLEANER_RATIO - 1e-6)
+    assert grainier_newest([just_under, earlier], cover_run_id=None) is None
+
+
+def test_grainier_newest_needs_an_earlier_run():
+    assert grainier_newest([_run(1, sigma=0.02)], cover_run_id=None) is None
+    assert grainier_newest([], cover_run_id=None) is None
+
+
+@pytest.mark.parametrize("new_sigma,old_sigma", [
+    (None, 0.01),           # pre-schema-6 newest
+    (0.02, None),           # pre-schema-6 earlier run
+    (0.0, 0.01),            # degenerate measurement
+    (0.02, 0.0),
+    (float("nan"), 0.01),
+    (float("inf"), 0.01),
+])
+def test_grainier_newest_unusable_sigma_is_silent(new_sigma, old_sigma):
+    runs = [_run(2, sigma=new_sigma), _run(1, sigma=old_sigma)]
+    assert grainier_newest(runs, cover_run_id=None) is None
+
+
+def test_grainier_newest_skips_earlier_runs_without_a_usable_sigma():
+    """One pre-schema-6 run in the history must not silence the nudge — it just
+    isn't a candidate."""
+    runs = [_run(3, sigma=0.02), _run(2, sigma=None), _run(1, sigma=0.01)]
+    nudge = grainier_newest(runs, cover_run_id=None)
+    assert nudge is not None and nudge.run_id == 1
+
+
+def test_grainier_newest_breaks_a_tie_towards_the_more_recent_picture():
+    """Two equally-clean earlier stacks: offer the newer one, which is more
+    likely to be the framing the owner recognises."""
+    runs = [_run(3, sigma=0.02, ts="2026-05-20T00:00:00Z"),
+            _run(2, sigma=0.010, ts="2026-05-14T00:00:00Z"),
+            _run(1, sigma=0.010, ts="2026-05-01T00:00:00Z")]
+    nudge = grainier_newest(runs, cover_run_id=None)
+    assert nudge is not None and nudge.run_id == 2
+
+
+def test_grainier_newest_percent_never_reports_zero():
+    at = _run(2, sigma=0.0100 / CLEANER_RATIO)
+    nudge = grainier_newest([at, _run(1, sigma=0.0100)], cover_run_id=None)
+    assert nudge is not None and nudge.percent_grainier >= 1
