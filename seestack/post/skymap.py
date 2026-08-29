@@ -339,6 +339,182 @@ def _draw_thumbnail_on_aitoff(ax, image_path: str, ra_deg: float, dec_deg: float
     ax.add_artist(ab)
 
 
+# ---- "My map": an all-sky view built only from the owner's own pictures ----
+
+# How much bigger than life each picture is drawn. A Seestar field is ~1.3° wide
+# and the whole sky is ~1200 px across on the default figure, so at true scale a
+# night's work would be four pixels — invisible. Every picture is inflated by the
+# *same* factor, so their relative sizes stay honest (a six-panel mosaic really
+# does look bigger than a single field) and the caption says so plainly.
+DEFAULT_PICTURE_EXAGGERATION = 8.0
+# …and a floor/ceiling on the drawn size, in degrees of the picture's long edge,
+# so one enormous mosaic can't swamp the map and a tiny crop is still findable.
+_MIN_DRAWN_DEG = 3.0
+_MAX_DRAWN_DEG = 22.0
+
+
+@dataclass
+class MapPicture:
+    """One finished picture to drop on the all-sky map, already masked.
+
+    ``rgba`` is the picture's own pixels with an alpha channel that is 0 wherever
+    the stack doesn't have enough frames to be trusted (see
+    :func:`seestack.render.thumbnail.stack_detail_mask`) — so a mosaic's ragged
+    fringe fades out instead of smearing a noisy rectangle across the sky, which
+    is the owner's "only map parts of images with enough detail".
+
+    ``width_deg`` / ``height_deg`` are the picture's *true* on-sky size; the
+    renderer inflates every picture by one shared factor so they're visible while
+    keeping their relative sizes honest.
+    """
+
+    name: str
+    ra_deg: float
+    dec_deg: float
+    rgba: np.ndarray
+    width_deg: float
+    height_deg: float
+
+
+def _drawn_half_width_deg(width_deg: float, height_deg: float,
+                          exaggeration: float) -> float:
+    """Half the width the picture is *drawn* at, in degrees — its true width
+    scaled by the shared exaggeration, then clamped by the long edge so one huge
+    mosaic can't swamp the map (and a sliver is still findable)."""
+    w = max(float(width_deg), 1e-6)
+    h = max(float(height_deg), 1e-6)
+    long_deg = max(w, h) * max(float(exaggeration), 1.0)
+    clamped = min(_MAX_DRAWN_DEG, max(_MIN_DRAWN_DEG, long_deg))
+    # Preserve the picture's aspect: scale width by however much the long edge
+    # had to move.
+    return 0.5 * w * (clamped / max(w, h))
+
+
+def render_my_map(pictures: list[MapPicture], *,
+                  options: SkyMapOptions | None = None,
+                  subtitle: str | None = None,
+                  exaggeration: float = DEFAULT_PICTURE_EXAGGERATION):
+    """An Aitoff all-sky figure built **only from the owner's own pictures**.
+
+    Same projection, star background, grid and Galactic equator as
+    :func:`render_skymap` — but instead of a library and its preview thumbnails it
+    takes already-masked :class:`MapPicture` records, so the caller decides what
+    "enough detail" means and this stays a pure renderer with no I/O. A picture
+    with no name is drawn unlabelled; an empty list still produces a valid (empty)
+    sky, so the web layer never has to special-case a fresh install.
+
+    Deliberately additive: :func:`render_skymap` is untouched, so the desktop
+    all-sky view behaves exactly as it always has.
+    """
+    if options is None:
+        options = SkyMapOptions()
+
+    import matplotlib
+    matplotlib.use("Agg", force=False)
+    import matplotlib.pyplot as plt
+    from matplotlib.offsetbox import AnnotationBbox, OffsetImage
+
+    fg, bg, accent, faint = _style_colors(options.style)
+    fig = plt.figure(figsize=options.figure_size, dpi=options.dpi, facecolor=bg)
+    ax = fig.add_subplot(111, projection="aitoff")
+    ax.set_facecolor(bg)
+    if options.show_grid:
+        ax.grid(True, color=faint, alpha=0.6, linewidth=0.5)
+    if options.show_bright_stars:
+        _plot_bright_stars(ax, color=fg)
+    if options.show_galactic_plane:
+        _plot_galactic_plane(ax, color=accent)
+
+    # Everything that moves the axes — ticks, titles, tight_layout — happens
+    # *before* the pictures go on, because their size is measured off the axes'
+    # own transform below and a later reflow would silently change the scale
+    # they were sized against.
+    tick_deg = np.arange(-150, 151, 30)
+    ax.set_xticks(np.deg2rad(tick_deg))
+    ax.set_xticklabels([f"{((-d) % 360) / 15:.0f}h" for d in tick_deg],
+                       color=fg, fontsize=8)
+    ax.tick_params(axis="y", colors=fg, labelsize=8)
+    if options.title:
+        fig.suptitle(options.title, color=fg, fontsize=14)
+    if subtitle:
+        # Clear of the +75° tick label the Aitoff frame puts at the top.
+        ax.set_title(subtitle, color=fg, fontsize=9, pad=26)
+    fig.tight_layout()
+
+    # The projection's *actual* scale, measured off the drawn axes rather than
+    # guessed from the figure size — so "this picture is N degrees wide" becomes
+    # a real number of pixels. Aitoff is non-linear, so this is the scale at the
+    # map's centre; it is the same for every picture, which is what keeps their
+    # relative sizes comparable (the point of one shared exaggeration).
+    fig.canvas.draw()
+    px_per_deg = _aitoff_px_per_deg(ax)
+    # OffsetImage's ``zoom`` is applied on top of a points→pixels correction, so
+    # an image drawn at ``zoom`` occupies ``pixels · zoom · dpi/72`` device pixels.
+    px_per_zoom = max(options.dpi, 1) / 72.0
+
+    for pic in pictures:
+        x = _ra_to_aitoff_rad(pic.ra_deg)
+        y = math.radians(pic.dec_deg)
+        arr = np.asarray(pic.rgba)
+        img_w = max(int(arr.shape[1]) if arr.ndim >= 2 else 0, 1)
+        img_h = max(int(arr.shape[0]) if arr.ndim >= 2 else 0, 1)
+        half_w_deg = _drawn_half_width_deg(pic.width_deg, pic.height_deg,
+                                           exaggeration)
+        wanted_px = 2.0 * half_w_deg * px_per_deg
+        zoom = max(0.01, wanted_px / (img_w * px_per_zoom))
+        try:
+            ab = AnnotationBbox(OffsetImage(arr, zoom=zoom), (x, y),
+                                frameon=False, pad=0.0, zorder=3)
+            ax.add_artist(ab)
+        except Exception as exc:  # noqa: BLE001 — one bad picture must not kill the map
+            log.debug("could not place %s on the map: %s", pic.name, exc)
+            continue
+        if options.label_targets and pic.name:
+            # Under the picture, not on it: the offset box is centred on the
+            # target, so a fixed corner offset drops the name *inside* anything
+            # bigger than a few points — unreadable over its own pixels.
+            drop_pt = 0.5 * img_h * zoom + 4.0     # half the drawn height, in points
+            ax.annotate(pic.name, xy=(x, y), xytext=(0, -drop_pt),
+                        textcoords="offset points", color=fg, fontsize=7,
+                        ha="center", va="top", zorder=5)
+    return fig
+
+
+def _aitoff_px_per_deg(ax) -> float:  # noqa: ANN001
+    """Display pixels per degree of RA at the centre of an Aitoff axis.
+
+    Measured through the axis's own ``transData`` (after a draw), so it follows
+    whatever size and layout the figure actually ended up with instead of a
+    figure-width guess. Falls back to a sane constant if the transform can't be
+    evaluated, so a picture is never dropped for want of a scale."""
+    try:
+        span = 10.0
+        p0 = ax.transData.transform((_ra_to_aitoff_rad(0.0), 0.0))
+        p1 = ax.transData.transform((_ra_to_aitoff_rad(span), 0.0))
+        px = abs(float(p1[0]) - float(p0[0])) / span
+        return px if px > 0 else 3.5
+    except Exception:  # noqa: BLE001 — a scale we can't measure just uses the default
+        return 3.5
+
+
+def my_map_png(pictures: list[MapPicture], *,
+               options: SkyMapOptions | None = None,
+               subtitle: str | None = None,
+               exaggeration: float = DEFAULT_PICTURE_EXAGGERATION) -> bytes:
+    """:func:`render_my_map` encoded as PNG bytes (and the figure closed)."""
+    import io
+
+    import matplotlib.pyplot as plt
+
+    fig = render_my_map(pictures, options=options, subtitle=subtitle,
+                        exaggeration=exaggeration)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=fig.dpi,
+                facecolor=fig.get_facecolor(), bbox_inches="tight")
+    plt.close(fig)
+    return buf.getvalue()
+
+
 def _format_duration(seconds: float) -> str:
     """Friendly duration string. e.g. 12345 -> '3h 25m 45s'."""
     s = int(round(seconds))

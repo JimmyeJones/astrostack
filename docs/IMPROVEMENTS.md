@@ -13523,6 +13523,19 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the owner *save* their
+  universe map, and put it where they'd think to look for it.** *(Pillar: enjoy + share — PRIORITY 3.
+  Size: S. Confidence: high — the picture already exists at a stable URL.)* "My map" is a pride object:
+  the one image that says "here's everywhere I've pointed my scope this year". Right now it only exists
+  inside the Sky page. Two cheap additions: (a) a **"Save this map"** button beside the mode switch —
+  the PNG is already served whole at `/api/sky/my-map.png`, so this is a download link with a nice
+  filename (`astrostack_my_sky_<date>.png`), not new rendering; and (b) a small **preview card on the
+  Dashboard** ("Where you've been · N pictures") that links into the Sky page's My-map mode, so a
+  beginner meets it instead of having to find a third segmented-control option. Careful with (b): the
+  standing IA item says the Dashboard is already busy — put it *inside* an existing grouping rather than
+  appending one more always-on card, and only show it once there are, say, three or more mapped pictures
+  (below that the map is mostly empty sky and reads as a bug rather than a milestone).
+
 - **NEW IDEA (Builder 2026-08-29, the one half deliberately left out of the v0.291.0 preview-crop fix) — the
   History caption's Moon sentence still describes the *un-cropped* frame on a picture the auto-edit trimmed.**
   *(Pillar: understand / trust — PRIORITY 3. Size: S. Confidence: certain — I left it, knowingly, this run.)*
@@ -16787,8 +16800,46 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-REQUESTED (2026-08-28) — "Universe map": an all-sky view built ONLY from the owner's own captured
-  data, with each target's picture masked down to just its well-detailed pixels.** *(Enjoyment/pride feature —
+- **✅ SHIPPED — FIRST SLICE (Builder, v0.292.0, branch `claude/compassionate-galileo-4drm6t`) —
+  ~~⭐ OWNER-REQUESTED (2026-08-28) — "Universe map": an all-sky view built ONLY from the owner's own captured
+  data, with each target's picture masked down to just its well-detailed pixels.~~** Shipped as **"My map"**,
+  a third mode on the existing Sky page beside "Real sky (online)" and "Stars (offline)" — exactly the delivery
+  the spec below recommended, and built the way it said: by *connecting* what already existed rather than
+  standing up a new sky-rendering stack.
+
+  **What shipped.** `GET /api/sky/my-map.png` renders the whole sky server-side as an Aitoff PNG
+  (`seestack.post.skymap.render_my_map` / `my_map_png` — new, additive; the existing desktop `render_skymap`
+  is untouched and pinned by a test) with the same offline bright-star background, grid and Galactic equator,
+  and every target's newest finished picture dropped at its plate-solved position.
+  * **"Only … enough detail"** is the per-pixel *frame-count* sibling every run already writes
+    (`{stem}_framecov.fits`): new `seestack.render.thumbnail.stack_detail_mask` thresholds it with
+    `well_covered_mask` — extracted from `coverage_trim.largest_covered_rect`, so the "enough coverage"
+    number is *the app's existing definition*, not one picked blind — and the mask becomes the picture's
+    alpha, so a mosaic's ragged fringe fades out instead of smearing across the sky. A run with no
+    frame-count sibling falls back to its has-data footprint rather than vanishing.
+  * **"Rough"** is honoured literally: a still picture, no new WebGL layer, and every picture inflated by one
+    *shared* factor (~8×, clamped 3°–22° on the long edge) so their **relative** sizes stay honest — a
+    six-panel mosaic really does look bigger than a single field — with the caption saying so in plain words.
+  * It composes the v0.291.0 `preview_crop` work: a trimmed preview's mask is cropped to match, and a run
+    whose geometry can't be reconciled is left off the map rather than mis-registered.
+  * Cached as one PNG + one fingerprint in the app's own `state/`, re-rendered only when a target's newest
+    picture actually changes (drawing the whole sky is not free), overwritten in place so nothing grows.
+  Offline, read-only, no new dependency (matplotlib is already a core dep, in the image via `pip install
+  .[web]`), and nothing outside the app's own store is written. **Tests:** `tests/test_my_map.py` (12) and
+  `tests/webapp/test_my_map_endpoint.py` (6) plus a `Sky.test.tsx` case.
+
+  **Left for a follow-up slice (deliberately):** clicking a picture on the map to open its target (it's a flat
+  PNG today — the interactive 3D globe already answers that, so this is a nicety); a light/print style; sizing
+  from the true projected scale at each picture's own position instead of the centre scale (Aitoff is
+  non-linear, so a picture near the poles is drawn slightly small — invisible at "rough" scale, and the shared
+  factor keeps it honest between pictures); and placing each picture by its **run's own centre**
+  (`cropped_center_radec_from_fits`, which the Sky map's tile already uses as of v0.291.0) rather than the
+  library target's RA/Dec — they differ by the border trim's offset, which is sub-picture at this scale but is
+  free correctness once someone is in the file.
+
+  Original spec, for the record:
+
+  *(Enjoyment/pride feature —
   "look what I've actually explored" — not a workflow necessity, so pull it on a slow run. Size M–L. Read-only
   against existing per-run artifacts; cannot touch the imaging path.)* Owner's own framing: *"a rough universe
   map based on the targets I have picked up and only mapping parts of images with enough detail... just to use

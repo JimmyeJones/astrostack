@@ -229,7 +229,34 @@ function OfflineSky({ stars, images, onSelect }: {
   );
 }
 
-type SkyMode = "online" | "offline";
+/**
+ * "My map" — the whole sky drawn only from the owner's own finished pictures.
+ *
+ * Rendered server-side (an Aitoff all-sky PNG, star background and all) because
+ * the compositing needs each run's per-pixel frame-coverage map to mask a mosaic's
+ * ragged fringe away, which lives beside the FITS on the server. It's a still
+ * picture on purpose — "rough", in the owner's words — so this is just an <img>
+ * that fills the stage; the interactive views above are what you pan and zoom.
+ */
+export function MyMap() {
+  return (
+    <div
+      style={{
+        position: "absolute", inset: 0, display: "flex",
+        alignItems: "center", justifyContent: "center",
+        background: "#0a0e1a", overflow: "auto",
+      }}
+    >
+      <img
+        src={api.myMapUrl()}
+        alt="An all-sky map built from your own pictures"
+        style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+      />
+    </div>
+  );
+}
+
+type SkyMode = "online" | "offline" | "mine";
 const MODE_KEY = "astrostack.skyMode";
 
 export function SkyView() {
@@ -248,7 +275,9 @@ export function SkyView() {
 
   return (
     <div style={{ position: "relative", height: "calc(100dvh - 110px)", minHeight: 420 }}>
-      {mode === "online" ? (
+      {mode === "mine" ? (
+        <MyMap />
+      ) : mode === "online" ? (
         <AladinSky images={sky.data?.images ?? []} />
       ) : sky.data ? (
         <OfflineSky stars={sky.data.stars} images={sky.data.images} onSelect={setSelected} />
@@ -270,13 +299,18 @@ export function SkyView() {
           data={[
             { label: "Real sky (online)", value: "online" },
             { label: "Stars (offline)", value: "offline" },
+            { label: "My map", value: "mine" },
           ]}
         />
         <Text size="xs" c="dimmed" mt={6}>
-          {mode === "online"
+          {mode === "mine"
+            ? "The whole sky drawn from your pictures alone — nothing borrowed, no internet. Each one is masked down to the part enough frames actually reached, and shown larger than life so you can see it."
+            : mode === "online"
             ? "Real-sky atlas (needs internet). Drag to pan, scroll to zoom."
             : "Built-in star map (offline). Drag to look around, scroll to zoom."}
-          {" "}Your images sit at their plate-solved positions; newest on top where they overlap.
+          {mode === "mine"
+            ? null
+            : " Your images sit at their plate-solved positions; newest on top where they overlap."}
         </Text>
         {sky.isLoading ? <Group mt="xs" gap={6}><Loader size="xs" /><Text size="xs">Loading…</Text></Group> : null}
         {sky.isError ? (
