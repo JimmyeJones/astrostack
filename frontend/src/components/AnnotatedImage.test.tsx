@@ -358,3 +358,37 @@ describe("AnnotatedImage — the rose", () => {
     expect(screen.getByAltText("M31")).toBeInTheDocument();
   });
 });
+
+describe("AnnotatedImage — the overlay layer", () => {
+  function renderOverlay(overlaySrc: string | null) {
+    return render(
+      <MantineProvider>
+        <AnnotatedImage
+          src="/preview.png" alt="M31" imgWidth={1000} imgHeight={600}
+          objects={[]} show={false} height={180} overlaySrc={overlaySrc}
+        />
+      </MantineProvider>,
+    );
+  }
+
+  it("draws nothing over the picture by default", () => {
+    renderOverlay(null);
+    expect(screen.queryByTestId("image-overlay")).toBeNull();
+    expect(screen.getByAltText("M31")).toBeInTheDocument();
+  });
+
+  it("lays the overlay on the picture's own contain-fit grid", () => {
+    // The overlay PNG is the same pixel size as the picture, so sharing the
+    // contain-fit is what makes it land true at any box size — a different fit
+    // would slide the highlighted trail off the trail.
+    renderOverlay("/rej.png");
+    const overlay = screen.getByTestId("image-overlay");
+    expect(overlay).toHaveAttribute("src", "/rej.png");
+    expect(overlay.style.objectFit).toBe("contain");
+    expect(overlay.style.position).toBe("absolute");
+    // Decorative and click-through: the picture underneath still opens the
+    // lightbox, and a screen reader isn't told about a tint it can't see.
+    expect(overlay.style.pointerEvents).toBe("none");
+    expect(overlay).toHaveAttribute("aria-hidden");
+  });
+});
