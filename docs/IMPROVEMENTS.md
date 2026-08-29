@@ -15543,6 +15543,21 @@ problems. Dogfood it every big-picture run and fix root causes.
     moves, plus a check it never *over*-counts. Small and well-contained; grep for other readers of
     `n_frames_used` first (the noise-ratio badge anchors on √N).
 
+- **NEW IDEA (Builder 2026-08-29, the loose end left by the v0.293.1 two-pass frame-count fix) — a sub that
+  blipped in pass 1 and stacked fine in pass 2 now counts as *used*, but its pass-1 error string is still in
+  the run's error list, so the Jobs summary reports a failure for a frame the header says was combined.**
+  *(Pillar: trust / friendliness — PRIORITY 3; size S; presentation-only, no engine behaviour change.
+  Confidence: traced — `_pass` appends to the shared `errors` list on any exception (`stacker.py` ~2361) and
+  both passes are handed the *same* list; `pipeline.py:2659` passes it straight to the job result.)* The
+  error record is *true* (a read really did fail), just no longer *fatal* for that frame — and "1 sub failed"
+  next to "0 couldn't be aligned" reads as a contradiction rather than as the transient blip it is.
+  **Shape:** the errors are already per-frame strings prefixed with the file's name, and the pass knows which
+  frames it consumed, so a pass-2 success can either drop the matching pass-1 line or re-word it ("read
+  failed once, recovered on the second pass"). The second is better — it keeps the storage-trouble signal the
+  owner needs when a NAS share is flaking, without claiming a lost sub. **Caution:** don't silence errors for
+  frames that failed *both* passes; that is the real failure the list exists for. Do it with the existing
+  frame-accounting tests as the guard, plus one asserting the recovered frame's line reads as recovered.
+
 - **IDEA / GPU-ONLY HARDENING (Scout QA audit 2026-08-27 #18, traced — NOT a verified bug; unreproducible
   without cupy, nil-impact on fully-NaN tiles) — `per_frame._subtract_background_gpu` (`seestack/bg/per_frame.py`
   ~line 604) fills a *fully-masked* background tile with the global **luminance** median (`luma_med`) rather than
