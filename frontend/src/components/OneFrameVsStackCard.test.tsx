@@ -68,6 +68,23 @@ describe("OneFrameVsStackCard", () => {
     expect(screen.queryByTestId("noise-badge")).toBeNull();
   });
 
+  it("offers the composed before/after download once revealed", async () => {
+    vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
+      available: true, n_frames: 505, sub_exposure_s: 30, integration_s: 15150,
+    });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: null });
+    renderCard("M_42", 7);
+    // Collapsed, the card is one button — the download appears with the reveal,
+    // not before it.
+    expect(screen.queryByRole("link", { name: /before\/after/i })).toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
+    const link = await screen.findByRole("link", { name: /before\/after/i });
+    expect(link).toHaveAttribute(
+      "href", "/api/targets/M_42/stack-runs/7/before-after.jpg");
+    expect(link).toHaveAttribute("download");
+  });
+
   it("degrades the caption when provenance is missing", async () => {
     vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
       available: true, n_frames: null, sub_exposure_s: null, integration_s: null,

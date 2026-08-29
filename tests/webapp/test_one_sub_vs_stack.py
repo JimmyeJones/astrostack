@@ -255,6 +255,127 @@ def test_saved_stretch_on_a_display_space_run_stays_null(client, solved_library)
     assert run.preview_stretch is None and run.preview_black is None
 
 
+# --- "Share your glow-up": the downloadable before/after -------------------
+#
+# The reveal above lives in the app; this is the portable artefact — the one
+# picture a non-astro friend understands. It must be gated exactly as the reveal
+# is, so the download button can never offer an unfair pairing.
+
+
+def test_before_after_downloads_one_composed_jpeg(client, solved_library):
+    from seestack.beforeafter import DEFAULT_WIDTH
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(solved_library, safe, with_preview=True)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+    # Saved, not shown inline, and named after the run so two downloads don't
+    # overwrite each other.
+    assert "attachment" in r.headers["content-disposition"]
+    assert "master_before-after.jpg" in r.headers["content-disposition"]
+    im = Image.open(BytesIO(r.content))
+    assert im.width == DEFAULT_WIDTH
+    # Two half-cells side by side plus a caption bar — wider than it is tall.
+    assert im.height < im.width
+
+
+def test_before_after_captions_itself_from_the_runs_own_provenance(
+    client, solved_library, monkeypatch,
+):
+    # The picture is only shareable if it *says* what it shows: the target's
+    # name, the comparison, and the integration — all read off the run, none of
+    # it typed by the user.
+    import seestack.beforeafter as ba
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(solved_library, safe, with_preview=True)
+    seen: dict = {}
+    real = ba.build_before_after
+
+    def capture(before, after, **kw):
+        seen.update(kw)
+        return real(before, after, **kw)
+
+    monkeypatch.setattr(ba, "build_before_after", capture)
+
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg").status_code == 200
+    assert "42 frames stacked" in seen["caption"]      # n_frames_used
+    assert "21m of light" in seen["caption"]           # total_exposure_s = 1260 s
+    assert seen["labels"][1] == "42 frames stacked"
+    # And it names the target rather than leading with the comparison.
+    assert seen["caption"].split(" · ")[0] not in ("", "one frame")
+
+
+def test_before_after_404_without_a_preview_to_compare(client, solved_library):
+    # No stored picture → nothing to put beside the sub. A 404 (not a lopsided
+    # image) is what lets the button self-hide, exactly as the card does.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(solved_library, safe, with_preview=False)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg")
+    assert r.status_code == 404
+
+
+def test_before_after_404_for_a_display_space_export(client, solved_library):
+    # An edited export's preview is a bespoke tone-mapped image a raw sub can't
+    # be honestly matched to — the same gate the reveal itself uses. Without it
+    # the download would sell a tone difference as what stacking bought you.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "edited_ba.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=True)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg")
+    assert r.status_code == 404
+
+
+def test_before_after_404_for_unknown_run(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    r = client.get("/api/targets/%s/stack-runs/999999/before-after.jpg" % safe)
+    assert r.status_code == 404
+
+
+def test_before_after_is_not_swallowed_by_the_artifact_download_route(
+    client, solved_library,
+):
+    # `/{kind}` is a catch-all registered later in the same router; if this
+    # endpoint ever moves below it, "before-after.jpg" becomes an unknown
+    # artifact kind and the feature silently 404s on a healthy run.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(solved_library, safe, with_preview=True)
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+
+
+def test_before_after_honours_the_saved_custom_stretch(client, solved_library):
+    # The sub half must be rendered through the run's *saved* curve, like the
+    # in-app reveal: otherwise the downloaded picture shows a tone offset the
+    # card doesn't, and the "only the noise changed" promise breaks on export.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "linear_ba.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(solved_library, safe, master)
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg"
+    default_jpeg = client.get(url).content
+    assert client.post(
+        f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+        json={"stretch": 0.9, "black": 0.8}).status_code == 200
+    custom_jpeg = client.get(url).content
+    assert custom_jpeg != default_jpeg
+
+
 # --- "stacking cut your noise ~N×" number -----------------------------------
 
 def _register_run_with_master(data_root, safe: str, master_path: Path) -> int:
