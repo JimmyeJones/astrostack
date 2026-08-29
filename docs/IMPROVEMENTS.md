@@ -43,7 +43,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+- **CLAIMED (Builder 2026-08-29, branch `claude/compassionate-galileo-92mr4d`) — "See what stacking removed":
+  the per-pixel rejection map, its sibling FITS, the overlay endpoint and the History toggle.** Filed under
+  "Features that serve real workflows" (Scout 2026-08-27 #9). Doing the κ-σ and two-pass-drizzle recording
+  paths — both of which the walk-away chain turns on for itself — opt-in and memory-charged, exactly as the
+  entry specifies. Min/max stays unrecorded (falls back to "no overlay available", which the design already
+  handles) and is filed as the follow-on.
+
+_(claim an item here with your branch name)_
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-gwhwwd` — run finished, claim released.**
 > Shipped three: the stack run's read errors rolled up into a counted sentence on History and the Jobs
