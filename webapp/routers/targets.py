@@ -29,6 +29,8 @@ from webapp.schemas import (
     IntegrationGoalOut,
     IntegrationGoalPatch,
     LightTravelOut,
+    LiveConditionsOut,
+    LiveSessionOut,
     MergeRequest,
     MergeSuggestionOut,
     MergeSuggestionTarget,
@@ -614,6 +616,62 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
             if drift is not None
             else None
         ),
+    )
+
+
+@router.get("/{safe}/live-session", response_model=LiveSessionOut | None)
+def target_live_session(safe: str, request: Request) -> LiveSessionOut | None:
+    """**"Tonight, live"** — how the session happening *right now* is going.
+
+    The forward-looking planner says what is up; the session recap says what last
+    night gave you. Neither answers the two questions a beginner standing outside
+    in the cold actually has — *"is this actually working?"* and *"have I got
+    enough to go inside?"* — and the app knows both, live: the watcher QCs each
+    sub within a minute or two of it landing, so it holds every sub's accept
+    verdict and star size while the night is still running.
+
+    Returns the trailing capture session with an ``active`` flag (the newest sub
+    is recent enough for the night to still be in progress), the counts and
+    integration so far, a rolling read of how the last ~20 subs have gone, and the
+    target's goal when one is set. ``null`` when the target has no datable frames
+    at all, so the page shows its empty state rather than an invented night.
+
+    Read-only aggregation over the ``frames`` table — safe to call while a scan,
+    an ingest or a stack is running, which is exactly when it will be called.
+    """
+    from seestack.livesession import live_session
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        live = live_session(proj)
+        goal_s = read_goal_s(proj)
+    finally:
+        proj.close()
+        lib.close()
+    if live is None:
+        return None
+    c = live.conditions
+    return LiveSessionOut(
+        active=live.active,
+        n_frames=live.n_frames,
+        n_kept=live.n_kept,
+        n_set_aside=live.n_set_aside,
+        kept_exposure_s=live.kept_exposure_s,
+        session_exposure_s=live.session_exposure_s,
+        total_kept_exposure_s=live.total_kept_exposure_s,
+        start_utc=live.start_utc,
+        latest_utc=live.latest_utc,
+        minutes_since_latest=live.minutes_since_latest,
+        conditions=LiveConditionsOut(
+            verdict=c.verdict,
+            n_recent=c.n_recent,
+            n_recent_kept=c.n_recent_kept,
+            median_fwhm_px=c.median_fwhm_px,
+            recent_buckets=c.recent_buckets,
+        ),
+        reject_buckets=live.reject_buckets,
+        newest_kept_frame_id=live.newest_kept_frame_id,
+        goal_exposure_s=goal_s,
     )
 
 

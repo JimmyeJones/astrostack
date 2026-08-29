@@ -129,6 +129,39 @@ export function windowsIntro(count: number): string {
   return count > 1 ? "Your next good windows:" : "Your next good window:";
 }
 
+/** How many windows the *card* lists — the nights a beginner plans around, not
+ * the nights the forecast counts. Deliberately unchanged when the card asks the
+ * planner for more (see `windowsWanted`): listing eight rows would bury the next
+ * session under a fortnight of dates on exactly the page the owner already calls
+ * "extremely busy". */
+export const WINDOWS_SHOWN = 3;
+
+/** The most windows the planner will return in one request — mirrors the
+ * endpoint's own `_NEXT_SESSION_WANT_MAX`, so a bigger ask is clamped here
+ * rather than bounced as a 422. */
+export const WINDOWS_WANT_MAX = 8;
+
+/**
+ * How many windows to *ask* the planner for.
+ *
+ * `finishForecast` names a finish date by reading the n-th window for an
+ * n-night goal, so with a fixed three-window request the beginner furthest from
+ * their goal — the one who most wants to know "when am I done?" — was the one
+ * told nothing. Ask for as many windows as the goal needs (never fewer than the
+ * `WINDOWS_SHOWN` the card lists, so a met or unknown goal requests exactly what
+ * it always did), capped at `WINDOWS_WANT_MAX`.
+ *
+ * Beyond the cap the forecast still says nothing: the planner scans a fixed
+ * fortnight, so a goal needing more good nights than that fortnight holds has no
+ * honest date to name, and silence stays the right answer.
+ */
+export function windowsWanted(nightsToGo: number | null | undefined): number {
+  if (typeof nightsToGo !== "number" || !Number.isFinite(nightsToGo)) return WINDOWS_SHOWN;
+  const n = Math.ceil(nightsToGo);
+  if (n <= WINDOWS_SHOWN) return WINDOWS_SHOWN;
+  return Math.min(n, WINDOWS_WANT_MAX);
+}
+
 /**
  * "When will I finish this?" — the one thing the card leaves hanging.
  *

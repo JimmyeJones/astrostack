@@ -3,7 +3,8 @@ import { IconCalendarPlus, IconCalendarStar } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import {
-  describeGap, describeWindow, finishForecast, windowUtcTooltip, windowsIntro,
+  WINDOWS_SHOWN, describeGap, describeWindow, finishForecast, windowUtcTooltip,
+  windowsIntro, windowsWanted,
 } from "./nextSession";
 
 /**
@@ -32,9 +33,15 @@ export function NextSessionCard({
   nightsToGo?: number | null;
 }) {
   const hasGap = gapSeconds > 0;
+  // Ask for as many windows as the goal actually needs (three when it needs
+  // three or fewer, so the common case is the request it always made) — the
+  // forecast below counts to the n-th window, and used to go silent on the
+  // 4+-night goals that most need a date. `want` is in the cache key so the
+  // wider ask can't be served the narrower cached answer.
+  const want = windowsWanted(nightsToGo);
   const next = useQuery({
-    queryKey: ["next-session", safe],
-    queryFn: () => api.nextSession(safe),
+    queryKey: ["next-session", safe, want],
+    queryFn: () => api.nextSession(safe, want),
     enabled: !!safe && hasGap,
   });
 
@@ -43,8 +50,12 @@ export function NextSessionCard({
   if (windows.length === 0) return null;
   // "…and when am I done?" — the night count and the dated windows joined into
   // the one answer neither gives alone. Self-hides without a pace, or when the
-  // goal needs more nights than the planner looked ahead for.
+  // goal needs more nights than the planner *found* (the 14-night scan is the
+  // real horizon, and a goal it can't reach gets a silence, not a guess).
   const forecast = finishForecast(nightsToGo, windows);
+  // The forecast may count further than the card lists: the list is the nights
+  // to plan around, and a fortnight of rows would bury the next session.
+  const shown = windows.slice(0, WINDOWS_SHOWN);
 
   return (
     <Paper withBorder p="sm" radius="md" mt="xs">
@@ -56,9 +67,9 @@ export function NextSessionCard({
         <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
           <Text size="sm" fw={500}>Plan your next night</Text>
           <Text size="xs" c="dimmed">{describeGap(gapSeconds, subExposureSeconds)}</Text>
-          <Text size="xs" fw={500}>{windowsIntro(windows.length)}</Text>
+          <Text size="xs" fw={500}>{windowsIntro(shown.length)}</Text>
           <List size="xs" spacing={2} c="dimmed" listStyleType="none" withPadding={false}>
-            {windows.map((w) => (
+            {shown.map((w) => (
               <List.Item key={w.dark_start_utc}>
                 <Tooltip label={windowUtcTooltip(w)} withArrow position="top-start">
                   <span>{describeWindow(w)}</span>
