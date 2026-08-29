@@ -486,6 +486,36 @@ export interface SessionRecap {
   moon_note?: string | null;
 }
 
+/** How the last handful of subs have been going — the rolling "is it working
+ *  right now?" read behind "Tonight, live". `verdict` is one of good / mixed /
+ *  poor / unknown, and `unknown` means "too few recent subs to say", never bad. */
+export interface LiveConditions {
+  verdict: string;
+  n_recent: number;
+  n_recent_kept: number;
+  median_fwhm_px: number | null;
+  recent_buckets: Record<string, number>;
+}
+
+/** The capture session in progress (or the trailing one, if it has gone quiet).
+ *  `active` is what separates "tonight, live" from the ordinary recap. */
+export interface LiveSession {
+  active: boolean;
+  n_frames: number;
+  n_kept: number;
+  n_set_aside: number;
+  kept_exposure_s: number;
+  session_exposure_s: number;
+  total_kept_exposure_s: number;
+  start_utc: string | null;
+  latest_utc: string | null;
+  minutes_since_latest: number | null;
+  conditions: LiveConditions;
+  reject_buckets: Record<string, number>;
+  newest_kept_frame_id: number | null;
+  goal_exposure_s: number | null;
+}
+
 export interface HealthNote {
   kind: string;
   severity: "good" | "info";
@@ -1982,6 +2012,11 @@ export const api = {
     req<ObjectInfo | null>(`/api/targets/${safe}/identify`),
   sessionRecap: (safe: string) =>
     req<SessionRecap | null>(`/api/targets/${safe}/session-recap`),
+  // "Tonight, live" — the session happening right now (or the trailing one, with
+  // `active` false). Polled while the page is open, so it stays cheap: a
+  // read-only aggregation of the frames table, no pixels touched.
+  liveSession: (safe: string) =>
+    req<LiveSession | null>(`/api/targets/${safe}/live-session`),
   autoStackHold: (safe: string) =>
     req<AutoStackHold | null>(`/api/targets/${safe}/autostack-hold`),
   cleanestShot: (safe: string) =>
@@ -2001,8 +2036,13 @@ export const api = {
     req<FocusTrend | null>(`/api/targets/${safe}/focus-trend`),
   transparencyTrend: (safe: string) =>
     req<TransparencyTrend | null>(`/api/targets/${safe}/transparency-trend`),
-  nextSession: (safe: string) =>
-    req<NextSession>(`/api/plan/next-session/${safe}`),
+  // `want` asks for more than the default three windows — the finish forecast
+  // counts to the n-th window for an n-night goal, so a 5-night goal needs 5.
+  // The 14-night scan behind it is unchanged, so this is a bigger slice of the
+  // same search; omit it and the response is byte-for-byte what it always was.
+  nextSession: (safe: string, want?: number) =>
+    req<NextSession>(`/api/plan/next-session/${safe}`
+      + (want ? `?want=${encodeURIComponent(String(want))}` : "")),
   // Download URL for the next-session windows as a .ics calendar file (one-tap
   // "Add to calendar"). A plain href/download, not a fetch — the browser hands
   // the file to the OS calendar.

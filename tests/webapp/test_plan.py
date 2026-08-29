@@ -434,6 +434,65 @@ def test_next_session_without_location_self_hides(client, solved_library):
     assert body["windows"] == []
 
 
+def test_next_session_defaults_to_three_windows(client, solved_library):
+    # The default is unchanged by the `want` parameter: every existing caller
+    # (and the .ics download) still gets the same three-window answer.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/next-session/M_42", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    assert len(r.json()["windows"]) == 3
+
+
+def test_next_session_want_returns_more_windows_for_a_longer_goal(client, solved_library):
+    # A goal that needs 5 more clear nights used to get *no* finish date at all,
+    # because the endpoint only ever returned three windows to count against.
+    # Asking for more is a bigger slice of the same 14-night scan.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/next-session/M_42",
+                   params={"when": JAN_EVENING, "want": 5})
+    assert r.status_code == 200
+    body = r.json()
+    wins = body["windows"]
+    assert len(wins) == 5
+    # Still the same scan, still chronological, and the first three are exactly
+    # the ones the default request returns.
+    assert body["nights_scanned"] == 14
+    assert [w["dark_start_utc"] for w in wins] == sorted(w["dark_start_utc"] for w in wins)
+    default = client.get("/api/plan/next-session/M_42",
+                         params={"when": JAN_EVENING}).json()["windows"]
+    assert [w["dark_start_utc"] for w in wins[:3]] == [w["dark_start_utc"] for w in default]
+
+
+def test_next_session_want_is_bounded(client, solved_library):
+    # Bounded on both ends so one request can't be turned into a long grind, and
+    # so "0 windows" can't be asked for. Out-of-range is a 422, not a silent clamp.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    for bad in (0, -1, 9, 1000):
+        r = client.get("/api/plan/next-session/M_42",
+                       params={"when": JAN_EVENING, "want": bad})
+        assert r.status_code == 422, bad
+    r = client.get("/api/plan/next-session/M_42",
+                   params={"when": JAN_EVENING, "want": 8})
+    assert r.status_code == 200
+    assert len(r.json()["windows"]) <= 8
+
+
+def test_next_session_want_does_not_widen_the_scan_horizon(client, solved_library):
+    # The 14-night scan stays the real limit: `want` slices what that scan found,
+    # it never looks further ahead. Every window returned for the widest ask is
+    # still inside the fortnight.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/next-session/M_42",
+                   params={"when": JAN_EVENING, "want": 8})
+    body = r.json()
+    start = datetime.fromisoformat(JAN_EVENING)
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    horizon = start + timedelta(days=body["nights_scanned"] + 1)
+    for w in body["windows"]:
+        assert datetime.fromisoformat(w["dark_start_utc"]) < horizon
+
+
 def test_next_session_unknown_target_404s(client, solved_library):
     client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
     r = client.get("/api/plan/next-session/NOPE_404", params={"when": JAN_EVENING})
