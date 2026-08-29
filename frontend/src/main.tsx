@@ -36,6 +36,10 @@ import { MoonSunView } from "./routes/MoonSun";
 const SkyView = React.lazy(() =>
   import("./routes/Sky").then((m) => ({ default: m.SkyView })),
 );
+// Same reason — "Your universe" is the other three.js route.
+const UniverseView = React.lazy(() =>
+  import("./routes/Universe").then((m) => ({ default: m.UniverseView })),
+);
 
 const theme = createTheme({
   primaryColor: "violet",
@@ -74,6 +78,11 @@ const router = createBrowserRouter([
       { path: "sky", element: (
         <React.Suspense fallback={<Center h="60vh"><Loader /></Center>}>
           <SkyView />
+        </React.Suspense>
+      ) },
+      { path: "universe", element: (
+        <React.Suspense fallback={<Center h="60vh"><Loader /></Center>}>
+          <UniverseView />
         </React.Suspense>
       ) },
       { path: "jobs", element: <JobsView /> },

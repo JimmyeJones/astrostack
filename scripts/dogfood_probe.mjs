@@ -40,6 +40,7 @@ const RUN_ID = process.env.TARGET_RUN_ID || "";
 // ("Unexpected Application Error! 404 Not Found") that is entirely the probe's.
 const ROUTES = [
   "/", "/library", "/gallery", "/best", "/sky-so-far", "/tonight", "/sky",
+  "/universe", "/life-list",
   "/telescope", "/moon-sun", "/calibration", "/combine", "/jobs", "/storage",
   "/logs", "/settings",
   ...(SAFE ? [`/targets/${SAFE}`, `/targets/${SAFE}/stack`,

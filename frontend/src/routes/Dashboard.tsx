@@ -17,6 +17,7 @@ import { folderReadiness, folderReadinessSignature } from "../components/dashboa
 import { ContinueTonightCard } from "../components/ContinueTonightCard";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { MissingFilesNote } from "../components/dashboard/MissingFilesNote";
+import { StackFailuresNote } from "../components/dashboard/StackFailuresNote";
 import { PointHereTonightCard } from "../components/dashboard/PointHereTonightCard";
 import { UnexportedEditsNote } from "../components/dashboard/UnexportedEditsNote";
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
@@ -203,6 +204,13 @@ export function Dashboard() {
           // louder cousin. Self-hiding at zero.
           { key: "missing-files", priority: NOTICE_PRIORITY.warning,
             node: <MissingFilesNote /> },
+          // A target that stopped producing pictures. Same rung as the other
+          // warnings: nothing is corrupt, but the walk-away workflow the owner
+          // relies on has quietly stopped delivering for that target, and the
+          // engine's refusal names the one setting that would fix it. Self-hiding
+          // at zero, which is every healthy install.
+          { key: "stack-failures", priority: NOTICE_PRIORITY.warning,
+            node: <StackFailuresNote /> },
           // Advisory, and the reason this board exists: work of the user's that
           // the app isn't showing anywhere. Self-hiding at zero, so on an
           // ordinary install it costs nothing and the board folds nothing.

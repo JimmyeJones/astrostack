@@ -22,6 +22,7 @@ import { AutoStackHoldNote } from "../components/AutoStackHoldNote";
 import { CleanestShotNote } from "../components/CleanestShotNote";
 import { GrainierNewestNote } from "../components/GrainierNewestNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
+import { StackFailedNote } from "../components/target/StackFailedNote";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { InsightTabs } from "../components/InsightTabs";
 import { NightsCard } from "../components/NightsCard";
@@ -809,6 +810,12 @@ export function TargetView() {
         inlineCount={2}
         data-testid="target-notes"
         items={[
+          // "Your last stack didn't run, and here's the setting that would fix
+          // it." Self-hiding when this target is fine. A warning rather than
+          // blocking: the target still has all its frames and everything else
+          // works — it just stopped producing new pictures.
+          { key: "stack-failed", priority: NOTICE_PRIORITY.warning,
+            node: <StackFailedNote safe={safe} /> },
           { key: "solve-setup", priority: NOTICE_PRIORITY.blocking, node: solveSetup ? (
             <Alert color="orange" icon={<IconAlertTriangle size={18} />}
               title={solveSetup.kind === "astap"
