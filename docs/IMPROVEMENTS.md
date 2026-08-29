@@ -16958,6 +16958,75 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER CLARIFICATION (2026-08-29) — "My map" (v0.292.0, shipped below) is NOT what the owner meant by
+  "universe map"; this is the actual ask, and it is a genuinely different feature.** *(Enjoyment/pride — pull
+  on a slow run, doesn't touch the imaging path. Size L — bigger than "My map" was, be honest about that up
+  front.)* **Do not build this as a mode on "My map" or reuse its renderer** — the two answer different
+  questions and conflating them will produce something that satisfies neither. "My map" (keep it, it's a good
+  feature) answers *"where in the sky have I pointed my scope?"* — a flat, angle-only projection where every
+  object sits on the same imaginary dome regardless of how far away it really is. The owner's actual reference
+  is **SpaceEngine's universe map: true 3D space, positioned by real relative distance, not just direction** —
+  *"where stars and objects are located in comparison with the others... my own version, made from my own
+  data."* Two objects that appear close together on the sky but are wildly different real distances away
+  (a foreground nebula vs. a background galaxy in the same line of sight) must end up correctly separated in
+  depth, and the owner should be able to orbit/fly around the resulting structure the way the existing 3D
+  globe already lets them orbit the (flat) star dome.
+
+  **Confirmed while scoping this:** the existing 3D globe (`Sky.tsx`, `raDecToVector` in
+  `frontend/src/sky/projection.ts`) places every star and every one of the owner's pictures on the surface of
+  **one single fixed-radius sphere** (`STAR_RADIUS = 100` in `Sky.tsx`) — angle only, zero depth, same
+  information as a flat map wearing a 3D costume. It is not a smaller version of what's being asked for; it's
+  the wrong shape entirely and shouldn't be extended for this.
+
+  **The good news: the depth data already exists, bundled, 100% covered.** `distance_ly` is a vetted field on
+  *every single object* in both bundled catalogs — confirmed by direct count: `seestack/data/messier.json`
+  (110/110 objects) and `seestack/data/deepsky_popular.json` (47/47 objects) **all** carry a real
+  `distance_ly`. It's already wired to the object card via `seestack/lighttravel.py` ("How far did you see?",
+  v0.272.0) under a strict **"never guess" discipline** — `None` renders as nothing, never a fake number. Reuse
+  that exact discipline here: a target whose object isn't in either bundled catalog (no vetted distance) must
+  not be placed by a guessed depth — see scope note below.
+
+  **Be honest with the owner about data provenance — don't oversell "made from my own data."** The owner's own
+  data determines *which objects appear* (their captured target list) and *where they point* (solved RA/Dec).
+  The *distance* of each object is **not** something derivable from a Seestar's images — that needs real
+  astrometry (parallax, standard candles) no single amateur scope can produce, which is exactly why
+  `distance_ly` is a vetted catalog fact, not measured. Say so plainly in the feature's own copy (mirroring how
+  the object card already frames `distance_ly` as a known fact, not a measurement) — the owner should come away
+  understanding *why* Andromeda sits `2.5M ly` out while the Ring Nebula sits `2.3k ly` out, not think the app
+  derived that number from their pixels.
+
+  **Scope boundary — say this explicitly, don't silently under-deliver:** this places the owner's captured
+  **deep-sky targets** (galaxies, nebulae, clusters — anything with a bundled catalog distance) in true 3D.
+  It does **NOT** place individual field stars from within a frame by their own real distance — that needs a
+  large stellar-distance catalog (Gaia-scale) which is a **heavy/networked dependency the guardrails require
+  owner sign-off for** (`AGENTS.md` §10). File that separately under "Needs owner sign-off" if ever wanted;
+  don't build it speculatively as part of this. A target outside both bundled catalogs (no vetted
+  `distance_ly`) should be excluded from the 3D placement rather than guessed — optionally noted as "distance
+  unknown" rather than silently dropped, so the owner isn't left wondering where a target went.
+
+  **The real design problem worth calling out up front: scale.** Real distances span light-years to
+  megalight-years — a linear scale crushes every nearby nebula into a single point next to Andromeda. Use a
+  **log-scaled radial distance** (standard practice for exactly this reason — it's what makes SpaceEngine's own
+  map readable) so relative structure stays legible across the owner's whole collection, near and far alike.
+  This is a real decision to make deliberately, not a default to pick blind — sanity-check it against the
+  owner's actual bundled-catalog spread (roughly 1 kly to several Mly for a typical Messier-heavy collection).
+
+  **What's reusable vs. what genuinely needs building:**
+  - Reusable: `react-three-fiber` + `OrbitControls` (already a proven dependency via `Sky.tsx`); the
+    RA/Dec-to-unit-vector math in `raDecToVector` (same formula, just multiply by each object's own — log-
+    scaled — distance instead of one shared `STAR_RADIUS`); the picture-as-textured-footprint pattern already
+    used for the 3D globe's images.
+  - New: the log-distance scale itself; a legend/scale reference so "far" has a felt sense of magnitude, not
+    just a bare number; sourcing `distance_ly` per target (reuse `seestack/lighttravel.py`'s lookup, don't
+    re-derive it); the "distance unknown" handling for un-catalogued targets; almost certainly its own route
+    or its own clearly-labelled mode, distinct from both existing Sky-page views — name it something a beginner
+    won't confuse with "My map" ("My map" and "the real thing this is" are answering different questions and
+    deserve different names in the nav, not "map" vs. "map 2").
+
+  **Beginner bar:** clears it — no astronomy background needed to be told "these are your pictures, placed
+  where they really are compared to each other," and flying through your own captured slice of the universe is
+  a strong, shareable "wow" moment, same spirit as the light-travel-time feature it reuses data from.
+
 - **⚠️ PROCESS NOTE (Builder 2026-08-29) — the FOURTH concurrent-duplicate collision, and this time it was a
   whole feature: I built the "Universe map" independently and STOOD DOWN on it at merge time, because
   `4b5131b` ("My map") had landed first. Recorded because the convergence is the useful signal and because
