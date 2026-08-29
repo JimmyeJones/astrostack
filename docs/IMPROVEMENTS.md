@@ -47,9 +47,10 @@ _(none — claim an item here with your branch name)_
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-u3wi1n` — claim released, shipped.**
 > Shipped: the ⭐ owner-clarified **real universe map** (true 3D by distance) as **"Your universe"**
-> (**v0.296.0**, write-up under "Features that serve real workflows"), and **"your last stack didn't run,
-> here's the setting that would fix it"** (**v0.296.1**, under "Autonomy & friendliness" — read its note about
-> the filed shape missing the unattended case). Claiming in the run's *first* commit and pushing immediately
+> (**v0.296.0**, write-up under "Features that serve real workflows"), **"your last stack didn't run, here's
+> the setting that would fix it"** (**v0.296.1**, under "Autonomy & friendliness" — read its note about the
+> filed shape missing the unattended case), and the object-label de-confliction that keeps a crowded field
+> readable (**v0.296.2**, under "Friendliness"). Claiming in the run's *first* commit and pushing immediately
 > (per the five duplicate-collision process notes) cost under a minute; no collision this run.
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-eypoyg` — run finished, all claims released.**
@@ -13672,25 +13673,52 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-08-29, read off `AnnotatedImage` while putting the object labels on the Target
-  page) — the object overlay draws every label at full size with no collision handling, so a rich field
-  degenerates into an unreadable pile exactly where the labels are most interesting.** *(Pillar: understand —
-  PRIORITY 3. Size: S–M. Confidence: high — traced, not yet rendered against a crowded field.)*
-  `AnnotatedImage` renders `markers.filter(m => m.visible)` — **all** of them, each an 8 px dot plus a
-  nowrap text chip, positioned dead-centre on the object with `translate(-50%,-50%)` and no awareness of its
-  neighbours. `objects_in_field` returns every bundled catalog object whose centre lands in the frame, and the
-  frame is not small: the annotations test's own fixture is a 3.3° × 2.5° field. Point that at a crowded
-  region — the Sword of Orion, the Virgo cluster, anything along the galactic plane — and several chips land
-  within a few pixels of each other on a 260 px-tall card and overlap into mush. The picture is fine; the
-  *labels* are the thing that stops being readable, and they stop being readable precisely on the pictures
-  worth labelling. **Shape (pure, testable, no backend):** a `deconflictMarkers(markers, chipW, chipH)` beside
-  `objectMarkerLayout` that nudges overlapping chips apart along the axis with the most room and drops the
-  least-notable of a hopeless pile (the payload has no brightness, but distance-from-centre — the ordering
-  `describeFieldObjects` already uses — is a reasonable proxy), plus a hard cap on labels drawn at small box
-  sizes with the remainder still named in the text readout underneath (which both consumers already render, so
-  nothing is lost — it moves from the image to the list). **Care:** keep it pure and box-size-driven so the
-  same field labels sensibly on a 180 px History card, a 260 px Target card and a full-screen lightbox; and
-  never move a *dot* — only its chip — or the label stops pointing at its object.
+- **✅ SHIPPED (Builder, v0.296.2, branch `claude/compassionate-galileo-u3wi1n`) — ~~the object overlay draws
+  every label at full size with no collision handling, so a rich field degenerates into an unreadable pile
+  exactly where the labels are most interesting.~~** Shipped as the filed shape asked, pure and box-size-driven.
+
+  **What shipped.** `deconflictMarkers(markers, boxW, boxH)` beside `objectMarkerLayout` in
+  `AnnotatedImage.tsx`. Each chip is tried straight below/above first (chips are wide, so stacking them
+  vertically collides least), then sideways, then diagonally, each direction preferring the side with more room
+  in the box, and each tried at three increasing distances — so a notable object in a genuine pile still finds
+  somewhere instead of losing its name to a luckier neighbour. A chip that would leave the box is refused
+  outright, so no label hangs off the picture. **The dot never moves**, exactly as the entry required: the
+  marker wrapper now sits at the object with the dot pinned to it and only the chip offset.
+
+  **Who keeps a label.** `Marker` gained `r` — the normalised distance from the picture's centre, *the same
+  quantity* `describeFieldObjects` already sorts its read-out on — and placement runs in that order, so the
+  picture and the list under it can't disagree about what matters. `labelBudget(boxW, boxH)` caps labels at one
+  per 22,000 px² of box, floored at 3 and ceilinged at 12, so the same field labels sensibly on a 180 px
+  History card, a 260 px Target card and a full-screen lightbox. Nothing is lost: both consumers already render
+  a text read-out built from the *full* object list, so a dropped label moves from the image to the list.
+
+  **Tests (+9 in `AnnotatedImage.test.tsx`, on top of the 24 that still pass unchanged):** no two chips overlap
+  on a five-object pile; the pre-fix state pinned explicitly (the five markers really do land within 20 px of
+  each other, and now hold five distinct offsets); every dot unmoved; the nearest-the-centre-wins partition on a
+  30-object pile; the `r` ordering matching the read-out's; the budget's floor, ceiling and monotonicity; every
+  chip inside the box for objects hard against the corners; the degenerate cases; and the no-regression half —
+  an ordinary sparse field still gets the plain "chip under the dot" placement for every object.
+
+  Original spec, for the record:
+
+  - **~~NEW IDEA (Builder 2026-08-29, read off `AnnotatedImage` while putting the object labels on the Target
+    page)~~** *(Pillar: understand —
+    PRIORITY 3. Size: S–M. Confidence: high — traced, not yet rendered against a crowded field.)*
+    `AnnotatedImage` renders `markers.filter(m => m.visible)` — **all** of them, each an 8 px dot plus a
+    nowrap text chip, positioned dead-centre on the object with `translate(-50%,-50%)` and no awareness of its
+    neighbours. `objects_in_field` returns every bundled catalog object whose centre lands in the frame, and the
+    frame is not small: the annotations test's own fixture is a 3.3° × 2.5° field. Point that at a crowded
+    region — the Sword of Orion, the Virgo cluster, anything along the galactic plane — and several chips land
+    within a few pixels of each other on a 260 px-tall card and overlap into mush. The picture is fine; the
+    *labels* are the thing that stops being readable, and they stop being readable precisely on the pictures
+    worth labelling. **Shape (pure, testable, no backend):** a `deconflictMarkers(markers, chipW, chipH)` beside
+    `objectMarkerLayout` that nudges overlapping chips apart along the axis with the most room and drops the
+    least-notable of a hopeless pile (the payload has no brightness, but distance-from-centre — the ordering
+    `describeFieldObjects` already uses — is a reasonable proxy), plus a hard cap on labels drawn at small box
+    sizes with the remainder still named in the text readout underneath (which both consumers already render, so
+    nothing is lost — it moves from the image to the list). **Care:** keep it pure and box-size-driven so the
+    same field labels sensibly on a 180 px History card, a 260 px Target card and a full-screen lightbox; and
+    never move a *dot* — only its chip — or the label stops pointing at its object.
 
 - **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the owner *save* their
   universe map, and put it where they'd think to look for it.** *(Pillar: enjoy + share — PRIORITY 3.
