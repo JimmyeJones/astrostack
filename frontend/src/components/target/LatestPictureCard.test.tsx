@@ -106,6 +106,113 @@ describe("LatestPictureCard", () => {
   });
 });
 
+// "What's in it?" — the named-object overlay History has always had, on the page
+// a beginner actually lands on. The pins are measured on the run's un-rotated,
+// un-cropped FITS grid, so every state where those bytes aren't that grid has to
+// say so rather than mis-plot a label onto the wrong smudge.
+describe("LatestPictureCard — what's in my picture", () => {
+  // jsdom reports every element as 0×0, and the overlay places nothing into an
+  // unmeasured box — so give the picture a real size, the way a browser would.
+  function measureTheBox() {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(500);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
+  }
+
+  function mkObjects(): client.StackAnnotations {
+    return {
+      width: 1920, height: 1080, scale_bar: null,
+      objects: [
+        { catalog_id: "M42", name: "Orion Nebula", type: "nebula",
+          ra_deg: 83.8, dec_deg: -5.4, x_px: 960, y_px: 540 },
+        { catalog_id: "NGC 1977", name: "Running Man Nebula", type: "nebula",
+          ra_deg: 83.9, dec_deg: -4.8, x_px: 300, y_px: 200 },
+      ],
+    };
+  }
+
+  it("doesn't offer the labels on a run with no FITS to read a WCS from", () => {
+    renderCard(mkRun({ has_fits: false }));
+    expect(screen.queryByTestId("identify-toggle")).not.toBeInTheDocument();
+  });
+
+  it("fetches nothing until the user asks", () => {
+    const spy = vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(mkObjects());
+    renderCard(mkRun());
+    expect(screen.getByTestId("identify-toggle")).toHaveTextContent("What's in it?");
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("labels the objects on the picture and names them in plain words", async () => {
+    measureTheBox();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(mkObjects());
+    renderCard(mkRun());
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await waitFor(() =>
+      expect(screen.getAllByTestId("object-marker")).toHaveLength(2));
+    const note = screen.getByTestId("identify-note");
+    expect(note).toHaveTextContent("In this picture — 2 catalog objects:");
+    expect(note).toHaveTextContent(/Orion Nebula \(M42\) — a nebula, near the centre\./);
+    expect(note).toHaveTextContent(/Running Man Nebula \(NGC 1977\)/);
+    // …and it turns back off, so the picture stays the point.
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    expect(screen.queryAllByTestId("object-marker")).toHaveLength(0);
+    expect(screen.queryByTestId("identify-note")).not.toBeInTheDocument();
+  });
+
+  it("says so plainly when nothing in the catalog falls inside the field", async () => {
+    vi.spyOn(client.api, "stackAnnotations")
+      .mockResolvedValue({ ...mkObjects(), objects: [] });
+    renderCard(mkRun());
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await waitFor(() => expect(screen.getByTestId("identify-note"))
+      .toHaveTextContent("No catalog objects fall inside this field"));
+    expect(screen.queryAllByTestId("object-marker")).toHaveLength(0);
+  });
+
+  it("refuses to place labels on a preview an earlier save turned North-up", async () => {
+    const spy = vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(mkObjects());
+    renderCard(mkRun({ preview_north_up_deg: 12.5 }));
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await waitFor(() => expect(screen.getByTestId("identify-note"))
+      .toHaveTextContent(/saved rotated so North is up/));
+    expect(screen.queryAllByTestId("object-marker")).toHaveLength(0);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("refuses to place labels on a processed preview whose geometry is unknown", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(mkObjects());
+    renderCard(mkRun({ preview_geometry_unknown: true }));
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await waitFor(() => expect(screen.getByTestId("identify-note"))
+      .toHaveTextContent(/reshaped when it was processed/));
+    expect(screen.queryAllByTestId("object-marker")).toHaveLength(0);
+  });
+
+  it("follows a trimmed preview into its crop, dropping what the trim cut away", async () => {
+    measureTheBox();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(mkObjects());
+    // The auto-edit trimmed the outer quarter: M42 (centre) survives, the Running
+    // Man at (300, 200) is outside the kept rectangle and is no longer in the
+    // picture, so it must not be pinned or listed.
+    renderCard(mkRun({ preview_crop: { x0: 0.25, y0: 0.25, x1: 0.75, y1: 0.75 } }));
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await waitFor(() =>
+      expect(screen.getAllByTestId("object-marker")).toHaveLength(1));
+    const note = screen.getByTestId("identify-note");
+    expect(note).toHaveTextContent("1 catalog object:");
+    expect(note).toHaveTextContent(/Orion Nebula/);
+    expect(note).not.toHaveTextContent(/Running Man/);
+  });
+
+  it("explains itself instead of going quiet when the lookup fails", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockRejectedValue(new Error("no wcs"));
+    renderCard(mkRun());
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await waitFor(() => expect(screen.getByTestId("identify-note"))
+      .toHaveTextContent(/Couldn’t work out what’s in this picture/));
+  });
+});
+
 // The picture on this card is the run's baked preview. When the user saved an
 // edit and never exported it, that preview is NOT the picture they made — so the
 // card has to say so rather than quietly present the auto-stretch as theirs.
