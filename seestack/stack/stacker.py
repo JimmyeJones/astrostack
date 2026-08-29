@@ -114,10 +114,35 @@ def _min_max_reject_arrays(reject_count: int) -> int:
     return 2 + 2 * max(1, int(reject_count))
 
 
+def _records_rejection_map(options: "StackOptions", n: int) -> bool:
+    """Will this run actually allocate a per-pixel rejection map?
+
+    Only the two **data-driven** rejections record one, under exactly the
+    conditions their own branches in :func:`run_stack` take: two-pass drizzle
+    (``drizzle and drizzle_reject and n >= 4``) and κ-σ (``sigma_clip and
+    n >= 4``, drizzle off, min/max not taking precedence). Everything else — a
+    single-pass drizzle, a min/max reject whose drop is structural rather than
+    data-driven, a plain mean, a stack too small to reject at all — records
+    nothing and writes no sibling.
+
+    Pass the *effective* options (post ``_resolve_auto_reject`` /
+    ``_afford_drizzle_reject``), so the memory guard, the in-flight cap and the
+    pre-submit estimate all charge the plane exactly when the run allocates it.
+    """
+    if not options.record_rejection_map:
+        return False
+    if options.drizzle:
+        return bool(options.drizzle_reject) and n >= 4
+    if options.min_max_reject and n >= 3:
+        return False
+    return bool(options.sigma_clip) and n >= 4
+
+
 def _estimate_peak_bytes(dst_shape: tuple[int, int], *, drizzle: bool,
                          drizzle_scale: float,
                          drizzle_reject: bool = False,
                          reject_arrays: int = 0,
+                         rejection_map: bool = False,
                          ) -> tuple[int, tuple[int, int]]:
     """Peak working-memory estimate for a stack and its post-drizzle output
     shape. ``dst_shape`` is (h, w) of the pre-drizzle canvas; drizzle multiplies
@@ -126,6 +151,12 @@ def _estimate_peak_bytes(dst_shape: tuple[int, int], *, drizzle: bool,
     ``reject_arrays`` is the number of canvas planes a top/bottom-k min/max reject
     accumulator holds at once (see ``_min_max_reject_arrays``); it raises the array
     factor when a k>1 reject would need more than the baseline working set.
+
+    ``rejection_map`` adds the one ``uint16`` **2-D** plane
+    ``StackOptions.record_rejection_map`` allocates — charged at its true size
+    (2 bytes/pixel, a sixth of an RGB float32 array) rather than rounded up to a
+    whole array, so asking for the overlay can't push a run over the budget by
+    six times what it actually costs.
 
     Shared by ``_guard_stack_memory`` (which refuses over-budget stacks) and
     ``estimate_stack`` (which surfaces the same number to the UI *before* a run
@@ -149,6 +180,8 @@ def _estimate_peak_bytes(dst_shape: tuple[int, int], *, drizzle: bool,
     else:
         arrays = max(_PEAK_CANVAS_ARRAYS, reject_arrays)
     need = out_pixels * 3 * 4 * arrays  # float32 RGB working arrays
+    if rejection_map:
+        need += out_pixels * 2  # one uint16 2-D drop-count plane
     return need, (out_h, out_w)
 
 
@@ -161,6 +194,7 @@ def _memory_bounded_in_flight(
     drizzle_scale: float = 1.0,
     drizzle_reject: bool = False,
     reject_arrays: int = 0,
+    rejection_map: bool = False,
     memory_budget_gb: float | None = None,
 ) -> int:
     """Cap the number of in-flight per-frame worker buffers so they can't exceed the
@@ -184,7 +218,8 @@ def _memory_bounded_in_flight(
     budget = _stack_memory_budget_bytes(memory_budget_gb)
     canvas_peak, _ = _estimate_peak_bytes(
         dst_shape, drizzle=drizzle, drizzle_scale=drizzle_scale,
-        drizzle_reject=drizzle_reject, reject_arrays=reject_arrays)
+        drizzle_reject=drizzle_reject, reject_arrays=reject_arrays,
+        rejection_map=rejection_map)
     headroom = budget - canvas_peak
     cap = int(headroom // per_frame_bytes)
     return max(2, min(max_in_flight, cap))
@@ -263,7 +298,7 @@ def _best_memory_fix(
     dst_shape: tuple[int, int], ref_shape: tuple[int, int] | None, *,
     is_mosaic: bool, drizzle: bool, drizzle_scale: float,
     drizzle_reject: bool, reject_arrays: int, min_max_reject_count: int,
-    budget: int,
+    budget: int, rejection_map: bool = False,
 ) -> MemoryFix | None:
     """The single least-destructive concrete change that brings an over-budget
     stack within ``budget`` — a :class:`MemoryFix` — or ``None`` when no one lever
@@ -286,7 +321,7 @@ def _best_memory_fix(
         if s is not None:
             peak, _ = _estimate_peak_bytes(
                 dst_shape, drizzle=True, drizzle_scale=s,
-                drizzle_reject=drizzle_reject)
+                drizzle_reject=drizzle_reject, rejection_map=rejection_map)
             return MemoryFix("drizzle_scale", s, int(peak))
         return None
     # Non-drizzle levers, least-destructive first. Dropping extra outlier passes
@@ -295,13 +330,13 @@ def _best_memory_fix(
     if reject_arrays > _min_max_reject_arrays(1) and min_max_reject_count > 1:
         peak, _ = _estimate_peak_bytes(
             dst_shape, drizzle=False, drizzle_scale=1.0,
-            reject_arrays=_min_max_reject_arrays(1))
+            reject_arrays=_min_max_reject_arrays(1), rejection_map=rejection_map)
         if peak <= budget:
             return MemoryFix("reduce_outlier_passes", None, int(peak))
     if is_mosaic and ref_shape is not None:
         peak, _ = _estimate_peak_bytes(
             ref_shape, drizzle=False, drizzle_scale=1.0,
-            reject_arrays=reject_arrays)
+            reject_arrays=reject_arrays, rejection_map=rejection_map)
         if peak <= budget:
             return MemoryFix("reference_canvas", None, int(peak))
     return None
@@ -314,6 +349,7 @@ def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
                         ref_shape: tuple[int, int] | None = None,
                         is_mosaic: bool = False,
                         min_max_reject_count: int = 1,
+                        rejection_map: bool = False,
                         memory_budget_gb: float | None = None) -> None:
     """Refuse a stack whose output canvas would blow the memory budget instead
     of letting it OOM-kill the whole process. ``dst_shape`` is (h, w) of the
@@ -326,13 +362,14 @@ def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
     need, _ = _estimate_peak_bytes(dst_shape, drizzle=drizzle,
                                    drizzle_scale=drizzle_scale,
                                    drizzle_reject=drizzle_reject,
-                                   reject_arrays=reject_arrays)
+                                   reject_arrays=reject_arrays,
+                                   rejection_map=rejection_map)
     budget = _stack_memory_budget_bytes(memory_budget_gb)
     if need > budget:
         fix = _best_memory_fix(
             dst_shape, ref_shape, is_mosaic=is_mosaic, drizzle=drizzle,
             drizzle_scale=drizzle_scale, drizzle_reject=drizzle_reject,
-            reject_arrays=reject_arrays,
+            reject_arrays=reject_arrays, rejection_map=rejection_map,
             min_max_reject_count=min_max_reject_count, budget=int(budget))
         if fix is not None:
             advice = (f"To fit, {_memory_fix_sentence(fix)} "
@@ -386,6 +423,23 @@ class StackOptions:
     # the ``sigma_clip``/``min_max_reject`` toggles when set. No-op on the drizzle
     # path (drizzle has its own two-pass rejection).
     auto_reject: bool = False
+    # Record *where* outlier rejection dropped samples, not just how many: a
+    # per-pixel ``uint16`` drop count written beside the picture as
+    # ``{base}_rejected.fits``, which the app overlays on the finished image so
+    # the user can see the satellite trails and cosmic rays that were cleaned out
+    # for them. Purely observational — it watches the same keep/drop decision the
+    # combine already applied, so a run with it on is pixel-identical to one with
+    # it off. Costs one extra 2-bytes-per-pixel canvas plane, charged through the
+    # OOM guard, which is why it is **opt-in** rather than always on.
+    #
+    # Recorded on the two rejection paths whose decision is *data-driven* — κ-σ
+    # and two-pass drizzle — and deliberately **not** on min/max, whose drop is
+    # structural (every pixel with ≥3 samples loses exactly 2k of them, see
+    # ``MinMaxRejectAccumulator.rejection_counts``): a map of that is a flat wash
+    # over the whole canvas, which would tell the user nothing and imply damage
+    # that isn't there. A run that records nothing simply writes no sibling, and
+    # every consumer reads that as "no overlay available".
+    record_rejection_map: bool = False
     background_flatten: bool = True
     background_box_size: int = 128
     # 'per_channel' (default, good for star fields and small targets)
@@ -833,6 +887,7 @@ def estimate_stack(project: Project, options: StackOptions,
         reject_arrays=(_min_max_reject_arrays(options.min_max_reject_count)
                        if options.min_max_reject and not options.drizzle and n >= 3
                        else 0),
+        rejection_map=_records_rejection_map(options, n),
     )
     budget = int(_stack_memory_budget_bytes(memory_budget_gb))
     would_exceed = int(peak) > budget
@@ -848,6 +903,7 @@ def estimate_stack(project: Project, options: StackOptions,
             reject_arrays=(_min_max_reject_arrays(options.min_max_reject_count)
                            if options.min_max_reject and not options.drizzle
                            and n >= 3 else 0),
+            rejection_map=_records_rejection_map(options, n),
             min_max_reject_count=options.min_max_reject_count, budget=budget)
         if would_exceed else None
     )
@@ -869,7 +925,8 @@ def estimate_stack(project: Project, options: StackOptions,
             ref_shape, drizzle=False, drizzle_scale=1.0,
             reject_arrays=(_min_max_reject_arrays(options.min_max_reject_count)
                            if options.min_max_reject and n >= 3
-                           else 0))
+                           else 0),
+            rejection_map=_records_rejection_map(options, n))
         suggest_ref_canvas = int(ref_peak) <= budget
     return StackEstimate(
         n_frames=n,
@@ -1085,6 +1142,7 @@ def _build_output_header_meta(
     drizzle_reject_declined: bool = False,
     drizzle_scale_requested: float | None = None,
     min_max_reject_count_requested: int | None = None,
+    rejection_map_written: bool | None = None,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -1225,6 +1283,12 @@ def _build_output_header_meta(
                            "fraction of samples rejected")
         meta["REJNREJ"] = (int(rstats.n_rejected), "samples rejected")
         meta["REJNTOT"] = (int(rstats.n_contributed), "samples contributed")
+        # …and whether the *spatial* record of those drops was kept beside the
+        # picture, so a consumer can tell "this run wasn't asked to record where"
+        # from "it recorded, and nothing was removed" without stat()-ing a file.
+        if rejection_map_written is not None:
+            meta["REJMAP"] = (bool(rejection_map_written),
+                              "per-pixel rejection map written")
     # …and the other half of that story: an auto-enabled drizzle rejection the
     # memory budget couldn't afford, which the run deliberately skipped rather
     # than refusing outright (see :func:`_afford_drizzle_reject`). Stamped so the
@@ -1730,6 +1794,7 @@ def run_stack(
                         min_max_reject_count=(eff.min_max_reject_count
                                               if eff.min_max_reject and not options.drizzle and n >= 3
                                               else 1),
+                        rejection_map=_records_rejection_map(eff, n),
                         memory_budget_gb=memory_budget_gb)
     # Bound the in-flight aligned/prepared frame buffers (each ~one native
     # reference frame, ``max_workers·2`` of them by default) to the RAM left after
@@ -1746,6 +1811,7 @@ def run_stack(
         reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
                        if eff.min_max_reject and not options.drizzle and n >= 3
                        else 0),
+        rejection_map=_records_rejection_map(eff, n),
         memory_budget_gb=memory_budget_gb)
     errors: list[str] = []
     # Set by the κ-σ pass-2 branch to record how much rejection actually clipped
@@ -1759,6 +1825,12 @@ def run_stack(
     # min/max path (whose ``coverage`` is already a true count) and the drizzle
     # path (which falls back to its weight map).
     frame_cov: np.ndarray | None = None
+    # Per-pixel "how many samples did rejection drop here" map, when the run asked
+    # for one (``record_rejection_map``). Filled by the κ-σ and two-pass-drizzle
+    # branches below — the two rejections whose decision is data-driven — and left
+    # None everywhere else, including on a run that recorded nothing, which is what
+    # every consumer reads as "no overlay available".
+    rejection_map: np.ndarray | None = None
 
     # Periodic pass-1 previews: the legacy quick-look PNG and, when
     # ``save_progress`` is on, the "watch it appear" reel. Wired into the
@@ -1837,7 +1909,13 @@ def run_stack(
                 clip = stats.clip_reference(options.sigma_kappa)
             # Free the statistics accumulators before pass 2 allocates its own.
             del stats
-        drizzler = DrizzleStacker(ref_wcs, dst_shape, params)
+        # Only pass 2 is asked to record where samples were dropped: pass 1 builds
+        # the mean/σ reference and clips nothing, so a map from it would be empty.
+        # ``reject`` gates it too, because a single-pass drizzle has no clip to
+        # record — that run writes no sibling, which reads as "no overlay".
+        drizzler = DrizzleStacker(
+            ref_wcs, dst_shape, params,
+            record_rejection_map=bool(reject and options.record_rejection_map))
         log.info("Drizzle: pixfrac=%.2f scale=%.2f kernel=%s reject=%s output=%dx%d",
                  params.pixfrac, params.scale, params.kernel, clip is not None,
                  drizzler.output_canvas_shape[1], drizzler.output_canvas_shape[0])
@@ -1871,6 +1949,7 @@ def run_stack(
                 n_contributed=_dz_contrib,
                 n_rejected=_dz_rej,
             )
+            rejection_map = drizzler.rejection_map
         result_image = drizzler.result()
         coverage = drizzler.coverage
         # Honest per-pixel *frame count* for the coverage_min/max diagnostics:
@@ -1973,6 +2052,15 @@ def run_stack(
         # clipped, so it's excluded from rejected but still counted as
         # contributed — the honest denominator.
         clip_counts = {"contributed": 0, "rejected": 0}
+        # …and, when asked for, the *spatial* half of the same truth: how many
+        # samples the clip dropped at each pixel, so the finished picture can show
+        # the user the satellite trail it removed rather than only a percentage.
+        # One uint16 plane (a sixth of an RGB float32 canvas), charged through the
+        # OOM guard by ``_estimate_peak_bytes``; ``None`` when not recording, which
+        # is the default and costs nothing.
+        rej_map = (
+            np.zeros(dst_shape, dtype=np.uint16)
+            if options.record_rejection_map else None)
 
         def consume_clipped(aligned: np.ndarray, y0: int, x0: int, weight: float) -> None:
             wh, ww = aligned.shape[:2]
@@ -1980,8 +2068,18 @@ def run_stack(
             std_win = std[y0:y0 + wh, x0:x0 + ww]
             keep = _kappa_sigma_keep_mask(aligned, mean_win, std_win, options.sigma_kappa)
             valid = np.isfinite(aligned)
+            dropped = valid & ~keep
             clip_counts["contributed"] += int(valid.sum())
-            clip_counts["rejected"] += int(np.count_nonzero(valid & ~keep))
+            clip_counts["rejected"] += int(np.count_nonzero(dropped))
+            if rej_map is not None:
+                # One count per *frame* that lost anything here, OR-ed across the
+                # channels — κ-σ clips per channel, and a trail that only reddens
+                # a pixel is still a trail the user should see. ``where=`` makes
+                # the add saturating rather than wrapping, so a pathological
+                # 65 535-sample pixel pins at the top instead of falling to 0.
+                win = rej_map[y0:y0 + wh, x0:x0 + ww]
+                np.add(win, dropped.any(axis=2), out=win,
+                       where=win < np.uint16(65535), casting="unsafe")
             wsum.add_window(np.where(keep, aligned, np.nan), y0, x0, weight=weight)
 
         n_used_p2 = _pass(
@@ -2039,6 +2137,7 @@ def run_stack(
             n_contributed=clip_counts["contributed"],
             n_rejected=clip_counts["rejected"],
         )
+        rejection_map = rej_map
     else:
         # Single-pass weighted mean.
         wsum = WeightedSumAccumulator(canvas_3)
@@ -2179,6 +2278,14 @@ def run_stack(
         read_error_ids.update(_plog.error_slot)
     n_read_errors = len(read_error_ids)
     n_read_recovered = min(n_read_recovered, n_read_errors)
+    # Whether the spatial record of the drops is going beside the picture. Decided
+    # here, not inside the writer, so the header card and the file on disk are the
+    # same answer: a map that is all-zero writes no sibling (a canvas-sized file
+    # saying "nothing was removed", which the absence already says), so the card
+    # reads False. ``None`` — no map recorded at all — omits the card entirely,
+    # which is what every run before this feature looks like.
+    rejection_map_written = (
+        bool(np.any(rejection_map)) if rejection_map is not None else None)
     header_meta = _build_output_header_meta(project, frames, eff, n_used, wstats,
                                             calibration=calibration, pstats=pstats,
                                             photometric_auto=photometric_auto,
@@ -2194,7 +2301,9 @@ def run_stack(
                                             drizzle_scale_requested=(
                                                 drizzle_scale_requested),
                                             min_max_reject_count_requested=(
-                                                min_max_reject_count_requested))
+                                                min_max_reject_count_requested),
+                                            rejection_map_written=(
+                                                rejection_map_written))
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     if stack_fwhm is not None:
@@ -2214,6 +2323,10 @@ def run_stack(
         # sky. The in-stack leveling pass above already gets it directly; the
         # editor reloads from disk and until now had nothing to reload.
         frame_coverage=frame_cov,
+        # …and, when the run was asked to record it, *where* rejection dropped
+        # samples — so the app can show the user the satellite trail it cleaned
+        # out instead of only telling them a percentage.
+        rejection_map=rejection_map,
     )
     # Assemble the "watch it appear" reel now that the previous run's reel (if
     # any) has been archived aside by write_stack_outputs — so this becomes the

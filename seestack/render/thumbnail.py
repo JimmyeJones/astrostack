@@ -659,6 +659,72 @@ def overlay_rgba_png(preview_png: bytes, coverage_mask: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
+#: Tint for the "what stacking removed" overlay. Cyan, because an OSC deep-sky
+#: picture is overwhelmingly red/gold/black and a warm highlight would vanish
+#: into the very nebulosity the user is trying to look past.
+REJECTION_TINT_RGB = (53, 224, 255)
+
+#: The drop density (samples per pixel, after the resize below) that reads as
+#: fully opaque. Taken as a high percentile of the *non-empty* pixels rather than
+#: the maximum: a handful of hot pixels rejected in every single sub would
+#: otherwise set the scale and render the satellite trail — the thing the user
+#: actually wants to see — as good as invisible.
+_REJECTION_SCALE_PERCENTILE = 90.0
+#: Gamma applied to the normalised density, <1 so a trail that only appears in
+#: one sub of many is still plainly visible rather than a ghost.
+_REJECTION_ALPHA_GAMMA = 0.7
+
+
+def rejection_overlay_png(rejection_map: np.ndarray,
+                          size: tuple[int, int]) -> bytes:
+    """A transparent RGBA PNG tinting where outlier rejection dropped samples.
+
+    ``rejection_map`` is the run's per-pixel drop count (the ``_rejected.fits``
+    sibling); ``size`` is the ``(width, height)`` of the preview it will be laid
+    over, so the result drops straight onto the picture at any box size. Pixels
+    that lost nothing are fully transparent, so this is an *overlay* — the
+    picture underneath is untouched.
+
+    **Why the resize averages rather than samples.** Rejection legitimately
+    clips a scattering of lone pixels all over the frame (the tails of the noise
+    distribution), and those are not what the user is being shown — the
+    satellites, plane trails and cosmic rays are. Down-sampling the counts with
+    an area average turns the map into a local *density*: a trail, which is
+    dense along a line, keeps its strength, while isolated speckle dilutes
+    toward nothing. Scaling up (a small canvas, a big preview) degrades to
+    nearest-neighbour, which is the right answer there too.
+    """
+    import io
+
+    from PIL import Image
+
+    m = np.asarray(rejection_map, dtype=np.float32)
+    if m.ndim != 2:
+        raise ValueError("rejection_map must be 2-D")
+    w, h = int(size[0]), int(size[1])
+    if w <= 0 or h <= 0:
+        raise ValueError("size must be positive")
+
+    dens = np.asarray(
+        Image.fromarray(m, mode="F").resize((w, h), Image.BOX),
+        dtype=np.float32)
+    hit = dens > 0
+    if hit.any():
+        scale = float(np.percentile(dens[hit], _REJECTION_SCALE_PERCENTILE))
+        if scale <= 0:
+            scale = float(dens.max())
+        alpha = np.clip(dens / scale, 0.0, 1.0) ** _REJECTION_ALPHA_GAMMA
+    else:
+        alpha = np.zeros_like(dens)
+
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    rgba[..., 0], rgba[..., 1], rgba[..., 2] = REJECTION_TINT_RGB
+    rgba[..., 3] = np.rint(alpha * 255.0).astype(np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(rgba, mode="RGBA").save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def asinh_stretch(
     rgb: np.ndarray,
     *,

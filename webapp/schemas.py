@@ -512,6 +512,12 @@ class StackRunOut(BaseModel):
     has_fits: bool = False
     has_tiff: bool = False
     has_preview: bool = False
+    # True when this run recorded *where* outlier rejection dropped samples (the
+    # ``{base}_rejected.fits`` sibling — ``StackOptions.record_rejection_map``,
+    # off by default), so the card can offer "show me what was removed". Defaults
+    # False, which is every run that didn't ask and every run recorded before the
+    # option existed — an older client simply ignores the field.
+    has_rejection_map: bool = False
     # True when this run is the target's pinned showcase "cover" (the image the
     # Library/Dashboard tile shows). False when unpinned (the default) — the tile
     # then shows the newest stack. Only ever one run per target is the cover.
@@ -835,6 +841,12 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "group": "advanced",
      "help": "Keep a short looping animation of your picture coming together as frames "
              "stack, shown on the result. A fun beginner extra; off by default."},
+    {"key": "record_rejection_map", "label": "Record what rejection removed",
+     "type": "bool", "group": "advanced",
+     "help": "Keep a map of where outlier rejection dropped samples, so the finished "
+             "picture can show you the satellite trails and cosmic rays it cleaned out "
+             "for you. Doesn't change a single pixel of the result — it only watches. "
+             "Costs a little extra memory while stacking; off by default."},
     {"key": "max_workers", "label": "Max workers", "type": "int", "group": "advanced",
      "min": 1, "max": 64, "step": 1, "help": "Blank = all CPU cores."},
     {"key": "use_gpu", "label": "Use GPU (if available)", "type": "bool", "group": "advanced",

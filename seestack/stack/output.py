@@ -91,6 +91,7 @@ def write_stack_outputs(
     header_meta: dict[str, Any] | None = None,
     already_display: bool = False,
     frame_coverage: np.ndarray | None = None,
+    rejection_map: np.ndarray | None = None,
 ) -> dict[str, Path]:
     """
     Write the FITS + TIFF + preview PNG. Returns a dict of ``{kind: path}``.
@@ -106,6 +107,15 @@ def write_stack_outputs(
         writes no sibling at all, which is exactly what every run recorded
         before this existed looks like, and every consumer falls back to the
         weighted ``coverage`` as it always has.
+    rejection_map
+        The per-pixel **count of samples outlier rejection dropped**, when the
+        run was asked to record one (``StackOptions.record_rejection_map``, off
+        by default). Written as a sibling ``{base}_rejected.fits`` so the app can
+        show the user *where* the satellites and cosmic rays it cleaned out
+        actually were, instead of only a percentage. ``None`` — which is every
+        run that didn't ask, and every run recorded before this existed — writes
+        no sibling at all, and every consumer reads that as "no overlay
+        available".
     header_meta
         Optional extra FITS header cards to record in ``master.fits`` — stack
         provenance such as target name, number of frames, integration time and
@@ -131,6 +141,7 @@ def write_stack_outputs(
     preview_path = out_dir / f"{out_basename}_preview.png"
     cov_fits_path = out_dir / f"{out_basename}_coverage.fits"
     framecov_fits_path = out_dir / f"{out_basename}_framecov.fits"
+    rejected_fits_path = out_dir / f"{out_basename}_rejected.fits"
 
     archived = _archive_existing_outputs(out_dir, out_basename)
 
@@ -145,6 +156,13 @@ def write_stack_outputs(
         and not _same_map(coverage, frame_coverage))
     if wrote_framecov:
         _write_frame_coverage_fits(framecov_fits_path, frame_coverage)
+    # Only written when the run was asked to record it *and* rejection actually
+    # dropped something. An all-zero map is a real answer ("nothing was removed")
+    # but it's a canvas-sized file saying nothing, and a consumer that finds no
+    # sibling already renders exactly that answer — so the disk stays quiet.
+    wrote_rejected = rejection_map is not None and bool(np.any(rejection_map))
+    if wrote_rejected:
+        _write_rejection_map_fits(rejected_fits_path, rejection_map)
     _write_tiff(tiff_path, rgb, mode=tiff_mode, already_display=already_display)
     # Preview PNG normally autostretches a linear stack. For an editor export the
     # data is already in display space (the recipe applied a stretch), so writing
@@ -158,6 +176,7 @@ def write_stack_outputs(
         "preview": preview_path,
         "coverage": cov_fits_path,
         **({"frame_coverage": framecov_fits_path} if wrote_framecov else {}),
+        **({"rejection_map": rejected_fits_path} if wrote_rejected else {}),
         # {original_path: archived_path} for outputs that already existed and were
         # moved aside. The caller uses this to repoint the *previous* run's history
         # row at its archived files, so a re-stack keeps ``master`` as the newest
@@ -299,6 +318,31 @@ def _same_map(coverage: np.ndarray, frame_coverage: np.ndarray) -> bool:
     """
     a, b = _collapse_2d(coverage), _collapse_2d(frame_coverage)
     return a.shape == b.shape and bool(np.array_equal(a, b))
+
+
+def _write_rejection_map_fits(path: Path, rejection_map: np.ndarray) -> None:
+    """Write the per-pixel **rejected-sample count** beside the picture.
+
+    This is the spatial half of the ``REJFRAC`` trust line. The header already
+    says *"sigma clipping dropped 0.3% of samples"*; this file says **where** —
+    so the app can lay the satellite trains, plane trails and cosmic rays it
+    quietly removed over the finished picture, and the user can see that leaving
+    the frames in and trusting the stack was the right call.
+
+    Purely observational: it records the same keep/drop decision the combine
+    already applied, so a run that writes it produces pixel-identical output to
+    one that doesn't. Stored as ``uint16`` — the count is bounded by the number
+    of samples that landed on the pixel, and both recording paths saturate
+    rather than wrap — which keeps the file a sixth the size of a float32
+    canvas.
+    """
+    from astropy.io import fits
+
+    hdu = fits.PrimaryHDU(data=np.asarray(rejection_map, dtype=np.uint16))
+    hdu.header["CREATOR"] = "Seestack"
+    # Kept short so astropy doesn't truncate the comment mid-word on the card.
+    hdu.header["BUNIT"] = ("count", "samples dropped by outlier rejection")
+    hdu.writeto(path, overwrite=True)
 
 
 def _write_frame_coverage_fits(path: Path, frame_coverage: np.ndarray) -> None:
@@ -561,6 +605,7 @@ RUN_ARTEFACT_SUFFIXES: dict[str, str] = {
     "preview": "_preview.png",
     "coverage": "_coverage.fits",
     "frame_coverage": "_framecov.fits",
+    "rejection_map": "_rejected.fits",
     "progress_webp": "_progress.webp",
     "progress_apng": "_progress.png",
 }

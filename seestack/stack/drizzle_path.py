@@ -145,6 +145,7 @@ class DrizzleStacker:
         params: DrizzleParams,
         *,
         compute_stats: bool = False,
+        record_rejection_map: bool = False,
     ) -> None:
         from drizzle.resample import Drizzle
 
@@ -207,6 +208,17 @@ class DrizzleStacker:
         # drizzle too.
         self._n_contributed = 0
         self._n_rejected = 0
+        # …and, when the run asked for it, the *spatial* half of that tally: how
+        # many samples the clip dropped at each **output** pixel, so the finished
+        # picture can show the user the satellite trail it removed. The clip works
+        # in input-pixel space, so a dropped sample is scattered to the output
+        # pixel nearest its centre — the same ``(yi, xi)`` the clip itself tested
+        # against, so the map can never disagree with the decision it records.
+        # One uint16 plane (a sixth of an RGB float32 canvas), charged through the
+        # stacker's OOM guard; ``None`` when not recording, which costs nothing.
+        self._rej_map: np.ndarray | None = (
+            np.zeros(self.out_shape, dtype=np.uint16)
+            if record_rejection_map else None)
 
     @property
     def output_canvas_shape(self) -> tuple[int, int]:
@@ -280,6 +292,13 @@ class DrizzleStacker:
         # channel's ``out_wht`` right before its own ``add_image`` — so only one
         # float snapshot is live at a time (memory-bounded, as before).
         deposited = np.zeros(self.out_shape, dtype=bool)
+        # Input-space "this frame lost a sample here" mask, OR-ed across the three
+        # channels before it is scattered to the output grid — the clip is
+        # per-channel, and a trail that only reddens a pixel is still a trail the
+        # user should see. Only built when a map is actually being recorded.
+        dropped_any = (
+            np.zeros(rgb.shape[:2], dtype=bool)
+            if (clip is not None and self._rej_map is not None) else None)
         for c in range(3):
             vals = rgb[..., c]
             finite = np.isfinite(vals)
@@ -298,6 +317,8 @@ class DrizzleStacker:
                 contributing = in_bounds & finite
                 self._n_contributed += int(contributing.sum())
                 self._n_rejected += int(np.count_nonzero(contributing & rejected))
+                if dropped_any is not None:
+                    dropped_any |= contributing & rejected
             ch = np.where(finite, vals, 0.0).astype(np.float32, copy=False)
             prev_wht = self._drizzlers[c].out_wht.copy()
             self._drizzlers[c].add_image(
@@ -319,8 +340,32 @@ class DrizzleStacker:
                     in_units="counts",
                 )
         self._count += deposited.astype(np.uint32, copy=False)
+        if dropped_any is not None and dropped_any.any():
+            self._scatter_rejected(dropped_any, yi, xi)
         self._n_added += 1
         return intersects
+
+    def _scatter_rejected(self, dropped: np.ndarray, yi: np.ndarray,
+                          xi: np.ndarray) -> None:
+        """Add this frame's dropped input samples into the output-space map.
+
+        Uses the *same* nearest-output-pixel indices the clip itself tested
+        against, so the map records exactly the decision that was applied. The
+        gather runs over the dropped samples only — a small fraction of a frame
+        on anything but a catastrophic sub — and saturates at the ``uint16``
+        ceiling instead of wrapping, so a pathological pixel pins at the top
+        rather than reading as "nothing was removed here".
+        """
+        if self._rej_map is None:  # not recording — nothing to add to
+            return
+        flat = self._rej_map.reshape(-1)
+        idx = (yi[dropped].astype(np.intp) * self.out_shape[1]
+               + xi[dropped].astype(np.intp))
+        # Several input pixels can land on one output pixel (scale < 1, or just
+        # the rounding), so fold the duplicates in before the saturating add.
+        uniq, hits = np.unique(idx, return_counts=True)
+        flat[uniq] = np.minimum(
+            flat[uniq].astype(np.int64) + hits, 65535).astype(np.uint16)
 
     def clip_reference(self, kappa: float) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -410,6 +455,13 @@ class DrizzleStacker:
         ``mean ± κ·σ``), so the stacker surfaces it with the sigma-clip trust
         wording, not min/max's structural one."""
         return self._n_contributed, self._n_rejected
+
+    @property
+    def rejection_map(self) -> np.ndarray | None:
+        """Per-output-pixel count of samples the reject pass dropped, or ``None``
+        when this drizzler wasn't asked to record one (the default) — which every
+        consumer reads as "no overlay available", never as an error."""
+        return self._rej_map
 
 
 def _compute_output_canvas(ref_wcs, ref_shape: tuple[int, int], scale: float):

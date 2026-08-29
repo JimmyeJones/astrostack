@@ -322,7 +322,7 @@ function CompassArm({ letter, dx, dy }: { letter: string; dx: number; dy: number
 
 export function AnnotatedImage({
   src, alt, imgWidth, imgHeight, objects, show, height, onClick,
-  scaleBar, showScale, directions, showCompass,
+  scaleBar, showScale, directions, showCompass, overlaySrc,
 }: {
   src: string;
   alt: string;
@@ -342,6 +342,13 @@ export function AnnotatedImage({
   directions?: SkyDirections | null;
   /** Draw the North/East rose. When false it isn't shown. */
   showCompass?: boolean;
+  /**
+   * A transparent PNG laid over the picture — the "what stacking removed" tint.
+   * Rendered with the *same* contain-fit as the picture and at the same pixel
+   * dimensions, so it lands true at any box size without any geometry of its
+   * own. Null/absent draws nothing.
+   */
+  overlaySrc?: string | null;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -386,6 +393,19 @@ export function AnnotatedImage({
         draggable={false}
         style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
       />
+      {overlaySrc ? (
+        <img
+          src={overlaySrc}
+          alt=""
+          aria-hidden
+          draggable={false}
+          data-testid="image-overlay"
+          style={{
+            position: "absolute", left: 0, top: 0, width: "100%", height: "100%",
+            objectFit: "contain", display: "block", pointerEvents: "none",
+          }}
+        />
+      ) : null}
       {markers.map((m) => (
         <div
           key={m.object.catalog_id}

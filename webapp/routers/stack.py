@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
+from seestack.edit.proxy import rejection_map_path_for
 from seestack.io.project import readable_frame_path
 from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
@@ -468,6 +469,14 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             has_fits=bool(r.fits_path and Path(r.fits_path).exists()),
             has_tiff=bool(r.tiff_path and Path(r.tiff_path).exists()),
             has_preview=bool(r.preview_path and Path(r.preview_path).exists()),
+            # Does this run carry the "what stacking removed" map? Answered here,
+            # from the same stat() sweep ``has_fits``/``has_preview`` already do,
+            # so the card can decide whether to offer the overlay without one
+            # extra header read per run on every History page load. False on
+            # every run that didn't record one, which is every run today and all
+            # of them before the option existed.
+            has_rejection_map=bool(
+                r.fits_path and rejection_map_path_for(r.fits_path).exists()),
             is_cover=(cover_id is not None and r.id == cover_id),
             notes=r.notes,
             total_exposure_s=r.total_exposure_s,
@@ -812,6 +821,77 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
         return preview
 
     png = await run_in_threadpool(work)
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/rejection-overlay")
+async def rejection_overlay(safe: str, run_id: int, request: Request) -> Response:
+    """A transparent PNG showing *where* outlier rejection dropped samples, sized
+    to the run's stored preview so it lays straight over the picture.
+
+    The trust line already says rejection clipped ~0.4% of samples; this is the
+    other half — the satellite trains, plane trails and cosmic rays the stack
+    quietly removed, laid over the user's own image. Only runs that were asked to
+    record a map have one (``StackOptions.record_rejection_map``, off by
+    default); every other run 404s, which the History card reads as "no overlay
+    for this one" rather than as a failure.
+
+    Geometry follows the *stored preview* exactly the way ``sky_overlay`` does —
+    the same crop rectangle for an auto-edit border trim, the same North-up
+    rotation — because the map comes off the un-cropped, un-rotated canvas and
+    would otherwise highlight a trail where the trail no longer is. A preview
+    whose geometry can't be reconciled with the canvas (``CROP_UNKNOWN``) serves
+    no overlay at all rather than a misaligned one.
+    """
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+    finally:
+        proj.close()
+        lib.close()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    preview_path = run.preview_path
+    if not preview_path or not Path(preview_path).exists():
+        raise HTTPException(status_code=404, detail="No preview for this run")
+    if not run.fits_path:
+        raise HTTPException(status_code=404, detail="No rejection map for this run")
+    map_path = rejection_map_path_for(run.fits_path)
+    if not map_path.exists():
+        raise HTTPException(status_code=404, detail="No rejection map for this run")
+    crop = parse_preview_crop(run.preview_crop_json)
+    if crop == CROP_UNKNOWN:
+        raise HTTPException(status_code=404,
+                            detail="Preview geometry can't be matched to the map")
+    north_up_deg = baked_north_up_deg(run)
+
+    from seestack.render.orient import rotate_plane_north_up
+    from seestack.render.thumbnail import rejection_overlay_png
+
+    def work() -> bytes:
+        import io
+
+        import numpy as np
+        from astropy.io import fits as _fits
+        from PIL import Image
+
+        with _fits.open(map_path) as hdul:
+            dens = np.asarray(hdul[0].data, dtype=np.float32)
+        if isinstance(crop, PreviewCrop):
+            cx0, cy0, cx1, cy1 = crop_pixel_box(crop, dens.shape[1], dens.shape[0])
+            dens = dens[cy0:cy1, cx0:cx1]
+        if north_up_deg:
+            dens = rotate_plane_north_up(dens, north_up_deg)
+        with Image.open(io.BytesIO(Path(preview_path).read_bytes())) as im:
+            size = im.size
+        return rejection_overlay_png(dens, size)
+
+    try:
+        png = await run_in_threadpool(work)
+    except Exception as exc:  # noqa: BLE001 — a broken sibling is "no overlay"
+        raise HTTPException(
+            status_code=404, detail="Rejection map could not be read") from exc
     return Response(content=png, media_type="image/png",
                     headers={"Cache-Control": "no-store"})
 
@@ -1839,6 +1919,14 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
         for hk, k in (("REJFRAC", "fraction"),):
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 rejection[k] = float(header[hk])
+        # …and whether this run also kept the *spatial* record of those drops, so
+        # the picture can offer "show me what was removed". Only True when the
+        # sibling map is actually there: the run asked for it (``REJMAP``) *and*
+        # the file survived (a hand-tidied output dir, a restored-from-backup run).
+        # Absent on every run recorded before the feature, which reads as no
+        # overlay — the same as False, without claiming the run refused one.
+        if header.get("REJMAP"):
+            rejection["has_map"] = rejection_map_path_for(fits_path).exists()
 
     # "Your picture came out slightly less zoomed-in" — an unattended run whose
     # drizzle canvas didn't fit the memory budget and was stepped down to the
