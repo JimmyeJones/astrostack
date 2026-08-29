@@ -54,6 +54,12 @@ _(none — claim an item here with your branch name)_
 > scale plus an **area-averaging** resize or a single hot pixel and the noise-tail speckle between them bury the
 > satellite trail the overlay exists to show. Two follow-ons filed under Ideas (the Gallery lightbox, and a
 > connected-component "N spots" count).
+> **Stood down** on *"Finish what you started"* after measuring the reshaped slice a previous Builder left on
+> it: marginal noise gain is `1 − √(t/(t+1))`, strictly decreasing in `t`, so the proposed "biggest gain per
+> hour" sort is **exactly** "least-shot target first" and would stop that card ever finishing anything. The
+> ⚠️ note now on that entry has the measured table, why the *line* version was declined too (the Target page
+> already answers it from **measured** grain, and `/tonight` carries no `noise_sigma`), and the one shape that
+> would earn its place if the owner asks.
 > The bug queue was checked first and is genuinely dry: every entry under "Bugs (fix these first)" is either
 > ✅ shipped or a ⚪ audit non-finding, and the one live item (the ASTAP ladder's 3× per-frame timeout) is
 > explicitly stood down pending owner data — see the Builder note on it. Claiming in the run's **first** commit
@@ -18953,6 +18959,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   integration increase, with measured `noise_sigma`), which `/api/library-progress` does not carry — so either
   extend that roll-up additively or fall back to the ideal √t projection from `total_exposure_s` + goal, which
   needs no new data at all and is the honest thing to say for a target with only one stack.
+
+  **⚠️ Builder 2026-08-29 (branch `claude/compassionate-galileo-92mr4d`) — sized it, MEASURED the proposed sort,
+  and stood down. Do not build the reshaped slice above as written; the arithmetic makes it degenerate.**
+  Marginal noise gain from one more hour is `1 − √(t/(t+1))`, which is **strictly decreasing in `t`** — measured
+  across the range a Seestar owner actually sits in:
+
+  | integration so far | one more hour cuts noise |
+  |---|---|
+  | 0.5 h | 42.3 % |
+  | 1 h | 29.3 % |
+  | 2 h | 18.4 % |
+  | 4 h | 10.6 % |
+  | 8 h | 5.7 % |
+  | 16 h | 3.0 % |
+
+  So sorting by "biggest gain per hour" is **exactly** sorting by *least integration so far*, ascending — it is
+  `total_exposure_s` wearing a physics costume. On a card whose entire purpose is *finish what you started*, it
+  would recommend whichever target you have shot **least**, every single night, and never let anything reach its
+  goal. That is strictly worse than the readiness sort `pickContinueTonight` has today, which at least converges
+  on a finished picture. The premise — "a target at 30 % on the steep part of its √t curve would gain far more"
+  — is *true* and still doesn't make it the right recommendation: the beginner is not maximising instantaneous
+  dσ/dt, they are trying to finish a picture.
+  **The other half — a "~1 h more → about 11 % less noise" *line* on each row, keeping the sort** — was also
+  considered and declined, for two reasons worth recording: (1) the app already answers this **better** on the
+  Target page, from *measured* grain rather than an ideal curve (`components/target/grainProjection.ts`, with
+  `CLEAN_SIGMA`/`GRAINY_SIGMA` anchored to the owner's own real stacks), and `/tonight`'s `PlannedTarget` carries
+  `total_exposure_s` but **no `noise_sigma`**, so a line here could only be the *weaker* ideal-curve version of a
+  claim made properly elsewhere — a third derivation of the same physics, which this entry itself warns against;
+  and (2) it is one more always-on line on every row of a Dashboard card, against the owner's standing "the UI is
+  extremely busy" priority. **If the owner ever asks for this**, the shape that would actually earn its place is
+  putting the *measured* projection here — i.e. extending `/api/library-progress` (or the tonight rows) with each
+  target's newest `noise_sigma`, then reusing `grainProjection` verbatim. That is a real, if larger, item; the
+  ranking change is not.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #5) — "How big is it, really?": a full-Moons-wide scale line on
   the "what am I looking at?" object card.**~~ — **SHIPPED v0.277.0** (Builder 2026-08-27, branch
