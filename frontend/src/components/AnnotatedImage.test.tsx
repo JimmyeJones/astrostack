@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   AnnotatedImage,
+  compassLayout,
   croppedAnnotationView,
   objectLabel,
   objectMarkerLayout,
@@ -159,5 +160,83 @@ describe("croppedAnnotationView", () => {
       .objects).toBe(objs);
     expect(croppedAnnotationView({ x0: 0.2, y0: 0, x1: 0.8, y1: 1 }, objs, bar, 0, 0)
       .objects).toBe(objs);
+  });
+});
+
+// "Which way is up?" — the on-screen half of the North/East rose the shared JPEG
+// has baked since v0.284.0. Angles come off the engine's own convention
+// (`seestack.skymarks`): degrees counter-clockwise from screen-right, screen-up
+// positive, so North-is-up is 90. CSS y grows downward, so every arm's screen
+// vector negates the y component — the sign error that would silently draw the
+// sky upside down, which is why these assert the direction and not just a length.
+describe("compassLayout", () => {
+  it("points North straight up on an already-North-up field", () => {
+    const c = compassLayout({ north_deg: 90, east_deg: 180 }, 400, 300)!;
+    expect(c.north.dx).toBeCloseTo(0);
+    expect(c.north.dy).toBeCloseTo(-c.armPx);   // up on screen is negative y
+    expect(c.east.dx).toBeCloseTo(-c.armPx);    // East to the left: the usual
+    expect(c.east.dy).toBeCloseTo(0);           // sky parity for a normal field
+  });
+
+  it("turns both arms with a rotated field", () => {
+    // A field rotated so North points screen-right (0°) and East points down.
+    const c = compassLayout({ north_deg: 0, east_deg: -90 }, 400, 300)!;
+    expect(c.north.dx).toBeCloseTo(c.armPx);
+    expect(c.north.dy).toBeCloseTo(0);
+    expect(c.east.dx).toBeCloseTo(0);
+    expect(c.east.dy).toBeCloseTo(c.armPx);
+  });
+
+  it("draws a mirrored field mirrored, because that is what the WCS says", () => {
+    // Negative parity: East ends up 90° clockwise of North rather than CCW.
+    const c = compassLayout({ north_deg: 90, east_deg: 0 }, 400, 300)!;
+    expect(c.north.dy).toBeCloseTo(-c.armPx);
+    expect(c.east.dx).toBeCloseTo(c.armPx);
+  });
+
+  it("sizes the arms off the box's short side, so a wide box isn't overdrawn", () => {
+    const wide = compassLayout({ north_deg: 90, east_deg: 180 }, 1200, 300)!;
+    const square = compassLayout({ north_deg: 90, east_deg: 180 }, 300, 300)!;
+    expect(wide.armPx).toBe(square.armPx);
+    expect(wide.armPx).toBeLessThan(300 / 2);   // can't span the picture
+  });
+
+  it("places nothing when there is nothing to place", () => {
+    expect(compassLayout(null, 400, 300)).toBeNull();
+    expect(compassLayout(undefined, 400, 300)).toBeNull();
+    expect(compassLayout({ north_deg: 90, east_deg: 180 }, 0, 300)).toBeNull();
+    expect(compassLayout({ north_deg: 90, east_deg: 180 }, 400, 0)).toBeNull();
+  });
+
+  it("refuses a non-finite angle rather than drawing a NaN arm", () => {
+    expect(compassLayout({ north_deg: NaN, east_deg: 180 }, 400, 300)).toBeNull();
+    expect(compassLayout({ north_deg: 90, east_deg: Infinity }, 400, 300)).toBeNull();
+  });
+});
+
+describe("AnnotatedImage — the rose", () => {
+  function renderRose(showCompass: boolean) {
+    return render(
+      <MantineProvider>
+        <AnnotatedImage
+          src="/preview.png" alt="M31" imgWidth={1000} imgHeight={600}
+          objects={[]} show={false} height={180}
+          directions={{ north_deg: 90, east_deg: 180 }} showCompass={showCompass}
+        />
+      </MantineProvider>,
+    );
+  }
+
+  it("draws no rose until it is asked for", () => {
+    renderRose(false);
+    expect(screen.queryByTestId("sky-compass")).toBeNull();
+    expect(screen.getByAltText("M31")).toBeInTheDocument();
+  });
+
+  it("does not throw when asked for one (box measured to 0 in jsdom)", () => {
+    // Same jsdom limitation the marker/scale-bar cases have: clientWidth is 0, so
+    // nothing is placed — the geometry is covered by compassLayout's unit tests.
+    renderRose(true);
+    expect(screen.getByAltText("M31")).toBeInTheDocument();
   });
 });

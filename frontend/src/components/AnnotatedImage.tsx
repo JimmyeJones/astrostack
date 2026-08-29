@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { FieldObject, ScaleBar } from "../api/client";
+import type { FieldObject, ScaleBar, SkyDirections } from "../api/client";
 
 /**
  * "What's in this picture?" — overlay named catalog objects on a finished stack.
@@ -125,9 +125,66 @@ export function scaleBarLayout(
   return { widthPx };
 }
 
+/**
+ * On-screen geometry for the North/East rose over a contain-fit image.
+ *
+ * `directions` are angles measured **counter-clockwise from screen-right, with
+ * screen-up positive** — the engine's convention (`seestack.skymarks`), the same
+ * one the baked share JPEG draws in, so the rose on screen and the rose in the
+ * downloaded file can't disagree. CSS y grows *downward*, so each arm's screen
+ * vector negates the y component. Arms are sized from the box's short side, so a
+ * wide mosaic and a square crop get proportionally the same rose — the same rule
+ * the baked version uses.
+ *
+ * Returns `null` when there is nothing to place (no directions, or a box not yet
+ * measured). Pure, so the geometry is unit-testable without a DOM.
+ */
+export function compassLayout(
+  directions: SkyDirections | null | undefined,
+  boxW: number,
+  boxH: number,
+): { armPx: number; north: { dx: number; dy: number }; east: { dx: number; dy: number } } | null {
+  if (!directions || boxW <= 0 || boxH <= 0) return null;
+  const { north_deg, east_deg } = directions;
+  if (!Number.isFinite(north_deg) || !Number.isFinite(east_deg)) return null;
+  const armPx = Math.max(10, Math.round(Math.min(boxW, boxH) * 0.11));
+  const arm = (deg: number) => {
+    const rad = (deg * Math.PI) / 180;
+    return { dx: Math.cos(rad) * armPx, dy: -Math.sin(rad) * armPx };
+  };
+  return { armPx, north: arm(north_deg), east: arm(east_deg) };
+}
+
+/** One arm of the rose, drawn from the hub out to its tip with a letter on the end. */
+function CompassArm({ letter, dx, dy }: { letter: string; dx: number; dy: number }) {
+  const len = Math.hypot(dx, dy);
+  // Rotate a horizontal bar into place rather than computing a path: the hub is
+  // the transform origin, so the bar always starts at the centre.
+  const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  return (
+    <>
+      <div style={{
+        position: "absolute", left: 0, top: 0, width: len, height: 2,
+        background: "rgba(223,241,255,0.95)", borderRadius: 1,
+        boxShadow: "0 0 3px rgba(8,12,22,0.9)",
+        transformOrigin: "0 50%", transform: `translateY(-50%) rotate(${angle}deg)`,
+      }} />
+      <span style={{
+        position: "absolute", left: dx, top: dy,
+        transform: "translate(-50%, -50%)",
+        fontSize: 11, lineHeight: 1, color: "#dff1ff",
+        padding: "1px 3px", borderRadius: 3, background: "rgba(8,12,22,0.72)",
+        textShadow: "0 1px 2px rgba(0,0,0,0.9)",
+      }}>
+        {letter}
+      </span>
+    </>
+  );
+}
+
 export function AnnotatedImage({
   src, alt, imgWidth, imgHeight, objects, show, height, onClick,
-  scaleBar, showScale,
+  scaleBar, showScale, directions, showCompass,
 }: {
   src: string;
   alt: string;
@@ -143,6 +200,10 @@ export function AnnotatedImage({
   scaleBar?: ScaleBar | null;
   /** Draw the scale bar in the corner. When false it isn't shown. */
   showScale?: boolean;
+  /** Where North and East point on the run's grid (null when unorientable). */
+  directions?: SkyDirections | null;
+  /** Draw the North/East rose. When false it isn't shown. */
+  showCompass?: boolean;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -164,6 +225,7 @@ export function AnnotatedImage({
   const bar = showScale
     ? scaleBarLayout(scaleBar, imgWidth, imgHeight, box.w, box.h)
     : null;
+  const rose = showCompass ? compassLayout(directions, box.w, box.h) : null;
 
   return (
     <div
@@ -225,6 +287,23 @@ export function AnnotatedImage({
             borderLeft: "2px solid rgba(223,241,255,0.95)",
             borderRight: "2px solid rgba(223,241,255,0.95)",
           }} />
+        </div>
+      ) : null}
+      {/* The rose sits top-right and the bar bottom-left, so they can never
+          overlap however small the box gets. (The baked share picture puts both
+          along the *top* because its bottom edge is the caption zone; on screen
+          there is no caption, and bottom-left is where the bar has always been.)
+          Inset by the arm length plus a margin so no arm can run off an edge. */}
+      {rose ? (
+        <div
+          data-testid="sky-compass"
+          style={{
+            position: "absolute", right: rose.armPx + 10, top: rose.armPx + 10,
+            width: 0, height: 0, pointerEvents: "none",
+          }}
+        >
+          <CompassArm letter="N" dx={rose.north.dx} dy={rose.north.dy} />
+          <CompassArm letter="E" dx={rose.east.dx} dy={rose.east.dy} />
         </div>
       ) : null}
     </div>
