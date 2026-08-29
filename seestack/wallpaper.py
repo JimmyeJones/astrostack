@@ -19,6 +19,10 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover — annotation only (kept off the import path)
+    from seestack.previewcrop import PreviewCrop
 
 # Aspect presets a beginner actually wants. ``aspect_w``/``aspect_h`` set the crop
 # shape; ``max_w``/``max_h`` cap the output size (a sane device resolution). We
@@ -80,7 +84,7 @@ def wallpaper_crop_box(
 
 def wallpaper_target_pixel(
     fits_path: str | Path, ra_deg: float | None, dec_deg: float | None,
-    preview_w: int, preview_h: int,
+    preview_w: int, preview_h: int, crop: PreviewCrop | str | None = None,
 ) -> tuple[float, float] | None:
     """Where the target sits in the **preview PNG's** pixel grid, from the stack's
     stored celestial WCS and the target's RA/Dec.
@@ -90,14 +94,29 @@ def wallpaper_target_pixel(
     convention, matching :func:`seestack.io.wcs_io.wcs_dict_rescaled_to_preview`).
     Returns ``None`` — so the caller centres on the image instead — when there's no
     WCS, no target position, or the mapping fails.
+
+    ``crop`` is what the stored preview shows of that canvas (an auto-edit border
+    trim, see :mod:`seestack.previewcrop`): the full-res pixel is shifted into the
+    cropped rectangle before the rescale, so the wallpaper still centres on the
+    object. :data:`~seestack.previewcrop.UNKNOWN` returns ``None`` (centre the
+    crop on the image) rather than guessing. ``None`` — every ordinary run — is
+    the plain full-canvas downscale, unchanged.
     """
     if ra_deg is None or dec_deg is None or preview_w <= 0 or preview_h <= 0:
+        return None
+    from seestack.previewcrop import UNKNOWN, PreviewCrop, crop_pixel_box
+
+    if crop == UNKNOWN:
         return None
     from seestack.io.wcs_io import celestial_wcs_from_fits
 
     wcs, full_w, full_h = celestial_wcs_from_fits(fits_path)
     if wcs is None or full_w <= 0 or full_h <= 0:
         return None
+    off_x = off_y = 0
+    if isinstance(crop, PreviewCrop):
+        off_x, off_y, cx1, cy1 = crop_pixel_box(crop, full_w, full_h)
+        full_w, full_h = cx1 - off_x, cy1 - off_y
     try:
         px, py = wcs.world_to_pixel_values(float(ra_deg), float(dec_deg))
         px = float(px)
@@ -106,6 +125,8 @@ def wallpaper_target_pixel(
         return None
     if not (_finite(px) and _finite(py)):
         return None
+    px -= off_x
+    py -= off_y
     # 0-based full-res pixel centre → 0-based preview pixel centre for a uniform
     # downscale: (p_full + 0.5)/s = p_prev + 0.5.
     s_x = full_w / preview_w

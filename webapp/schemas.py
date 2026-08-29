@@ -507,6 +507,17 @@ class StackRunOut(BaseModel):
     # pins and the scale bar, whose coordinates are measured on the un-rotated
     # FITS grid) needs to know, or it plots on a picture that has since turned.
     preview_north_up_deg: float | None = None
+    # What the *stored preview PNG* shows of the stack canvas when the "Process
+    # target" auto-edit trimmed its ragged border: fractional ``x0/y0/x1/y1``
+    # bounds, or None (the common case) for a plain full-canvas downscale. The
+    # object pins and scale bar are measured on the un-cropped FITS grid, so they
+    # have to be shifted into this rectangle before they're drawn on those bytes.
+    preview_crop: dict[str, float] | None = None
+    # True when the stored preview came out of a recipe whose geometry can't be
+    # reduced to a crop of the canvas at all, so nothing measured on the FITS grid
+    # can honestly be placed on it — the UI hides the pins/bar rather than
+    # mis-plotting them, exactly as it does for a North-up-saved picture.
+    preview_geometry_unknown: bool = False
     # How flat this *mosaic's* panel joins came out: the sky step still left
     # between coverage levels, in units of the picture's own grain (~0 = the
     # panels matched; around 1 is where a seam starts to show once stretched).
