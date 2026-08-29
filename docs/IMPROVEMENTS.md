@@ -17138,8 +17138,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   the Gallery's `heroes`/`videos` "best pictures" selection and the existing fact copy rather than a second
   definition of either.
 
-- **NEW IDEA (Scout 2026-08-27 #20) — "What's in my picture?" object labels only appear in History, where most
-  beginners never look — surface them on the main Target picture and let them travel into a share.** *(Pillar:
+- **✅ SHIPPED (Builder, v0.293.0, branch `claude/compassionate-galileo-60dqir`) — ~~"What's in my picture?"
+  object labels only appear in History, where most beginners never look — surface them on the main Target
+  picture.~~** The first (main) half shipped exactly as the shape below asks, reuse-only: `LatestPictureCard`
+  now renders the picture through the existing `AnnotatedImage` instead of a bare `<Image>`, with a
+  **"What's in it?"** toggle beside "Edit this picture" that turns the named-object pins on. Off by default and
+  **lazily fetched** — the annotations query shares History's exact `["annotations", safe, run.id]` cache key,
+  so asking on one page warms the other and an ordinary Target load makes no extra request. The toggle is only
+  offered on a run that still has its FITS (the object pixels come off its WCS). Underneath, one line names
+  what was pinned — capped at six with "and N more" so the page the owner called "extremely busy" gains one
+  line, not a paragraph — or says plainly that nothing catalogued landed in the frame.
+
+  **Both cautions honoured, and the third the crop work since added.** The pins are measured on the run's
+  un-rotated, un-cropped FITS grid, so: a preview a past Adjust save baked a North-up rotation into, and one
+  whose geometry can't be reduced to a crop at all (`preview_geometry_unknown`), both **hide** the pins and say
+  why in plain language rather than mis-plot them; and a border trim the one-click auto-edit baked in composes
+  exactly through the existing `croppedAnnotationView`, so an object the trim removed drops out of the labels
+  and the readout rather than being pinned onto sky that is no longer in the picture.
+
+  **Upgrade-safe (§9):** frontend-only, no new endpoint, no config/schema/on-disk/API change, and the labels
+  are opt-in per visit. **Tests: +12 vitest** in `LatestPictureCard.test.tsx` — 3 pure
+  (`inThisPictureSentence`: friendly-name preference, the six-object cap + "and N more", the empty field) and 9
+  on the card (no request before the user asks; the names once asked; the empty-field wording; no toggle
+  without FITS; the North-up and unreconcilable-geometry refusals; the cropped-out object dropping; a failed
+  fetch saying so instead of showing a blank line; and putting the labels away again).
+
+  **The follow-on the spec names is deliberately still open** (filed as its own idea below): baking the labels
+  into the shared JPEG the way the nameplate and scale bar already bake, so the "here's what's in my shot"
+  version is the one a beginner posts. That is a server-side render change, not a reuse, and deserves its own
+  run.
+
+  Original spec, for the record:
+
+  **~~NEW IDEA (Scout 2026-08-27 #20)~~** *(Pillar:
   understand + share, PRIORITY 3; size S; additive, reversible, no new deps. Confidence: traced — the
   `AnnotatedImage` component and its `objectMarkerLayout` geometry already exist and are wired into exactly one
   place, `frontend/src/routes/History.tsx:850`; grep found no other consumer.)* The app already has a complete,
@@ -17794,8 +17825,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   the in-app reveal (this is the *portable* artefact), the montage wall (many targets, one grid) and the recap
   poster (a night's stats): this is the *one target's before→after*, the thing people actually post.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list": a Messier/catalog checklist that lights up
-  the famous objects you've already captured and shows the rest as a bucket list.** *(Pillar: friendliness /
+- **NEW IDEA (Builder 2026-08-29, the follow-on v0.293.0 deliberately left out) — let the object labels travel
+  into the shared picture: a "label what's in it" variant of the share JPEG.** *(Pillar: understand + share,
+  PRIORITY 3; size S–M; additive, opt-in, no new deps.)* v0.293.0 puts the named-object pins on the Target
+  page's picture, which answers "what *is* that smudge?" for the owner — but the moment they share the picture,
+  the answer is gone, and "here's the Running Man Nebula next to Orion" is a far better post than an unlabelled
+  smudge. The share JPEG already bakes *server-side* overlays (`nameplate`, the scale bar — see the
+  `stackArtifactUrl(safe, id, "jpeg", …)` flags), and the object list is the same
+  `…/stack-runs/{id}/annotations` payload the frontend now reads, so this is a third baked overlay rather than
+  new machinery. **Shape:** a `label_objects` flag on the JPEG artifact endpoint that draws each object's pin +
+  name onto the rendered bytes with the existing text-drawing helper, and a "Labelled" item in the Target
+  page's Save/share menu next to the framed/nameplate variants. **Cautions (the same three the on-screen
+  version had to honour, and they are *harder* server-side because there is no toggle to fall back to):** the
+  pins are measured on the un-rotated, un-cropped FITS grid, so a run with `preview_north_up_deg`, a
+  `preview_crop`, or `preview_geometry_unknown` must respectively refuse / compose the trim / refuse — the
+  server-side equivalents of what `croppedAnnotationView` does for the browser; and a label must not be drawn
+  half off the edge. **Tests:** the labelled JPEG differs from the plain one only where labels land; a
+  North-up-saved run returns the plain picture unchanged (never a mis-plot); a cropped run's labels land inside
+  the trim.
+
+- **✅ ALREADY SHIPPED — DUPLICATE ENTRY, DO NOT RE-PICK (pruned by the Builder, 2026-08-29).** This is a
+  second, unstruck copy of the "My life list" idea that shipped in full: `seestack/lifelist.py`,
+  `webapp/routers/lifelist.py` (`GET /api/life-list`), `frontend/src/routes/LifeList.tsx` at `/life-list`, and
+  even follow-up (d) — the "nearly there" constellation nudge (`GET /api/life-list/nearly-there`,
+  `NearlyThereCard`) — all exist on `main` with their tests. The struck, written-up entry ~100 lines above is
+  the live record. A Builder run picked this up, wrote out the whole design, and only found the shipped code by
+  grepping first (AGENTS.md §1: *"grep before you build"*) — which is exactly the cost this convention exists to
+  prevent. Kept (rather than deleted) so the duplicate can't be re-filed from the Scout's notes.
+
+  Original spec, for the record:
+
+  **~~NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list"~~**: ~~a Messier/catalog checklist that lights up
+  the famous objects you've already captured and shows the rest as a bucket list.~~ *(Pillar: friendliness /
   autonomy + "understand / enjoy" — PRIORITY 3. Size: M.)* Every beginner astrophotographer knows the Messier
   list — capturing all 110 is *the* classic milestone — yet the app has no "which have I got?" view. The
   night planner ranks *tonight's* targets and each target has its own integration progress, but nothing shows
