@@ -1,5 +1,5 @@
 import {
-  IconActivity, IconAward, IconChecklist, IconDatabase, IconFileText, IconFlask, IconGauge,
+  IconActivity, IconAntenna, IconAward, IconChecklist, IconDatabase, IconFileText, IconFlask, IconGauge,
   IconLayoutGrid,
   IconGalaxy,
   IconMoon, IconPalette, IconRadar2, IconSettings, IconSparkles, IconStars, IconTelescope,
@@ -67,6 +67,7 @@ export const NAV_SECTIONS: NavSection[] = [
     // Getting frames in and turning them into a stack.
     title: "Capture & process",
     links: [
+      { to: "/live", label: "Tonight, live", icon: <IconAntenna size={18} /> },
       { to: "/telescope", label: "Telescope", icon: <IconTelescope size={18} /> },
       { to: "/moon-sun", label: "Moon & Sun", icon: <IconVideo size={18} /> },
       { to: "/calibration", label: "Calibration", icon: <IconFlask size={18} /> },

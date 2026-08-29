@@ -43,15 +43,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-> **Builder 2026-08-29, branch `claude/compassionate-galileo-1i6x9x` — claiming three, in this order
-> (claim posted in the run's FIRST commit, per the five duplicate-collision process notes):**
-> 1. **"a target that needs 4+ good nights gets no finish date at all"** (Autonomy & friendliness, size S) —
->    the `want` parameter on `/api/plan/next-session/{safe}` so `finishForecast` can count past three windows.
-> 2. **"a badly flaking drive lights TWO separate yellow alerts, and they are one story"** (Autonomy &
->    friendliness, size S) — compose the missing-files and read-error notes into one storage alert on the Jobs
->    result, keeping both counts distinct and both helpers exported for History.
-> 3. **"Tonight, live"** (Features that serve real workflows, size M) — the new beginner feature this run,
->    a mobile-friendly live view of the session happening *right now*.
+_(none — claim an item here with your branch name)_
+
+> **Builder 2026-08-29, branch `claude/compassionate-galileo-1i6x9x` — run finished, all three claims released.**
+> Shipped: the finish forecast's **`want` horizon** so a 4+-night goal finally gets a date (**v0.297.1**, under
+> "Autonomy & friendliness"), the **one storage alert** a flaking drive now gets instead of two (**v0.297.2**,
+> same section), and the run's new beginner feature — **"Tonight, live"** at `/live` (**v0.298.0**, under
+> "Features that serve real workflows"). Claiming in the run's **first** commit and pushing immediately (per
+> the five duplicate-collision process notes) cost under a minute; no collision this run.
+> Two follow-ons filed below, both spotted while building the live page.
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-gwhwwd` — run finished, claim released.**
 > Shipped three: the stack run's read errors rolled up into a counted sentence on History and the Jobs
@@ -9167,6 +9167,22 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-29, the two follow-ons "Tonight, live" v0.298.0 deliberately left out) — keep the
+  screen awake on the live page, and cover a night that shot more than one target.** *(Pillar: understand +
+  enjoy — PRIORITY 3; size S each; both frontend-only, no new data.)*
+  (a) **Keep-awake.** `/live` is the second page in the app designed to be *left open* — outdoors, on a phone,
+  for hours — and it is the one where the screen sleeping actually costs something (you walk over to check and
+  it's black). v0.296.6 already shipped a wake-lock for the slideshow; **grep for it and reuse that exact
+  helper**, don't write a second one, and hold the lock only while the session reads `active` so a finished
+  night releases it. Same fail-soft posture: a browser without the Wake Lock API simply doesn't get it.
+  (b) **A night that shot two targets shows only one.** The page opens on whichever target's frames arrived
+  most recently, which is right — but a Seestar that re-points mid-night (or a mosaic split across panels)
+  leaves the earlier target invisible unless the reader knows to use the picker. Cheapest honest fix: one line
+  under the card naming the *other* targets that also got subs inside the same window ("NGC 7000 got 40 subs
+  earlier tonight"), each a link that sets `?target=`. `last_activity_utc` on the target list already carries
+  everything needed, so this stays a zero-extra-request change. **Don't** turn it into a full multi-target
+  dashboard — the page's value is that it answers two questions about *one* night at a glance.
+
 - **✅ SHIPPED (Builder, v0.297.1, branch `claude/compassionate-galileo-1i6x9x`) — ~~a target that needs 4+
   good nights gets no finish date at all, because the planner is only ever asked for three windows.~~**
   Shipped exactly as the shape below asked. `/api/plan/next-session/{safe}` takes an optional `want`
@@ -18098,10 +18114,58 @@ problems. Dogfood it every big-picture run and fix root causes.
     solved centre or timestamp. *(Shipped as `nightplan.session_moon()` + `_session_moon_note`; see the pruned
     headline above for the end-to-end wiring.)*
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #19) — "Tonight, live": a mobile-friendly capture-night monitor that
-  shows a target's *in-progress* session filling up as the Seestar drops subs — count kept vs set-aside so far,
-  minutes of integration, the latest thumbnail, and a plain "how it's going" line — so a beginner sitting outside
-  in the cold knows it's working and roughly when they've got enough to stop.** *(Pillar: understand + get +
+- **✅ SHIPPED (Builder, v0.298.0, branch `claude/compassionate-galileo-1i6x9x`) — ~~"Tonight, live": a
+  mobile-friendly capture-night monitor that shows a target's *in-progress* session filling up as the Seestar
+  drops subs.~~** Shipped as its own page at **`/live`**, "Tonight, live", under "Capture & process" in the nav.
+
+  **What shipped.** New `seestack/livesession.py` (pure, offline, injected clock) turns the frames table into
+  the night in progress: `active` (the newest sub is within `LIVE_STALE_MINUTES = 45`), the session's kept /
+  set-aside counts and integration, the target's all-time kept integration, the newest **accepted** frame id
+  for the thumbnail, and a `LiveConditions` rolling read over the last `CONDITIONS_WINDOW_FRAMES = 20` subs —
+  keep-rate verdict (`good`/`mixed`/`poor`/`unknown`), the kept subs' median FWHM, and the plain reject buckets
+  behind the ones lost. `GET /api/targets/{safe}/live-session` serialises it and carries the target's
+  integration goal beside it (through `webapp.goals.read_goal_s`, so it is the *same* goal every other screen
+  reads). The page polls every 30 s and answers the two questions in one screen: *"143 subs so far · 118 kept ·
+  2.0 h"* + *"Going well — 19 of your last 20 subs were kept"*, and *"4.0 h of your 6.0 h goal — about 2.0 h to
+  go."*
+
+  **Zero navigation, by design.** It opens on whichever target's frames arrived most recently — read off
+  `last_activity_utc` on the target list every screen already loads, so no extra request and no project DB
+  opened — which on a capture night is the one filling up. `?target=<safe>` pins one and is what the picker
+  writes, so it stays bookmarkable; the picker itself only appears when there is more than one target.
+
+  **The cautions the entry named are all honoured.** It reuses `session_recap`'s clustering rather than
+  defining "a session" twice — `last_session_frames` is called directly, and a test asserts the trailing
+  cluster it reports *is* the shared one (`_parse` was promoted to a public `parse_capture_time` for the same
+  reason; `_parse` stays as the in-module alias, so `session_recap.py` is otherwise untouched). It is strictly
+  read-only: frame rows and an existing preview artifact, never `incoming/` (§10), never a stack. "Ongoing" is a
+  pure time window over the stored capture stamp with the clock injected, so every boundary is unit-tested
+  without sleeping. And it never nags — a finished session says *"No subs for a while — this session looks
+  finished"* and reads `Finished`, an empty library gets an honest empty state, and too few recent subs is
+  `unknown` ("not enough yet to tell"), which is deliberately **not** "going badly".
+
+  **Two judgement calls worth recording.** (1) The conditions verdict is keep-rate only; star size is quoted
+  *beside* it rather than folded in, because a sharp night being thrown away by cloud and a soft night being
+  kept are different problems and one adjective would hide both. (2) The goal line measures against the
+  target's **total** kept integration, not tonight's — the goal is for the picture, and "is the picture done?"
+  is the question actually being asked at 2 a.m.
+
+  **Upgrade-safe (§9):** one new additive endpoint, one new page, one new nav link, one new engine module. No
+  config, no schema, no on-disk change, no default flipped, no existing response shape touched.
+
+  **Tests (+16 engine / +8 webapp / +31 frontend):** `tests/test_livesession.py` (active vs finished, the exact
+  stale boundary, a mid-session gap staying active, a future-stamped sub reading as "just now", the rolling
+  window catching cloud after a great first half, each verdict band, star size over *kept* subs only,
+  unmeasured subs leaving it unstated, the thumbnail being a kept frame, and the shared-session-cut proof),
+  `tests/webapp/test_target_live_session.py` (serialisation incl. nested conditions and buckets, active
+  through the API, the goal agreeing with `/integration-goal`, null for an empty target, 404 for an unknown
+  one), and `frontend/src/live/liveSession.test.ts` + `routes/Live.test.tsx` (every sentence, the "mostly"
+  threshold that refuses to call a plurality a cause, the auto-pick, `?target=`, the kept-frame thumbnail URL,
+  and both empty states).
+
+  Original spec, for the record:
+
+  *(Pillar: understand + get +
   autonomy, PRIORITY 2–3; size M; fully offline, additive, read-only — reuses the frames the watcher already
   ingested + QC'd, the session-clustering in `session_recap`, and the integration goal in `webapp/goals.py`; no
   new deps, no schema/config change.)*
