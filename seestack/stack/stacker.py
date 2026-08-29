@@ -1774,8 +1774,13 @@ def run_stack(
         if options.drizzle_reject and n < 4:
             log.info("Drizzle outlier rejection skipped: needs >=4 frames, have %d", n)
         clip = None
+        # Only populated on the two-pass (rejection) drizzle, where a frame the
+        # statistics pass couldn't read may still be deposited by pass 2.
+        dz_stats_log: _PassFrameLog | None = None
+        dz_final_log = _PassFrameLog()
         if reject:
             stats = DrizzleStacker(ref_wcs, dst_shape, params, compute_stats=True)
+            dz_stats_log = _PassFrameLog()
             n_stats = _drizzle_pass(
                 frames, ref, stats, weights,
                 options=options,
@@ -1786,6 +1791,7 @@ def run_stack(
                 mono=options.mono,
                 photometric_scales=pscales,
                 max_in_flight=max_in_flight,
+                frame_log=dz_stats_log,
             )
             if n_stats == 0 and not cancel():
                 raise ValueError("drizzle: no usable frames")
@@ -1808,9 +1814,15 @@ def run_stack(
             mono=options.mono,
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
+            frame_log=dz_final_log,
         )
         if n_used == 0 and not cancel():
             raise ValueError("drizzle: no usable frames")
+        # A sub the statistics pass blipped on but this one deposited is in the
+        # picture; say so on its error line rather than leave the run's error
+        # list claiming a frame the header counts as used.
+        if dz_stats_log is not None:
+            _mark_recovered_errors(errors, dz_stats_log, dz_final_log)
         # Surface how much the two-pass drizzle rejection actually clipped
         # (only when rejection ran — single-pass drizzle has no clip to tally).
         if clip is not None:
@@ -1875,6 +1887,8 @@ def run_stack(
     # done after one pass.
     elif eff.sigma_clip and n >= 4:
         wel = WelfordAccumulator(canvas_3)
+        p1_log = _PassFrameLog()
+        p2_log = _PassFrameLog()
 
         def consume_pass1(aligned: np.ndarray, y0: int, x0: int, _weight: float) -> None:
             wel.add_window(aligned, y0, x0)
@@ -1893,6 +1907,7 @@ def run_stack(
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
             roughly_aligned_ids=roughly_ids,
+            frame_log=p1_log,
         )
         if n_used_p1 == 0 and not cancel():
             raise ValueError("pass 1 produced no usable frames")
@@ -1942,7 +1957,15 @@ def run_stack(
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
             roughly_aligned_ids=roughly_ids,
+            frame_log=p2_log,
         )
+        # ...and the presentation half of the same truth: a sub that blipped in
+        # pass 1 and loaded fine in pass 2 still carries its pass-1 error line, so
+        # the run's error list would report a failure for a frame ``NFRAMES`` says
+        # was combined. Qualify that line (never drop it — see
+        # ``_mark_recovered_errors``) so the storage signal survives without the
+        # contradiction.
+        _mark_recovered_errors(errors, p1_log, p2_log)
         # The frames that actually contributed *pixels* are pass 2's — pass 1 only
         # built the mean/σ reference the clip is measured against, and a frame it
         # missed is still combined (``_kappa_sigma_keep_mask`` keeps a sample whose
@@ -2294,6 +2317,53 @@ def _imap_bounded(ex: ThreadPoolExecutor, fn, items, max_in_flight: int):
             pending.add(fu)
 
 
+# Appended to the error line a pass recorded for a frame the *other* pass of a
+# two-pass run went on to combine. The line is re-worded rather than dropped: the
+# read really did fail, and a NAS share that drops one sub in a hundred is exactly
+# what the run's error list exists to show — but leaving it unqualified made the
+# list claim a lost sub for a frame ``NFRAMES`` says is in the picture.
+RECOVERED_ERROR_SUFFIX = (
+    " — read again on the other pass and combined, so this sub IS in the picture")
+
+
+@dataclass
+class _PassFrameLog:
+    """Per-frame bookkeeping for one :func:`_pass` / :func:`_drizzle_pass`.
+
+    ``error_slot`` maps a frame's ``id`` to the index of the line that pass
+    appended to the run's shared ``errors`` list, so the line can later be
+    re-worded **in place**; ``used`` holds the ids that actually contributed
+    pixels. Together they let a two-pass run tell a transient read blip
+    (failed here, combined there) from a genuinely lost sub, which is the only
+    case :func:`_mark_recovered_errors` touches. Optional everywhere — a
+    single-pass run simply doesn't ask for one.
+    """
+
+    error_slot: dict[int, int] = field(default_factory=dict)
+    used: set[int] = field(default_factory=set)
+
+
+def _mark_recovered_errors(errors: list[str], first: _PassFrameLog,
+                           second: _PassFrameLog) -> int:
+    """Qualify each error ``first`` recorded for a frame ``second`` combined.
+
+    Returns how many lines were re-worded. A frame that failed **both** passes is
+    left exactly as it was — that is the real failure the list is for — and so is
+    one that failed the *second* pass, whose light genuinely isn't in the picture
+    (``n_frames_used`` is pass 2's count). Idempotent, and a frame with no ``id``
+    is never recorded in the first place, so nothing here can mis-attribute a line.
+    """
+    n = 0
+    for fid, slot in first.error_slot.items():
+        if fid not in second.used or not (0 <= slot < len(errors)):
+            continue
+        if errors[slot].endswith(RECOVERED_ERROR_SUFFIX):
+            continue
+        errors[slot] += RECOVERED_ERROR_SUFFIX
+        n += 1
+    return n
+
+
 def _pass(
     frames: list[FrameRow],
     ref: FrameRow,
@@ -2314,6 +2384,7 @@ def _pass(
     photometric_scales: dict[int, float] | None = None,
     max_in_flight: int | None = None,
     roughly_aligned_ids: set[int] | None = None,
+    frame_log: _PassFrameLog | None = None,
 ) -> int:
     """
     Run one pass over ``frames``, feeding each windowed aligned image plus its
@@ -2335,6 +2406,11 @@ def _pass(
     ``photometric_scales`` (optional) gain-matches each frame's *pixels* by an
     in-place multiply before the consumer sees them, so the scaling is applied
     identically in every pass and every accumulator/rejection path.
+
+    ``frame_log`` (optional) records which frames this pass errored on (and where
+    it put each line in ``errors``) and which contributed, so a two-pass caller can
+    qualify a pass-1 error for a frame pass 2 combined — see
+    :func:`_mark_recovered_errors`.
     """
     total = len(frames)
     progress(phase_label, 0, total)
@@ -2370,6 +2446,8 @@ def _pass(
                 aligned = fut.result()
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{Path(f.source_path).name}: {type(exc).__name__}: {exc}")
+                if frame_log is not None and f.id is not None:
+                    frame_log.error_slot[f.id] = len(errors) - 1
                 progress(phase_label, done, total)
                 continue
             if aligned is None:
@@ -2394,6 +2472,8 @@ def _pass(
             with consumer_lock:
                 consumer(win_rgb, y0, x0, w)
             used += 1
+            if frame_log is not None and f.id is not None:
+                frame_log.used.add(f.id)
             progress(phase_label, done, total)
     return used
 
@@ -2414,6 +2494,7 @@ def _drizzle_pass(
     mono: bool = False,
     photometric_scales: dict[int, float] | None = None,
     max_in_flight: int | None = None,
+    frame_log: _PassFrameLog | None = None,
 ) -> int:
     """
     One-shot drizzle accumulation. Drizzle's ``add_image`` mutates internal
@@ -2424,6 +2505,9 @@ def _drizzle_pass(
     ``max_in_flight`` caps how many prepared frame buffers may be in flight at once
     (memory-bounded by the caller via :func:`_memory_bounded_in_flight`); when None
     it falls back to ``max_workers·2`` — the historical bound.
+
+    ``frame_log`` (optional) records this pass's per-frame errors and contributions
+    for :func:`_mark_recovered_errors`, exactly as :func:`_pass` does.
     """
     from seestack.io.wcs_io import wcs_from_text
 
@@ -2483,6 +2567,8 @@ def _drizzle_pass(
                 payload = fut.result()
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{Path(f.source_path).name}: {type(exc).__name__}: {exc}")
+                if frame_log is not None and f.id is not None:
+                    frame_log.error_slot[f.id] = len(errors) - 1
                 progress(phase_label, done, total)
                 continue
             if payload is None:
@@ -2503,8 +2589,12 @@ def _drizzle_pass(
                 # This mirrors the standard path's ``align_one`` → ``None`` skip.
                 if aligned:
                     used += 1
+                    if frame_log is not None and f.id is not None:
+                        frame_log.used.add(f.id)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{Path(f.source_path).name}: drizzle add_image: {exc}")
+                if frame_log is not None and f.id is not None:
+                    frame_log.error_slot[f.id] = len(errors) - 1
             progress(phase_label, done, total)
     return used
 
