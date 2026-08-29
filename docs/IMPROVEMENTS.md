@@ -47,9 +47,10 @@ _(none — claim an item here with your branch name)_
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-u3wi1n` — claim released, shipped.**
 > Shipped: the ⭐ owner-clarified **real universe map** (true 3D by distance) as **"Your universe"**
-> (**v0.296.0**) — write-up under "Features that serve real workflows". Claiming it in the run's *first*
-> commit and pushing immediately (per the five duplicate-collision process notes) cost under a minute; no
-> collision this run.
+> (**v0.296.0**, write-up under "Features that serve real workflows"), and **"your last stack didn't run,
+> here's the setting that would fix it"** (**v0.296.1**, under "Autonomy & friendliness" — read its note about
+> the filed shape missing the unattended case). Claiming in the run's *first* commit and pushing immediately
+> (per the five duplicate-collision process notes) cost under a minute; no collision this run.
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-eypoyg` — run finished, all claims released.**
 > Shipped: the two-pass error-list loose end (**v0.294.3**), "what would it take to print bigger?"
@@ -9247,33 +9248,72 @@ to **Shipped**.)_
   read and an initial index — no data change. **Grep first:** the slide keys are `run:<safe>:<run_id>` /
   `video:<capture_id>` in `frontend/src/showAndTell.ts`; reuse them rather than inventing a second identifier.
 
-- **NEW IDEA (Builder 2026-08-27, the gap left standing by the v0.287.0 non-drizzle memory lever) — a
-  walk-away stack that still *refuses* goes dark in complete silence: nothing on the Target page or the
-  Dashboard says the target stopped producing pictures, or why, or which single setting would fix it.**
-  *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: M. Confidence: verified this run — grepped
-  `Target.tsx` and `routers/targets.py`; the only failure reason either surfaces is `solve_failed`, and
-  neither reads a failed *stack job* at all.)*
-  **Why this is now the sharp edge.** v0.281.0 and v0.287.0 both rest on the same premise: *a refusal is the
-  right answer for a watching user and useless at 3 a.m.* Each took one lever the engine could apply itself.
-  What is left over is precisely the set the engine must **not** apply on its own — `reference_canvas` (it
-  crops a mosaic's field), and a canvas that even the cheapest configuration can't hold — and for those the
-  MemoryError is still raised into a job record nobody opens. The engine's own message is already excellent
-  (`_best_memory_fix` names the one lever and the GB it lands at, and `_memory_fix_sentence` words it), so the
-  work is not analysis: it is **carrying a sentence that already exists to a page the owner actually looks
-  at**.
-  **Shape.** The job record already holds the failure; a target-scoped read of "did this target's most recent
-  stack job fail, and with what?" turns it into a `Notice` on the Target page (the `NoticeBoard` primitive from
-  IA slice (a), at `warning`) and, when it is the only thing standing between the owner and a picture, a
-  Dashboard line. Word it as the engine does — *"Last night's stack of M 31 didn't run: the canvas needs
-  ~9.4 GB, over your ~6 GB budget. Switching Canvas mode to 'reference' would fit (~5.1 GB)."* — with a link
-  to the control, exactly like the existing "Fix in Settings" deep links (`/settings/stacking`). **Do NOT**
-  make it a one-click auto-apply for `reference_canvas`: that is the change v0.281.0 and v0.287.0 both
-  deliberately declined to make silently, and the owner clicking it *is* the point.
-  **Cautions.** Scope it to the *most recent* stack attempt per target, so a long-fixed failure from three
-  weeks ago never nags; self-hide the moment a later stack succeeds; and put it inside the notes board rather
-  than adding another always-on banner (the standing IA priority). **Grep first:** confirm no per-target job
-  failure surface has landed since this was filed, and check whether the auto-stack "attempt marker" machinery
-  from the v0.270.1 walk-away fix already records enough to answer the question without a new query.
+- **✅ SHIPPED (Builder, v0.296.1, branch `claude/compassionate-galileo-u3wi1n`) — ~~a walk-away stack that
+  still *refuses* goes dark in complete silence: nothing on the Target page or the Dashboard says the target
+  stopped producing pictures, or why, or which single setting would fix it.~~** Shipped as filed, with one
+  finding that changed the shape and is worth reading before touching this area again.
+
+  **The filed shape would have missed the case it exists for.** The spec says "a target-scoped read of *did
+  this target's most recent stack **job** fail*". It doesn't — not on the walk-away path. The unattended
+  auto-stack runs **inside the scan job** and catches per target on purpose (one target must not sink the
+  batch, `webapp/pipeline.py`), so the scan job finishes **`done`** and the refusal is filed in its *result*
+  under `stack_errors: {safe: message}`. A "failed jobs" query returns nothing for exactly the 3 a.m. failure
+  this entry is about. The shipped reader therefore reads **both** sites: a failed `stack`/`process_target`
+  job, and a *successful* scan job whose result carries `stack_errors`.
+
+  **What shipped.** Pure `webapp/stackfailure.py` (`latest_stack_failures` — newest failure per target from a
+  job history in any order; `superseded_by_success` — the self-hiding half) plus additive
+  `GET /api/stack-failures`, which scans the recent job history once and opens a project DB **only** for a
+  target that actually has a failure to report (normally none). `webapp.jobs.classify_error_message` was split
+  out of `classify_job_error` so the unattended path — which only ever kept `str(exc)`, no exception — gets the
+  same stable `error_kind` the frontend already translates; the exception path still adds what only the *type*
+  can say (a bare `MemoryError`). One `StackFailedAlert` renders on both surfaces: the Target page's
+  `NoticeBoard` at `warning` (`StackFailedNote`, this target only) and the Dashboard's (`StackFailuresNote`,
+  library-wide, first two named + "N more"), sharing one `["stack-failures"]` query cache.
+
+  **The cautions were honoured.** Most-recent attempt only; retired the moment a later stack run lands (parsed,
+  not string-compared — the job stamp ends in `Z` and the stack-run stamp is a full isoformat offset, so a
+  string sort gets it wrong); inside the notes board, never a new always-on banner; and **no one-click
+  auto-apply** — every lever here changes the picture, which is precisely why v0.281.0 and v0.287.0 declined to
+  take them silently, so it links to `/settings/stacking` and the owner clicks. The engine's raw sentence is
+  shown *verbatim* beneath the friendly translation, because only the raw line carries the numbers
+  ("~9.4 GB, over the ~6.0 GB budget") that make the fix actionable.
+
+  **Upgrade-safe (§9):** one additive endpoint, two additive self-hiding notes, no config/schema/on-disk/
+  default change, no existing response shape touched. A healthy install renders nothing new.
+
+  **Tests (+13 python / +10 frontend):** `tests/webapp/test_stack_failures.py` (both recording sites, the
+  DONE-scan-job case called out explicitly, newest-wins in either job order, malformed results never raising,
+  the mixed-stamp-shape supersede, the classifier matching the exception path, and four endpoint tests incl.
+  the deleted-target and retire-on-success paths) and `frontend/src/components/StackFailedAlert.test.tsx`.
+
+  Original spec, for the record:
+
+  - **~~NEW IDEA (Builder 2026-08-27, the gap left standing by the v0.287.0 non-drizzle memory lever)~~**
+    *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: M. Confidence: verified this run — grepped
+    `Target.tsx` and `routers/targets.py`; the only failure reason either surfaces is `solve_failed`, and
+    neither reads a failed *stack job* at all.)*
+    **Why this is now the sharp edge.** v0.281.0 and v0.287.0 both rest on the same premise: *a refusal is the
+    right answer for a watching user and useless at 3 a.m.* Each took one lever the engine could apply itself.
+    What is left over is precisely the set the engine must **not** apply on its own — `reference_canvas` (it
+    crops a mosaic's field), and a canvas that even the cheapest configuration can't hold — and for those the
+    MemoryError is still raised into a job record nobody opens. The engine's own message is already excellent
+    (`_best_memory_fix` names the one lever and the GB it lands at, and `_memory_fix_sentence` words it), so the
+    work is not analysis: it is **carrying a sentence that already exists to a page the owner actually looks
+    at**.
+    **Shape.** The job record already holds the failure; a target-scoped read of "did this target's most recent
+    stack job fail, and with what?" turns it into a `Notice` on the Target page (the `NoticeBoard` primitive from
+    IA slice (a), at `warning`) and, when it is the only thing standing between the owner and a picture, a
+    Dashboard line. Word it as the engine does — *"Last night's stack of M 31 didn't run: the canvas needs
+    ~9.4 GB, over your ~6 GB budget. Switching Canvas mode to 'reference' would fit (~5.1 GB)."* — with a link
+    to the control, exactly like the existing "Fix in Settings" deep links (`/settings/stacking`). **Do NOT**
+    make it a one-click auto-apply for `reference_canvas`: that is the change v0.281.0 and v0.287.0 both
+    deliberately declined to make silently, and the owner clicking it *is* the point.
+    **Cautions.** Scope it to the *most recent* stack attempt per target, so a long-fixed failure from three
+    weeks ago never nags; self-hide the moment a later stack succeeds; and put it inside the notes board rather
+    than adding another always-on banner (the standing IA priority). **Grep first:** confirm no per-target job
+    failure surface has landed since this was filed, and check whether the auto-stack "attempt marker" machinery
+    from the v0.270.1 walk-away fix already records enough to answer the question without a new query.
 
 - **NEW IDEA (Builder 2026-08-27, spotted while fixing the v0.286.1 stack-time-crop sharpen bug) — the video
   still's stack-time crop *knows* its box and then throws it away, so every later operation has to infer the

@@ -3,6 +3,21 @@
 import type { SkyImage, SkyStar } from "../sky/projection";
 import type { UniverseData } from "../sky/universe";
 
+/** One target whose most recent stack attempt failed (see webapp/stackfailure.py).
+ *  `unattended` means it failed on the walk-away path, where nobody read it. */
+export interface StackFailure {
+  safe: string;
+  name: string;
+  message: string;
+  kind?: string | null;
+  when_utc?: string | null;
+  unattended?: boolean;
+}
+
+export interface StackFailuresData {
+  failures: StackFailure[];
+}
+
 export interface SkyData {
   stars: SkyStar[];
   images: SkyImage[];
@@ -2326,6 +2341,9 @@ export const api = {
   myMapUrl: () => "/api/sky/my-map.png",
   /** "Your universe" — the captured objects placed in depth by catalog distance. */
   getUniverse: () => req<UniverseData>("/api/sky/universe"),
+
+  /** Targets whose most recent stack attempt failed, with nothing since. */
+  getStackFailures: () => req<StackFailuresData>("/api/stack-failures"),
 
   // tonight — night planner. `date` (YYYY-MM-DD) plans an upcoming night instead
   // of tonight; omit it for tonight.
