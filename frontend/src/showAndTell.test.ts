@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { BestPicture, VideoStill } from "./api/client";
 import { formatStampDate } from "./format";
 import {
-  buildSlides, deepSkyFact, deepSkyMeta, nextIndex,
+  buildSlides, deepSkyFact, deepSkyMeta, nextIndex, runSlideKey, showFromHref,
+  startIndexFor, videoSlideKey,
 } from "./showAndTell";
 
 function pic(over: Partial<BestPicture>): BestPicture {
@@ -107,5 +108,36 @@ describe("nextIndex", () => {
   it("rests on a one-picture show rather than flickering", () => {
     expect(nextIndex(0, 1, 1)).toBe(0);
     expect(nextIndex(0, 0, 1)).toBe(0);
+  });
+});
+
+describe("start the show here", () => {
+  it("mints the same keys buildSlides does", () => {
+    const slides = buildSlides([pic({ safe: "m42", run_id: 7 })],
+      [still({ capture_id: "cap9" })]);
+    expect(slides[0].key).toBe(runSlideKey("m42", 7));
+    expect(slides[1].key).toBe(videoSlideKey("cap9"));
+  });
+
+  it("encodes the key into the link, so an odd safe name can't break it", () => {
+    expect(showFromHref(runSlideKey("m42", 7))).toBe("/show?from=run%3Am42%3A7");
+    expect(showFromHref(videoSlideKey("cap 9&x")))
+      .toBe("/show?from=video%3Acap%209%26x");
+  });
+
+  it("starts on the named picture", () => {
+    const slides = buildSlides(
+      [pic({ safe: "m31", run_id: 1 }), pic({ safe: "m42", run_id: 2 })], []);
+    expect(startIndexFor(slides, runSlideKey("m42", 2))).toBe(1);
+  });
+
+  it("falls back to the top of the wall rather than nothing", () => {
+    const slides = buildSlides([pic({ safe: "m31", run_id: 1 })], []);
+    // No key at all (the plain /show link), a key whose picture is gone, and an
+    // empty show all play from the beginning.
+    expect(startIndexFor(slides, null)).toBe(0);
+    expect(startIndexFor(slides, "")).toBe(0);
+    expect(startIndexFor(slides, "run:gone:99")).toBe(0);
+    expect(startIndexFor([], "run:m31:1")).toBe(0);
   });
 });
