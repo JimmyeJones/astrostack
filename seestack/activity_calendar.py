@@ -44,7 +44,7 @@ from datetime import date, datetime, timedelta, timezone
 _DAYS_PER_MONTH = 30.4375
 
 
-def _parse_utc(timestamp_utc: str) -> datetime | None:
+def parse_utc(timestamp_utc: str) -> datetime | None:
     """Parse an ISO-8601 capture timestamp into an aware UTC datetime, or None.
 
     Frames store ``timestamp_utc`` as an ISO string (usually ``...Z`` or with an
@@ -62,6 +62,14 @@ def _parse_utc(timestamp_utc: str) -> datetime | None:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+#: The app writes UTC stamps in more than one shape — ``…Z`` from the job
+#: manager and the library registry, a full ``isoformat()`` offset from the
+#: stacker — so anything comparing two of them must parse rather than compare
+#: strings. Kept as the module-private name this file has always used, with
+#: :func:`parse_utc` as the public one other modules import.
+_parse_utc = parse_utc
 
 
 def night_date_of(timestamp_utc: str, lon_deg: float | None = None) -> date | None:

@@ -45,6 +45,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 _(none — claim an item here with your branch name)_
 
+> **Builder 2026-08-29, branch `claude/compassionate-galileo-u3wi1n` — claim released, shipped.**
+> Shipped: the ⭐ owner-clarified **real universe map** (true 3D by distance) as **"Your universe"**
+> (**v0.296.0**, write-up under "Features that serve real workflows"), **"your last stack didn't run, here's
+> the setting that would fix it"** (**v0.296.1**, under "Autonomy & friendliness" — read its note about the
+> filed shape missing the unattended case), and the object-label de-confliction that keeps a crowded field
+> readable (**v0.296.2**, under "Friendliness"). Claiming in the run's *first* commit and pushing immediately
+> (per the five duplicate-collision process notes) cost under a minute; no collision this run.
+
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-eypoyg` — run finished, all claims released.**
 > Shipped: the two-pass error-list loose end (**v0.294.3**), "what would it take to print bigger?"
 > (**v0.295.0**), and the framing nudge on "Point here tonight" (**v0.295.1**). **Stood down** on *"the picture
@@ -9241,33 +9249,72 @@ to **Shipped**.)_
   read and an initial index — no data change. **Grep first:** the slide keys are `run:<safe>:<run_id>` /
   `video:<capture_id>` in `frontend/src/showAndTell.ts`; reuse them rather than inventing a second identifier.
 
-- **NEW IDEA (Builder 2026-08-27, the gap left standing by the v0.287.0 non-drizzle memory lever) — a
-  walk-away stack that still *refuses* goes dark in complete silence: nothing on the Target page or the
-  Dashboard says the target stopped producing pictures, or why, or which single setting would fix it.**
-  *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: M. Confidence: verified this run — grepped
-  `Target.tsx` and `routers/targets.py`; the only failure reason either surfaces is `solve_failed`, and
-  neither reads a failed *stack job* at all.)*
-  **Why this is now the sharp edge.** v0.281.0 and v0.287.0 both rest on the same premise: *a refusal is the
-  right answer for a watching user and useless at 3 a.m.* Each took one lever the engine could apply itself.
-  What is left over is precisely the set the engine must **not** apply on its own — `reference_canvas` (it
-  crops a mosaic's field), and a canvas that even the cheapest configuration can't hold — and for those the
-  MemoryError is still raised into a job record nobody opens. The engine's own message is already excellent
-  (`_best_memory_fix` names the one lever and the GB it lands at, and `_memory_fix_sentence` words it), so the
-  work is not analysis: it is **carrying a sentence that already exists to a page the owner actually looks
-  at**.
-  **Shape.** The job record already holds the failure; a target-scoped read of "did this target's most recent
-  stack job fail, and with what?" turns it into a `Notice` on the Target page (the `NoticeBoard` primitive from
-  IA slice (a), at `warning`) and, when it is the only thing standing between the owner and a picture, a
-  Dashboard line. Word it as the engine does — *"Last night's stack of M 31 didn't run: the canvas needs
-  ~9.4 GB, over your ~6 GB budget. Switching Canvas mode to 'reference' would fit (~5.1 GB)."* — with a link
-  to the control, exactly like the existing "Fix in Settings" deep links (`/settings/stacking`). **Do NOT**
-  make it a one-click auto-apply for `reference_canvas`: that is the change v0.281.0 and v0.287.0 both
-  deliberately declined to make silently, and the owner clicking it *is* the point.
-  **Cautions.** Scope it to the *most recent* stack attempt per target, so a long-fixed failure from three
-  weeks ago never nags; self-hide the moment a later stack succeeds; and put it inside the notes board rather
-  than adding another always-on banner (the standing IA priority). **Grep first:** confirm no per-target job
-  failure surface has landed since this was filed, and check whether the auto-stack "attempt marker" machinery
-  from the v0.270.1 walk-away fix already records enough to answer the question without a new query.
+- **✅ SHIPPED (Builder, v0.296.1, branch `claude/compassionate-galileo-u3wi1n`) — ~~a walk-away stack that
+  still *refuses* goes dark in complete silence: nothing on the Target page or the Dashboard says the target
+  stopped producing pictures, or why, or which single setting would fix it.~~** Shipped as filed, with one
+  finding that changed the shape and is worth reading before touching this area again.
+
+  **The filed shape would have missed the case it exists for.** The spec says "a target-scoped read of *did
+  this target's most recent stack **job** fail*". It doesn't — not on the walk-away path. The unattended
+  auto-stack runs **inside the scan job** and catches per target on purpose (one target must not sink the
+  batch, `webapp/pipeline.py`), so the scan job finishes **`done`** and the refusal is filed in its *result*
+  under `stack_errors: {safe: message}`. A "failed jobs" query returns nothing for exactly the 3 a.m. failure
+  this entry is about. The shipped reader therefore reads **both** sites: a failed `stack`/`process_target`
+  job, and a *successful* scan job whose result carries `stack_errors`.
+
+  **What shipped.** Pure `webapp/stackfailure.py` (`latest_stack_failures` — newest failure per target from a
+  job history in any order; `superseded_by_success` — the self-hiding half) plus additive
+  `GET /api/stack-failures`, which scans the recent job history once and opens a project DB **only** for a
+  target that actually has a failure to report (normally none). `webapp.jobs.classify_error_message` was split
+  out of `classify_job_error` so the unattended path — which only ever kept `str(exc)`, no exception — gets the
+  same stable `error_kind` the frontend already translates; the exception path still adds what only the *type*
+  can say (a bare `MemoryError`). One `StackFailedAlert` renders on both surfaces: the Target page's
+  `NoticeBoard` at `warning` (`StackFailedNote`, this target only) and the Dashboard's (`StackFailuresNote`,
+  library-wide, first two named + "N more"), sharing one `["stack-failures"]` query cache.
+
+  **The cautions were honoured.** Most-recent attempt only; retired the moment a later stack run lands (parsed,
+  not string-compared — the job stamp ends in `Z` and the stack-run stamp is a full isoformat offset, so a
+  string sort gets it wrong); inside the notes board, never a new always-on banner; and **no one-click
+  auto-apply** — every lever here changes the picture, which is precisely why v0.281.0 and v0.287.0 declined to
+  take them silently, so it links to `/settings/stacking` and the owner clicks. The engine's raw sentence is
+  shown *verbatim* beneath the friendly translation, because only the raw line carries the numbers
+  ("~9.4 GB, over the ~6.0 GB budget") that make the fix actionable.
+
+  **Upgrade-safe (§9):** one additive endpoint, two additive self-hiding notes, no config/schema/on-disk/
+  default change, no existing response shape touched. A healthy install renders nothing new.
+
+  **Tests (+13 python / +10 frontend):** `tests/webapp/test_stack_failures.py` (both recording sites, the
+  DONE-scan-job case called out explicitly, newest-wins in either job order, malformed results never raising,
+  the mixed-stamp-shape supersede, the classifier matching the exception path, and four endpoint tests incl.
+  the deleted-target and retire-on-success paths) and `frontend/src/components/StackFailedAlert.test.tsx`.
+
+  Original spec, for the record:
+
+  - **~~NEW IDEA (Builder 2026-08-27, the gap left standing by the v0.287.0 non-drizzle memory lever)~~**
+    *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: M. Confidence: verified this run — grepped
+    `Target.tsx` and `routers/targets.py`; the only failure reason either surfaces is `solve_failed`, and
+    neither reads a failed *stack job* at all.)*
+    **Why this is now the sharp edge.** v0.281.0 and v0.287.0 both rest on the same premise: *a refusal is the
+    right answer for a watching user and useless at 3 a.m.* Each took one lever the engine could apply itself.
+    What is left over is precisely the set the engine must **not** apply on its own — `reference_canvas` (it
+    crops a mosaic's field), and a canvas that even the cheapest configuration can't hold — and for those the
+    MemoryError is still raised into a job record nobody opens. The engine's own message is already excellent
+    (`_best_memory_fix` names the one lever and the GB it lands at, and `_memory_fix_sentence` words it), so the
+    work is not analysis: it is **carrying a sentence that already exists to a page the owner actually looks
+    at**.
+    **Shape.** The job record already holds the failure; a target-scoped read of "did this target's most recent
+    stack job fail, and with what?" turns it into a `Notice` on the Target page (the `NoticeBoard` primitive from
+    IA slice (a), at `warning`) and, when it is the only thing standing between the owner and a picture, a
+    Dashboard line. Word it as the engine does — *"Last night's stack of M 31 didn't run: the canvas needs
+    ~9.4 GB, over your ~6 GB budget. Switching Canvas mode to 'reference' would fit (~5.1 GB)."* — with a link
+    to the control, exactly like the existing "Fix in Settings" deep links (`/settings/stacking`). **Do NOT**
+    make it a one-click auto-apply for `reference_canvas`: that is the change v0.281.0 and v0.287.0 both
+    deliberately declined to make silently, and the owner clicking it *is* the point.
+    **Cautions.** Scope it to the *most recent* stack attempt per target, so a long-fixed failure from three
+    weeks ago never nags; self-hide the moment a later stack succeeds; and put it inside the notes board rather
+    than adding another always-on banner (the standing IA priority). **Grep first:** confirm no per-target job
+    failure surface has landed since this was filed, and check whether the auto-stack "attempt marker" machinery
+    from the v0.270.1 walk-away fix already records enough to answer the question without a new query.
 
 - **NEW IDEA (Builder 2026-08-27, spotted while fixing the v0.286.1 stack-time-crop sharpen bug) — the video
   still's stack-time crop *knows* its box and then throws it away, so every later operation has to infer the
@@ -13626,25 +13673,69 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-08-29, read off `AnnotatedImage` while putting the object labels on the Target
-  page) — the object overlay draws every label at full size with no collision handling, so a rich field
-  degenerates into an unreadable pile exactly where the labels are most interesting.** *(Pillar: understand —
-  PRIORITY 3. Size: S–M. Confidence: high — traced, not yet rendered against a crowded field.)*
-  `AnnotatedImage` renders `markers.filter(m => m.visible)` — **all** of them, each an 8 px dot plus a
-  nowrap text chip, positioned dead-centre on the object with `translate(-50%,-50%)` and no awareness of its
-  neighbours. `objects_in_field` returns every bundled catalog object whose centre lands in the frame, and the
-  frame is not small: the annotations test's own fixture is a 3.3° × 2.5° field. Point that at a crowded
-  region — the Sword of Orion, the Virgo cluster, anything along the galactic plane — and several chips land
-  within a few pixels of each other on a 260 px-tall card and overlap into mush. The picture is fine; the
-  *labels* are the thing that stops being readable, and they stop being readable precisely on the pictures
-  worth labelling. **Shape (pure, testable, no backend):** a `deconflictMarkers(markers, chipW, chipH)` beside
-  `objectMarkerLayout` that nudges overlapping chips apart along the axis with the most room and drops the
-  least-notable of a hopeless pile (the payload has no brightness, but distance-from-centre — the ordering
-  `describeFieldObjects` already uses — is a reasonable proxy), plus a hard cap on labels drawn at small box
-  sizes with the remainder still named in the text readout underneath (which both consumers already render, so
-  nothing is lost — it moves from the image to the list). **Care:** keep it pure and box-size-driven so the
-  same field labels sensibly on a 180 px History card, a 260 px Target card and a full-screen lightbox; and
-  never move a *dot* — only its chip — or the label stops pointing at its object.
+- **✅ SHIPPED (Builder, v0.296.2, branch `claude/compassionate-galileo-u3wi1n`) — ~~the object overlay draws
+  every label at full size with no collision handling, so a rich field degenerates into an unreadable pile
+  exactly where the labels are most interesting.~~** Shipped as the filed shape asked, pure and box-size-driven.
+
+  **What shipped.** `deconflictMarkers(markers, boxW, boxH)` beside `objectMarkerLayout` in
+  `AnnotatedImage.tsx`. Each chip is tried straight below/above first (chips are wide, so stacking them
+  vertically collides least), then sideways, then diagonally, each direction preferring the side with more room
+  in the box, and each tried at three increasing distances — so a notable object in a genuine pile still finds
+  somewhere instead of losing its name to a luckier neighbour. A chip that would leave the box is refused
+  outright, so no label hangs off the picture. **The dot never moves**, exactly as the entry required: the
+  marker wrapper now sits at the object with the dot pinned to it and only the chip offset.
+
+  **Who keeps a label.** `Marker` gained `r` — the normalised distance from the picture's centre, *the same
+  quantity* `describeFieldObjects` already sorts its read-out on — and placement runs in that order, so the
+  picture and the list under it can't disagree about what matters. `labelBudget(boxW, boxH)` caps labels at one
+  per 22,000 px² of box, floored at 3 and ceilinged at 12, so the same field labels sensibly on a 180 px
+  History card, a 260 px Target card and a full-screen lightbox. Nothing is lost: both consumers already render
+  a text read-out built from the *full* object list, so a dropped label moves from the image to the list.
+
+  **Tests (+9 in `AnnotatedImage.test.tsx`, on top of the 24 that still pass unchanged):** no two chips overlap
+  on a five-object pile; the pre-fix state pinned explicitly (the five markers really do land within 20 px of
+  each other, and now hold five distinct offsets); every dot unmoved; the nearest-the-centre-wins partition on a
+  30-object pile; the `r` ordering matching the read-out's; the budget's floor, ceiling and monotonicity; every
+  chip inside the box for objects hard against the corners; the degenerate cases; and the no-regression half —
+  an ordinary sparse field still gets the plain "chip under the dot" placement for every object.
+
+  Original spec, for the record:
+
+  - **~~NEW IDEA (Builder 2026-08-29, read off `AnnotatedImage` while putting the object labels on the Target
+    page)~~** *(Pillar: understand —
+    PRIORITY 3. Size: S–M. Confidence: high — traced, not yet rendered against a crowded field.)*
+    `AnnotatedImage` renders `markers.filter(m => m.visible)` — **all** of them, each an 8 px dot plus a
+    nowrap text chip, positioned dead-centre on the object with `translate(-50%,-50%)` and no awareness of its
+    neighbours. `objects_in_field` returns every bundled catalog object whose centre lands in the frame, and the
+    frame is not small: the annotations test's own fixture is a 3.3° × 2.5° field. Point that at a crowded
+    region — the Sword of Orion, the Virgo cluster, anything along the galactic plane — and several chips land
+    within a few pixels of each other on a 260 px-tall card and overlap into mush. The picture is fine; the
+    *labels* are the thing that stops being readable, and they stop being readable precisely on the pictures
+    worth labelling. **Shape (pure, testable, no backend):** a `deconflictMarkers(markers, chipW, chipH)` beside
+    `objectMarkerLayout` that nudges overlapping chips apart along the axis with the most room and drops the
+    least-notable of a hopeless pile (the payload has no brightness, but distance-from-centre — the ordering
+    `describeFieldObjects` already uses — is a reasonable proxy), plus a hard cap on labels drawn at small box
+    sizes with the remainder still named in the text readout underneath (which both consumers already render, so
+    nothing is lost — it moves from the image to the list). **Care:** keep it pure and box-size-driven so the
+    same field labels sensibly on a 180 px History card, a 260 px Target card and a full-screen lightbox; and
+    never move a *dot* — only its chip — or the label stops pointing at its object.
+
+- **DOGFOOD FINDING (Builder 2026-08-29, measured by `scripts/agent-dogfood.sh`, not read off the code) — "My
+  life list" is 14,584 px tall on a phone, nearly 3× the next-worst page and 2.8× its own desktop height.**
+  *(Pillar: friendliness — PRIORITY 3, the standing "the pages are extremely busy" item. Size: M.
+  Confidence: measured — the probe's own page-height table, this run.)*
+  The probe's ranking is unambiguous: `[phone] /life-list: 14584px`, then `[desktop] /life-list: 5236px`, then
+  the Target page at 3035 px. Nothing overflows and there are no console errors — the page is *correct*, it is
+  simply enormous, and on the device the owner actually reads it on that is ~17 screens of scrolling. Every
+  other page the probe visits fits in a third of that.
+  **Why it is worth a slice.** The owner's complaint is explicitly about scrolling to reach the actual
+  information, and this is the app's clearest instance of it. The fix is the same regrouping the IA slices have
+  used elsewhere — nothing removed: a phone-first shape for the list (collapse the not-yet-shot bulk behind a
+  count, or paginate/section by catalog), with the shot ones — the part that is *about the owner* — above the
+  fold. **Measure it the same way afterwards** (`scripts/agent-dogfood.sh`, the page-height table) and state
+  the before/after in the commit, exactly as the IA slices do with block counts.
+  **Grep first:** confirm whether the height is the catalog's full length rendered eagerly; if so, the cheap
+  half may be a windowed / "show more" list rather than an IA rethink.
 
 - **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the owner *save* their
   universe map, and put it where they'd think to look for it.** *(Pillar: enjoy + share — PRIORITY 3.
@@ -17052,74 +17143,161 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER CLARIFICATION (2026-08-29) — "My map" (v0.292.0, shipped below) is NOT what the owner meant by
-  "universe map"; this is the actual ask, and it is a genuinely different feature.** *(Enjoyment/pride — pull
-  on a slow run, doesn't touch the imaging path. Size L — bigger than "My map" was, be honest about that up
-  front.)* **Do not build this as a mode on "My map" or reuse its renderer** — the two answer different
-  questions and conflating them will produce something that satisfies neither. "My map" (keep it, it's a good
-  feature) answers *"where in the sky have I pointed my scope?"* — a flat, angle-only projection where every
-  object sits on the same imaginary dome regardless of how far away it really is. The owner's actual reference
-  is **SpaceEngine's universe map: true 3D space, positioned by real relative distance, not just direction** —
-  *"where stars and objects are located in comparison with the others... my own version, made from my own
-  data."* Two objects that appear close together on the sky but are wildly different real distances away
-  (a foreground nebula vs. a background galaxy in the same line of sight) must end up correctly separated in
-  depth, and the owner should be able to orbit/fly around the resulting structure the way the existing 3D
-  globe already lets them orbit the (flat) star dome.
+- **✅ SHIPPED — FIRST SLICE (Builder, v0.296.0, branch `claude/compassionate-galileo-u3wi1n`) —
+  ~~⭐ OWNER CLARIFICATION (2026-08-29): the *actual* universe map — the owner's captured objects placed in
+  TRUE 3D by real distance, not on one fixed-radius dome.~~** Shipped as **"Your universe"**, its own page at
+  `/universe` under "Your pictures" — a separate destination, not a mode on "My map" and not an extension of
+  the flat star dome, exactly as the spec insisted.
 
-  **Confirmed while scoping this:** the existing 3D globe (`Sky.tsx`, `raDecToVector` in
-  `frontend/src/sky/projection.ts`) places every star and every one of the owner's pictures on the surface of
-  **one single fixed-radius sphere** (`STAR_RADIUS = 100` in `Sky.tsx`) — angle only, zero depth, same
-  information as a flat map wearing a 3D costume. It is not a smaller version of what's being asked for; it's
-  the wrong shape entirely and shouldn't be extended for this.
+  **What shipped.** New `seestack/universemap.py` owns the placement decision (pure, offline, no webapp
+  import): it identifies each captured target against the bundled catalog via the existing
+  `objectinfo.identify_object`, takes the vetted `distance_ly` through `lighttravel`, and returns a
+  **log-scaled 0..1 `depth`** per object plus the labelled **distance shells** to draw around them. The
+  renderer only multiplies each object's RA/Dec direction vector by `radiusForDepth(depth)` — so the scale
+  decision lives in Python where it is measured and tested, not scattered through the viewer.
+  `GET /api/sky/universe` is additive and deliberately cheap (target registry + bundled catalog only, no
+  project DBs opened); the page joins it to `/api/sky` **by `safe` on the same query cache** for the pictures,
+  so opening it after the Sky Map costs no second fetch.
 
-  **The good news: the depth data already exists, bundled, 100% covered.** `distance_ly` is a vetted field on
-  *every single object* in both bundled catalogs — confirmed by direct count: `seestack/data/messier.json`
-  (110/110 objects) and `seestack/data/deepsky_popular.json` (47/47 objects) **all** carry a real
-  `distance_ly`. It's already wired to the object card via `seestack/lighttravel.py` ("How far did you see?",
-  v0.272.0) under a strict **"never guess" discipline** — `None` renders as nothing, never a fake number. Reuse
-  that exact discipline here: a target whose object isn't in either bundled catalog (no vetted distance) must
-  not be placed by a guessed depth — see scope note below.
+  **The three rules the spec asked for, each enforced by a test.** (1) **Never guess a distance** — a target
+  the catalog can't identify, or identifies with no vetted distance, comes back under `unplaced` with a
+  plain-language reason and is *named* in the legend ("1 not placed" → the list), never silently dropped and
+  never placed at a made-up depth. (2) **Log scale, always** — the bundled spread is 444 ly to 83.5 Mly (5.3
+  decades), and the regression test pins the failure mode explicitly: on a linear axis M57 and M13 both round
+  to <1 % of M31's radius, i.e. one dot and two specks on the origin. Equal ratios are equal on-screen gaps,
+  asserted to 2 %. A collection tighter than one decade is widened to one rather than stretched to imply a
+  spread it hasn't got; a single object sits at mid-scale. (3) **Say where the numbers come from** — the
+  `PROVENANCE` line ("your own pictures decide which objects are here and which way they lie; how far away
+  each one is comes from a published catalogue — that is a measurement no backyard telescope can make") is
+  carried on every response, empty maps included, and rendered on every load.
 
-  **Be honest with the owner about data provenance — don't oversell "made from my own data."** The owner's own
-  data determines *which objects appear* (their captured target list) and *where they point* (solved RA/Dec).
-  The *distance* of each object is **not** something derivable from a Seestar's images — that needs real
-  astrometry (parallax, standard candles) no single amateur scope can produce, which is exactly why
-  `distance_ly` is a vetted catalog fact, not measured. Say so plainly in the feature's own copy (mirroring how
-  the object card already frames `distance_ly` as a known fact, not a measurement) — the owner should come away
-  understanding *why* Andromeda sits `2.5M ly` out while the Ring Nebula sits `2.3k ly` out, not think the app
-  derived that number from their pixels.
+  **Reading the scene.** Rings on round decades (1,000 ly → 10 million ly), capped at six so labels can't
+  collide, thinned rather than truncated (the outermost rung is what gives "far" its felt sense) and never
+  drawn beyond the furthest thing the owner has actually shot. Each object is its own picture, billboarded,
+  with a radial line back to "You are here" — without that line a lone point under a perspective camera is
+  ambiguous between "small and near" and "big and far". A placed target with no finished stack yet still
+  draws as a marker. The caption says the rings are *not* evenly spaced distances without using the word
+  "logarithmic". Picture size is deliberately constant: distance is the radial axis, so scaling a picture by
+  angular size would imply a second, false dimension.
 
-  **Scope boundary — say this explicitly, don't silently under-deliver:** this places the owner's captured
-  **deep-sky targets** (galaxies, nebulae, clusters — anything with a bundled catalog distance) in true 3D.
-  It does **NOT** place individual field stars from within a frame by their own real distance — that needs a
-  large stellar-distance catalog (Gaia-scale) which is a **heavy/networked dependency the guardrails require
-  owner sign-off for** (`AGENTS.md` §10). File that separately under "Needs owner sign-off" if ever wanted;
-  don't build it speculatively as part of this. A target outside both bundled catalogs (no vetted
-  `distance_ly`) should be excluded from the 3D placement rather than guessed — optionally noted as "distance
-  unknown" rather than silently dropped, so the owner isn't left wondering where a target went.
+  **Scope boundary, stated in the app, not just here.** This places the owner's *deep-sky targets* by catalog
+  distance. It does not place field stars by their own distances — that needs a Gaia-scale catalog, i.e. a
+  heavy/networked dependency (§10) — and nothing in the UI implies otherwise.
 
-  **The real design problem worth calling out up front: scale.** Real distances span light-years to
-  megalight-years — a linear scale crushes every nearby nebula into a single point next to Andromeda. Use a
-  **log-scaled radial distance** (standard practice for exactly this reason — it's what makes SpaceEngine's own
-  map readable) so relative structure stays legible across the owner's whole collection, near and far alike.
-  This is a real decision to make deliberately, not a default to pick blind — sanity-check it against the
-  owner's actual bundled-catalog spread (roughly 1 kly to several Mly for a typical Messier-heavy collection).
+  **Upgrade-safe (§9):** one new additive endpoint, one new page, one new nav link. No config, no schema, no
+  on-disk change, no default flipped, no existing response shape touched. `lighttravel._friendly_years` was
+  split into a public `friendly_amount`/`friendly_light_years` so the time voice ("2.5 million years") and the
+  distance voice ("2.5 million ly") round identically — same output, existing tests unchanged.
 
-  **What's reusable vs. what genuinely needs building:**
-  - Reusable: `react-three-fiber` + `OrbitControls` (already a proven dependency via `Sky.tsx`); the
-    RA/Dec-to-unit-vector math in `raDecToVector` (same formula, just multiply by each object's own — log-
-    scaled — distance instead of one shared `STAR_RADIUS`); the picture-as-textured-footprint pattern already
-    used for the 3D globe's images.
-  - New: the log-distance scale itself; a legend/scale reference so "far" has a felt sense of magnitude, not
-    just a bare number; sourcing `distance_ly` per target (reuse `seestack/lighttravel.py`'s lookup, don't
-    re-derive it); the "distance unknown" handling for un-catalogued targets; almost certainly its own route
-    or its own clearly-labelled mode, distinct from both existing Sky-page views — name it something a beginner
-    won't confuse with "My map" ("My map" and "the real thing this is" are answering different questions and
-    deserve different names in the nav, not "map" vs. "map 2").
+  **Tests (+17 python engine / +5 webapp / +20 frontend):** `tests/test_universemap.py` (ordering, the
+  log-vs-linear proof, padding, the tight-collection widening, shells, never-guess, provenance, and an
+  end-to-end pass on the **real bundled catalogs** placing M42 < M57 < M31), `tests/webapp/test_sky_universe.py`
+  (placement, scale + provenance through the API, an unplaceable target named not invented, frameless registry
+  rows ignored, and the honest empty map), `frontend/src/sky/universe.test.ts` and
+  `frontend/src/routes/Universe.test.tsx` (radius mapping and its clamps, the picture join incl. the
+  no-picture case, the two captions, and the legend/card copy — the provenance assertion is the one that
+  fails if anyone ever drops it).
 
-  **Beginner bar:** clears it — no astronomy background needed to be told "these are your pictures, placed
-  where they really are compared to each other," and flying through your own captured slice of the universe is
-  a strong, shareable "wow" moment, same spirit as the light-travel-time feature it reuses data from.
+  **Deliberately left for a follow-up run** (filed as an idea below): a "fly to this object" camera move, and
+  a constellation-line backdrop at the far radius. Neither is needed for the map to read.
+
+  Original spec, for the record:
+
+  - **~~⭐ OWNER CLARIFICATION (2026-08-29) — "My map" (v0.292.0, shipped below) is NOT what the owner meant by
+    "universe map"; this is the actual ask, and it is a genuinely different feature.~~** *(Enjoyment/pride — pull
+    on a slow run, doesn't touch the imaging path. Size L — bigger than "My map" was, be honest about that up
+    front.)* **Do not build this as a mode on "My map" or reuse its renderer** — the two answer different
+    questions and conflating them will produce something that satisfies neither. "My map" (keep it, it's a good
+    feature) answers *"where in the sky have I pointed my scope?"* — a flat, angle-only projection where every
+    object sits on the same imaginary dome regardless of how far away it really is. The owner's actual reference
+    is **SpaceEngine's universe map: true 3D space, positioned by real relative distance, not just direction** —
+    *"where stars and objects are located in comparison with the others... my own version, made from my own
+    data."* Two objects that appear close together on the sky but are wildly different real distances away
+    (a foreground nebula vs. a background galaxy in the same line of sight) must end up correctly separated in
+    depth, and the owner should be able to orbit/fly around the resulting structure the way the existing 3D
+    globe already lets them orbit the (flat) star dome.
+
+    **Confirmed while scoping this:** the existing 3D globe (`Sky.tsx`, `raDecToVector` in
+    `frontend/src/sky/projection.ts`) places every star and every one of the owner's pictures on the surface of
+    **one single fixed-radius sphere** (`STAR_RADIUS = 100` in `Sky.tsx`) — angle only, zero depth, same
+    information as a flat map wearing a 3D costume. It is not a smaller version of what's being asked for; it's
+    the wrong shape entirely and shouldn't be extended for this.
+
+    **The good news: the depth data already exists, bundled, 100% covered.** `distance_ly` is a vetted field on
+    *every single object* in both bundled catalogs — confirmed by direct count: `seestack/data/messier.json`
+    (110/110 objects) and `seestack/data/deepsky_popular.json` (47/47 objects) **all** carry a real
+    `distance_ly`. It's already wired to the object card via `seestack/lighttravel.py` ("How far did you see?",
+    v0.272.0) under a strict **"never guess" discipline** — `None` renders as nothing, never a fake number. Reuse
+    that exact discipline here: a target whose object isn't in either bundled catalog (no vetted distance) must
+    not be placed by a guessed depth — see scope note below.
+
+    **Be honest with the owner about data provenance — don't oversell "made from my own data."** The owner's own
+    data determines *which objects appear* (their captured target list) and *where they point* (solved RA/Dec).
+    The *distance* of each object is **not** something derivable from a Seestar's images — that needs real
+    astrometry (parallax, standard candles) no single amateur scope can produce, which is exactly why
+    `distance_ly` is a vetted catalog fact, not measured. Say so plainly in the feature's own copy (mirroring how
+    the object card already frames `distance_ly` as a known fact, not a measurement) — the owner should come away
+    understanding *why* Andromeda sits `2.5M ly` out while the Ring Nebula sits `2.3k ly` out, not think the app
+    derived that number from their pixels.
+
+    **Scope boundary — say this explicitly, don't silently under-deliver:** this places the owner's captured
+    **deep-sky targets** (galaxies, nebulae, clusters — anything with a bundled catalog distance) in true 3D.
+    It does **NOT** place individual field stars from within a frame by their own real distance — that needs a
+    large stellar-distance catalog (Gaia-scale) which is a **heavy/networked dependency the guardrails require
+    owner sign-off for** (`AGENTS.md` §10). File that separately under "Needs owner sign-off" if ever wanted;
+    don't build it speculatively as part of this. A target outside both bundled catalogs (no vetted
+    `distance_ly`) should be excluded from the 3D placement rather than guessed — optionally noted as "distance
+    unknown" rather than silently dropped, so the owner isn't left wondering where a target went.
+
+    **The real design problem worth calling out up front: scale.** Real distances span light-years to
+    megalight-years — a linear scale crushes every nearby nebula into a single point next to Andromeda. Use a
+    **log-scaled radial distance** (standard practice for exactly this reason — it's what makes SpaceEngine's own
+    map readable) so relative structure stays legible across the owner's whole collection, near and far alike.
+    This is a real decision to make deliberately, not a default to pick blind — sanity-check it against the
+    owner's actual bundled-catalog spread (roughly 1 kly to several Mly for a typical Messier-heavy collection).
+
+    **What's reusable vs. what genuinely needs building:**
+    - Reusable: `react-three-fiber` + `OrbitControls` (already a proven dependency via `Sky.tsx`); the
+      RA/Dec-to-unit-vector math in `raDecToVector` (same formula, just multiply by each object's own — log-
+      scaled — distance instead of one shared `STAR_RADIUS`); the picture-as-textured-footprint pattern already
+      used for the 3D globe's images.
+    - New: the log-distance scale itself; a legend/scale reference so "far" has a felt sense of magnitude, not
+      just a bare number; sourcing `distance_ly` per target (reuse `seestack/lighttravel.py`'s lookup, don't
+      re-derive it); the "distance unknown" handling for un-catalogued targets; almost certainly its own route
+      or its own clearly-labelled mode, distinct from both existing Sky-page views — name it something a beginner
+      won't confuse with "My map" ("My map" and "the real thing this is" are answering different questions and
+      deserve different names in the nav, not "map" vs. "map 2").
+
+    **Beginner bar:** clears it — no astronomy background needed to be told "these are your pictures, placed
+    where they really are compared to each other," and flying through your own captured slice of the universe is
+    a strong, shareable "wow" moment, same spirit as the light-travel-time feature it reuses data from.
+
+- **NEW IDEA (Builder 2026-08-29, the follow-ups deliberately left out of "Your universe" v0.296.0) — "fly to
+  it", and tell the reader what they're looking at.** *(Pillar: enjoy + understand — PRIORITY 3; size S each;
+  frontend-only, no new data.)* Three cheap taps on the shipped page, in value order:
+  (a) **Fly to this object.** Clicking a picture selects it and stops the drift, but the camera stays where it
+  was — on a five-decade scale the nearest objects are a long way in from the outer ring, so the reader has to
+  orbit and dolly to actually *look* at the thing they clicked. An eased camera tween to a point just outside
+  the object (the classic "fly through your universe" move the owner's SpaceEngine reference is built on) is
+  the single biggest felt improvement left. Keep OrbitControls' target at the origin or the orbit becomes
+  confusing; tween the camera position only.
+  (b) **The blurb is already there.** `CatalogObject.blurb` — the plain-language "what am I looking at?"
+  one-liner the object card on the Target page already shows — is loaded by `identify_object` and simply not
+  carried onto `UniverseObjectOut`. One additive field and one `<Text>`: the read-out goes from a distance to
+  an actual sentence about the object. **Grep first**, don't re-derive the lookup.
+  (c) **Constellation lines at the backdrop radius.** The star backdrop is a bare point cloud at r=420; the
+  offline Sky viewer's recognisable-star labelling is the precedent. Only worth it if a constellation-line
+  dataset is already bundled — check before scoping, and do **not** add one as a dependency for this.
+
+- **NEW IDEA (Builder 2026-08-29, spotted while building "Your universe" v0.296.0) — two targets that are the
+  same object land on exactly the same point, and one hides the other.** *(Pillar: understand — PRIORITY 3;
+  size S; frontend-only.)* The universe map places each target at its *catalog* position, which is right — all
+  of a target's pictures belong where the object actually is. But a library that has both `M_31` and
+  `Andromeda` (or a re-imaged target under a second folder, which the owner's library does accumulate) draws
+  two coincident pictures and two overlapping labels, and the reader can't tell there are two. Cheapest honest
+  fix: group placed objects by `object_id` in the viewer, draw one node, and let the card list the targets
+  behind it ("2 of your targets are this object"). **Don't** fix it by nudging one aside — a fake offset on a
+  map whose whole promise is "placed where they really are" is exactly the wrong trade.
 
 - **⚠️ PROCESS NOTE (Builder 2026-08-29) — the FIFTH concurrent-duplicate collision, hours after the fourth:
   two Builders built the Scout's "What's in my picture?" item at the same time. I stood mine down at merge

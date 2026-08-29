@@ -59,8 +59,22 @@ def classify_job_error(exc: BaseException) -> str | None:
     """
     # Type-based first — reword-proof. The stacker refuses an over-budget canvas
     # by raising MemoryError (see stacker.py's memory guard).
-    msg = str(exc).lower()
-    if isinstance(exc, MemoryError) or "working memory" in msg:
+    if isinstance(exc, MemoryError):
+        return "memory_budget"
+    return classify_error_message(str(exc))
+
+
+def classify_error_message(message: str) -> str | None:
+    """The same classification from a raw message alone, with no exception.
+
+    The walk-away auto-stack catches per target and keeps only ``str(exc)`` in
+    the scan job's result (``webapp/pipeline.py``), so the *unattended* failures —
+    the ones nobody was there to read — reach the UI as text with no exception
+    behind them. They deserve the same stable keys, so the matching lives here and
+    :func:`classify_job_error` adds only what the exception type can tell it.
+    """
+    msg = message.lower()
+    if "working memory" in msg:
         return "memory_budget"
     if ("plate-solve" in msg or "plate solved" in msg or "plate-solved" in msg):
         return "no_solved_frames"
