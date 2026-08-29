@@ -43,14 +43,21 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-- **CLAIMED (Builder 2026-08-29, branch `claude/compassionate-galileo-92mr4d`) — "See what stacking removed":
-  the per-pixel rejection map, its sibling FITS, the overlay endpoint and the History toggle.** Filed under
-  "Features that serve real workflows" (Scout 2026-08-27 #9). Doing the κ-σ and two-pass-drizzle recording
-  paths — both of which the walk-away chain turns on for itself — opt-in and memory-charged, exactly as the
-  entry specifies. Min/max stays unrecorded (falls back to "no overlay available", which the design already
-  handles) and is filed as the follow-on.
+_(none — claim an item here with your branch name)_
 
-_(claim an item here with your branch name)_
+> **Builder 2026-08-29, branch `claude/compassionate-galileo-92mr4d` — run finished, claim released.**
+> Shipped one, deep: **"See what stacking removed"** (**v0.298.0**, write-up under "Features that serve real
+> workflows") — all three filed slices, engine → endpoint → History toggle, across `stacker.py`,
+> `drizzle_path.py`, `output.py`, the memory guard, a new endpoint and the run card. Two findings worth
+> carrying forward are in that entry: **min/max rejection is deliberately not mapped** (its drop is structural,
+> so a map of it is a canvas-wide wash implying damage that isn't there), and the tint needs a **percentile**
+> scale plus an **area-averaging** resize or a single hot pixel and the noise-tail speckle between them bury the
+> satellite trail the overlay exists to show. Two follow-ons filed under Ideas (the Gallery lightbox, and a
+> connected-component "N spots" count).
+> The bug queue was checked first and is genuinely dry: every entry under "Bugs (fix these first)" is either
+> ✅ shipped or a ⚪ audit non-finding, and the one live item (the ASTAP ladder's 3× per-frame timeout) is
+> explicitly stood down pending owner data — see the Builder note on it. Claiming in the run's **first** commit
+> and pushing immediately (per the five duplicate-collision process notes) cost under a minute; no collision.
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-gwhwwd` — run finished, claim released.**
 > Shipped three: the stack run's read errors rolled up into a counted sentence on History and the Jobs
@@ -17385,6 +17392,26 @@ problems. Dogfood it every big-picture run and fix root causes.
     where they really are compared to each other," and flying through your own captured slice of the universe is
     a strong, shareable "wow" moment, same spirit as the light-travel-time feature it reuses data from.
 
+- **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
+  v0.298.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
+  *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
+  (a) **The Gallery lightbox and the Target hero (S, frontend-only).** v0.298.0 put the toggle on the History
+  run card, because History is where a run gets inspected — but the full-screen lightbox is where a beginner
+  actually studies their picture, and the tint is far more legible large. Everything needed is already built:
+  `AnnotatedImage` takes an `overlaySrc`, `api.stackRejectionOverlayUrl` exists, and `rejection.has_map` on the
+  run-info says whether to offer it. The only real work is that the lightbox shows a *different* rendition in
+  some states (the share JPEG, a north-up render), and the overlay is sized to the **stored preview** — so it
+  must stand down there exactly as the History card does when Adjust is open, rather than laying a tint on a
+  picture it wasn't measured for. Ship the gate before the feature.
+  (b) **"N spots", instead of a percentage (S–M, engine + one response field).** The caption today reuses the
+  run's `REJFRAC` — *"that was about 0.4% of your samples"* — because that number already exists. What the
+  Scout's entry actually asked for is more human: *"stacking removed 14 streaks and hot spots"*. That needs a
+  connected-component pass over the `_rejected.fits` map (scipy's `ndimage.label`, already a dependency), with
+  a minimum blob size so the noise-tail speckle isn't counted as 8,000 "spots" — which is the whole difficulty,
+  and the reason it was left out rather than guessed at. Compute it **once, at write time**, into a header card
+  beside `REJMAP` (not per-request over a canvas-sized file), and surface it on the run-info the caption already
+  reads. Measure the threshold against a real map before picking it.
+
 - **NEW IDEA (Builder 2026-08-29, the follow-ups deliberately left out of "Your universe" v0.296.0) — "fly to
   it", and tell the reader what they're looking at.** *(Pillar: enjoy + understand — PRIORITY 3; size S each;
   frontend-only, no new data.)* Three cheap taps on the shipped page, in value order:
@@ -18670,41 +18697,117 @@ problems. Dogfood it every big-picture run and fix root causes.
   *tonight*), per-target progress (one object's integration), and the "what's in this picture?" annotation
   (labels objects *inside one frame*): this is the **collection-level** view none of them provide.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #9) — "See what stacking removed": a one-tap overlay on the finished
-  picture that highlights the pixels rejection dropped, turning the abstract "rejection dropped ~X% of samples"
-  trust line into a visible "here's the satellite trail we caught and cleaned out for you."** *(Pillar: trust /
-  understand — PRIORITY 3–4. Size: M–L, memory-sensitive. Confidence the gap is real: grepped this run — no
-  "rejection overlay"/"what was removed" surface is filed or built; only the `RejectionBadge` count exists.)*
-  **Why it's beginner-gold:** the single most reassuring thing a stacker does is quietly delete the satellite
-  trains, plane trails and cosmic rays that would otherwise ruin a sub — and right now the beginner only gets a
-  number ("sigma clipping dropped 0.3% of samples"). Letting them *see* the exact streaks the app removed, laid
-  over their own picture, is a delightful, confidence-building proof that leaving the frames in and trusting the
-  stack was the right call — it directly answers "did it actually work?" on the stack→result path this app's
-  owner cares most about. It also teaches *why* more subs + rejection beats hand-culling. **What exists to build
-  on:** the stacker already computes the per-pixel keep/drop decision in every rejection path
-  (`_kappa_sigma_keep_mask` in the κ-σ pass-2, `MinMaxRejectAccumulator`'s extreme drops, the drizzle two-pass
-  zero-weighting) and already sums a scalar `RejectionStats(n_contributed, n_rejected)`. What's missing is a
-  *spatial* record of *where* the drops happened. **Feasibility / the one real constraint — memory (§10 OOM
-  history):** a full per-pixel rejection-count canvas is one extra plane, which the OOM guard
-  (`_guard_stack_memory` / `_estimate_peak_bytes`) must price in, so it **must be opt-in and budgeted**, never
-  on by default. Shape it so a healthy default install is byte-for-byte unchanged:
-  **(a) engine (M):** an optional `record_rejection_map=False` on `StackOptions`; when on, each rejecting
-  accumulator also accumulates a 2-D `uint16` per-pixel drop count (κ-σ: `valid & ~keep`; min/max: derivable
-  from the count bands it already computes; drizzle: the `rejected & contributing` mask it already forms), and
-  `write_stack_outputs` writes it as a new sibling `{base}_rejected.fits` (mirrors the `_framecov.fits`
-  precedent — additive, absent on every existing run, consumers fall back to "no overlay available"). Charge the
-  extra plane through the existing guard so a canvas that no longer fits is refused with the usual named fix
-  (or the pass is simply not recorded, as `_afford_drizzle_reject` already does for the reject pass itself on the
-  walk-away path).
-  **(b) backend (S):** a read-only `GET /api/targets/{safe}/stack-runs/{id}/rejection-map` that returns a small
-  downsized PNG/mask of the drop map from the sibling FITS (empty/none when the run has no sibling), computed in
-  a threadpool — same shape as the existing coverage/annotations endpoints.
-  **(c) frontend (S):** a "Show what was removed" toggle on the History run card / Gallery lightbox that
-  overlays the mask (tinted, semi-transparent) on the result image, with a plain readout — *"Stacking removed N
-  streak/hot-pixel spots across your subs — that's the satellites and cosmic rays cleaned out for you."* Reuse
-  the `AnnotatedImage` contain-fit layout so the overlay lands pixel-true at any box size. **Care:** default OFF
-  end-to-end; never let the recording change the *pixels* of the stack (it only observes the same keep/drop the
-  combine already applied); and phrase the readout as protection delivered, not as "N% of your data thrown away."
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #9) — "See what stacking removed": a one-tap overlay on the finished
+  picture that highlights the pixels rejection dropped.**~~ — **SHIPPED v0.298.0** (Builder 2026-08-29, branch
+  `claude/compassionate-galileo-92mr4d`) — **all three filed slices, (a) engine / (b) backend / (c) frontend.**
+  *(Pillar: trust + understand — PRIORITY 3–4.)*
+
+  **(a) The engine records *where*, not only how much.** A new default-off `StackOptions.record_rejection_map`
+  makes the two **data-driven** rejections keep a per-pixel `uint16` drop count beside their scalar tally: the
+  κ-σ pass-2 ORs `valid & ~keep` across the channels into a saturating add (no extra pass, no extra allocation
+  beyond the one plane), and the two-pass drizzle scatters its `contributing & rejected` input pixels to the
+  **same** nearest-output indices the clip itself tested against — so the map can never disagree with the
+  decision it records. Written as a sibling `{base}_rejected.fits` (the `_framecov.fits` precedent), registered
+  in `RUN_ARTEFACT_SUFFIXES` so a re-stack archives it with the picture it belongs to, and stamped `REJMAP` in
+  the header so a consumer can tell "didn't record" from "recorded, and nothing was removed".
+
+  **Min/max is deliberately NOT recorded, and that is the finding, not an omission.** Its drop is *structural* —
+  every pixel with ≥3 samples loses exactly 2k of them (`MinMaxRejectAccumulator.rejection_counts`) — so a map
+  of it is a flat wash across the whole canvas that would tell the user nothing and imply damage that isn't
+  there. Pinned by a test with that reasoning in its docstring.
+
+  **Memory (the entry's one real constraint) is charged, at its true size.** `_estimate_peak_bytes` grows a
+  `rejection_map` flag adding `out_pixels × 2` bytes — not a whole rounded-up RGB float32 array, which would
+  price a 2-bytes-per-pixel plane at six times what it costs. One predicate, `_records_rejection_map(eff, n)`,
+  answers "will this run actually allocate one?" under exactly the conditions the branches take, and the memory
+  guard, the in-flight cap **and** the pre-submit `estimate_stack` all read it, so none of them can charge a
+  plane the run doesn't allocate or miss one it does.
+
+  **(b) `GET …/stack-runs/{id}/rejection-overlay`** serves a transparent tint sized to the run's *stored
+  preview*, composing the same crop and North-up rotation `sky_overlay` does (the map comes off the un-cropped,
+  un-rotated canvas; without that the highlighted trail lands where the trail isn't). A preview whose geometry
+  can't be reconciled serves nothing rather than something misaligned.
+
+  **Whether to *offer* the toggle rides the run listing, not a per-run header read.** The first cut hung it off
+  `rejection.has_map` on the run-info, which meant History fired one `/info` request **per run** on every page
+  load just to decide whether to draw a menu item — a page of 30 runs paying 30 round trips for a feature almost
+  none of them have. It is now `has_rejection_map` on the `stack-runs` row, answered by one `stat()` in the sweep
+  `has_fits`/`has_preview` already do, and the run-info is fetched only once the overlay is actually switched on
+  (for the caption's fraction). `rejection.has_map` stayed on the run-info too — it is the honest answer to "does
+  this run's own header claim a map, and is the file still there?", which is a different question from the
+  listing's, and it's `False`, not a broken toggle, when a hand-tidied output dir has taken the sibling away.
+
+  **The tint is scaled to be *useful*, which took two deliberate choices.** It is normalised against the **90th
+  percentile** of the non-empty pixels, not the maximum: a hot pixel rejected in every sub would otherwise set
+  the scale and render a satellite trail — rejected in one sub of many, and the thing the user actually wants to
+  see — as good as invisible. And the resize to the preview grid **area-averages**, turning counts into a local
+  density, so a dense line keeps its strength while the scattering of lone noise-tail drops rejection
+  legitimately makes fades toward nothing. Both are measured by tests, not asserted by comment.
+
+  **(c) The toggle lives inside the existing "About this stack" menu**, not as another always-on banner (the
+  owner's standing "the UI is extremely busy" priority), and only appears on a run that has a map. The caption
+  under the tinted picture is deliberately protection-delivered, never data-thrown-away: *"The cyan marks are
+  what stacking removed — satellite trails, plane trails and cosmic rays that were in your subs but aren't in
+  your picture. That was about 0.4% of your samples; the rest is untouched."* Cyan because an OSC deep-sky
+  picture is overwhelmingly red/gold/black. Opening Adjust stands the overlay down with a plain line saying why
+  (the live render is a different picture from the one the tint was sized to).
+
+  **Upgrade-safe (§9):** no config, schema, on-disk-layout or API-shape change; one new default-off
+  `StackOptions` field (so every recorded run's options replay exactly as before), one additive header card, one
+  additive response key an older frontend ignores, and one new file that only a run which asked for it writes.
+  An all-zero map writes nothing — the absence already says "nothing was removed".
+
+  **Tests (+22 python engine / +7 webapp / +7 frontend):** `tests/test_rejection_map.py` (the map landing on
+  the planted satellite trail on **both** paths, on the same synthetic scene `test_drizzle_reject` already
+  proved rejection cleans up; the bit-for-bit no-change safety property; off-by-default; the single-pass-drizzle
+  and min/max no-record cases; the `_records_rejection_map` truth table; the memory charge on both canvases; the
+  all-zero no-file rule; and the four renderer properties including the hot-pixel and speckle-dilution ones),
+  `tests/webapp/test_rejection_overlay.py` (the `has_map` flag's three states, the listing row's two, the tint
+  landing only on the trail, the 404 for a run without one, and the overlay following a genuinely 35°-rotated
+  North-up save),
+  `History.test.tsx` + `AnnotatedImage.test.tsx` (the toggle appearing only when there's a map **and costing no
+  request when there isn't**, the overlay element and its URL, the caption's wording, and the overlay layer's
+  contain-fit/click-through/aria contract).
+
+  **Left for a follow-on, filed under Ideas → "Features that serve real workflows":** the same overlay in the
+  Gallery lightbox (History is where a run is inspected, so it went first), and a per-run "N spots" count, which
+  needs a connected-component pass over the map rather than the fraction the caption reuses today.
+
+  Original spec, for the record:
+
+    *(Pillar: trust /
+    understand — PRIORITY 3–4. Size: M–L, memory-sensitive. Confidence the gap is real: grepped this run — no
+    "rejection overlay"/"what was removed" surface is filed or built; only the `RejectionBadge` count exists.)*
+    **Why it's beginner-gold:** the single most reassuring thing a stacker does is quietly delete the satellite
+    trains, plane trails and cosmic rays that would otherwise ruin a sub — and right now the beginner only gets a
+    number ("sigma clipping dropped 0.3% of samples"). Letting them *see* the exact streaks the app removed, laid
+    over their own picture, is a delightful, confidence-building proof that leaving the frames in and trusting the
+    stack was the right call — it directly answers "did it actually work?" on the stack→result path this app's
+    owner cares most about. It also teaches *why* more subs + rejection beats hand-culling. **What exists to build
+    on:** the stacker already computes the per-pixel keep/drop decision in every rejection path
+    (`_kappa_sigma_keep_mask` in the κ-σ pass-2, `MinMaxRejectAccumulator`'s extreme drops, the drizzle two-pass
+    zero-weighting) and already sums a scalar `RejectionStats(n_contributed, n_rejected)`. What's missing is a
+    *spatial* record of *where* the drops happened. **Feasibility / the one real constraint — memory (§10 OOM
+    history):** a full per-pixel rejection-count canvas is one extra plane, which the OOM guard
+    (`_guard_stack_memory` / `_estimate_peak_bytes`) must price in, so it **must be opt-in and budgeted**, never
+    on by default. Shape it so a healthy default install is byte-for-byte unchanged:
+    **(a) engine (M):** an optional `record_rejection_map=False` on `StackOptions`; when on, each rejecting
+    accumulator also accumulates a 2-D `uint16` per-pixel drop count (κ-σ: `valid & ~keep`; min/max: derivable
+    from the count bands it already computes; drizzle: the `rejected & contributing` mask it already forms), and
+    `write_stack_outputs` writes it as a new sibling `{base}_rejected.fits` (mirrors the `_framecov.fits`
+    precedent — additive, absent on every existing run, consumers fall back to "no overlay available"). Charge the
+    extra plane through the existing guard so a canvas that no longer fits is refused with the usual named fix
+    (or the pass is simply not recorded, as `_afford_drizzle_reject` already does for the reject pass itself on the
+    walk-away path).
+    **(b) backend (S):** a read-only `GET /api/targets/{safe}/stack-runs/{id}/rejection-map` that returns a small
+    downsized PNG/mask of the drop map from the sibling FITS (empty/none when the run has no sibling), computed in
+    a threadpool — same shape as the existing coverage/annotations endpoints.
+    **(c) frontend (S):** a "Show what was removed" toggle on the History run card / Gallery lightbox that
+    overlays the mask (tinted, semi-transparent) on the result image, with a plain readout — *"Stacking removed N
+    streak/hot-pixel spots across your subs — that's the satellites and cosmic rays cleaned out for you."* Reuse
+    the `AnnotatedImage` contain-fit layout so the overlay lands pixel-true at any box size. **Care:** default OFF
+    end-to-end; never let the recording change the *pixels* of the stack (it only observes the same keep/drop the
+    combine already applied); and phrase the readout as protection delivered, not as "N% of your data thrown away."
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #8) — "Was my focus sharp last night?": a per-session focus /
   soft-star flag.**~~ — **ALREADY SHIPPED; pruned by the Builder 2026-08-29** (branch

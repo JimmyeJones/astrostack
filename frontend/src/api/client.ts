@@ -867,6 +867,10 @@ export interface StackRun {
   has_fits: boolean;
   has_tiff: boolean;
   has_preview: boolean;
+  // True when this run recorded *where* outlier rejection dropped samples (the
+  // `_rejected.fits` sibling), so the card can offer "show what was removed".
+  // Absent on an older backend, which reads the same as false — nothing to offer.
+  has_rejection_map?: boolean;
   is_cover?: boolean;
   notes: string | null;
   total_exposure_s?: number | null;
@@ -975,6 +979,11 @@ export interface StackRejectionSummary {
   n_rejected?: number;
   n_contributed?: number;
   fraction?: number;
+  // Whether this run also kept the *spatial* record of those drops beside the
+  // picture (`StackOptions.record_rejection_map`, off by default), so the card
+  // can offer "show me what was removed". Absent on every run recorded before
+  // the option existed, which reads the same as false — no overlay to offer.
+  has_map?: boolean;
 }
 
 export interface PrintSize {
@@ -2173,6 +2182,11 @@ export const api = {
     if (scale) params.push("scale=true");
     return params.length ? `${base}?${params.join("&")}` : base;
   },
+  // "See what stacking removed" — a transparent PNG tinting where outlier
+  // rejection dropped samples, sized to the run's stored preview so it lays
+  // straight over it. Only runs whose `rejection.has_map` is true have one.
+  stackRejectionOverlayUrl: (safe: string, id: number) =>
+    `/api/targets/${safe}/stack-runs/${id}/rejection-overlay`,
   // "Make it your wallpaper" — the finished preview cropped to a device aspect
   // (phone/desktop/square), auto-centred on the target, downloaded as a JPEG.
   stackWallpaperUrl: (
