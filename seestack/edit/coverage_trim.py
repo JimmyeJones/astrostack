@@ -101,6 +101,30 @@ def _max_rectangle(mask: np.ndarray):
     return best
 
 
+def well_covered_mask(coverage: np.ndarray,
+                      min_frac: float = DEFAULT_MIN_FRAC) -> np.ndarray | None:
+    """Boolean mask of the pixels a coverage map calls **well covered**: finite,
+    and at or above ``min_frac`` of the map's own peak coverage.
+
+    This is the one place the "enough frames landed here to trust this pixel"
+    rule lives. :func:`largest_covered_rect` reduces it to a rectangle for the
+    editor's one-click border trim; the all-sky "My map" uses the mask itself, so
+    a mosaic's ragged fringe fades out instead of smearing across the sky. Returns
+    ``None`` for a non-2-D / empty map or one with no finite, positive coverage,
+    which callers read as "no opinion — keep everything"."""
+    cov = np.asarray(coverage, dtype=np.float32)
+    if cov.ndim != 2 or cov.size == 0:
+        return None
+    finite = cov[np.isfinite(cov)]
+    if finite.size == 0:
+        return None
+    peak = float(finite.max())
+    if peak <= 0:
+        return None
+    frac = min(0.95, max(0.05, float(min_frac)))
+    return np.isfinite(cov) & (cov >= frac * peak)
+
+
 def largest_covered_rect(coverage: np.ndarray,
                          min_frac: float = DEFAULT_MIN_FRAC):
     """Fractional ``(x0, y0, x1, y1)`` bounds (each in 0..1) of the largest
@@ -115,17 +139,9 @@ def largest_covered_rect(coverage: np.ndarray,
     trim), or when the result would be degenerate — so the caller can treat
     ``None`` as "leave the image alone".
     """
-    cov = np.asarray(coverage, dtype=np.float32)
-    if cov.ndim != 2 or cov.size == 0:
+    mask = well_covered_mask(coverage, min_frac)
+    if mask is None:
         return None
-    finite = cov[np.isfinite(cov)]
-    if finite.size == 0:
-        return None
-    peak = float(finite.max())
-    if peak <= 0:
-        return None
-    frac = min(0.95, max(0.05, float(min_frac)))
-    mask = np.isfinite(cov) & (cov >= frac * peak)
     if mask.all() or not mask.any():
         return None  # uniform (single-field) or nothing covered → no trim
     rect = _max_rectangle(mask)

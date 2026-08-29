@@ -12,10 +12,12 @@
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from seestack.io.wcs_io import (
@@ -25,7 +27,7 @@ from seestack.io.wcs_io import (
 )
 from seestack.post.skymap import bright_star_catalog
 from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
-from seestack.previewcrop import parse_preview_crop
+from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from webapp import deps
 
 router = APIRouter(tags=["sky"])
@@ -232,3 +234,153 @@ def get_sky(request: Request) -> SkyResponse:
     # Oldest first so the frontend can paint newest last (on top of overlaps).
     images.sort(key=lambda im: im.timestamp_utc or "")
     return SkyResponse(stars=stars, images=images)
+
+
+# ---- "My map": the whole sky, drawn only from the owner's own pictures ----
+
+#: The rendered map + the fingerprint it was built from, side by side in the
+#: app's own state dir. One file each, overwritten in place — no growth, and
+#: nothing outside the app's own store is ever touched.
+_MY_MAP_PNG = "my_map.png"
+_MY_MAP_FINGERPRINT = "my_map.json"
+
+
+def _my_map_pictures(lib) -> tuple[list, dict]:  # noqa: ANN001, ANN202
+    """Every target's newest finished picture, masked to its well-covered pixels.
+
+    Returns ``(pictures, fingerprint)`` — the fingerprint identifies exactly what
+    went in (each target's run id and the preview file's size+mtime), so a cached
+    render can be reused until a picture actually changes.
+    """
+    from seestack.io.project import Project
+    from seestack.io.wcs_io import canvas_extent_from_fits
+    from seestack.post.skymap import MapPicture
+    from seestack.render.thumbnail import overlay_rgba_array, stack_detail_mask
+
+    pictures: list[MapPicture] = []
+    fingerprint: dict[str, list] = {"v": 1, "runs": []}
+    for t in lib.list_targets():
+        if t.ra_deg is None or t.dec_deg is None:
+            continue
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(t))
+        except Exception:  # noqa: BLE001 — one broken project must not lose the map
+            if proj is not None:
+                proj.close()
+            continue
+        try:
+            run = next(
+                (r for r in proj.iter_stack_runs()
+                 if r.preview_path and Path(r.preview_path).exists()
+                 and r.canvas_w and r.canvas_h),
+                None,
+            )
+        finally:
+            proj.close()
+        if run is None:
+            continue
+        try:
+            stat = Path(run.preview_path).stat()
+        except OSError:
+            continue
+        fingerprint["runs"].append(
+            [t.safe_name, run.id, int(stat.st_size), int(stat.st_mtime),
+             run.preview_crop_json or ""])
+
+        crop = parse_preview_crop(run.preview_crop_json)
+        if crop == CROP_UNKNOWN:
+            # The preview's geometry can't be reconciled with the canvas, so the
+            # mask can't be lined up with it — skip rather than smear a
+            # mis-registered footprint across the sky.
+            continue
+        try:
+            preview = Path(run.preview_path).read_bytes()
+            mask = (stack_detail_mask(run.fits_path)
+                    if run.fits_path and Path(run.fits_path).exists() else None)
+            if mask is not None and isinstance(crop, PreviewCrop):
+                mx0, my0, mx1, my1 = crop_pixel_box(
+                    crop, mask.shape[1], mask.shape[0])
+                mask = mask[my0:my1, mx0:mx1]
+            rgba = (overlay_rgba_array(preview, mask) if mask is not None
+                    else overlay_rgba_array(
+                        preview, _opaque_mask(run.canvas_h, run.canvas_w)))
+        except Exception:  # noqa: BLE001 — one unreadable picture just isn't drawn
+            continue
+        extent = (canvas_extent_from_fits(run.fits_path, crop=crop or None)
+                  if run.fits_path else None)
+        if extent is not None:
+            width_deg, height_deg, _rot = extent
+        else:
+            # No stored WCS (older/edited runs): fall back to the canvas's own
+            # aspect at a nominal Seestar-ish field, so it still lands somewhere
+            # honest in *relative* size rather than being dropped.
+            width_deg = 1.3
+            height_deg = 1.3 * (run.canvas_h / max(run.canvas_w, 1))
+        pictures.append(MapPicture(
+            name=t.name, ra_deg=float(t.ra_deg), dec_deg=float(t.dec_deg),
+            rgba=rgba, width_deg=width_deg, height_deg=height_deg,
+        ))
+    return pictures, fingerprint
+
+
+def _opaque_mask(h: int, w: int):  # noqa: ANN202
+    import numpy as np
+
+    return np.ones((max(int(h), 1), max(int(w), 1)), dtype=bool)
+
+
+@router.get("/api/sky/my-map.png")
+async def my_map_png(request: Request) -> Response:
+    """The whole sky as **the owner's own data alone** — a rough Aitoff map with
+    each target's finished picture dropped at its plate-solved position, masked
+    down to the pixels enough frames actually reached.
+
+    "Look what I've explored", not a workflow step: no survey imagery, no
+    internet, nothing borrowed — every pixel on this map came off the owner's own
+    scope. Pictures are drawn larger than life (a Seestar field is ~1.3° and the
+    sky is 360°) by one shared factor, so their *relative* sizes stay honest.
+
+    Cached in the app's own state dir and re-rendered only when a target's newest
+    picture changes, since drawing the whole sky is not free.
+    """
+    from seestack.post.skymap import DEFAULT_PICTURE_EXAGGERATION, SkyMapOptions, _format_duration
+    from seestack.post.skymap import my_map_png as render_png
+
+    settings = deps.get_settings(request)
+    state_dir = settings.state_dir
+    png_path = state_dir / _MY_MAP_PNG
+    fp_path = state_dir / _MY_MAP_FINGERPRINT
+
+    def work() -> bytes:
+        lib = deps.open_library(request)
+        try:
+            pictures, fingerprint = _my_map_pictures(lib)
+            stats = lib.campaign_stats()
+        finally:
+            lib.close()
+        want = json.dumps(fingerprint, sort_keys=True)
+        try:
+            if png_path.exists() and fp_path.read_text() == want:
+                return png_path.read_bytes()
+        except OSError:
+            pass
+        subtitle = (
+            f"{len(pictures)} of your pictures · "
+            f"{stats['n_frames_accepted']} frames · "
+            f"{_format_duration(stats['total_exposure_s'])} · "
+            f"shown ~{DEFAULT_PICTURE_EXAGGERATION:.0f}× life size so you can see them"
+        )
+        png = render_png(pictures, options=SkyMapOptions(title="Where you've been"),
+                         subtitle=subtitle)
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+            png_path.write_bytes(png)
+            fp_path.write_text(want)
+        except OSError:  # noqa: PERF203 — a read-only state dir just means no cache
+            pass
+        return png
+
+    data = await run_in_threadpool(work)
+    return Response(content=data, media_type="image/png",
+                    headers={"Cache-Control": "no-cache"})
