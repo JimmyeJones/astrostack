@@ -9212,8 +9212,37 @@ to **Shipped**.)_
   that must stay a silence rather than a guess. **Don't** widen the *rendered list* to eight rows at the same
   time; the card lists windows to plan by, and the forecast only needs to count them.
 
-- **NEW IDEA (Builder 2026-08-29, spotted while adding the read-error note in v0.296.5) — a badly flaking
-  drive now lights TWO separate yellow alerts on the Jobs result, and they are one story.**
+- **✅ SHIPPED (Builder, v0.297.2, branch `claude/compassionate-galileo-1i6x9x`) — ~~a badly flaking drive now
+  lights TWO separate yellow alerts on the Jobs result, and they are one story.~~** Shipped as the
+  compose-and-re-word the entry asked for. New pure `storageTroubleAlert(nUnreadable, nReadErrors, nRecovered,
+  nOffered)` in `routes/Jobs.tsx` returns `{title, message} | null` and is the single thing the result renders:
+  when only one failure fired it is that note under its own unchanged title (`missingSubsNote` /
+  `readErrorsNote` verbatim — asserted by equality in the tests, so the healthy-install wording can't drift);
+  when **both** fired it composes one alert instead.
+
+  **Both cautions honoured.** The two counts and their two *causes* stay distinct in the combined wording —
+  "142 of 500 subs couldn't be read at all — their files weren't on disk. Another 5 subs were there but hit a
+  read error while stacking (3 of them read fine on the second try, so those are in your picture)." — because
+  they really are different failures. The shared fix is said **once**: "Both point at the same place: check the
+  drive or network share these files live on is connected, then scan and stack again." (pinned by a test that
+  counts the occurrences of "check the drive" and "scan and stack again" — one each). And **both underlying
+  helpers stay exported and byte-for-byte unchanged**, since History renders them as separate lines beside its
+  align clause, where the one-story problem doesn't arise. `processTargetSummary` now carries one `storage`
+  field where it carried `missing` and `readErrors`.
+
+  **Upgrade-safe (§9):** frontend copy only — no config, schema, on-disk, API or default change; the backend
+  fields it reads (`n_unreadable`, `n_read_errors`, `n_read_recovered`, `n_offered`) are untouched and an older
+  backend that reports none of them still yields silence.
+
+  **Tests (+6 frontend):** a `storageTroubleAlert` block in `Jobs.test.tsx` — silence on a healthy run and an
+  old backend; each single-failure case *equal to* its existing note; the both-fired regression (one title, both
+  counts, both causes, the fix said exactly once, and none of the old "worth checking" second voice); the
+  singular "Another 1 sub was" and all-recovered phrasings; and the clamp that can't claim more failures than
+  subs were offered. The existing `processTargetSummary` assertions were re-pointed at `storage` — same
+  coverage, through the new field.
+
+  Original spec, for the record:
+
   *(Pillar: friendliness — PRIORITY 3. Size: S. Confidence: certain — I put the second one there.)*
   `missingSubsNote` ("their files weren't on disk") and `readErrorsNote` ("the files are there but didn't read
   cleanly") are deliberately different diagnoses, and on a healthy install at most one ever fires. But an
