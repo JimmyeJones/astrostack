@@ -1031,6 +1031,15 @@ export interface ScaleBar {
   moon_comparison: string; // one plain sentence comparing the frame to the Moon
 }
 
+/** "Which way is up?" — where North and East point on a run's own pixel grid.
+ *  Angles are degrees counter-clockwise from screen-right with screen-up
+ *  positive (the engine's `seestack.skymarks` convention), so "North is up" is
+ *  `north_deg === 90`. The shared JPEG bakes the same two numbers. */
+export interface SkyDirections {
+  north_deg: number;
+  east_deg: number;
+}
+
 /** "What's in this picture?" — objects + the grid their pixel coords live on. */
 export interface StackAnnotations {
   width: number;        // the run's FITS pixel width (x_px domain)
@@ -1039,6 +1048,9 @@ export interface StackAnnotations {
   // The scale bar for this run, or null when it has no usable celestial WCS
   // (older/edited runs) — the overlay then simply doesn't offer it.
   scale_bar: ScaleBar | null;
+  // Where North/East point, or null when the run has no usable orientation.
+  // Absent on an older backend, which reads as "no rose" and shows nothing.
+  directions?: SkyDirections | null;
 }
 
 /** "Did I frame it well?" — the post-stack verdict on how a finished picture

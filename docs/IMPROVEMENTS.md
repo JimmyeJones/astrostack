@@ -11818,6 +11818,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   mandate: the beginner stops having to *know* what a matching dark is. **Grep first:** `routers/stack.py` /
   `get_stack_defaults` — confirm the form doesn't already thread a confidence hint before building; reuse
   `_confident_master_binding` rather than re-deriving the match.
+  **Builder 2026-08-29 — did that grep, and the premise is largely already false. RESHAPE BEFORE BUILDING.**
+  The entry's claim that the Calibration box "only says either *No masters built yet* or shows a raw picker" is
+  not what `routes/Stack.tsx` does. It already queries `calibrationSuggestions(safe)` and, via
+  `src/calibrationFit.ts`, already renders: a **per-option misfit suffix** on every master in the picker
+  (`masterOptionSuffix`, so a wrong-size master is visibly unusable), an **exposure-mismatch caution** naming
+  both numbers and the fix ("This dark was shot at 10s but your subs are 30s — …"), a **temperature-mismatch
+  caution**, a **bias-size warning**, a **"scale it with a master bias" nudge** when the library holds one, a
+  **dark-already-contains-bias** note, and a prominent **"you have masters but aren't using them"** advisory
+  with a one-click **apply-recommendation** button. So "a beginner has no idea whether it fits" is not the live
+  behaviour, and a green/amber verdict on top of that would be a *sixth* piece of calibration copy on a form the
+  owner already calls too busy.
+  **What is genuinely left, and it is small:** the form's recommendation follows `recommend_masters` (best
+  *available*), while the walk-away path follows the stricter `auto_bind_master_paths` (best *confident*) — so
+  the two paths can pick differently, and the form never says "this is what the unattended stack would have
+  chosen". The worthwhile slice is therefore **agreement, not more copy**: surface the confident binding as the
+  pre-selection / one-click recommendation so the interactive path lands where the walk-away path would, and let
+  the *existing* cautions keep doing the explaining. Do not add another advisory line.
 
 - **NEW IDEA (Scout 2026-08-26 #6) — auto-detect the Seestar's calibration-frame folders sitting in `incoming/`
   and offer a one-click "Build master darks" instead of making the beginner know what calibration is.**
@@ -13551,6 +13568,26 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-29, read off `AnnotatedImage` while putting the object labels on the Target
+  page) — the object overlay draws every label at full size with no collision handling, so a rich field
+  degenerates into an unreadable pile exactly where the labels are most interesting.** *(Pillar: understand —
+  PRIORITY 3. Size: S–M. Confidence: high — traced, not yet rendered against a crowded field.)*
+  `AnnotatedImage` renders `markers.filter(m => m.visible)` — **all** of them, each an 8 px dot plus a
+  nowrap text chip, positioned dead-centre on the object with `translate(-50%,-50%)` and no awareness of its
+  neighbours. `objects_in_field` returns every bundled catalog object whose centre lands in the frame, and the
+  frame is not small: the annotations test's own fixture is a 3.3° × 2.5° field. Point that at a crowded
+  region — the Sword of Orion, the Virgo cluster, anything along the galactic plane — and several chips land
+  within a few pixels of each other on a 260 px-tall card and overlap into mush. The picture is fine; the
+  *labels* are the thing that stops being readable, and they stop being readable precisely on the pictures
+  worth labelling. **Shape (pure, testable, no backend):** a `deconflictMarkers(markers, chipW, chipH)` beside
+  `objectMarkerLayout` that nudges overlapping chips apart along the axis with the most room and drops the
+  least-notable of a hopeless pile (the payload has no brightness, but distance-from-centre — the ordering
+  `describeFieldObjects` already uses — is a reasonable proxy), plus a hard cap on labels drawn at small box
+  sizes with the remainder still named in the text readout underneath (which both consumers already render, so
+  nothing is lost — it moves from the image to the list). **Care:** keep it pure and box-size-driven so the
+  same field labels sensibly on a 180 px History card, a 260 px Target card and a full-screen lightbox; and
+  never move a *dot* — only its chip — or the label stops pointing at its object.
+
 - **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the owner *save* their
   universe map, and put it where they'd think to look for it.** *(Pillar: enjoy + share — PRIORITY 3.
   Size: S. Confidence: high — the picture already exists at a stable URL.)* "My map" is a pride object:
@@ -13579,10 +13616,54 @@ problems. Dogfood it every big-picture run and fix root causes.
   let `croppedAnnotationView` pick. Cosmetic, never wrong-result — the picture and its pins are correct as of
   v0.291.0; only one sentence overstates the field.
 
-- **NEW IDEA (Builder 2026-08-27, the parity gap the v0.284.0 "Scale & compass" feature just opened) — the
-  downloaded picture now carries a scale bar *and* a North/East rose, but the app's own on-screen overlay still
-  shows only the bar, and only on the History page. Screen and file should show the same two marks, and the
-  page a beginner actually lands on should show them at all.** *(Pillar: understand + friendliness — PRIORITY
+- **✅ SHIPPED — BOTH HALVES (Builder, v0.293.0 + v0.294.0, branch `claude/compassionate-galileo-60dqir`) —
+  ~~the downloaded picture carries a scale bar *and* a North/East rose, but the app's own on-screen overlay
+  shows only the bar, and only on the History page.~~**
+
+  **Half (a) — the rose on screen (v0.294.0), built exactly as filed.** `sky_directions` now rides the
+  `…/annotations` response as an additive `directions: {north_deg, east_deg} | null` (the same helper the baked
+  JPEG calls, so screen and file cannot disagree — the API hands the frontend the engine's numbers rather than
+  letting it re-derive an orientation from a CD-matrix sign, which is the convention hazard the sky-atlas
+  overlay is still gated on). A pure `compassLayout(directions, boxW, boxH)` sits beside `scaleBarLayout` in
+  `AnnotatedImage.tsx`, converting the engine's convention (degrees CCW from screen-right, screen-up positive)
+  into CSS vectors — negating y, the sign error that would silently draw the sky upside down — and sizing the
+  arms off the box's **short** side so a wide mosaic and a square crop get proportionally the same rose. The
+  rose renders top-right, opposite the bar's bottom-left, so they can never collide; the baked version puts
+  both along the top only because its bottom edge is the caption zone.
+  **It rides the existing Scale toggle rather than adding a third**, and that toggle is now named **"Scale &
+  compass"** — they are one question ("how big, and which way up?"), the file has drawn them as a pair since
+  v0.284.0, and a third menu item on the busiest card in the app is exactly what the standing IA priority says
+  not to do. Still **off by default**, as the entry's Care note requires.
+
+  **One deliberate departure from the filed spec.** The spec asks for the arms to be *turned* by the applied
+  rotation when the North-up toggle is on. They are **hidden** instead — the rose obeys the same
+  `cantPlaceMarks` rule the pins and bar already do (a rotation a past save baked in, or a render whose
+  geometry can't be reconciled), which is the honest, already-tested behaviour, and the note beside the picture
+  now names the compass alongside them. Turning the rose to match a *live* Adjust render would need the render's
+  angle client-side, which the browser does not have; a crop needs no composition at all, since trimming a
+  border turns nothing. Filed as a follow-on below rather than guessed at.
+
+  **Half (b) — on the Target page (v0.293.0).** The object labels shipped there first, under a "What's in it?"
+  toggle on `LatestPictureCard` — see the full entry under "Features that serve real workflows". The card
+  deliberately keeps **one** toggle: a second ("Scale & compass") would put four controls in that header row,
+  which wraps badly on the phone the owner reads this on. Filed as a follow-on.
+
+  **Upgrade-safe (§9):** one additive, optional response field (an older frontend ignores it; an older backend
+  omitting it reads as "no rose"), no schema/config/on-disk change, no default flip. **Tests: +11** — 8 vitest
+  in `AnnotatedImage.test.tsx` (`compassLayout`: North-up straight up with East to the left, a rotated field
+  turning both arms, a mirrored field drawn mirrored because that is what the WCS says, short-side arm sizing,
+  the four nothing-to-place cases, a non-finite angle refused rather than drawing a NaN arm; plus the component
+  rendering with and without the rose), 1 in `History.test.tsx` (the renamed pair-toggle and its fetch), and 2
+  in `tests/webapp/test_stack_annotations.py` (the field's values pinned **against the engine helper itself**,
+  so this asserts parity rather than re-deriving the geometry; and `null` for a run with no WCS).
+
+  **Follow-ons deliberately left open:** (i) turn the rose by the live/baked rotation instead of hiding it —
+  needs the applied angle on the client, which is a server-side number today; (ii) put the "Scale & compass"
+  pair on the Target page's picture card once that header row can carry another control.
+
+  Original spec, for the record:
+
+  **~~NEW IDEA (Builder 2026-08-27)~~** *(Pillar: understand + friendliness — PRIORITY
   3. Size: S–M. Confidence: certain — I built the baked half this run and read the overlay to match it.)*
   **Two halves, either shippable alone.** (a) *The rose on screen.* `AnnotatedImage.tsx` already draws the
   scale bar over a contain-fit preview via the pure `scaleBarLayout`; the compass needs the same treatment —
