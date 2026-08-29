@@ -17,6 +17,7 @@ from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from seestack.stackhealth import seam_verdict
 from webapp import deps, pipeline
+from webapp.preview_orient import baked_north_up_deg, recovered_north_up_deg
 from webapp.schemas import (
     STACK_DEFAULTS_META_KEY,
     StackOptionField,
@@ -474,7 +475,14 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             transparency_ratio=r.transparency_ratio,
             noise_sigma=r.noise_sigma,
             stack_fwhm_px=r.stack_fwhm_px,
-            preview_north_up_deg=r.preview_north_up_deg,
+            # A recorded angle is passed through verbatim (including an explicit
+            # 0.0 — that is a statement, not an absence); only a run from before
+            # the column existed falls through to the recovery, so History stops
+            # drawing its pins and scale bar on a picture an old save turned.
+            preview_north_up_deg=(
+                r.preview_north_up_deg if r.preview_north_up_deg is not None
+                else (recovered_north_up_deg(r) or None)
+            ),
             preview_crop=(
                 {"x0": crop.x0, "y0": crop.y0, "x1": crop.x1, "y1": crop.y1}
                 if isinstance(crop, PreviewCrop) else None
@@ -772,7 +780,7 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
     if not preview_path or not Path(preview_path).exists():
         raise HTTPException(status_code=404, detail="No preview for this run")
     fits_path = run.fits_path
-    north_up_deg = run.preview_north_up_deg or 0.0
+    north_up_deg = baked_north_up_deg(run)
     crop = parse_preview_crop(run.preview_crop_json)
 
     from seestack.render.orient import rotate_mask_north_up
@@ -2044,7 +2052,7 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
     # overwrites the preview with a rotated render and records the angle. Both
     # halves below map from the FITS grid, so neither may assume the stored
     # preview is still on it.
-    baked_north_up = float(run.preview_north_up_deg or 0.0)
+    baked_north_up = baked_north_up_deg(run)
     # Locate the target in the preview grid from the run's own WCS; None → centre.
     # `wallpaper_target_pixel` maps onto a *uniform downscale* of the master, so
     # on a preview a past save rotated it has to be given that un-rotated grid and
@@ -2123,7 +2131,7 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # Save" overwrites the preview with a rotated render and records the
         # angle. Everything below is measured against the FITS grid, so it has to
         # start from this rather than assume the preview is the un-rotated one.
-        baked_north_up = float(run.preview_north_up_deg or 0.0)
+        baked_north_up = baked_north_up_deg(run)
         # The width the scale bar is measured against: the bar's length is a
         # *fraction* of the picture's width, and a rotate-with-expand grows the
         # canvas without changing the pixel scale, so it must be the width of the
