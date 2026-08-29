@@ -128,3 +128,41 @@ export function windowUtcTooltip(w: NextObservingWindow): string {
 export function windowsIntro(count: number): string {
   return count > 1 ? "Your next good windows:" : "Your next good window:";
 }
+
+/**
+ * "When will I finish this?" — the one thing the card leaves hanging.
+ *
+ * The app already knows how many more clear nights the goal needs (the readiness
+ * card's own `estimateClearNights`, from this target's *own* recent pace) and
+ * which upcoming nights this object is genuinely well-placed (the planner's
+ * altitude- and Moon-aware windows). Neither alone answers the beginner's actual
+ * question, and the night *count* on its own quietly misleads: "2 more nights"
+ * reads as "the day after tomorrow" when the object is Moon-washed or too low
+ * until the week after. Joining them names the date.
+ *
+ * Deliberately conditional on the weather ("if the next clear ones cooperate"),
+ * because the planner knows altitude and Moon and knows nothing about cloud.
+ *
+ * Returns null — say nothing rather than guess — when there's no night estimate,
+ * when the goal is already met, or when the goal needs more nights than the
+ * planner looked ahead for: the windows list is capped, so naming the last one
+ * would understate the finish date rather than admit it doesn't know.
+ */
+export function finishForecast(
+  nightsToGo: number | null | undefined,
+  windows: NextObservingWindow[] | null | undefined,
+): string | null {
+  if (typeof nightsToGo !== "number" || !Number.isFinite(nightsToGo)) return null;
+  const n = Math.ceil(nightsToGo);
+  if (n < 1) return null;
+  const wins = windows ?? [];
+  if (n > wins.length) return null;
+  const date = formatWindowDate(wins[n - 1].dark_start_utc);
+  if (!date) return null;
+  if (n === 1) {
+    return `One more good night should finish this — if ${date} stays clear, `
+      + "that could be the one.";
+  }
+  return `About ${n} more good nights — if the next clear ones cooperate, you `
+    + `could finish around ${date}.`;
+}
