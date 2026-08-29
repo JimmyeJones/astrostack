@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { Billboard, Html, Line, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useQuery } from "@tanstack/react-query";
@@ -59,17 +59,31 @@ function DistanceRing({ radius, label }: { radius: number; label: string }) {
     }
     return pts;
   }, [radius]);
+  // Ride the label around to whichever point of the ring faces the camera. A
+  // label pinned to a fixed world point drifts off the canvas as the scene turns
+  // — on a phone the outermost ring's label was already clipped on arrival — and
+  // an unlabelled ring is just a circle.
+  const labelAt = useRef<THREE.Group>(null);
+  useFrame(({ camera }) => {
+    const g = labelAt.current;
+    if (!g) return;
+    const len = Math.hypot(camera.position.x, camera.position.z) || 1;
+    g.position.set(
+      (camera.position.x / len) * radius, 0, (camera.position.z / len) * radius);
+  });
   return (
     <group>
       <Line points={points} color="#3b4668" lineWidth={1} transparent opacity={0.75} />
-      <Html position={[radius, 0, 0]} center style={{ pointerEvents: "none" }}>
-        <span style={{
-          color: "rgba(180,195,235,0.75)", fontSize: 10, whiteSpace: "nowrap",
-          textShadow: "0 0 4px #000",
-        }}>
-          {label}
-        </span>
-      </Html>
+      <group ref={labelAt} position={[radius, 0, 0]}>
+        <Html center style={{ pointerEvents: "none" }}>
+          <span style={{
+            color: "rgba(180,195,235,0.75)", fontSize: 10, whiteSpace: "nowrap",
+            textShadow: "0 0 4px #000",
+          }}>
+            {label}
+          </span>
+        </Html>
+      </group>
     </group>
   );
 }
