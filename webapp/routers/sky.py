@@ -29,6 +29,7 @@ from seestack.post.skymap import bright_star_catalog
 from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from webapp import deps
+from webapp.preview_orient import baked_north_up_deg
 
 router = APIRouter(tags=["sky"])
 
@@ -145,7 +146,12 @@ def get_sky(request: Request) -> SkyResponse:
                 # same rotation — otherwise the map places the un-rotated canvas
                 # under a rotated image. 0.0/NULL (every ordinary run) composes
                 # nothing and is unchanged.
-                north_up_deg = run.preview_north_up_deg or 0.0
+                # ...and a save from *before* that column existed recorded
+                # nothing, so the angle is recovered from the stored PNG's own
+                # dimensions rather than assumed away (see
+                # ``webapp.preview_orient``). An ordinary run costs one PNG
+                # header read and answers 0.0.
+                north_up_deg = baked_north_up_deg(run)
                 # The other way the stored bytes leave the canvas grid: the
                 # one-click "Process target" auto-edit ends its recipe with a
                 # border trim, so the picture is a *crop* of the canvas — placed
