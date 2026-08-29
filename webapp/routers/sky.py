@@ -242,6 +242,84 @@ def get_sky(request: Request) -> SkyResponse:
     return SkyResponse(stars=stars, images=images)
 
 
+# ---- "Your universe": the same targets, placed in depth by real distance ----
+
+
+class UniverseObjectOut(BaseModel):
+    safe: str
+    name: str
+    object_id: str
+    object_name: str
+    type: str
+    ra_deg: float
+    dec_deg: float
+    distance_ly: float
+    distance_text: str
+    years_text: str
+    depth: float
+
+
+class UniverseShellOut(BaseModel):
+    distance_ly: float
+    depth: float
+    label: str
+
+
+class UniverseUnplacedOut(BaseModel):
+    safe: str
+    name: str
+    reason: str
+
+
+class UniverseResponse(BaseModel):
+    objects: list[UniverseObjectOut]
+    shells: list[UniverseShellOut]
+    unplaced: list[UniverseUnplacedOut]
+    near_ly: float
+    far_ly: float
+    provenance: str
+
+
+@router.get("/api/sky/universe", response_model=UniverseResponse)
+def get_universe(request: Request) -> UniverseResponse:
+    """The owner's captured objects placed in **true 3D by real distance**.
+
+    The Sky Map puts every picture on one imaginary dome — direction only. This
+    answers the other half: *how far out is each of these, compared to the
+    others?* Depth is log-scaled (five decades separate the nearest nebula from
+    the furthest galaxy in the bundled catalog), and a target with no vetted
+    catalog distance is reported under ``unplaced`` rather than guessed into the
+    scene — see :mod:`seestack.universemap`.
+
+    Deliberately cheap: it reads the target registry and the bundled catalog
+    only, opening no project DBs. The viewer joins it to ``/api/sky`` by
+    ``safe`` for the pictures, so the two queries share one cache.
+    """
+    from seestack.universemap import CapturedTarget, build_universe_map
+
+    lib = deps.open_library(request)
+    try:
+        captured = [
+            CapturedTarget(safe=t.safe_name, name=t.name,
+                           ra_deg=t.ra_deg, dec_deg=t.dec_deg)
+            # Registry rows with no frames at all are folders that never became a
+            # capture; listing them as "we couldn't place this" would be noise.
+            for t in lib.list_targets() if t.n_frames > 0
+        ]
+    finally:
+        lib.close()
+
+    m = build_universe_map(captured)
+    return UniverseResponse(
+        objects=[UniverseObjectOut(**vars(o)) for o in m.objects],
+        shells=[UniverseShellOut(**vars(s)) for s in m.shells],
+        unplaced=[UniverseUnplacedOut(**vars(u)) for u in m.unplaced],
+        near_ly=m.near_ly,
+        far_ly=m.far_ly,
+        provenance=m.provenance,
+    )
+
+
 # ---- "My map": the whole sky, drawn only from the owner's own pictures ----
 
 #: The rendered map + the fingerprint it was built from, side by side in the

@@ -1,6 +1,7 @@
 // Tiny typed fetch wrapper around the AstroStack API.
 
 import type { SkyImage, SkyStar } from "../sky/projection";
+import type { UniverseData } from "../sky/universe";
 
 export interface SkyData {
   stars: SkyStar[];
@@ -2323,6 +2324,8 @@ export const api = {
   getSky: () => req<SkyData>("/api/sky"),
   /** The all-sky "My map" PNG, built server-side from the owner's own pictures. */
   myMapUrl: () => "/api/sky/my-map.png",
+  /** "Your universe" — the captured objects placed in depth by catalog distance. */
+  getUniverse: () => req<UniverseData>("/api/sky/universe"),
 
   // tonight — night planner. `date` (YYYY-MM-DD) plans an upcoming night instead
   // of tonight; omit it for tonight.

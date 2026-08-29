@@ -57,24 +57,39 @@ class LightTravel:
     text: str            # the full sentence, ready to render
 
 
-def _friendly_years(distance_ly: float) -> str:
-    """A distance in light-years as a friendly duration.
+def friendly_amount(value: float) -> str:
+    """A big number as a friendly magnitude, *without* a unit — "2.5 million".
 
     Rounded hard on purpose: published distances to deep-sky objects carry real
-    uncertainty, and "about 2.5 million years" is right whether the catalog says
+    uncertainty, and "about 2.5 million" is right whether the catalog says
     2.48 or 2.54 Mly. One decimal below ten of a unit and whole numbers above
-    it. The "thousand" wording only starts at ten thousand — "1.3 thousand
-    years" is clumsier than the plain "1,340 years" a beginner reads at a
-    glance — and below that it's the comma-grouped number, to the nearest ten.
+    it. The "thousand" wording only starts at ten thousand — "1.3 thousand" is
+    clumsier than the plain "1,340" a beginner reads at a glance — and below
+    that it's the comma-grouped number, to the nearest ten.
+
+    The unit is the caller's to add, because the same distance is read out in
+    two voices: as a *time* here ("2.5 million years" — when the light left) and
+    as a *distance* on the universe map ("2.5 million ly" — how far out it sits).
+    Both must round identically, so they share this.
     """
     for unit, name, floor in ((1_000_000.0, "million", 1_000_000.0),
                               (1_000.0, "thousand", 10_000.0)):
-        if distance_ly >= floor:
-            v = distance_ly / unit
+        if value >= floor:
+            v = value / unit
             shown = f"{v:.1f}".rstrip("0").rstrip(".") if v < 10 else f"{v:.0f}"
-            return f"{shown} {name} years"
-    n = max(10, int(round(distance_ly / 10.0)) * 10)
-    return f"{n:,} years"
+            return f"{shown} {name}"
+    n = max(10, int(round(value / 10.0)) * 10)
+    return f"{n:,}"
+
+
+def friendly_light_years(distance_ly: float) -> str:
+    """A distance as a friendly light-year figure, e.g. ``"2.5 million ly"``."""
+    return f"{friendly_amount(distance_ly)} ly"
+
+
+def _friendly_years(distance_ly: float) -> str:
+    """A distance in light-years as a friendly duration."""
+    return f"{friendly_amount(distance_ly)} years"
 
 
 def light_travel(distance_ly: float | None) -> LightTravel | None:
