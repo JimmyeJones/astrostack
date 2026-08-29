@@ -24671,6 +24671,24 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Infra / maintainability
 
+- **⚪ PRE-EXISTING TEST-HARNESS QUIRK (Builder 2026-08-29, tripped over while spot-checking a merge; recorded
+  so nobody spends a run thinking their change broke it) — naming an engine test file and a `tests/webapp/` one
+  on the SAME pytest command line can make `tests/webapp/conftest.py` not apply, so every `client` fixture in
+  the run errors with "fixture 'client' not found".** *(Severity: none to the product — the **full** suite
+  (`python -m pytest -q`) is unaffected and green, and each file passes alone. It only bites an agent running a
+  hand-picked subset, which is exactly what an agent does while iterating. Confidence: reproduced.)*
+  Repro, entirely on files that predate this note:
+  `python -m pytest tests/test_drizzle_reject.py tests/webapp/test_last_night.py tests/test_livesession.py
+  tests/webapp/test_target_live_session.py -q` → 8 errors, all "fixture 'client' not found". The same four files
+  in pairs, or either directory alone, pass. Swapping in different engine/webapp files reproduces it too, so it
+  is about the *interleaving*, not any one file.
+  **Working around it costs nothing:** run subsets **per directory** (`pytest tests/webapp/... -q` and
+  `pytest tests/... -q` as two commands), and trust the full suite as the gate — which AGENTS.md §5 already says.
+  **If someone fixes it:** it smells like conftest/rootdir resolution interacting with `tests/webapp/__init__.py`
+  (the package makes `tests.webapp` importable, and pytest's conftest collection for a mixed arg list is
+  order-sensitive). Confirm the mechanism before changing anything — the current layout is what every green run
+  in this repo's history used, so a "tidy-up" here risks the suite for a convenience fix.
+
 - **QA LEAD (Builder 2026-08-27, generalised from three fixes of the same bug in one run) — sweep every
   consumer of a run's *stored preview bytes* that derives geometry from the FITS.** *(Pillar: image quality /
   correctness — PRIORITY 4; size S to audit, unknown to fix; a good Scout run.)* Three separate surfaces shipped
