@@ -15579,24 +15579,65 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **IDEA / TRUST-ACCURACY (Scout QA audit 2026-08-27 #19, traced) — report the *true* contributing-frame count in
-  a κ-σ run's History / integration time, not the conservative `min(pass1, pass2)`.** *(Pillar: image quality /
-  trust — PRIORITY 4 (with a friendliness flavour — it's an honest-number fix); size S; additive, no default/
-  schema change.)*
-  **Why.** `stacker.py:1893` records `n_frames_used = min(n_used_p1, n_used_p2)` (surfaced as NFRAMES and
-  integration time, `:2187`, and as `n_align_failed`, `:2195`). When a frame throws a transient load error in
-  pass 1 but succeeds in pass 2 — the exact NAS-blip case the `mean`-unknown keep-guard in
-  `_kappa_sigma_keep_mask` was built for — that frame *does* contribute pixels to the final image (kept where only
-  it covers), yet `min()` credits only the smaller pass-1 count, so History under-reports the integration the
-  owner actually banked. The error is always fail-safe (understates, never overstates), which is why the QA note
-  above didn't file it as a bug — but the *right* number is knowable: `wsum.frame_coverage.max()` is the true
-  per-pixel contributing-frame count the accumulator already holds. **Shape.** Use `frame_coverage.max()` (or an
-  explicit "frames that reached pass-2 combine" tally) for `n_frames_used` on the κ-σ path; keep `min()`'s
-  fail-safe intent for the reverse case (pass-1-only frames must still be excluded — they only fed the reference,
-  not the image). **Caution — hot path (§1):** NFRAMES feeds integration-time and the noise/√N badges, so this
-  needs a test that an ordinary run (p1==p2) is byte-for-byte unchanged and only the cross-pass-divergence case
-  moves, plus a check it never *over*-counts. Small and well-contained; grep for other readers of
-  `n_frames_used` first (the noise-ratio badge anchors on √N).
+- **✅ SHIPPED (Builder, v0.294.1, branch `claude/compassionate-galileo-i9ybki`) — ~~report the *true*
+  contributing-frame count in a κ-σ run's History / integration time, not the conservative
+  `min(pass1, pass2)`.~~** `stacker.py` now records `n_used = n_used_p2`, with the reasoning in the code:
+  pass 2 is the pass that sums pixels into the image, pass 1 only builds the mean/σ the clip is measured
+  against, and `_kappa_sigma_keep_mask` deliberately *keeps* a sample whose reference is unknown — which is
+  exactly the transient-read-error (NAS blip) case. So a sub that blipped in pass 1 and loaded in pass 2 has
+  its light in the picture, and used to be left out of `NFRAMES`, `EXPTOTAL` and the `NALIGNFL` tally anyway.
+  The fail-safe half of `min()`'s intent is kept **by construction**: a frame that made pass 1 and failed
+  pass 2 contributed nothing and is still excluded, because it never reached pass 2's counter.
+
+  **Not `frame_coverage.max()`** — the shape the spec below suggested first. That is the deepest *pixel's*
+  frame count, which on a mosaic is a fraction of the frames (no pixel is covered by every panel's subs), so
+  it would under-report a mosaic badly. `n_used_p2` is the frames-that-were-combined tally the spec's own
+  parenthetical asked for, and `_pass` already returns exactly it.
+
+  **Bounded blast radius:** on every ordinary run the two passes see the same frames, so the number is
+  identical — the fix only ever moves the divergent case, and only ever toward the truth. Everything
+  downstream (`NFRAMES`, integration time, `NOFFERED`/`NALIGNFL`, `n_unreadable`'s clamp, the noise-ratio √N
+  badges) reads the same `n_used` and gets *more* honest with it; no schema, config, API or default change.
+
+  **Tests (+3, `tests/test_stack_two_pass_frame_count.py`, 1 fails before):** an end-to-end run through
+  `run_stack` where one sub's alignment raises on pass 1 only — `n_frames_used` 4 → **5**, `NALIGNFL` 1 → 0,
+  `EXPTOTAL` 40 s → 50 s; the reverse case (failing on pass 2 only) still counted as 4, pinning the fail-safe
+  half; and an ordinary run unchanged at 5.
+
+  Original spec, for the record:
+
+  - **~~IDEA / TRUST-ACCURACY (Scout QA audit 2026-08-27 #19, traced)~~** *(Pillar: image quality /
+    trust — PRIORITY 4 (with a friendliness flavour — it's an honest-number fix); size S; additive, no default/
+    schema change.)*
+    **Why.** `stacker.py:1893` records `n_frames_used = min(n_used_p1, n_used_p2)` (surfaced as NFRAMES and
+    integration time, `:2187`, and as `n_align_failed`, `:2195`). When a frame throws a transient load error in
+    pass 1 but succeeds in pass 2 — the exact NAS-blip case the `mean`-unknown keep-guard in
+    `_kappa_sigma_keep_mask` was built for — that frame *does* contribute pixels to the final image (kept where only
+    it covers), yet `min()` credits only the smaller pass-1 count, so History under-reports the integration the
+    owner actually banked. The error is always fail-safe (understates, never overstates), which is why the QA note
+    above didn't file it as a bug — but the *right* number is knowable: `wsum.frame_coverage.max()` is the true
+    per-pixel contributing-frame count the accumulator already holds. **Shape.** Use `frame_coverage.max()` (or an
+    explicit "frames that reached pass-2 combine" tally) for `n_frames_used` on the κ-σ path; keep `min()`'s
+    fail-safe intent for the reverse case (pass-1-only frames must still be excluded — they only fed the reference,
+    not the image). **Caution — hot path (§1):** NFRAMES feeds integration-time and the noise/√N badges, so this
+    needs a test that an ordinary run (p1==p2) is byte-for-byte unchanged and only the cross-pass-divergence case
+    moves, plus a check it never *over*-counts. Small and well-contained; grep for other readers of
+    `n_frames_used` first (the noise-ratio badge anchors on √N).
+
+- **NEW IDEA (Builder 2026-08-29, the loose end left by the v0.294.1 two-pass frame-count fix) — a sub that
+  blipped in pass 1 and stacked fine in pass 2 now counts as *used*, but its pass-1 error string is still in
+  the run's error list, so the Jobs summary reports a failure for a frame the header says was combined.**
+  *(Pillar: trust / friendliness — PRIORITY 3; size S; presentation-only, no engine behaviour change.
+  Confidence: traced — `_pass` appends to the shared `errors` list on any exception (`stacker.py` ~2361) and
+  both passes are handed the *same* list; `pipeline.py:2659` passes it straight to the job result.)* The
+  error record is *true* (a read really did fail), just no longer *fatal* for that frame — and "1 sub failed"
+  next to "0 couldn't be aligned" reads as a contradiction rather than as the transient blip it is.
+  **Shape:** the errors are already per-frame strings prefixed with the file's name, and the pass knows which
+  frames it consumed, so a pass-2 success can either drop the matching pass-1 line or re-word it ("read
+  failed once, recovered on the second pass"). The second is better — it keeps the storage-trouble signal the
+  owner needs when a NAS share is flaking, without claiming a lost sub. **Caution:** don't silence errors for
+  frames that failed *both* passes; that is the real failure the list exists for. Do it with the existing
+  frame-accounting tests as the guard, plus one asserting the recovered frame's line reads as recovered.
 
 - **IDEA / GPU-ONLY HARDENING (Scout QA audit 2026-08-27 #18, traced — NOT a verified bug; unreproducible
   without cupy, nil-impact on fully-NaN tiles) — `per_frame._subtract_background_gpu` (`seestack/bg/per_frame.py`
@@ -17027,6 +17068,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   where they really are compared to each other," and flying through your own captured slice of the universe is
   a strong, shareable "wow" moment, same spirit as the light-travel-time feature it reuses data from.
 
+- **⚠️ PROCESS NOTE (Builder 2026-08-29) — the FIFTH concurrent-duplicate collision, hours after the fourth:
+  two Builders built the Scout's "What's in my picture?" item at the same time. I stood mine down at merge
+  time; `77a6122` (v0.293.0) had landed first.** *(Same single root cause as all four notes below — neither
+  of us moved the item to **In progress** before starting. It is the top unclaimed beginner feature in this
+  section, so it is what any Builder picks the moment the bug queue is dry; with runs every hour, two
+  overlapping picks is the expected outcome, not bad luck.)*
+  The two implementations were near-identical — same card, same "What's in it?" toggle name, the same reuse
+  of `AnnotatedImage` + `croppedAnnotationView` + History's exact annotations cache key, and the same three
+  geometry refusals — which is more evidence that a well-written spec entry has one natural implementation.
+  **Two things mine had that the shipped one may not, in case a future run wants them.** (1) The read-out
+  used the existing `describeFieldObjects`, so each object came with *where it sits* ("toward the top-left")
+  rather than only its name; the shipped version's one capped line is the better fit for the "extremely busy"
+  page, but the position phrases are the half a beginner uses to actually find the smudge. (2) Its marker
+  tests reported `clientWidth`/`clientHeight` the way a browser does, so they assert the pins are really
+  *placed* — without that stub jsdom measures the box at 0×0 and `objectMarkerLayout` returns nothing, so a
+  test can only assert the words. Worth borrowing the next time anyone touches that card.
+  **The cheap fix remains the one nobody does:** claim the item in **In progress** in the *first* commit of
+  the run, and push that commit early — a Builder that fetches before starting then sees it.
+
 - **⚠️ PROCESS NOTE (Builder 2026-08-29) — the FOURTH concurrent-duplicate collision, and this time it was a
   whole feature: I built the "Universe map" independently and STOOD DOWN on it at merge time, because
   `4b5131b` ("My map") had landed first. Recorded because the convergence is the useful signal and because
@@ -17050,14 +17110,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   dot for a target with a known RA/Dec but no placeable picture ("you have been here"); worth checking
   whether the shipped map drops those silently, and if so, filing it. Nothing else mine had is worth porting.
 
-- **NEW IDEA (Builder 2026-08-29, the obvious next tap on the v0.292.0 "My map") — let the owner keep the
-  map.** *(Pillar: enjoy + share — PRIORITY 3; size S; additive, no new deps.)* "My map" is a pride picture,
-  and pride pictures get posted. Today it is a bare `<img>`: a desktop right-click or a tablet long-press
-  saves it, which works but does not *invite* it, and neither gives the file a sensible name. A "Save this
-  map" button beside the mode switch, downloading `astrostack-my-map-<date>.png` at the width the page is
-  already rendering, is one `<a download>` — the endpoint already serves exactly those bytes. **Worth pairing
-  with:** the map's own subtitle already names the owner's totals, so a saved map explains itself with no
-  extra work. **Grep first:** the map's URL builder already exists in `api`; don't write a second one.
+- **✅ SHIPPED (Builder, v0.294.2, branch `claude/compassionate-galileo-i9ybki`) — ~~let the owner keep the
+  map.~~** A **"Save this map"** button now sits in the corner of the "My map" stage, downloading
+  `astrostack-my-map-<local date>.png` — one `<a download>` on `api.myMapUrl()`, the *same* bytes the `<img>`
+  is already showing, so nothing is re-rendered and no second URL builder exists. Dated by the viewer's own
+  local day (not the UTC slice) for the same reason every other picture surface goes through
+  `formatStampDate`: an evening west of UTC would otherwise be filed under tomorrow. Frontend-only, additive,
+  no backend change. **Tests:** +2 in `Sky.test.tsx` — the link points at the map endpoint and carries a dated
+  `.png` filename, and the pure `myMapFilename` zero-pads a local evening onto the right day.
+
+  Original spec, for the record:
+
+  - **~~NEW IDEA (Builder 2026-08-29, the obvious next tap on the v0.292.0 "My map")~~** *(Pillar: enjoy + share — PRIORITY 3; size S; additive, no new deps.)* "My map" is a pride picture,
+    and pride pictures get posted. Today it is a bare `<img>`: a desktop right-click or a tablet long-press
+    saves it, which works but does not *invite* it, and neither gives the file a sensible name. A "Save this
+    map" button beside the mode switch, downloading `astrostack-my-map-<date>.png` at the width the page is
+    already rendering, is one `<a download>` — the endpoint already serves exactly those bytes. **Worth pairing
+    with:** the map's own subtitle already names the owner's totals, so a saved map explains itself with no
+    extra work. **Grep first:** the map's URL builder already exists in `api`; don't write a second one.
 
 - **NEW IDEA (Builder 2026-08-29) — "how much of the sky have you actually seen?" — cheap, but only on an
   equal-area projection.** *(Pillar: enjoy + understand — PRIORITY 3; size S; read-only.)* Painted-pixels ÷
