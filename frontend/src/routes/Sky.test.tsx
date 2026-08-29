@@ -1,5 +1,7 @@
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { skyFootprintLine } from "./Sky";
+import { MyMap, skyFootprintLine } from "./Sky";
+import { api } from "../api/client";
 import { formatStampDate } from "../format";
 
 function image(timestamp_utc: string | null) {
@@ -28,5 +30,16 @@ describe("skyFootprintLine", () => {
     const line = skyFootprintLine(image("not-a-date"));
     expect(line).toBe("RA 83.822° · Dec -5.391°");
     expect(line).not.toMatch(/Invalid/);
+  });
+});
+
+describe("MyMap", () => {
+  it("shows the all-sky picture built from the owner's own data", () => {
+    render(<MyMap />);
+    const img = screen.getByRole("img");
+    expect(img.getAttribute("src")).toBe(api.myMapUrl());
+    expect(img.getAttribute("src")).toBe("/api/sky/my-map.png");
+    // Named for what it is, so a screen reader doesn't just say "image".
+    expect(img.getAttribute("alt")).toMatch(/your own pictures/i);
   });
 });

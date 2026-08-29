@@ -2293,6 +2293,8 @@ export const api = {
 
   // sky viewer
   getSky: () => req<SkyData>("/api/sky"),
+  /** The all-sky "My map" PNG, built server-side from the owner's own pictures. */
+  myMapUrl: () => "/api/sky/my-map.png",
 
   // tonight — night planner. `date` (YYYY-MM-DD) plans an upcoming night instead
   // of tonight; omit it for tonight.
