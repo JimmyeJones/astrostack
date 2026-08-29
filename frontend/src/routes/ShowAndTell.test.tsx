@@ -32,12 +32,12 @@ function mockLibrary(items: BestPicture[], videos: VideoStill[] = []) {
   vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [], videos });
 }
 
-function renderShow() {
+function renderShow(route = "/show") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <MantineProvider>
       <QueryClientProvider client={qc}>
-        <MemoryRouter><ShowAndTellView /></MemoryRouter>
+        <MemoryRouter initialEntries={[route]}><ShowAndTellView /></MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -125,6 +125,76 @@ describe("ShowAndTellView", () => {
     expect(screen.getByText("Moon")).toBeInTheDocument();
     // With nowhere to go, the transport is offered but inert.
     expect(screen.getByRole("button", { name: "Next picture" })).toBeDisabled();
+  });
+
+  it("starts on the picture the link names, not at the top of the wall", async () => {
+    mockLibrary([
+      pic({ target_name: "M31" }),
+      pic({ safe: "m42", target_name: "M42", run_id: 2 }),
+    ]);
+    renderShow(`/show?from=${encodeURIComponent("run:m42:2")}`);
+    await waitFor(() => expect(screen.getByText("M42")).toBeInTheDocument());
+    expect(screen.getByText(/2 of 2/)).toBeInTheDocument();
+  });
+
+  it("starts a Moon still's link on that still", async () => {
+    mockLibrary([pic({ target_name: "M31" })], [still({ capture_id: "cap9" })]);
+    renderShow(`/show?from=${encodeURIComponent("video:cap9")}`);
+    await waitFor(() => expect(screen.getByText("Moon")).toBeInTheDocument());
+  });
+
+  it("plays from the beginning when the link has gone stale", async () => {
+    // The picture it named was deleted (or the cover pin moved). The show must
+    // still play rather than land on nothing.
+    mockLibrary([
+      pic({ target_name: "M31" }),
+      pic({ safe: "m42", target_name: "M42", run_id: 2 }),
+    ]);
+    renderShow("/show?from=run:gone:99");
+    await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
+  });
+
+  it("doesn't yank the viewer back to the link's picture once they've moved on",
+    async () => {
+      mockLibrary([
+        pic({ target_name: "M31" }),
+        pic({ safe: "m42", target_name: "M42", run_id: 2 }),
+      ]);
+      renderShow(`/show?from=${encodeURIComponent("run:m42:2")}`);
+      await waitFor(() => expect(screen.getByText("M42")).toBeInTheDocument());
+      fireEvent.click(screen.getByRole("button", { name: "Next picture" }));
+      await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
+      // A re-render (a background refetch, say) must not re-apply `from`.
+      fireEvent.click(screen.getByRole("button", { name: "Pause slideshow" }));
+      expect(screen.getByText("M31")).toBeInTheDocument();
+    });
+
+  it("holds the screen awake while playing, and lets go when it unmounts",
+    async () => {
+      const release = vi.fn().mockResolvedValue(undefined);
+      const request = vi.fn().mockResolvedValue({ release });
+      Object.defineProperty(navigator, "wakeLock", {
+        value: { request }, configurable: true, writable: true,
+      });
+      try {
+        mockLibrary([pic({ target_name: "M31" })]);
+        const view = renderShow();
+        await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
+        await waitFor(() => expect(request).toHaveBeenCalledWith("screen"));
+        view.unmount();
+        await waitFor(() => expect(release).toHaveBeenCalled());
+      } finally {
+        delete (navigator as unknown as Record<string, unknown>).wakeLock;
+      }
+    });
+
+  it("plays normally on a browser with no wake-lock support", async () => {
+    // The API is absent on some browsers and in the test DOM; a slideshow that
+    // throws on the way to the TV is worse than one that lets the screen dim.
+    expect((navigator as unknown as Record<string, unknown>).wakeLock).toBeUndefined();
+    mockLibrary([pic({ target_name: "M31" })]);
+    renderShow();
+    await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
   });
 
   it("says something friendly when there is nothing to show yet", async () => {

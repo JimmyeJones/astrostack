@@ -9236,22 +9236,52 @@ to **Shipped**.)_
   resample-then-rotate is not bit-identical to rotate-then-resample, so this moves alpha edges by up to a
   pixel. Only worth doing if the peak-RSS win measures real on a big master — otherwise close it. *(Size S.)*
 
-- **NEW IDEA (Builder 2026-08-27, the two things I deliberately left out of the v0.289.0 "Show and tell"
-  slideshow) — the show can't keep the screen awake, and you can't start it on the picture you're looking at.**
-  *(Pillar: enjoy + share — PRIORITY 3. Size: S. Confidence: certain — this is the code I just wrote; both were
-  scoped out to keep the first slice honest, not because they're hard.)*
-  **(a) Keep-awake.** The whole point of the feature is "point a screen at it and walk away", and a tablet or
-  laptop will dim and sleep partway through the show — the one failure mode that makes it feel broken in the
-  room. `navigator.wakeLock.request("screen")` while the show is playing, released on unmount and re-requested
-  on `visibilitychange` (browsers drop the lock when the tab is hidden). **Guardrails:** the API is absent on
-  some browsers and rejects when the page isn't visible, so every call needs a `try`/no-op — a slideshow that
-  throws on the way to the TV is worse than one that lets the screen dim. Nothing to configure, nothing to
-  persist.
-  **(b) "Start the show here".** From the Gallery / My best pictures lightbox, "show me this one" should open
-  `/show?from=<safe>:<run_id>` (or `video:<capture_id>`) and start on that slide, still looping through
-  everything after it. `buildSlides` already returns a stable `key` per slide, so this is one `useSearchParams`
-  read and an initial index — no data change. **Grep first:** the slide keys are `run:<safe>:<run_id>` /
-  `video:<capture_id>` in `frontend/src/showAndTell.ts`; reuse them rather than inventing a second identifier.
+- **✅ SHIPPED (Builder, v0.296.6, branch `claude/compassionate-galileo-gwhwwd`) — ~~the show can't keep the
+  screen awake, and you can't start it on the picture you're looking at.~~** Both halves, exactly as filed,
+  with every guard the entry asked for.
+
+  **(a) Keep-awake.** `useKeepAwake` requests `navigator.wakeLock.request("screen")` while the show is
+  *playing* — not while it's paused (someone stopping to look) and not on an empty show — releases on unmount,
+  and re-requests on `visibilitychange`, because browsers drop the lock whenever the tab is hidden. Every call
+  is guarded: the API is absent on some browsers and in the test DOM, and it rejects when the page isn't
+  visible, so a missing or refused lock is a no-op and the screen simply dims. Nothing persisted, nothing to
+  configure.
+
+  **(b) "Start the show here".** `/show?from=<key>` starts on that slide and keeps looping through everything
+  after it. The slide keys were already stable, so they were only lifted into named helpers
+  (`runSlideKey` / `videoSlideKey` / `showFromHref`, used by `buildSlides` itself so a call site can't drift
+  from the show's own spelling) plus a pure `startIndexFor`. A stale link — the picture deleted, the cover pin
+  moved — falls back to the top of the ranked wall rather than landing on nothing, and the start index is
+  applied **once**, so a background refetch can never yank a viewer back to where they came in. The entry
+  point is an icon in the lightbox toolbar on **My best pictures** and on **Gallery** (both the stack lightbox
+  and the Moon/Sun still one, which the filed entry didn't mention but is the same one-tap gesture).
+
+  **Upgrade-safe (§9):** frontend-only, additive, no new endpoint, no data change; `/show` with no query
+  behaves exactly as it does today.
+
+  **Tests (+11):** six in `ShowAndTell.test.tsx` (starts on the named run; on a named Moon still; falls back on
+  a stale key; doesn't re-apply `from` after the viewer moves on; takes and releases the wake lock; plays
+  normally with no wake-lock support), four in `showAndTell.test.ts` (the keys match `buildSlides`, the href
+  encodes, the index resolves, and every fallback), and one in `BestPictures.test.tsx` pinning the lightbox
+  link for the *second* picture — which is the whole point.
+
+  Original spec, for the record:
+
+  - **~~NEW IDEA (Builder 2026-08-27, the two things I deliberately left out of the v0.289.0 "Show and tell"
+    slideshow)~~** *(Pillar: enjoy + share — PRIORITY 3. Size: S. Confidence: certain — this is the code I just
+    wrote; both were scoped out to keep the first slice honest, not because they're hard.)*
+    **(a) Keep-awake.** The whole point of the feature is "point a screen at it and walk away", and a tablet or
+    laptop will dim and sleep partway through the show — the one failure mode that makes it feel broken in the
+    room. `navigator.wakeLock.request("screen")` while the show is playing, released on unmount and re-requested
+    on `visibilitychange` (browsers drop the lock when the tab is hidden). **Guardrails:** the API is absent on
+    some browsers and rejects when the page isn't visible, so every call needs a `try`/no-op — a slideshow that
+    throws on the way to the TV is worse than one that lets the screen dim. Nothing to configure, nothing to
+    persist.
+    **(b) "Start the show here".** From the Gallery / My best pictures lightbox, "show me this one" should open
+    `/show?from=<safe>:<run_id>` (or `video:<capture_id>`) and start on that slide, still looping through
+    everything after it. `buildSlides` already returns a stable `key` per slide, so this is one `useSearchParams`
+    read and an initial index — no data change. **Grep first:** the slide keys are `run:<safe>:<run_id>` /
+    `video:<capture_id>` in `frontend/src/showAndTell.ts`; reuse them rather than inventing a second identifier.
 
 - **✅ SHIPPED (Builder, v0.296.1, branch `claude/compassionate-galileo-u3wi1n`) — ~~a walk-away stack that
   still *refuses* goes dark in complete silence: nothing on the Target page or the Dashboard says the target
