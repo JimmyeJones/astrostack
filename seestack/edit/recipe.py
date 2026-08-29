@@ -10,9 +10,12 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from seestack.edit.registry import EditParam, get_op
+
+if TYPE_CHECKING:  # pragma: no cover — annotation only (avoids an import cycle)
+    from seestack.previewcrop import PreviewCrop
 
 RECIPE_VERSION = 1
 
@@ -136,3 +139,48 @@ def recipe_from_json(text: str | None) -> Recipe:
         return recipe_from_dict(json.loads(text))
     except (ValueError, TypeError):
         return Recipe()
+
+
+def preview_crop_of_recipe(recipe: Recipe) -> PreviewCrop | str | None:
+    """What a render of ``recipe`` shows of its *source* image, as a crop.
+
+    A stored preview rewritten through a recipe is only still a plain downscale
+    of the stack canvas if the recipe's geometry ops leave the mapping alone.
+    Returns:
+
+    * ``None`` — the render covers the whole source (no crop, or only ops that
+      don't move pixels around: every tone/detail op, and ``geometry.resize``,
+      which is a uniform rescale the consumers already handle by working in
+      fractions).
+    * a :class:`~seestack.previewcrop.PreviewCrop` — the composed fractional
+      bounds of one or more enabled ``geometry.crop`` ops.
+    * :data:`~seestack.previewcrop.UNKNOWN` — an enabled ``geometry.rotate``
+      with a real angle is present, so the result isn't a crop of the canvas at
+      all and callers must decline to place geometry rather than guess.
+
+    Disabled ops are ignored (they don't render). Pure — it reads the recipe, so
+    the caller must only trust it for a render it actually performed."""
+    from seestack.previewcrop import UNKNOWN, make_crop
+
+    crop: PreviewCrop | None = None
+    for op in recipe.ops:
+        if not op.enabled:
+            continue
+        if op.id == "geometry.rotate":
+            # `_rotate` no-ops below ~1e-3°, matching the op itself.
+            try:
+                angle = float(op.params.get("angle", 0.0))
+            except (TypeError, ValueError):
+                return UNKNOWN
+            if abs(angle) >= 1e-3:
+                return UNKNOWN
+        elif op.id == "geometry.crop":
+            p = op.params
+            step = make_crop(p.get("x0", 0.0), p.get("y0", 0.0),
+                             p.get("x1", 1.0), p.get("y1", 1.0))
+            if step is None:  # degenerate — `_crop` ignores it too
+                continue
+            crop = step if crop is None else crop.compose(step)
+    if crop is None or crop.is_full:
+        return None
+    return crop

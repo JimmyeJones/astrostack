@@ -92,6 +92,22 @@ def get_proxy(project_dir: Path, run_id: int, fits_path: str | Path) -> tuple[np
     return rgb, scale
 
 
+def cached_proxy_shape(project_dir: Path, run_id: int) -> tuple[int, int] | None:
+    """``(height, width)`` of the run's *cached* proxy, without loading it.
+
+    A caller that has just rendered through :func:`get_proxy` can use this to ask
+    "how big was the image the recipe rendered on?" — e.g. to check that a
+    recipe's crop really did shrink the render — for the cost of one small JSON
+    read. ``None`` when no proxy has been cached yet or the sidecar is unusable.
+    """
+    _npy_path, meta_path = _proxy_paths(project_dir, run_id)
+    try:
+        shape = json.loads(meta_path.read_text()).get("shape")
+        return (int(shape[0]), int(shape[1]))
+    except (OSError, ValueError, TypeError, IndexError, KeyError):
+        return None
+
+
 def coverage_path_for(fits_path: str | Path) -> Path:
     """The sibling per-pixel coverage FITS a stack run writes next to its output
     (``{basename}_coverage.fits`` — see :mod:`seestack.stack.output`)."""

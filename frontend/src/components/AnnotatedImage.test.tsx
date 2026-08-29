@@ -1,7 +1,13 @@
 import { MantineProvider } from "@mantine/core";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { AnnotatedImage, objectLabel, objectMarkerLayout, scaleBarLayout } from "./AnnotatedImage";
+import {
+  AnnotatedImage,
+  croppedAnnotationView,
+  objectLabel,
+  objectMarkerLayout,
+  scaleBarLayout,
+} from "./AnnotatedImage";
 import type { FieldObject, ScaleBar } from "../api/client";
 
 function obj(over: Partial<FieldObject> = {}): FieldObject {
@@ -96,5 +102,62 @@ describe("AnnotatedImage", () => {
     // component must render without error and still show the image.
     renderImg(true);
     expect(screen.getByAltText("M31")).toBeInTheDocument();
+  });
+});
+
+describe("croppedAnnotationView", () => {
+  const bar: ScaleBar = {
+    arcsec: 60, label: "1′", fraction: 0.2, frame_arcmin: 5,
+    moon_comparison: "about a fifth of a full Moon wide",
+  };
+
+  it("leaves an ordinary (un-cropped) run exactly as it is", () => {
+    const objs = [obj({ x_px: 500, y_px: 300 })];
+    const v = croppedAnnotationView(null, objs, bar, 1000, 600);
+    expect(v.objects).toBe(objs);
+    expect(v.scaleBar).toBe(bar);
+    expect(v.width).toBe(1000);
+    expect(v.height).toBe(600);
+  });
+
+  it("shifts object pins into the trimmed picture", () => {
+    // The auto-edit kept x 200…800, y 60…540 of a 1000×600 canvas.
+    const v = croppedAnnotationView(
+      { x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.9 },
+      [obj({ x_px: 500, y_px: 300 })], null, 1000, 600);
+    expect(v.width).toBe(600);
+    expect(v.height).toBe(480);
+    expect(v.objects[0].x_px).toBe(300);   // 500 − 200
+    expect(v.objects[0].y_px).toBe(240);   // 300 − 60
+  });
+
+  it("drops an object the trim cut away", () => {
+    const v = croppedAnnotationView(
+      { x0: 0.5, y0: 0.0, x1: 1.0, y1: 1.0 },
+      [obj({ x_px: 100, y_px: 300 }), obj({ catalog_id: "M32", x_px: 900, y_px: 300 })],
+      null, 1000, 600);
+    expect(v.objects.map((o) => o.catalog_id)).toEqual(["M32"]);
+  });
+
+  it("re-bases the scale bar on the narrower picture", () => {
+    // Half the width kept → the same on-sky bar covers twice the share.
+    const v = croppedAnnotationView(
+      { x0: 0.25, y0: 0.0, x1: 0.75, y1: 1.0 }, [], bar, 1000, 600);
+    expect(v.scaleBar?.fraction).toBeCloseTo(0.4);
+    expect(v.scaleBar?.label).toBe("1′");   // the bar's own length is unchanged
+  });
+
+  it("drops a bar that would no longer fit on the picture", () => {
+    const v = croppedAnnotationView(
+      { x0: 0.45, y0: 0.0, x1: 0.55, y1: 1.0 }, [], bar, 1000, 600);
+    expect(v.scaleBar).toBeNull();          // 0.2 × 10 = 2× the picture width
+  });
+
+  it("is a no-op for a full-canvas crop or an unknown size", () => {
+    const objs = [obj()];
+    expect(croppedAnnotationView({ x0: 0, y0: 0, x1: 1, y1: 1 }, objs, bar, 1000, 600)
+      .objects).toBe(objs);
+    expect(croppedAnnotationView({ x0: 0.2, y0: 0, x1: 0.8, y1: 1 }, objs, bar, 0, 0)
+      .objects).toBe(objs);
   });
 });

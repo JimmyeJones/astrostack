@@ -866,6 +866,16 @@ export interface StackRun {
   // object pins and scale bar are measured on the un-rotated FITS grid, so they
   // can't be drawn on a picture that was saved turned.
   preview_north_up_deg?: number | null;
+  // What the *stored preview PNG* shows of the stack canvas when the one-click
+  // "Process target" auto-edit trimmed its ragged border: fractional bounds of
+  // the canvas, or null/absent (the common case) for a plain full-canvas
+  // downscale. The object pins and the scale bar are measured on the un-cropped
+  // FITS grid, so they have to be shifted into this rectangle to land right.
+  preview_crop?: { x0: number; y0: number; x1: number; y1: number } | null;
+  // True when the stored preview came out of a recipe whose geometry can't be
+  // reduced to a crop of the canvas, so nothing measured on the FITS grid can
+  // honestly be placed on it — hide the pins/bar rather than mis-plot them.
+  preview_geometry_unknown?: boolean;
   // How flat this *mosaic's* panel joins came out, read for us by the backend:
   // "flat" (the sky matches across the joins), "check" (a step big enough to show
   // once stretched), or null/absent when there's nothing honest to say — a

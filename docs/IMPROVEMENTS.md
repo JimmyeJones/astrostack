@@ -671,11 +671,54 @@ _(none — claim an item here with your branch name)_
   withholds the pins and says why for a run with a saved rotation (fails before / passes after); and the
   no-regression half — an ordinary run still labels its objects.
 
-- **🟠 WRONG-RESULT / BROKEN-UX (Builder 2026-08-27, traced end to end while sweeping the North-up family;
-  NOT yet reproduced — needs a repro before a fix) — the same root class as the whole v0.288.1→v0.290.1 chain,
-  but for **crop** instead of rotation: an auto-edited run's stored preview is a `geometry.crop` of the canvas,
-  and *nothing records that*, so every consumer that treats the preview as a uniform downscale of the FITS
-  places its geometry wrong.** *(Severity: wrong-result on the Sky map — a picture is placed at the wrong
+- **✅ SHIPPED (Builder, v0.291.0, branch `claude/compassionate-galileo-4drm6t`) — ~~the same root class as the
+  whole v0.288.1→v0.290.1 chain, but for **crop** instead of rotation: an auto-edited run's stored preview is a
+  `geometry.crop` of the canvas, and *nothing records that*, so every consumer that treats the preview as a
+  uniform downscale of the FITS places its geometry wrong.~~** **Reproduced first, then fixed exactly as the
+  spec below asked**, writer's half and every consumer.
+
+  **Reproduced.** A mosaic run with a ragged coverage border, put through the real one-click auto-edit
+  (`_auto_edit_process_run`, `auto_crop=True` — the shipping default): the saved recipe ends with a
+  `geometry.crop`, the rewritten preview PNG comes out materially smaller than the canvas rescale, and the
+  Sky-map coverage overlay's alpha disagreed with the picture's true footprint over >10 % of its pixels,
+  the shared scale bar claimed a length 1/0.7× longer than it drew, and `wallpaper_target_pixel` landed the
+  target tens of pixels from where it is. All four are now regression-tested.
+
+  **What shipped.** New `seestack/previewcrop.py` is the vocabulary: a run's stored preview is either a plain
+  full-canvas downscale (NULL — every existing run, every stack-time preview, every un-cropped render),
+  a recorded fractional `PreviewCrop`, or `UNKNOWN` ("this render's geometry isn't a crop of the canvas at
+  all"). Additive `stack_runs.preview_crop_json` (SCHEMA_VERSION 16 → 17) carries it. The **writer** is
+  `_auto_edit_process_run`, which records the crop it actually rendered — the recipe's composed bounds
+  (`preview_crop_of_recipe`, which folds nested crops, ignores disabled/degenerate ones, and returns `UNKNOWN`
+  on a real `geometry.rotate`) *checked against the shape the render came out*, so a crop the op declined can
+  never be recorded as one — and the "Adjust → Save" preview rewrite clears it, mirroring the North-up angle's
+  always-written rule. The **consumers** each compose it: the Sky map's tile WCS
+  (`wcs_dict_rescaled_to_preview(crop=…)`), its size (`canvas_extent_from_fits(crop=…)`) and its **centre**
+  (new `cropped_center_radec_from_fits` — the target's RA/Dec is the picture's centre only while the picture is
+  the whole canvas); the `sky-overlay` coverage mask; the shared JPEG's scale bar (now sized against the
+  *visible* field, so its label matches its drawn length); `wallpaper_target_pixel`; and History's object pins
+  + scale-bar overlay via two additive run fields (`preview_crop`, `preview_geometry_unknown`) and the pure
+  `croppedAnnotationView`. **Sequencing honoured:** `UNKNOWN` never guesses — the tile gets no WCS, the overlay
+  stays opaque, the bar and the pins hide with a plain-language note.
+
+  **Upgrade-safe (§9):** one additive column with an additive migration (tested from a real v16 DB), two
+  additive API fields, no default flip, no on-disk change. A run with no recorded crop behaves bit-for-bit as
+  before — asserted for the overlay, the bar, the wallpaper pixel and the sky tile.
+
+  **Tests:** `tests/test_previewcrop.py` (16, the encoding + the recipe reduction),
+  `tests/webapp/test_preview_crop_geometry.py` (15, writer + all five consumers, each with an explicit
+  "the pre-fix value really does disagree" assertion so none is vacuous),
+  `tests/test_history.py::test_v16_schema_migrates_to_v17_adds_preview_crop_json`, and 6 new
+  `AnnotatedImage.test.tsx` cases.
+
+  **One thing deliberately left:** the History *caption's* Moon sentence (`scale_bar.moon_comparison`) still
+  describes the un-cropped frame's width — it is generated server-side from the canvas, and re-deriving it for
+  the visible field means recomputing the ladder rung client-side. Small, cosmetic, filed under Ideas →
+  Friendliness.
+
+  Original spec, for the record:
+
+  *(Severity: wrong-result on the Sky map — a picture is placed at the wrong
   size/centre on the sky — plus misplaced History object pins, a wrong scale bar and a mis-centred wallpaper
   crop, on runs a beginner produced with one click. The picture itself is fine. Confidence: traced against the
   code, on-by-default settings confirmed; **not** reproduced, which is why it is filed rather than fixed.)*
@@ -13479,6 +13522,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEW IDEA (Builder 2026-08-29, the one half deliberately left out of the v0.291.0 preview-crop fix) — the
+  History caption's Moon sentence still describes the *un-cropped* frame on a picture the auto-edit trimmed.**
+  *(Pillar: understand / trust — PRIORITY 3. Size: S. Confidence: certain — I left it, knowingly, this run.)*
+  `scale_bar.moon_comparison` ("the whole frame is about 2.5 full Moons wide") is generated server-side from
+  the **canvas** width (`_scale_bar_from_wcs(wcs, width, height)` in the `…/annotations` handler), and after
+  v0.291.0 the *bar* on screen is re-based on the visible picture but that sentence is not — so a beginner
+  sharing a trimmed mosaic reads a frame width up to ~1/0.7× too large. **Shape:** the run row already carries
+  `preview_crop`, so the cleanest fix is server-side — have the annotations handler size its `scale_bar`
+  against the cropped rectangle (it can read the run's `preview_crop_json` the way `sky-overlay` does) and
+  return the cropped `width`/`height`, *plus* an honest signal for the one case that then breaks: History's
+  **live Adjust render** shows the full canvas, so the frontend must keep the un-cropped numbers for that
+  image. Probably: return both (`scale_bar` for the stored preview, `canvas_scale_bar` for the raw grid) and
+  let `croppedAnnotationView` pick. Cosmetic, never wrong-result — the picture and its pins are correct as of
+  v0.291.0; only one sentence overstates the field.
 
 - **NEW IDEA (Builder 2026-08-27, the parity gap the v0.284.0 "Scale & compass" feature just opened) — the
   downloaded picture now carries a scale bar *and* a North/East rose, but the app's own on-screen overlay still

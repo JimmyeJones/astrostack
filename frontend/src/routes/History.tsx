@@ -26,7 +26,7 @@ import { focusChips, type FocusVerdict } from "../components/target/focusChips";
 import { integrationTrend } from "../components/target/integrationTrend";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
-import { AnnotatedImage } from "../components/AnnotatedImage";
+import { AnnotatedImage, croppedAnnotationView } from "../components/AnnotatedImage";
 import { describeFieldObjects } from "../components/fieldObjectList";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
@@ -852,6 +852,23 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   // measured on the un-rotated FITS grid, so both cases must suppress them.
   const savedNorthUp = !!run.preview_north_up_deg;
   const imageIsNorthUp = imgSrc === previewSrc ? savedNorthUp : applyNorthUp;
+  // The *stored* preview can also be a crop of the canvas (the one-click
+  // "Process target" auto-edit trims a mosaic's ragged border), which the pins
+  // and bar are not measured on. Unlike a rotation this composes exactly, so
+  // shift them into the trim rather than hiding them — and only while the stored
+  // bytes are what's on screen; the live Adjust render is the full canvas.
+  const showingStored = imgSrc === previewSrc;
+  const view = croppedAnnotationView(
+    showingStored ? run.preview_crop : null,
+    objects, scaleBar,
+    annotations.data?.width ?? run.canvas_w,
+    annotations.data?.height ?? run.canvas_h,
+  );
+  // …and the one case that *can't* be composed: a stored preview whose geometry
+  // isn't a crop of the canvas at all. Nothing measured on the FITS grid can be
+  // placed on it honestly, so hide the pins/bar like a North-up save does.
+  const geometryUnplaceable = showingStored && !!run.preview_geometry_unknown;
+  const cantPlaceMarks = imageIsNorthUp || geometryUnplaceable;
 
   return (
     <Card withBorder padding="md" radius="md">
@@ -859,10 +876,10 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         {run.has_preview || (adjust && run.has_fits) ? (
           <AnnotatedImage
             src={imgSrc} alt={run.output_basename}
-            imgWidth={annotations.data?.width ?? run.canvas_w}
-            imgHeight={annotations.data?.height ?? run.canvas_h}
-            objects={objects} show={identify && !imageIsNorthUp} height={180}
-            scaleBar={scaleBar} showScale={scale && !imageIsNorthUp}
+            imgWidth={view.width}
+            imgHeight={view.height}
+            objects={view.objects} show={identify && !cantPlaceMarks} height={180}
+            scaleBar={view.scaleBar} showScale={scale && !cantPlaceMarks}
             onClick={() => setLight(true)}
           />
         ) : (
@@ -870,37 +887,40 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         )}
       </Card.Section>
 
-      {imageIsNorthUp && (identify || scale) ? (
-        // Object pins and the scale bar are computed on the un-rotated FITS grid,
-        // so they'd land in the wrong place on the North-up-rotated render. Hide
-        // them (rather than mis-plot) and say why — which differs depending on
-        // whether the rotation is the live toggle or one a past save baked in.
+      {cantPlaceMarks && (identify || scale) ? (
+        // Object pins and the scale bar are computed on the un-rotated, un-cropped
+        // FITS grid, so they'd land in the wrong place on a render that turned or
+        // reshaped it. Hide them (rather than mis-plot) and say why — which differs
+        // depending on whether it's the live toggle, a rotation a past save baked
+        // in, or a processed picture whose geometry we can't reconcile at all.
         <Text size="xs" c="dimmed" mt={6}>
-          {applyNorthUp
+          {geometryUnplaceable && !imageIsNorthUp
+            ? "This picture was reshaped when it was processed, so object pins and the scale bar can’t be placed on it — they’re measured on the original image. Open Adjust and save it again to use them."
+            : applyNorthUp
             ? "Turn off “Rotate so North is up” to place object pins and the scale bar — they’re measured on the un-rotated image."
             : "This picture was saved rotated so North is up, so object pins and the scale bar can’t be placed on it — they’re measured on the un-rotated image. Open Adjust and save it un-rotated to use them."}
         </Text>
       ) : null}
 
-      {identify && !imageIsNorthUp && !annotations.isLoading && annotations.isSuccess ? (
-        objects.length ? (
+      {identify && !cantPlaceMarks && !annotations.isLoading && annotations.isSuccess ? (
+        view.objects.length ? (
           // Plain-language "what else is in this picture?" list — the friendly
           // read of the same objects the overlay labels on the image, so a
           // beginner can tell what the other smudges are without squinting at
           // overlapping labels on a small preview.
           <Stack gap={2} mt={6}>
             <Text size="xs" c="cyan.4">
-              In this picture — {objects.length} catalog object{objects.length === 1 ? "" : "s"}:
+              In this picture — {view.objects.length} catalog object{view.objects.length === 1 ? "" : "s"}:
             </Text>
             {describeFieldObjects(
-              objects, annotations.data?.width ?? 0, annotations.data?.height ?? 0,
+              view.objects, view.width, view.height,
             ).map((d) => (
               <Text key={d.catalogId} size="xs" c="dimmed">
                 {d.label}{d.typePhrase ? ` — ${d.typePhrase}` : ""}, {d.positionPhrase}.
               </Text>
             ))}
-            {objects.length > 5 ? (
-              <Text size="xs" c="dimmed">…and {objects.length - 5} more.</Text>
+            {view.objects.length > 5 ? (
+              <Text size="xs" c="dimmed">…and {view.objects.length - 5} more.</Text>
             ) : null}
           </Stack>
         ) : (
@@ -908,7 +928,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         )
       ) : null}
 
-      {scale && !imageIsNorthUp && !annotations.isLoading && annotations.isSuccess ? (
+      {scale && !cantPlaceMarks && !annotations.isLoading && annotations.isSuccess ? (
         <Text size="xs" c={scaleBar ? "grape.3" : "dimmed"} mt={6}>
           {scaleBar
             // Capitalise the plain-language Moon sentence for the caption.

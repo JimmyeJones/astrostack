@@ -191,9 +191,26 @@ def arcsec_per_px(wcs) -> float | None:  # noqa: ANN001
     return scale if scale > 0 else None
 
 
+def _crop_matrix_inputs(crop, crpix, full_w: int, full_h: int):
+    """Shift a canvas WCS's reference pixel into a cropped rectangle and return
+    the cropped dimensions — the "the stored preview shows only part of the
+    canvas" composition, shared by the two preview helpers below.
+
+    ``crop`` is a :class:`~seestack.previewcrop.PreviewCrop` (or ``None`` for the
+    whole canvas, which is a no-op). A crop is a pure integer-pixel translation of
+    the grid, so shifting ``CRPIX`` by the crop's origin is exact in either the
+    0- or 1-based convention."""
+    from seestack.previewcrop import crop_pixel_box
+
+    if crop is None:
+        return crpix, full_w, full_h
+    x0, y0, x1, y1 = crop_pixel_box(crop, full_w, full_h)
+    return ([float(crpix[0]) - x0, float(crpix[1]) - y0], x1 - x0, y1 - y0)
+
+
 def wcs_dict_rescaled_to_preview(
     fits_path: str | Path, preview_w: int, preview_h: int,
-    *, north_up_deg: float = 0.0,
+    *, north_up_deg: float = 0.0, crop=None,  # noqa: ANN001 — PreviewCrop | None
 ) -> dict | None:
     """The stack's **stored** celestial WCS, rescaled to a downscaled preview PNG.
 
@@ -222,6 +239,13 @@ def wcs_dict_rescaled_to_preview(
     in this order matches what the render did to within the sub-pixel rounding of the
     rotated canvas's bounding box.) The default ``0.0`` leaves every existing call
     bit-for-bit unchanged.
+
+    ``crop`` is the *other* way a stored preview stops being a plain downscale: the
+    "Process target" auto-edit's border trim (:mod:`seestack.previewcrop`). Pass it
+    and the canvas grid is cut to that rectangle before the rescale, so the tile is
+    placed at the size **and centre** the cropped picture actually has instead of
+    being stretched over the whole canvas footprint. ``None`` — every ordinary run
+    — composes nothing.
     """
     if preview_w <= 0 or preview_h <= 0:
         return None
@@ -230,7 +254,8 @@ def wcs_dict_rescaled_to_preview(
         return None
     try:
         m = wcs.pixel_scale_matrix  # 2×2 CD matrix (deg/px), includes sign + rotation
-        crpix = wcs.wcs.crpix
+        crpix, full_w, full_h = _crop_matrix_inputs(
+            crop, wcs.wcs.crpix, full_w, full_h)
         if north_up_deg:
             rotated = _rotate_matrix_and_crpix(m, crpix, full_w, full_h, north_up_deg)
             if rotated is None:
@@ -284,7 +309,7 @@ def _extent_from_scale_matrix(
 
 
 def canvas_extent_from_fits(
-    fits_path: str | Path, *, north_up_deg: float = 0.0,
+    fits_path: str | Path, *, north_up_deg: float = 0.0, crop=None,  # noqa: ANN001
 ) -> tuple[float, float, float] | None:
     """A stack canvas's on-sky (width_deg, height_deg, rotation_deg) from its
     **stored** WCS, or ``None`` when the master FITS is missing/headerless.
@@ -302,15 +327,22 @@ def canvas_extent_from_fits(
     grid instead — a bigger bounding box, and a position angle of ~0 because the
     picture now *is* North-up. The default ``0.0`` is the unrotated canvas exactly
     as before.
+
+    ``crop`` describes a stored preview the "Process target" auto-edit trimmed
+    (:mod:`seestack.previewcrop`); pass it and the extent is that of the visible
+    rectangle, so the tile isn't drawn stretched over the un-cropped footprint.
+    ``None`` is the whole canvas exactly as before.
     """
     wcs, full_w, full_h = celestial_wcs_from_fits(fits_path)
     if wcs is None or full_w <= 0 or full_h <= 0:
         return None
     try:
         m = wcs.pixel_scale_matrix
+        crpix, full_w, full_h = _crop_matrix_inputs(
+            crop, wcs.wcs.crpix, full_w, full_h)
         if north_up_deg:
             rotated = _rotate_matrix_and_crpix(
-                m, wcs.wcs.crpix, full_w, full_h, north_up_deg)
+                m, crpix, full_w, full_h, north_up_deg)
             if rotated is None:
                 return None
             m, _crpix, full_w, full_h = rotated
@@ -318,6 +350,36 @@ def canvas_extent_from_fits(
     except Exception as exc:  # noqa: BLE001 — a malformed WCS just means "fall back"
         log.warning("WCS extent from FITS failed (%s): %s", fits_path, exc)
         return None
+
+
+def cropped_center_radec_from_fits(fits_path: str | Path, crop
+                                   ) -> tuple[float, float] | None:  # noqa: ANN001
+    """Where the centre of a *cropped* stored preview sits on the sky.
+
+    A tile is placed by its centre, and the Sky map uses the library target's own
+    RA/Dec for that — fine while the picture is the whole canvas (the target is
+    what the canvas was built around), wrong once the "Process target" auto-edit
+    trims a ragged border off one side. Projects the crop rectangle's centre pixel
+    through the canvas WCS instead. ``None`` (caller keeps the target position)
+    when there's no crop or no usable celestial WCS. A rotation about the picture
+    centre doesn't move it, so this needs no ``north_up_deg``."""
+    from seestack.previewcrop import PreviewCrop, crop_pixel_box
+
+    if not isinstance(crop, PreviewCrop):
+        return None
+    wcs, full_w, full_h = celestial_wcs_from_fits(fits_path)
+    if wcs is None or full_w <= 0 or full_h <= 0:
+        return None
+    try:
+        x0, y0, x1, y1 = crop_pixel_box(crop, full_w, full_h)
+        ra, dec = wcs.all_pix2world((x0 + x1 - 1) / 2.0, (y0 + y1 - 1) / 2.0, 0)
+        ra, dec = float(ra), float(dec)
+    except Exception as exc:  # noqa: BLE001 — a malformed WCS just means "fall back"
+        log.warning("Cropped centre from FITS failed (%s): %s", fits_path, exc)
+        return None
+    if ra != ra or dec != dec:  # NaN
+        return None
+    return (ra, dec)
 
 
 def footprint_radec_deg(wcs, width_px: int, height_px: int) -> list[tuple[float, float]] | None:
