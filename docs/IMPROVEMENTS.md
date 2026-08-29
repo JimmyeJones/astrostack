@@ -45,6 +45,26 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 _(none — claim an item here with your branch name)_
 
+> **Builder 2026-08-29, branch `claude/compassionate-galileo-4txqj1` — run finished, both claims released.**
+> Shipped two: **"Share your glow-up"** (**v0.300.0**, write-up under "Features that serve real workflows") —
+> all three filed slices, a new pure `seestack/beforeafter.py`, the `before-after.jpg` endpoint and the
+> download button on the reveal card; and the **tofu-glyph guard** (**v0.300.1**, under "Friendliness") —
+> `tests/glyphs.py` plus a walk over every caption builder in the seven modules that import `ImageDraw`. No
+> current caption was affected, which is the honest outcome for a guard filed after its one live instance was
+> fixed.
+> **Verified in a running app, not just in tests:** `scripts/agent-dogfood.sh` booted a real install with the
+> bundled sample, and the composed JPEG came back correct on a plain stack — which is also how the dogfood
+> finding below was found (the reveal, and now the share, self-hide on every one-click "Process target" run).
+> Filed under "Features that serve real workflows" with the measurement, the honest fix, and the interim
+> slice. **Pruned** the Scout's "close the loop when auto-grade brings frames back" idea: grepped before
+> starting it and found it already shipped end to end (`auto_regraded_back` → `autoRegradedBackNote`).
+> The bug queue was checked first and is still genuinely dry — every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data. A fresh adversarial read of
+> `stack/accumulator.py` (all three accumulators, the k-set insertion, the min/max drop schedule and its
+> coverage semantics) found nothing — recorded so nobody re-treads it this month.
+> Claiming in the run's **first** commit and pushing immediately (per the five duplicate-collision process
+> notes) cost under a minute; no collision, and `main` never moved while the run ran.
+
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-92mr4d` — run finished, claim released.**
 > Shipped one, deep: **"See what stacking removed"** (**v0.299.0**, write-up under "Features that serve real
 > workflows") — all three filed slices, engine → endpoint → History toggle, across `stacker.py`,
@@ -9689,9 +9709,21 @@ to **Shipped**.)_
   pre-merge sync (§11) rather than after merging. Both halves of the lesson stand: claim the item early, *and*
   make the sync cheap to lose.
 
-- **NEW IDEA (Scout 2026-08-27 #15) — close the loop when auto-grade *brings frames back*: a plain-language,
-  self-hiding note telling the owner "N subs you'd set aside earlier turned out typical after all and are back in
-  your stack", so the machine's second-thoughts are visible instead of silent.** *(Pillar: autonomy + trust,
+- ~~**NEW IDEA (Scout 2026-08-27 #15) — close the loop when auto-grade *brings frames back*.**~~ —
+  **ALREADY SHIPPED; pruned by the Builder 2026-08-29 (branch `claude/compassionate-galileo-4txqj1`) after
+  grepping it before starting it.** Both halves the entry asks for exist: the backend threads the count as
+  `summary["auto_regraded_back"]` from all three job bodies (`webapp/pipeline.py` — the whole-library scan as a
+  per-target map, `qc_solve` and `process_target` as a plain count), and the frontend renders exactly the
+  plain-language, self-hiding sentence described — `autoRegradedBackCount` / `autoRegradedBackNote` in
+  `routes/Jobs.tsx` ("Put 3 subs back: with more of your night to compare against, they're no longer
+  outliers."), read on three job surfaces and covered by `Jobs.test.tsx`. **Nothing to build.** Kept, struck,
+  rather than deleted, so the next agent who reads the Scout's reasoning doesn't re-file it. *(This is the
+  third stale "already shipped" idea a Builder has tripped over — AGENTS.md §1's "grep before you build" is
+  load-bearing, and it cost about two minutes here.)*
+
+  Original spec:
+
+  *(Pillar: autonomy + trust,
   PRIORITY 2–3; size S; additive/read-only — no schema/config/default change. Confidence: traced against the
   code that already does the re-accepting.)*
   **The mechanism already exists and is invisible.** On every scan the unattended hook re-grades a live target
@@ -9716,9 +9748,36 @@ to **Shipped**.)_
   read-only, off nothing; incoming/ untouched; a plain regression test that a target whose population grew past a
   borderline early-reject reports a non-zero re-accept count and the sentence renders (and hides at 0).
 
-- **NEW IDEA (Builder 2026-08-27, the class of bug the v0.282.1 tofu-glyph fix belongs to) — nothing in the app
+- ~~**NEW IDEA (Builder 2026-08-27, the class of bug the v0.282.1 tofu-glyph fix belongs to) — nothing in the app
   ever *looks at* the pixels it bakes text onto, so a whole family of "the picture is wrong but the string is
-  right" defects is invisible to the suite.** *(Pillar: trust / image quality — PRIORITY 3–4. Size: S.
+  right" defects is invisible to the suite.**~~ — **SHIPPED v0.300.1** (Builder 2026-08-29, branch
+  `claude/compassionate-galileo-4txqj1`), exactly as specified. *(Pillar: trust / image quality —
+  PRIORITY 3–4.)*
+
+  New shared helper `tests/glyphs.py` (`missing_glyphs` / `assert_drawable`, plus `load_default_font` — the
+  *same* `ImageFont.load_default(size=…)` call the drawing modules make, so the guard can never test a face
+  the app doesn't draw with), and `tests/test_drawn_text_glyphs.py` walks **every** caption builder whose
+  output is burned into an image through it: nameplate + keepsake, montage caption/title, all five recap
+  poster lines *and* both halves of every `recap_stats` pair, the deepening reel's frame label, the new
+  before/after caption + panel labels, and the scale bar's `ascii_label` across the arcsecond/arcminute/degree
+  rungs plus the compass "N"/"E". Cross-checked against the source: those seven modules are exactly the ones
+  that import `ImageDraw` (`grep -rl ImageDraw seestack/ webapp/`), so the walk is complete as of this run.
+
+  **The guard is asserted able to fail**, per the entry's "care" note, in two ways: the reference `.notdef`
+  mask is asserted non-empty inside the helper (a future Pillow that maps unmapped codepoints to a blank
+  fails loudly instead of going toothless), and a test pins that `missing_glyphs` actually *catches* the
+  three characters this class of bug keeps reaching for — `×` (the v0.282.1 defect verbatim), `—` and `→` —
+  while passing everything the app really uses (`·`, `°`, `'`, `"`). One more pin keeps the scale bar's
+  HTML-only `label` (which legitimately uses the ′/″ primes) distinguishable from the drawn `ascii_label`,
+  so a later "why do we have two of these?" tidy-up can't silently collapse them.
+
+  **Findings: none — every current caption is clean**, which is the honest outcome for a guard filed after
+  the one live instance was already fixed. Its value is forward-looking: the hand-audit that entry describes
+  is now a test that stays true. Test-only change; no runtime code touched.
+
+  Original spec:
+
+  *(Pillar: trust / image quality — PRIORITY 3–4. Size: S.
   Confidence: this run shipped a fix for exactly one instance of it, which had been live for months.)*
   The nameplate shipped `(505×30s)` into every share export for months; every assertion in the suite compared
   the caption *string*, which was always exactly right — the defect only existed once the characters met
@@ -17478,6 +17537,35 @@ problems. Dogfood it every big-picture run and fix root causes.
     where they really are compared to each other," and flying through your own captured slice of the universe is
     a strong, shareable "wow" moment, same spirit as the light-travel-time feature it reuses data from.
 
+- **DOGFOOD FINDING (Builder 2026-08-29, found by running the app — `scripts/agent-dogfood.sh` — while
+  verifying the new before/after share, not by reading code) — "One frame vs your stack" (and therefore the
+  new "Share this before/after") is invisible on every one-click **"Process target"** run, which is the
+  flagship path a beginner actually uses.** *(Pillar: enjoy + trust — PRIORITY 2–3; size M; **not** a bug —
+  the gate is deliberate and correct as written, so this is a feature to build, not a check to loosen.)*
+  **Measured, not inferred.** On a freshly-booted app with the bundled sample loaded and processed by the
+  one-click button, `GET .../stack-runs/1/one-sub-vs-stack` answers `{"available": false, "n_frames": 6, …}`
+  and the before/after download 404s with *"This run's picture is an edited export…"*. Submitting a plain
+  stack of the same frames (run 2) makes both work immediately. The cause is exactly the gate:
+  `_auto_edit_process_run` rewrites the run's preview to the Auto recipe's tone-mapped result and stamps
+  `preview_display_space`, and a raw STF sub render can't be honestly matched to a recipe-toned picture — so
+  the reveal self-hides, correctly.
+  **Why it matters more than its "one path" sounds.** `auto_edit_on_autostack` defaults to **off**, so the
+  walk-away auto-stack still produces a linear preview and keeps the reveal — but "Process target" *always*
+  auto-edits, and it is the button the app points a beginner at. So the app's single most convincing moment,
+  and the shareable artefact just built on top of it, are absent from the one journey most likely to be taken.
+  **Shape (the honest fix, and why it isn't small).** The run's recipe is already stored per run
+  (`RECIPE_META_PREFIX{run_id}`), so the matched "before" exists in principle: debayer the reference sub to
+  linear RGB and render it through the **same recipe**, which is a *more* honest comparison than STF-matching
+  (identical processing, one frame vs many). But that means driving `seestack.edit` over a single sub —
+  op-by-op behaviour on one noisy frame (background extraction, star handling, any crop), the memory/time cost
+  on the request path, and a cache story — which is why it is filed rather than bolted onto the v0.300.0
+  endpoint. **Cheaper interim slice, if the full one isn't wanted:** say *why* instead of showing nothing —
+  the card currently renders `null`, so a beginner who processed their target sees no reveal and no reason.
+  One calm line ("your picture has been auto-edited, so there's nothing fair to compare a raw frame against —
+  a plain stack of the same subs will show it") turns an invisible surface into an explained one. **Care:**
+  do NOT make the gate looser to get the reveal back — pairing an STF sub against a recipe-toned stack sells
+  a tone difference as what stacking bought you, which is the one thing this feature must never do.
+
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
   *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
@@ -18714,10 +18802,46 @@ problems. Dogfood it every big-picture run and fix root causes.
 
   *(Original spec, kept for context.)* *(Pillar: friendliness /
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #11) — "Share your glow-up": a one-tap download that composes the
-  representative single raw sub next to the finished stack into one labelled before/after image, so a beginner can
-  post the single most impressive thing stacking does — *"1 photo → 500 photos stacked"* — without a screenshot or
-  an editor.** *(Pillar: share / enjoy + trust — PRIORITY 3. Size: S–M. Confidence the gap is real: grepped this
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #11) — "Share your glow-up": a one-tap download that composes the
+  representative single raw sub next to the finished stack into one labelled before/after image.**~~ —
+  **SHIPPED v0.300.0** (Builder 2026-08-29, branch `claude/compassionate-galileo-4txqj1`), all three filed
+  slices in one run. *(Pillar: share / enjoy + trust — PRIORITY 3.)*
+
+  **(a) Engine — `seestack/beforeafter.py`.** Pure, offline, no new dependency: `build_before_after(before,
+  after, *, caption, labels, width)` fits both halves *whole* into equal half-cells
+  (`render.deepening._fit_onto`, so a portrait sub beside a wider mosaic master keeps both geometries true),
+  burns the reel's own corner label onto each, draws the keepsake's hairline down the seam, and sets one
+  caption line under the pair. It deliberately **does not touch either half's pixels** — matching the two tone
+  curves is the caller's job (that's what `reference-sub` already does), so the composer can never flatter the
+  result; a test pins a flat mid-grey coming out the same mid-grey. `before_after_caption` /
+  `panel_labels` / `sub_exposure_label` build the wording, each clause dropping out on its own so a thin
+  older run gets a shorter sentence rather than one with a hole in it, and `_pair_aspect` follows the
+  *taller* of the two shapes so the half being examined is never the letterboxed one.
+
+  **(b) Backend — `GET /api/targets/{safe}/stack-runs/{id}/before-after.jpg`.** Renders the reference sub
+  through the run's own saved stretch (the reveal's exact call), loads the stored preview, composes, and
+  serves a JPEG as an `attachment` named `{basename}_before-after.jpg`. Gated **identically to the reveal** —
+  404 on no preview, no readable frame, or a display-space / in-place-Auto-edited run whose bespoke tone
+  curve a raw sub can't honestly match — so the button self-hides on exactly the runs the card does. Composed
+  in a threadpool; nothing written to the library (a display-time render, like the montage wall). Registered
+  *above* the `/{kind}` catch-all, with a test that pins the ordering.
+
+  **(c) Frontend — one "Share this before/after" download button** on `OneFrameVsStackCard`, appearing with
+  the reveal (not before it, so History's list of runs still fetches nothing up front), plus a plain-language
+  line saying what the file contains.
+
+  **Upgrade-safe (§9):** purely additive — one new engine module, one new read-only endpoint, one button. No
+  schema, config, on-disk, API-shape or default change.
+
+  **Tests:** `tests/test_beforeafter.py` (+21 — caption degradation incl. a non-finite integration, the
+  no-tofu-glyph rule, width clamping, a missing/unreadable half yielding `None`, the two halves landing on
+  their own sides, pixels unmodified), `tests/webapp/test_one_sub_vs_stack.py` (+7 — the composed download,
+  the caption built from the run's own provenance, all three 404 gates, the catch-all ordering, and the saved
+  custom stretch reaching the download), `OneFrameVsStackCard.test.tsx` (+1).
+
+  Original spec:
+
+  *(Pillar: share / enjoy + trust — PRIORITY 3. Size: S–M. Confidence the gap is real: grepped this
   run — the `one-sub-vs-stack` reveal exists **in-app only** (`OneFrameVsStackCard.tsx`, the `/one-sub-vs-stack`
   info + `/reference-sub` PNG + `/noise` endpoints); there is no *downloadable* composed before/after image
   anywhere.)*

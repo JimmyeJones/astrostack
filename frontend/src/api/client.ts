@@ -2273,6 +2273,11 @@ export const api = {
       `/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack/noise`),
   stackReferenceSubUrl: (safe: string, id: number) =>
     `/api/targets/${safe}/stack-runs/${id}/reference-sub`,
+  // "Share your glow-up" — the reveal composed into one labelled, captioned
+  // JPEG you can post. 404s on exactly the runs the reveal itself hides on, so
+  // the button only ever appears where the card does.
+  stackBeforeAfterUrl: (safe: string, id: number) =>
+    `/api/targets/${safe}/stack-runs/${id}/before-after.jpg`,
   // "Watch your picture come together" progress reel (opt-in save_progress).
   stackProgressInfo: (safe: string, id: number) =>
     req<{ available: boolean; frames: number; format?: string }>(
