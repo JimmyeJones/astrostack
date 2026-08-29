@@ -125,6 +125,39 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.300.2, branch `claude/compassionate-galileo-4txqj1`) — ~~`Target.test.tsx`'s note-board
+  test asserts the fold *synchronously* off the first note's arrival, so it races `NoticeBoard`'s
+  measure-then-fold commit and goes red on a loaded runner.~~** Found by CI going red on main (run 1228,
+  `TargetView note board > keeps the urgent notes inline and folds the rest behind one line`) right after the
+  v0.300.0/.1 merge — **a test-timing defect, not a flake to re-run and not a product bug.** *(Severity: CI
+  health only; no user-visible behaviour. Confidence: mechanism traced in the component; the failing assertion
+  is structurally one render early.)*
+
+  **Root cause.** `NoticeBoard` cannot ask its caller which notes will speak — most are self-hiding components
+  that fetch their own data — so it renders them all and **measures the DOM** (`useEffect(measure)` plus a
+  `MutationObserver`), then re-renders with `display: none` on the demoted ones. Its own comment states the
+  deliberate consequence: *"before the first measurement everything is inline, so a note is never invisible on
+  first paint"*. The demote therefore lands **one commit after** a note's text appears. The test did
+  `await findByText(<first note>)` and then immediately asserted the *third* note `.not.toBeVisible()` — a claim
+  that is only true once that later commit has flushed. Locally it always had; on a runner sharing four cores
+  with 195 other test files, it hadn't, and "Ready to process?" was still inline. Nothing about the shipped diff
+  touched this page (it changed `OneFrameVsStackCard`, on History) — the merge just paid for a latent race.
+
+  **Fix (same claim, no assertion weakened).** Wait for the `"1 more note"` disclosure — the measurement's own
+  observable signal — before asserting the fold: `const more = await screen.findByRole("button", …)`, then the
+  identical `expect(offer).not.toBeVisible()`. This is exactly what `NoticeBoard.test.tsx` already does for the
+  same measurement (`…waits for /1 more note$/, then asserts not.toBeVisible()`), so the two now agree on how
+  this component settles. The `fireEvent.click` assertions after it are direct `setOpen` state, which flushes
+  synchronously, and stay as they were. **The component is deliberately left alone:** showing every note until
+  the board has measured is the right behaviour for a real user (a note is never briefly invisible), so the test
+  must tolerate it rather than the product being reshaped to suit a test.
+
+  **Honest limitation:** the failure is load-dependent and did **not** reproduce locally (the file passes
+  standalone, 90/90, four consecutive runs, and passed in the full local suite of 2377 before the merge too), so
+  the evidence is the traced mechanism plus the sibling test's precedent, not a local red→green. If this test
+  ever goes red again, it is *not* to be re-run: the next thing to check is whether another assertion in it
+  reads board state synchronously off a `findBy*`.
+
 - **✅ SHIPPED (Builder, v0.292.1, branch `claude/compassionate-galileo-4drm6t`) — ~~the Tonight planner's
   "nudge your scope this way" row can keep quoting the picture *before* the newest one for up to a minute,
   because the registry-signature cache behind it can't see a stack.~~** Found by CI going red on main
