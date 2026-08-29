@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BestPicturesView } from "./BestPictures";
@@ -46,6 +46,24 @@ describe("BestPicturesView", () => {
     // The top three carry a rank chip.
     expect(screen.getByText("#1")).toBeInTheDocument();
     expect(screen.getByText("#2")).toBeInTheDocument();
+  });
+
+  it("offers to start the slideshow on the picture you're looking at", async () => {
+    vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
+      items: [
+        pic({ safe: "m31", target_name: "M31", run_id: 1 }),
+        pic({ safe: "m42", target_name: "M42", run_id: 2 }),
+      ],
+    });
+    renderWall();
+    await waitFor(() => expect(screen.getByText("M42")).toBeInTheDocument());
+    // Open the second picture, not the first — the whole point is that the show
+    // starts here rather than at the top of the ranked wall.
+    fireEvent.click(document.querySelectorAll("img")[1]);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Start the slideshow here")).toBeInTheDocument());
+    expect(screen.getByLabelText("Start the slideshow here"))
+      .toHaveAttribute("href", "/show?from=run%3Am42%3A2");
   });
 
   it("shows a friendly empty state when the wall self-hides", async () => {

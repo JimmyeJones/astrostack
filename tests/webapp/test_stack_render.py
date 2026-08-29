@@ -1033,6 +1033,63 @@ def test_stack_info_surfaces_unreadable_subs_separately(client, solved_library):
     assert fa["n_unreadable"] == 142
 
 
+def test_stack_info_surfaces_read_errors_and_the_ones_that_recovered(
+        client, solved_library):
+    """The other storage failure: the file *was* there and the read blew up. Its
+    counts ride through the same summary, including how many read fine on the
+    run's other pass — the difference between "your night is gone" and "check
+    the share tomorrow"."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["NOFFERED"] = 500
+                hdul[0].header["NALIGNFL"] = 3
+                hdul[0].header["NREADERR"] = 5
+                hdul[0].header["NREADREC"] = 2
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    fa = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["frame_accounting"]
+    assert fa["n_offered"] == 500
+    assert fa["n_read_errors"] == 5
+    assert fa["n_read_recovered"] == 2
+
+
+def test_stack_info_frame_accounting_omits_read_errors_on_an_older_master(
+        client, solved_library):
+    """A master stacked before the read-error tally existed carries NOFFERED but
+    no NREADERR — the summary still resolves, and the frontend's "absent means
+    nothing to say" fallback keeps the panel exactly as it reads today."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["NOFFERED"] = 2000
+                hdul[0].header["NALIGNFL"] = 150
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    fa = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["frame_accounting"]
+    assert fa["n_offered"] == 2000
+    assert "n_read_errors" not in fa
+    assert "n_read_recovered" not in fa
+
+
 def test_stack_info_frame_accounting_omits_unreadable_on_an_older_master(
         client, solved_library):
     """A master stacked before the readability preflight existed carries NOFFERED

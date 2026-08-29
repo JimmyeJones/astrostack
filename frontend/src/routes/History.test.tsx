@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import { SAMPLE_TOUR_COPY } from "../components/SampleTourNote";
@@ -1357,6 +1357,56 @@ describe("frameAccountingNote", () => {
       n_offered: 100, n_align_failed: 5, n_unreadable: 80,
     });
     expect(fa!.text).toBe("95 of 100 subs combined · 5 couldn't be read");
+  });
+});
+
+describe("readErrorNote", () => {
+  it("returns null when nothing hit a read error", () => {
+    expect(readErrorNote(null)).toBeNull();
+    expect(readErrorNote(undefined)).toBeNull();
+    // Healthy run → stamped 0 → nothing to say.
+    expect(readErrorNote({ n_offered: 2000, n_read_errors: 0 })).toBeNull();
+    // Master stacked before the tally existed → the card is simply absent.
+    expect(readErrorNote({ n_offered: 2000 })).toBeNull();
+    expect(readErrorNote({ n_offered: 0, n_read_errors: 4 })).toBeNull();
+  });
+  it("reports a blip that fully recovered without a scary nudge", () => {
+    const re = readErrorNote({
+      n_offered: 500, n_read_errors: 2, n_read_recovered: 2,
+    });
+    expect(re!.text).toBe(
+      "2 of 500 subs hit a read error · all of them read fine on the second try");
+    expect(re!.concern).toBe(false);
+    expect(re!.guidance).toBeNull();
+  });
+  it("names the partial recovery so the owner knows what's actually lost", () => {
+    const re = readErrorNote({
+      n_offered: 500, n_read_errors: 40, n_read_recovered: 12,
+    });
+    expect(re!.text).toBe(
+      "40 of 500 subs hit a read error · 12 read fine on the second try");
+    expect(re!.concern).toBe(true);
+    expect(re!.guidance).toContain("network share");
+  });
+  it("guides a fix when subs were genuinely lost to bad reads", () => {
+    const re = readErrorNote({ n_offered: 200, n_read_errors: 40 });
+    expect(re!.text).toBe("40 of 200 subs hit a read error");
+    expect(re!.concern).toBe(true);
+    expect(re!.guidance).toContain("stack again");
+  });
+  it("doesn't nag on a tiny stack where one bad read is a big fraction", () => {
+    const re = readErrorNote({ n_offered: 5, n_read_errors: 1 });
+    expect(re!.concern).toBe(false);
+    expect(re!.guidance).toBeNull();
+  });
+  it("clamps counts that exceed what they're a subset of", () => {
+    const re = readErrorNote({
+      n_offered: 10, n_read_errors: 99, n_read_recovered: 99,
+    });
+    expect(re!.text).toBe(
+      "10 of 10 subs hit a read error · all of them read fine on the second try");
+    // Fully recovered → nothing was lost → no nudge, however big the share.
+    expect(re!.concern).toBe(false);
   });
 });
 

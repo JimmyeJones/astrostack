@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
   bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobKindLabel,
-  calibrationMismatchNote, missingSubsNote,
+  calibrationMismatchNote, missingSubsNote, readErrorsNote,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
 } from "./Jobs";
 import * as client from "../api/client";
@@ -982,7 +982,7 @@ describe("processTargetSummary", () => {
       stacked: true, solved_accepted: 8, stack: { n_frames_used: 8 },
     })).toEqual({
       line: "Stacked 8 frames into a new master.", stacked: true, thin: null,
-      cleaned: null, missing: null, calMismatch: null,
+      cleaned: null, missing: null, readErrors: null, calMismatch: null,
     });
   });
   it("names the outlier clean-up a small auto-stack made with min/max", () => {
@@ -1021,7 +1021,7 @@ describe("processTargetSummary", () => {
     expect(processTargetSummary({ stacked: true, solved_accepted: 5 }))
       .toEqual({
         line: "Stacked 5 frames into a new master.", stacked: true, thin: null,
-        cleaned: null, missing: null, calMismatch: null,
+        cleaned: null, missing: null, readErrors: null, calMismatch: null,
       });
   });
   it("flags a thin stack (very few frames combined) so it isn't shown as a clean result", () => {
@@ -1065,6 +1065,7 @@ describe("processTargetSummary", () => {
       thin: null,
       cleaned: null,
       missing: null,
+      readErrors: null,
       calMismatch: null,
     });
   });
@@ -1072,12 +1073,12 @@ describe("processTargetSummary", () => {
     expect(processTargetSummary({ stacked: false, stack_skipped_reason: "cancelled" }))
       .toEqual({
         line: "Cancelled before stacking.", stacked: false, thin: null,
-        cleaned: null, missing: null, calMismatch: null,
+        cleaned: null, missing: null, readErrors: null, calMismatch: null,
       });
     expect(processTargetSummary({ stacked: false }))
       .toEqual({
         line: "Finished, but no stack was produced.", stacked: false, thin: null,
-        cleaned: null, missing: null, calMismatch: null,
+        cleaned: null, missing: null, readErrors: null, calMismatch: null,
       });
   });
 });
@@ -1141,5 +1142,55 @@ describe("missingSubsNote", () => {
   });
   it("never claims more missing subs than were offered", () => {
     expect(missingSubsNote(99, 10)).toContain("10 of 10 subs");
+  });
+});
+
+describe("readErrorsNote", () => {
+  it("stays silent when nothing errored or nothing was reported", () => {
+    expect(readErrorsNote(0, 0, 500)).toBeNull();
+    expect(readErrorsNote(5, 0, 0)).toBeNull();
+    expect(readErrorsNote(NaN, 0, 500)).toBeNull();
+    expect(readErrorsNote(5, 0, NaN)).toBeNull();
+  });
+  it("names the count and points at the drive, not the subs", () => {
+    const note = readErrorsNote(7, 0, 500)!;
+    expect(note).toContain("7 subs hit a read error");
+    expect(note).toContain("network share");
+    expect(note).not.toContain("second try");
+  });
+  it("says so when every blip recovered, so nothing reads as lost", () => {
+    const note = readErrorsNote(3, 3, 500)!;
+    expect(note).toContain("all of them read fine on the second try");
+    expect(note).toContain("in your picture");
+  });
+  it("counts the partial recovery", () => {
+    expect(readErrorsNote(9, 4, 500)!).toContain(
+      "4 of them read fine on the second try");
+  });
+  it("uses the singular for one sub", () => {
+    expect(readErrorsNote(1, 0, 500)!).toContain("1 sub hit a read error");
+  });
+  it("never claims more errored or recovered subs than were offered", () => {
+    const note = readErrorsNote(99, 99, 10)!;
+    expect(note).toContain("10 subs hit a read error");
+    expect(note).toContain("all of them");
+  });
+});
+
+describe("processTargetSummary read errors", () => {
+  it("carries the read-error note through the stack result", () => {
+    const { readErrors } = processTargetSummary({
+      stacked: true,
+      stack: { n_frames_used: 495, n_offered: 500, n_read_errors: 5,
+               n_read_recovered: 2 },
+    });
+    expect(readErrors).toContain("5 subs hit a read error");
+    expect(readErrors).toContain("2 of them read fine");
+  });
+  it("stays null on a healthy run and on an older backend", () => {
+    expect(processTargetSummary({
+      stacked: true, stack: { n_frames_used: 500, n_offered: 500 },
+    }).readErrors).toBeNull();
+    expect(processTargetSummary({ stacked: false }).readErrors).toBeNull();
   });
 });

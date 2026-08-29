@@ -1673,6 +1673,11 @@ export function TargetView() {
                       ? target.data.total_exposure_s / target.data.n_frames_accepted
                       : null
                   }
+                  /* The nights-to-go figure the readiness card already derives
+                     from this target's own pace — handed over so the card can
+                     turn "2 more clear nights" into a date the planner can
+                     actually vouch for. */
+                  nightsToGo={clearNights?.nights ?? null}
                 />
               ) : null}
               {/* Which months of the year this object is actually up. Self-hides

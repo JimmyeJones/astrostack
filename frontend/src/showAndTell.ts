@@ -96,7 +96,7 @@ export function buildSlides(
   for (const pic of best ?? []) {
     if (!pic.preview_url) continue;
     slides.push({
-      key: `run:${pic.safe}:${pic.run_id}`,
+      key: runSlideKey(pic.safe, pic.run_id),
       src: pic.preview_url,
       title: pic.target_name,
       fact: deepSkyFact(pic),
@@ -113,7 +113,7 @@ export function buildSlides(
       parts.push(`${v.n_stacked} ${v.n_stacked === 1 ? "frame" : "frames"} stacked`);
     }
     slides.push({
-      key: `video:${v.capture_id}`,
+      key: videoSlideKey(v.capture_id),
       src: v.preview_url,
       title: v.label,
       fact: VIDEO_FACTS[v.kind] ?? "",
@@ -121,6 +121,36 @@ export function buildSlides(
     });
   }
   return slides;
+}
+
+/** The slide key for a finished stack / a Moon-or-Sun still. The show's own
+ *  `buildSlides` mints these, and "start the show here" links quote them back —
+ *  so both live here rather than being spelled out at each call site, where a
+ *  typo would silently start the show at the beginning instead. */
+export function runSlideKey(safe: string, runId: number): string {
+  return `run:${safe}:${runId}`;
+}
+
+export function videoSlideKey(captureId: string): string {
+  return `video:${captureId}`;
+}
+
+/** A link that opens the slideshow *on* a given picture (and keeps looping
+ *  through everything after it). Encoded, because a target's safe name is
+ *  free-form enough to carry a character that would end the query string. */
+export function showFromHref(key: string): string {
+  return `/show?from=${encodeURIComponent(key)}`;
+}
+
+/** Where the show should start, given the `from` key in its URL.
+ *
+ * 0 (the ranked wall's best picture) for no key, an unknown key, or an empty
+ * show — a link that has gone stale because the picture was deleted or the
+ * cover pin moved should still play the show, never land on nothing. */
+export function startIndexFor(slides: Slide[], from: string | null): number {
+  if (!from) return 0;
+  const i = slides.findIndex((s) => s.key === from);
+  return i >= 0 ? i : 0;
 }
 
 /** How long each picture holds the screen. Long enough to actually look at it

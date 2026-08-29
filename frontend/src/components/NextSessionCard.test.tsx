@@ -34,13 +34,15 @@ function renderCard(props: {
   safe?: string;
   gapSeconds: number;
   subExposureSeconds: number | null;
+  nightsToGo?: number | null;
 }) {
   return render(
     <MantineProvider>
       <QueryClientProvider client={new QueryClient()}>
         <NextSessionCard safe={props.safe ?? "M_42"}
           gapSeconds={props.gapSeconds}
-          subExposureSeconds={props.subExposureSeconds} />
+          subExposureSeconds={props.subExposureSeconds}
+          nightsToGo={props.nightsToGo} />
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -100,5 +102,31 @@ describe("NextSessionCard", () => {
     await waitFor(() =>
       expect(screen.getByText("Your next good windows:")).toBeInTheDocument(),
     );
+  });
+
+  it("says when the goal could actually be finished", async () => {
+    vi.spyOn(client.api, "nextSession").mockResolvedValue(session());
+    renderCard({ gapSeconds: 2 * 3600, subExposureSeconds: 10, nightsToGo: 1 });
+    await waitFor(() =>
+      expect(screen.getByText(/One more good night should finish this/))
+        .toBeInTheDocument());
+    expect(screen.getByText(/Thu 15 Jan stays clear/)).toBeInTheDocument();
+  });
+
+  it("keeps quiet about a finish date when there's no pace to project", async () => {
+    vi.spyOn(client.api, "nextSession").mockResolvedValue(session());
+    renderCard({ gapSeconds: 2 * 3600, subExposureSeconds: 10, nightsToGo: null });
+    await waitFor(() =>
+      expect(screen.getByText("Plan your next night")).toBeInTheDocument());
+    expect(screen.queryByText(/could finish around/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/should finish this/)).not.toBeInTheDocument();
+  });
+
+  it("keeps quiet when the goal needs more nights than the planner can see", async () => {
+    vi.spyOn(client.api, "nextSession").mockResolvedValue(session());
+    renderCard({ gapSeconds: 9 * 3600, subExposureSeconds: 10, nightsToGo: 4 });
+    await waitFor(() =>
+      expect(screen.getByText("Plan your next night")).toBeInTheDocument());
+    expect(screen.queryByText(/could finish around/)).not.toBeInTheDocument();
   });
 });

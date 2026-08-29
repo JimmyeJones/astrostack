@@ -45,6 +45,18 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 _(none — claim an item here with your branch name)_
 
+> **Builder 2026-08-29, branch `claude/compassionate-galileo-gwhwwd` — run finished, claim released.**
+> Shipped three: the stack run's read errors rolled up into a counted sentence on History and the Jobs
+> result (**v0.296.5**, under "Image quality"), the two "Show and tell" follow-ons — keep-awake and
+> "start the show here" (**v0.296.6**, under "Autonomy & friendliness"), and the observability-aware
+> **"When will I finish this?"** forecast (**v0.297.0**, under "Features that serve real workflows").
+> **Stood down** on *"Does my colour look right?"* — its premise doesn't hold: measured against the real
+> bundled catalog, all 157 entries carry one flat `nebula` type, so emission and reflection (the two
+> families whose colour expectations disagree) aren't separable offline. The ⚠️ note now on that entry
+> has the measurement and the data task that has to come first.
+> Claiming in the run's **first** commit and pushing immediately (per the five duplicate-collision process
+> notes) again cost about a minute; no collision this run, and `main` never moved while it ran.
+
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-u3wi1n` — claim released, shipped.**
 > Shipped: the ⭐ owner-clarified **real universe map** (true 3D by distance) as **"Your universe"**
 > (**v0.296.0**, write-up under "Features that serve real workflows"), **"your last stack didn't run, here's
@@ -9147,6 +9159,38 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-29, the horizon the v0.297.0 finish forecast deliberately stops at) — a target
+  that needs 4+ good nights gets no finish date at all, because the planner is only ever asked for three
+  windows.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: S. Confidence: certain — this is the
+  constant the forecast reads against.)*
+  `finishForecast` returns `null` when `nightsToGo > windows.length`, which is the honest call: quoting the
+  last of a capped list would promise a finish that is too early. But the cap is not a fact about the sky, it
+  is `_NEXT_SESSION_WANT = 3` in `webapp/routers/plan.py` — chosen when the card only had to *list* the next
+  few windows, before anything counted them. So the beginner furthest from their goal — the one who most
+  wants to know "when am I done?" — is the one told nothing.
+  **Shape:** let `/api/plan/next-session/{safe}` take an optional `want` (bounded, e.g. 1–8, defaulting to
+  today's 3 so every existing caller is byte-for-byte unchanged), and have the card ask for
+  `max(3, nightsToGo)` when it has a nights estimate. `next_observing_windows` already takes `want` and scans
+  `nights=14` regardless, so this is a parameter, not a new search. **Watch:** the 14-night scan is the real
+  horizon — a 6-night goal on an object with one good night a week still legitimately returns nothing, and
+  that must stay a silence rather than a guess. **Don't** widen the *rendered list* to eight rows at the same
+  time; the card lists windows to plan by, and the forecast only needs to count them.
+
+- **NEW IDEA (Builder 2026-08-29, spotted while adding the read-error note in v0.296.5) — a badly flaking
+  drive now lights TWO separate yellow alerts on the Jobs result, and they are one story.**
+  *(Pillar: friendliness — PRIORITY 3. Size: S. Confidence: certain — I put the second one there.)*
+  `missingSubsNote` ("their files weren't on disk") and `readErrorsNote` ("the files are there but didn't read
+  cleanly") are deliberately different diagnoses, and on a healthy install at most one ever fires. But an
+  unmounting-mid-scan share fires **both**, and the result is two stacked alerts that each end by telling the
+  owner to go check the same drive — which reads as two problems, and buries the one action under twice the
+  words. **Shape:** one storage alert that carries whichever clauses apply ("142 subs' files weren't there; 5
+  more were there but didn't read cleanly — check the drive or share they live on"), with the single fix
+  sentence said once. Both helpers are already pure and tested, so this is a compose-and-re-word, not a
+  re-derivation. **Care:** keep the two counts *distinct* in the wording — they really are different failures
+  and the missing-file one has the different fix (reconnect, re-scan, re-stack) — and keep both helpers
+  exported, since History renders them as separate lines beside the align clause, where the one-story problem
+  doesn't arise.
+
 - **⚪ PROCESS NOTE + TWO FOLLOW-ONS (Builder 2026-08-27, branch `claude/compassionate-galileo-xhognz`) — I
   built the v0.289.0 Sky-map North-up fix concurrently and STOOD DOWN on it when I synced to merge; recorded
   because the convergence is the useful signal, and because two small things I had are not in what shipped.**
@@ -9232,22 +9276,52 @@ to **Shipped**.)_
   resample-then-rotate is not bit-identical to rotate-then-resample, so this moves alpha edges by up to a
   pixel. Only worth doing if the peak-RSS win measures real on a big master — otherwise close it. *(Size S.)*
 
-- **NEW IDEA (Builder 2026-08-27, the two things I deliberately left out of the v0.289.0 "Show and tell"
-  slideshow) — the show can't keep the screen awake, and you can't start it on the picture you're looking at.**
-  *(Pillar: enjoy + share — PRIORITY 3. Size: S. Confidence: certain — this is the code I just wrote; both were
-  scoped out to keep the first slice honest, not because they're hard.)*
-  **(a) Keep-awake.** The whole point of the feature is "point a screen at it and walk away", and a tablet or
-  laptop will dim and sleep partway through the show — the one failure mode that makes it feel broken in the
-  room. `navigator.wakeLock.request("screen")` while the show is playing, released on unmount and re-requested
-  on `visibilitychange` (browsers drop the lock when the tab is hidden). **Guardrails:** the API is absent on
-  some browsers and rejects when the page isn't visible, so every call needs a `try`/no-op — a slideshow that
-  throws on the way to the TV is worse than one that lets the screen dim. Nothing to configure, nothing to
-  persist.
-  **(b) "Start the show here".** From the Gallery / My best pictures lightbox, "show me this one" should open
-  `/show?from=<safe>:<run_id>` (or `video:<capture_id>`) and start on that slide, still looping through
-  everything after it. `buildSlides` already returns a stable `key` per slide, so this is one `useSearchParams`
-  read and an initial index — no data change. **Grep first:** the slide keys are `run:<safe>:<run_id>` /
-  `video:<capture_id>` in `frontend/src/showAndTell.ts`; reuse them rather than inventing a second identifier.
+- **✅ SHIPPED (Builder, v0.296.6, branch `claude/compassionate-galileo-gwhwwd`) — ~~the show can't keep the
+  screen awake, and you can't start it on the picture you're looking at.~~** Both halves, exactly as filed,
+  with every guard the entry asked for.
+
+  **(a) Keep-awake.** `useKeepAwake` requests `navigator.wakeLock.request("screen")` while the show is
+  *playing* — not while it's paused (someone stopping to look) and not on an empty show — releases on unmount,
+  and re-requests on `visibilitychange`, because browsers drop the lock whenever the tab is hidden. Every call
+  is guarded: the API is absent on some browsers and in the test DOM, and it rejects when the page isn't
+  visible, so a missing or refused lock is a no-op and the screen simply dims. Nothing persisted, nothing to
+  configure.
+
+  **(b) "Start the show here".** `/show?from=<key>` starts on that slide and keeps looping through everything
+  after it. The slide keys were already stable, so they were only lifted into named helpers
+  (`runSlideKey` / `videoSlideKey` / `showFromHref`, used by `buildSlides` itself so a call site can't drift
+  from the show's own spelling) plus a pure `startIndexFor`. A stale link — the picture deleted, the cover pin
+  moved — falls back to the top of the ranked wall rather than landing on nothing, and the start index is
+  applied **once**, so a background refetch can never yank a viewer back to where they came in. The entry
+  point is an icon in the lightbox toolbar on **My best pictures** and on **Gallery** (both the stack lightbox
+  and the Moon/Sun still one, which the filed entry didn't mention but is the same one-tap gesture).
+
+  **Upgrade-safe (§9):** frontend-only, additive, no new endpoint, no data change; `/show` with no query
+  behaves exactly as it does today.
+
+  **Tests (+11):** six in `ShowAndTell.test.tsx` (starts on the named run; on a named Moon still; falls back on
+  a stale key; doesn't re-apply `from` after the viewer moves on; takes and releases the wake lock; plays
+  normally with no wake-lock support), four in `showAndTell.test.ts` (the keys match `buildSlides`, the href
+  encodes, the index resolves, and every fallback), and one in `BestPictures.test.tsx` pinning the lightbox
+  link for the *second* picture — which is the whole point.
+
+  Original spec, for the record:
+
+  - **~~NEW IDEA (Builder 2026-08-27, the two things I deliberately left out of the v0.289.0 "Show and tell"
+    slideshow)~~** *(Pillar: enjoy + share — PRIORITY 3. Size: S. Confidence: certain — this is the code I just
+    wrote; both were scoped out to keep the first slice honest, not because they're hard.)*
+    **(a) Keep-awake.** The whole point of the feature is "point a screen at it and walk away", and a tablet or
+    laptop will dim and sleep partway through the show — the one failure mode that makes it feel broken in the
+    room. `navigator.wakeLock.request("screen")` while the show is playing, released on unmount and re-requested
+    on `visibilitychange` (browsers drop the lock when the tab is hidden). **Guardrails:** the API is absent on
+    some browsers and rejects when the page isn't visible, so every call needs a `try`/no-op — a slideshow that
+    throws on the way to the TV is worse than one that lets the screen dim. Nothing to configure, nothing to
+    persist.
+    **(b) "Start the show here".** From the Gallery / My best pictures lightbox, "show me this one" should open
+    `/show?from=<safe>:<run_id>` (or `video:<capture_id>`) and start on that slide, still looping through
+    everything after it. `buildSlides` already returns a stable `key` per slide, so this is one `useSearchParams`
+    read and an initial index — no data change. **Grep first:** the slide keys are `run:<safe>:<run_id>` /
+    `video:<capture_id>` in `frontend/src/showAndTell.ts`; reuse them rather than inventing a second identifier.
 
 - **✅ SHIPPED (Builder, v0.296.1, branch `claude/compassionate-galileo-u3wi1n`) — ~~a walk-away stack that
   still *refuses* goes dark in complete silence: nothing on the Target page or the Dashboard says the target
@@ -15724,24 +15798,56 @@ problems. Dogfood it every big-picture run and fix root causes.
     moves, plus a check it never *over*-counts. Small and well-contained; grep for other readers of
     `n_frames_used` first (the noise-ratio badge anchors on √N).
 
-- **NEW IDEA (Builder 2026-08-29, traced while making the run's error list honest in v0.294.3) — a stack run's
-  per-frame error list has **no UI consumer at all**, so the storage signal it carries only ever reaches the
-  raw job-result JSON.** *(Pillar: trust + autonomy — PRIORITY 2–3; size S; read-only, additive. Confidence:
-  traced — `StackResult.errors` → `pipeline.py:2659` `"errors"` on the job result, and a grep of
-  `frontend/src` finds **no** reader of it for a stack job; `Jobs.tsx`'s `errors` is the unrelated per-*target*
-  `stack_errors`/`qc_errors` map, and `Editor.tsx`'s is the editor's `op_errors`.)* So a night where the NAS
-  share dropped forty reads produces forty accurate, per-file error strings that nobody will ever see. The
-  walk-away owner instead learns about it obliquely, through `n_align_failed` / `n_unreadable` counts on
-  History's honest-accounting line — which is the *right* surface, and is exactly where these belong.
-  **Shape:** roll the strings up server-side into a small count (how many subs hit a read error, and — now that
-  v0.294.3 marks them — how many of those **recovered on the other pass**) and put one sentence beside the
-  existing "150 couldn't be aligned" clause: *"3 subs hit a read error; 2 of them read fine on the second try —
-  worth checking the drive or share they live on."* **Why it's better than showing the list:** forty raw
-  `OSError` lines are noise, one counted sentence naming the cause and the fix is guidance — the same shape
-  `missingSubsNote` already uses, and it should sit right next to it so the two storage signals read as one
-  story. **Grep first:** `missingSubsNote` / `alignFailureNote` in `Jobs.tsx` and the accounting line in
-  `History.tsx:311` are where this lands; `RECOVERED_ERROR_SUFFIX` in `seestack/stack/stacker.py` is how a
-  recovered line is identified — count it there rather than re-parsing the suffix in the frontend.
+- **✅ SHIPPED (Builder, v0.296.5, branch `claude/compassionate-galileo-gwhwwd`) — ~~a stack run's per-frame
+  error list has **no UI consumer at all**, so the storage signal it carries only ever reaches the raw
+  job-result JSON.~~** Built as the entry asked: rolled up server-side into a count, rendered as one sentence
+  beside the existing missing-files clause on **both** surfaces, and never as the raw list.
+
+  **What shipped.** The engine now counts read errors per **sub**, not per error line. Every pass — not only
+  the two-pass ones that re-word their lines — gets a `_PassFrameLog`, and `run_stack` unions their
+  `error_slot` keys into `n_read_errors`, while `n_read_recovered` accumulates what `_mark_recovered_errors`
+  returns on the κ-σ *and* drizzle two-pass paths. Counting `errors` directly would have double-counted the one
+  sub the number most needs to get right — the one that failed **both** passes, which really is lost. Stamped
+  as `NREADERR`/`NREADREC` beside `NUNREAD` (0 included, so the cards' *absence* means "older master"), carried
+  on `StackResult` and the `process_target` job result, parsed into the existing `frame_accounting` summary,
+  and rendered by `readErrorNote` (History Info panel, right under the "150 couldn't be aligned" clause) and
+  `readErrorsNote` (the Jobs result, beside the missing-files alert so the two storage signals read as one
+  story about the drive). The recovered half is load-bearing copy: *"all of them read fine on the second try"*
+  is the difference between "your night is gone" and "check the share tomorrow", and it suppresses the
+  fix-nudge entirely when nothing was actually lost.
+
+  **Upgrade-safe (§9):** two additive FITS cards, two additive result fields, two additive `frame_accounting`
+  keys, two self-hiding notes. No config, schema, on-disk, default or existing-response-shape change; an older
+  master lacks the cards and its History panel reads exactly as it does today, and a healthy run (empty
+  `errors`) renders nothing new anywhere.
+
+  **Tests (+7 python / +12 frontend):** `tests/test_stack_read_error_count.py` (the recovered blip; the
+  **both-passes** sub counted once from two error lines — the double-count guard; a single-pass run counting
+  its errors with nothing to recover; a healthy run stamping 0 rather than nothing), two endpoint tests in
+  `tests/webapp/test_stack_render.py` (the counts through `/info`, and an older master omitting them), the
+  drizzle two-pass assertion in `tests/test_drizzle_reject.py`, and the `readErrorNote`/`readErrorsNote`
+  suites in `History.test.tsx` / `Jobs.test.tsx` (including the clamps and the "fully recovered → no nudge"
+  rule).
+
+  Original spec, for the record:
+
+  - **~~NEW IDEA (Builder 2026-08-29, traced while making the run's error list honest in v0.294.3)~~**
+    *(Pillar: trust + autonomy — PRIORITY 2–3; size S; read-only, additive. Confidence:
+    traced — `StackResult.errors` → `pipeline.py:2659` `"errors"` on the job result, and a grep of
+    `frontend/src` finds **no** reader of it for a stack job; `Jobs.tsx`'s `errors` is the unrelated per-*target*
+    `stack_errors`/`qc_errors` map, and `Editor.tsx`'s is the editor's `op_errors`.)* So a night where the NAS
+    share dropped forty reads produces forty accurate, per-file error strings that nobody will ever see. The
+    walk-away owner instead learns about it obliquely, through `n_align_failed` / `n_unreadable` counts on
+    History's honest-accounting line — which is the *right* surface, and is exactly where these belong.
+    **Shape:** roll the strings up server-side into a small count (how many subs hit a read error, and — now that
+    v0.294.3 marks them — how many of those **recovered on the other pass**) and put one sentence beside the
+    existing "150 couldn't be aligned" clause: *"3 subs hit a read error; 2 of them read fine on the second try —
+    worth checking the drive or share they live on."* **Why it's better than showing the list:** forty raw
+    `OSError` lines are noise, one counted sentence naming the cause and the fix is guidance — the same shape
+    `missingSubsNote` already uses, and it should sit right next to it so the two storage signals read as one
+    story. **Grep first:** `missingSubsNote` / `alignFailureNote` in `Jobs.tsx` and the accounting line in
+    `History.tsx:311` are where this lands; `RECOVERED_ERROR_SUFFIX` in `seestack/stack/stacker.py` is how a
+    recovered line is identified — count it there rather than re-parsing the suffix in the frontend.
 
 - **✅ SHIPPED (Builder, v0.294.3, branch `claude/compassionate-galileo-eypoyg`) — ~~a sub that blipped in
   pass 1 and stacked fine in pass 2 counts as *used*, but its pass-1 error string is still in the run's error
@@ -18804,6 +18910,26 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #4) — "Does my colour look right?": an object-aware colour sanity
   nudge on the finished picture.** *(Pillar: understand + trust / image quality — PRIORITY 3–4. Size: M.)*
+  **⚠️ BLOCKED ON DATA — Builder 2026-08-29 sized this against the real catalog and stood down; read this
+  before picking it up.** The spec's premise is that "the bundled catalogs carry a `type` field
+  (galaxy / **emission nebula** / cluster / …)". **They don't carry the distinction the feature turns on.**
+  Measured this run — `collections.Counter(o.type for o in load_catalog())` over all 157 bundled entries:
+  `galaxy 51, globular cluster 31, open cluster 30, nebula 28, planetary nebula 10, supernova remnant 4,
+  star cloud 1, double star 1, asterism 1`. There is **one** flat `nebula` bucket; emission (red-pink Hα) and
+  reflection (blue) are not separable, and they are the two families whose expectations *disagree*. The other
+  path the spec offers — `seestack/post/target_id.py`'s SIMBAD codes, which *do* split `HII` / `RNe` / `EmO` —
+  needs `astroquery` and a **network** lookup, which this app is deliberately offline for (`target_id`
+  degrades to "unknown target" without it), so it can't be the gate on a walk-away install.
+  **So the only way to build it as filed is to hand-curate an emission/reflection flag onto the 28 `nebula`
+  entries from an agent's own recall — and this is the one feature where that is the wrong move**, because its
+  own Care note is *"a single wrong 'your colour is off' on a genuinely fine picture is worse than ten correct
+  reassurances are good"*, and the awkward cases are exactly the famous ones (M20 is emission **and**
+  reflection; M45's nebulosity is reflection-blue; M78 is blue) — i.e. the objects a beginner shoots first.
+  **If it is picked up, the shippable order is:** (1) add a vetted `nebula_class` (`emission`/`reflection`/
+  `both`/`unknown`) to the catalog data, defaulting to `unknown` → silence, with the same
+  agrees-with-its-own-blurb cross-check the v0.276.0 `distance_ly` curation used as its evidence; (2) only
+  then the hue helper and the card line, with `both`/`unknown` never nudging. Step (1) is a data task with a
+  real correctness bar, not a code task — size it as such.
   A beginner who stacks and auto-edits an emission nebula has **no way to tell whether the colour came out
   right** — is that grey-green M42 a bad white balance they should fix, or just what it looks like? The app
   already *knows the object class*: the bundled catalogs carry a `type` field (galaxy / emission nebula /
@@ -19047,32 +19173,62 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Slices —** (a) the pure `build_gallery_montage` helper + tests (a shippable Builder run on its own);
   (b) the `/api/gallery/montage` endpoint + caching; (c) the Gallery/Dashboard button + share menu (frontend).
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26) — "When will I finish this?": an observability-aware completion
-  forecast for a target that has an integration goal.** *(Pillar: autonomy + friendliness — PRIORITY 2–3.
-  Size: M.)* The app already holds every piece separately: a target's integration **goal** (`goal_s`), its
-  recent **pace** (`recent_pace_s` — median kept integration per clear night), and, via
-  `nightplan.next_observing_windows`, the next nights *this exact target* is genuinely well-placed (clears the
-  altitude floor, Moon-weighted). Nothing yet **joins** them into the one thing a beginner actually wonders:
-  *"how many more nights, and roughly when, until this is done?"* The existing readiness hint says "~1 more
-  night finishes this" (a bare count) but never says *which* upcoming nights are observable — so a target that
-  needs 2 more nights yet is Moon-washed / too low for the next week reads as "nearly there" when it is really a
-  fortnight away. **Verified new:** grepped this run — no finish-date / completion-date / "done by" forecast
-  exists in code or backlog; the closest, `recent_pace_s`, only yields a night *count*.
-  **Shape:** a pure helper `finish_forecast(goal_s, current_integration_s, recent_pace_s, windows) ->
-  FinishForecast | None` that (a) computes `nights_needed = ceil((goal − current) / pace)`, then (b) walks the
-  already-computed `next_observing_windows` list and returns the calendar date of the *n-th* qualifying night —
-  e.g. *"About 2 more good nights — if the next clear ones cooperate, you could finish around Sept 2."* Returns
-  `None` (render nothing) when no goal is set, there's no pace history, or the target is already at goal — never
-  a guess. **Surface:** one extra sentence on the existing Target progress/readiness card and the planner's
-  already-shot rows — no new banner, it rides a notice that exists. **Beginner bar:** clears it cleanly — plain
-  language, directly actionable ("point here on the next 2 clear nights"), sane default, no expert knob; it
-  *removes* the "when am I done?" uncertainty rather than adding surface (Method D — remove work/uncertainty).
-  **Caution — honesty about weather:** phrase it as conditional on clear skies (*"if the next clear nights
-  cooperate"*), never a hard promise — the planner knows observability (altitude + Moon) but not cloud cover.
-  **Feasibility:** offline, composes existing pieces, additive nullable payload, trivially unit-testable
-  (at-goal→None, no-pace→None, a 2-night case landing on the 2nd observable date, a Moon-washed week pushing
-  the date out). **Slices —** (a) the pure helper + tests; (b) render the sentence (frontend, gated on
-  presence). Slice (a) alone is a shippable Builder run.
+- **✅ SHIPPED (Builder, v0.297.0, branch `claude/compassionate-galileo-gwhwwd`) — ~~"When will I finish
+  this?": an observability-aware completion forecast for a target that has an integration goal.~~** Shipped as
+  filed, and it needed **no new endpoint, no new query and no new card** — both halves were already on screen,
+  four lines apart, refusing to talk to each other.
+
+  **What shipped.** A pure `finishForecast(nightsToGo, windows)` in `components/nextSession.ts` (where the
+  card's every other sentence already lives) takes the nights-to-go the readiness card *already* derives from
+  this target's own pace (`estimateClearNights`) and reads the **n-th** of the planner's already-fetched
+  altitude- and Moon-aware windows: *"About 2 more good nights — if the next clear ones cooperate, you could
+  finish around Sun 18 Jan."* `Target.tsx` hands `clearNights.nights` down to `NextSessionCard`, which had the
+  windows all along. The filed shape put it on the readiness card; it went on **"Plan your next night"**
+  instead, because that card is where the windows are — the alternative was a second `["next-session"]` query
+  mounted on a tab the user may never open.
+
+  **The honesty rules the entry asked for, all kept.** Phrased conditionally on the weather (the planner knows
+  altitude and Moon and nothing about cloud). One night is worded as one night, never "about 1". And it
+  **stays silent when the planner can't see far enough**: the windows list is capped at three, so a 4-night
+  goal gets no date rather than the last window's — quoting it would promise a finish that is too early, which
+  is the exact failure the feature exists to prevent (a bare "2 more nights" reading as "the day after
+  tomorrow" for an object that is Moon-washed for a week).
+
+  **Upgrade-safe (§9):** frontend-only, additive, one optional prop; no endpoint, config, schema or default
+  change, and the card renders exactly as it does today for any target without a pace.
+
+  **Tests (+10):** seven in `nextSession.test.ts` (the n-th-window date — on a window list where the 2nd good
+  night is three days out, so a naive "tomorrow + 1" would fail it; the one-night wording; silence past the
+  window horizon; silence with no/zero/negative/NaN nights; silence with no windows; a junk stamp; fractional
+  nights rounding up) and three in `NextSessionCard.test.tsx` (renders, and both silences).
+
+  Original spec, for the record:
+
+  - **~~NEW BEGINNER FEATURE (Scout 2026-08-26)~~** *(Pillar: autonomy + friendliness — PRIORITY 2–3.
+    Size: M.)* The app already holds every piece separately: a target's integration **goal** (`goal_s`), its
+    recent **pace** (`recent_pace_s` — median kept integration per clear night), and, via
+    `nightplan.next_observing_windows`, the next nights *this exact target* is genuinely well-placed (clears the
+    altitude floor, Moon-weighted). Nothing yet **joins** them into the one thing a beginner actually wonders:
+    *"how many more nights, and roughly when, until this is done?"* The existing readiness hint says "~1 more
+    night finishes this" (a bare count) but never says *which* upcoming nights are observable — so a target that
+    needs 2 more nights yet is Moon-washed / too low for the next week reads as "nearly there" when it is really a
+    fortnight away. **Verified new:** grepped this run — no finish-date / completion-date / "done by" forecast
+    exists in code or backlog; the closest, `recent_pace_s`, only yields a night *count*.
+    **Shape:** a pure helper `finish_forecast(goal_s, current_integration_s, recent_pace_s, windows) ->
+    FinishForecast | None` that (a) computes `nights_needed = ceil((goal − current) / pace)`, then (b) walks the
+    already-computed `next_observing_windows` list and returns the calendar date of the *n-th* qualifying night —
+    e.g. *"About 2 more good nights — if the next clear ones cooperate, you could finish around Sept 2."* Returns
+    `None` (render nothing) when no goal is set, there's no pace history, or the target is already at goal — never
+    a guess. **Surface:** one extra sentence on the existing Target progress/readiness card and the planner's
+    already-shot rows — no new banner, it rides a notice that exists. **Beginner bar:** clears it cleanly — plain
+    language, directly actionable ("point here on the next 2 clear nights"), sane default, no expert knob; it
+    *removes* the "when am I done?" uncertainty rather than adding surface (Method D — remove work/uncertainty).
+    **Caution — honesty about weather:** phrase it as conditional on clear skies (*"if the next clear nights
+    cooperate"*), never a hard promise — the planner knows observability (altitude + Moon) but not cloud cover.
+    **Feasibility:** offline, composes existing pieces, additive nullable payload, trivially unit-testable
+    (at-goal→None, no-pace→None, a 2-night case landing on the 2nd observable date, a Moon-washed week pushing
+    the date out). **Slices —** (a) the pure helper + tests; (b) render the sentence (frontend, gated on
+    presence). Slice (a) alone is a shippable Builder run.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-26) — "How far did you see?": a light-travel-time wow-badge on the
   finished picture.**~~ — **SHIPPED v0.276.0** (Builder 2026-08-26, branch
