@@ -17259,8 +17259,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Beginner bar:** clears it easily — no astro knowledge needed, purely "here's a picture of everywhere
   you've pointed your scope," and it's explicitly a pride/fun feature, which the owner asked for directly.
 
-- **NEW IDEA (Builder 2026-08-27, the half v0.290.2 deliberately left out) — carry the "nudge it this way"
-  chip onto the *other* pre-session surfaces, above all "Finish what you started".** *(Pillar: autonomy +
+- **✅ SHIPPED (Builder, v0.295.1, branch `claude/compassionate-galileo-eypoyg`) — ~~carry the "nudge it this
+  way" chip onto the *other* pre-session surfaces, above all "Finish what you started".~~ Shipped for the one
+  card the entry called out, and deliberately **not** for the other two.**
+
+  **It turned out to be frontend-only.** `ContinueTonightCard` reads `/api/plan/tonight`, not `/best-tonight` —
+  and those rows already carry `recentre_nudge` (v0.290.2). So the card just renders the existing
+  `recentreNudgeRowBadge` with the backend's own `short` phrase, which is the whole point: the chip on the
+  Dashboard and the chip on the Tonight page are the *same* helper over the *same* payload, so they cannot
+  disagree, and neither re-rounds the number. Nothing new is computed and no endpoint changed.
+
+  **Why only this card — the entry's own caution, applied.** `PointHereTonightCard`, `ContinueTonightCard` and
+  `SuggestTargetsCard` sit **side by side on the Dashboard**, so the same sentence on all three is clutter, not
+  guidance. `ContinueTonightCard` is the one that names a target you've *already shot* and tells you to point
+  there tonight, which is the only one where "and nudge 1.0° south this time" is both applicable and
+  actionable. `SuggestTargetsCard` suggests targets you've never shot, which by definition have no nudge.
+  I also started, then **reverted**, an additive `recentre_nudge` on `nightplan.TonightPick` (the
+  `/best-tonight` payload) — with the caution above there is no consumer for it, and shipping unused API
+  surface on a live install is speculative. Anyone wiring `PointHereTonightCard` later should add it then.
+
+  **Tests (+2 in `ContinueTonightCard.test.tsx`, 1 fails before):** a target whose newest picture landed
+  off-centre shows `Nudge 1.0° south` on the card; a well-framed one shows no chip at all (never a guessed
+  direction).
+
+  Original spec, for the record:
+
+  *(Pillar: autonomy +
   better-picture-next-time, PRIORITY 2–3; size S; additive, no new deps — the fact is already computed and
   cached.)* v0.290.2 put the chip on the Tonight planner's target rows, which is the right *first* home. But
   the surface a beginner most often acts on before a session is the Dashboard's "Finish what you started" /
