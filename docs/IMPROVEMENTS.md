@@ -43,7 +43,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+> **Builder 2026-08-29, branch `claude/compassionate-galileo-gwhwwd` — claimed, in flight.**
+> Working: (1) *"a stack run's per-frame error list has no UI consumer at all"* (Image quality section —
+> roll the read-error strings up into a counted sentence beside the existing missing/align accounting);
+> (2) the two follow-ons the v0.289.0 "Show and tell" slideshow deliberately left out (keep-awake +
+> "start the show here"). Will release this block when the run finishes.
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-u3wi1n` — claim released, shipped.**
 > Shipped: the ⭐ owner-clarified **real universe map** (true 3D by distance) as **"Your universe"**
