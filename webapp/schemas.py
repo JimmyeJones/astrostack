@@ -272,6 +272,42 @@ class SessionRecapOut(BaseModel):
     moon_note: str | None = None
 
 
+class LiveConditionsOut(BaseModel):
+    """How the last handful of subs have been going — the rolling "is it working
+    right now?" read behind the live session view."""
+
+    # "good" / "mixed" / "poor" / "unknown" — the last means "too few recent subs
+    # to say", never "bad".
+    verdict: str
+    n_recent: int
+    n_recent_kept: int
+    median_fwhm_px: float | None = None
+    recent_buckets: dict[str, int] = {}
+
+
+class LiveSessionOut(BaseModel):
+    """The capture session in progress (or the trailing one, if it has gone
+    quiet) — "Tonight, live"."""
+
+    active: bool
+    n_frames: int
+    n_kept: int
+    n_set_aside: int
+    kept_exposure_s: float
+    session_exposure_s: float
+    total_kept_exposure_s: float
+    start_utc: str | None = None
+    latest_utc: str | None = None
+    minutes_since_latest: float | None = None
+    conditions: LiveConditionsOut
+    reject_buckets: dict[str, int] = {}
+    newest_kept_frame_id: int | None = None
+    # The target's readiness goal, when one is set — the other half of "have I got
+    # enough to go inside?". ``None`` when no goal exists, so the page simply says
+    # nothing rather than inventing a target to hit.
+    goal_exposure_s: float | None = None
+
+
 class NightSummaryOut(BaseModel):
     """One capture night in the per-target "Nights" breakdown."""
 

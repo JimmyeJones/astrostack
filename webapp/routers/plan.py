@@ -325,8 +325,17 @@ def get_best_tonight(
 # way" without turning one request into a long ephemeris grind; three windows is
 # enough to say "your next session — and the couple after it" when a goal needs
 # more than one night.
+#
+# ``_NEXT_SESSION_WANT`` is only the *default*: a caller that needs to count
+# further ahead — the finish forecast, which says "you could finish around
+# <date>" by looking at the n-th window for an n-night goal — may ask for up to
+# ``_NEXT_SESSION_WANT_MAX``. The 14-night scan is unchanged either way, so a
+# bigger ``want`` is a bigger slice of the same search, never a longer one; the
+# scan horizon stays the real limit, and a goal it can't reach still returns
+# fewer windows (an honest silence) rather than a guess.
 _NEXT_SESSION_NIGHTS = 14
 _NEXT_SESSION_WANT = 3
+_NEXT_SESSION_WANT_MAX = 8
 
 
 @router.get("/next-session/{safe}")
@@ -336,17 +345,19 @@ def get_next_session(
     min_alt: int | None = Query(default=None, ge=0, le=80),
     when: str | None = Query(default=None,
                              description="ISO-8601 UTC reference to plan from; defaults to now"),
+    want: int | None = Query(default=None, ge=1, le=_NEXT_SESSION_WANT_MAX,
+                             description="How many windows to return; defaults to 3"),
 ) -> dict[str, Any]:
     """When to next point the scope at *this* target — the forward-looking
     companion to ``/tonight``.
 
-    Returns the next few nights (up to ``_NEXT_SESSION_WANT``) this target clears
-    the altitude floor for a usable stretch of darkness, so the Target page can
-    turn "you're 2 h short of a good M31" into "…and Thursday 22:40 → 02:10 is
-    your next good window". Read-only and offline. ``windows`` is empty (the card
-    self-hides) when no location is set, the target has no position, or nothing is
-    well-placed in the horizon; ``target_has_position``/``location_source`` let the
-    UI explain which.
+    Returns the next few nights (``want`` of them, ``_NEXT_SESSION_WANT`` by
+    default) this target clears the altitude floor for a usable stretch of
+    darkness, so the Target page can turn "you're 2 h short of a good M31" into
+    "…and Thursday 22:40 → 02:10 is your next good window". Read-only and
+    offline. ``windows`` is empty (the card self-hides) when no location is set,
+    the target has no position, or nothing is well-placed in the horizon;
+    ``target_has_position``/``location_source`` let the UI explain which.
     """
     settings = deps.get_settings(request)
 
@@ -370,6 +381,7 @@ def get_next_session(
     observer, location_source = _resolve_observer(request, settings)
     min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
     has_position = entry.ra_deg is not None and entry.dec_deg is not None
+    n_want = _NEXT_SESSION_WANT if want is None else int(want)
 
     base: dict[str, Any] = {
         "location_source": location_source,
@@ -387,7 +399,7 @@ def get_next_session(
         start_utc=start,
         min_altitude_deg=float(min_altitude),
         horizon=HorizonProfile.from_pairs(settings.horizon_profile),
-        nights=_NEXT_SESSION_NIGHTS, want=_NEXT_SESSION_WANT,
+        nights=_NEXT_SESSION_NIGHTS, want=n_want,
     )
     base["windows"] = [{
         "dark_start_utc": w.dark_start.isoformat(),

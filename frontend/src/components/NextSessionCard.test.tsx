@@ -123,10 +123,54 @@ describe("NextSessionCard", () => {
   });
 
   it("keeps quiet when the goal needs more nights than the planner can see", async () => {
+    // Four nights wanted, but the planner only found one inside its fortnight —
+    // the honest silence, not a date read off the last window it happened to have.
     vi.spyOn(client.api, "nextSession").mockResolvedValue(session());
     renderCard({ gapSeconds: 9 * 3600, subExposureSeconds: 10, nightsToGo: 4 });
     await waitFor(() =>
       expect(screen.getByText("Plan your next night")).toBeInTheDocument());
     expect(screen.queryByText(/could finish around/)).not.toBeInTheDocument();
+  });
+
+  it("asks the planner for enough windows to date a 4+-night goal", async () => {
+    // The regression: the card only ever requested three windows, so exactly the
+    // beginner furthest from their goal got no finish date. Now it asks for five.
+    const w = session().windows[0];
+    const spy = vi.spyOn(client.api, "nextSession").mockResolvedValue(session({
+      windows: [
+        w,
+        { ...w, dark_start_utc: "2026-01-17T22:00:00+00:00" },
+        { ...w, dark_start_utc: "2026-01-19T22:00:00+00:00" },
+        { ...w, dark_start_utc: "2026-01-23T22:00:00+00:00" },
+        { ...w, dark_start_utc: "2026-01-26T22:00:00+00:00" },
+      ],
+    }));
+    renderCard({ gapSeconds: 12 * 3600, subExposureSeconds: 10, nightsToGo: 5 });
+    await waitFor(() =>
+      expect(screen.getByText(/About 5 more good nights/)).toBeInTheDocument());
+    expect(spy).toHaveBeenCalledWith("M_42", 5);
+    expect(screen.getByText(/finish around Mon 26 Jan/)).toBeInTheDocument();
+  });
+
+  it("still lists only the next few nights, however many it counted", async () => {
+    // The forecast may count to the eighth window; the *list* stays the nights
+    // you plan around. A fortnight of rows would bury the next session.
+    const w = session().windows[0];
+    vi.spyOn(client.api, "nextSession").mockResolvedValue(session({
+      windows: ["15", "17", "19", "23", "26"].map((d) => (
+        { ...w, dark_start_utc: `2026-01-${d}T22:00:00+00:00` }
+      )),
+    }));
+    renderCard({ gapSeconds: 12 * 3600, subExposureSeconds: 10, nightsToGo: 5 });
+    await waitFor(() =>
+      expect(screen.getByText("Your next good windows:")).toBeInTheDocument());
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+  });
+
+  it("requests the unchanged three windows for a short goal", async () => {
+    const spy = vi.spyOn(client.api, "nextSession").mockResolvedValue(session());
+    renderCard({ gapSeconds: 2 * 3600, subExposureSeconds: 10, nightsToGo: 2 });
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(spy).toHaveBeenCalledWith("M_42", 3);
   });
 });
