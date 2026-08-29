@@ -29,6 +29,7 @@ import { CombineView } from "./routes/Combine";
 import { CompareView } from "./routes/Compare";
 import { TonightView } from "./routes/Tonight";
 import { LifeListView } from "./routes/LifeList";
+import { LiveView } from "./routes/Live";
 import { SkySoFarView } from "./routes/SkySoFar";
 import { MoonSunView } from "./routes/MoonSun";
 
@@ -68,6 +69,7 @@ const router = createBrowserRouter([
       { path: "show", element: <ShowAndTellView /> },
       { path: "compare", element: <CompareView /> },
       { path: "tonight", element: <TonightView /> },
+      { path: "live", element: <LiveView /> },
       { path: "sky-so-far", element: <SkySoFarView /> },
       { path: "life-list", element: <LifeListView /> },
       { path: "moon-sun", element: <MoonSunView /> },
