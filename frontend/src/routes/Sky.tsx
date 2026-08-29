@@ -4,7 +4,7 @@ import { OrbitControls, Html } from "@react-three/drei";
 import * as THREE from "three";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Badge, Button, Group, Loader, Paper, SegmentedControl, Text } from "@mantine/core";
-import { IconStars } from "@tabler/icons-react";
+import { IconDownload, IconStars } from "@tabler/icons-react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
@@ -252,8 +252,39 @@ export function MyMap() {
         alt="An all-sky map built from your own pictures"
         style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
       />
+      {/* A map of everywhere you've been is a pride picture, and pride pictures
+          get posted. A right-click or a long-press already saved it, but neither
+          *invites* it and neither gives the file a name worth keeping — this is
+          the same bytes the <img> is already showing, under a name that says
+          what it is and when it was true. */}
+      <Button
+        size="compact-xs" variant="light"
+        leftSection={<IconDownload size={14} />}
+        component="a"
+        href={api.myMapUrl()}
+        download={myMapFilename()}
+        style={{ position: "absolute", top: 12, right: 12 }}
+      >
+        Save this map
+      </Button>
     </div>
   );
+}
+
+/**
+ * The filename a saved "My map" arrives under, e.g.
+ * `astrostack-my-map-2026-08-29.png`.
+ *
+ * Dated because the map changes every time a picture does, so a folder of them
+ * is a record of the sky filling up. The date is the viewer's **local** day (not
+ * the UTC slice) for the same reason every other picture surface uses
+ * `formatStampDate`: an evening west of UTC would otherwise be filed under
+ * tomorrow.
+ */
+export function myMapFilename(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  return `astrostack-my-map-${day}.png`;
 }
 
 type SkyMode = "online" | "offline" | "mine";
