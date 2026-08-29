@@ -17230,24 +17230,74 @@ problems. Dogfood it every big-picture run and fix root causes.
   the Gallery's `heroes`/`videos` "best pictures" selection and the existing fact copy rather than a second
   definition of either.
 
-- **NEW IDEA (Scout 2026-08-27 #20) — "What's in my picture?" object labels only appear in History, where most
-  beginners never look — surface them on the main Target picture and let them travel into a share.** *(Pillar:
-  understand + share, PRIORITY 3; size S; additive, reversible, no new deps. Confidence: traced — the
-  `AnnotatedImage` component and its `objectMarkerLayout` geometry already exist and are wired into exactly one
-  place, `frontend/src/routes/History.tsx:850`; grep found no other consumer.)* The app already has a complete,
-  tested "overlay named catalog objects on a finished stack" capability (`frontend/src/components/
-  AnnotatedImage.tsx`, driven by the field-objects the backend already computes) — but it lives only on the
-  History "Adjust" panel. A beginner who lands on the Target page, sees "Your picture", and never opens History
-  never discovers that their smudge is "the Running Man Nebula (NGC 1977)" or that the bright star is Rigel —
-  one of the most delightful, understand-it moments the app can offer, hidden behind a page they don't visit.
-  **Shape (small, reuse-only):** add a toggle-able "Label objects" overlay to the Target page's "Your picture"
-  card (the same `AnnotatedImage` component, same endpoint) — and, per the standing IA priority (AGENTS §1), put
-  it *inside* that existing card rather than as another always-on banner. A natural size-S follow-on: offer the
-  labelled version as a share export (bake the labels onto the JPEG the way the nameplate/scale bar already
-  bake), so the "here's what's in my shot" version is the one a beginner posts. **Cautions:** the labels are
-  placed from the stack's own WCS grid, so they must self-hide on an unsolved run and on a north-up-rotated
-  preview (History already hides them when `applyNorthUp` is on — mirror that). Reuse, don't re-implement, the
-  marker-layout geometry.
+- **✅ SHIPPED — FIRST SLICE (Builder, v0.293.0, branch `claude/compassionate-galileo-i9ybki`) —
+  ~~"What's in my picture?" object labels only appear in History, where most beginners never look — surface
+  them on the main Target picture.~~** Shipped as the **"What's in it?"** toggle on the Target page's "Your
+  picture" card, built exactly as the spec asked: reuse-only, *inside* the existing card (no new banner, no
+  new page), and off by default so an ordinary visit is unchanged and costs no extra request.
+
+  **What shipped.** `LatestPictureCard` now renders the picture through the same `AnnotatedImage` component
+  History uses (same `objectMarkerLayout` geometry, same `/annotations` endpoint and **the same query key**,
+  so opening one page after the other costs no second fetch), plus the same plain-language
+  `describeFieldObjects` read-out underneath — *"Orion Nebula (M42) — a nebula, near the centre."* — so a
+  beginner can tell what the other smudges are without squinting at overlapping labels on a 260 px thumbnail.
+  The toggle only exists on a run with a FITS master to read a WCS from.
+
+  **Both cautions honoured, and a third the spec didn't know about.** The pins are measured on the run's
+  un-rotated, un-cropped FITS grid, and this card always shows the *stored* preview bytes — so a run whose
+  preview an earlier "Adjust → North up → Save" turned (`preview_north_up_deg`), or whose geometry can't be
+  reduced to a crop at all (`preview_geometry_unknown`), gets the honest sentence instead of a mis-plotted
+  label, and isn't even fetched. A *trimmed* preview (`preview_crop`, the one-click auto-edit's border trim)
+  composes exactly, so it follows the trim through the existing `croppedAnnotationView` — an object the trim
+  cut away is dropped from both the pins and the list rather than pinned onto the wrong pixel. Every state a
+  tap can land in answers in words, including the lookup failing.
+
+  **Upgrade-safe (§9):** frontend-only, additive, no backend/API/schema/config change, and no default flipped.
+
+  **Tests (+8 `LatestPictureCard.test.tsx`, 21 in the file green):** the labels drawn *and* named in words and
+  turning back off; no fetch until asked; hidden entirely without a FITS master; the North-up and
+  unknown-geometry refusals (with no request made); the crop following; the empty field; and the failed
+  lookup. The overlay geometry is jsdom-invisible without a measured box, so the marker tests stub
+  `clientWidth`/`clientHeight` the way a browser reports them.
+
+  **The half deliberately left open** (filed as its own follow-on below): baking the labels into the *share*
+  JPEG the way the nameplate and scale bar already bake, so the "here's what's in my shot" version is the one
+  a beginner posts. That is a backend render change, not a reuse, and is worth its own slice.
+
+  Original spec, for the record:
+
+  - **~~NEW IDEA (Scout 2026-08-27 #20)~~** *(Pillar:
+    understand + share, PRIORITY 3; size S; additive, reversible, no new deps. Confidence: traced — the
+    `AnnotatedImage` component and its `objectMarkerLayout` geometry already exist and are wired into exactly one
+    place, `frontend/src/routes/History.tsx:850`; grep found no other consumer.)* The app already has a complete,
+    tested "overlay named catalog objects on a finished stack" capability (`frontend/src/components/
+    AnnotatedImage.tsx`, driven by the field-objects the backend already computes) — but it lives only on the
+    History "Adjust" panel. A beginner who lands on the Target page, sees "Your picture", and never opens History
+    never discovers that their smudge is "the Running Man Nebula (NGC 1977)" or that the bright star is Rigel —
+    one of the most delightful, understand-it moments the app can offer, hidden behind a page they don't visit.
+    **Shape (small, reuse-only):** add a toggle-able "Label objects" overlay to the Target page's "Your picture"
+    card (the same `AnnotatedImage` component, same endpoint) — and, per the standing IA priority (AGENTS §1), put
+    it *inside* that existing card rather than as another always-on banner. A natural size-S follow-on: offer the
+    labelled version as a share export (bake the labels onto the JPEG the way the nameplate/scale bar already
+    bake), so the "here's what's in my shot" version is the one a beginner posts. **Cautions:** the labels are
+    placed from the stack's own WCS grid, so they must self-hide on an unsolved run and on a north-up-rotated
+    preview (History already hides them when `applyNorthUp` is on — mirror that). Reuse, don't re-implement, the
+    marker-layout geometry.
+
+- **NEW IDEA (Builder 2026-08-29, the half v0.293.0 deliberately left out) — let the labelled version be the
+  one a beginner *posts*: bake the object names into the share JPEG.** *(Pillar: understand + share —
+  PRIORITY 3; size S–M; additive, opt-in, no new deps.)* v0.293.0 put "What's in it?" on the Target page, and
+  the reaction it earns — *"the smudge above Orion is the Running Man Nebula"* — is exactly the thing someone
+  wants in the picture they send their family. Today the labels live only in the browser's DOM, so a share or
+  a download loses them. The machinery to do it already exists on the server: the share JPEG already bakes a
+  **nameplate** and (v0.284.0) a **scale bar** onto the pixels, and `objects_in_field` already projects the
+  catalog into the run's grid, so this is one more optional overlay in the same renderer, behind the same kind
+  of menu-item flag the existing bakes use. **Cautions, all already learned in this family:** the pin
+  positions are measured on the un-rotated, un-cropped FITS grid, so the bake must follow `preview_crop` and
+  **refuse** on `preview_north_up_deg` / `preview_geometry_unknown` exactly as the on-screen overlay does
+  (see the QA-lead sweep note under Infra) — and it must draw at the *exported* resolution rather than
+  scaling a 260 px layout up, or the labels come out soft. Keep it off by default: a bare picture is still the
+  right default share.
 
 - **✅ SHIPPED (Builder, v0.288.0, branch `claude/compassionate-galileo-pr7p04`) — ~~"Download all my
   pictures" leaves out the Moon and the Sun, which are most beginners' *first* good picture.~~**
