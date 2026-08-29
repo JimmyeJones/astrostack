@@ -211,6 +211,37 @@ describe("EditorView", () => {
     await waitFor(() => expect(client.api.printSizes).toHaveBeenCalled());
     // …but no print control, so nobody is tempted into a soft enlargement.
     expect(screen.queryByText("Download print file")).toBeNull();
+    // It does say *why*, though: hiding the control used to leave this case
+    // silent, which is the one place a beginner most needs an explanation.
+    expect(screen.getByText(/doesn't have enough detail/)).toBeInTheDocument();
+  });
+
+  it("says what would unlock a bigger print, naming pixels rather than more subs", async () => {
+    // The motivating half of "Print it": how far off the next size is, and the
+    // lever that actually gets there. More exposure never does — it makes the
+    // picture cleaner, not bigger — so the copy must not imply it.
+    mockEditorQueries();
+    vi.spyOn(client.api, "printSizes").mockResolvedValue({
+      sizes: [
+        { name: "A4", dpi: 180, label: "A4 · 180 DPI", width_in: 11.69, height_in: 8.27 },
+      ],
+      advice: "Best print size for this picture: up to A4 at 180 DPI.",
+      bigger: {
+        name: "A3", scale: 1.3, width_px: 2481, height_px: 1754,
+        text: "About 1.3× more detail would print this at A3. More subs won't do "
+          + "it — they make the picture cleaner, not bigger. What adds detail is "
+          + "re-stacking with Drizzle (super-resolution) switched on, which pays "
+          + "off when you have plenty of subs.",
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    expect(await screen.findByText(/would print this at A3/)).toBeInTheDocument();
+    expect(screen.getByText(/cleaner, not bigger/)).toBeInTheDocument();
   });
 
   it("surfaces the 'How's my stack?' health check on the result, without a redundant Trim-border self-link", async () => {

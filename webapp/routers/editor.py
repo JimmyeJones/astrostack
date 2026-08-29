@@ -1565,8 +1565,14 @@ def print_sizes(safe: str, run_id: int, request: Request) -> dict:
     recipe that *crops* makes this a little optimistic — the export itself
     re-checks against the real rendered pixels and refuses with a clear message
     rather than printing something soft.
+
+    ``bigger`` (optional, ``None`` when there's nothing to reach for) is the
+    motivating half: the next size up and what it would take — named as *pixels*,
+    never as more exposure, because more subs make a picture cleaner rather than
+    bigger. It is the one thing a picture too small to print at all can still be
+    told, and that case is exactly where the size menu hides itself.
     """
-    from seestack.printexport import print_advice, print_options
+    from seestack.printexport import bigger_print, print_advice, print_options
 
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -1576,12 +1582,17 @@ def print_sizes(safe: str, run_id: int, request: Request) -> dict:
         lib.close()
     if run is None:
         raise HTTPException(status_code=404, detail="No such run")
-    options = print_options(int(run.canvas_w or 0), int(run.canvas_h or 0))
+    canvas_w, canvas_h = int(run.canvas_w or 0), int(run.canvas_h or 0)
+    options = print_options(canvas_w, canvas_h)
+    bigger = bigger_print(canvas_w, canvas_h)
     return {
         "sizes": [{"name": o.name, "dpi": o.dpi, "label": o.label,
                    "width_in": o.width_in, "height_in": o.height_in}
                   for o in options],
         "advice": print_advice(options),
+        "bigger": ({"name": bigger.name, "scale": bigger.scale,
+                    "width_px": bigger.width_px, "height_px": bigger.height_px,
+                    "text": bigger.text} if bigger is not None else None),
     }
 
 

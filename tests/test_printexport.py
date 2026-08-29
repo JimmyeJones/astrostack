@@ -14,9 +14,12 @@ import numpy as np
 import pytest
 
 from seestack.printexport import (
+    BIGGER_PRINT_MAX_SCALE,
     DEFAULT_MIN_DPI,
+    DRIZZLE_MAX_USEFUL_SCALE,
     MAX_DPI,
     PAPER_SIZES,
+    bigger_print,
     print_advice,
     print_options,
     render_print,
@@ -81,8 +84,12 @@ def test_a_small_picture_offers_only_what_it_can_actually_print():
 
 def test_a_picture_too_small_to_print_well_offers_nothing():
     assert print_options(300, 200) == []
-    # …and says so kindly rather than silently vanishing.
-    assert "another night" in print_advice(print_options(300, 200))
+    # …and says so kindly rather than silently vanishing. (It used to promise
+    # "another night or two of subs will get it there", which is false — subs add
+    # signal, not pixels. `bigger_print` now names the lever that really works.)
+    advice = print_advice(print_options(300, 200))
+    assert "doesn't have enough detail" in advice
+    assert "pixels" in advice
 
 
 def test_degenerate_inputs_are_refused_rather_than_guessed():
@@ -99,6 +106,105 @@ def test_advice_names_the_size_not_the_arithmetic():
     assert advice.endswith(".")
     # A beginner picks a size, so the size leads the label too.
     assert best.label.startswith(best.name)
+
+
+def test_advice_never_claims_more_subs_unlock_a_print():
+    """The honesty rule this whole nudge exists to keep: exposure adds signal,
+    not pixels, so nothing here may suggest another night makes a print bigger."""
+    too_small = print_advice(print_options(100, 80))
+    assert "pixels" in too_small
+    assert "night" not in too_small.lower()
+    assert "subs" not in too_small.lower()
+
+
+# --- "what would it take to print bigger?" --------------------------------
+
+def test_the_next_size_up_is_named_with_the_gap_to_it():
+    # A ~3 MP picture prints at A4 but not A3; the nudge names A3 and how far off.
+    assert "A4" in _names(print_options(2000, 1500))
+    assert "A3" not in _names(print_options(2000, 1500))
+    nudge = bigger_print(2000, 1500)
+    assert nudge is not None
+    assert nudge.name == "A3"
+    assert 1.0 < nudge.scale <= DRIZZLE_MAX_USEFUL_SCALE
+    assert nudge.name in nudge.text
+    # The pixel counts are the real bar, and the picture is genuinely short of it.
+    assert nudge.width_px > 2000 or nudge.height_px > 1500
+
+
+def test_a_picture_that_already_prints_at_the_largest_size_says_nothing():
+    """Nothing to reach for — a nudge here would be noise on a great stack."""
+    assert _names(print_options(5000, 3500))[0] == PAPER_SIZES[-1].name
+    assert bigger_print(5000, 3500) is None
+
+
+def test_a_picture_too_small_to_print_at_all_still_gets_the_next_step():
+    """The case the size menu hides itself for: it must still say what it would
+    take to get a first print, since that is the only useful thing left to say."""
+    assert print_options(600, 400) == []
+    nudge = bigger_print(600, 400)
+    assert nudge is not None
+    assert nudge.name == PAPER_SIZES[0].name          # the smallest size offered
+    assert "smallest size" in nudge.text
+
+
+def test_the_lever_is_resolution_and_never_more_exposure():
+    """The one thing this must get right (see the module docstring): more subs
+    make a picture cleaner, not bigger, so they may never be offered as the way
+    to a larger print."""
+    for w, h in [(2000, 1500), (1200, 900), (600, 400), (400, 300)]:
+        nudge = bigger_print(w, h)
+        assert nudge is not None, (w, h)
+        assert "cleaner, not bigger" in nudge.text
+        # Within reach of super-resolution → name drizzle; beyond it → a mosaic.
+        if nudge.scale <= DRIZZLE_MAX_USEFUL_SCALE:
+            assert "Drizzle" in nudge.text
+            assert "mosaic" not in nudge.text
+        else:
+            assert "mosaic" in nudge.text
+            assert "Drizzle" not in nudge.text
+
+
+def test_an_unreachable_gap_stays_silent_rather_than_setting_a_daft_goal():
+    tiny = bigger_print(100, 80)
+    assert tiny is None
+    # …and the boundary is the constant, not a coincidence: 300x200 needs exactly
+    # 3x for a 6x4 in print at 150 DPI (900 px wide), which is the last one voiced.
+    edge = bigger_print(300, 200)
+    assert edge is not None and edge.scale == BIGGER_PRINT_MAX_SCALE
+    assert bigger_print(290, 200) is None
+
+
+def test_the_gap_is_rounded_up_so_the_nudge_never_promises_too_little():
+    """Acting on the number must actually get there — a rounded-down scale would
+    leave the picture just short of the size it was promised."""
+    for w, h in [(2000, 1500), (1234, 987), (1001, 800), (777, 555)]:
+        nudge = bigger_print(w, h)
+        if nudge is None:
+            continue
+        grown = print_options(round(w * nudge.scale), round(h * nudge.scale))
+        assert nudge.name in _names(grown), (w, h, nudge.scale)
+
+
+def test_the_next_size_is_always_bigger_than_what_the_picture_already_prints():
+    """Paper aspects differ (10x8 is 1.25, A4 is 1.41), so a very wide picture can
+    clear A4 while missing the smaller 10x8 — the nudge must still point up."""
+    for w, h in [(4000, 1000), (3000, 800), (1500, 1400), (900, 1600)]:
+        nudge = bigger_print(w, h)
+        if nudge is None:
+            continue
+        printable = _names(print_options(w, h))
+        assert nudge.name not in printable
+        by_name = {p.name: p for p in PAPER_SIZES}
+        assert all(by_name[nudge.name].long_in > by_name[n].long_in
+                   for n in printable), (w, h, nudge.name, printable)
+
+
+def test_degenerate_sizes_get_no_nudge():
+    assert bigger_print(0, 100) is None
+    assert bigger_print(100, 0) is None
+    assert bigger_print(-5, -5) is None
+    assert bigger_print(1000, 800, min_dpi=0) is None
 
 
 @pytest.mark.parametrize("shape", [(400, 400, 3), (400, 400)])
