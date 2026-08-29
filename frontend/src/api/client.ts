@@ -1992,8 +1992,13 @@ export const api = {
     req<FocusTrend | null>(`/api/targets/${safe}/focus-trend`),
   transparencyTrend: (safe: string) =>
     req<TransparencyTrend | null>(`/api/targets/${safe}/transparency-trend`),
-  nextSession: (safe: string) =>
-    req<NextSession>(`/api/plan/next-session/${safe}`),
+  // `want` asks for more than the default three windows — the finish forecast
+  // counts to the n-th window for an n-night goal, so a 5-night goal needs 5.
+  // The 14-night scan behind it is unchanged, so this is a bigger slice of the
+  // same search; omit it and the response is byte-for-byte what it always was.
+  nextSession: (safe: string, want?: number) =>
+    req<NextSession>(`/api/plan/next-session/${safe}`
+      + (want ? `?want=${encodeURIComponent(String(want))}` : "")),
   // Download URL for the next-session windows as a .ics calendar file (one-tap
   // "Add to calendar"). A plain href/download, not a fetch — the browser hands
   // the file to the OS calendar.

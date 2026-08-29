@@ -9,6 +9,9 @@ import {
   subsToGo,
   windowUtcTooltip,
   windowsIntro,
+  windowsWanted,
+  WINDOWS_SHOWN,
+  WINDOWS_WANT_MAX,
 } from "./nextSession";
 import type { NextObservingWindow } from "../api/client";
 
@@ -190,5 +193,52 @@ describe("finishForecast", () => {
 
   it("rounds a fractional night estimate up to a whole night", () => {
     expect(finishForecast(1.2, wins)).toContain("Sun 18 Jan");
+  });
+
+  it("dates a long goal once the planner is asked for enough windows", () => {
+    // The regression: with a fixed three-window request, the beginner furthest
+    // from their goal was the only one told nothing. Given the five windows a
+    // five-night goal now asks for, it names the fifth.
+    const five = [
+      ...wins,
+      win({ dark_start_utc: "2026-01-26T22:00:00+00:00" }),  // Mon 26 Jan
+      win({ dark_start_utc: "2026-01-29T22:00:00+00:00" }),  // Thu 29 Jan
+    ];
+    expect(finishForecast(5, five)).toBe(
+      "About 5 more good nights — if the next clear ones cooperate, you could "
+      + "finish around Thu 29 Jan.");
+    // …and it still counts to the *n-th* window, not the last one it was given.
+    expect(finishForecast(4, five)).toContain("Mon 26 Jan");
+  });
+});
+
+describe("windowsWanted", () => {
+  it("asks for exactly the windows the card lists when the goal is short", () => {
+    // The common case must be byte-for-byte the request it always made, so a
+    // one- or three-night goal can't change what any existing caller receives.
+    expect(windowsWanted(1)).toBe(WINDOWS_SHOWN);
+    expect(windowsWanted(2)).toBe(WINDOWS_SHOWN);
+    expect(windowsWanted(3)).toBe(WINDOWS_SHOWN);
+  });
+
+  it("asks for as many windows as a longer goal needs to be dated", () => {
+    expect(windowsWanted(4)).toBe(4);
+    expect(windowsWanted(6)).toBe(6);
+    // Fractional paces round up, the same way the forecast counts them.
+    expect(windowsWanted(4.2)).toBe(5);
+  });
+
+  it("clamps to the endpoint's own ceiling rather than being bounced as a 422", () => {
+    expect(windowsWanted(WINDOWS_WANT_MAX)).toBe(WINDOWS_WANT_MAX);
+    expect(windowsWanted(WINDOWS_WANT_MAX + 5)).toBe(WINDOWS_WANT_MAX);
+    expect(windowsWanted(1000)).toBe(WINDOWS_WANT_MAX);
+  });
+
+  it("falls back to the default with no pace estimate, or a met goal", () => {
+    expect(windowsWanted(null)).toBe(WINDOWS_SHOWN);
+    expect(windowsWanted(undefined)).toBe(WINDOWS_SHOWN);
+    expect(windowsWanted(0)).toBe(WINDOWS_SHOWN);
+    expect(windowsWanted(-3)).toBe(WINDOWS_SHOWN);
+    expect(windowsWanted(Number.NaN)).toBe(WINDOWS_SHOWN);
   });
 });

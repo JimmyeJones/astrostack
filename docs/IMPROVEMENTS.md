@@ -9167,9 +9167,37 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-29, the horizon the v0.297.0 finish forecast deliberately stops at) — a target
-  that needs 4+ good nights gets no finish date at all, because the planner is only ever asked for three
-  windows.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: S. Confidence: certain — this is the
+- **✅ SHIPPED (Builder, v0.297.1, branch `claude/compassionate-galileo-1i6x9x`) — ~~a target that needs 4+
+  good nights gets no finish date at all, because the planner is only ever asked for three windows.~~**
+  Shipped exactly as the shape below asked. `/api/plan/next-session/{safe}` takes an optional `want`
+  (`ge=1, le=8`, defaulting to the same `_NEXT_SESSION_WANT = 3`, so every existing caller — the card's short-goal
+  case and the `.ics` download alike — gets a byte-for-byte unchanged response), and the card asks for
+  `windowsWanted(nightsToGo)`: the `WINDOWS_SHOWN = 3` it always asked for when the goal needs three nights or
+  fewer, otherwise `ceil(nightsToGo)` clamped to the endpoint's own ceiling so an implausible pace estimate is
+  never bounced as a 422. `want` is in the TanStack query key, so the wider ask can't be served the narrower
+  cached answer.
+
+  **The two cautions the entry named are both honoured.** The 14-night scan is untouched — `want` slices what
+  that one scan found, so a bigger ask is a bigger slice of the same search, never a longer one, and a 6-night
+  goal on an object with one good night a week still comes back with fewer windows and stays *silent* rather
+  than naming a date it can't see (pinned by a test that every window returned for the widest ask is inside the
+  fortnight). And the **rendered list is unchanged at three rows** — `finishForecast` may count to the eighth
+  window, but the card lists the nights you plan around, and a fortnight of dates would bury the next session on
+  exactly the page the owner calls "extremely busy".
+
+  **Upgrade-safe (§9):** one optional query parameter with today's value as its default; no config, schema,
+  on-disk, or response-shape change, and no default behaviour flipped.
+
+  **Tests (+4 webapp / +5 frontend):** `tests/webapp/test_plan.py` (the default is still exactly three; `want=5`
+  returns five whose first three are the default's, in order; out-of-range is a 422 on both ends; the scan
+  horizon isn't widened) and `frontend/src/components/nextSession.test.ts` +
+  `NextSessionCard.test.tsx` (`windowsWanted`'s four cases, the forecast dating a 5-night goal off the fifth
+  window, the card requesting `("M_42", 5)` — the assertion that fails before the fix — the unchanged
+  `("M_42", 3)` for a short goal, and the list still holding three rows when five came back).
+
+  Original spec, for the record:
+
+  *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: S. Confidence: certain — this is the
   constant the forecast reads against.)*
   `finishForecast` returns `null` when `nightsToGo > windows.length`, which is the honest call: quoting the
   last of a capped list would promise a finish that is too early. But the cap is not a fact about the sky, it
