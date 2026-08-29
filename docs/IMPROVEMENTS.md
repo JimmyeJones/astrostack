@@ -43,15 +43,16 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-- **Builder 2026-08-29, branch `claude/compassionate-galileo-eypoyg`** — claiming two items (claimed in the
-  run's *first* commit and pushed immediately, per the five duplicate-collision process notes under "Features
-  that serve real workflows"):
-  1. ~~*"the loose end left by the v0.294.1 two-pass frame-count fix"*~~ — **SHIPPED v0.294.3**; see the entry
-     under Ideas → "Trust".
-  2. ~~*"the picture a beginner actually shares is 1024 px wide"*~~ — **STOOD DOWN, released back to Ideas**;
-     sizing it against the code showed it is an **L**, not the filed S–M. See the ⚠️ Builder note added to that
-     entry for the three pieces, the cache the recipe path needs, and the test blast radius. Replaced this run
-     by the "what would it take to print bigger?" beginner feature (**SHIPPED v0.295.0**).
+_(none — claim an item here with your branch name)_
+
+> **Builder 2026-08-29, branch `claude/compassionate-galileo-eypoyg` — run finished, all claims released.**
+> Shipped: the two-pass error-list loose end (**v0.294.3**), "what would it take to print bigger?"
+> (**v0.295.0**), and the framing nudge on "Point here tonight" (**v0.295.1**). **Stood down** on *"the picture
+> a beginner actually shares is 1024 px wide"* — sizing it against the code showed an **L**, not the filed
+> S–M; the ⚠️ Builder note now on that entry has the three pieces, the cache the recipe path needs, and the
+> test blast radius. Also pruned *"Was my focus sharp last night?"* as already shipped twice over.
+> Claiming in the run's **first** commit and pushing it immediately (per the five duplicate-collision process
+> notes) cost about a minute and is worth doing.
 
 ---
 
@@ -15632,6 +15633,25 @@ problems. Dogfood it every big-picture run and fix root causes.
     moves, plus a check it never *over*-counts. Small and well-contained; grep for other readers of
     `n_frames_used` first (the noise-ratio badge anchors on √N).
 
+- **NEW IDEA (Builder 2026-08-29, traced while making the run's error list honest in v0.294.3) — a stack run's
+  per-frame error list has **no UI consumer at all**, so the storage signal it carries only ever reaches the
+  raw job-result JSON.** *(Pillar: trust + autonomy — PRIORITY 2–3; size S; read-only, additive. Confidence:
+  traced — `StackResult.errors` → `pipeline.py:2659` `"errors"` on the job result, and a grep of
+  `frontend/src` finds **no** reader of it for a stack job; `Jobs.tsx`'s `errors` is the unrelated per-*target*
+  `stack_errors`/`qc_errors` map, and `Editor.tsx`'s is the editor's `op_errors`.)* So a night where the NAS
+  share dropped forty reads produces forty accurate, per-file error strings that nobody will ever see. The
+  walk-away owner instead learns about it obliquely, through `n_align_failed` / `n_unreadable` counts on
+  History's honest-accounting line — which is the *right* surface, and is exactly where these belong.
+  **Shape:** roll the strings up server-side into a small count (how many subs hit a read error, and — now that
+  v0.294.3 marks them — how many of those **recovered on the other pass**) and put one sentence beside the
+  existing "150 couldn't be aligned" clause: *"3 subs hit a read error; 2 of them read fine on the second try —
+  worth checking the drive or share they live on."* **Why it's better than showing the list:** forty raw
+  `OSError` lines are noise, one counted sentence naming the cause and the fix is guidance — the same shape
+  `missingSubsNote` already uses, and it should sit right next to it so the two storage signals read as one
+  story. **Grep first:** `missingSubsNote` / `alignFailureNote` in `Jobs.tsx` and the accounting line in
+  `History.tsx:311` are where this lands; `RECOVERED_ERROR_SUFFIX` in `seestack/stack/stacker.py` is how a
+  recovered line is identified — count it there rather than re-parsing the suffix in the frontend.
+
 - **✅ SHIPPED (Builder, v0.294.3, branch `claude/compassionate-galileo-eypoyg`) — ~~a sub that blipped in
   pass 1 and stacked fine in pass 2 counts as *used*, but its pass-1 error string is still in the run's error
   list, so the run reports a failure for a frame the header says was combined.~~** Built as the entry's
@@ -17620,6 +17640,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   (`heroes.length`, `MyDeepSkyWallCard`) counts library targets only, so it has to learn about stills too or
   it will promise fewer files than the zip holds; and the card currently hides below two *targets*, which
   would still hide the button from someone whose only pictures are Moon stills.
+
+- **NEW IDEA (Builder 2026-08-29, the obvious next tap on "what would print bigger?" v0.295.0) — say the print
+  size on the **Stack form**, where the decision that sets it is actually made.** *(Pillar: enjoy + autonomy —
+  PRIORITY 2–3; size S; read-only, additive, no new deps — every ingredient exists.)* v0.295.0 tells a finished
+  picture *"about 1.3× more detail would print this at A3 — the lever is re-stacking with Drizzle on."* That is
+  the right sentence in the wrong tense: by the time it is read, the stack that fixed the canvas size is
+  already made, and the user has to remember it until the next time they open the Stack form. **The Stack form
+  is where the lever lives**, and it already knows both halves of the answer: `estimate_stack` returns the
+  canvas the run *would* produce for the settings on screen (drizzle on/off, `drizzle_scale`, mosaic), and
+  `print_options` turns any canvas into a print size in pure arithmetic. So the estimate panel can say *"this
+  stack will print sharply up to A4 — at Drizzle ×2 it would reach A3"* **before** the user commits, in the
+  unit a human wants rather than in megapixels. **Why it beats the finished-picture version:** it is
+  actionable at the one moment it can change the outcome, and it turns an advanced-section knob nobody
+  understands ("Drizzle scale") into a plain benefit. **Cautions:** the estimate panel already carries a
+  memory verdict (`memory_fix` / `suggested_drizzle_scale`), so the print line must **defer** to it — never
+  offer a bigger print on a canvas the guard is refusing, which is the exact trap `bigger_print` was
+  deliberately not coupled to on the *finished* picture. And keep it to one line: the Stack form is already
+  dense (AGENTS §1 IA priority). **Grep first:** `seestack.printexport.print_options` / `bigger_print`,
+  `estimate_stack`'s returned `canvas_h`/`canvas_w`, and the estimate panel component that renders `memory_fix`.
 
 - **✅ SHIPPED (Builder, v0.295.0, branch `claude/compassionate-galileo-eypoyg`) — ~~turn "how big can I print
   this?" into a *reason to keep shooting*: tell a target still short of a good print what it would take to get
