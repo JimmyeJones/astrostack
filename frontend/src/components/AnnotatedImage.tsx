@@ -18,6 +18,15 @@ export interface Marker {
   top: number;
   /** True when the centre lands within the rendered (letterbox-trimmed) image. */
   visible: boolean;
+  /**
+   * Normalised distance from the picture's centre — 0 at the centre, ~1.41 at a
+   * corner. Exactly the quantity `describeFieldObjects` sorts its read-out on,
+   * so "how notable is this object?" is answered the same way in the list under
+   * the picture and in the labels drawn on it. Used by
+   * :func:`deconflictMarkers` to decide who keeps a label when a field is too
+   * crowded to give one to everybody.
+   */
+  r: number;
 }
 
 /**
@@ -46,8 +55,137 @@ export function objectMarkerLayout(
     const visible =
       left >= offsetX && left <= offsetX + renderW &&
       top >= offsetY && top <= offsetY + renderH;
-    return { object: o, left, top, visible };
+    const nx = (o.x_px - imgWidth / 2) / (imgWidth / 2);
+    const ny = (o.y_px - imgHeight / 2) / (imgHeight / 2);
+    return { object: o, left, top, visible, r: Math.hypot(nx, ny) };
   });
+}
+
+/* ---- keeping a crowded field readable ---------------------------------- */
+
+/** Radius of the marker dot, and the gap between it and its label chip. */
+const DOT_R = 4;
+const CHIP_GAP = 2;
+/** Chip metrics, matching the rendered chip's font-size/padding closely enough
+ *  to test overlap. Deliberately a *pure estimate* rather than a DOM measurement:
+ *  the layout has to be decidable before anything is rendered, and being a pixel
+ *  or two generous only makes the spacing safer. */
+const CHIP_H = 15;
+const CHIP_CHAR_PX = 6.2;
+const CHIP_PAD_PX = 10;
+/** Breathing room required between two chips before they count as "apart". */
+const CHIP_MARGIN = 2;
+/** How many rings out from the dot a chip may be pushed before its label is
+ *  given up. Three is enough to place a genuinely crowded pile without a chip
+ *  ending up so far from its dot that it reads as pointing at something else. */
+const CHIP_RINGS = 3;
+/** One label per this much box area, so the same field labels sensibly on a
+ *  180 px History card, a 260 px Target card and a full-screen lightbox. */
+const AREA_PER_LABEL = 22_000;
+const MIN_LABELS = 3;
+const MAX_LABELS = 12;
+
+/** A marker whose label chip has been given a place that nothing else wants. */
+export interface PlacedMarker extends Marker {
+  /** CSS px offset of the chip's centre from the dot. Never moves the dot. */
+  labelDx: number;
+  labelDy: number;
+}
+
+interface Rect { x0: number; y0: number; x1: number; y1: number }
+
+function chipWidth(label: string): number {
+  return label.length * CHIP_CHAR_PX + CHIP_PAD_PX;
+}
+
+function chipRect(m: Marker, dx: number, dy: number, w: number): Rect {
+  const cx = m.left + dx;
+  const cy = m.top + dy;
+  return { x0: cx - w / 2, y0: cy - CHIP_H / 2, x1: cx + w / 2, y1: cy + CHIP_H / 2 };
+}
+
+function overlaps(a: Rect, b: Rect): boolean {
+  return a.x0 < b.x1 + CHIP_MARGIN && b.x0 < a.x1 + CHIP_MARGIN
+    && a.y0 < b.y1 + CHIP_MARGIN && b.y0 < a.y1 + CHIP_MARGIN;
+}
+
+/** How many labels a box this size can carry before it stops being readable. */
+export function labelBudget(boxW: number, boxH: number): number {
+  if (boxW <= 0 || boxH <= 0) return 0;
+  const n = Math.floor((boxW * boxH) / AREA_PER_LABEL);
+  return Math.max(MIN_LABELS, Math.min(MAX_LABELS, n));
+}
+
+/**
+ * Give each object's label a spot of its own, and drop the ones a crowded field
+ * has no room for.
+ *
+ * Drawing every label dead-centre on its object — which is what this used to do
+ * — turns a rich field into an unreadable pile exactly where the labels are most
+ * interesting: point a 3° frame at the Sword of Orion or the Virgo cluster and
+ * several chips land within a few pixels of each other on a 260 px card.
+ *
+ * Three rules:
+ *   * **The dot never moves.** Only its chip is nudged, or the label stops
+ *     pointing at its object. Positions are tried below/above first (chips are
+ *     wide, so stacking them vertically collides least), then left/right, each
+ *     time preferring the direction with more room inside the box.
+ *   * **Nearest the centre wins.** Ordering is `Marker.r` — the same "how
+ *     notable is this?" proxy the text read-out under the picture already sorts
+ *     on — so when there isn't room for everybody, the objects a beginner is
+ *     actually looking at keep their names.
+ *   * **Nothing is lost, it moves.** A dropped label's object is still named in
+ *     that read-out, which both consumers render.
+ *
+ * Pure and box-size-driven, so it is unit-testable and behaves consistently
+ * from a small card to a lightbox.
+ */
+export function deconflictMarkers(
+  markers: Marker[], boxW: number, boxH: number,
+): PlacedMarker[] {
+  if (boxW <= 0 || boxH <= 0) return [];
+  const budget = labelBudget(boxW, boxH);
+  const ordered = markers.filter((m) => m.visible).slice()
+    .sort((a, b) => a.r - b.r);
+
+  const taken: Rect[] = [];
+  const placed: PlacedMarker[] = [];
+  for (const m of ordered) {
+    if (placed.length >= budget) break;
+    const w = chipWidth(objectLabel(m.object));
+    const vOff = DOT_R + CHIP_GAP + CHIP_H / 2;
+    const hOff = DOT_R + CHIP_GAP + w / 2;
+    // Prefer the side of the dot with more room left in the box, and try
+    // straight below/above before sideways — chips are wide, so stacking them
+    // vertically collides least. Each direction is then tried further out, so a
+    // notable object in a genuine pile still finds somewhere rather than losing
+    // its name to a less interesting neighbour that happened to be luckier.
+    const vs = m.top < boxH / 2 ? [1, -1] : [-1, 1];
+    const hs = m.left < boxW / 2 ? [1, -1] : [-1, 1];
+    const dirs: [number, number][] = [
+      [0, vs[0]], [0, vs[1]], [hs[0], 0], [hs[1], 0],
+      [hs[0], vs[0]], [hs[1], vs[0]], [hs[0], vs[1]], [hs[1], vs[1]],
+    ];
+    const candidates: [number, number][] = [];
+    for (let step = 0; step < CHIP_RINGS; step++) {
+      for (const [hx, vy] of dirs) {
+        candidates.push([
+          hx === 0 ? 0 : hx * (hOff + (step * (w + CHIP_MARGIN)) / 2),
+          vy === 0 ? 0 : vy * (vOff + step * (CHIP_H + CHIP_MARGIN)),
+        ]);
+      }
+    }
+    for (const [dx, dy] of candidates) {
+      const rect = chipRect(m, dx, dy, w);
+      if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > boxW || rect.y1 > boxH) continue;
+      if (taken.some((t) => overlaps(t, rect))) continue;
+      taken.push(rect);
+      placed.push({ ...m, labelDx: dx, labelDy: dy });
+      break;
+    }
+    // No candidate fits: this object's label is one the read-out carries instead.
+  }
+  return placed;
 }
 
 /** Fractional bounds of the stack canvas a stored preview shows (`run.preview_crop`). */
@@ -221,7 +359,13 @@ export function AnnotatedImage({
     return () => ro.disconnect();
   }, []);
 
-  const markers = show ? objectMarkerLayout(objects, imgWidth, imgHeight, box.w, box.h) : [];
+  // Lay the labels out so they don't pile up on each other in a crowded field —
+  // and so a small card draws only as many as it can carry (the rest stay named
+  // in the read-out both consumers render under the picture).
+  const markers = show
+    ? deconflictMarkers(
+      objectMarkerLayout(objects, imgWidth, imgHeight, box.w, box.h), box.w, box.h)
+    : [];
   const bar = showScale
     ? scaleBarLayout(scaleBar, imgWidth, imgHeight, box.w, box.h)
     : null;
@@ -242,22 +386,25 @@ export function AnnotatedImage({
         draggable={false}
         style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
       />
-      {markers.filter((m) => m.visible).map((m) => (
+      {markers.map((m) => (
         <div
           key={m.object.catalog_id}
           data-testid="object-marker"
           style={{
             position: "absolute", left: m.left, top: m.top,
-            transform: "translate(-50%, -50%)", pointerEvents: "none",
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+            width: 0, height: 0, pointerEvents: "none",
           }}
         >
+          {/* The dot stays exactly on the object; only the chip is placed. */}
           <div style={{
+            position: "absolute", left: -DOT_R, top: -DOT_R,
             width: 8, height: 8, borderRadius: "50%",
             border: "1.5px solid rgba(120,200,255,0.95)",
             boxShadow: "0 0 3px rgba(0,0,0,0.9)",
           }} />
           <span style={{
+            position: "absolute", left: m.labelDx, top: m.labelDy,
+            transform: "translate(-50%, -50%)",
             fontSize: 11, lineHeight: 1.1, color: "#dff1ff", whiteSpace: "nowrap",
             padding: "1px 4px", borderRadius: 4, background: "rgba(8,12,22,0.72)",
             textShadow: "0 1px 2px rgba(0,0,0,0.9)",

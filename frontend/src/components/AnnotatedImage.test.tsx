@@ -6,6 +6,8 @@ import {
   compassLayout,
   croppedAnnotationView,
   objectLabel,
+  deconflictMarkers,
+  labelBudget,
   objectMarkerLayout,
   scaleBarLayout,
 } from "./AnnotatedImage";
@@ -46,6 +48,122 @@ describe("objectMarkerLayout", () => {
   it("returns nothing until every dimension is known", () => {
     expect(objectMarkerLayout([obj()], 1000, 600, 0, 300)).toEqual([]);
     expect(objectMarkerLayout([obj()], 0, 600, 500, 300)).toEqual([]);
+  });
+});
+
+describe("deconflictMarkers", () => {
+  // A field where several objects project to nearly the same spot — the Sword of
+  // Orion case: on a 260px card their chips would land within a few pixels of
+  // each other and overlap into mush.
+  const crowded = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      obj({ catalog_id: `NGC${100 + i}`, name: `Object ${i}`,
+        x_px: 500 + i * 4, y_px: 300 + i * 3 }));
+
+  const place = (objects: FieldObject[], boxW = 600, boxH = 260) =>
+    deconflictMarkers(
+      objectMarkerLayout(objects, 1000, 600, boxW, boxH), boxW, boxH);
+
+  it("gives every chip a spot of its own", () => {
+    const placed = place(crowded(5));
+    const rects = placed.map((m) => {
+      const w = objectLabel(m.object).length * 6.2 + 10;
+      return {
+        x0: m.left + m.labelDx - w / 2, x1: m.left + m.labelDx + w / 2,
+        y0: m.top + m.labelDy - 7.5, y1: m.top + m.labelDy + 7.5,
+      };
+    });
+    for (let i = 0; i < rects.length; i++) {
+      for (let j = i + 1; j < rects.length; j++) {
+        const a = rects[i];
+        const b = rects[j];
+        const apart = a.x1 <= b.x0 || b.x1 <= a.x0 || a.y1 <= b.y0 || b.y1 <= a.y0;
+        expect(apart).toBe(true);
+      }
+    }
+  });
+
+  it("is what the old behaviour was not — pinned against it", () => {
+    // Before this, every chip sat dead-centre on its object, so five objects a
+    // few pixels apart produced five mutually overlapping chips.
+    const raw = objectMarkerLayout(crowded(5), 1000, 600, 600, 260);
+    const spread = Math.max(...raw.map((m) => m.left)) - Math.min(...raw.map((m) => m.left));
+    expect(spread).toBeLessThan(20);          // they really are on top of each other
+    const placed = place(crowded(5));
+    const offsets = new Set(placed.map((m) => `${m.labelDx},${m.labelDy}`));
+    expect(offsets.size).toBe(placed.length); // …and now each has its own place
+  });
+
+  it("never moves a dot — only its chip", () => {
+    const raw = objectMarkerLayout(crowded(4), 1000, 600, 600, 260);
+    const placed = place(crowded(4));
+    for (const m of placed) {
+      const original = raw.find((r) => r.object.catalog_id === m.object.catalog_id)!;
+      expect(m.left).toBe(original.left);
+      expect(m.top).toBe(original.top);
+    }
+  });
+
+  it("keeps the labels nearest the centre when it can't keep them all", () => {
+    // 30 objects piled around the centre, far past any box's budget.
+    const many = Array.from({ length: 30 }, (_, i) =>
+      obj({ catalog_id: `NGC${i}`, name: `O${i}`, x_px: 500 + i, y_px: 300 + i }));
+    const placed = place(many);
+    expect(placed.length).toBeLessThan(many.length);
+    const kept = placed.map((m) => m.r);
+    const dropped = objectMarkerLayout(many, 1000, 600, 600, 260)
+      .filter((m) => !placed.some((p) => p.object.catalog_id === m.object.catalog_id))
+      .map((m) => m.r);
+    expect(Math.max(...kept)).toBeLessThanOrEqual(Math.min(...dropped));
+  });
+
+  it("orders notability exactly as the read-out under the picture does", () => {
+    // `describeFieldObjects` sorts on normalised distance from the centre; the
+    // labels must agree, or the picture and the list disagree about what matters.
+    const m = objectMarkerLayout(
+      [obj({ x_px: 500, y_px: 300 }), obj({ catalog_id: "X", x_px: 900, y_px: 550 })],
+      1000, 600, 600, 260);
+    expect(m[0].r).toBeCloseTo(0);
+    expect(m[1].r).toBeGreaterThan(m[0].r);
+  });
+
+  it("draws more labels on a bigger box and few on a small card", () => {
+    expect(labelBudget(180, 120)).toBe(3);        // floor: always at least a few
+    expect(labelBudget(600, 180)).toBeLessThan(labelBudget(600, 400));
+    expect(labelBudget(2000, 1200)).toBe(12);     // ceiling: never a wall of text
+    expect(labelBudget(0, 300)).toBe(0);
+  });
+
+  it("keeps every chip inside the box", () => {
+    // Objects hard against each edge: a chip must never hang off the picture.
+    const edges = [
+      obj({ catalog_id: "TL", name: "Top left", x_px: 2, y_px: 2 }),
+      obj({ catalog_id: "BR", name: "Bottom right", x_px: 998, y_px: 598 }),
+    ];
+    for (const m of place(edges)) {
+      const w = objectLabel(m.object).length * 6.2 + 10;
+      expect(m.left + m.labelDx - w / 2).toBeGreaterThanOrEqual(0);
+      expect(m.top + m.labelDy - 7.5).toBeGreaterThanOrEqual(0);
+      expect(m.left + m.labelDx + w / 2).toBeLessThanOrEqual(600);
+      expect(m.top + m.labelDy + 7.5).toBeLessThanOrEqual(260);
+    }
+  });
+
+  it("drops an off-picture object and copes with an unmeasured box", () => {
+    expect(place([obj({ x_px: 5000, y_px: 300 })])).toEqual([]);
+    expect(deconflictMarkers([], 0, 0)).toEqual([]);
+  });
+
+  it("labels an ordinary sparse field with no nudging beyond the first choice", () => {
+    // The common case must not get worse: three well-separated objects each keep
+    // the natural "chip under the dot" placement.
+    const placed = place([
+      obj({ catalog_id: "A", name: "A", x_px: 200, y_px: 150 }),
+      obj({ catalog_id: "B", name: "B", x_px: 500, y_px: 300 }),
+      obj({ catalog_id: "C", name: "C", x_px: 800, y_px: 450 }),
+    ]);
+    expect(placed).toHaveLength(3);
+    expect(placed.every((m) => m.labelDx === 0)).toBe(true);
   });
 });
 
