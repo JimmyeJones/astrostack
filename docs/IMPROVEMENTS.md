@@ -46,9 +46,8 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 - **Builder 2026-08-29, branch `claude/compassionate-galileo-eypoyg`** — claiming two items (claimed in the
   run's *first* commit and pushed immediately, per the five duplicate-collision process notes under "Features
   that serve real workflows"):
-  1. *"the loose end left by the v0.293.1 two-pass frame-count fix"* — a sub that blipped in pass 1 and stacked
-     fine in pass 2 still carries its pass-1 error line, so the Jobs summary reports a failure for a frame the
-     header says was combined. (Ideas → trust/friendliness, size S.)
+  1. ~~*"the loose end left by the v0.294.1 two-pass frame-count fix"*~~ — **SHIPPED v0.294.3**; see the entry
+     under Ideas → "Trust".
   2. *"the picture a beginner actually shares is 1024 px wide"* — every share export is built from the stored
      preview PNG rather than the master. (Features that serve real workflows, size S–M.)
 
@@ -15631,9 +15630,34 @@ problems. Dogfood it every big-picture run and fix root causes.
     moves, plus a check it never *over*-counts. Small and well-contained; grep for other readers of
     `n_frames_used` first (the noise-ratio badge anchors on √N).
 
-- **NEW IDEA (Builder 2026-08-29, the loose end left by the v0.294.1 two-pass frame-count fix) — a sub that
-  blipped in pass 1 and stacked fine in pass 2 now counts as *used*, but its pass-1 error string is still in
-  the run's error list, so the Jobs summary reports a failure for a frame the header says was combined.**
+- **✅ SHIPPED (Builder, v0.294.3, branch `claude/compassionate-galileo-eypoyg`) — ~~a sub that blipped in
+  pass 1 and stacked fine in pass 2 counts as *used*, but its pass-1 error string is still in the run's error
+  list, so the run reports a failure for a frame the header says was combined.~~** Built as the entry's
+  preferred half: the line is **re-worded, never dropped**, so a flaking NAS share still shows.
+
+  **What shipped.** A new `_PassFrameLog` (frame id → the index of the line that pass appended to the run's
+  shared `errors`, plus the ids that actually contributed) is filled in by **both** two-pass paths — the κ-σ
+  `_pass` and the drizzle-rejection `_drizzle_pass` — and `_mark_recovered_errors` then appends
+  `RECOVERED_ERROR_SUFFIX` (*"— read again on the other pass and combined, so this sub IS in the picture"*) to
+  exactly the lines whose frame the **second** pass combined. Everything else is untouched by construction: a
+  frame that failed *both* passes keeps both plain lines (that is the real failure the list exists for), and so
+  does one that failed the second pass, whose light genuinely isn't in the picture (`n_frames_used` is pass 2's
+  count). A frame with no `id` is never recorded, so no line can be mis-attributed; the re-wording is
+  idempotent and bounds-checked. Single-pass runs (min/max reject, no-clip, single-pass drizzle) don't ask for
+  a log at all, so they are bit-for-bit unchanged — as is every healthy run, which has no errors to re-word.
+
+  **Upgrade-safe (§9):** engine-internal only — no config, schema, on-disk, API-shape or default change; the
+  job result's `errors` list is the same list of strings it always was.
+
+  **Tests (+7, 4 fail before):** three end-to-end in `tests/test_stack_two_pass_frame_count.py` (the recovered
+  sub's line still names the file and the underlying `OSError` *and* ends with the suffix; a pass-2 failure
+  keeps its plain error; a sub that fails both passes keeps **both** plain lines), three pure unit tests of the
+  re-wording rule (only a frame the second pass combined, idempotent, a slot past the end of the list can't
+  raise), one end-to-end in `tests/test_drizzle_reject.py` for the drizzle two-pass path, plus an added
+  `res.errors == []` assertion on the existing ordinary-run test.
+
+  Original spec, for the record:
+
   *(Pillar: trust / friendliness — PRIORITY 3; size S; presentation-only, no engine behaviour change.
   Confidence: traced — `_pass` appends to the shared `errors` list on any exception (`stacker.py` ~2361) and
   both passes are handed the *same* list; `pipeline.py:2659` passes it straight to the job result.)* The
