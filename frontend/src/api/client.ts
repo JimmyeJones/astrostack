@@ -1032,6 +1032,14 @@ export interface StackFrameAccounting {
   // the originals on an offline share, an unmounted drive, moved files. Absent
   // on masters stacked before this was recorded.
   n_unreadable?: number;
+  // Subs whose file *was* on disk and then failed mid-read (a flaking network
+  // share, a bad sector, a half-written file). Counted per sub, not per error
+  // line, so a sub that failed both passes counts once. Absent on masters
+  // stacked before this was recorded.
+  n_read_errors?: number;
+  // Of `n_read_errors`, how many a two-pass run read fine on its *other* pass
+  // and combined anyway — so their light is in the picture after all.
+  n_read_recovered?: number;
   // How many contributing subs sub-pixel refine had to leave *only roughly*
   // aligned (its measured shift exceeded the cap, so the frame stacked
   // unshifted → possibly soft/doubled stars). Present only when refine ran.

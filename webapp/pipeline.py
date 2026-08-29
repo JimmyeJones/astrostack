@@ -2668,6 +2668,12 @@ def _stack_target(
         # offline share, unmounted drive) — so the walk-away user is pointed at
         # the storage, not sent hunting for mixed targets or bad plate-solves.
         "n_unreadable": getattr(result, "n_unreadable", 0),
+        # The other storage failure: subs whose file *was* there and then failed
+        # mid-read (a flaking share, a bad sector), counted per sub rather than
+        # left as raw strings in `errors` that no screen reads — and how many of
+        # those a two-pass run read fine on its other pass and combined anyway.
+        "n_read_errors": getattr(result, "n_read_errors", 0),
+        "n_read_recovered": getattr(result, "n_read_recovered", 0),
         # The outlier-rejection tally, so the Jobs "Process target" result can
         # name the invisible clean-up (e.g. a lone satellite/plane trail that a
         # walk-away small-stack auto-picked min/max removed) right where the

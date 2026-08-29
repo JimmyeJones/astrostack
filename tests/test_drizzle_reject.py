@@ -859,5 +859,9 @@ def test_a_sub_that_blipped_in_the_statistics_pass_reads_as_recovered(
         assert len(res.errors) == 1, res.errors
         assert "transient read error" in res.errors[0]
         assert res.errors[0].endswith(RECOVERED_ERROR_SUFFIX)
+        # …and the counted form of the same truth, which is what actually
+        # reaches a screen: one sub hit a read error, and it recovered.
+        assert res.n_read_errors == 1
+        assert res.n_read_recovered == 1
     finally:
         proj.close()
