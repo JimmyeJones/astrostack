@@ -972,12 +972,28 @@ export interface PrintSize {
   height_in: number;
 }
 
+/** The next print size up, and what it would take to reach it. */
+export interface BiggerPrint {
+  /** The next paper size up, e.g. "A3". */
+  name: string;
+  /** Times more pixels per side than the picture has now. */
+  scale: number;
+  width_px: number;
+  height_px: number;
+  /** The finished sentence — names *resolution* as the lever, never more subs. */
+  text: string;
+}
+
 export interface PrintSizes {
   // Largest first, so the head of the list is the recommended print.
   sizes: PrintSize[];
   // One plain-language line: "Best print size for this picture: up to A4 at
   // 240 DPI." — or, for a picture too small to print well, why not yet.
   advice: string;
+  // The motivating half: how close the picture is to the next size up and which
+  // lever gets it there. Absent/null when it already prints at the largest size
+  // offered, when the gap is too big to be worth naming, or on an older backend.
+  bigger?: BiggerPrint | null;
 }
 
 /** An unattended run that lowered its drizzle scale to fit the memory budget. */

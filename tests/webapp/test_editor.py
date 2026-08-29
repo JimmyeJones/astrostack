@@ -1859,7 +1859,40 @@ def test_print_sizes_offers_only_what_the_picture_can_print_sharply(client, solv
         f"/api/targets/{safe}/stack-runs/{tiny}/editor/print-sizes").json()
     assert small_body["sizes"] == []
     # …and says why, rather than leaving an empty menu with no explanation.
-    assert "another night" in small_body["advice"]
+    assert "doesn't have enough detail" in small_body["advice"]
+
+
+def test_print_sizes_says_what_would_unlock_a_bigger_print(client, solved_library):
+    """The motivating half: how far off the next size is, and — the part that has
+    to be right — that the lever is more *pixels*, never more exposure."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    mid = _make_run(solved_library, safe, basename="mid", h=1500, w=2000)
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{mid}/editor/print-sizes").json()
+    assert "A3" not in [s["name"] for s in body["sizes"]]
+    bigger = body["bigger"]
+    assert bigger is not None
+    assert bigger["name"] == "A3"
+    assert bigger["scale"] > 1.0
+    assert bigger["width_px"] > 2000 or bigger["height_px"] > 1500
+    assert "cleaner, not bigger" in bigger["text"]
+
+    # A picture that already fills the largest size has nothing to reach for.
+    big = client.get(
+        f"/api/targets/{safe}/stack-runs/"
+        f"{_make_run(solved_library, safe, basename='huge', h=3500, w=5000)}"
+        "/editor/print-sizes").json()
+    assert big["sizes"][0]["name"] == "A3"
+    assert big["bigger"] is None
+
+    # …and the picture that can't print at all — the one whose size menu hides
+    # itself — is exactly the one that still gets a next step.
+    tiny = client.get(
+        f"/api/targets/{safe}/stack-runs/"
+        f"{_make_run(solved_library, safe, basename='wee', h=400, w=600)}"
+        "/editor/print-sizes").json()
+    assert tiny["sizes"] == []
+    assert tiny["bigger"] is not None and tiny["bigger"]["name"] == "6×4 in"
 
 
 def test_print_sizes_404s_for_a_run_that_does_not_exist(client, solved_library):
