@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { MyMap, skyFootprintLine } from "./Sky";
+import { MyMap, myMapFilename, skyFootprintLine } from "./Sky";
+import { MantineProvider } from "@mantine/core";
 import { api } from "../api/client";
 import { formatStampDate } from "../format";
 
@@ -35,11 +36,29 @@ describe("skyFootprintLine", () => {
 
 describe("MyMap", () => {
   it("shows the all-sky picture built from the owner's own data", () => {
-    render(<MyMap />);
+    render(<MantineProvider><MyMap /></MantineProvider>);
     const img = screen.getByRole("img");
     expect(img.getAttribute("src")).toBe(api.myMapUrl());
     expect(img.getAttribute("src")).toBe("/api/sky/my-map.png");
     // Named for what it is, so a screen reader doesn't just say "image".
     expect(img.getAttribute("alt")).toMatch(/your own pictures/i);
+  });
+
+  it("invites the owner to keep it, from the bytes already on screen", () => {
+    render(<MantineProvider><MyMap /></MantineProvider>);
+    const save = screen.getByRole("link", { name: /save this map/i });
+    // The same endpoint the <img> is showing — never a second render.
+    expect(save).toHaveAttribute("href", api.myMapUrl());
+    expect(save.getAttribute("download")).toMatch(
+      /^astrostack-my-map-\d{4}-\d{2}-\d{2}\.png$/);
+  });
+});
+
+describe("myMapFilename", () => {
+  it("dates the file by the viewer's own day, zero-padded", () => {
+    // Local, not the UTC slice: 23:30 on the 29th west of UTC is still the 29th
+    // to the person saving it, the same rule every other picture surface uses.
+    expect(myMapFilename(new Date(2026, 7, 9, 23, 30)))
+      .toBe("astrostack-my-map-2026-08-09.png");
   });
 });

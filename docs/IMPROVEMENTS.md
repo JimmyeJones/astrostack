@@ -16926,14 +16926,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   dot for a target with a known RA/Dec but no placeable picture ("you have been here"); worth checking
   whether the shipped map drops those silently, and if so, filing it. Nothing else mine had is worth porting.
 
-- **NEW IDEA (Builder 2026-08-29, the obvious next tap on the v0.292.0 "My map") — let the owner keep the
-  map.** *(Pillar: enjoy + share — PRIORITY 3; size S; additive, no new deps.)* "My map" is a pride picture,
-  and pride pictures get posted. Today it is a bare `<img>`: a desktop right-click or a tablet long-press
-  saves it, which works but does not *invite* it, and neither gives the file a sensible name. A "Save this
-  map" button beside the mode switch, downloading `astrostack-my-map-<date>.png` at the width the page is
-  already rendering, is one `<a download>` — the endpoint already serves exactly those bytes. **Worth pairing
-  with:** the map's own subtitle already names the owner's totals, so a saved map explains itself with no
-  extra work. **Grep first:** the map's URL builder already exists in `api`; don't write a second one.
+- **✅ SHIPPED (Builder, v0.293.2, branch `claude/compassionate-galileo-i9ybki`) — ~~let the owner keep the
+  map.~~** A **"Save this map"** button now sits in the corner of the "My map" stage, downloading
+  `astrostack-my-map-<local date>.png` — one `<a download>` on `api.myMapUrl()`, the *same* bytes the `<img>`
+  is already showing, so nothing is re-rendered and no second URL builder exists. Dated by the viewer's own
+  local day (not the UTC slice) for the same reason every other picture surface goes through
+  `formatStampDate`: an evening west of UTC would otherwise be filed under tomorrow. Frontend-only, additive,
+  no backend change. **Tests:** +2 in `Sky.test.tsx` — the link points at the map endpoint and carries a dated
+  `.png` filename, and the pure `myMapFilename` zero-pads a local evening onto the right day.
+
+  Original spec, for the record:
+
+  - **~~NEW IDEA (Builder 2026-08-29, the obvious next tap on the v0.292.0 "My map")~~** *(Pillar: enjoy + share — PRIORITY 3; size S; additive, no new deps.)* "My map" is a pride picture,
+    and pride pictures get posted. Today it is a bare `<img>`: a desktop right-click or a tablet long-press
+    saves it, which works but does not *invite* it, and neither gives the file a sensible name. A "Save this
+    map" button beside the mode switch, downloading `astrostack-my-map-<date>.png` at the width the page is
+    already rendering, is one `<a download>` — the endpoint already serves exactly those bytes. **Worth pairing
+    with:** the map's own subtitle already names the owner's totals, so a saved map explains itself with no
+    extra work. **Grep first:** the map's URL builder already exists in `api`; don't write a second one.
 
 - **NEW IDEA (Builder 2026-08-29) — "how much of the sky have you actually seen?" — cheap, but only on an
   equal-area projection.** *(Pillar: enjoy + understand — PRIORITY 3; size S; read-only.)* Painted-pixels ÷
