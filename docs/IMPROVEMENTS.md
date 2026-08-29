@@ -43,7 +43,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+> **Builder 2026-08-29, branch `claude/compassionate-galileo-1i6x9x` — claiming three, in this order
+> (claim posted in the run's FIRST commit, per the five duplicate-collision process notes):**
+> 1. **"a target that needs 4+ good nights gets no finish date at all"** (Autonomy & friendliness, size S) —
+>    the `want` parameter on `/api/plan/next-session/{safe}` so `finishForecast` can count past three windows.
+> 2. **"a badly flaking drive lights TWO separate yellow alerts, and they are one story"** (Autonomy &
+>    friendliness, size S) — compose the missing-files and read-error notes into one storage alert on the Jobs
+>    result, keeping both counts distinct and both helpers exported for History.
+> 3. **"Tonight, live"** (Features that serve real workflows, size M) — the new beginner feature this run,
+>    a mobile-friendly live view of the session happening *right now*.
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-gwhwwd` — run finished, claim released.**
 > Shipped three: the stack run's read errors rolled up into a counted sentence on History and the Jobs
