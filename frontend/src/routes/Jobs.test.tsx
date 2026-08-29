@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
   bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobKindLabel,
-  calibrationMismatchNote, missingSubsNote, readErrorsNote,
+  calibrationMismatchNote, missingSubsNote, readErrorsNote, storageTroubleAlert,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
 } from "./Jobs";
 import * as client from "../api/client";
@@ -982,7 +982,7 @@ describe("processTargetSummary", () => {
       stacked: true, solved_accepted: 8, stack: { n_frames_used: 8 },
     })).toEqual({
       line: "Stacked 8 frames into a new master.", stacked: true, thin: null,
-      cleaned: null, missing: null, readErrors: null, calMismatch: null,
+      cleaned: null, storage: null, calMismatch: null,
     });
   });
   it("names the outlier clean-up a small auto-stack made with min/max", () => {
@@ -1021,7 +1021,7 @@ describe("processTargetSummary", () => {
     expect(processTargetSummary({ stacked: true, solved_accepted: 5 }))
       .toEqual({
         line: "Stacked 5 frames into a new master.", stacked: true, thin: null,
-        cleaned: null, missing: null, readErrors: null, calMismatch: null,
+        cleaned: null, storage: null, calMismatch: null,
       });
   });
   it("flags a thin stack (very few frames combined) so it isn't shown as a clean result", () => {
@@ -1038,22 +1038,23 @@ describe("processTargetSummary", () => {
     }).thin).toBeNull();
   });
   it("names subs that couldn't be read at all, and how to get them back", () => {
-    const { missing } = processTargetSummary({
+    const { storage } = processTargetSummary({
       stacked: true, solved_accepted: 358,
       stack: { n_frames_used: 358, n_offered: 500, n_unreadable: 142 },
     });
-    expect(missing).toContain("142 of 500 subs couldn't be read");
-    expect(missing).toContain("connected");
+    expect(storage?.title).toBe("Some subs couldn't be read");
+    expect(storage?.message).toContain("142 of 500 subs couldn't be read");
+    expect(storage?.message).toContain("connected");
   });
   it("says nothing about missing subs when every file was there", () => {
     expect(processTargetSummary({
       stacked: true, solved_accepted: 20,
       stack: { n_frames_used: 20, n_offered: 20, n_unreadable: 0 },
-    }).missing).toBeNull();
+    }).storage).toBeNull();
     // ...or when the backend is too old to report it at all.
     expect(processTargetSummary({
       stacked: true, solved_accepted: 20, stack: { n_frames_used: 20 },
-    }).missing).toBeNull();
+    }).storage).toBeNull();
   });
   it("explains a skip with nothing plate-solved to stack", () => {
     expect(processTargetSummary({
@@ -1064,8 +1065,7 @@ describe("processTargetSummary", () => {
       stacked: false,
       thin: null,
       cleaned: null,
-      missing: null,
-      readErrors: null,
+      storage: null,
       calMismatch: null,
     });
   });
@@ -1073,12 +1073,12 @@ describe("processTargetSummary", () => {
     expect(processTargetSummary({ stacked: false, stack_skipped_reason: "cancelled" }))
       .toEqual({
         line: "Cancelled before stacking.", stacked: false, thin: null,
-        cleaned: null, missing: null, readErrors: null, calMismatch: null,
+        cleaned: null, storage: null, calMismatch: null,
       });
     expect(processTargetSummary({ stacked: false }))
       .toEqual({
         line: "Finished, but no stack was produced.", stacked: false, thin: null,
-        cleaned: null, missing: null, readErrors: null, calMismatch: null,
+        cleaned: null, storage: null, calMismatch: null,
       });
   });
 });
@@ -1179,18 +1179,70 @@ describe("readErrorsNote", () => {
 
 describe("processTargetSummary read errors", () => {
   it("carries the read-error note through the stack result", () => {
-    const { readErrors } = processTargetSummary({
+    const { storage } = processTargetSummary({
       stacked: true,
       stack: { n_frames_used: 495, n_offered: 500, n_read_errors: 5,
                n_read_recovered: 2 },
     });
-    expect(readErrors).toContain("5 subs hit a read error");
-    expect(readErrors).toContain("2 of them read fine");
+    expect(storage?.title).toBe("Some subs didn't read cleanly");
+    expect(storage?.message).toContain("5 subs hit a read error");
+    expect(storage?.message).toContain("2 of them read fine");
   });
   it("stays null on a healthy run and on an older backend", () => {
     expect(processTargetSummary({
       stacked: true, stack: { n_frames_used: 500, n_offered: 500 },
-    }).readErrors).toBeNull();
-    expect(processTargetSummary({ stacked: false }).readErrors).toBeNull();
+    }).storage).toBeNull();
+    expect(processTargetSummary({ stacked: false }).storage).toBeNull();
+  });
+});
+
+describe("storageTroubleAlert", () => {
+  it("says nothing when every sub read fine", () => {
+    expect(storageTroubleAlert(0, 0, 0, 500)).toBeNull();
+    // …and on an older backend that reports no totals at all.
+    expect(storageTroubleAlert(0, 0, 0, 0)).toBeNull();
+  });
+
+  it("is the missing-files note alone when only files were absent", () => {
+    const a = storageTroubleAlert(142, 0, 0, 500)!;
+    expect(a.title).toBe("Some subs couldn't be read");
+    expect(a.message).toBe(missingSubsNote(142, 500));
+  });
+
+  it("is the read-error note alone when only reads failed", () => {
+    const a = storageTroubleAlert(0, 5, 2, 500)!;
+    expect(a.title).toBe("Some subs didn't read cleanly");
+    expect(a.message).toBe(readErrorsNote(5, 2, 500));
+  });
+
+  it("folds a flaking drive's two failures into one alert, said once", () => {
+    // The regression: a share that unmounts mid-scan fires both notes, and two
+    // stacked yellow alerts each ending in "go check the drive" read as two
+    // problems. One alert, both counts kept distinct, one fix sentence.
+    const a = storageTroubleAlert(142, 5, 3, 500)!;
+    expect(a.title).toBe("Trouble reading your subs");
+    // Both counts survive, and the two causes stay different diagnoses.
+    expect(a.message).toContain("142 of 500 subs couldn't be read at all");
+    expect(a.message).toContain("their files weren't on disk");
+    expect(a.message).toContain("Another 5 subs were there but hit a read error");
+    expect(a.message).toContain("3 of them read fine on the second try");
+    // The fix is said exactly once — that's the whole point of composing them.
+    expect(a.message.match(/check the drive/g)).toHaveLength(1);
+    expect(a.message.match(/scan and stack again/g)).toHaveLength(1);
+    // …and it's one alert, not two notes glued together.
+    expect(a.message).not.toContain("worth checking");
+  });
+
+  it("reads naturally for a single errored sub, and when all of them recovered", () => {
+    expect(storageTroubleAlert(9, 1, 0, 500)!.message)
+      .toContain("Another 1 sub was there but hit a read error");
+    expect(storageTroubleAlert(9, 4, 4, 500)!.message)
+      .toContain("all of them read fine on the second try");
+  });
+
+  it("never claims more failures than subs were offered", () => {
+    const a = storageTroubleAlert(9_000, 9_000, 9_000, 10)!;
+    expect(a.message).toContain("10 of 10 subs couldn't be read at all");
+    expect(a.message).toContain("Another 10 subs were there");
   });
 });
