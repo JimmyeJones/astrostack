@@ -28,6 +28,7 @@ owns the file.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -123,13 +124,112 @@ def print_advice(options: list[PrintOption]) -> str:
 
     Says the *recommendation*, not the arithmetic: a beginner should never have
     to reason about DPI to order a print.
+
+    The too-small line deliberately does **not** promise that more subs fix it —
+    they don't. What a print needs is *pixels*, and another night of the same
+    pointing adds none (it makes the picture cleaner, not bigger). The lever is
+    named by :func:`bigger_print`, which the caller shows alongside this.
     """
     if not options:
         return ("This picture doesn't have enough detail for a sharp print yet — "
-                "another night or two of subs will get it there.")
+                "it needs more pixels, not more exposure.")
     best = options[0]
     return (f"Best print size for this picture: up to {best.name} "
             f"at {best.dpi} DPI.")
+
+
+# What super-resolution realistically buys. The Stack form offers a drizzle scale
+# of ×1.0–×4.0 with ×2.0 as "full super-res", so a picture within 2× of the next
+# paper size can get there by re-stacking with Drizzle on; past that the honest
+# lever is a mosaic.
+DRIZZLE_MAX_USEFUL_SCALE = 2.0
+
+# Past this, the next print size is too far away to be a motivating nudge — a
+# beginner told they need 5× more detail learns nothing they can act on — so we
+# say nothing at all rather than set an unreachable goal.
+BIGGER_PRINT_MAX_SCALE = 3.0
+
+
+@dataclass(frozen=True)
+class BiggerPrint:
+    """The next print size up from what a picture can already fill, and what it
+    would take to get there."""
+
+    name: str            # the next paper size up, e.g. "A3"
+    scale: float         # times more pixels *per side* than the picture has now
+    width_px: int        # the picture would need to be at least this wide…
+    height_px: int       # …and this tall, oriented to match it
+    text: str            # the finished plain-language sentence
+
+
+def bigger_print(width_px: int, height_px: int, *,
+                 min_dpi: int = DEFAULT_MIN_DPI) -> BiggerPrint | None:
+    """What it would take to print this picture one size *bigger*, or ``None``.
+
+    :func:`print_options` answers "what can I print today?" and hides itself when
+    the answer is *nothing*, which drops the more motivating fact on the floor:
+    how close the picture is to the next size up, and — the part that has to be
+    right — **which lever actually gets it there**.
+
+    More integration does not add pixels. Another night of the same pointing
+    makes the picture *cleaner*, not *bigger*, so it can never unlock a larger
+    print; what adds resolution is drizzle (super-resolution) or shooting the
+    object as a mosaic. The sentence says exactly that, and names drizzle only
+    while the gap is within :data:`DRIZZLE_MAX_USEFUL_SCALE`.
+
+    Returns ``None`` when the picture already fills the largest size offered
+    (nothing left to reach for), when the gap is beyond
+    :data:`BIGGER_PRINT_MAX_SCALE`, and for degenerate sizes. The pixel counts
+    are the *minimum* that would qualify, and ``scale`` is rounded **up** to a
+    tenth so the nudge never promises a size the picture would just miss.
+    """
+    if width_px < 1 or height_px < 1 or min_dpi < 1:
+        return None
+    printable = {o.name for o in print_options(width_px, height_px, min_dpi=min_dpi)}
+    # The largest paper the picture already fills. Papers differ slightly in
+    # aspect (10×8 is 1.25, A4 is 1.41), so a very wide picture can qualify for
+    # A4 while missing the *smaller* 10×8 — skipping anything no larger than
+    # what it already prints keeps the nudge pointing upward.
+    best_long = max((p.long_in for p in PAPER_SIZES if p.name in printable),
+                    default=0.0)
+    for paper in PAPER_SIZES:            # smallest first
+        if paper.name in printable or paper.long_in <= best_long:
+            continue
+        if width_px >= height_px:
+            paper_w, paper_h = paper.long_in, paper.short_in
+        else:
+            paper_w, paper_h = paper.short_in, paper.long_in
+        need_w, need_h = paper_w * min_dpi, paper_h * min_dpi
+        # Both axes have to clear the floor, so the binding one sets the gap.
+        scale = math.ceil(max(need_w / width_px, need_h / height_px) * 10) / 10
+        if scale > BIGGER_PRINT_MAX_SCALE:
+            return None
+        return BiggerPrint(
+            name=paper.name, scale=scale,
+            width_px=max(1, math.ceil(need_w)), height_px=max(1, math.ceil(need_h)),
+            text=_bigger_print_text(paper.name, scale, bool(printable)),
+        )
+    return None
+
+
+def _bigger_print_text(name: str, scale: float, prints_already: bool) -> str:
+    """The nudge, in the app's plain voice — the gap first, then the one lever
+    that closes it, then the thing it is *not* (more subs)."""
+    gap = f"{scale:g}×"        # "1.5×"
+    lead = (f"About {gap} more detail would print this at {name}."
+            if prints_already else
+            f"About {gap} more detail would make it printable at {name}, the "
+            "smallest size that comes out sharp.")
+    if scale <= DRIZZLE_MAX_USEFUL_SCALE:
+        lever = ("More subs won't do it — they make the picture cleaner, not "
+                 "bigger. What adds detail is re-stacking with Drizzle "
+                 "(super-resolution) switched on, which pays off when you have "
+                 "plenty of subs.")
+    else:
+        lever = ("That's more than super-resolution alone adds, so this one "
+                 "wants a mosaic — the same object shot as several overlapping "
+                 "panels. More subs make the picture cleaner, not bigger.")
+    return f"{lead} {lever}"
 
 
 def render_print(rgb: np.ndarray, option: PrintOption):

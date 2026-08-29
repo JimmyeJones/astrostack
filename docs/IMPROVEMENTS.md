@@ -45,6 +45,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 _(none — claim an item here with your branch name)_
 
+> **Builder 2026-08-29, branch `claude/compassionate-galileo-eypoyg` — run finished, all claims released.**
+> Shipped: the two-pass error-list loose end (**v0.294.3**), "what would it take to print bigger?"
+> (**v0.295.0**), and the framing nudge on "Point here tonight" (**v0.295.1**). **Stood down** on *"the picture
+> a beginner actually shares is 1024 px wide"* — sizing it against the code showed an **L**, not the filed
+> S–M; the ⚠️ Builder note now on that entry has the three pieces, the cache the recipe path needs, and the
+> test blast radius. Also pruned *"Was my focus sharp last night?"* as already shipped twice over.
+> Claiming in the run's **first** commit and pushing it immediately (per the five duplicate-collision process
+> notes) cost about a minute and is worth doing.
+
 ---
 
 ## Bugs (fix these first)
@@ -15624,9 +15633,53 @@ problems. Dogfood it every big-picture run and fix root causes.
     moves, plus a check it never *over*-counts. Small and well-contained; grep for other readers of
     `n_frames_used` first (the noise-ratio badge anchors on √N).
 
-- **NEW IDEA (Builder 2026-08-29, the loose end left by the v0.294.1 two-pass frame-count fix) — a sub that
-  blipped in pass 1 and stacked fine in pass 2 now counts as *used*, but its pass-1 error string is still in
-  the run's error list, so the Jobs summary reports a failure for a frame the header says was combined.**
+- **NEW IDEA (Builder 2026-08-29, traced while making the run's error list honest in v0.294.3) — a stack run's
+  per-frame error list has **no UI consumer at all**, so the storage signal it carries only ever reaches the
+  raw job-result JSON.** *(Pillar: trust + autonomy — PRIORITY 2–3; size S; read-only, additive. Confidence:
+  traced — `StackResult.errors` → `pipeline.py:2659` `"errors"` on the job result, and a grep of
+  `frontend/src` finds **no** reader of it for a stack job; `Jobs.tsx`'s `errors` is the unrelated per-*target*
+  `stack_errors`/`qc_errors` map, and `Editor.tsx`'s is the editor's `op_errors`.)* So a night where the NAS
+  share dropped forty reads produces forty accurate, per-file error strings that nobody will ever see. The
+  walk-away owner instead learns about it obliquely, through `n_align_failed` / `n_unreadable` counts on
+  History's honest-accounting line — which is the *right* surface, and is exactly where these belong.
+  **Shape:** roll the strings up server-side into a small count (how many subs hit a read error, and — now that
+  v0.294.3 marks them — how many of those **recovered on the other pass**) and put one sentence beside the
+  existing "150 couldn't be aligned" clause: *"3 subs hit a read error; 2 of them read fine on the second try —
+  worth checking the drive or share they live on."* **Why it's better than showing the list:** forty raw
+  `OSError` lines are noise, one counted sentence naming the cause and the fix is guidance — the same shape
+  `missingSubsNote` already uses, and it should sit right next to it so the two storage signals read as one
+  story. **Grep first:** `missingSubsNote` / `alignFailureNote` in `Jobs.tsx` and the accounting line in
+  `History.tsx:311` are where this lands; `RECOVERED_ERROR_SUFFIX` in `seestack/stack/stacker.py` is how a
+  recovered line is identified — count it there rather than re-parsing the suffix in the frontend.
+
+- **✅ SHIPPED (Builder, v0.294.3, branch `claude/compassionate-galileo-eypoyg`) — ~~a sub that blipped in
+  pass 1 and stacked fine in pass 2 counts as *used*, but its pass-1 error string is still in the run's error
+  list, so the run reports a failure for a frame the header says was combined.~~** Built as the entry's
+  preferred half: the line is **re-worded, never dropped**, so a flaking NAS share still shows.
+
+  **What shipped.** A new `_PassFrameLog` (frame id → the index of the line that pass appended to the run's
+  shared `errors`, plus the ids that actually contributed) is filled in by **both** two-pass paths — the κ-σ
+  `_pass` and the drizzle-rejection `_drizzle_pass` — and `_mark_recovered_errors` then appends
+  `RECOVERED_ERROR_SUFFIX` (*"— read again on the other pass and combined, so this sub IS in the picture"*) to
+  exactly the lines whose frame the **second** pass combined. Everything else is untouched by construction: a
+  frame that failed *both* passes keeps both plain lines (that is the real failure the list exists for), and so
+  does one that failed the second pass, whose light genuinely isn't in the picture (`n_frames_used` is pass 2's
+  count). A frame with no `id` is never recorded, so no line can be mis-attributed; the re-wording is
+  idempotent and bounds-checked. Single-pass runs (min/max reject, no-clip, single-pass drizzle) don't ask for
+  a log at all, so they are bit-for-bit unchanged — as is every healthy run, which has no errors to re-word.
+
+  **Upgrade-safe (§9):** engine-internal only — no config, schema, on-disk, API-shape or default change; the
+  job result's `errors` list is the same list of strings it always was.
+
+  **Tests (+7, 4 fail before):** three end-to-end in `tests/test_stack_two_pass_frame_count.py` (the recovered
+  sub's line still names the file and the underlying `OSError` *and* ends with the suffix; a pass-2 failure
+  keeps its plain error; a sub that fails both passes keeps **both** plain lines), three pure unit tests of the
+  re-wording rule (only a frame the second pass combined, idempotent, a slot past the end of the list can't
+  raise), one end-to-end in `tests/test_drizzle_reject.py` for the drizzle two-pass path, plus an added
+  `res.errors == []` assertion on the existing ordinary-run test.
+
+  Original spec, for the record:
+
   *(Pillar: trust / friendliness — PRIORITY 3; size S; presentation-only, no engine behaviour change.
   Confidence: traced — `_pass` appends to the shared `errors` list on any exception (`stacker.py` ~2361) and
   both passes are handed the *same* list; `pipeline.py:2659` passes it straight to the job result.)* The
@@ -17226,8 +17279,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Beginner bar:** clears it easily — no astro knowledge needed, purely "here's a picture of everywhere
   you've pointed your scope," and it's explicitly a pride/fun feature, which the owner asked for directly.
 
-- **NEW IDEA (Builder 2026-08-27, the half v0.290.2 deliberately left out) — carry the "nudge it this way"
-  chip onto the *other* pre-session surfaces, above all "Finish what you started".** *(Pillar: autonomy +
+- **✅ SHIPPED (Builder, v0.295.1, branch `claude/compassionate-galileo-eypoyg`) — ~~carry the "nudge it this
+  way" chip onto the *other* pre-session surfaces, above all "Finish what you started".~~ Shipped for the one
+  card the entry called out, and deliberately **not** for the other two.**
+
+  **It turned out to be frontend-only.** `ContinueTonightCard` reads `/api/plan/tonight`, not `/best-tonight` —
+  and those rows already carry `recentre_nudge` (v0.290.2). So the card just renders the existing
+  `recentreNudgeRowBadge` with the backend's own `short` phrase, which is the whole point: the chip on the
+  Dashboard and the chip on the Tonight page are the *same* helper over the *same* payload, so they cannot
+  disagree, and neither re-rounds the number. Nothing new is computed and no endpoint changed.
+
+  **Why only this card — the entry's own caution, applied.** `PointHereTonightCard`, `ContinueTonightCard` and
+  `SuggestTargetsCard` sit **side by side on the Dashboard**, so the same sentence on all three is clutter, not
+  guidance. `ContinueTonightCard` is the one that names a target you've *already shot* and tells you to point
+  there tonight, which is the only one where "and nudge 1.0° south this time" is both applicable and
+  actionable. `SuggestTargetsCard` suggests targets you've never shot, which by definition have no nudge.
+  I also started, then **reverted**, an additive `recentre_nudge` on `nightplan.TonightPick` (the
+  `/best-tonight` payload) — with the caution above there is no consumer for it, and shipping unused API
+  surface on a live install is speculative. Anyone wiring `PointHereTonightCard` later should add it then.
+
+  **Tests (+2 in `ContinueTonightCard.test.tsx`, 1 fails before):** a target whose newest picture landed
+  off-centre shows `Nudge 1.0° south` on the card; a well-framed one shows no chip at all (never a guessed
+  direction).
+
+  Original spec, for the record:
+
+  *(Pillar: autonomy +
   better-picture-next-time, PRIORITY 2–3; size S; additive, no new deps — the fact is already computed and
   cached.)* v0.290.2 put the chip on the Tonight planner's target rows, which is the right *first* home. But
   the surface a beginner most often acts on before a session is the Dashboard's "Finish what you started" /
@@ -17311,6 +17388,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   into a real render on a RAM-capped NAS, so cap it, do it in the threadpool as the full-res download already
   does, and leave the *gallery/History thumbnail* on the cheap stored preview — only the export grows. Keep
   the un-rotated/no-marks path byte-identical where it can be, or state plainly that it changed.
+
+  **⚠️ Builder note (2026-08-29, branch `claude/compassionate-galileo-eypoyg`) — I claimed this, sized it
+  against the real code, and STOOD DOWN before writing any of it. It is not S–M; read this before picking it
+  up, because two of the three pieces are cheap and the third is what makes it an L.**
+  1. **The plain (non-recipe) path is genuinely easy, and the note below is right about why.** Render un-rotated
+     through `render_preview_png_full_res(fits, max_long_edge=~2560, stretch=run.preview_stretch,
+     black=run.preview_black)`, then apply the *existing* `orient_preview_north_up(..., already_deg=0.0)` — a
+     fresh render is on the canvas grid by construction, so `baked_north_up` is 0 for it,
+     `_unrotated_preview_width` collapses to the PNG's own width, and the marks/nameplate machinery is already
+     fraction-of-width so it scales for free. Memory is bounded: `load_stack_rgb(max_width=cap)` decimates
+     *during* load, so the peak is the output size, not the master's.
+  2. **The recipe path is not.** A "Process target" auto-edit — the owner's *main* workflow — leaves the run
+     display-space with its look in a saved recipe, and the only honest render for it is
+     `pipeline.render_run_recipe_fullres_png`, which goes through `_render_recipe_fullres` →
+     `_load_full_rgb_wcs` at **native** resolution and only decimates afterwards. That is fine behind the
+     deliberate "Download full-res PNG" button; behind a casual *share* tap on a NAS it is a multi-second,
+     full-canvas render every time. So the real shape is **render once and cache it** (keyed on the run's
+     preview mtime, with the cache living in the target tree beside the other derived files) — that cache, its
+     invalidation and its cleanup are the bulk of the work, and without it the feature is either slow or only
+     helps the runs that need it least.
+  3. **Test blast radius, stated so nobody is surprised.** `tests/webapp/test_share_north_up_double_rotation.py`
+     asserts **byte identity** with `png_bytes_to_jpeg(stored_preview)` in three places; those encode the
+     double-rotation invariants and would need rewriting against the new source (legitimately — the fresh
+     render *removes* that whole bug class for this path — but carefully, not casually).
+     `tests/webapp/test_wallpaper.py` is worse: its fixtures register a **zero-valued** FITS beside a
+     solid-colour preview, so any switch to a FITS-derived source turns its pictures black and its
+     colour/mean assertions meaningless. The **wallpaper** half therefore needs its own slice and its own
+     fixture rework — it is not a free rider on the share JPEG.
+  **Suggested slicing:** (i) the cache + the plain path behind it; (ii) the recipe path onto the same cache;
+  (iii) the wallpaper, with new fixtures. Re-size this entry as **L**.
 
   **Builder note (2026-08-27, after the v0.290.1 North-up sweep):** this got *simpler*, not just more
   worthwhile. A full-res render from the FITS is on the canvas grid by construction, so it takes
@@ -17534,9 +17641,66 @@ problems. Dogfood it every big-picture run and fix root causes.
   it will promise fewer files than the zip holds; and the card currently hides below two *targets*, which
   would still hide the button from someone whose only pictures are Moon stills.
 
-- **NEW BEGINNER FEATURE (Builder 2026-08-27, the motivating half "Print it" v0.286.0 deliberately left out) —
-  turn "how big can I print this?" into a *reason to keep shooting*: tell a target still short of a good print
-  what it would take to get there.** *(Pillar: enjoy + autonomy — PRIORITY 2–3. Size: S.)* v0.286.0 can now
+- **NEW IDEA (Builder 2026-08-29, the obvious next tap on "what would print bigger?" v0.295.0) — say the print
+  size on the **Stack form**, where the decision that sets it is actually made.** *(Pillar: enjoy + autonomy —
+  PRIORITY 2–3; size S; read-only, additive, no new deps — every ingredient exists.)* v0.295.0 tells a finished
+  picture *"about 1.3× more detail would print this at A3 — the lever is re-stacking with Drizzle on."* That is
+  the right sentence in the wrong tense: by the time it is read, the stack that fixed the canvas size is
+  already made, and the user has to remember it until the next time they open the Stack form. **The Stack form
+  is where the lever lives**, and it already knows both halves of the answer: `estimate_stack` returns the
+  canvas the run *would* produce for the settings on screen (drizzle on/off, `drizzle_scale`, mosaic), and
+  `print_options` turns any canvas into a print size in pure arithmetic. So the estimate panel can say *"this
+  stack will print sharply up to A4 — at Drizzle ×2 it would reach A3"* **before** the user commits, in the
+  unit a human wants rather than in megapixels. **Why it beats the finished-picture version:** it is
+  actionable at the one moment it can change the outcome, and it turns an advanced-section knob nobody
+  understands ("Drizzle scale") into a plain benefit. **Cautions:** the estimate panel already carries a
+  memory verdict (`memory_fix` / `suggested_drizzle_scale`), so the print line must **defer** to it — never
+  offer a bigger print on a canvas the guard is refusing, which is the exact trap `bigger_print` was
+  deliberately not coupled to on the *finished* picture. And keep it to one line: the Stack form is already
+  dense (AGENTS §1 IA priority). **Grep first:** `seestack.printexport.print_options` / `bigger_print`,
+  `estimate_stack`'s returned `canvas_h`/`canvas_w`, and the estimate panel component that renders `memory_fix`.
+
+- **✅ SHIPPED (Builder, v0.295.0, branch `claude/compassionate-galileo-eypoyg`) — ~~turn "how big can I print
+  this?" into a *reason to keep shooting*: tell a target still short of a good print what it would take to get
+  there.~~ Built with the honesty caution as the load-bearing part — and it turned up a shipped copy line that
+  broke exactly that rule.**
+
+  **The bug the spec's caution predicted, found and fixed.** `print_advice`'s too-small line read *"This picture
+  doesn't have enough detail for a sharp print yet — **another night or two of subs will get it there**."* That
+  is false: subs add signal, not pixels, so another night of the same pointing can never unlock a print. It now
+  reads *"…it needs more pixels, not more exposure."* and the lever is named beside it.
+
+  **The nudge.** New pure `seestack.printexport.bigger_print(width_px, height_px)` → `BiggerPrint | None`: the
+  next paper size *up* from what the picture already fills, the gap to it (times more pixels **per side**,
+  rounded **up** to a tenth so acting on the number really gets there), the minimum pixel canvas that would
+  qualify, and the finished sentence. It names **drizzle** while the gap is within
+  `DRIZZLE_MAX_USEFUL_SCALE` (×2.0 — the Stack form's "full super-res"), a **mosaic** beyond it, and stays
+  silent past `BIGGER_PRINT_MAX_SCALE` (×3.0) rather than setting an unreachable goal or on a picture that
+  already prints at the largest size offered. Papers differ slightly in aspect (10×8 is 1.25, A4 is 1.41), so a
+  very wide picture can clear A4 while missing the *smaller* 10×8 — the search skips any paper no larger than
+  what the picture already prints, so the nudge always points up.
+
+  **Where it lands — and the friendliness half.** Additive optional `bigger` on the existing `GET
+  …/editor/print-sizes` (null when there's nothing to reach for; an older frontend ignores it). In the editor's
+  export panel, both advice lines moved **outside** the size picker: the picker hides itself on a picture too
+  small to print sharply, which meant that case — the one where a beginner most needs to know *why* — rendered
+  the existing `advice` string nowhere at all. It is now the case that gets the most guidance.
+
+  **Deliberately not coupled to the memory guard.** The sentence names a lever ("re-stacking with Drizzle
+  switched on"), it does not promise the run will fit — the Stack form's own estimate (`memory_fix` /
+  `suggested_drizzle_scale`) already tells the user that at the moment they set it up, and duplicating the
+  judgement here would give two voices one answer.
+
+  **Tests (+9 engine, +1 endpoint, +2 frontend):** the next size and its gap; silence at the largest size, on
+  an unreachable gap (with the ×3.0 boundary pinned to the constant), and on degenerate sizes; a too-small
+  picture still gets a first step; drizzle-vs-mosaic wording follows the scale; the gap really is enough
+  (growing the picture by `scale` makes `print_options` offer that size); the next size is always larger than
+  everything already printable; `print_advice` mentions neither "night" nor "subs"; the endpoint's `bigger`
+  across all three cases; and the editor rendering both the too-small explanation and the nudge.
+
+  Original spec, for the record:
+
+  *(Pillar: enjoy + autonomy — PRIORITY 2–3. Size: S.)* v0.286.0 can now
   answer, from a picture's own pixels, the largest size it will print sharply — and for a small or
   single-panel stack the honest answer is sometimes *nothing yet*. That is a genuinely motivating fact and the
   app currently drops it on the floor: the print control simply hides. Meanwhile the goal/readiness card
@@ -18251,10 +18415,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   end-to-end; never let the recording change the *pixels* of the stack (it only observes the same keep/drop the
   combine already applied); and phrase the readout as protection delivered, not as "N% of your data thrown away."
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #8) — "Was my focus sharp last night?": a per-session focus / soft-star
-  flag that tells a beginner, in plain language, when a night's subs came out soft (a slipped-focus Seestar
-  autofocus — one of the most common beginner ruin-the-night mistakes) so they know to re-focus, not that they
-  did nothing wrong.** *(Pillar: understand + trust — PRIORITY 3. Size: M.)* Every sub already carries a measured
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #8) — "Was my focus sharp last night?": a per-session focus /
+  soft-star flag.**~~ — **ALREADY SHIPPED; pruned by the Builder 2026-08-29** (branch
+  `claude/compassionate-galileo-eypoyg`) after doing the grep the spec itself asks for at the end. This exists
+  **twice over**, and both halves are the per-target relative comparison the entry (rightly) insists on rather
+  than an absolute arcsec bar:
+  * **Across sessions** — `frontend/src/components/target/softStars.ts` (`softerThanUsual`, with
+    `SOFT_STAR_MARGIN = 0.25` and `SOFT_STAR_MIN_PRIORS = 2`) compares the newest stack's own measured
+    `stack_fwhm_px` against the **median of that target's prior runs**, and says nothing on the first run, on
+    missing measurements, or inside the normal band. Covered by `softStars.test.ts` / `focusChips.test.ts`.
+  * **Within a night** — `seestack/session_recap.py`'s `focus_trend()` / `FocusTrend` trends the most recent
+    session's per-sub FWHM over capture time and returns a plain `"steady"` / `"softened"` / `"improved"`
+    verdict (with `FOCUS_TREND_DRIFT_RATIO` **and** an absolute floor, so ordinary seeing wobble never cries
+    drift), rendered by `frontend/src/components/focusTrend.ts` — whose copy already lands on the entry's own
+    advice: *"a dew heater or a quick refocus next time helps"*.
+  Both are informational only and neither rejects a frame, which is exactly the default the entry asked for.
+  **Nothing to build.** Kept rather than deleted so the idea isn't re-derived a third time. Original spec below.
+
+  *(Pillar: understand + trust — PRIORITY 3. Size: M.)* Every sub already carries a measured
   FWHM (used by QC, weighting, and the reference-frame pick), so the app *knows* when a night's stars are bloated
   — but nothing surfaces that to the beginner. **The feature:** on the Target page (and in the "last night" recap),
   when a session's **median FWHM is materially worse than this target's own best nights** (e.g. ≥1.4× the target's

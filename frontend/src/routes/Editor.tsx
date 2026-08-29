@@ -2366,10 +2366,20 @@ export function EditorView() {
                   {downloadPrint.isPending && printProgress ? (
                     <Text size="xs" c="dimmed" ta="center" mt={4}>{printProgress}</Text>
                   ) : null}
-                  {printSizes.data?.advice ? (
-                    <Text size="xs" c="dimmed" mt={4}>{printSizes.data.advice}</Text>
-                  ) : null}
                 </>
+              ) : null}
+              {/* The two advice lines sit *outside* the size picker on purpose.
+                  A picture too small to print sharply hides the whole control,
+                  which used to leave it saying nothing at all — the one case
+                  where a beginner most needs to know why, and what would change
+                  it. The second line names the lever honestly: a bigger print
+                  needs more *pixels* (drizzle / a mosaic), and another night of
+                  subs makes the picture cleaner rather than bigger. */}
+              {printSizes.data?.advice ? (
+                <Text size="xs" c="dimmed" mt={4}>{printSizes.data.advice}</Text>
+              ) : null}
+              {printSizes.data?.bigger?.text ? (
+                <Text size="xs" c="dimmed" mt={4}>{printSizes.data.bigger.text}</Text>
               ) : null}
               {shareBlurb ? (
                 <Group gap="xs" mt={6} wrap="nowrap" align="center">

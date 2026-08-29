@@ -824,3 +824,40 @@ def test_a_non_drizzle_unattended_run_is_never_rescaled(tmp_path):
             ), memory_budget_gb=0.000001)
     finally:
         proj.close()
+
+
+def test_a_sub_that_blipped_in_the_statistics_pass_reads_as_recovered(
+        tmp_path, monkeypatch):
+    """Two-pass drizzle is the other place a frame can fail one pass and land in
+    the picture on the next. Its error line must say so, exactly as the κ-σ
+    two-pass path's does (see ``tests/test_stack_two_pass_frame_count.py``)."""
+    from seestack.stack.stacker import RECOVERED_ERROR_SUFFIX
+
+    spec = [{"seed": 3, "noise_seed": 400 + i, "n_stars": 10} for i in range(6)]
+    proj = _build_project(tmp_path / "recovered", [dict(s) for s in spec])
+    try:
+        real_add = DrizzleStacker.add_frame
+        seen = {"stats": 0}
+
+        def flaky(self, rgb, in_wcs, **kw):
+            # ``_sq_drizzlers`` is only built for the statistics pass, so this
+            # blips exactly one frame on pass 1 and leaves pass 2 alone.
+            if self._sq_drizzlers is not None:
+                seen["stats"] += 1
+                if seen["stats"] == 1:
+                    raise RuntimeError("transient read error")
+            return real_add(self, rgb, in_wcs, **kw)
+
+        monkeypatch.setattr(DrizzleStacker, "add_frame", flaky)
+        res = run_stack(proj, StackOptions(
+            drizzle=True, drizzle_reject=True, drizzle_scale=1.0,
+            drizzle_pixfrac=1.0, background_flatten=False,
+            suppress_hot_pixels=False, max_workers=1, output_name="recovered",
+        ))
+        # Every frame was deposited by pass 2, so every frame is in the picture.
+        assert res.n_frames_used == 6
+        assert len(res.errors) == 1, res.errors
+        assert "transient read error" in res.errors[0]
+        assert res.errors[0].endswith(RECOVERED_ERROR_SUFFIX)
+    finally:
+        proj.close()

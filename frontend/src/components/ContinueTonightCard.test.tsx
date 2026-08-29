@@ -95,6 +95,40 @@ describe("ContinueTonightCard", () => {
     expect(container.querySelector(".mantine-Paper-root")).toBeNull();
   });
 
+  it("carries the 'nudge it this way' chip onto the card you act on", async () => {
+    // The framing advice from this target's newest picture, said on the screen a
+    // beginner reads *before* pointing the scope rather than only on the finished
+    // picture's card the morning after.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(
+      plan([
+        owned({
+          name: "M31", target_safe: "m31", total_exposure_s: 4.5 * 3600, score: 50,
+          recentre_nudge: {
+            direction: "south", degrees: 1.0, short: "1.0° south",
+            text: "Next time, nudge your Seestar about 1.0° south before you start, "
+              + "and it'll sit in the middle.",
+          },
+        } as Partial<PlannedTarget>),
+      ]),
+    );
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+    renderCard();
+    expect(await screen.findByText("Nudge 1.0° south")).toBeInTheDocument();
+  });
+
+  it("stays silent about framing when the newest picture was well framed", async () => {
+    // Never a guessed direction: no nudge from the backend → no chip at all.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(
+      plan([owned({ name: "M31", target_safe: "m31", total_exposure_s: 4.5 * 3600 })]),
+    );
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByText("Point here tonight")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Nudge /)).toBeNull();
+  });
+
   it("honours a user-set integration goal from library-progress", async () => {
     // M31 at 4.5 h: default 6 h goal → improvable and it would be the pick. With
     // a user goal of 4 h it's already 'plenty' → excluded, leaving M81.
