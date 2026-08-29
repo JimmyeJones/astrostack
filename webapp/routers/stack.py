@@ -1002,12 +1002,24 @@ async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dic
     def work() -> dict[str, Any]:
         from seestack.annotate import objects_in_field
         from seestack.io.wcs_io import celestial_wcs_from_fits
+        from seestack.skymarks import sky_directions
 
         wcs, width, height = celestial_wcs_from_fits(fits_path) if fits_path else (None, 0, 0)
         objs = objects_in_field(wcs, width, height)
+        directions = sky_directions(wcs, width, height)
         return {
             "width": width,
             "height": height,
+            # "Which way is up?" — where North and East point on this run's own
+            # pixel grid, so the in-app overlay can draw the same rose the shared
+            # JPEG bakes (v0.284.0) instead of the file and the screen disagreeing.
+            # Same numbers, same helper, one definition. None when the run has no
+            # usable orientation — the overlay then simply omits the rose rather
+            # than drawing a made-up direction.
+            "directions": (
+                {"north_deg": directions.north_deg, "east_deg": directions.east_deg}
+                if directions is not None else None
+            ),
             # "How big is this in the sky?" — a round scale bar + full-Moon
             # comparison from the run's own local pixel scale, so a beginner can
             # read (and share) the picture's true angular size. None when the run

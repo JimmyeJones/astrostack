@@ -11867,6 +11867,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   mandate: the beginner stops having to *know* what a matching dark is. **Grep first:** `routers/stack.py` /
   `get_stack_defaults` — confirm the form doesn't already thread a confidence hint before building; reuse
   `_confident_master_binding` rather than re-deriving the match.
+  **Builder 2026-08-29 — did that grep, and the premise is largely already false. RESHAPE BEFORE BUILDING.**
+  The entry's claim that the Calibration box "only says either *No masters built yet* or shows a raw picker" is
+  not what `routes/Stack.tsx` does. It already queries `calibrationSuggestions(safe)` and, via
+  `src/calibrationFit.ts`, already renders: a **per-option misfit suffix** on every master in the picker
+  (`masterOptionSuffix`, so a wrong-size master is visibly unusable), an **exposure-mismatch caution** naming
+  both numbers and the fix ("This dark was shot at 10s but your subs are 30s — …"), a **temperature-mismatch
+  caution**, a **bias-size warning**, a **"scale it with a master bias" nudge** when the library holds one, a
+  **dark-already-contains-bias** note, and a prominent **"you have masters but aren't using them"** advisory
+  with a one-click **apply-recommendation** button. So "a beginner has no idea whether it fits" is not the live
+  behaviour, and a green/amber verdict on top of that would be a *sixth* piece of calibration copy on a form the
+  owner already calls too busy.
+  **What is genuinely left, and it is small:** the form's recommendation follows `recommend_masters` (best
+  *available*), while the walk-away path follows the stricter `auto_bind_master_paths` (best *confident*) — so
+  the two paths can pick differently, and the form never says "this is what the unattended stack would have
+  chosen". The worthwhile slice is therefore **agreement, not more copy**: surface the confident binding as the
+  pre-selection / one-click recommendation so the interactive path lands where the walk-away path would, and let
+  the *existing* cautions keep doing the explaining. Do not add another advisory line.
 
 - **NEW IDEA (Scout 2026-08-26 #6) — auto-detect the Seestar's calibration-frame folders sitting in `incoming/`
   and offer a one-click "Build master darks" instead of making the beginner know what calibration is.**
@@ -13600,6 +13617,26 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-29, read off `AnnotatedImage` while putting the object labels on the Target
+  page) — the object overlay draws every label at full size with no collision handling, so a rich field
+  degenerates into an unreadable pile exactly where the labels are most interesting.** *(Pillar: understand —
+  PRIORITY 3. Size: S–M. Confidence: high — traced, not yet rendered against a crowded field.)*
+  `AnnotatedImage` renders `markers.filter(m => m.visible)` — **all** of them, each an 8 px dot plus a
+  nowrap text chip, positioned dead-centre on the object with `translate(-50%,-50%)` and no awareness of its
+  neighbours. `objects_in_field` returns every bundled catalog object whose centre lands in the frame, and the
+  frame is not small: the annotations test's own fixture is a 3.3° × 2.5° field. Point that at a crowded
+  region — the Sword of Orion, the Virgo cluster, anything along the galactic plane — and several chips land
+  within a few pixels of each other on a 260 px-tall card and overlap into mush. The picture is fine; the
+  *labels* are the thing that stops being readable, and they stop being readable precisely on the pictures
+  worth labelling. **Shape (pure, testable, no backend):** a `deconflictMarkers(markers, chipW, chipH)` beside
+  `objectMarkerLayout` that nudges overlapping chips apart along the axis with the most room and drops the
+  least-notable of a hopeless pile (the payload has no brightness, but distance-from-centre — the ordering
+  `describeFieldObjects` already uses — is a reasonable proxy), plus a hard cap on labels drawn at small box
+  sizes with the remainder still named in the text readout underneath (which both consumers already render, so
+  nothing is lost — it moves from the image to the list). **Care:** keep it pure and box-size-driven so the
+  same field labels sensibly on a 180 px History card, a 260 px Target card and a full-screen lightbox; and
+  never move a *dot* — only its chip — or the label stops pointing at its object.
+
 - **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the owner *save* their
   universe map, and put it where they'd think to look for it.** *(Pillar: enjoy + share — PRIORITY 3.
   Size: S. Confidence: high — the picture already exists at a stable URL.)* "My map" is a pride object:
@@ -13628,10 +13665,54 @@ problems. Dogfood it every big-picture run and fix root causes.
   let `croppedAnnotationView` pick. Cosmetic, never wrong-result — the picture and its pins are correct as of
   v0.291.0; only one sentence overstates the field.
 
-- **NEW IDEA (Builder 2026-08-27, the parity gap the v0.284.0 "Scale & compass" feature just opened) — the
-  downloaded picture now carries a scale bar *and* a North/East rose, but the app's own on-screen overlay still
-  shows only the bar, and only on the History page. Screen and file should show the same two marks, and the
-  page a beginner actually lands on should show them at all.** *(Pillar: understand + friendliness — PRIORITY
+- **✅ SHIPPED — BOTH HALVES (Builder, v0.293.0 + v0.294.0, branch `claude/compassionate-galileo-60dqir`) —
+  ~~the downloaded picture carries a scale bar *and* a North/East rose, but the app's own on-screen overlay
+  shows only the bar, and only on the History page.~~**
+
+  **Half (a) — the rose on screen (v0.294.0), built exactly as filed.** `sky_directions` now rides the
+  `…/annotations` response as an additive `directions: {north_deg, east_deg} | null` (the same helper the baked
+  JPEG calls, so screen and file cannot disagree — the API hands the frontend the engine's numbers rather than
+  letting it re-derive an orientation from a CD-matrix sign, which is the convention hazard the sky-atlas
+  overlay is still gated on). A pure `compassLayout(directions, boxW, boxH)` sits beside `scaleBarLayout` in
+  `AnnotatedImage.tsx`, converting the engine's convention (degrees CCW from screen-right, screen-up positive)
+  into CSS vectors — negating y, the sign error that would silently draw the sky upside down — and sizing the
+  arms off the box's **short** side so a wide mosaic and a square crop get proportionally the same rose. The
+  rose renders top-right, opposite the bar's bottom-left, so they can never collide; the baked version puts
+  both along the top only because its bottom edge is the caption zone.
+  **It rides the existing Scale toggle rather than adding a third**, and that toggle is now named **"Scale &
+  compass"** — they are one question ("how big, and which way up?"), the file has drawn them as a pair since
+  v0.284.0, and a third menu item on the busiest card in the app is exactly what the standing IA priority says
+  not to do. Still **off by default**, as the entry's Care note requires.
+
+  **One deliberate departure from the filed spec.** The spec asks for the arms to be *turned* by the applied
+  rotation when the North-up toggle is on. They are **hidden** instead — the rose obeys the same
+  `cantPlaceMarks` rule the pins and bar already do (a rotation a past save baked in, or a render whose
+  geometry can't be reconciled), which is the honest, already-tested behaviour, and the note beside the picture
+  now names the compass alongside them. Turning the rose to match a *live* Adjust render would need the render's
+  angle client-side, which the browser does not have; a crop needs no composition at all, since trimming a
+  border turns nothing. Filed as a follow-on below rather than guessed at.
+
+  **Half (b) — on the Target page (v0.293.0).** The object labels shipped there first, under a "What's in it?"
+  toggle on `LatestPictureCard` — see the full entry under "Features that serve real workflows". The card
+  deliberately keeps **one** toggle: a second ("Scale & compass") would put four controls in that header row,
+  which wraps badly on the phone the owner reads this on. Filed as a follow-on.
+
+  **Upgrade-safe (§9):** one additive, optional response field (an older frontend ignores it; an older backend
+  omitting it reads as "no rose"), no schema/config/on-disk change, no default flip. **Tests: +11** — 8 vitest
+  in `AnnotatedImage.test.tsx` (`compassLayout`: North-up straight up with East to the left, a rotated field
+  turning both arms, a mirrored field drawn mirrored because that is what the WCS says, short-side arm sizing,
+  the four nothing-to-place cases, a non-finite angle refused rather than drawing a NaN arm; plus the component
+  rendering with and without the rose), 1 in `History.test.tsx` (the renamed pair-toggle and its fetch), and 2
+  in `tests/webapp/test_stack_annotations.py` (the field's values pinned **against the engine helper itself**,
+  so this asserts parity rather than re-deriving the geometry; and `null` for a run with no WCS).
+
+  **Follow-ons deliberately left open:** (i) turn the rose by the live/baked rotation instead of hiding it —
+  needs the applied angle on the client, which is a server-side number today; (ii) put the "Scale & compass"
+  pair on the Target page's picture card once that header row can carry another control.
+
+  Original spec, for the record:
+
+  **~~NEW IDEA (Builder 2026-08-27)~~** *(Pillar: understand + friendliness — PRIORITY
   3. Size: S–M. Confidence: certain — I built the baked half this run and read the overlay to match it.)*
   **Two halves, either shippable alone.** (a) *The rose on screen.* `AnnotatedImage.tsx` already draws the
   scale bar over a contain-fit preview via the pure `scaleBarLayout`; the compass needs the same treatment —
@@ -17230,8 +17311,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   the Gallery's `heroes`/`videos` "best pictures" selection and the existing fact copy rather than a second
   definition of either.
 
-- **NEW IDEA (Scout 2026-08-27 #20) — "What's in my picture?" object labels only appear in History, where most
-  beginners never look — surface them on the main Target picture and let them travel into a share.** *(Pillar:
+- **✅ SHIPPED (Builder, v0.293.0, branch `claude/compassionate-galileo-60dqir`) — ~~"What's in my picture?"
+  object labels only appear in History, where most beginners never look — surface them on the main Target
+  picture.~~** The first (main) half shipped exactly as the shape below asks, reuse-only: `LatestPictureCard`
+  now renders the picture through the existing `AnnotatedImage` instead of a bare `<Image>`, with a
+  **"What's in it?"** toggle beside "Edit this picture" that turns the named-object pins on. Off by default and
+  **lazily fetched** — the annotations query shares History's exact `["annotations", safe, run.id]` cache key,
+  so asking on one page warms the other and an ordinary Target load makes no extra request. The toggle is only
+  offered on a run that still has its FITS (the object pixels come off its WCS). Underneath, one line names
+  what was pinned — capped at six with "and N more" so the page the owner called "extremely busy" gains one
+  line, not a paragraph — or says plainly that nothing catalogued landed in the frame.
+
+  **Both cautions honoured, and the third the crop work since added.** The pins are measured on the run's
+  un-rotated, un-cropped FITS grid, so: a preview a past Adjust save baked a North-up rotation into, and one
+  whose geometry can't be reduced to a crop at all (`preview_geometry_unknown`), both **hide** the pins and say
+  why in plain language rather than mis-plot them; and a border trim the one-click auto-edit baked in composes
+  exactly through the existing `croppedAnnotationView`, so an object the trim removed drops out of the labels
+  and the readout rather than being pinned onto sky that is no longer in the picture.
+
+  **Upgrade-safe (§9):** frontend-only, no new endpoint, no config/schema/on-disk/API change, and the labels
+  are opt-in per visit. **Tests: +12 vitest** in `LatestPictureCard.test.tsx` — 3 pure
+  (`inThisPictureSentence`: friendly-name preference, the six-object cap + "and N more", the empty field) and 9
+  on the card (no request before the user asks; the names once asked; the empty-field wording; no toggle
+  without FITS; the North-up and unreconcilable-geometry refusals; the cropped-out object dropping; a failed
+  fetch saying so instead of showing a blank line; and putting the labels away again).
+
+  **The follow-on the spec names is deliberately still open** (filed as its own idea below): baking the labels
+  into the shared JPEG the way the nameplate and scale bar already bake, so the "here's what's in my shot"
+  version is the one a beginner posts. That is a server-side render change, not a reuse, and deserves its own
+  run.
+
+  Original spec, for the record:
+
+  **~~NEW IDEA (Scout 2026-08-27 #20)~~** *(Pillar:
   understand + share, PRIORITY 3; size S; additive, reversible, no new deps. Confidence: traced — the
   `AnnotatedImage` component and its `objectMarkerLayout` geometry already exist and are wired into exactly one
   place, `frontend/src/routes/History.tsx:850`; grep found no other consumer.)* The app already has a complete,
@@ -17886,8 +17998,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   the in-app reveal (this is the *portable* artefact), the montage wall (many targets, one grid) and the recap
   poster (a night's stats): this is the *one target's before→after*, the thing people actually post.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list": a Messier/catalog checklist that lights up
-  the famous objects you've already captured and shows the rest as a bucket list.** *(Pillar: friendliness /
+- **NEW IDEA (Builder 2026-08-29, the follow-on v0.293.0 deliberately left out) — let the object labels travel
+  into the shared picture: a "label what's in it" variant of the share JPEG.** *(Pillar: understand + share,
+  PRIORITY 3; size S–M; additive, opt-in, no new deps.)* v0.293.0 puts the named-object pins on the Target
+  page's picture, which answers "what *is* that smudge?" for the owner — but the moment they share the picture,
+  the answer is gone, and "here's the Running Man Nebula next to Orion" is a far better post than an unlabelled
+  smudge. The share JPEG already bakes *server-side* overlays (`nameplate`, the scale bar — see the
+  `stackArtifactUrl(safe, id, "jpeg", …)` flags), and the object list is the same
+  `…/stack-runs/{id}/annotations` payload the frontend now reads, so this is a third baked overlay rather than
+  new machinery. **Shape:** a `label_objects` flag on the JPEG artifact endpoint that draws each object's pin +
+  name onto the rendered bytes with the existing text-drawing helper, and a "Labelled" item in the Target
+  page's Save/share menu next to the framed/nameplate variants. **Cautions (the same three the on-screen
+  version had to honour, and they are *harder* server-side because there is no toggle to fall back to):** the
+  pins are measured on the un-rotated, un-cropped FITS grid, so a run with `preview_north_up_deg`, a
+  `preview_crop`, or `preview_geometry_unknown` must respectively refuse / compose the trim / refuse — the
+  server-side equivalents of what `croppedAnnotationView` does for the browser; and a label must not be drawn
+  half off the edge. **Tests:** the labelled JPEG differs from the plain one only where labels land; a
+  North-up-saved run returns the plain picture unchanged (never a mis-plot); a cropped run's labels land inside
+  the trim.
+
+- **✅ ALREADY SHIPPED — DUPLICATE ENTRY, DO NOT RE-PICK (pruned by the Builder, 2026-08-29).** This is a
+  second, unstruck copy of the "My life list" idea that shipped in full: `seestack/lifelist.py`,
+  `webapp/routers/lifelist.py` (`GET /api/life-list`), `frontend/src/routes/LifeList.tsx` at `/life-list`, and
+  even follow-up (d) — the "nearly there" constellation nudge (`GET /api/life-list/nearly-there`,
+  `NearlyThereCard`) — all exist on `main` with their tests. The struck, written-up entry ~100 lines above is
+  the live record. A Builder run picked this up, wrote out the whole design, and only found the shipped code by
+  grepping first (AGENTS.md §1: *"grep before you build"*) — which is exactly the cost this convention exists to
+  prevent. Kept (rather than deleted) so the duplicate can't be re-filed from the Scout's notes.
+
+  Original spec, for the record:
+
+  **~~NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list"~~**: ~~a Messier/catalog checklist that lights up
+  the famous objects you've already captured and shows the rest as a bucket list.~~ *(Pillar: friendliness /
   autonomy + "understand / enjoy" — PRIORITY 3. Size: M.)* Every beginner astrophotographer knows the Messier
   list — capturing all 110 is *the* classic milestone — yet the app has no "which have I got?" view. The
   night planner ranks *tonight's* targets and each target has its own integration progress, but nothing shows

@@ -80,6 +80,48 @@ def test_annotations_lists_catalog_objects_in_the_field(client, solved_library):
     assert abs(sb["frame_arcmin"] - (3.0 * w / 60.0)) < 1e-3
 
 
+def test_annotations_report_where_north_and_east_point(client, solved_library):
+    """The in-app overlay draws the same rose the shared JPEG bakes (v0.284.0),
+    so the two can't disagree — which means the endpoint has to hand the frontend
+    the *engine's* numbers rather than let it re-derive an orientation from a
+    CD-matrix sign (the convention hazard the sky-atlas overlay is still gated
+    on)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 4000, 3000
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=w, h=h,
+                      arcsec_per_px=3.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    d = body["directions"]
+    assert d is not None
+    assert set(d) == {"north_deg", "east_deg"}
+    # Ground truth: the *same* helper the baked share picture uses, read off the
+    # same header — so this pins parity, not a re-derivation of the geometry.
+    from seestack.io.wcs_io import celestial_wcs_from_fits
+    from seestack.skymarks import sky_directions
+    wcs, gw, gh = celestial_wcs_from_fits(_run_fits(solved_library, safe, run_id))
+    expected = sky_directions(wcs, gw, gh)
+    assert expected is not None
+    assert abs(d["north_deg"] - expected.north_deg) < 1e-6
+    assert abs(d["east_deg"] - expected.east_deg) < 1e-6
+    # …and the two arms are genuinely different directions, so a rose drawn from
+    # them can't collapse into one line.
+    assert 30 < abs(((d["north_deg"] - d["east_deg"]) + 180) % 360 - 180) < 150
+
+
+def _run_fits(data_root, safe: str, run_id: int) -> str:
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+            return run.fits_path
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
 def test_annotations_empty_when_run_has_no_wcs(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=512, h=512,
@@ -89,8 +131,10 @@ def test_annotations_empty_when_run_has_no_wcs(client, solved_library):
     assert r.status_code == 200  # never 404s where the run exists
     body = r.json()
     assert body["objects"] == []
-    # No WCS → no scale bar (the overlay simply doesn't offer it).
+    # No WCS → no scale bar and no rose (the overlay simply doesn't offer them,
+    # rather than drawing a made-up direction).
     assert body["scale_bar"] is None
+    assert body["directions"] is None
 
 
 def test_annotations_404_for_unknown_run(client, solved_library):
