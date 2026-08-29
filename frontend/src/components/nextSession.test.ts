@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   describeGap,
   describeWindow,
+  finishForecast,
   formatGapHours,
   formatWindowDate,
   moonPhrase,
@@ -139,5 +140,55 @@ describe("windowsIntro", () => {
   it("is singular for one window and plural for more", () => {
     expect(windowsIntro(1)).toBe("Your next good window:");
     expect(windowsIntro(3)).toBe("Your next good windows:");
+  });
+});
+
+describe("finishForecast", () => {
+  const wins = [
+    win({ dark_start_utc: "2026-01-15T22:00:00+00:00" }),  // Thu 15 Jan
+    win({ dark_start_utc: "2026-01-18T22:00:00+00:00" }),  // Sun 18 Jan
+    win({ dark_start_utc: "2026-01-24T22:00:00+00:00" }),  // Sat 24 Jan
+  ];
+
+  it("dates the finish off the n-th night the target is actually well-placed", () => {
+    // Two nights of pace, but the second observable night is three days out —
+    // the whole point: a bare "2 more nights" would have implied tomorrow.
+    expect(finishForecast(2, wins)).toBe(
+      "About 2 more good nights — if the next clear ones cooperate, you could "
+      + "finish around Sun 18 Jan.");
+  });
+
+  it("words the last-night case as one night, not 'about 1'", () => {
+    expect(finishForecast(1, wins)).toBe(
+      "One more good night should finish this — if Thu 15 Jan stays clear, "
+      + "that could be the one.");
+  });
+
+  it("stays silent when it can't see far enough ahead to name a date", () => {
+    // The planner returns a capped list of windows; quoting the last one for a
+    // 5-night goal would promise a finish date that's too early.
+    expect(finishForecast(5, wins)).toBeNull();
+    expect(finishForecast(4, wins)).toBeNull();
+  });
+
+  it("says nothing without a pace estimate, or once the goal is met", () => {
+    expect(finishForecast(null, wins)).toBeNull();
+    expect(finishForecast(undefined, wins)).toBeNull();
+    expect(finishForecast(0, wins)).toBeNull();
+    expect(finishForecast(-1, wins)).toBeNull();
+    expect(finishForecast(Number.NaN, wins)).toBeNull();
+  });
+
+  it("says nothing when the planner found no windows at all", () => {
+    expect(finishForecast(2, [])).toBeNull();
+    expect(finishForecast(2, null)).toBeNull();
+  });
+
+  it("says nothing rather than a broken date when a window's stamp is junk", () => {
+    expect(finishForecast(1, [win({ dark_start_utc: "not-a-date" })])).toBeNull();
+  });
+
+  it("rounds a fractional night estimate up to a whole night", () => {
+    expect(finishForecast(1.2, wins)).toContain("Sun 18 Jan");
   });
 });

@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import {
-  Alert, Badge, Button, Card, Center, Checkbox, Group, Image, Loader, Menu, Paper,
-  SegmentedControl, Select, SimpleGrid, Spoiler, Stack, Text, TextInput, Title,
-  Tooltip,
+  ActionIcon, Alert, Badge, Button, Card, Center, Checkbox, Group, Image, Loader,
+  Menu, Paper, SegmentedControl, Select, SimpleGrid, Spoiler, Stack, Text, TextInput,
+  Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconArrowBackUp, IconCopy, IconCrop, IconGitCompare, IconPhoto, IconSearch,
-  IconSparkles, IconVideo, IconWand,
+  IconArrowBackUp, IconCopy, IconCrop, IconGitCompare, IconPhoto, IconPlayerPlay,
+  IconSearch, IconSparkles, IconVideo, IconWand,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -34,6 +34,7 @@ import {
   sharpenOffer, sharpenValueOf,
 } from "../components/videoFraming";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
+import { runSlideKey, showFromHref, videoSlideKey } from "../showAndTell";
 
 export type GallerySort = "newest" | "cleanest";
 export type CalFilter = "all" | "calibrated" | "uncalibrated";
@@ -695,7 +696,21 @@ export function GalleryView() {
         rawHref={viewing?.has_fits
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
         toolbarExtra={viewing?.has_preview
-          ? <WallpaperMenu safe={viewing.safe} runId={viewing.run_id} variant="subtle" /> : undefined}
+          ? (
+            <Group gap={4} wrap="nowrap">
+              {/* Same "show me this one" entry point as My best pictures, so the
+                  slideshow can start on whatever you're looking at. */}
+              <Tooltip label="Start the slideshow on this picture">
+                <ActionIcon
+                  variant="subtle" color="gray" aria-label="Start the slideshow here"
+                  component={Link} to={showFromHref(runSlideKey(viewing.safe, viewing.run_id))}
+                >
+                  <IconPlayerPlay size={18} />
+                </ActionIcon>
+              </Tooltip>
+              <WallpaperMenu safe={viewing.safe} runId={viewing.run_id} variant="subtle" />
+            </Group>
+          ) : undefined}
         {...(viewing?.has_preview
           ? (() => {
               const { title, text, filename } = sharePictureText(
@@ -720,6 +735,16 @@ export function GalleryView() {
         downloadHref={viewingStill?.preview_url}
         rawHref={viewingStill?.tiff_url ?? undefined}
         rawLabel="16-bit TIFF"
+        toolbarExtra={viewingStill ? (
+          <Tooltip label="Start the slideshow on this picture">
+            <ActionIcon
+              variant="subtle" color="gray" aria-label="Start the slideshow here"
+              component={Link} to={showFromHref(videoSlideKey(viewingStill.capture_id))}
+            >
+              <IconPlayerPlay size={18} />
+            </ActionIcon>
+          </Tooltip>
+        ) : undefined}
         {...(viewingStill
           ? (() => {
               // The still's PNG *is* its picture, so the share sheet gets that —

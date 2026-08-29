@@ -534,6 +534,17 @@ class StackResult:
     # walk-away stack can say "142 of your 500 subs couldn't be read" instead of
     # blaming alignment for a storage problem. 0 when everything was readable.
     n_unreadable: int = 0
+    # How many distinct subs raised an error while a pass was reading/aligning
+    # them — the counted form of ``errors``, which is a list of raw per-file
+    # strings nothing ever showed the user. Different from ``n_unreadable``
+    # (whose file wasn't on disk at all): these files existed and then failed
+    # mid-read, which is what a flaking share or a bad sector looks like.
+    # ``n_read_recovered`` is the subset a two-pass run's *other* pass read fine
+    # and combined anyway, so their light is in the picture (the same frames
+    # whose error line ``_mark_recovered_errors`` qualifies). Both 0 on a healthy
+    # run, which is every run with an empty ``errors`` list.
+    n_read_errors: int = 0
+    n_read_recovered: int = 0
     # How many contributing subs sub-pixel refine had to leave *only roughly
     # aligned* (its measured shift exceeded ``SUBPIXEL_SHIFT_CAP_PX``, so the
     # frame stacked unshifted → possibly soft/doubled stars). 0 when refine was
@@ -1069,6 +1080,8 @@ def _build_output_header_meta(
     weights_applied: bool = True,
     n_roughly_aligned: int = 0,
     n_unreadable: int = 0,
+    n_read_errors: int = 0,
+    n_read_recovered: int = 0,
     drizzle_reject_declined: bool = False,
     drizzle_scale_requested: float | None = None,
     min_max_reject_count_requested: int | None = None,
@@ -1264,6 +1277,19 @@ def _build_output_header_meta(
         # NALIGNFL (0 included) so its absence means "older master", not "none".
         meta["NUNREAD"] = (int(max(0, n_unreadable)),
                            "subs whose file was not on disk")
+        # …and the *other* storage failure, which NUNREAD can't see: a sub whose
+        # file was there at the preflight but blew up when a worker actually read
+        # it (a flaking NAS share, a bad sector, a half-written file). Those only
+        # ever reached the run's per-frame ``errors`` list, which no screen reads,
+        # so a night of dropped reads looked like ordinary align failures.
+        # NREADREC is the reassuring half: of those subs, how many the *other*
+        # pass of a two-pass run read fine and combined anyway (see
+        # ``_mark_recovered_errors``), so their light IS in the picture. Stamped
+        # beside NUNREAD, 0 included, so absence means "older master", not "none".
+        meta["NREADERR"] = (int(max(0, n_read_errors)),
+                            "subs that hit a read error")
+        meta["NREADREC"] = (int(max(0, min(n_read_recovered, n_read_errors))),
+                            "of those, subs combined on the other pass")
     # Sub-pixel refine accounting: how many contributing subs the refine step
     # had to leave *only roughly aligned* (its measured shift exceeded the cap,
     # so the frame stacked unshifted). Softer/doubled stars the user sees but
@@ -1747,6 +1773,18 @@ def run_stack(
     # refine is off (drizzle never refines), so a run with it off is unaffected.
     roughly_ids: set[int] = set()
 
+    # Honest-accounting, storage half: every pass gets a ``_PassFrameLog`` (not
+    # only the two-pass ones that re-word their error lines) so the run can count
+    # how many *distinct* subs hit a read error. Counting the ``errors`` list
+    # itself would double-count a sub that failed both passes — the one case the
+    # count most needs to get right, since that sub really is lost.
+    pass_logs: list[_PassFrameLog] = []
+    n_read_recovered = 0
+
+    def _new_pass_log() -> "_PassFrameLog":
+        pass_logs.append(_PassFrameLog())
+        return pass_logs[-1]
+
     # ---- 3a. Drizzle path (alternate accumulator) --------------------------
     if options.drizzle:
         from seestack.io.wcs_io import wcs_from_text, wcs_to_text
@@ -1777,10 +1815,10 @@ def run_stack(
         # Only populated on the two-pass (rejection) drizzle, where a frame the
         # statistics pass couldn't read may still be deposited by pass 2.
         dz_stats_log: _PassFrameLog | None = None
-        dz_final_log = _PassFrameLog()
+        dz_final_log = _new_pass_log()
         if reject:
             stats = DrizzleStacker(ref_wcs, dst_shape, params, compute_stats=True)
-            dz_stats_log = _PassFrameLog()
+            dz_stats_log = _new_pass_log()
             n_stats = _drizzle_pass(
                 frames, ref, stats, weights,
                 options=options,
@@ -1822,7 +1860,8 @@ def run_stack(
         # picture; say so on its error line rather than leave the run's error
         # list claiming a frame the header counts as used.
         if dz_stats_log is not None:
-            _mark_recovered_errors(errors, dz_stats_log, dz_final_log)
+            n_read_recovered += _mark_recovered_errors(errors, dz_stats_log,
+                                                       dz_final_log)
         # Surface how much the two-pass drizzle rejection actually clipped
         # (only when rejection ran — single-pass drizzle has no clip to tally).
         if clip is not None:
@@ -1870,6 +1909,7 @@ def run_stack(
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
             roughly_aligned_ids=roughly_ids,
+            frame_log=_new_pass_log(),
         )
         if n_used == 0 and not cancel():
             raise ValueError("no frames could be aligned")
@@ -1887,8 +1927,8 @@ def run_stack(
     # done after one pass.
     elif eff.sigma_clip and n >= 4:
         wel = WelfordAccumulator(canvas_3)
-        p1_log = _PassFrameLog()
-        p2_log = _PassFrameLog()
+        p1_log = _new_pass_log()
+        p2_log = _new_pass_log()
 
         def consume_pass1(aligned: np.ndarray, y0: int, x0: int, _weight: float) -> None:
             wel.add_window(aligned, y0, x0)
@@ -1965,7 +2005,7 @@ def run_stack(
         # was combined. Qualify that line (never drop it — see
         # ``_mark_recovered_errors``) so the storage signal survives without the
         # contradiction.
-        _mark_recovered_errors(errors, p1_log, p2_log)
+        n_read_recovered += _mark_recovered_errors(errors, p1_log, p2_log)
         # The frames that actually contributed *pixels* are pass 2's — pass 1 only
         # built the mean/σ reference the clip is measured against, and a frame it
         # missed is still combined (``_kappa_sigma_keep_mask`` keeps a sample whose
@@ -2020,6 +2060,7 @@ def run_stack(
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
             roughly_aligned_ids=roughly_ids,
+            frame_log=_new_pass_log(),
         )
         if n_used == 0 and not cancel():
             raise ValueError("no frames could be aligned")
@@ -2128,6 +2169,16 @@ def run_stack(
     # frame the preflight found missing whose share came back before its worker
     # read it would otherwise make "couldn't be read" exceed the whole gap.
     n_unreadable = min(n_unreadable, max(0, len(frames) - n_used))
+    # Distinct subs that errored in *any* pass, and how many of those a two-pass
+    # run combined anyway. A frame that failed both passes appears in both logs
+    # and is counted once; a frame with no id is never logged (the same rule the
+    # error re-wording and the roughly-aligned tally already use), so on a run
+    # over rows straight from the project DB this is exact.
+    read_error_ids: set[int] = set()
+    for _plog in pass_logs:
+        read_error_ids.update(_plog.error_slot)
+    n_read_errors = len(read_error_ids)
+    n_read_recovered = min(n_read_recovered, n_read_errors)
     header_meta = _build_output_header_meta(project, frames, eff, n_used, wstats,
                                             calibration=calibration, pstats=pstats,
                                             photometric_auto=photometric_auto,
@@ -2135,6 +2186,8 @@ def run_stack(
                                             weights_applied=weights_applied,
                                             n_roughly_aligned=n_roughly,
                                             n_unreadable=n_unreadable,
+                                            n_read_errors=n_read_errors,
+                                            n_read_recovered=n_read_recovered,
                                             drizzle_reject_declined=(
                                                 _drizzle_reject_wanted
                                                 and not eff.drizzle_reject),
@@ -2282,6 +2335,8 @@ def run_stack(
         n_offered=len(frames),
         n_align_failed=max(0, len(frames) - n_used),
         n_unreadable=n_unreadable,
+        n_read_errors=n_read_errors,
+        n_read_recovered=n_read_recovered,
         n_roughly_aligned=n_roughly,
         run_id=run_id,
         rejection_mode=rej_stats.mode if _rej_recorded else None,

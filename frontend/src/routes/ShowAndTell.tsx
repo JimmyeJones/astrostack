@@ -7,10 +7,58 @@ import {
   IconPlayerPlay, IconSparkles, IconX,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { QueryError } from "../components/QueryError";
-import { SLIDE_MS, buildSlides, nextIndex } from "../showAndTell";
+import { SLIDE_MS, buildSlides, nextIndex, startIndexFor } from "../showAndTell";
+
+/**
+ * Hold the screen awake while the show is playing.
+ *
+ * The whole point of the feature is "point a screen at it and walk away", and a
+ * tablet or laptop dimming three pictures in is the one failure that makes it
+ * feel broken in the room. Every call is guarded: the Screen Wake Lock API is
+ * absent on some browsers (and in the test DOM), and it *rejects* when the page
+ * isn't visible — a slideshow that throws on the way to the TV is worse than one
+ * that lets the screen dim. Browsers also drop the lock whenever the tab is
+ * hidden, so it is re-requested on `visibilitychange`; nothing is persisted and
+ * nothing is configurable.
+ */
+function useKeepAwake(active: boolean) {
+  useEffect(() => {
+    if (!active) return undefined;
+    const wl = (navigator as Navigator & {
+      wakeLock?: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> };
+    }).wakeLock;
+    if (!wl || typeof wl.request !== "function") return undefined;
+
+    let released = false;
+    let sentinel: { release: () => Promise<void> } | null = null;
+
+    const acquire = async () => {
+      if (released || document.visibilityState !== "visible") return;
+      try {
+        sentinel = await wl.request("screen");
+      } catch {
+        // Denied, unsupported on this surface, or the page went hidden between
+        // the check and the call. Nothing to do — the screen just dims.
+      }
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") void acquire(); };
+
+    void acquire();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      released = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      try {
+        void sentinel?.release();
+      } catch {
+        // A lock the browser already dropped throws on release; harmless.
+      }
+    };
+  }, [active]);
+}
 
 /**
  * "Show and tell" — a hands-off, room-filling slideshow of your best pictures.
@@ -37,9 +85,26 @@ export function ShowAndTellView() {
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const [params] = useSearchParams();
+  const from = params.get("from");
 
   const slides = buildSlides(best.data?.items, gallery.data?.videos);
   const count = slides.length;
+
+  // "Show me this one": opened from a lightbox, the show starts on that picture
+  // and keeps looping through everything after it. Applied once, the first time
+  // the slides arrive — after that the user is driving, and a background refetch
+  // must never yank them back to where they came in.
+  const startedFrom = useRef(false);
+  useEffect(() => {
+    if (startedFrom.current || count === 0) return;
+    startedFrom.current = true;
+    setIndex(startIndexFor(slides, from));
+  }, [count, from, slides]);
+
+  // Keep the screen awake while the show is actually playing — not while it's
+  // paused, which is someone stopping to look, or on an empty show.
+  useKeepAwake(count > 0 && !paused);
 
   const go = useCallback((step: number) => {
     setIndex((i) => nextIndex(i, count, step));

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
-  Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid, Stack, Text, Title,
-  Tooltip,
+  ActionIcon, Badge, Button, Card, Center, Group, Image, Loader, SimpleGrid, Stack,
+  Text, Title, Tooltip,
 } from "@mantine/core";
 import { IconPlayerPlay, IconSparkles, IconStarFilled } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -13,6 +13,7 @@ import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
 import { bestPictureReason, pinnedNote } from "../components/bestPictures";
+import { runSlideKey, showFromHref } from "../showAndTell";
 
 function BestCard({ pic, rank, onView }: {
   pic: BestPicture;
@@ -141,7 +142,22 @@ export function BestPicturesView() {
         rawHref={viewing?.has_fits
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
         toolbarExtra={viewing?.has_preview
-          ? <WallpaperMenu safe={viewing.safe} runId={viewing.run_id} variant="subtle" /> : undefined}
+          ? (
+            <Group gap={4} wrap="nowrap">
+              {/* "Show me this one" — the slideshow already exists, but until now
+                  it always began at the top of the ranked wall, so the picture
+                  you were actually looking at was the last thing anyone saw. */}
+              <Tooltip label="Start the slideshow on this picture">
+                <ActionIcon
+                  variant="subtle" color="gray" aria-label="Start the slideshow here"
+                  component={Link} to={showFromHref(runSlideKey(viewing.safe, viewing.run_id))}
+                >
+                  <IconPlayerPlay size={18} />
+                </ActionIcon>
+              </Tooltip>
+              <WallpaperMenu safe={viewing.safe} runId={viewing.run_id} variant="subtle" />
+            </Group>
+          ) : undefined}
         {...(viewing?.has_preview
           ? (() => {
               const { title, text, filename } = sharePictureText(
