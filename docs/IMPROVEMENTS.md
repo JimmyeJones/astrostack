@@ -43,7 +43,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+- **Builder 2026-08-29, branch `claude/compassionate-galileo-eypoyg`** — claiming two items (claimed in the
+  run's *first* commit and pushed immediately, per the five duplicate-collision process notes under "Features
+  that serve real workflows"):
+  1. *"the loose end left by the v0.293.1 two-pass frame-count fix"* — a sub that blipped in pass 1 and stacked
+     fine in pass 2 still carries its pass-1 error line, so the Jobs summary reports a failure for a frame the
+     header says was combined. (Ideas → trust/friendliness, size S.)
+  2. *"the picture a beginner actually shares is 1024 px wide"* — every share export is built from the stored
+     preview PNG rather than the master. (Features that serve real workflows, size S–M.)
 
 ---
 
