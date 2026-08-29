@@ -43,11 +43,19 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-> **Builder 2026-08-29, branch `claude/compassionate-galileo-gwhwwd` — claimed, in flight.**
-> Working: (1) *"a stack run's per-frame error list has no UI consumer at all"* (Image quality section —
-> roll the read-error strings up into a counted sentence beside the existing missing/align accounting);
-> (2) the two follow-ons the v0.289.0 "Show and tell" slideshow deliberately left out (keep-awake +
-> "start the show here"). Will release this block when the run finishes.
+_(none — claim an item here with your branch name)_
+
+> **Builder 2026-08-29, branch `claude/compassionate-galileo-gwhwwd` — run finished, claim released.**
+> Shipped three: the stack run's read errors rolled up into a counted sentence on History and the Jobs
+> result (**v0.296.5**, under "Image quality"), the two "Show and tell" follow-ons — keep-awake and
+> "start the show here" (**v0.296.6**, under "Autonomy & friendliness"), and the observability-aware
+> **"When will I finish this?"** forecast (**v0.297.0**, under "Features that serve real workflows").
+> **Stood down** on *"Does my colour look right?"* — its premise doesn't hold: measured against the real
+> bundled catalog, all 157 entries carry one flat `nebula` type, so emission and reflection (the two
+> families whose colour expectations disagree) aren't separable offline. The ⚠️ note now on that entry
+> has the measurement and the data task that has to come first.
+> Claiming in the run's **first** commit and pushing immediately (per the five duplicate-collision process
+> notes) again cost about a minute; no collision this run, and `main` never moved while it ran.
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-u3wi1n` — claim released, shipped.**
 > Shipped: the ⭐ owner-clarified **real universe map** (true 3D by distance) as **"Your universe"**
@@ -9150,6 +9158,38 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **NEW IDEA (Builder 2026-08-29, the horizon the v0.297.0 finish forecast deliberately stops at) — a target
+  that needs 4+ good nights gets no finish date at all, because the planner is only ever asked for three
+  windows.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: S. Confidence: certain — this is the
+  constant the forecast reads against.)*
+  `finishForecast` returns `null` when `nightsToGo > windows.length`, which is the honest call: quoting the
+  last of a capped list would promise a finish that is too early. But the cap is not a fact about the sky, it
+  is `_NEXT_SESSION_WANT = 3` in `webapp/routers/plan.py` — chosen when the card only had to *list* the next
+  few windows, before anything counted them. So the beginner furthest from their goal — the one who most
+  wants to know "when am I done?" — is the one told nothing.
+  **Shape:** let `/api/plan/next-session/{safe}` take an optional `want` (bounded, e.g. 1–8, defaulting to
+  today's 3 so every existing caller is byte-for-byte unchanged), and have the card ask for
+  `max(3, nightsToGo)` when it has a nights estimate. `next_observing_windows` already takes `want` and scans
+  `nights=14` regardless, so this is a parameter, not a new search. **Watch:** the 14-night scan is the real
+  horizon — a 6-night goal on an object with one good night a week still legitimately returns nothing, and
+  that must stay a silence rather than a guess. **Don't** widen the *rendered list* to eight rows at the same
+  time; the card lists windows to plan by, and the forecast only needs to count them.
+
+- **NEW IDEA (Builder 2026-08-29, spotted while adding the read-error note in v0.296.5) — a badly flaking
+  drive now lights TWO separate yellow alerts on the Jobs result, and they are one story.**
+  *(Pillar: friendliness — PRIORITY 3. Size: S. Confidence: certain — I put the second one there.)*
+  `missingSubsNote` ("their files weren't on disk") and `readErrorsNote` ("the files are there but didn't read
+  cleanly") are deliberately different diagnoses, and on a healthy install at most one ever fires. But an
+  unmounting-mid-scan share fires **both**, and the result is two stacked alerts that each end by telling the
+  owner to go check the same drive — which reads as two problems, and buries the one action under twice the
+  words. **Shape:** one storage alert that carries whichever clauses apply ("142 subs' files weren't there; 5
+  more were there but didn't read cleanly — check the drive or share they live on"), with the single fix
+  sentence said once. Both helpers are already pure and tested, so this is a compose-and-re-word, not a
+  re-derivation. **Care:** keep the two counts *distinct* in the wording — they really are different failures
+  and the missing-file one has the different fix (reconnect, re-scan, re-stack) — and keep both helpers
+  exported, since History renders them as separate lines beside the align clause, where the one-story problem
+  doesn't arise.
 
 - **⚪ PROCESS NOTE + TWO FOLLOW-ONS (Builder 2026-08-27, branch `claude/compassionate-galileo-xhognz`) — I
   built the v0.289.0 Sky-map North-up fix concurrently and STOOD DOWN on it when I synced to merge; recorded
