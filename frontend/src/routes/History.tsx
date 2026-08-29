@@ -241,6 +241,26 @@ export function rejectionSummaryText(
   return `Rejection ${verb} ~${pctText} ${noun} (${note})`;
 }
 
+// The caption under a picture whose "what was removed" tint is showing. The
+// overlay alone is a mystery — a beginner sees cyan speckle on their nebula and
+// has no idea whether something went wrong. This names it, and deliberately
+// frames it as protection delivered rather than data thrown away: those samples
+// were in the subs and are *not* in the picture, which is the whole point of
+// stacking many frames. Reuses the run's own measured fraction so it can never
+// disagree with the trust line a few pixels above it.
+export function removedOverlayCaption(
+  rejection: StackRejectionSummary | null | undefined,
+): string {
+  const lead =
+    "The cyan marks are what stacking removed — satellite trails, plane trails " +
+    "and cosmic rays that were in your subs but aren’t in your picture.";
+  const frac = rejection?.fraction;
+  if (typeof frac !== "number" || !Number.isFinite(frac) || frac <= 0) return lead;
+  const pct = frac * 100;
+  const pctText = pct < 0.1 ? "under 0.1%" : pct < 10 ? `about ${pct.toFixed(1)}%` : `about ${Math.round(pct)}%`;
+  return `${lead} That was ${pctText} of your samples; the rest is untouched.`;
+}
+
 // Plain-language trust note for quality weighting. The stacker already computes
 // which subs it down-weighted (soft/hazy/elongated frames pulled below full
 // weight), but the raw "7 frames down-weighted · weights 0.31–1.00 (median
@@ -755,6 +775,20 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   // on has_fits).
   const [identify, setIdentify] = useState(false);
   const [scale, setScale] = useState(false);
+  // "See what stacking removed" — tint the pixels outlier rejection dropped, so
+  // the satellite trails and cosmic rays the stack quietly cleaned out stop being
+  // an abstract percentage. Whether a run *has* such a map rides on the listing
+  // row the page already fetched (alongside has_fits/has_preview), so offering
+  // the toggle costs no request; the caption's fraction comes from the run-info
+  // the Info panel reads, fetched only once the overlay is actually switched on.
+  const [showRemoved, setShowRemoved] = useState(false);
+  const hasRejectionMap = !!run.has_rejection_map;
+  const removedInfo = useQuery({
+    queryKey: ["stack-info", safe, run.id],
+    queryFn: () => api.stackRunInfo(safe, run.id),
+    enabled: showRemoved && hasRejectionMap,
+    staleTime: Infinity,
+  });
   const annotations = useQuery({
     queryKey: ["annotations", safe, run.id],
     queryFn: () => api.stackAnnotations(safe, run.id),
@@ -945,6 +979,13 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             // rotation/unreconcilable cases hide it with everything else.
             directions={annotations.data?.directions ?? null}
             showCompass={scale && !cantPlaceMarks}
+            // The server sizes the tint to the *stored* preview, so it only lands
+            // true on those bytes — the live Adjust render is a different picture
+            // (full canvas, possibly rotated), so the overlay steps aside there
+            // rather than landing somewhere the trail isn't.
+            overlaySrc={showRemoved && hasRejectionMap && showingStored
+              ? api.stackRejectionOverlayUrl(safe, run.id)
+              : null}
             onClick={() => setLight(true)}
           />
         ) : (
@@ -964,6 +1005,14 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             : applyNorthUp
             ? "Turn off “Rotate so North is up” to place object pins, the scale bar and the compass — they’re measured on the un-rotated image."
             : "This picture was saved rotated so North is up, so object pins, the scale bar and the compass can’t be placed on it — they’re measured on the un-rotated image. Open Adjust and save it un-rotated to use them."}
+        </Text>
+      ) : null}
+
+      {showRemoved && hasRejectionMap ? (
+        <Text size="xs" c={showingStored ? "cyan.4" : "dimmed"} mt={6}>
+          {showingStored
+            ? removedOverlayCaption(removedInfo.data?.rejection)
+            : "Close Adjust to see what stacking removed — the marks are measured on the saved picture, not on the live render."}
         </Text>
       ) : null}
 
@@ -1300,6 +1349,16 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                   >
                     Scale &amp; compass
                     <span style={MENU_HINT}>How big this is in the sky, and which way is North</span>
+                  </Menu.Item>
+                )}
+                {hasRejectionMap && (
+                  <Menu.Item
+                    leftSection={<IconSparkles size={16} />}
+                    rightSection={showRemoved ? <IconCheck size={14} /> : null}
+                    onClick={() => setShowRemoved((v) => !v)}
+                  >
+                    Show what was removed
+                    <span style={MENU_HINT}>The satellite trails and cosmic rays stacking cleaned out</span>
                   </Menu.Item>
                 )}
                 {run.has_fits && (

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote, removedOverlayCaption } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import { SAMPLE_TOUR_COPY } from "../components/SampleTourNote";
@@ -1157,6 +1157,71 @@ describe("drizzleDegradedNote", () => {
     // Defensive: a bad/equal pair must not read "×1.5 instead of ×1.5".
     const s = drizzleDegradedNote({ reason: "memory", applied: 1.5, requested: 1.5 });
     expect(s).not.toContain("instead of");
+  });
+});
+
+describe("See what stacking removed", () => {
+  const withMap = {
+    run_id: 1, integration_s: 2520, n_frames: 840, weighting: null, cards: [],
+    rejection: { mode: "sigma-clip", fraction: 0.004, n_rejected: 40,
+                 n_contributed: 10000, has_map: true },
+  };
+
+  it("offers the overlay only on a run that actually recorded one", async () => {
+    // The offer rides the *listing* row, so a History page of runs without maps
+    // costs no extra request at all.
+    const info = vi.spyOn(client.api, "stackRunInfo").mockResolvedValue(withMap);
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, has_rejection_map: false })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    // The Adjust item next to it is there, so the menu really did open.
+    expect(await menuItem("Adjust")).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^Show what was removed/ })).toBeNull();
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it("tints the picture and says what the tint is", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, has_rejection_map: true })]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue(withMap);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    // Nothing is laid over the picture until the user asks for it.
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "About this stack" }).length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("image-overlay")).toBeNull();
+
+    openAbout();
+    fireEvent.click(await menuItem("Show what was removed"));
+    await waitFor(() => expect(screen.getByTestId("image-overlay")).toBeInTheDocument());
+    expect(screen.getByTestId("image-overlay")).toHaveAttribute(
+      "src", "/api/targets/M_42/stack-runs/1/rejection-overlay");
+    // …and the caption that stops cyan speckle reading as damage.
+    expect(screen.getByText(/what stacking removed/)).toBeInTheDocument();
+  });
+});
+
+describe("removedOverlayCaption", () => {
+  it("names the marks as protection delivered, not data thrown away", () => {
+    const s = removedOverlayCaption({ mode: "sigma-clip", fraction: 0.004 });
+    expect(s).toContain("satellite trails");
+    expect(s).toContain("aren’t in your picture");
+    expect(s).toContain("about 0.4% of your samples");
+    expect(s).toContain("the rest is untouched");
+  });
+  it("says under 0.1% rather than a misleading 0.0%", () => {
+    expect(removedOverlayCaption({ mode: "sigma-clip", fraction: 0.0003 }))
+      .toContain("under 0.1%");
+  });
+  it("drops the fraction clause when there is no usable number", () => {
+    for (const r of [undefined, null, { mode: "sigma-clip" },
+                     { mode: "sigma-clip", fraction: 0 }]) {
+      const s = removedOverlayCaption(r as never);
+      expect(s).toContain("what stacking removed");
+      expect(s).not.toContain("of your samples");
+    }
   });
 });
 

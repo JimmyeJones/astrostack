@@ -177,6 +177,33 @@ def rotate_mask_north_up(mask: np.ndarray, angle_deg: float) -> np.ndarray:
     return np.asarray(img, dtype=np.uint8) > 127
 
 
+def rotate_plane_north_up(plane: np.ndarray, angle_deg: float) -> np.ndarray:
+    """Rotate a float ``(H, W)`` plane exactly the way
+    :func:`rotate_image_north_up` rotates the picture it belongs to.
+
+    The greyscale sibling of :func:`rotate_mask_north_up`, for a plane whose
+    *values* matter and not just its footprint — the "what stacking removed"
+    overlay's per-pixel drop density, which has to make the same journey as the
+    North-up preview it is laid over or the highlighted trail lands where the
+    trail isn't. Exposed corners fill with 0 ("nothing was removed out here"),
+    matching the black the picture's own corners fill with. Bilinear rather than
+    nearest, because a density is a continuum and its resampling should be.
+    """
+    from PIL import Image
+
+    arr = np.asarray(plane, dtype=np.float32)
+    if arr.ndim != 2:
+        raise ValueError("plane must be 2-D")
+
+    snapped = round(angle_deg / 90.0) * 90.0
+    if abs(angle_deg - snapped) <= _SNAP_TOL_DEG:
+        return np.ascontiguousarray(np.rot90(arr, k=int(snapped / 90.0) % 4))
+
+    img = Image.fromarray(arr, mode="F").rotate(
+        angle_deg, resample=Image.BILINEAR, expand=True, fillcolor=0.0)
+    return np.asarray(img, dtype=np.float32)
+
+
 def rotate_image_north_up(rgb: np.ndarray, angle_deg: float) -> np.ndarray:
     """Rotate an ``(H, W, 3)`` display image CCW by ``angle_deg`` so North is up.
 

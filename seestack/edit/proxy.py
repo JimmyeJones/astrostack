@@ -126,6 +126,19 @@ def frame_coverage_path_for(fits_path: str | Path) -> Path:
     return p.with_name(f"{p.stem}_framecov.fits")
 
 
+def rejection_map_path_for(fits_path: str | Path) -> Path:
+    """The sibling per-pixel **rejected-sample count** FITS a stack run writes
+    next to its output (``{basename}_rejected.fits`` — see
+    :mod:`seestack.stack.output`), when it was asked to record one.
+
+    Off by default and absent on every run recorded before it existed, so a
+    caller must treat "no file" as the ordinary case — it means "no overlay
+    available", never an error.
+    """
+    p = Path(fits_path)
+    return p.with_name(f"{p.stem}_rejected.fits")
+
+
 def _load_map(path: Path, *, step: int) -> np.ndarray | None:
     """Load one 2-D float32 sibling map, strided like the proxy, or ``None``."""
     if not path.exists():

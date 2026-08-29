@@ -124,6 +124,11 @@
     "group": "advanced",
     "type": "int"
   },
+  "record_rejection_map": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
   "save_progress": {
     "depends_on": null,
     "group": "advanced",
