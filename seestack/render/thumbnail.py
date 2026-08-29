@@ -566,6 +566,78 @@ def stack_coverage_mask(fits_path: str | Path) -> np.ndarray:
         return np.isfinite(data)            # 2-D mono (a fresh array, not a view)
 
 
+#: Longest axis the frame-count map is loaded at when deriving the detail mask.
+#: The mask only ever drives a ≤1024 px preview's alpha, so reading a big
+#: mosaic's full-canvas float32 count map would be hundreds of megabytes for a
+#: decision that survives a nearest-neighbour resize unchanged.
+_DETAIL_MAX_DIM = 2048
+
+
+def stack_detail_mask(fits_path: str | Path, *, min_frac: float = 0.5
+                      ) -> np.ndarray:
+    """Boolean ``(H, W)`` mask of a stack's **well-covered** pixels.
+
+    Stricter than :func:`stack_coverage_mask`, which only asks "is there data
+    here?". This asks "did enough frames land here to trust it?", using the
+    per-pixel frame-count sibling every run writes (``{stem}_framecov.fits``) and
+    the same "at least ``min_frac`` of the peak" rule the editor's one-click
+    border trim already uses (:func:`seestack.edit.coverage_trim.well_covered_mask`)
+    — so the number isn't picked blind, it is the app's existing definition of
+    "enough coverage".
+
+    Falls back to the plain has-data footprint when there is no frame-count
+    sibling (older runs) or it carries no usable coverage, so a legacy run still
+    maps its real shape rather than vanishing. On the canvas grid, like
+    :func:`stack_coverage_mask`.
+    """
+    from seestack.edit.coverage_trim import well_covered_mask
+    from seestack.edit.proxy import load_frame_coverage
+
+    covered = stack_coverage_mask(fits_path)
+    # Stride the frame-count sibling the way the editor's trim already does: a
+    # big mosaic's map is a full-canvas float32 array (hundreds of MB), and the
+    # answer is only ever resized down onto a ≤1024 px preview anyway.
+    step = max(1, -(-max(covered.shape) // _DETAIL_MAX_DIM))  # ceil division
+    try:
+        counts = load_frame_coverage(fits_path, step=step)
+    except Exception:  # noqa: BLE001 — an unreadable sibling just means "no opinion"
+        counts = None
+    if counts is None:
+        return covered
+    mask = well_covered_mask(counts, min_frac)
+    if mask is None or not mask.any():
+        return covered
+    if mask.shape != covered.shape:
+        from PIL import Image
+
+        mask = np.asarray(
+            Image.fromarray(mask.astype(np.uint8) * 255, mode="L").resize(
+                (covered.shape[1], covered.shape[0]), Image.NEAREST)) > 127
+    return covered & mask
+
+
+def overlay_rgba_array(preview_png: bytes, coverage_mask: np.ndarray) -> np.ndarray:
+    """The RGBA ``(H, W, 4)`` uint8 array behind :func:`overlay_rgba_png` — the
+    preview's pixels with the mask resized onto its grid as the alpha channel.
+
+    Split out so a caller that wants to *draw* the transparent picture (the
+    all-sky "My map" composite) doesn't have to encode a PNG and decode it again.
+    """
+    import io
+
+    from PIL import Image
+
+    mask = np.asarray(coverage_mask, dtype=bool)
+    if mask.ndim != 2:
+        raise ValueError("coverage_mask must be 2-D")
+    im = Image.open(io.BytesIO(preview_png)).convert("RGB")
+    w, h = im.size
+    alpha_img = Image.fromarray((mask.astype(np.uint8) * 255), mode="L").resize(
+        (w, h), Image.NEAREST)
+    return np.dstack([np.asarray(im, dtype=np.uint8),
+                      np.asarray(alpha_img, dtype=np.uint8)])
+
+
 def overlay_rgba_png(preview_png: bytes, coverage_mask: np.ndarray) -> bytes:
     """Compose an RGBA overlay PNG from an opaque preview PNG and a coverage mask.
 
@@ -581,15 +653,7 @@ def overlay_rgba_png(preview_png: bytes, coverage_mask: np.ndarray) -> bytes:
 
     from PIL import Image
 
-    mask = np.asarray(coverage_mask, dtype=bool)
-    if mask.ndim != 2:
-        raise ValueError("coverage_mask must be 2-D")
-    im = Image.open(io.BytesIO(preview_png)).convert("RGB")
-    w, h = im.size
-    alpha_img = Image.fromarray((mask.astype(np.uint8) * 255), mode="L").resize(
-        (w, h), Image.NEAREST)
-    rgba = np.dstack([np.asarray(im, dtype=np.uint8),
-                      np.asarray(alpha_img, dtype=np.uint8)])
+    rgba = overlay_rgba_array(preview_png, coverage_mask)
     buf = io.BytesIO()
     Image.fromarray(rgba, mode="RGBA").save(buf, format="PNG")
     return buf.getvalue()
