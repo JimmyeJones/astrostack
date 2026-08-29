@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Anchor, Box, Button, Group, Paper, Stack, Text } from "@mantine/core";
+import { Alert, Anchor, Box, Button, Group, Image, Paper, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, type FieldObject, type StackRun } from "../../api/client";
+import { api, type StackRun } from "../../api/client";
 import { formatIntegration, formatStampDate } from "../../format";
-import { AnnotatedImage, croppedAnnotationView } from "../AnnotatedImage";
-import { describeFieldObjects } from "../fieldObjectList";
 import { ImageLightbox } from "../ImageLightbox";
 import { isJobPollAbort, pollJobUntilDone } from "../editor/pollJob";
 import { sharePictureText } from "../../share";
@@ -51,11 +49,6 @@ export function LatestPictureCard({
   run?: StackRun | null;
 }) {
   const [light, setLight] = useState(false);
-  // "What's in it?" — the same named-catalog-object overlay History's Adjust
-  // panel has, on the page a beginner actually lands on. Off by default (the
-  // picture is the point; the labels are the answer to a question), and the
-  // fetch is lazy so an ordinary visit costs nothing extra.
-  const [identify, setIdentify] = useState(false);
   const qc = useQueryClient();
   // Hooks must run unconditionally, so this is declared before the early return.
   // `run` is captured lazily inside the mutation, which only fires from a button
@@ -85,46 +78,14 @@ export function LatestPictureCard({
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
-  // The pins are measured on the run's un-rotated, un-cropped FITS grid, and this
-  // card always shows the *stored* preview bytes — which an earlier "Adjust →
-  // North up → Save" may have turned, and the one-click auto-edit may have
-  // trimmed. A trim composes exactly (shift the pixels into it); a rotation, or a
-  // geometry that can't be reduced to a crop at all, does not — say so rather
-  // than mis-plot, exactly as History does, and don't even fetch.
-  const cantPlaceMarks = !!run?.preview_north_up_deg || !!run?.preview_geometry_unknown;
-  // Same endpoint, cache key and staleness History uses, so opening either page
-  // after the other costs no second fetch. Needs the master's WCS, hence has_fits.
-  const annotations = useQuery({
-    queryKey: ["annotations", safe, run?.id],
-    queryFn: () => api.stackAnnotations(safe, run!.id),
-    enabled: identify && !!run?.has_fits && !cantPlaceMarks,
-    staleTime: Infinity,
-  });
   if (!run || !run.has_preview) return null;
   const previewSrc = api.stackArtifactUrl(safe, run.id, "preview");
   const share = sharePictureText(name, formatStampDate(run.timestamp_utc));
-  const view = croppedAnnotationView(
-    run.preview_crop,
-    annotations.data?.objects ?? [],
-    null,
-    annotations.data?.width ?? run.canvas_w,
-    annotations.data?.height ?? run.canvas_h,
-  );
-  const showLabels = identify && !cantPlaceMarks;
   return (
     <Paper withBorder p="sm" radius="md" data-testid="latest-picture">
       <Group justify="space-between" gap="xs" mb={6} wrap="nowrap">
         <Text size="sm" fw={500}>Your picture</Text>
         <Group gap="sm" wrap="nowrap">
-          {run.has_fits ? (
-            <Anchor
-              component="button" type="button" size="xs" data-testid="identify-toggle"
-              c={identify ? "cyan.4" : undefined}
-              onClick={() => setIdentify((v) => !v)}
-            >
-              {identify ? "Hide labels" : "What's in it?"}
-            </Anchor>
-          ) : null}
           <Anchor component={Link} to={`/targets/${safe}/edit/${run.id}`} size="xs">
             Edit this picture
           </Anchor>
@@ -136,32 +97,21 @@ export function LatestPictureCard({
       {/* Height-capped on purpose: the point of this slice is that the picture
           AND the frames table below it fit on one screen, so the thumbnail must
           not push the table off the fold on a 1080p window. */}
-      <Box style={{ borderRadius: 8, overflow: "hidden" }}>
-        <AnnotatedImage
+      <Box
+        style={{ background: "#000", borderRadius: 8, overflow: "hidden", cursor: "zoom-in" }}
+        onClick={() => setLight(true)}
+      >
+        <Image
           src={previewSrc}
           alt={`Latest stacked picture of ${name ?? "this target"}`}
-          imgWidth={view.width}
-          imgHeight={view.height}
-          objects={view.objects}
-          show={showLabels}
-          height={260}
-          onClick={() => setLight(true)}
+          fit="contain"
+          h={260}
+          fallbackSrc=""
         />
       </Box>
       <Text size="xs" c="dimmed" mt={6}>
         {latestPictureCaption(run)} — click to view it big
       </Text>
-      {identify ? (
-        <ObjectLabelNote
-          cantPlaceMarks={cantPlaceMarks}
-          northUpSaved={!!run.preview_north_up_deg}
-          loading={annotations.isLoading}
-          ready={annotations.isSuccess}
-          objects={view.objects}
-          width={view.width}
-          height={view.height}
-        />
-      ) : null}
       {/* The honest half of "your picture": a saved-but-never-exported edit lives
           only in the editor, so what's shown above is still the plain auto-stretch
           of the stack. Say so where the picture is, and offer the one step that
@@ -204,72 +154,5 @@ export function LatestPictureCard({
         onClose={() => setLight(false)}
       />
     </Paper>
-  );
-}
-
-/**
- * The words under the labelled picture — the friendly read of the same objects
- * the overlay pins, plus every honest reason the pins can't be drawn.
- *
- * Split out (and pure) so each state is testable on its own: a beginner who taps
- * "What's in it?" must always get a sentence back, never a silently unchanged
- * picture — including on the runs where the labels genuinely can't be placed.
- */
-function ObjectLabelNote({
-  cantPlaceMarks, northUpSaved, loading, ready, objects, width, height,
-}: {
-  cantPlaceMarks: boolean;
-  northUpSaved: boolean;
-  loading: boolean;
-  ready: boolean;
-  objects: FieldObject[];
-  width: number;
-  height: number;
-}) {
-  if (cantPlaceMarks) {
-    return (
-      <Text size="xs" c="dimmed" mt={6} data-testid="identify-note">
-        {northUpSaved
-          ? "This picture was saved rotated so North is up, so the labels can’t be placed on it — they’re measured on the un-rotated image. Open Adjust in All versions and save it un-rotated to use them."
-          : "This picture was reshaped when it was processed, so the labels can’t be placed on it — they’re measured on the original image. Open Adjust in All versions and save it again to use them."}
-      </Text>
-    );
-  }
-  if (loading) {
-    return (
-      <Text size="xs" c="dimmed" mt={6} data-testid="identify-note">
-        Looking up what’s in this picture…
-      </Text>
-    );
-  }
-  if (!ready) {
-    return (
-      <Text size="xs" c="dimmed" mt={6} data-testid="identify-note">
-        Couldn’t work out what’s in this picture — it needs a located (plate-solved) stack.
-      </Text>
-    );
-  }
-  if (!objects.length) {
-    return (
-      <Text size="xs" c="dimmed" mt={6} data-testid="identify-note">
-        No catalog objects fall inside this field
-      </Text>
-    );
-  }
-  const described = describeFieldObjects(objects, width, height);
-  return (
-    <Stack gap={2} mt={6} data-testid="identify-note">
-      <Text size="xs" c="cyan.4">
-        In this picture — {objects.length} catalog object{objects.length === 1 ? "" : "s"}:
-      </Text>
-      {described.map((d) => (
-        <Text key={d.catalogId} size="xs" c="dimmed">
-          {d.label}{d.typePhrase ? ` — ${d.typePhrase}` : ""}, {d.positionPhrase}.
-        </Text>
-      ))}
-      {objects.length > described.length ? (
-        <Text size="xs" c="dimmed">…and {objects.length - described.length} more.</Text>
-      ) : null}
-    </Stack>
   );
 }
