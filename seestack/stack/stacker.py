@@ -1943,7 +1943,17 @@ def run_stack(
             max_in_flight=max_in_flight,
             roughly_aligned_ids=roughly_ids,
         )
-        n_used = min(n_used_p1, n_used_p2)
+        # The frames that actually contributed *pixels* are pass 2's — pass 1 only
+        # built the mean/σ reference the clip is measured against, and a frame it
+        # missed is still combined (``_kappa_sigma_keep_mask`` keeps a sample whose
+        # reference is unknown, which is exactly the transient-read-error case it
+        # was written for). Counting ``min(p1, p2)`` credited the *smaller* pass, so
+        # a sub that blipped in pass 1 and loaded fine in pass 2 was silently left
+        # out of NFRAMES, the integration time and the align-failure tally, even
+        # though its light is in the picture. Identical on every ordinary run, where
+        # the two passes see the same frames; the difference only ever shows up when
+        # they diverge, and only ever in the direction of the truth.
+        n_used = n_used_p2
         # Pass 1 succeeded but pass 2 aligned nothing (e.g. the cached/source
         # frames became unreadable *between* the two passes on a long run) →
         # ``wsum`` is empty and ``result()`` is all-NaN. Guard it exactly like

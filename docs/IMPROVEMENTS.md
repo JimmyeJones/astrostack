@@ -15498,24 +15498,50 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **IDEA / TRUST-ACCURACY (Scout QA audit 2026-08-27 #19, traced) — report the *true* contributing-frame count in
-  a κ-σ run's History / integration time, not the conservative `min(pass1, pass2)`.** *(Pillar: image quality /
-  trust — PRIORITY 4 (with a friendliness flavour — it's an honest-number fix); size S; additive, no default/
-  schema change.)*
-  **Why.** `stacker.py:1893` records `n_frames_used = min(n_used_p1, n_used_p2)` (surfaced as NFRAMES and
-  integration time, `:2187`, and as `n_align_failed`, `:2195`). When a frame throws a transient load error in
-  pass 1 but succeeds in pass 2 — the exact NAS-blip case the `mean`-unknown keep-guard in
-  `_kappa_sigma_keep_mask` was built for — that frame *does* contribute pixels to the final image (kept where only
-  it covers), yet `min()` credits only the smaller pass-1 count, so History under-reports the integration the
-  owner actually banked. The error is always fail-safe (understates, never overstates), which is why the QA note
-  above didn't file it as a bug — but the *right* number is knowable: `wsum.frame_coverage.max()` is the true
-  per-pixel contributing-frame count the accumulator already holds. **Shape.** Use `frame_coverage.max()` (or an
-  explicit "frames that reached pass-2 combine" tally) for `n_frames_used` on the κ-σ path; keep `min()`'s
-  fail-safe intent for the reverse case (pass-1-only frames must still be excluded — they only fed the reference,
-  not the image). **Caution — hot path (§1):** NFRAMES feeds integration-time and the noise/√N badges, so this
-  needs a test that an ordinary run (p1==p2) is byte-for-byte unchanged and only the cross-pass-divergence case
-  moves, plus a check it never *over*-counts. Small and well-contained; grep for other readers of
-  `n_frames_used` first (the noise-ratio badge anchors on √N).
+- **✅ SHIPPED (Builder, v0.293.1, branch `claude/compassionate-galileo-i9ybki`) — ~~report the *true*
+  contributing-frame count in a κ-σ run's History / integration time, not the conservative
+  `min(pass1, pass2)`.~~** `stacker.py` now records `n_used = n_used_p2`, with the reasoning in the code:
+  pass 2 is the pass that sums pixels into the image, pass 1 only builds the mean/σ the clip is measured
+  against, and `_kappa_sigma_keep_mask` deliberately *keeps* a sample whose reference is unknown — which is
+  exactly the transient-read-error (NAS blip) case. So a sub that blipped in pass 1 and loaded in pass 2 has
+  its light in the picture, and used to be left out of `NFRAMES`, `EXPTOTAL` and the `NALIGNFL` tally anyway.
+  The fail-safe half of `min()`'s intent is kept **by construction**: a frame that made pass 1 and failed
+  pass 2 contributed nothing and is still excluded, because it never reached pass 2's counter.
+
+  **Not `frame_coverage.max()`** — the shape the spec below suggested first. That is the deepest *pixel's*
+  frame count, which on a mosaic is a fraction of the frames (no pixel is covered by every panel's subs), so
+  it would under-report a mosaic badly. `n_used_p2` is the frames-that-were-combined tally the spec's own
+  parenthetical asked for, and `_pass` already returns exactly it.
+
+  **Bounded blast radius:** on every ordinary run the two passes see the same frames, so the number is
+  identical — the fix only ever moves the divergent case, and only ever toward the truth. Everything
+  downstream (`NFRAMES`, integration time, `NOFFERED`/`NALIGNFL`, `n_unreadable`'s clamp, the noise-ratio √N
+  badges) reads the same `n_used` and gets *more* honest with it; no schema, config, API or default change.
+
+  **Tests (+3, `tests/test_stack_two_pass_frame_count.py`, 1 fails before):** an end-to-end run through
+  `run_stack` where one sub's alignment raises on pass 1 only — `n_frames_used` 4 → **5**, `NALIGNFL` 1 → 0,
+  `EXPTOTAL` 40 s → 50 s; the reverse case (failing on pass 2 only) still counted as 4, pinning the fail-safe
+  half; and an ordinary run unchanged at 5.
+
+  Original spec, for the record:
+
+  - **~~IDEA / TRUST-ACCURACY (Scout QA audit 2026-08-27 #19, traced)~~** *(Pillar: image quality /
+    trust — PRIORITY 4 (with a friendliness flavour — it's an honest-number fix); size S; additive, no default/
+    schema change.)*
+    **Why.** `stacker.py:1893` records `n_frames_used = min(n_used_p1, n_used_p2)` (surfaced as NFRAMES and
+    integration time, `:2187`, and as `n_align_failed`, `:2195`). When a frame throws a transient load error in
+    pass 1 but succeeds in pass 2 — the exact NAS-blip case the `mean`-unknown keep-guard in
+    `_kappa_sigma_keep_mask` was built for — that frame *does* contribute pixels to the final image (kept where only
+    it covers), yet `min()` credits only the smaller pass-1 count, so History under-reports the integration the
+    owner actually banked. The error is always fail-safe (understates, never overstates), which is why the QA note
+    above didn't file it as a bug — but the *right* number is knowable: `wsum.frame_coverage.max()` is the true
+    per-pixel contributing-frame count the accumulator already holds. **Shape.** Use `frame_coverage.max()` (or an
+    explicit "frames that reached pass-2 combine" tally) for `n_frames_used` on the κ-σ path; keep `min()`'s
+    fail-safe intent for the reverse case (pass-1-only frames must still be excluded — they only fed the reference,
+    not the image). **Caution — hot path (§1):** NFRAMES feeds integration-time and the noise/√N badges, so this
+    needs a test that an ordinary run (p1==p2) is byte-for-byte unchanged and only the cross-pass-divergence case
+    moves, plus a check it never *over*-counts. Small and well-contained; grep for other readers of
+    `n_frames_used` first (the noise-ratio badge anchors on √N).
 
 - **IDEA / GPU-ONLY HARDENING (Scout QA audit 2026-08-27 #18, traced — NOT a verified bug; unreproducible
   without cupy, nil-impact on fully-NaN tiles) — `per_frame._subtract_background_gpu` (`seestack/bg/per_frame.py`
