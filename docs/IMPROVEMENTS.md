@@ -15728,24 +15728,56 @@ problems. Dogfood it every big-picture run and fix root causes.
     moves, plus a check it never *over*-counts. Small and well-contained; grep for other readers of
     `n_frames_used` first (the noise-ratio badge anchors on √N).
 
-- **NEW IDEA (Builder 2026-08-29, traced while making the run's error list honest in v0.294.3) — a stack run's
-  per-frame error list has **no UI consumer at all**, so the storage signal it carries only ever reaches the
-  raw job-result JSON.** *(Pillar: trust + autonomy — PRIORITY 2–3; size S; read-only, additive. Confidence:
-  traced — `StackResult.errors` → `pipeline.py:2659` `"errors"` on the job result, and a grep of
-  `frontend/src` finds **no** reader of it for a stack job; `Jobs.tsx`'s `errors` is the unrelated per-*target*
-  `stack_errors`/`qc_errors` map, and `Editor.tsx`'s is the editor's `op_errors`.)* So a night where the NAS
-  share dropped forty reads produces forty accurate, per-file error strings that nobody will ever see. The
-  walk-away owner instead learns about it obliquely, through `n_align_failed` / `n_unreadable` counts on
-  History's honest-accounting line — which is the *right* surface, and is exactly where these belong.
-  **Shape:** roll the strings up server-side into a small count (how many subs hit a read error, and — now that
-  v0.294.3 marks them — how many of those **recovered on the other pass**) and put one sentence beside the
-  existing "150 couldn't be aligned" clause: *"3 subs hit a read error; 2 of them read fine on the second try —
-  worth checking the drive or share they live on."* **Why it's better than showing the list:** forty raw
-  `OSError` lines are noise, one counted sentence naming the cause and the fix is guidance — the same shape
-  `missingSubsNote` already uses, and it should sit right next to it so the two storage signals read as one
-  story. **Grep first:** `missingSubsNote` / `alignFailureNote` in `Jobs.tsx` and the accounting line in
-  `History.tsx:311` are where this lands; `RECOVERED_ERROR_SUFFIX` in `seestack/stack/stacker.py` is how a
-  recovered line is identified — count it there rather than re-parsing the suffix in the frontend.
+- **✅ SHIPPED (Builder, v0.296.5, branch `claude/compassionate-galileo-gwhwwd`) — ~~a stack run's per-frame
+  error list has **no UI consumer at all**, so the storage signal it carries only ever reaches the raw
+  job-result JSON.~~** Built as the entry asked: rolled up server-side into a count, rendered as one sentence
+  beside the existing missing-files clause on **both** surfaces, and never as the raw list.
+
+  **What shipped.** The engine now counts read errors per **sub**, not per error line. Every pass — not only
+  the two-pass ones that re-word their lines — gets a `_PassFrameLog`, and `run_stack` unions their
+  `error_slot` keys into `n_read_errors`, while `n_read_recovered` accumulates what `_mark_recovered_errors`
+  returns on the κ-σ *and* drizzle two-pass paths. Counting `errors` directly would have double-counted the one
+  sub the number most needs to get right — the one that failed **both** passes, which really is lost. Stamped
+  as `NREADERR`/`NREADREC` beside `NUNREAD` (0 included, so the cards' *absence* means "older master"), carried
+  on `StackResult` and the `process_target` job result, parsed into the existing `frame_accounting` summary,
+  and rendered by `readErrorNote` (History Info panel, right under the "150 couldn't be aligned" clause) and
+  `readErrorsNote` (the Jobs result, beside the missing-files alert so the two storage signals read as one
+  story about the drive). The recovered half is load-bearing copy: *"all of them read fine on the second try"*
+  is the difference between "your night is gone" and "check the share tomorrow", and it suppresses the
+  fix-nudge entirely when nothing was actually lost.
+
+  **Upgrade-safe (§9):** two additive FITS cards, two additive result fields, two additive `frame_accounting`
+  keys, two self-hiding notes. No config, schema, on-disk, default or existing-response-shape change; an older
+  master lacks the cards and its History panel reads exactly as it does today, and a healthy run (empty
+  `errors`) renders nothing new anywhere.
+
+  **Tests (+7 python / +12 frontend):** `tests/test_stack_read_error_count.py` (the recovered blip; the
+  **both-passes** sub counted once from two error lines — the double-count guard; a single-pass run counting
+  its errors with nothing to recover; a healthy run stamping 0 rather than nothing), two endpoint tests in
+  `tests/webapp/test_stack_render.py` (the counts through `/info`, and an older master omitting them), the
+  drizzle two-pass assertion in `tests/test_drizzle_reject.py`, and the `readErrorNote`/`readErrorsNote`
+  suites in `History.test.tsx` / `Jobs.test.tsx` (including the clamps and the "fully recovered → no nudge"
+  rule).
+
+  Original spec, for the record:
+
+  - **~~NEW IDEA (Builder 2026-08-29, traced while making the run's error list honest in v0.294.3)~~**
+    *(Pillar: trust + autonomy — PRIORITY 2–3; size S; read-only, additive. Confidence:
+    traced — `StackResult.errors` → `pipeline.py:2659` `"errors"` on the job result, and a grep of
+    `frontend/src` finds **no** reader of it for a stack job; `Jobs.tsx`'s `errors` is the unrelated per-*target*
+    `stack_errors`/`qc_errors` map, and `Editor.tsx`'s is the editor's `op_errors`.)* So a night where the NAS
+    share dropped forty reads produces forty accurate, per-file error strings that nobody will ever see. The
+    walk-away owner instead learns about it obliquely, through `n_align_failed` / `n_unreadable` counts on
+    History's honest-accounting line — which is the *right* surface, and is exactly where these belong.
+    **Shape:** roll the strings up server-side into a small count (how many subs hit a read error, and — now that
+    v0.294.3 marks them — how many of those **recovered on the other pass**) and put one sentence beside the
+    existing "150 couldn't be aligned" clause: *"3 subs hit a read error; 2 of them read fine on the second try —
+    worth checking the drive or share they live on."* **Why it's better than showing the list:** forty raw
+    `OSError` lines are noise, one counted sentence naming the cause and the fix is guidance — the same shape
+    `missingSubsNote` already uses, and it should sit right next to it so the two storage signals read as one
+    story. **Grep first:** `missingSubsNote` / `alignFailureNote` in `Jobs.tsx` and the accounting line in
+    `History.tsx:311` are where this lands; `RECOVERED_ERROR_SUFFIX` in `seestack/stack/stacker.py` is how a
+    recovered line is identified — count it there rather than re-parsing the suffix in the frontend.
 
 - **✅ SHIPPED (Builder, v0.294.3, branch `claude/compassionate-galileo-eypoyg`) — ~~a sub that blipped in
   pass 1 and stacked fine in pass 2 counts as *used*, but its pass-1 error string is still in the run's error

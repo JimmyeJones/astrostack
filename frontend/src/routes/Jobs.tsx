@@ -175,7 +175,8 @@ export function reprocessSummary(r: Record<string, unknown>): {
  * bare "done" and no idea where the result is (or why there isn't one). */
 export function processTargetSummary(r: Record<string, unknown>): {
   line: string; stacked: boolean; thin: ThinStackWarning | null;
-  cleaned: string | null; missing: string | null; calMismatch: string | null;
+  cleaned: string | null; missing: string | null; readErrors: string | null;
+  calMismatch: string | null;
 } {
   const stacked = Boolean(r.stacked);
   const solved = Number(r.solved_accepted ?? 0);
@@ -214,8 +215,18 @@ export function processTargetSummary(r: Record<string, unknown>): {
     // subtracts its pedestal on every frame. The engine has always measured it
     // and written it to the server log — which is exactly the place a walk-away
     // user never looks — so say it where the finished picture lands.
+    // The sibling storage signal: subs whose file *was* there and then failed
+    // mid-read. Until now those only ever existed as raw strings in the run's
+    // `errors` list, which nothing on any page reads.
+    const readErrors = readErrorsNote(
+      Number(stack.n_read_errors ?? 0) || 0,
+      Number(stack.n_read_recovered ?? 0) || 0,
+      Number(stack.n_offered ?? 0) || 0,
+    );
     const calMismatch = calibrationMismatchNote(stack.calibration_warnings);
-    return { line: `${line}.`, stacked, thin, cleaned, missing, calMismatch };
+    return {
+      line: `${line}.`, stacked, thin, cleaned, missing, readErrors, calMismatch,
+    };
   }
   const reason = typeof r.stack_skipped_reason === "string"
     ? r.stack_skipped_reason : null;
@@ -229,7 +240,8 @@ export function processTargetSummary(r: Record<string, unknown>): {
     line = "Finished, but no stack was produced.";
   }
   return {
-    line, stacked, thin: null, cleaned: null, missing: null, calMismatch: null,
+    line, stacked, thin: null, cleaned: null, missing: null, readErrors: null,
+    calMismatch: null,
   };
 }
 
@@ -266,6 +278,40 @@ export function missingSubsNote(nUnreadable: number, nOffered: number): string |
   return `${nf(missing)} of ${nf(nOffered)} subs couldn't be read — their files `
     + "weren't on disk. If they live on a drive or network share, check it's "
     + "connected, then scan and stack again.";
+}
+
+/** Plain-language note when some subs' files *were* on disk and then failed
+ * mid-read, so the stacker recorded a per-frame error for them (pure, tested).
+ *
+ * The sibling of `missingSubsNote`: that one is "the file wasn't there", this one
+ * is "the file was there and the read blew up" — a flaking network share, a bad
+ * sector, a half-written file. The engine has always recorded these as raw
+ * per-file strings in the run's `errors` list, which no screen reads, so a night
+ * of dropped reads reached the owner only as an unexplained thin stack. This
+ * turns the count into the one sentence that names the cause and the fix, and
+ * says how many read fine on the run's other pass — those subs *are* in the
+ * picture, which is the difference between "check the drive tomorrow" and "your
+ * night is gone". Returns null when nothing errored, or when the counts aren't
+ * reported (older backend). */
+export function readErrorsNote(
+  nReadErrors: number, nRecovered: number, nOffered: number,
+): string | null {
+  if (!Number.isFinite(nReadErrors) || nReadErrors <= 0) return null;
+  if (!Number.isFinite(nOffered) || nOffered <= 0) return null;
+  const errored = Math.min(Math.round(nReadErrors), Math.round(nOffered));
+  const recovered = Number.isFinite(nRecovered)
+    ? Math.min(Math.max(Math.round(nRecovered), 0), errored) : 0;
+  const nf = (n: number) => n.toLocaleString();
+  const subs = `${nf(errored)} sub${errored === 1 ? "" : "s"}`;
+  const lead = `${subs} hit a read error while stacking`;
+  const recoveredClause = recovered > 0
+    ? recovered === errored
+      ? ` — all of them read fine on the second try, so they're in your picture`
+      : ` — ${nf(recovered)} of them read fine on the second try, so those are `
+        + `in your picture`
+    : "";
+  return `${lead}${recoveredClause}. The files are there but didn't read `
+    + "cleanly — worth checking the drive or network share they live on.";
 }
 
 /** How many subs the stack-then-solve bootstrap rescued in this job result, or
@@ -531,7 +577,7 @@ function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;
   const r = job.result as Record<string, unknown>;
   if (job.kind === "process_target") {
-    const { line, stacked, thin, cleaned, missing, calMismatch } =
+    const { line, stacked, thin, cleaned, missing, readErrors, calMismatch } =
       processTargetSummary(r);
     // Deep-link straight to the finished run's editor when we know its id
     // (v0.85.3+ backend); fall back to the target's History on an older backend.
@@ -568,6 +614,14 @@ function JobResultActions({ job }: { job: Job }) {
         {missing ? (
           <Alert color="yellow" p="xs" title="Some subs couldn't be read">
             <Text size="xs">{missing}</Text>
+          </Alert>
+        ) : null}
+        {/* The same storage story from the other direction — the files were
+            there and the reads failed. Kept beside the missing-files alert so
+            the two read as one story about the drive, not two mysteries. */}
+        {readErrors ? (
+          <Alert color="yellow" p="xs" title="Some subs didn't read cleanly">
+            <Text size="xs">{readErrors}</Text>
           </Alert>
         ) : null}
         {/* The opposite of the skipped-master note below: a master that *was*

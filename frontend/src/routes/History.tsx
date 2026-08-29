@@ -407,6 +407,50 @@ export function frameAccountingNote(
   return { text, concern: guidance !== null, guidance };
 }
 
+// The storage signal `frameAccountingNote` can't carry: subs whose file *was*
+// on disk and then failed mid-read (a flaking network share, a bad sector, a
+// half-written file). The engine has always recorded one raw string per failed
+// read in the run's `errors` list — a list no screen has ever displayed — so a
+// night of dropped reads reached the owner only as an unexplained thin stack.
+//
+// It sits next to the missing-files clause deliberately: both are "check the
+// drive", and reading them as one story is what turns two mysteries into one
+// fix. The recovered count is the reassuring half — a sub that blipped on one
+// pass and read fine on the other IS in the picture, so the note must not imply
+// a lost night when nothing was lost.
+//
+// Returns null when nothing errored, or on a master stacked before the counts
+// were recorded (the cards are absent → the field is undefined).
+export function readErrorNote(
+  fa: StackFrameAccounting | null | undefined,
+): FrameAccountingNote | null {
+  if (!fa || typeof fa.n_offered !== "number" || fa.n_offered <= 0) return null;
+  if (typeof fa.n_read_errors !== "number" || fa.n_read_errors <= 0) return null;
+  const offered = fa.n_offered;
+  const errored = Math.min(fa.n_read_errors, offered);
+  const recovered = typeof fa.n_read_recovered === "number"
+    ? Math.min(Math.max(fa.n_read_recovered, 0), errored) : 0;
+  const nf = (n: number) => n.toLocaleString();
+  const lost = errored - recovered;
+  const tail = recovered <= 0
+    ? ""
+    : recovered === errored
+      ? " · all of them read fine on the second try"
+      : ` · ${nf(recovered)} read fine on the second try`;
+  const text =
+    `${nf(errored)} of ${nf(offered)} subs hit a read error${tail}`;
+  // Guide a fix only when subs were actually *lost* to it and it's a material
+  // share of a non-trivial stack — a single blip that recovered needs no nudge.
+  const concern = offered >= 10 && lost > 0 && lost / offered >= 0.05;
+  const guidance = concern
+    ? "Those files were on disk but didn't read cleanly — that's usually the " +
+      "drive or network share they live on, not the subs themselves. Check " +
+      "the connection (or copy them somewhere local), then stack again to " +
+      "get them back."
+    : null;
+  return { text, concern, guidance };
+}
+
 // One-line honest signal when sub-pixel refine had to leave some subs *only
 // roughly aligned* — its measured shift exceeded the cap, so those frames
 // stacked unshifted. The beginner sees slightly soft / doubled stars but has
@@ -567,6 +611,20 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
             </Text>
             {fa.guidance ? (
               <Text size="xs" c="dimmed">{fa.guidance}</Text>
+            ) : null}
+          </Stack>
+        );
+      })()}
+      {(() => {
+        const re = readErrorNote(data.frame_accounting);
+        if (!re) return null;
+        return (
+          <Stack gap={2}>
+            <Text size="xs" c={re.concern ? "yellow.7" : "dimmed"} fw={re.concern ? 600 : undefined}>
+              {re.text}
+            </Text>
+            {re.guidance ? (
+              <Text size="xs" c="dimmed">{re.guidance}</Text>
             ) : null}
           </Stack>
         );
