@@ -770,13 +770,19 @@ def _add_stack_run(data_root, safe: str, *, ra: float, dec: float,
         hdr["CD2_1"] = 0.0
         hdr["CD2_2"] = arcsec_per_px / 3600.0
         hdu.writeto(fits_path, overwrite=True)
+        # A real stack always writes a preview beside its master, and the library
+        # registry records the newest one — which is what tells the cached
+        # planner roll-up that a *new* picture has landed. Registering a run
+        # without one would be a fixture that never happens in production.
+        preview_path = fits_path.with_name(f"{fits_path.stem}_preview.png")
+        preview_path.write_bytes(b"\x89PNG\r\n\x1a\n")
 
         proj = lib.open_target(safe)
         try:
             run_id = proj.add_stack_run(StackRunRow(
                 id=None, timestamp_utc=when,
                 output_basename=f"master_{when[:10]}", fits_path=str(fits_path),
-                tiff_path=None, preview_path=None, n_frames_used=3,
+                tiff_path=None, preview_path=str(preview_path), n_frames_used=3,
                 canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=3,
                 options_json="{}",
             ))
@@ -847,4 +853,40 @@ def test_tonight_row_follows_the_newest_picture_not_an_old_one(
 
     _add_stack_run(solved_library, "M_42", ra=83.822, dec=-5.391,
                    when="2026-06-01T00:00:00Z")
+    assert _tonight_rows(client)["M_42"]["recentre_nudge"] is None
+
+
+def test_tonight_row_follows_a_new_picture_even_within_one_second(
+    client, solved_library
+):
+    """…and it must not depend on the clock. The planner row is cached behind the
+    library registry's signature, and ``last_activity_utc`` is written at
+    one-second granularity — so a re-stack that adds no accepted frames and lands
+    inside the same second as the previous registry write moves nothing the
+    signature used to look at. The row then went on quoting the *older* picture
+    for a whole 60 s TTL: telling someone to nudge a scope they had already
+    moved. Reproduced by pinning the stamp back to what it was."""
+    from seestack.io.library import Library
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    _add_stack_run(solved_library, "M_42", ra=83.822, dec=-5.391 + 1.0,
+                   when="2026-05-01T00:00:00Z")
+    assert _tonight_rows(client)["M_42"]["recentre_nudge"] is not None
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        stamp = lib.find_target("M_42").last_activity_utc
+    finally:
+        lib.close()
+    _add_stack_run(solved_library, "M_42", ra=83.822, dec=-5.391,
+                   when="2026-06-01T00:00:00Z")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        lib._conn.execute(
+            "UPDATE targets SET last_activity_utc = ? WHERE safe_name = ?",
+            (stamp, "M_42"))
+        lib._conn.commit()
+    finally:
+        lib.close()
+
     assert _tonight_rows(client)["M_42"]["recentre_nudge"] is None

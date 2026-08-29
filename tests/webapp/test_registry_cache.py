@@ -28,9 +28,11 @@ class _App:
         self.state = SimpleNamespace()
 
 
-def _target(safe: str, activity: str | None, accepted: int):
+def _target(safe: str, activity: str | None, accepted: int,
+            preview: str | None = None):
     return SimpleNamespace(
         safe_name=safe, last_activity_utc=activity, n_frames_accepted=accepted,
+        last_stack_preview=preview,
     )
 
 
@@ -45,7 +47,27 @@ def test_signature_is_order_stable_and_moves_with_activity_or_frames():
     assert registry_signature([a]) != registry_signature(
         [_target("M_42", "2026-07-01T00:00:00", 11)])
     # A target with no activity stamp yet is representable, not a crash.
-    assert registry_signature([_target("M_1", None, 0)]) == (("M_1", "", 0),)
+    assert registry_signature([_target("M_1", None, 0)]) == (("M_1", "", 0, ""),)
+
+
+def test_signature_moves_when_a_new_picture_lands_and_nothing_else_does():
+    """A re-stack of frames already in the library adds no accepted frames, and
+    ``last_activity_utc`` is written at one-second granularity — so a stack that
+    lands inside the same second as the previous registry write moves neither.
+    Without the newest-picture column the roll-up would keep answering from the
+    *previous* picture for a whole TTL: the Tonight planner would go on telling
+    someone to nudge a scope they have already moved."""
+    before = _target("M_42", "2026-07-01T00:00:00", 10, "/lib/M_42/old_preview.png")
+    after = _target("M_42", "2026-07-01T00:00:00", 10, "/lib/M_42/new_preview.png")
+    assert registry_signature([before]) != registry_signature([after])
+
+
+def test_signature_tolerates_a_target_without_the_picture_column():
+    """Every real ``TargetEntry`` carries it; a caller passing a leaner object
+    must still get a signature rather than an AttributeError."""
+    lean = SimpleNamespace(
+        safe_name="M_42", last_activity_utc="t", n_frames_accepted=1)
+    assert registry_signature([lean]) == (("M_42", "t", 1, ""),)
 
 
 def test_a_matching_signature_reuses_the_built_value():
