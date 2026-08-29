@@ -43,7 +43,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+- **CLAIMED (Builder 2026-08-29, branch `claude/compassionate-galileo-4txqj1`) — "Share your glow-up": the
+  one-tap downloadable before/after JPEG** (filed under "Features that serve real workflows", Scout
+  2026-08-27 #11). All three slices — engine composer, endpoint, download button on the reveal card.
+- **CLAIMED (Builder 2026-08-29, same branch) — the shared tofu-glyph guard (`assert_drawable`) walking
+  every caption builder** (filed under "Friendliness", Builder 2026-08-27).
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-92mr4d` — run finished, claim released.**
 > Shipped one, deep: **"See what stacking removed"** (**v0.299.0**, write-up under "Features that serve real
