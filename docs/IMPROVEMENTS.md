@@ -9144,7 +9144,33 @@ to **Shipped**.)_
   natural one. Theirs landed first, so I dropped mine wholesale rather than merge two implementations of one
   fix; what follows is only what mine had that theirs does not.
 
-  **(a) A preview saved North-up *before* the column existed is still misplaced, and it need not be.** The
+  **(a) ✅ SHIPPED (Builder, v0.292.2, branch `claude/compassionate-galileo-mkzo0l`)** — built exactly as
+  specified, including the two cases it said must stay silent. New `webapp/preview_orient.py` answers "what
+  rotation do this run's *stored bytes* actually carry?" — the recorded angle when there is one (an explicit
+  `0.0` included: that is a statement the auto-edit rewrite makes, not an absence), and otherwise a **check**,
+  never a guess: work out the grid the preview would sit on un-turned (`preview_grid_size` off the run's own
+  `canvas_w`/`canvas_h`, so the common answer costs one PNG *header* read and no FITS access at all), and
+  believe a rotation only when the stored PNG's dimensions are exactly `north_up_pixel_transform`'s output for
+  the angle that run's own WCS implies. Wired into all five readers that map bytes↔sky: the Sky map's
+  placement (`routers/sky.py`), `sky-overlay`'s alpha, the share JPEG, the wallpaper crop and baked marks
+  (`routers/stack.py`), and the run listing's `preview_north_up_deg` — that last one is the half the note
+  didn't mention and it fixes a *visible* bug: History keys "hide the object pins and scale bar" off that
+  field, so a legacy North-up picture was being annotated in the wrong places.
+  **Deliberately silent, as the entry required:** an exact-180° save (the dimensions don't move, so there is
+  nothing to measure) and a cropped preview (an auto-edit border trim leaves it on neither grid) both read as
+  un-rotated — i.e. exactly what the code did before — so an unrecognised run is never placed *more* wrongly
+  than it already was. **Upgrade-safe (§9):** read-only, no schema/config/on-disk/API-shape change; a recorded
+  angle is passed through verbatim so nothing about a current install moves.
+  **Tests (+8 in `tests/webapp/test_preview_orient_legacy.py`, 5 fail before):** the recovery itself; an
+  ordinary run untouched; a recorded `0.0` beating a recoverable rotation; the cropped-preview no-claim; and
+  end-to-end — `sky-overlay`'s alpha matching the visible footprint, the run listing reporting the angle, the
+  listing staying `null` for an ordinary run, and the Sky tile's extent swapping axes with the picture. The
+  fixture is the existing `test_sky_north_up` mosaic, saved North-up for real and then had its angle column
+  nulled — the exact pre-v0.288 state.
+
+  Original spec, for the record:
+
+  **A preview saved North-up *before* the column existed is still misplaced, and it need not be.** The
   shipped reader treats `preview_north_up_deg IS NULL` as "no rotation", so an install upgrading onto this
   build keeps drawing an old North-up-saved run at the master's orientation until someone happens to re-save
   it. That is *guessable-free*: the only thing that ever rotates a stored preview is this save, and its angle
@@ -9156,6 +9182,29 @@ to **Shipped**.)_
   the code does today; anything else whose size can't be accounted for must too, so an unrecognised run is
   never placed **more** wrongly than it already is.)* **Test:** a run with rotated pixels and a NULL angle gets
   an alpha matching its visible footprint; an ordinary run is byte-for-byte unchanged.
+
+  **(b) ✅ MEASURED, AND DELIBERATELY LEFT UNSHIPPED (Builder 2026-08-29) — the reorder is a real win; here
+  are the numbers so nobody has to measure it again.** On a 576 MB master (8000×6000 float32 ×3) with a 37°
+  (non-snap) North-up angle, comparing today's `rotate_mask_north_up(stack_coverage_mask(fits), 37°)`-then-
+  resize against decimating to the flat preview grid **first** and rotating there:
+
+  | order | wall | peak Python allocation |
+  | --- | --- | --- |
+  | rotate at full res, then resize (today) | 0.67 s | 288.3 MB |
+  | resize to the preview grid, then rotate | 0.13 s | 144.0 MB |
+
+  Both produce the **same output shape** (1230×1280, from a 1024×768 flat grid), and they disagree on
+  **0.034 %** of pixels — the alpha boundary moving by a pixel, exactly the cost this entry predicted.
+  **Why it is not shipped:** the win only materialises on a path that needs a North-up save *at a
+  non-orthogonal angle* (the 90° snap goes through `np.rot90`, already a single copy) on a very large mosaic,
+  and it trades a hard alignment guarantee — the property this whole family of bugs kept breaking — for
+  memory that a box which just held the 576 MB master demonstrably has. A future run that wants it now has
+  numbers instead of a hunch; the change is ~6 lines in `sky_overlay`, plus the same shape wherever "My map"
+  reads a run's mask. **Gate it on `crop is None`** — a cropped preview's flat grid is not
+  `preview_grid_size(canvas)`, so mixing the reorder with the crop's own rounding adds a second alignment
+  surface for no extra win.
+
+  Original spec, for the record:
 
   **(b) The coverage mask is rotated at full canvas resolution, and could be decimated first.** `sky_overlay`
   now does `rotate_mask_north_up(stack_coverage_mask(fits), angle)` — a whole-canvas rotate whose output is
@@ -16908,6 +16957,49 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **⚠️ PROCESS NOTE (Builder 2026-08-29) — the FOURTH concurrent-duplicate collision, and this time it was a
+  whole feature: I built the "Universe map" independently and STOOD DOWN on it at merge time, because
+  `4b5131b` ("My map") had landed first. Recorded because the convergence is the useful signal and because
+  two things mine had are not in what shipped.** *(Same root cause as the three notes above: neither of us
+  claimed the item in **In progress** before starting, which is the one rule in AGENTS §11 that would have
+  caught it. The item was the top ⭐ owner-requested feature in this section, so it was the obvious pick for
+  any Builder that ran while the bug queue was dry — the collision was close to inevitable.)*
+  Both reads landed on the same skeleton: a **third mode on the existing Sky page** (not a new route), the
+  per-pixel frame-count sibling thresholded at `coverage_trim.DEFAULT_MIN_FRAC` as the "enough detail" mask,
+  a **server-rendered PNG** rather than a client-side WebGL layer, a cache keyed on "has any target's newest
+  picture changed", and an explicit exaggeration of small pictures with the caption saying so. When a feature
+  is re-derived this closely twice, the shape really is the natural one. Theirs landed first, so I dropped
+  mine wholesale rather than merge two all-sky renderers.
+  **What differed, in case a future run wants either.** (1) **Exaggeration.** Theirs applies **one shared
+  factor** to every picture, so relative sizes stay honest (a six-panel mosaic really does look bigger than a
+  single field) — that is better than mine, which floored each picture at a minimum on-canvas size
+  independently and so quietly equalised a mosaic and a single frame. (2) **Projection.** Mine was a numpy
+  **Hammer** projection rather than matplotlib's `aitoff`; Hammer is *equal-area*, which is what would make
+  the "how much of the sky have I seen?" idea below answerable for free. Aitoff is not, so that idea needs
+  re-scoping or an equal-area second pass before anyone builds it. (3) **Unplaceable targets.** Mine drew a
+  dot for a target with a known RA/Dec but no placeable picture ("you have been here"); worth checking
+  whether the shipped map drops those silently, and if so, filing it. Nothing else mine had is worth porting.
+
+- **NEW IDEA (Builder 2026-08-29, the obvious next tap on the v0.292.0 "My map") — let the owner keep the
+  map.** *(Pillar: enjoy + share — PRIORITY 3; size S; additive, no new deps.)* "My map" is a pride picture,
+  and pride pictures get posted. Today it is a bare `<img>`: a desktop right-click or a tablet long-press
+  saves it, which works but does not *invite* it, and neither gives the file a sensible name. A "Save this
+  map" button beside the mode switch, downloading `astrostack-my-map-<date>.png` at the width the page is
+  already rendering, is one `<a download>` — the endpoint already serves exactly those bytes. **Worth pairing
+  with:** the map's own subtitle already names the owner's totals, so a saved map explains itself with no
+  extra work. **Grep first:** the map's URL builder already exists in `api`; don't write a second one.
+
+- **NEW IDEA (Builder 2026-08-29) — "how much of the sky have you actually seen?" — cheap, but only on an
+  equal-area projection.** *(Pillar: enjoy + understand — PRIORITY 3; size S; read-only.)* Painted-pixels ÷
+  in-projection-pixels is a genuinely honest "you have photographed 0.04 % of the sky" — one
+  `np.count_nonzero`, no new geometry — **but only if the projection is equal-area.** The shipped map is
+  **Aitoff, which is not**, so counting pixels off it over-weights the centre and under-weights the rim; a
+  Hammer (or Mollweide) pass, or an area-weighted count, is the honest version. **The second trap:** the map
+  exaggerates small pictures so they stay visible, which inflates any pixel count several-fold — so measure
+  on an *unexaggerated* pass, never off the picture the owner is looking at. A stat that silently disagrees
+  with the map beside it is worse than no stat at all. Deep-sky imagers love this number and a beginner
+  understands it immediately, so it is worth doing properly rather than approximately.
 
 - **✅ SHIPPED — FIRST SLICE (Builder, v0.292.0, branch `claude/compassionate-galileo-4drm6t`) —
   ~~⭐ OWNER-REQUESTED (2026-08-28) — "Universe map": an all-sky view built ONLY from the owner's own captured
