@@ -9720,9 +9720,36 @@ to **Shipped**.)_
   read-only, off nothing; incoming/ untouched; a plain regression test that a target whose population grew past a
   borderline early-reject reports a non-zero re-accept count and the sentence renders (and hides at 0).
 
-- **NEW IDEA (Builder 2026-08-27, the class of bug the v0.282.1 tofu-glyph fix belongs to) — nothing in the app
+- ~~**NEW IDEA (Builder 2026-08-27, the class of bug the v0.282.1 tofu-glyph fix belongs to) — nothing in the app
   ever *looks at* the pixels it bakes text onto, so a whole family of "the picture is wrong but the string is
-  right" defects is invisible to the suite.** *(Pillar: trust / image quality — PRIORITY 3–4. Size: S.
+  right" defects is invisible to the suite.**~~ — **SHIPPED v0.300.1** (Builder 2026-08-29, branch
+  `claude/compassionate-galileo-4txqj1`), exactly as specified. *(Pillar: trust / image quality —
+  PRIORITY 3–4.)*
+
+  New shared helper `tests/glyphs.py` (`missing_glyphs` / `assert_drawable`, plus `load_default_font` — the
+  *same* `ImageFont.load_default(size=…)` call the drawing modules make, so the guard can never test a face
+  the app doesn't draw with), and `tests/test_drawn_text_glyphs.py` walks **every** caption builder whose
+  output is burned into an image through it: nameplate + keepsake, montage caption/title, all five recap
+  poster lines *and* both halves of every `recap_stats` pair, the deepening reel's frame label, the new
+  before/after caption + panel labels, and the scale bar's `ascii_label` across the arcsecond/arcminute/degree
+  rungs plus the compass "N"/"E". Cross-checked against the source: those seven modules are exactly the ones
+  that import `ImageDraw` (`grep -rl ImageDraw seestack/ webapp/`), so the walk is complete as of this run.
+
+  **The guard is asserted able to fail**, per the entry's "care" note, in two ways: the reference `.notdef`
+  mask is asserted non-empty inside the helper (a future Pillow that maps unmapped codepoints to a blank
+  fails loudly instead of going toothless), and a test pins that `missing_glyphs` actually *catches* the
+  three characters this class of bug keeps reaching for — `×` (the v0.282.1 defect verbatim), `—` and `→` —
+  while passing everything the app really uses (`·`, `°`, `'`, `"`). One more pin keeps the scale bar's
+  HTML-only `label` (which legitimately uses the ′/″ primes) distinguishable from the drawn `ascii_label`,
+  so a later "why do we have two of these?" tidy-up can't silently collapse them.
+
+  **Findings: none — every current caption is clean**, which is the honest outcome for a guard filed after
+  the one live instance was already fixed. Its value is forward-looking: the hand-audit that entry describes
+  is now a test that stays true. Test-only change; no runtime code touched.
+
+  Original spec:
+
+  *(Pillar: trust / image quality — PRIORITY 3–4. Size: S.
   Confidence: this run shipped a fix for exactly one instance of it, which had been live for months.)*
   The nameplate shipped `(505×30s)` into every share export for months; every assertion in the suite compared
   the caption *string*, which was always exactly right — the defect only existed once the characters met
