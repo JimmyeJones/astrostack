@@ -43,7 +43,12 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+- **CLAIMED (Builder 2026-08-29, branch `claude/compassionate-galileo-u3wi1n`) — the ⭐ OWNER CLARIFICATION at
+  the top of "Features that serve real workflows": the *actual* universe map — the owner's captured targets
+  placed in **true 3D by real distance** (log-scaled radial), orbitable, distinct from the flat "My map".**
+  Claiming in the run's first commit per the five duplicate-collision process notes. Building the first slice
+  (size L): a new, clearly-named Sky-page mode/route fed by a new endpoint that sources `distance_ly` from the
+  bundled catalogs via `seestack/lighttravel.py`'s vetted lookup — never a guessed depth.
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-eypoyg` — run finished, all claims released.**
 > Shipped: the two-pass error-list loose end (**v0.294.3**), "what would it take to print bigger?"
