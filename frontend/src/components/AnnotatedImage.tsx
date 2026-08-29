@@ -50,6 +50,54 @@ export function objectMarkerLayout(
   });
 }
 
+/** Fractional bounds of the stack canvas a stored preview shows (`run.preview_crop`). */
+export interface PreviewCropBounds { x0: number; y0: number; x1: number; y1: number }
+
+/**
+ * Re-express the annotations payload on a *cropped* picture's own grid.
+ *
+ * Object pixels and the scale bar come off the run's un-cropped FITS grid, but
+ * the one-click "Process target" auto-edit rewrites the stored preview through a
+ * recipe that ends with a border trim — so drawn on those bytes as-is, every pin
+ * lands off by the trim's offset and the bar claims a length it doesn't have.
+ * Shifting the pixels into the crop and re-basing the bar's `fraction` on the
+ * narrower picture fixes both, exactly.
+ *
+ * Pure, and a no-op (same values, same references) when there is no crop — which
+ * is every ordinary run, and every moment the *live* Adjust render is on screen
+ * instead of the stored bytes. Objects whose centre falls outside the trim are
+ * dropped (they're no longer in the picture), and a bar that would no longer fit
+ * is dropped rather than drawn overflowing.
+ */
+export function croppedAnnotationView(
+  crop: PreviewCropBounds | null | undefined,
+  objects: FieldObject[],
+  scaleBar: ScaleBar | null,
+  width: number,
+  height: number,
+): { objects: FieldObject[]; scaleBar: ScaleBar | null; width: number; height: number } {
+  const same = { objects, scaleBar, width, height };
+  if (!crop || width <= 0 || height <= 0) return same;
+  const x0 = Math.min(Math.max(Math.round(crop.x0 * width), 0), width - 1);
+  const y0 = Math.min(Math.max(Math.round(crop.y0 * height), 0), height - 1);
+  const x1 = Math.max(Math.min(Math.round(crop.x1 * width), width), x0 + 1);
+  const y1 = Math.max(Math.min(Math.round(crop.y1 * height), height), y0 + 1);
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w === width && h === height) return same;
+  const shifted = objects
+    .map((o) => ({ ...o, x_px: o.x_px - x0, y_px: o.y_px - y0 }))
+    .filter((o) => o.x_px >= 0 && o.x_px < w && o.y_px >= 0 && o.y_px < h);
+  let bar: ScaleBar | null = null;
+  if (scaleBar) {
+    // The bar's on-sky length is unchanged, so it covers a *larger* share of the
+    // narrower picture. Past ~90 % it would run off the edge — drop it instead.
+    const fraction = (scaleBar.fraction * width) / w;
+    bar = fraction > 0.9 ? null : { ...scaleBar, fraction };
+  }
+  return { objects: shifted, scaleBar: bar, width: w, height: h };
+}
+
 /** A friendly one-word label for an object: its name if it has one, else its id. */
 export function objectLabel(o: FieldObject): string {
   return o.name && o.name.trim() ? o.name : o.catalog_id;

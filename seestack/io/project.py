@@ -30,7 +30,7 @@ from typing import Any, Iterable, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     n_roughly_aligned INTEGER,
     stack_fwhm_px REAL,
     seam_residual REAL,
-    preview_north_up_deg REAL
+    preview_north_up_deg REAL,
+    preview_crop_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -573,6 +574,22 @@ class Project:
                     "ALTER TABLE stack_runs ADD COLUMN preview_north_up_deg REAL")
             except sqlite3.OperationalError:
                 pass  # already present
+        if from_version < 17:
+            # Recorded what the stored preview PNG shows of its canvas when it is
+            # NOT a plain downscale of it: the "Process target" auto-edit renders
+            # through the Auto recipe, which ends with a ``geometry.crop`` that
+            # trims a mosaic's ragged border (on by default). Nothing used to
+            # record that, so every consumer that lines up with the preview — the
+            # Sky map tile and its coverage overlay, History's object pins and
+            # scale bar, the shared picture's bar, the wallpaper crop — placed
+            # full-canvas geometry on a cropped picture. Additive; older runs and
+            # every un-cropped preview stay NULL, which means exactly what it
+            # always meant (a plain full-canvas downscale).
+            try:
+                self._conn.execute(
+                    "ALTER TABLE stack_runs ADD COLUMN preview_crop_json TEXT")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -1033,6 +1050,10 @@ class Project:
                     row["preview_north_up_deg"]
                     if "preview_north_up_deg" in row.keys() else None
                 ),
+                preview_crop_json=(
+                    row["preview_crop_json"]
+                    if "preview_crop_json" in row.keys() else None
+                ),
             )
 
     def stack_run_options(self, run_ids: Iterable[int]) -> dict[int, tuple[str, str]]:
@@ -1118,6 +1139,20 @@ class Project:
         cur = self._conn.execute(
             "UPDATE stack_runs SET preview_north_up_deg = ? WHERE id = ?",
             (degrees, run_id))
+        return cur.rowcount > 0
+
+    def set_stack_preview_crop(self, run_id: int, crop_json: str | None) -> bool:
+        """Record what this run's stored preview PNG shows of its canvas — the
+        border trim an auto-edit render baked in (``None`` = the whole canvas),
+        encoded by :func:`seestack.previewcrop.preview_crop_json`. Everything that
+        lines up with those pixels composes it instead of describing the full
+        canvas. Always written by a preview rewrite, never left alone, so a
+        re-render that stops cropping clears a stale rectangle. Returns True if a
+        row was updated, False if no run with ``run_id`` exists."""
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "UPDATE stack_runs SET preview_crop_json = ? WHERE id = ?",
+            (crop_json, run_id))
         return cur.rowcount > 0
 
     def set_run_preview_display_space(self, run_id: int, value: bool = True) -> bool:
@@ -1214,6 +1249,11 @@ class StackRunRow:
     preview_stretch: float | None = None
     preview_black: float | None = None
     preview_north_up_deg: float | None = None
+    # What the stored preview shows of the canvas when it is not a plain
+    # downscale of it — the "Process target" auto-edit's border trim. NULL (the
+    # common case, and every run predating schema 17) means "the whole canvas",
+    # exactly as before. See :mod:`seestack.previewcrop` for the encoding.
+    preview_crop_json: str | None = None
     # How many contributing subs sub-pixel refine had to leave *only roughly
     # aligned* (its measured shift exceeded the cap, so the frame stacked
     # unshifted → possibly soft/doubled stars). None when refine was off, not

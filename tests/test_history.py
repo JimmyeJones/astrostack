@@ -664,3 +664,76 @@ def test_v15_schema_migrates_to_v16_adds_preview_north_up_deg(tmp_path):
         assert proj.set_stack_preview_north_up(999999, 90.0) is False
     finally:
         proj.close()
+
+
+def test_v16_schema_migrates_to_v17_adds_preview_crop_json(tmp_path):
+    """A v16 stack_runs table (no ``preview_crop_json``) migrates additively: the
+    pre-existing run survives, keeps its recorded North-up angle, and reads the
+    new column as None — which means exactly what it always meant, that the
+    stored preview is a plain full-canvas downscale."""
+    import sqlite3
+
+    db_path = tmp_path / "old16.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        PRAGMA user_version = 16;
+        CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE frames (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_path TEXT NOT NULL UNIQUE,
+            accept INTEGER NOT NULL DEFAULT 1,
+            ra_hint_deg REAL, dec_hint_deg REAL
+        );
+        CREATE TABLE stack_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_utc TEXT NOT NULL, output_basename TEXT NOT NULL,
+            fits_path TEXT, tiff_path TEXT, preview_path TEXT,
+            n_frames_used INTEGER NOT NULL, canvas_h INTEGER NOT NULL,
+            canvas_w INTEGER NOT NULL, coverage_min INTEGER NOT NULL DEFAULT 0,
+            coverage_max INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL,
+            notes TEXT, total_exposure_s REAL, transparency_ratio REAL,
+            noise_sigma REAL, calstat TEXT, is_mosaic INTEGER,
+            engine_version TEXT, rejection_fraction REAL, rejection_mode TEXT,
+            preview_stretch REAL, preview_black REAL, n_roughly_aligned INTEGER,
+            stack_fwhm_px REAL, seam_residual REAL, preview_north_up_deg REAL
+        );
+        INSERT INTO project_meta(key, value) VALUES('name', 'OldProject');
+        INSERT INTO stack_runs(timestamp_utc, output_basename, n_frames_used,
+            canvas_h, canvas_w, options_json, preview_north_up_deg)
+            VALUES('2026-01-01T00:00:00+00:00', 'old_run', 42, 320, 480, '{}',
+                   90.0);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    proj = Project(tmp_path)
+    proj.db_path = db_path
+    proj._open()
+    proj._check_schema()
+    try:
+        from seestack.io.project import SCHEMA_VERSION
+        from seestack.previewcrop import PreviewCrop, parse_preview_crop
+
+        assert proj._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        cols = {r[1] for r in proj._conn.execute("PRAGMA table_info(stack_runs)")}
+        assert "preview_crop_json" in cols
+        rows = {r.output_basename: r for r in proj.iter_stack_runs()}
+        old = rows["old_run"]
+        assert old.n_frames_used == 42
+        assert old.preview_north_up_deg == 90.0
+        assert old.preview_crop_json is None
+
+        assert proj.set_stack_preview_crop(
+            old.id, PreviewCrop(0.1, 0.2, 0.8, 0.9).to_json()) is True
+        again = {r.output_basename: r for r in proj.iter_stack_runs()}["old_run"]
+        crop = parse_preview_crop(again.preview_crop_json)
+        assert isinstance(crop, PreviewCrop)
+        assert crop.as_tuple() == (0.1, 0.2, 0.8, 0.9)
+        assert proj.set_stack_preview_crop(old.id, None) is True
+        assert {r.output_basename: r for r in proj.iter_stack_runs()}[
+            "old_run"].preview_crop_json is None
+        assert proj.set_stack_preview_crop(999999, None) is False
+    finally:
+        proj.close()

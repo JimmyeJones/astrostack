@@ -18,8 +18,14 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from seestack.io.wcs_io import canvas_extent_from_fits, wcs_dict_rescaled_to_preview
+from seestack.io.wcs_io import (
+    canvas_extent_from_fits,
+    cropped_center_radec_from_fits,
+    wcs_dict_rescaled_to_preview,
+)
 from seestack.post.skymap import bright_star_catalog
+from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
+from seestack.previewcrop import parse_preview_crop
 from webapp import deps
 
 router = APIRouter(tags=["sky"])
@@ -138,6 +144,17 @@ def get_sky(request: Request) -> SkyResponse:
                 # under a rotated image. 0.0/NULL (every ordinary run) composes
                 # nothing and is unchanged.
                 north_up_deg = run.preview_north_up_deg or 0.0
+                # The other way the stored bytes leave the canvas grid: the
+                # one-click "Process target" auto-edit ends its recipe with a
+                # border trim, so the picture is a *crop* of the canvas — placed
+                # on the full footprint it is drawn stretched, off-centre by the
+                # trim's offset. UNKNOWN means the geometry can't be reconciled
+                # at all; the tile then falls back to the canvas footprint with
+                # no WCS, because a confidently-misplaced tile is worse than an
+                # approximate one.
+                crop = parse_preview_crop(run.preview_crop_json)
+                crop_ok = crop != CROP_UNKNOWN
+                crop = crop if crop_ok else None
                 # Prefer the stack's *stored* canvas WCS for the tile's size and
                 # rotation too — that is the true union-canvas geometry the pixels
                 # were reprojected onto, so a mosaic (or a rotated canvas) is sized
@@ -146,7 +163,8 @@ def get_sky(request: Request) -> SkyResponse:
                 # now agree). Fall back to the single-frame pixscale/rotation when
                 # the master FITS is missing/headerless (older/edited runs).
                 extent = (
-                    canvas_extent_from_fits(run.fits_path, north_up_deg=north_up_deg)
+                    canvas_extent_from_fits(run.fits_path,
+                                            north_up_deg=north_up_deg, crop=crop)
                     if run.fits_path else None
                 )
                 if extent is not None:
@@ -166,21 +184,30 @@ def get_sky(request: Request) -> SkyResponse:
                     # 0's) with no rotation-sign guesswork. Fall back to the
                     # single-frame TAN extrapolation only when the master FITS is
                     # missing/headerless (older/edited runs).
-                    if run.fits_path:
+                    if run.fits_path and crop_ok:
                         wcs = wcs_dict_rescaled_to_preview(
                             run.fits_path, size[0], size[1],
-                            north_up_deg=north_up_deg,
+                            north_up_deg=north_up_deg, crop=crop,
                         )
-                    if wcs is None and not north_up_deg:
+                    if wcs is None and not north_up_deg and crop is None and crop_ok:
                         wcs = _tan_wcs(
                             float(t.ra_deg), float(t.dec_deg), width_deg,
                             size[0], size[1], rotation or 0.0,
                         )
+                # A tile is placed by its centre, and the target's own RA/Dec is
+                # that centre only while the picture is the whole canvas. A trim
+                # off one side moves it, so read the crop's own centre off the
+                # canvas WCS; an un-cropped run keeps the target position exactly
+                # as before.
+                centre = (
+                    cropped_center_radec_from_fits(run.fits_path, crop)
+                    if run.fits_path and crop is not None else None
+                ) or (float(t.ra_deg), float(t.dec_deg))
                 images.append(SkyImage(
                     safe=t.safe_name,
                     name=t.name,
-                    ra_deg=float(t.ra_deg),
-                    dec_deg=float(t.dec_deg),
+                    ra_deg=centre[0],
+                    dec_deg=centre[1],
                     width_deg=width_deg,
                     height_deg=height_deg,
                     rotation_deg=rotation or 0.0,
