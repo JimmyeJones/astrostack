@@ -1,4 +1,4 @@
-import { Group, Paper, Progress, Stack, Text, ThemeIcon } from "@mantine/core";
+import { Badge, Group, Paper, Progress, Stack, Text, ThemeIcon, Tooltip } from "@mantine/core";
 import { IconTelescope } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -10,7 +10,7 @@ import {
   type TonightPick,
 } from "../continueTonight";
 import { readinessColor } from "../readiness";
-import { usableWindowNote } from "../tonight";
+import { recentreNudgeRowBadge, usableWindowNote } from "../tonight";
 
 /**
  * "Point here tonight" — one calm recommendation of which target *you've already
@@ -77,6 +77,16 @@ export function ContinueTonightCard() {
   const subs = pick.target.frames_accepted;
   const so_far = formatIntegration(pick.target.total_exposure_s ?? 0);
   const color = pick.readiness ? readinessColor(pick.readiness.level) : "gray";
+  // "Nudge 1.0° south" — how this target's *newest* picture was framed. The
+  // Tonight page already shows it on its rows; this card is the surface a
+  // beginner actually acts on before a session ("point here tonight"), which is
+  // the one moment the advice can still change the next picture. The same
+  // backend-computed phrase, rendered by the same helper, so the two screens can
+  // never disagree — and silent (null) for a well-framed picture, exactly as the
+  // planner is. Deliberately on this card only: the Dashboard already carries
+  // two sibling planning cards, and the same sentence on all three would be
+  // clutter rather than guidance.
+  const nudge = recentreNudgeRowBadge(pick.target.recentre_nudge);
 
   return (
     <Paper withBorder p="md" radius="md">
@@ -111,6 +121,13 @@ export function ContinueTonightCard() {
           </Text>
         </Group>
         {win ? <Text size="xs" c="dimmed" mb={4}>{win}</Text> : null}
+        {nudge ? (
+          <Tooltip label={nudge.tooltip} multiline w={260} withArrow>
+            <Badge mb={6} size="xs" variant="light" color={nudge.color}>
+              {nudge.label}
+            </Badge>
+          </Tooltip>
+        ) : null}
         {pick.readiness ? (
           <>
             <Progress value={Math.round(pick.readiness.fraction * 100)} color={color}
