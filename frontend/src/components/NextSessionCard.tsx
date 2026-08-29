@@ -2,7 +2,9 @@ import { Anchor, Group, List, Paper, Stack, Text, ThemeIcon, Tooltip } from "@ma
 import { IconCalendarPlus, IconCalendarStar } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { describeGap, describeWindow, windowUtcTooltip, windowsIntro } from "./nextSession";
+import {
+  describeGap, describeWindow, finishForecast, windowUtcTooltip, windowsIntro,
+} from "./nextSession";
 
 /**
  * "Plan your next night" — the forward-looking companion to the retrospective
@@ -20,10 +22,14 @@ export function NextSessionCard({
   safe,
   gapSeconds,
   subExposureSeconds,
+  nightsToGo,
 }: {
   safe: string;
   gapSeconds: number;
   subExposureSeconds: number | null;
+  /** Clear nights still needed at this target's own recent pace, when the
+   *  readiness card could derive one — the other half of the finish forecast. */
+  nightsToGo?: number | null;
 }) {
   const hasGap = gapSeconds > 0;
   const next = useQuery({
@@ -35,6 +41,10 @@ export function NextSessionCard({
   if (!hasGap) return null;
   const windows = next.data?.windows ?? [];
   if (windows.length === 0) return null;
+  // "…and when am I done?" — the night count and the dated windows joined into
+  // the one answer neither gives alone. Self-hides without a pace, or when the
+  // goal needs more nights than the planner looked ahead for.
+  const forecast = finishForecast(nightsToGo, windows);
 
   return (
     <Paper withBorder p="sm" radius="md" mt="xs">
@@ -56,6 +66,9 @@ export function NextSessionCard({
               </List.Item>
             ))}
           </List>
+          {forecast ? (
+            <Text size="xs" c="dimmed">{forecast}</Text>
+          ) : null}
           {/* Turn the plan into a reminder the beginner won't miss: a one-tap
               .ics download their own calendar imports (no account, no network). */}
           <Anchor href={api.nextSessionIcsUrl(safe)} download size="xs" fw={500}>

@@ -18870,6 +18870,26 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 - **NEW BEGINNER FEATURE (Scout 2026-08-26 #4) — "Does my colour look right?": an object-aware colour sanity
   nudge on the finished picture.** *(Pillar: understand + trust / image quality — PRIORITY 3–4. Size: M.)*
+  **⚠️ BLOCKED ON DATA — Builder 2026-08-29 sized this against the real catalog and stood down; read this
+  before picking it up.** The spec's premise is that "the bundled catalogs carry a `type` field
+  (galaxy / **emission nebula** / cluster / …)". **They don't carry the distinction the feature turns on.**
+  Measured this run — `collections.Counter(o.type for o in load_catalog())` over all 157 bundled entries:
+  `galaxy 51, globular cluster 31, open cluster 30, nebula 28, planetary nebula 10, supernova remnant 4,
+  star cloud 1, double star 1, asterism 1`. There is **one** flat `nebula` bucket; emission (red-pink Hα) and
+  reflection (blue) are not separable, and they are the two families whose expectations *disagree*. The other
+  path the spec offers — `seestack/post/target_id.py`'s SIMBAD codes, which *do* split `HII` / `RNe` / `EmO` —
+  needs `astroquery` and a **network** lookup, which this app is deliberately offline for (`target_id`
+  degrades to "unknown target" without it), so it can't be the gate on a walk-away install.
+  **So the only way to build it as filed is to hand-curate an emission/reflection flag onto the 28 `nebula`
+  entries from an agent's own recall — and this is the one feature where that is the wrong move**, because its
+  own Care note is *"a single wrong 'your colour is off' on a genuinely fine picture is worse than ten correct
+  reassurances are good"*, and the awkward cases are exactly the famous ones (M20 is emission **and**
+  reflection; M45's nebulosity is reflection-blue; M78 is blue) — i.e. the objects a beginner shoots first.
+  **If it is picked up, the shippable order is:** (1) add a vetted `nebula_class` (`emission`/`reflection`/
+  `both`/`unknown`) to the catalog data, defaulting to `unknown` → silence, with the same
+  agrees-with-its-own-blurb cross-check the v0.276.0 `distance_ly` curation used as its evidence; (2) only
+  then the hue helper and the card line, with `both`/`unknown` never nudging. Step (1) is a data task with a
+  real correctness bar, not a code task — size it as such.
   A beginner who stacks and auto-edits an emission nebula has **no way to tell whether the colour came out
   right** — is that grey-green M42 a bad white balance they should fix, or just what it looks like? The app
   already *knows the object class*: the bundled catalogs carry a `type` field (galaxy / emission nebula /
@@ -19113,32 +19133,62 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Slices —** (a) the pure `build_gallery_montage` helper + tests (a shippable Builder run on its own);
   (b) the `/api/gallery/montage` endpoint + caching; (c) the Gallery/Dashboard button + share menu (frontend).
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-26) — "When will I finish this?": an observability-aware completion
-  forecast for a target that has an integration goal.** *(Pillar: autonomy + friendliness — PRIORITY 2–3.
-  Size: M.)* The app already holds every piece separately: a target's integration **goal** (`goal_s`), its
-  recent **pace** (`recent_pace_s` — median kept integration per clear night), and, via
-  `nightplan.next_observing_windows`, the next nights *this exact target* is genuinely well-placed (clears the
-  altitude floor, Moon-weighted). Nothing yet **joins** them into the one thing a beginner actually wonders:
-  *"how many more nights, and roughly when, until this is done?"* The existing readiness hint says "~1 more
-  night finishes this" (a bare count) but never says *which* upcoming nights are observable — so a target that
-  needs 2 more nights yet is Moon-washed / too low for the next week reads as "nearly there" when it is really a
-  fortnight away. **Verified new:** grepped this run — no finish-date / completion-date / "done by" forecast
-  exists in code or backlog; the closest, `recent_pace_s`, only yields a night *count*.
-  **Shape:** a pure helper `finish_forecast(goal_s, current_integration_s, recent_pace_s, windows) ->
-  FinishForecast | None` that (a) computes `nights_needed = ceil((goal − current) / pace)`, then (b) walks the
-  already-computed `next_observing_windows` list and returns the calendar date of the *n-th* qualifying night —
-  e.g. *"About 2 more good nights — if the next clear ones cooperate, you could finish around Sept 2."* Returns
-  `None` (render nothing) when no goal is set, there's no pace history, or the target is already at goal — never
-  a guess. **Surface:** one extra sentence on the existing Target progress/readiness card and the planner's
-  already-shot rows — no new banner, it rides a notice that exists. **Beginner bar:** clears it cleanly — plain
-  language, directly actionable ("point here on the next 2 clear nights"), sane default, no expert knob; it
-  *removes* the "when am I done?" uncertainty rather than adding surface (Method D — remove work/uncertainty).
-  **Caution — honesty about weather:** phrase it as conditional on clear skies (*"if the next clear nights
-  cooperate"*), never a hard promise — the planner knows observability (altitude + Moon) but not cloud cover.
-  **Feasibility:** offline, composes existing pieces, additive nullable payload, trivially unit-testable
-  (at-goal→None, no-pace→None, a 2-night case landing on the 2nd observable date, a Moon-washed week pushing
-  the date out). **Slices —** (a) the pure helper + tests; (b) render the sentence (frontend, gated on
-  presence). Slice (a) alone is a shippable Builder run.
+- **✅ SHIPPED (Builder, v0.297.0, branch `claude/compassionate-galileo-gwhwwd`) — ~~"When will I finish
+  this?": an observability-aware completion forecast for a target that has an integration goal.~~** Shipped as
+  filed, and it needed **no new endpoint, no new query and no new card** — both halves were already on screen,
+  four lines apart, refusing to talk to each other.
+
+  **What shipped.** A pure `finishForecast(nightsToGo, windows)` in `components/nextSession.ts` (where the
+  card's every other sentence already lives) takes the nights-to-go the readiness card *already* derives from
+  this target's own pace (`estimateClearNights`) and reads the **n-th** of the planner's already-fetched
+  altitude- and Moon-aware windows: *"About 2 more good nights — if the next clear ones cooperate, you could
+  finish around Sun 18 Jan."* `Target.tsx` hands `clearNights.nights` down to `NextSessionCard`, which had the
+  windows all along. The filed shape put it on the readiness card; it went on **"Plan your next night"**
+  instead, because that card is where the windows are — the alternative was a second `["next-session"]` query
+  mounted on a tab the user may never open.
+
+  **The honesty rules the entry asked for, all kept.** Phrased conditionally on the weather (the planner knows
+  altitude and Moon and nothing about cloud). One night is worded as one night, never "about 1". And it
+  **stays silent when the planner can't see far enough**: the windows list is capped at three, so a 4-night
+  goal gets no date rather than the last window's — quoting it would promise a finish that is too early, which
+  is the exact failure the feature exists to prevent (a bare "2 more nights" reading as "the day after
+  tomorrow" for an object that is Moon-washed for a week).
+
+  **Upgrade-safe (§9):** frontend-only, additive, one optional prop; no endpoint, config, schema or default
+  change, and the card renders exactly as it does today for any target without a pace.
+
+  **Tests (+10):** seven in `nextSession.test.ts` (the n-th-window date — on a window list where the 2nd good
+  night is three days out, so a naive "tomorrow + 1" would fail it; the one-night wording; silence past the
+  window horizon; silence with no/zero/negative/NaN nights; silence with no windows; a junk stamp; fractional
+  nights rounding up) and three in `NextSessionCard.test.tsx` (renders, and both silences).
+
+  Original spec, for the record:
+
+  - **~~NEW BEGINNER FEATURE (Scout 2026-08-26)~~** *(Pillar: autonomy + friendliness — PRIORITY 2–3.
+    Size: M.)* The app already holds every piece separately: a target's integration **goal** (`goal_s`), its
+    recent **pace** (`recent_pace_s` — median kept integration per clear night), and, via
+    `nightplan.next_observing_windows`, the next nights *this exact target* is genuinely well-placed (clears the
+    altitude floor, Moon-weighted). Nothing yet **joins** them into the one thing a beginner actually wonders:
+    *"how many more nights, and roughly when, until this is done?"* The existing readiness hint says "~1 more
+    night finishes this" (a bare count) but never says *which* upcoming nights are observable — so a target that
+    needs 2 more nights yet is Moon-washed / too low for the next week reads as "nearly there" when it is really a
+    fortnight away. **Verified new:** grepped this run — no finish-date / completion-date / "done by" forecast
+    exists in code or backlog; the closest, `recent_pace_s`, only yields a night *count*.
+    **Shape:** a pure helper `finish_forecast(goal_s, current_integration_s, recent_pace_s, windows) ->
+    FinishForecast | None` that (a) computes `nights_needed = ceil((goal − current) / pace)`, then (b) walks the
+    already-computed `next_observing_windows` list and returns the calendar date of the *n-th* qualifying night —
+    e.g. *"About 2 more good nights — if the next clear ones cooperate, you could finish around Sept 2."* Returns
+    `None` (render nothing) when no goal is set, there's no pace history, or the target is already at goal — never
+    a guess. **Surface:** one extra sentence on the existing Target progress/readiness card and the planner's
+    already-shot rows — no new banner, it rides a notice that exists. **Beginner bar:** clears it cleanly — plain
+    language, directly actionable ("point here on the next 2 clear nights"), sane default, no expert knob; it
+    *removes* the "when am I done?" uncertainty rather than adding surface (Method D — remove work/uncertainty).
+    **Caution — honesty about weather:** phrase it as conditional on clear skies (*"if the next clear nights
+    cooperate"*), never a hard promise — the planner knows observability (altitude + Moon) but not cloud cover.
+    **Feasibility:** offline, composes existing pieces, additive nullable payload, trivially unit-testable
+    (at-goal→None, no-pace→None, a 2-night case landing on the 2nd observable date, a Moon-washed week pushing
+    the date out). **Slices —** (a) the pure helper + tests; (b) render the sentence (frontend, gated on
+    presence). Slice (a) alone is a shippable Builder run.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-26) — "How far did you see?": a light-travel-time wow-badge on the
   finished picture.**~~ — **SHIPPED v0.276.0** (Builder 2026-08-26, branch
