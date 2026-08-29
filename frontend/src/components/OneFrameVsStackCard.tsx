@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Box, Button, Group, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
-import { IconArrowsHorizontal, IconPhoto } from "@tabler/icons-react";
+import { IconArrowsHorizontal, IconDownload, IconPhoto } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { splitClipLeft, splitFraction, splitLeftPct } from "./editor/splitCompare";
@@ -117,6 +117,23 @@ export function OneFrameVsStackCard({
                 {noiseBadge}
               </Text>
             )}
+            {/* The portable version of what they're looking at. The reveal is
+                the app's most convincing moment and until now it could only be
+                screenshotted; this hands over the same two halves as one
+                labelled, captioned picture. Same gate as the card itself — the
+                endpoint 404s wherever `available` is false — so it can never
+                offer an unfair pairing. */}
+            <Group gap="xs">
+              <Button size="xs" variant="light" color="teal"
+                leftSection={<IconDownload size={14} />}
+                component="a" href={api.stackBeforeAfterUrl(safe, runId)} download>
+                Share this before/after
+              </Button>
+            </Group>
+            <Text size="xs" c="dimmed">
+              Saves both halves as one picture, labelled and captioned with your
+              target, frame count and total exposure — ready to post.
+            </Text>
             </>
           ) : (
             <Group gap="xs">

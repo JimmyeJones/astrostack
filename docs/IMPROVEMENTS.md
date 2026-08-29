@@ -18718,10 +18718,46 @@ problems. Dogfood it every big-picture run and fix root causes.
 
   *(Original spec, kept for context.)* *(Pillar: friendliness /
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #11) — "Share your glow-up": a one-tap download that composes the
-  representative single raw sub next to the finished stack into one labelled before/after image, so a beginner can
-  post the single most impressive thing stacking does — *"1 photo → 500 photos stacked"* — without a screenshot or
-  an editor.** *(Pillar: share / enjoy + trust — PRIORITY 3. Size: S–M. Confidence the gap is real: grepped this
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #11) — "Share your glow-up": a one-tap download that composes the
+  representative single raw sub next to the finished stack into one labelled before/after image.**~~ —
+  **SHIPPED v0.300.0** (Builder 2026-08-29, branch `claude/compassionate-galileo-4txqj1`), all three filed
+  slices in one run. *(Pillar: share / enjoy + trust — PRIORITY 3.)*
+
+  **(a) Engine — `seestack/beforeafter.py`.** Pure, offline, no new dependency: `build_before_after(before,
+  after, *, caption, labels, width)` fits both halves *whole* into equal half-cells
+  (`render.deepening._fit_onto`, so a portrait sub beside a wider mosaic master keeps both geometries true),
+  burns the reel's own corner label onto each, draws the keepsake's hairline down the seam, and sets one
+  caption line under the pair. It deliberately **does not touch either half's pixels** — matching the two tone
+  curves is the caller's job (that's what `reference-sub` already does), so the composer can never flatter the
+  result; a test pins a flat mid-grey coming out the same mid-grey. `before_after_caption` /
+  `panel_labels` / `sub_exposure_label` build the wording, each clause dropping out on its own so a thin
+  older run gets a shorter sentence rather than one with a hole in it, and `_pair_aspect` follows the
+  *taller* of the two shapes so the half being examined is never the letterboxed one.
+
+  **(b) Backend — `GET /api/targets/{safe}/stack-runs/{id}/before-after.jpg`.** Renders the reference sub
+  through the run's own saved stretch (the reveal's exact call), loads the stored preview, composes, and
+  serves a JPEG as an `attachment` named `{basename}_before-after.jpg`. Gated **identically to the reveal** —
+  404 on no preview, no readable frame, or a display-space / in-place-Auto-edited run whose bespoke tone
+  curve a raw sub can't honestly match — so the button self-hides on exactly the runs the card does. Composed
+  in a threadpool; nothing written to the library (a display-time render, like the montage wall). Registered
+  *above* the `/{kind}` catch-all, with a test that pins the ordering.
+
+  **(c) Frontend — one "Share this before/after" download button** on `OneFrameVsStackCard`, appearing with
+  the reveal (not before it, so History's list of runs still fetches nothing up front), plus a plain-language
+  line saying what the file contains.
+
+  **Upgrade-safe (§9):** purely additive — one new engine module, one new read-only endpoint, one button. No
+  schema, config, on-disk, API-shape or default change.
+
+  **Tests:** `tests/test_beforeafter.py` (+21 — caption degradation incl. a non-finite integration, the
+  no-tofu-glyph rule, width clamping, a missing/unreadable half yielding `None`, the two halves landing on
+  their own sides, pixels unmodified), `tests/webapp/test_one_sub_vs_stack.py` (+7 — the composed download,
+  the caption built from the run's own provenance, all three 404 gates, the catch-all ordering, and the saved
+  custom stretch reaching the download), `OneFrameVsStackCard.test.tsx` (+1).
+
+  Original spec:
+
+  *(Pillar: share / enjoy + trust — PRIORITY 3. Size: S–M. Confidence the gap is real: grepped this
   run — the `one-sub-vs-stack` reveal exists **in-app only** (`OneFrameVsStackCard.tsx`, the `/one-sub-vs-stack`
   info + `/reference-sub` PNG + `/noise` endpoints); there is no *downloadable* composed before/after image
   anywhere.)*

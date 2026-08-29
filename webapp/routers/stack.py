@@ -1565,6 +1565,111 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
                     headers={"Cache-Control": "no-store"})
 
 
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg")
+async def before_after_jpeg(safe: str, run_id: int, request: Request,
+                            width: int = 0) -> Response:
+    """Download the reveal as one shareable picture: the representative single sub
+    beside the finished stack, labelled, under a plain-language caption.
+
+    The in-app reveal (``one-sub-vs-stack``) is the most convincing thing the app
+    does — and it can't leave the app, so the one picture a non-astro friend
+    actually understands ("this grainy frame → this clean photo, same little
+    telescope") could only be screenshotted. This composes it on demand from the
+    two renders that already exist: nothing is written to the library, exactly
+    like the montage wall (``/api/gallery/montage.jpg``) and the recap poster.
+
+    Gated **identically to the reveal** — 404 (rather than an unfair pairing) when
+    the run has no stored preview, no frame to render, or is a display-space
+    editor export whose bespoke tone curve a raw sub can't honestly match — so the
+    download button self-hides on exactly the runs the card already hides on.
+    Composed in a threadpool, like every other render here, so it never blocks
+    the job worker.
+    """
+    from seestack.stack.output import fits_is_display_space
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        if run is None:
+            raise HTTPException(status_code=404, detail="No such run")
+        entry = lib.find_target(safe)
+        preview_path = run.preview_path
+        if not preview_path or not Path(preview_path).exists():
+            raise HTTPException(status_code=404, detail="No preview for this run")
+        if _preview_is_display_space(run.options_json) or (
+            run.fits_path and Path(run.fits_path).exists()
+            and fits_is_display_space(run.fits_path)
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="This run's picture is an edited export, so a raw frame "
+                       "can't be matched to it honestly.")
+        ref = _pick_reference_sub(proj)
+        if ref is None:
+            raise HTTPException(status_code=404, detail="No frame to render for this run")
+        src = readable_frame_path(ref)
+        if not src:
+            raise HTTPException(status_code=404, detail="Frame file not found on disk")
+        pattern = (ref.bayer_pattern or "RGGB").upper()
+        if pattern not in _BAYER_PATTERNS:
+            pattern = "RGGB"
+        src_path = str(src)
+        # The run's own saved tone curve, exactly as `reference-sub` uses it, so
+        # the two halves of the download differ only in noise/detail.
+        stretch = run.preview_stretch
+        black = run.preview_black
+        name = (entry.name if entry is not None else None) or safe
+        n_frames = run.n_frames_used
+        integration_s = run.total_exposure_s
+        sub_exposure_s = ref.exposure_s
+        basename = run.output_basename
+    finally:
+        proj.close()
+        lib.close()
+
+    from seestack.beforeafter import (
+        DEFAULT_WIDTH,
+        before_after_caption,
+        build_before_after,
+        panel_labels,
+    )
+
+    asked = int(width) if width else DEFAULT_WIDTH
+
+    def _compose() -> bytes:
+        import io
+
+        from PIL import Image
+
+        from seestack.render.thumbnail import render_sub_preview
+
+        sub_png = render_sub_preview(src_path, bayer_pattern=pattern,
+                                     max_width=1024, stretch=stretch, black=black)
+        with Image.open(io.BytesIO(sub_png)) as raw:
+            before = raw.convert("RGB")
+        with Image.open(preview_path) as stored:
+            after = stored.convert("RGB")
+        image = build_before_after(
+            before, after,
+            caption=before_after_caption(name, n_frames, sub_exposure_s,
+                                         integration_s),
+            labels=panel_labels(n_frames, sub_exposure_s),
+            width=asked,
+        )
+        if image is None:  # pragma: no cover — both halves were just loaded
+            raise HTTPException(status_code=404, detail="Nothing to compare")
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=92)
+        return buf.getvalue()
+
+    data = await run_in_threadpool(_compose)
+    return Response(
+        content=data, media_type="image/jpeg",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{basename}_before-after.jpg"'},
+    )
+
+
 # Both sides of the noise measurement are bounded to this square, taken from the
 # centre of each image — enough background to estimate σ robustly, small enough
 # that a giant mosaic master costs a patch rather than a canvas.
