@@ -2682,6 +2682,39 @@ def _stack_target(
     }
 
 
+def _rendered_preview_crop(project_dir: Path, run_id: int, recipe,
+                           out_shape: tuple[int, int]) -> str | None:
+    """The ``stack_runs.preview_crop_json`` value for a preview just rendered from
+    ``recipe``, or ``None`` when the render still shows the whole canvas.
+
+    Reads the crop the recipe *asks* for and then checks it against what the
+    render actually produced: the rendered array should be the recipe's fraction
+    of the cached proxy the render ran on. If it isn't (``geometry.crop`` ignores
+    a crop that is degenerate at full resolution, and clamps a sliver to 1 px),
+    the recorded geometry would be a lie — so record
+    :data:`~seestack.previewcrop.UNKNOWN` and let the consumers decline to place
+    anything rather than place it wrong. When the proxy's own size can't be read
+    the recipe's bounds are taken at face value, which is the pre-check
+    behaviour and still strictly better than recording nothing."""
+    from seestack.edit.proxy import cached_proxy_shape
+    from seestack.edit.recipe import preview_crop_of_recipe
+    from seestack.previewcrop import UNKNOWN, PreviewCrop, preview_crop_json
+
+    crop = preview_crop_of_recipe(recipe)
+    if crop is None or crop == UNKNOWN:
+        return preview_crop_json(crop)
+    assert isinstance(crop, PreviewCrop)
+    src = cached_proxy_shape(project_dir, run_id)
+    if src is not None:
+        got_h, got_w = int(out_shape[0]), int(out_shape[1])
+        want_h = int(round(crop.h_frac * src[0]))
+        want_w = int(round(crop.w_frac * src[1]))
+        # One pixel of slack per axis: the op rounds each edge independently.
+        if abs(got_h - want_h) > 1 or abs(got_w - want_w) > 1:
+            return preview_crop_json(UNKNOWN)
+    return preview_crop_json(crop)
+
+
 def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                            auto_crop: bool = True) -> int | None:
     """Chain the one-click Auto recipe onto a freshly-produced stack run so the
@@ -2755,6 +2788,18 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                 # reads that column, and a stale one would have them correcting
                 # for a rotation that is no longer there.
                 proj.set_stack_preview_north_up(run_id, 0.0)
+                # ...and record the other way this render can stop being a plain
+                # downscale of the canvas: Auto ends with a `geometry.crop` that
+                # trims a mosaic's ragged border (`auto_crop_border`, on by
+                # default), so the bytes we just wrote can be a *crop*. Recorded
+                # from what the render actually did — the recipe's composed
+                # bounds, checked against the shape the render came out — so a
+                # crop the op declined (degenerate on the proxy) can't be
+                # recorded as one. NULL for every un-cropped render, which is
+                # what every consumer already assumes.
+                proj.set_stack_preview_crop(
+                    run_id, _rendered_preview_crop(proj.project_dir, run_id,
+                                                   recipe, out.shape[:2]))
                 # The preview is now the Auto recipe's tone-mapped result, but the
                 # run's FITS stays linear (the recipe is stored separately and is
                 # reversible). Mark the run so the parity surfaces — the one-sub-vs-

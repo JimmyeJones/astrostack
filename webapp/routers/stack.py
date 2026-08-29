@@ -13,6 +13,8 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
 from seestack.io.project import readable_frame_path
+from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
+from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from seestack.stackhealth import seam_verdict
 from webapp import deps, pipeline
 from webapp.schemas import (
@@ -449,6 +451,10 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
         lib.close()
     out = []
     for r in runs:
+        # What the stored preview shows of the canvas — an auto-edit border trim,
+        # or geometry we can't reconcile at all. The pins/scale bar are measured
+        # on the un-cropped FITS grid, so the UI needs both to draw on those bytes.
+        crop = parse_preview_crop(r.preview_crop_json)
         out.append(StackRunOut(
             id=r.id,
             timestamp_utc=r.timestamp_utc,
@@ -469,6 +475,11 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             noise_sigma=r.noise_sigma,
             stack_fwhm_px=r.stack_fwhm_px,
             preview_north_up_deg=r.preview_north_up_deg,
+            preview_crop=(
+                {"x0": crop.x0, "y0": crop.y0, "x1": crop.x1, "y1": crop.y1}
+                if isinstance(crop, PreviewCrop) else None
+            ),
+            preview_geometry_unknown=(crop == CROP_UNKNOWN),
             seam_residual=r.seam_residual,
             seam_verdict=seam_verdict(r.seam_residual),
             calstat=r.calstat,
@@ -762,6 +773,7 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
         raise HTTPException(status_code=404, detail="No preview for this run")
     fits_path = run.fits_path
     north_up_deg = run.preview_north_up_deg or 0.0
+    crop = parse_preview_crop(run.preview_crop_json)
 
     from seestack.render.orient import rotate_mask_north_up
     from seestack.render.thumbnail import overlay_rgba_png, stack_coverage_mask
@@ -770,7 +782,20 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
         preview = Path(preview_path).read_bytes()
         if fits_path and Path(fits_path).exists():
             try:
+                if crop == CROP_UNKNOWN:
+                    # The stored preview came out of a recipe whose geometry we
+                    # can't reconcile with the canvas, so there is no honest way
+                    # to line the mask up with it. Serve the opaque preview
+                    # rather than punch transparency through the wrong pixels.
+                    return preview
                 mask = stack_coverage_mask(fits_path)
+                if isinstance(crop, PreviewCrop):
+                    # The picture is a *crop* of the canvas (an auto-edit border
+                    # trim); the mask comes off the un-cropped FITS, so take the
+                    # same rectangle out of it before it drives the alpha.
+                    mx0, my0, mx1, my1 = crop_pixel_box(
+                        crop, mask.shape[1], mask.shape[0])
+                    mask = mask[my0:my1, mx0:mx1]
                 if north_up_deg:
                     mask = rotate_mask_north_up(mask, north_up_deg)
                 return overlay_rgba_png(preview, mask)
@@ -854,7 +879,8 @@ def _unrotated_preview_width(png_data: bytes, fits_path: str | None,
 
 
 def _sky_marks_for_run(fits_path: str | None, preview_width: int,
-                       north_up_deg: float = 0.0):  # noqa: ANN202
+                       north_up_deg: float = 0.0,
+                       crop: PreviewCrop | str | None = None):  # noqa: ANN202
     """The scale bar + North/East rose to bake onto a run's shared picture.
 
     Reads the run's own master-FITS WCS, turns its pixel scale into a round bar
@@ -866,12 +892,21 @@ def _sky_marks_for_run(fits_path: str | None, preview_width: int,
     the scale. ``north_up_deg`` is the rotation actually applied to those pixels,
     so the rose follows them.
 
+    ``crop`` is what the stored preview shows of the canvas (an auto-edit border
+    trim). The bar's length is a fraction of the *canvas* width, so on a cropped
+    picture the same on-sky length covers a larger fraction of what's left —
+    divide by the crop's width fraction. :data:`~seestack.previewcrop.UNKNOWN`
+    means the geometry can't be reconciled, so no bar is drawn at all rather than
+    a wrong one. (The rose is unaffected: a crop moves no pixel's orientation.)
+
     Always returns a :class:`~seestack.skymarks.SkyMarks` — an empty one (a
     clean no-op when drawn) for a run with no FITS, no WCS or an unusable scale,
     so the caller never has to special-case an older/edited run."""
     from seestack.skymarks import SkyMarks, rotated, sky_directions
 
     if not fits_path or not Path(fits_path).exists() or preview_width <= 0:
+        return SkyMarks()
+    if crop == CROP_UNKNOWN:
         return SkyMarks()
     from seestack.io.wcs_io import celestial_wcs_from_fits
 
@@ -881,7 +916,12 @@ def _sky_marks_for_run(fits_path: str | None, preview_width: int,
         return SkyMarks()
     if wcs is None:
         return SkyMarks()
-    bar = _scale_bar_from_wcs(wcs, width, height)
+    # Size the bar against the part of the canvas the picture actually shows, so
+    # its round length is chosen for the visible field and its `fraction` is
+    # already a fraction of *this* picture's width.
+    bx0, by0, bx1, by1 = crop_pixel_box(
+        crop if isinstance(crop, PreviewCrop) else None, width, height)
+    bar = _scale_bar_from_wcs(wcs, bx1 - bx0, by1 - by0)
     directions = rotated(sky_directions(wcs, width, height), north_up_deg)
     return SkyMarks(
         bar_px=(bar.fraction * preview_width) if bar is not None else None,
@@ -1298,6 +1338,12 @@ async def save_stack_preview(
             None if is_display else black,
         )
         proj.set_stack_preview_north_up(run_id, north_up_deg)
+        # This render comes straight off the master FITS, so it covers the whole
+        # canvas — clear any border trim a previous "Process target" auto-edit
+        # baked into the old bytes, exactly as the North-up angle above is always
+        # written rather than left alone. A stale crop would have every surface
+        # that lines up with the preview correcting for a trim that is gone.
+        proj.set_stack_preview_crop(run_id, None)
     finally:
         proj.close()
         lib.close()
@@ -2011,8 +2057,11 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
     if baked_north_up and run.fits_path:
         flat_size = _unrotated_preview_size(run.fits_path) or flat_size
     if ra is not None and dec is not None and run.fits_path and flat_size is not None:
+        # ...and the other way the stored bytes can leave the canvas grid: an
+        # auto-edit border trim, which shifts and shrinks the mapping.
         target_px = wallpaper_target_pixel(
-            run.fits_path, ra, dec, flat_size[0], flat_size[1])
+            run.fits_path, ra, dec, flat_size[0], flat_size[1],
+            parse_preview_crop(run.preview_crop_json))
         if target_px is not None and baked_north_up:
             target_px = rotate_point_north_up(
                 target_px[0], target_px[1], flat_size[0], flat_size[1],
@@ -2136,7 +2185,8 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         marks = None
         if scale:
             marks = _sky_marks_for_run(run.fits_path, preview_width,
-                                       applied_north_up)
+                                       applied_north_up,
+                                       parse_preview_crop(run.preview_crop_json))
         data = png_bytes_to_jpeg(
             preview,
             nameplate=plate if nameplate else None,
