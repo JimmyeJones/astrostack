@@ -49,6 +49,34 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.292.1, branch `claude/compassionate-galileo-4drm6t`) — ~~the Tonight planner's
+  "nudge your scope this way" row can keep quoting the picture *before* the newest one for up to a minute,
+  because the registry-signature cache behind it can't see a stack.~~** Found by CI going red on main
+  (`test_tonight_row_follows_the_newest_picture_not_an_old_one`, run 1204) — a **real racy behaviour**, not a
+  test flake, so it was root-caused and fixed rather than re-run. *(Severity: broken-UX / trust — the row exists
+  precisely so the planner never tells someone to move a scope they have already moved, and this made it do
+  exactly that. Confidence: reproduced deterministically.)*
+
+  **Root cause (reproduced).** `/api/plan/tonight`'s already-targeted rows are cached behind
+  `registry_signature`, which keyed on `(safe_name, last_activity_utc, n_frames_accepted)`. A re-stack of frames
+  already in the library adds **no** accepted frames, and `last_activity_utc` is written at **one-second**
+  granularity (`seestack.io.library._utc_iso`) — so a stack landing inside the same second as the previous
+  registry write moved *nothing the signature looked at*, and `cached_for_registry` served the previous row for
+  the whole 60 s TTL. The cache's own docstring claimed it "catches anything a scan or a stack changed"; it
+  didn't. On CI the two registry writes in that test fell in one second and the stale nudge came back; locally
+  they usually straddle a second boundary, which is why it passed for runs.
+
+  **Fix.** `registry_signature` now also keys on `last_stack_preview` — the registry column that moves whenever
+  a **new picture** lands (a stack always writes a preview) and stays put otherwise. Cheap (already on
+  `TargetEntry`, no extra read), order-stable as before, and tolerant of a target object without the attribute.
+  The test fixture that registered a run with `preview_path=None` — a shape production never produces — now
+  writes a preview beside its master like a real stack does.
+
+  **Tests:** a deterministic end-to-end regression in `tests/webapp/test_plan.py`
+  (`…_follows_a_new_picture_even_within_one_second`, which pins the activity stamp back to force the
+  same-second case — fails before, passes after), plus two unit tests in `tests/webapp/test_registry_cache.py`
+  (the signature moves on a new picture alone; a lean target object still signs).
+
 - **✅ SHIPPED (Builder, v0.287.3, branch `claude/compassionate-galileo-pr7p04`) — ~~a returncode-0 ASTAP
   solve whose `.wcs` sidecar is readable but carries NO celestial WCS is persisted as a *solved* frame with a
   garbage `wcs_json` and a null centre, then locked out of retry forever.~~** Fixed exactly as specified, plus
