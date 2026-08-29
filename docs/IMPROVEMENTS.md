@@ -13720,6 +13720,23 @@ problems. Dogfood it every big-picture run and fix root causes.
     same field labels sensibly on a 180 px History card, a 260 px Target card and a full-screen lightbox; and
     never move a *dot* — only its chip — or the label stops pointing at its object.
 
+- **DOGFOOD FINDING (Builder 2026-08-29, measured by `scripts/agent-dogfood.sh`, not read off the code) — "My
+  life list" is 14,584 px tall on a phone, nearly 3× the next-worst page and 2.8× its own desktop height.**
+  *(Pillar: friendliness — PRIORITY 3, the standing "the pages are extremely busy" item. Size: M.
+  Confidence: measured — the probe's own page-height table, this run.)*
+  The probe's ranking is unambiguous: `[phone] /life-list: 14584px`, then `[desktop] /life-list: 5236px`, then
+  the Target page at 3035 px. Nothing overflows and there are no console errors — the page is *correct*, it is
+  simply enormous, and on the device the owner actually reads it on that is ~17 screens of scrolling. Every
+  other page the probe visits fits in a third of that.
+  **Why it is worth a slice.** The owner's complaint is explicitly about scrolling to reach the actual
+  information, and this is the app's clearest instance of it. The fix is the same regrouping the IA slices have
+  used elsewhere — nothing removed: a phone-first shape for the list (collapse the not-yet-shot bulk behind a
+  count, or paginate/section by catalog), with the shot ones — the part that is *about the owner* — above the
+  fold. **Measure it the same way afterwards** (`scripts/agent-dogfood.sh`, the page-height table) and state
+  the before/after in the commit, exactly as the IA slices do with block counts.
+  **Grep first:** confirm whether the height is the catalog's full length rendered eagerly; if so, the cheap
+  half may be a windowed / "show more" list rather than an IA rethink.
+
 - **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the owner *save* their
   universe map, and put it where they'd think to look for it.** *(Pillar: enjoy + share — PRIORITY 3.
   Size: S. Confidence: high — the picture already exists at a stable URL.)* "My map" is a pride object:

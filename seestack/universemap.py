@@ -45,7 +45,7 @@ from seestack.objectinfo import identify_object
 #: see the third rule in the module docstring.
 PROVENANCE = (
     "Your own pictures decide which objects are here and which way they lie. "
-    "How far away each one is comes from a published catalogue — that is a "
+    "The distance to each one comes from a published catalogue — that is a "
     "measurement no backyard telescope can make."
 )
 
@@ -148,7 +148,10 @@ def _shells(lo: float, hi: float, distances: list[float]) -> tuple[UniverseShell
     Round decades (1,000 ly / 10,000 ly / 1 million ly …) are the rungs a reader
     already understands, so they are preferred. A collection tight enough to hold
     fewer than two of them gets its own nearest and furthest object instead — a
-    scale reference with one rung tells you nothing about spacing.
+    scale reference with one rung tells you nothing about spacing. (A collection
+    of *one* object is the exception that proves it: there is no spacing to show,
+    so it gets a single rung at its own distance and the caption beside the map
+    says nothing about steps.)
     """
     first = math.ceil(lo)
     # Never draw a rung beyond the furthest thing the owner has actually shot:
