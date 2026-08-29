@@ -175,7 +175,7 @@ export function reprocessSummary(r: Record<string, unknown>): {
  * bare "done" and no idea where the result is (or why there isn't one). */
 export function processTargetSummary(r: Record<string, unknown>): {
   line: string; stacked: boolean; thin: ThinStackWarning | null;
-  cleaned: string | null; missing: string | null; readErrors: string | null;
+  cleaned: string | null; storage: { title: string; message: string } | null;
   calMismatch: string | null;
 } {
   const stacked = Boolean(r.stacked);
@@ -201,13 +201,17 @@ export function processTargetSummary(r: Record<string, unknown>): {
       typeof stack.rejection_fraction === "number" ? stack.rejection_fraction : null,
       Number(stack.n_frames_used ?? 0) || null,
     );
-    // The walk-away user's only cue that a chunk of their subs simply weren't on
-    // disk (Stage-1 cache cleared while the originals sit on an offline share, a
-    // drive unmounted). Without it a storage problem reads as a thin stack with
-    // no reason. Self-omits when everything was readable, and on an older
-    // backend that doesn't report it.
-    const missing = missingSubsNote(
+    // The walk-away user's only cue that their subs didn't come off the disk
+    // cleanly — files that weren't there at all (Stage-1 cache cleared while the
+    // originals sit on an offline share, a drive unmounted) and files that were
+    // there and blew up mid-read. Both diagnoses in ONE alert, because a share
+    // that unmounts mid-scan produces both and they are one story about one
+    // drive. Self-omits when everything read fine, and on an older backend that
+    // doesn't report the counts.
+    const storage = storageTroubleAlert(
       Number(stack.n_unreadable ?? 0) || 0,
+      Number(stack.n_read_errors ?? 0) || 0,
+      Number(stack.n_read_recovered ?? 0) || 0,
       Number(stack.n_offered ?? 0) || 0,
     );
     // A master dark that *was* applied but doesn't match these subs (wrong
@@ -215,18 +219,8 @@ export function processTargetSummary(r: Record<string, unknown>): {
     // subtracts its pedestal on every frame. The engine has always measured it
     // and written it to the server log — which is exactly the place a walk-away
     // user never looks — so say it where the finished picture lands.
-    // The sibling storage signal: subs whose file *was* there and then failed
-    // mid-read. Until now those only ever existed as raw strings in the run's
-    // `errors` list, which nothing on any page reads.
-    const readErrors = readErrorsNote(
-      Number(stack.n_read_errors ?? 0) || 0,
-      Number(stack.n_read_recovered ?? 0) || 0,
-      Number(stack.n_offered ?? 0) || 0,
-    );
     const calMismatch = calibrationMismatchNote(stack.calibration_warnings);
-    return {
-      line: `${line}.`, stacked, thin, cleaned, missing, readErrors, calMismatch,
-    };
+    return { line: `${line}.`, stacked, thin, cleaned, storage, calMismatch };
   }
   const reason = typeof r.stack_skipped_reason === "string"
     ? r.stack_skipped_reason : null;
@@ -240,8 +234,7 @@ export function processTargetSummary(r: Record<string, unknown>): {
     line = "Finished, but no stack was produced.";
   }
   return {
-    line, stacked, thin: null, cleaned: null, missing: null, readErrors: null,
-    calMismatch: null,
+    line, stacked, thin: null, cleaned: null, storage: null, calMismatch: null,
   };
 }
 
@@ -312,6 +305,59 @@ export function readErrorsNote(
     : "";
   return `${lead}${recoveredClause}. The files are there but didn't read `
     + "cleanly — worth checking the drive or network share they live on.";
+}
+
+/** The run's storage trouble as ONE alert — title and body — or null when every
+ * sub read fine (pure, tested).
+ *
+ * `missingSubsNote` and `readErrorsNote` are deliberately different diagnoses
+ * ("the file wasn't there" vs. "the file was there and the read blew up"), and on
+ * a healthy install at most one ever fires. But a share that unmounts mid-scan
+ * fires **both**, and two stacked yellow alerts that each end by telling the owner
+ * to go check the same drive read as two problems and bury the one action under
+ * twice the words. When both fire this composes them into a single alert that
+ * keeps the two counts and their two causes distinct — they really are different
+ * failures — and says the shared fix once. When only one fires it is that note,
+ * unchanged, under its own title.
+ *
+ * Both underlying helpers stay exported and untouched: History renders them as
+ * separate lines beside its align clause, where the one-story problem doesn't
+ * arise. */
+export function storageTroubleAlert(
+  nUnreadable: number, nReadErrors: number, nRecovered: number, nOffered: number,
+): { title: string; message: string } | null {
+  const missing = missingSubsNote(nUnreadable, nOffered);
+  const readErrors = readErrorsNote(nReadErrors, nRecovered, nOffered);
+  if (!missing && !readErrors) return null;
+  if (missing && !readErrors) {
+    return { title: "Some subs couldn't be read", message: missing };
+  }
+  if (readErrors && !missing) {
+    return { title: "Some subs didn't read cleanly", message: readErrors };
+  }
+  // Both. Rebuild the clauses rather than concatenating the two notes, so the
+  // "check the drive" sentence is said once instead of twice.
+  const offered = Math.round(nOffered);
+  const gone = Math.min(Math.round(nUnreadable), offered);
+  const errored = Math.min(Math.round(nReadErrors), offered);
+  const recovered = Number.isFinite(nRecovered)
+    ? Math.min(Math.max(Math.round(nRecovered), 0), errored) : 0;
+  const nf = (n: number) => n.toLocaleString();
+  const recoveredClause = recovered > 0
+    ? recovered === errored
+      ? " (all of them read fine on the second try, so they're in your picture)"
+      : ` (${nf(recovered)} of them read fine on the second try, so those are `
+        + "in your picture)"
+    : "";
+  return {
+    title: "Trouble reading your subs",
+    message: `${nf(gone)} of ${nf(offered)} subs couldn't be read at all — their `
+      + `files weren't on disk. Another ${nf(errored)} sub`
+      + `${errored === 1 ? " was" : "s were"} there but hit a read error while `
+      + `stacking${recoveredClause}. Both point at the same place: check the drive `
+      + "or network share these files live on is connected, then scan and stack "
+      + "again.",
+  };
 }
 
 /** How many subs the stack-then-solve bootstrap rescued in this job result, or
@@ -577,7 +623,7 @@ function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;
   const r = job.result as Record<string, unknown>;
   if (job.kind === "process_target") {
-    const { line, stacked, thin, cleaned, missing, readErrors, calMismatch } =
+    const { line, stacked, thin, cleaned, storage, calMismatch } =
       processTargetSummary(r);
     // Deep-link straight to the finished run's editor when we know its id
     // (v0.85.3+ backend); fall back to the target's History on an older backend.
@@ -610,18 +656,13 @@ function JobResultActions({ job }: { job: Job }) {
         ) : null}
         {/* Names a storage problem as a storage problem — otherwise a cleared
             cache over an offline share just looks like a mysteriously thin
-            stack. Shown above the reassuring notes because it's actionable. */}
-        {missing ? (
-          <Alert color="yellow" p="xs" title="Some subs couldn't be read">
-            <Text size="xs">{missing}</Text>
-          </Alert>
-        ) : null}
-        {/* The same storage story from the other direction — the files were
-            there and the reads failed. Kept beside the missing-files alert so
-            the two read as one story about the drive, not two mysteries. */}
-        {readErrors ? (
-          <Alert color="yellow" p="xs" title="Some subs didn't read cleanly">
-            <Text size="xs">{readErrors}</Text>
+            stack. Shown above the reassuring notes because it's actionable, and
+            deliberately ONE alert: a flaking drive produces both the
+            missing-file and the failed-read counts, and two stacked yellow
+            blocks that both end in "go check the drive" read as two problems. */}
+        {storage ? (
+          <Alert color="yellow" p="xs" title={storage.title}>
+            <Text size="xs">{storage.message}</Text>
           </Alert>
         ) : null}
         {/* The opposite of the skipped-master note below: a master that *was*

@@ -100,7 +100,14 @@ class SessionRecap:
     quality_drift: SessionQualityDrift | None = None  # cross-session softness nudge, or None
 
 
-def _parse(ts: str | None) -> datetime | None:
+def parse_capture_time(ts: str | None) -> datetime | None:
+    """A frame's stored capture time as a tz-aware UTC ``datetime``, or ``None``
+    when it's absent or unparseable.
+
+    Public because every night-shaped screen must read a capture stamp the *same*
+    way — the tz-naive coercion below is exactly the kind of detail two
+    implementations would disagree about. ``_parse`` remains as the in-module
+    shorthand this file has always used."""
     if not ts:
         return None
     try:
@@ -116,6 +123,9 @@ def _parse(ts: str | None) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+_parse = parse_capture_time
 
 
 def _split_sessions(frames: list[_TimedT], gap_hours: float) -> list[list[_TimedT]]:
