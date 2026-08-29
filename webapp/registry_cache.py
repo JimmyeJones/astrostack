@@ -12,11 +12,11 @@ synthetic 40-target library with 1500 frames each: opening + the goal read costs
 every render, and it grows with both the target count and the frame count.
 
 So the answer is cached on ``app.state`` under a caller-chosen key, invalidated
-by a **signature** over the library registry — each target's activity stamp and
-accepted-frame count — plus a short TTL. The signature catches anything a scan
-or a stack changed; the TTL backstops the edits it can't see (setting a goal
-doesn't bump ``last_activity_utc``), so a just-changed goal still shows within a
-minute.
+by a **signature** over the library registry — each target's activity stamp,
+accepted-frame count and newest picture — plus a short TTL. The signature catches
+anything a scan or a stack changed; the TTL backstops the edits it can't see
+(setting a goal doesn't bump ``last_activity_utc``), so a just-changed goal still
+shows within a minute.
 
 This started as a bespoke cache inside ``routers/stats.py`` for
 ``/api/library-progress``; the Tonight planner needs exactly the same treatment
@@ -43,12 +43,24 @@ DEFAULT_TTL_S = 60.0
 def registry_signature(targets: Iterable[Any]) -> tuple:
     """A cheap, order-stable fingerprint of the library registry.
 
-    Keys on each target's identity, last activity and accepted-frame count — the
-    three registry columns that move whenever a scan, an ingest, a stack or a
-    frame accept/reject changes what a per-target roll-up would say.
+    Keys on each target's identity, last activity, accepted-frame count and
+    newest picture — the registry columns that move whenever a scan, an ingest,
+    a stack or a frame accept/reject changes what a per-target roll-up would say.
+
+    The newest picture is in there because the first three genuinely miss a
+    stack. ``last_activity_utc`` is written at **one-second** granularity
+    (``seestack.io.library._utc_iso``), and a re-stack of frames already in the
+    library moves neither the accepted-frame count nor — if it lands inside the
+    same second as the previous registry write — the stamp. The roll-up would
+    then keep answering from the *previous* picture for a whole TTL, which for
+    the Tonight planner means telling someone to nudge a scope they have already
+    moved (the exact thing ``newest_picture_nudge`` exists to avoid). A stack
+    always writes a new preview path, so this column moves when a new picture
+    lands and nothing else does. Tolerates a target object without the attribute.
     """
     return tuple(sorted(
-        (t.safe_name, t.last_activity_utc or "", int(t.n_frames_accepted or 0))
+        (t.safe_name, t.last_activity_utc or "", int(t.n_frames_accepted or 0),
+         str(getattr(t, "last_stack_preview", None) or ""))
         for t in targets
     ))
 
