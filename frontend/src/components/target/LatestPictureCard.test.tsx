@@ -3,9 +3,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LatestPictureCard, latestPictureCaption } from "./LatestPictureCard";
+import {
+  LatestPictureCard, inThisPictureSentence, latestPictureCaption,
+} from "./LatestPictureCard";
 import * as client from "../../api/client";
-import type { StackRun } from "../../api/client";
+import type { FieldObject, StackAnnotations, StackRun } from "../../api/client";
+
+function obj(over: Partial<FieldObject> = {}): FieldObject {
+  return {
+    catalog_id: "M42", name: "Orion Nebula", type: "nebula",
+    ra_deg: 83.8, dec_deg: -5.4, x_px: 960, y_px: 540, ...over,
+  };
+}
+
+function annotations(over: Partial<StackAnnotations> = {}): StackAnnotations {
+  return { width: 1920, height: 1080, objects: [obj()], scale_bar: null, ...over };
+}
 
 function mkRun(over: Partial<StackRun> = {}): StackRun {
   return {
@@ -103,6 +116,120 @@ describe("LatestPictureCard", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(img.parentElement!);
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+});
+
+describe("inThisPictureSentence", () => {
+  it("names the objects, preferring the friendly name over the catalog id", () => {
+    expect(inThisPictureSentence([obj(), obj({ catalog_id: "NGC 1977", name: "" })]))
+      .toBe("In this picture: Orion Nebula, NGC 1977");
+  });
+
+  it("caps a rich field at one line and counts the rest", () => {
+    const many = Array.from({ length: 9 }, (_, i) =>
+      obj({ catalog_id: `NGC ${i}`, name: "" }));
+    const s = inThisPictureSentence(many);
+    expect(s).toContain("NGC 5");   // the 6th, still shown
+    expect(s).not.toContain("NGC 6");
+    expect(s).toContain("and 3 more");
+  });
+
+  it("says nothing at all for an empty field", () => {
+    expect(inThisPictureSentence([])).toBe("");
+  });
+});
+
+// "What's in my picture?" — the named-object overlay used to exist only on the
+// History page, which most beginners never open. These pin it to the Target
+// page's picture card: opt-in, lazily fetched, and honest about the pictures its
+// geometry can't be placed on.
+describe("LatestPictureCard — object labels", () => {
+  it("does not ask the backend what's in the picture until the user asks", async () => {
+    const spy = vi.spyOn(client.api, "stackAnnotations")
+      .mockResolvedValue(annotations());
+    renderCard(mkRun());
+    await screen.findByAltText("Latest stacked picture of M42");
+    expect(spy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("identify-readout")).not.toBeInTheDocument();
+  });
+
+  it("names what's in the picture once asked", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations({
+      objects: [obj(), obj({ catalog_id: "NGC 1977", name: "Running Man Nebula" })],
+    }));
+    renderCard(mkRun());
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    const readout = await screen.findByTestId("identify-readout");
+    await waitFor(() => expect(readout)
+      .toHaveTextContent("In this picture: Orion Nebula, Running Man Nebula"));
+    expect(screen.getByTestId("identify-toggle")).toHaveTextContent("Hide labels");
+  });
+
+  it("says so plainly when nothing catalogued landed in the frame", async () => {
+    vi.spyOn(client.api, "stackAnnotations")
+      .mockResolvedValue(annotations({ objects: [] }));
+    renderCard(mkRun());
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await waitFor(() => expect(screen.getByTestId("identify-readout"))
+      .toHaveTextContent(/No catalog objects landed/));
+  });
+
+  it("doesn't offer labels on a run with no FITS to read a WCS from", () => {
+    renderCard(mkRun({ has_fits: false }));
+    expect(screen.queryByTestId("identify-toggle")).not.toBeInTheDocument();
+  });
+
+  it("refuses to place labels on a picture a past save rotated North-up", async () => {
+    const spy = vi.spyOn(client.api, "stackAnnotations")
+      .mockResolvedValue(annotations());
+    renderCard(mkRun({ preview_north_up_deg: 12.5 }));
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await waitFor(() => expect(screen.getByTestId("identify-readout"))
+      .toHaveTextContent(/saved rotated so North is up/));
+    expect(spy).toHaveBeenCalled();  // still asked; just not drawn on this render
+  });
+
+  it("refuses to place labels on a processed picture whose geometry can't be reconciled", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations());
+    renderCard(mkRun({ preview_geometry_unknown: true }));
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await waitFor(() => expect(screen.getByTestId("identify-readout"))
+      .toHaveTextContent(/reshaped when it was processed/));
+  });
+
+  it("drops an object the auto-edit's border trim cropped out of the picture", async () => {
+    // The stored preview of a processed mosaic is a crop of the canvas; the
+    // object pixels are measured on the un-cropped grid. NGC 1977 sits in the
+    // trimmed-away left edge, so it is no longer in the picture being labelled.
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations({
+      objects: [
+        obj({ x_px: 960, y_px: 540 }),
+        obj({ catalog_id: "NGC 1977", name: "Running Man Nebula", x_px: 20, y_px: 540 }),
+      ],
+    }));
+    renderCard(mkRun({ preview_crop: { x0: 0.25, y0: 0, x1: 1, y1: 1 } }));
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    const readout = await screen.findByTestId("identify-readout");
+    await waitFor(() => expect(readout).toHaveTextContent("Orion Nebula"));
+    expect(readout).not.toHaveTextContent("Running Man");
+  });
+
+  it("says it couldn't work it out rather than showing an empty line", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockRejectedValue(new Error("nope"));
+    renderCard(mkRun());
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await waitFor(() => expect(screen.getByTestId("identify-readout"))
+      .toHaveTextContent(/Couldn’t work out/));
+  });
+
+  it("puts the labels away again", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations());
+    renderCard(mkRun());
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await screen.findByTestId("identify-readout");
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    expect(screen.queryByTestId("identify-readout")).not.toBeInTheDocument();
+    expect(screen.getByTestId("identify-toggle")).toHaveTextContent("What’s in it?");
   });
 });
 

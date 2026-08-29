@@ -439,6 +439,28 @@ describe("HistoryView", () => {
     // jsdom — so it's covered by scaleBarLayout's pure unit test instead.)
   });
 
+  it("offers the compass alongside the scale, the pair the shared JPEG bakes", async () => {
+    // The download has carried a scale bar *and* a North/East rose since
+    // v0.284.0; the on-screen overlay only ever drew the bar. One toggle now
+    // means one idea — "how big, and which way up?" — on screen and in the file.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
+    const annot = vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600, objects: [], scale_bar: null,
+      directions: { north_deg: -90, east_deg: 180 },
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    const item = await menuItem("Scale");
+    expect(item).toHaveTextContent(/Scale & compass/);
+    expect(item).toHaveTextContent(/which way is North/);
+    fireEvent.click(item);
+    await waitFor(() => expect(annot).toHaveBeenCalledWith("M_42", 1));
+    // (The rose's on-image geometry needs a measured box — 0 in jsdom — so it is
+    // covered by compassLayout's pure unit tests instead.)
+  });
+
   it("copies a ready-to-post caption built from identity, run facts and scale", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ has_preview: true, n_frames_used: 240, total_exposure_s: 40 * 60,

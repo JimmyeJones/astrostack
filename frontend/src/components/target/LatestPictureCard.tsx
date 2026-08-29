@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Anchor, Box, Button, Group, Image, Paper, Text } from "@mantine/core";
+import { Alert, Anchor, Button, Group, Paper, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, type StackRun } from "../../api/client";
+import { api, type FieldObject, type StackRun } from "../../api/client";
 import { formatIntegration, formatStampDate } from "../../format";
+import { AnnotatedImage, croppedAnnotationView, objectLabel } from "../AnnotatedImage";
 import { ImageLightbox } from "../ImageLightbox";
 import { isJobPollAbort, pollJobUntilDone } from "../editor/pollJob";
 import { sharePictureText } from "../../share";
@@ -24,6 +25,24 @@ export function latestPictureCaption(run: StackRun): string {
   parts.push(`${run.n_frames_used} frame${run.n_frames_used === 1 ? "" : "s"}`);
   if (run.total_exposure_s) parts.push(`${formatIntegration(run.total_exposure_s)} of light`);
   return parts.join(" · ");
+}
+
+/**
+ * The one-line "what's in it?" readout under the labelled picture. Pure/testable.
+ *
+ * Names the catalog objects the overlay just pinned, in the order the backend
+ * returned them (brightest/most notable first), capped so the line can't grow
+ * into a paragraph on a rich field — the Target page is the one the owner called
+ * "extremely busy", so this stays one line whatever lands in the frame.
+ * Returns "" for an empty field, so the caller can say the honest thing instead.
+ */
+export function inThisPictureSentence(objects: FieldObject[], limit = 6): string {
+  if (!objects.length) return "";
+  const shown = objects.slice(0, limit).map(objectLabel);
+  const rest = objects.length - shown.length;
+  return rest > 0
+    ? `In this picture: ${shown.join(", ")} and ${rest} more`
+    : `In this picture: ${shown.join(", ")}`;
 }
 
 /**
@@ -49,6 +68,12 @@ export function LatestPictureCard({
   run?: StackRun | null;
 }) {
   const [light, setLight] = useState(false);
+  // "What's in it?" — the same named-object overlay History has always had, on
+  // the page a beginner actually lands on. Off by default (the picture is the
+  // point; the labels are the answer to a question they have to ask), and the
+  // annotations are only fetched once they ask, so an ordinary page load makes
+  // no extra request.
+  const [identify, setIdentify] = useState(false);
   const qc = useQueryClient();
   // Hooks must run unconditionally, so this is declared before the early return.
   // `run` is captured lazily inside the mutation, which only fires from a button
@@ -78,14 +103,48 @@ export function LatestPictureCard({
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
+  // Same endpoint and cache key History uses, so asking here warms the answer
+  // there (and vice versa) instead of solving the field twice. Needs the run's
+  // FITS-header WCS, hence the `has_fits` gate.
+  const annotations = useQuery({
+    queryKey: ["annotations", safe, run?.id],
+    queryFn: () => api.stackAnnotations(safe, run!.id),
+    enabled: identify && !!run?.has_fits,
+    staleTime: Infinity,
+  });
   if (!run || !run.has_preview) return null;
   const previewSrc = api.stackArtifactUrl(safe, run.id, "preview");
   const share = sharePictureText(name, formatStampDate(run.timestamp_utc));
+  // The pins are measured on the run's un-rotated, un-cropped FITS grid, and this
+  // card always shows the *stored* preview bytes. A crop the one-click auto-edit
+  // baked in composes exactly (shift the pixels into the trim); a baked-in
+  // North-up rotation, or a render whose geometry isn't a crop at all, does not —
+  // so hide the pins and say why, exactly as History does, rather than mis-plot.
+  const view = croppedAnnotationView(
+    run.preview_crop,
+    annotations.data?.objects ?? [],
+    null,
+    annotations.data?.width ?? run.canvas_w,
+    annotations.data?.height ?? run.canvas_h,
+  );
+  const cantPlaceMarks = !!run.preview_north_up_deg || !!run.preview_geometry_unknown;
+  const sentence = inThisPictureSentence(view.objects);
   return (
     <Paper withBorder p="sm" radius="md" data-testid="latest-picture">
       <Group justify="space-between" gap="xs" mb={6} wrap="nowrap">
         <Text size="sm" fw={500}>Your picture</Text>
         <Group gap="sm" wrap="nowrap">
+          {/* Only offered when the run still has its FITS: the object positions
+              come off its WCS, and a preview-only run has none to read. */}
+          {run.has_fits ? (
+            <Anchor
+              component="button" type="button" size="xs"
+              data-testid="identify-toggle"
+              onClick={() => setIdentify((v) => !v)}
+            >
+              {identify ? "Hide labels" : "What’s in it?"}
+            </Anchor>
+          ) : null}
           <Anchor component={Link} to={`/targets/${safe}/edit/${run.id}`} size="xs">
             Edit this picture
           </Anchor>
@@ -97,21 +156,34 @@ export function LatestPictureCard({
       {/* Height-capped on purpose: the point of this slice is that the picture
           AND the frames table below it fit on one screen, so the thumbnail must
           not push the table off the fold on a 1080p window. */}
-      <Box
-        style={{ background: "#000", borderRadius: 8, overflow: "hidden", cursor: "zoom-in" }}
+      <AnnotatedImage
+        src={previewSrc}
+        alt={`Latest stacked picture of ${name ?? "this target"}`}
+        imgWidth={view.width}
+        imgHeight={view.height}
+        objects={view.objects}
+        show={identify && !cantPlaceMarks}
+        height={260}
         onClick={() => setLight(true)}
-      >
-        <Image
-          src={previewSrc}
-          alt={`Latest stacked picture of ${name ?? "this target"}`}
-          fit="contain"
-          h={260}
-          fallbackSrc=""
-        />
-      </Box>
+      />
       <Text size="xs" c="dimmed" mt={6}>
         {latestPictureCaption(run)} — click to view it big
       </Text>
+      {identify ? (
+        <Text size="xs" c={cantPlaceMarks ? "dimmed" : "cyan.4"} mt={4}
+          data-testid="identify-readout">
+          {cantPlaceMarks
+            ? (run.preview_north_up_deg
+              ? "This picture was saved rotated so North is up, so object labels can’t be placed on it — they’re measured on the un-rotated image."
+              : "This picture was reshaped when it was processed, so object labels can’t be placed on it — they’re measured on the original image.")
+            : annotations.isError
+            ? "Couldn’t work out what’s in this picture."
+            : annotations.isLoading
+            ? "Working out what’s in this picture…"
+            : sentence
+            || "No catalog objects landed in this picture — it’s a patch of sky between the famous ones."}
+        </Text>
+      ) : null}
       {/* The honest half of "your picture": a saved-but-never-exported edit lives
           only in the editor, so what's shown above is still the plain auto-stretch
           of the stack. Say so where the picture is, and offer the one step that

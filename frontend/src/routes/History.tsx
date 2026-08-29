@@ -880,6 +880,13 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             imgHeight={view.height}
             objects={view.objects} show={identify && !cantPlaceMarks} height={180}
             scaleBar={view.scaleBar} showScale={scale && !cantPlaceMarks}
+            // The rose rides the same toggle as the bar — they are one idea
+            // ("how big, and which way up?") and the *baked* share picture has
+            // drawn them as a pair since v0.284.0. A crop doesn't turn a
+            // picture, so the directions need no crop composition; the
+            // rotation/unreconcilable cases hide it with everything else.
+            directions={annotations.data?.directions ?? null}
+            showCompass={scale && !cantPlaceMarks}
             onClick={() => setLight(true)}
           />
         ) : (
@@ -895,10 +902,10 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         // in, or a processed picture whose geometry we can't reconcile at all.
         <Text size="xs" c="dimmed" mt={6}>
           {geometryUnplaceable && !imageIsNorthUp
-            ? "This picture was reshaped when it was processed, so object pins and the scale bar can’t be placed on it — they’re measured on the original image. Open Adjust and save it again to use them."
+            ? "This picture was reshaped when it was processed, so object pins, the scale bar and the compass can’t be placed on it — they’re measured on the original image. Open Adjust and save it again to use them."
             : applyNorthUp
-            ? "Turn off “Rotate so North is up” to place object pins and the scale bar — they’re measured on the un-rotated image."
-            : "This picture was saved rotated so North is up, so object pins and the scale bar can’t be placed on it — they’re measured on the un-rotated image. Open Adjust and save it un-rotated to use them."}
+            ? "Turn off “Rotate so North is up” to place object pins, the scale bar and the compass — they’re measured on the un-rotated image."
+            : "This picture was saved rotated so North is up, so object pins, the scale bar and the compass can’t be placed on it — they’re measured on the un-rotated image. Open Adjust and save it un-rotated to use them."}
         </Text>
       ) : null}
 
@@ -1233,8 +1240,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                     rightSection={scale ? <IconCheck size={14} /> : null}
                     onClick={() => setScale((v) => !v)}
                   >
-                    Scale
-                    <span style={MENU_HINT}>How big this is in the sky, vs the Moon</span>
+                    Scale &amp; compass
+                    <span style={MENU_HINT}>How big this is in the sky, and which way is North</span>
                   </Menu.Item>
                 )}
                 {run.has_fits && (
