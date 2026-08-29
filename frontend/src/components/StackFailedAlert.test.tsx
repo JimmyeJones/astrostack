@@ -98,7 +98,12 @@ describe("StackFailuresNote (Dashboard)", () => {
     expect(await screen.findByText(/M 31 didn't stack/)).toBeTruthy();
     expect(screen.getByText(/M 42 didn't stack/)).toBeTruthy();
     expect(screen.queryByText(/M 13 didn't stack/)).toBeNull();
-    expect(screen.getByText(/2 more targets stopped stacking too/)).toBeTruthy();
+    // The rest are *named*, not counted — "2 more targets" would leave the
+    // reader hunting through a library for which two.
+    expect(screen.getByRole("link", { name: "M 13" }).getAttribute("href"))
+      .toBe("/targets/M_13");
+    expect(screen.getByRole("link", { name: "M 57" })).toBeTruthy();
+    expect(screen.getByText(/didn't stack either/)).toBeTruthy();
   });
 });
 
