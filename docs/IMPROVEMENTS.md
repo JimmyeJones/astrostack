@@ -15074,6 +15074,31 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **✅ SHIPPED (Builder, v0.311.4, branch `claude/compassionate-galileo-y2x4gk`) — ~~"Your 1 picture cover
+  0.29 square degrees" — the sky-coverage line on the Dashboard doesn't agree with itself, in the one state
+  every beginner passes through.~~** Second finding from the same `scripts/agent-dogfood.sh` pass as the
+  "First light" bug above; read straight off the phone Dashboard screenshot. *(Pillar: friendliness —
+  PRIORITY 3.)*
+
+  `describeSkyCoverage` pluralised the *noun* (`1 picture` / `12 pictures`) and left the verb at the plural
+  `cover`, so the singular branch — the state a beginner is in the day they make their first picture, i.e. the
+  most-read state of this sentence — said "Your 1 picture cover". Now: **"Your picture covers 1.3 square
+  degrees — …"** and **"Your 12 pictures cover 18.4 square degrees — …"**. The count is dropped in the
+  singular because "Your 1 picture" is stilted as well as ungrammatical.
+
+  **A test assertion was corrected, and that is worth being explicit about**, since "never weaken a test to go
+  green" is a hard rule. `skyCoverage.test.ts` had a test *named* `reads naturally on a first picture` whose
+  assertion was `expect(s).toContain("Your 1 picture cover")` — it pinned the defect its own name described.
+  The assertion now demands the corrected sentence and adds `not.toContain("picture cover ")`; nothing was
+  deleted, skipped or loosened, and a second test pins the plural branch unchanged.
+
+  **Upgrade-safe (§9):** frontend copy only — no API, schema, config, on-disk or default change. **Tests
+  (+1, and 1 corrected; both fail before.)**
+
+  **Noted, deliberately not changed:** this sentence writes "full moons" while the app's three other Moon
+  comparisons (`scalebar._moon_comparison`, `angularsize`, the framing hint) write "full Moon". One product
+  voice would capitalise it; it is cosmetic churn beyond this fix, so it is filed here rather than folded in.
+
 - **✅ SHIPPED (Builder, v0.296.2, branch `claude/compassionate-galileo-u3wi1n`) — ~~the object overlay draws
   every label at full size with no collision handling, so a rich field degenerates into an unreadable pile
   exactly where the labels are most interesting.~~** Shipped as the filed shape asked, pure and box-size-driven.
