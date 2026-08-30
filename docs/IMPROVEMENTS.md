@@ -9351,25 +9351,69 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-30, found while shipping the v0.304.1 Adjust→Save half of the recipe-drift guard — the *behaviour*
-  behind the stale marker I fixed, which the fix deliberately did not change) — History → "Adjust" → Save
-  silently throws away a "Process target" run's finished picture.** *(Pillar: friendliness / trust —
-  PRIORITY 3; size S; copy + one guard, no engine work.)* `save_stack_preview` re-renders the preview from
-  the **linear** FITS at the chosen stretch/black. On an ordinary run that is exactly right and is the point
-  of the feature. On an **auto-edited** run it replaces the Auto-toned picture — the one on the Target hero,
-  in the Gallery, on the Library tile, and possibly pinned as the target's cover — with a plain stretch, and
-  says nothing at all about having done so. The recipe survives (re-opening the editor still finds it, and
-  as of v0.304.1 the run stops *claiming* to be a recipe preview), so the loss is recoverable — but only by
-  someone who knows to go to the editor and export, which is precisely not the beginner this app is for. The
-  reachable path is innocent: the History menu offers **Adjust** on any run with a FITS, and its own hint
-  ("Stretch / black point, from the full-range FITS") reads like a *view* control, not a destructive one —
-  and a user who opens it just to tick **North up** (the same panel) pays the same price. **Fix shape:** the
-  run listing already carries the marker (`preview_display_space`), so the panel can say so before the fact —
-  a one-line note on Adjust ("This picture was processed for you; saving here replaces it with a plain
-  stretch of the raw stack. Your edit is kept — re-open the editor to get it back.") and, better, a
-  **North-up-only** save on those runs that re-renders through the stored recipe instead of the sliders,
-  since rotation is the one thing a user genuinely wants from that panel on an already-finished picture.
-  Don't remove Adjust — it is legitimate; just stop it being a silent trapdoor.
+- **✅ SHIPPED (Builder, v0.305.0, branch `claude/compassionate-galileo-1m28nv`) — ~~History → "Adjust" → Save
+  silently throws away a "Process target" run's finished picture.~~** Both halves of the filed shape, and no
+  wider.
+
+  **What shipped.** The trapdoor is now signposted *and* has a way round it.
+  * **The suggestion endpoint says what a save would cost.** `render-suggestion` (already fetched the moment
+    Adjust opens, so this costs no request) gained `processed_preview` — true when the stored picture is an
+    in-place "Process target" Auto edit whose FITS is still linear — and `can_keep_processed`, true when that
+    run's recipe is still on disk. Both default false, which is every ordinary run and every older client.
+  * **The panel warns before the fact**, in the beginner's words, next to the button that does it: *"This
+    picture was processed for you. 'Save as preview' replaces it with a plain view of the raw stack…"*, with
+    the tail differing on whether the rescue is available (use the other button) or not (re-open the editor).
+  * **`keep_processed` — the save that keeps the picture.** A second path through the same endpoint re-bakes
+    the run's own stored **recipe** into the preview instead of the sliders, optionally rotated North-up. So
+    the one control anybody genuinely wants from this panel on a finished picture — the rotation — now turns
+    *that* picture rather than flattening it. It writes exactly what `_auto_edit_process_run` writes (the
+    recipe render, its crop measured on the un-rotated render, the baked-look stamp, the display-space
+    marker) plus the angle this save applied, so the bytes, the marker and the stamp cannot disagree
+    afterwards; the stretch columns are cleared, because these bytes are not an asinh render and nothing
+    should match against one. The rotation goes through `orient_preview_north_up` and the angle through
+    `applied_north_up_deg` — the same pair the share/download path uses — so the recorded angle can't drift
+    from the pixels.
+  * **It also ends drift, rather than declining on it.** `_saved_recipe_json` is deliberately *drift-blind*
+    (unlike `_auto_edit_recipe_json`): re-baking makes the render and the stamp come from one recipe again,
+    which is exactly what the stamp means, so the surfaces that stood down (the reveal) reopen.
+
+  **The plain slider save is untouched** — the fix is "give them the other option", not "redefine Save", and a
+  test pins the old behaviour (bytes replaced, marker and stamp cleared) beside the new one.
+
+  **Upgrade-safe (§9):** one optional request field defaulting to the old path, two additive response fields;
+  no config, schema, on-disk, default or API-shape change. An old client never sends `keep_processed` and
+  reads the old shape.
+
+  **Tests (+13; 7 of the 9 Python ones fail before):** `tests/webapp/test_adjust_keeps_processed.py` — the
+  two flags on a linear run, after an auto-edit, and with the recipe removed; the plain save still replacing
+  the picture; the keep-save reproducing the baked bytes *byte for byte* and leaving marker/stamp/stretch
+  columns right; the North-up keep-save on a 30°-rotated WCS (canvas grows, level stays processed-bright, the
+  angle is recorded); the border trim re-recorded on a deliberately trimmable mosaic fixture; the 400 when
+  there is no recipe (and the bytes left alone); and the drifted run re-baked back into agreement. Four
+  `History.test.tsx` cases cover the warning, the two buttons' arguments, the no-rescue wording and the
+  silence on an ordinary run.
+
+  Original spec:
+
+  - **NEW IDEA (Builder 2026-08-30, found while shipping the v0.304.1 Adjust→Save half of the recipe-drift guard — the *behaviour*
+    behind the stale marker I fixed, which the fix deliberately did not change) — History → "Adjust" → Save
+    silently throws away a "Process target" run's finished picture.** *(Pillar: friendliness / trust —
+    PRIORITY 3; size S; copy + one guard, no engine work.)* `save_stack_preview` re-renders the preview from
+    the **linear** FITS at the chosen stretch/black. On an ordinary run that is exactly right and is the point
+    of the feature. On an **auto-edited** run it replaces the Auto-toned picture — the one on the Target hero,
+    in the Gallery, on the Library tile, and possibly pinned as the target's cover — with a plain stretch, and
+    says nothing at all about having done so. The recipe survives (re-opening the editor still finds it, and
+    as of v0.304.1 the run stops *claiming* to be a recipe preview), so the loss is recoverable — but only by
+    someone who knows to go to the editor and export, which is precisely not the beginner this app is for. The
+    reachable path is innocent: the History menu offers **Adjust** on any run with a FITS, and its own hint
+    ("Stretch / black point, from the full-range FITS") reads like a *view* control, not a destructive one —
+    and a user who opens it just to tick **North up** (the same panel) pays the same price. **Fix shape:** the
+    run listing already carries the marker (`preview_display_space`), so the panel can say so before the fact —
+    a one-line note on Adjust ("This picture was processed for you; saving here replaces it with a plain
+    stretch of the raw stack. Your edit is kept — re-open the editor to get it back.") and, better, a
+    **North-up-only** save on those runs that re-renders through the stored recipe instead of the sliders,
+    since rotation is the one thing a user genuinely wants from that panel on an already-finished picture.
+    Don't remove Adjust — it is legitimate; just stop it being a silent trapdoor.
 
 - **NEW IDEA (Builder 2026-08-30, read while fixing the mosaic half of the same card in v0.304.1) — the
   "Clouds & haze" card promises something it can't check: *"those later subs … were automatically counted

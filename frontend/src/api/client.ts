@@ -2267,6 +2267,13 @@ export const api = {
       // The rotation (deg) that puts celestial North up, or null when the run has
       // no usable WCS / the correction is trivial (so no "North up" toggle).
       north_up_deg?: number | null;
+      // True when the picture on screen is a *processed* one (the one-click
+      // "Process target" Auto edit), so a plain slider save would replace it
+      // with a flat stretch of the raw stack — the panel warns before the fact.
+      processed_preview?: boolean;
+      // …and true when that run's recipe is still on disk, so the save can
+      // re-bake the processed picture instead (rotation and all).
+      can_keep_processed?: boolean;
     }>(`/api/targets/${safe}/stack-runs/${id}/render-suggestion`),
   // "One frame vs your stack" reveal — a single raw sub next to the finished
   // stack, so a beginner sees what stacking bought them.
@@ -2314,11 +2321,17 @@ export const api = {
   deepeningReelUrl: (safe: string) => `/api/targets/${safe}/deepening-reel`,
   saveStackPreview: (
     safe: string, id: number, stretch: number, black: number, northUp = false,
+    keepProcessed = false,
   ) =>
     req<{ ok: boolean }>(`/api/targets/${safe}/stack-runs/${id}/preview`, {
       // north_up saves the image rotated so North is up, matching what the user
       // sees on screen when they save with the History "North up" toggle on.
-      method: "POST", body: JSON.stringify({ stretch, black, north_up: northUp }),
+      // keep_processed re-bakes a processed run's own saved edit instead of the
+      // sliders, so rotating a finished picture doesn't flatten it (default
+      // false — the plain stretch save, unchanged).
+      method: "POST",
+      body: JSON.stringify({ stretch, black, north_up: northUp,
+                             ...(keepProcessed ? { keep_processed: true } : {}) }),
     }),
 
   // pipeline
