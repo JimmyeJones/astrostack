@@ -17,6 +17,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from webapp import deps, video
+from webapp.capture_nights import capture_night_range
 from webapp.goals import read_goal_s
 from webapp.registry_cache import cached_for_registry, registry_signature
 from webapp.site_location import resolve_site_lon
@@ -51,6 +52,14 @@ class RecentStack(BaseModel):
     # frontend reads as "dimensions unknown" and words the common way.
     canvas_w: int = 0
     canvas_h: int = 0
+    # When this picture's subs were **shot**, as observing-night dates (ISO
+    # ``YYYY-MM-DD``, the same noon-to-noon bucket the Nights card uses). Equal
+    # when the whole stack came from one night; both None for a pre-schema-18
+    # run or one whose subs carry no capture time. Additive — an older frontend
+    # ignores them. The tile's own ``timestamp_utc`` is when the stack *ran*, so
+    # a strip captioned from it dates a re-stack of 2024 subs to today.
+    capture_night_start: str | None = None
+    capture_night_end: str | None = None
 
 
 class StatsResponse(BaseModel):
@@ -465,9 +474,15 @@ def get_library_missing_files(request: Request) -> LibraryMissingFilesOut:
     return out
 
 
-def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
+def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, int]:
     """Open each target's project and collect its stack runs. Expensive — this
-    is what the cache below is protecting."""
+    is what the cache below is protecting.
+
+    ``lon_deg`` is the observer's longitude, used only to name each run's capture
+    window by the observing night it belongs to (see
+    :mod:`webapp.capture_nights`); it is part of the cache signature, so a
+    changed location re-rolls rather than serving nights bucketed for the old
+    one."""
     from seestack.io.project import Project
 
     recent: list[RecentStack] = []
@@ -482,6 +497,8 @@ def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
                 target_runs += 1
                 has_preview = bool(run.preview_path and Path(run.preview_path).exists())
                 has_fits = bool(run.fits_path and Path(run.fits_path).exists())
+                night_start, night_end = capture_night_range(
+                    run.capture_start_utc, run.capture_end_utc, lon_deg)
                 recent.append(RecentStack(
                     safe=t.safe_name,
                     target_name=t.name,
@@ -494,6 +511,8 @@ def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
                     preview_url=f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview",
                     canvas_w=run.canvas_w or 0,
                     canvas_h=run.canvas_h or 0,
+                    capture_night_start=night_start,
+                    capture_night_end=night_end,
                 ))
             n_stack_runs += target_runs
             if target_runs:
@@ -615,16 +634,22 @@ def get_stats(request: Request, recent_limit: int = 8) -> StatsResponse:
         # set of targets, their activity stamp, or their latest-stack preview
         # does. Any of those bumps when a stack completes, so the cache refreshes
         # promptly; the TTL backstops the rare same-second collision.
-        sig = tuple(sorted(
+        # The observer's longitude buckets each run's capture window into the
+        # observing night the Nights card would name, so it belongs in the
+        # signature: a location the owner has just set must not keep serving
+        # nights bucketed for the old one.
+        lon = resolve_site_lon(request, lib, settings.site_lon)
+        sig = (lon, tuple(sorted(
             (t.safe_name, t.last_activity_utc or "", t.last_stack_preview or "")
             for t in targets
-        ))
+        )))
         cache = getattr(request.app.state, "stats_cache", None)
         now = time.monotonic()
         if cache and cache["sig"] == sig and (now - cache["at"]) < _STATS_CACHE_TTL_S:
             recent, n_stack_runs, n_targets_with_stacks = cache["data"]
         else:
-            recent, n_stack_runs, n_targets_with_stacks = _rollup_stacks(lib, targets)
+            recent, n_stack_runs, n_targets_with_stacks = _rollup_stacks(
+                lib, targets, lon)
             request.app.state.stats_cache = {
                 "sig": sig, "at": now,
                 "data": (recent, n_stack_runs, n_targets_with_stacks),

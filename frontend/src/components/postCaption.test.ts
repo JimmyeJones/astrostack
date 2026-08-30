@@ -1,20 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { postCaption, formatCaptionDate } from "./postCaption";
-
-describe("formatCaptionDate", () => {
-  it("formats an ISO UTC stamp as a friendly day-month-year", () => {
-    expect(formatCaptionDate("2026-07-20T22:14:03")).toBe("20 Jul 2026");
-    expect(formatCaptionDate("2026-01-05")).toBe("5 Jan 2026");
-  });
-  it("reads off the string (no timezone shift) and rejects junk", () => {
-    // A UTC midnight stamp must not roll back a day in a western timezone.
-    expect(formatCaptionDate("2026-12-31T00:00:00")).toBe("31 Dec 2026");
-    expect(formatCaptionDate("")).toBeNull();
-    expect(formatCaptionDate(null)).toBeNull();
-    expect(formatCaptionDate("not-a-date")).toBeNull();
-    expect(formatCaptionDate("2026-13-40")).toBeNull();
-  });
-});
+import { postCaption } from "./postCaption";
 
 describe("postCaption", () => {
   it("builds the full sentence from every fact", () => {
@@ -25,7 +10,8 @@ describe("postCaption", () => {
         type: "nebula",
         nFrames: 240,
         integrationS: 40 * 60,
-        dateLabel: "20 Jul 2026",
+        captureNightStart: "2026-07-20",
+        captureNightEnd: "2026-07-20",
         scaleBar: { moon_comparison: "the whole frame is about 5.4 full Moons wide" },
       }),
     ).toBe(
@@ -47,7 +33,8 @@ describe("postCaption", () => {
       type: "galaxy",
       nFrames: 100,
       integrationS: 3600,
-      dateLabel: "1 Sep 2026",
+      captureNightStart: "2026-09-01",
+      captureNightEnd: "2026-09-01",
       scaleBar: null,
     });
     expect(c).toBe(
@@ -90,5 +77,50 @@ describe("postCaption", () => {
     const c = postCaption({ name: "Dumbbell Nebula", catalogId: "M27", nFrames: 80, integrationS: 0 });
     expect(c).toContain("a stack of 80 subs,");
     expect(c).not.toContain("total");
+  });
+
+  // The date was the one fact this caption used to get *wrong*: it was fed
+  // `run.timestamp_utc`, when the stack ran, and published it as when the
+  // picture was shot. These pin that it now says the capture window or nothing.
+  it("names the night the subs were shot, not the day the stack ran", () => {
+    const c = postCaption({
+      name: "Orion Nebula", catalogId: "M42", type: "nebula", nFrames: 240,
+      captureNightStart: "2024-11-15", captureNightEnd: "2024-11-15",
+    });
+    expect(c).toContain("shot on 15 Nov 2024 with a Seestar");
+    expect(c).not.toContain("2026");
+  });
+
+  it("says 'between' for a picture built over several nights", () => {
+    const c = postCaption({
+      name: "Andromeda Galaxy", catalogId: "M31", nFrames: 600,
+      captureNightStart: "2024-11-15", captureNightEnd: "2024-11-18",
+    });
+    expect(c).toContain("shot between 15 and 18 Nov 2024 with a Seestar");
+  });
+
+  it("drops the date clause entirely when no capture window was recorded", () => {
+    // Every run made before the app recorded one — i.e. the owner's whole
+    // library on the day of the upgrade. Saying nothing is the honest outcome;
+    // reaching for the stack stamp is the bug.
+    const c = postCaption({ name: "Ring Nebula", catalogId: "M57", nFrames: 40 });
+    expect(c).toBe("Ring Nebula (M57) — a stack of 40 subs, shot with a Seestar.");
+    expect(c).not.toContain("shot on");
+  });
+
+  it("still names the one night it has when only one end was recorded", () => {
+    expect(postCaption({ name: "M13", nFrames: 10, captureNightStart: "2024-06-02" }))
+      .toContain("shot on 2 Jun 2024");
+    expect(postCaption({ name: "M13", nFrames: 10, captureNightEnd: "2024-06-02" }))
+      .toContain("shot on 2 Jun 2024");
+  });
+
+  it("ignores an unparseable window rather than printing a placeholder", () => {
+    const c = postCaption({
+      name: "M13", nFrames: 10,
+      captureNightStart: "not-a-date", captureNightEnd: "2024-13-40",
+    });
+    expect(c).toContain("shot with a Seestar");
+    expect(c).not.toContain("—date");
   });
 });

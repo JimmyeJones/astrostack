@@ -15,7 +15,7 @@ import {
   api, type GalleryItem, type StackOptionField, type VideoStill,
 } from "../api/client";
 import { sharePictureText } from "../share";
-import { formatIntegration, formatStampDate } from "../format";
+import { formatCaptureNights, formatIntegration, formatStampDate } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
@@ -765,7 +765,8 @@ export function GalleryView() {
           ? (() => {
               const { title, text, filename } = sharePictureText(
                 viewing.target_name,
-                formatStampDate(viewing.timestamp_utc),
+                formatCaptureNights(
+                  viewing.capture_night_start, viewing.capture_night_end),
               );
               return { shareFilename: filename, shareTitle: title, shareText: text };
             })()

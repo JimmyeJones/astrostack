@@ -525,8 +525,12 @@ describe("HistoryView", () => {
 
   it("copies a ready-to-post caption built from identity, run facts and scale", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      // The date in the caption is the run's *capture* window, and the stack
+      // stamp here is deliberately a different year: a caption that quotes when
+      // the stack ran is the wrong-fact bug this pins.
       mkRun({ has_preview: true, n_frames_used: 240, total_exposure_s: 40 * 60,
-        timestamp_utc: "2026-07-20T22:14:03" }),
+        timestamp_utc: "2026-08-30T22:14:03",
+        capture_night_start: "2026-07-20", capture_night_end: "2026-07-20" }),
     ]);
     vi.spyOn(client.api, "identifyTarget").mockResolvedValue(mkIdentity());
     vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
@@ -555,7 +559,8 @@ describe("HistoryView", () => {
   it("still copies an honest caption when the target isn't identified", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ has_preview: true, has_fits: false, n_frames_used: 12,
-        total_exposure_s: 5 * 60, timestamp_utc: "2026-09-01T03:00:00" }),
+        total_exposure_s: 5 * 60, timestamp_utc: "2026-09-01T03:00:00",
+        capture_night_start: "2026-09-01", capture_night_end: "2026-09-01" }),
     ]);
     // identifyTarget defaults to null (unidentified) via beforeEach; no FITS →
     // no annotations fetch, so the caption drops the scale clause too.
@@ -570,6 +575,49 @@ describe("HistoryView", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(writeText).toHaveBeenCalledWith(
       "M_42 — a stack of 12 subs (5 min total), shot on 1 Sep 2026 with a Seestar.",
+    );
+  });
+
+  it("never dates the caption from the day the stack ran", async () => {
+    // The owner's own case: subs from a 2024 back catalogue, stacked today. The
+    // caption used to read the run stamp and publish it as the capture date.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, has_fits: false, n_frames_used: 300,
+        total_exposure_s: 3600, timestamp_utc: "2026-08-30T12:00:00",
+        capture_night_start: "2024-11-15", capture_night_end: "2024-11-18" }),
+    ]);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    fireEvent.click(await menuItem("Copy caption"));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const caption = writeText.mock.calls[0][0] as string;
+    expect(caption).toContain("shot between 15 and 18 Nov 2024 with a Seestar");
+    expect(caption).not.toContain("2026");
+  });
+
+  it("says nothing about the date when the run has no capture window", async () => {
+    // Every run made before the app recorded one. Dropping the clause is the
+    // honest outcome; reaching for `timestamp_utc` is what went wrong.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, has_fits: false, n_frames_used: 12,
+        total_exposure_s: 5 * 60, timestamp_utc: "2026-09-01T03:00:00" }),
+    ]);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    fireEvent.click(await menuItem("Copy caption"));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText).toHaveBeenCalledWith(
+      "M_42 — a stack of 12 subs (5 min total), shot with a Seestar.",
     );
   });
 

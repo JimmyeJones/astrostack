@@ -15,7 +15,7 @@
  */
 
 import type { BestPicture, VideoStill } from "./api/client";
-import { formatIntegration, formatStampDate } from "./format";
+import { formatIntegration, formatStampDate, pictureDateLabel } from "./format";
 
 /** One picture in the show, with everything needed to caption it. */
 export interface Slide {
@@ -60,10 +60,15 @@ const VIDEO_FACTS: Record<string, string> = {
 };
 
 /** The acquisition line for a deep-sky picture: date, integration time and
- *  frame count, dropping any clause the run didn't record. */
+ *  frame count, dropping any clause the run didn't record.
+ *
+ *  The date is labelled, and prefers the night the subs were *shot*: this line
+ *  calls itself an acquisition line, and it used to print the run's own stamp —
+ *  when the stack ran — with nothing to say which of the two it was. */
 export function deepSkyMeta(pic: BestPicture): string {
   const parts: string[] = [];
-  const date = formatStampDate(pic.timestamp_utc);
+  const date = pictureDateLabel(
+    pic.capture_night_start, pic.capture_night_end, pic.timestamp_utc);
   if (date) parts.push(date);
   if (
     pic.total_exposure_s != null &&
@@ -107,8 +112,11 @@ export function buildSlides(
   for (const v of videos ?? []) {
     if (!v.preview_url) continue;
     const parts: string[] = [];
+    // A still's own date is when it was *made* from the video — the app never
+    // records when the clip was shot — so it is labelled as such rather than
+    // sitting bare beside the deep-sky slides' "Shot …".
     const date = formatStampDate(v.created_utc);
-    if (date) parts.push(date);
+    if (date) parts.push(`Stacked ${date}`);
     if (Number.isFinite(v.n_stacked) && v.n_stacked > 0) {
       parts.push(`${v.n_stacked} ${v.n_stacked === 1 ? "frame" : "frames"} stacked`);
     }
