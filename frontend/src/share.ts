@@ -1,3 +1,5 @@
+import type { CaptureLabel } from "./format";
+
 // Share a finished picture through the operating system's native share sheet
 // (the Web Share API). Purely local: the browser/OS hands the image file to
 // whatever app the user picks (Instagram, Messages, WhatsApp, …) — AstroStack
@@ -114,7 +116,7 @@ function slugify(name: string): string {
  */
 export function sharePictureText(
   name: string | null | undefined,
-  captureLabel?: string | null,
+  captureLabel?: CaptureLabel | null,
   ext: string = "jpg",
 ): { title: string; text: string; filename: string } {
   const clean = (name ?? "").trim() || "My astrophoto";
@@ -122,6 +124,34 @@ export function sharePictureText(
   const title = date ? `${clean} · ${date}` : clean;
   const text = date ? `${clean} — captured ${date}` : clean;
   const filename = `${slugify(clean) || "astrophoto"}.${slugify(ext) || "jpg"}`;
+  return { title, text, filename };
+}
+
+/**
+ * The same caption for a **video still** (a Moon or Sun frame stacked from a
+ * clip), which is a different kind of picture: the app never learns when the
+ * clip was *shot*. All it has is `created_utc`, the moment it stacked the
+ * capture — so this says exactly that, in as many words.
+ *
+ * That is the whole reason this is a separate function rather than an argument.
+ * A still used to go through {@link sharePictureText} with its processing stamp
+ * in the capture slot, so a Moon shared as *"captured 30 Aug 2026"* was making
+ * the one claim the app cannot support. Here the date keeps its label, nothing
+ * is dropped, and {@link CaptureLabel} keeps the two callers from swapping.
+ *
+ * `ext` defaults to `png` — a still's picture *is* its PNG — because a PNG
+ * arriving named `.jpg` confuses the app it lands in.
+ */
+export function shareStillText(
+  name: string | null | undefined,
+  stackedLabel?: string | null,
+  ext: string = "png",
+): { title: string; text: string; filename: string } {
+  const clean = (name ?? "").trim() || "My astrophoto";
+  const date = (stackedLabel ?? "").trim();
+  const title = date ? `${clean} · Stacked ${date}` : clean;
+  const text = date ? `${clean} — stacked ${date}` : clean;
+  const filename = `${slugify(clean) || "astrophoto"}.${slugify(ext) || "png"}`;
   return { title, text, filename };
 }
 

@@ -99,6 +99,18 @@ describe("postCaption", () => {
     expect(c).toContain("shot between 15 and 18 Nov 2024 with a Seestar");
   });
 
+  it("says how many nights a picture took when the run recorded it", () => {
+    // The sentence a person actually says out loud about their picture. A span
+    // alone cannot supply it: 15→18 Nov is equally consistent with two nights.
+    const c = postCaption({
+      name: "Andromeda Galaxy", catalogId: "M31", nFrames: 600,
+      captureNightStart: "2024-11-15", captureNightEnd: "2024-11-18",
+      captureNights: 4,
+    });
+    expect(c).toContain(
+      "shot over 4 nights, between 15 and 18 Nov 2024 with a Seestar");
+  });
+
   it("drops the date clause entirely when no capture window was recorded", () => {
     // Every run made before the app recorded one — i.e. the owner's whole
     // library on the day of the upgrade. Saying nothing is the honest outcome;

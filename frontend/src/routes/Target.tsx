@@ -15,7 +15,7 @@ import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
 import { fullResPngLabel } from "../fullres";
-import { formatIntegration, formatStampDate } from "../format";
+import { formatCaptureNights, formatIntegration } from "../format";
 import { integrationReadiness, readinessColor, noiseReductionHint } from "../readiness";
 import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
@@ -447,6 +447,11 @@ export function TargetView() {
   });
   const runs = useQuery({ queryKey: ["runs", safe], queryFn: () => api.listStackRuns(safe) });
   const latestRun = runs.data?.[0];  // listStackRuns returns newest first
+  // The night this picture's subs were **shot**, for the share sheet's caption —
+  // never `timestamp_utc`, which is when the stack ran. `""` on a run with no
+  // recorded window, which `sharePictureText` turns into no date clause at all.
+  const captureLabel = formatCaptureNights(
+    latestRun?.capture_night_start, latestRun?.capture_night_end);
   // The *measured* framing verdict for the newest picture, if there is one. The
   // note below renders it; this page reads the same answer (one shared query) so
   // the object card can drop its catalog "will it fit?" prediction while the
@@ -1307,10 +1312,14 @@ export function TargetView() {
                   {...sharePictureText(
                     target.data?.name,
                     // The same date `LatestPictureCard`'s share text uses for the
-                    // same picture: a bare `toLocaleDateString()` prints the numeric
-                    // form half the world reads the other way round ("8/16/2026"),
-                    // and this text is what the owner posts publicly.
-                    formatStampDate(latestRun.timestamp_utc),
+                    // same picture — and it has to be the night the subs were
+                    // *shot*, not the day the stack ran. This site was missed when
+                    // the rest of the share sheet was fixed, so the app's most
+                    // prominent picture went on announcing "captured <the day you
+                    // pressed Process>": the same day only if you stack the night
+                    // you shoot, and years out on a re-stack of a back catalogue.
+                    // A run with no recorded window shares with no date at all.
+                    captureLabel,
                   )}
                 />
                 {/* Share the *framed* variant. This is the one that matters on
@@ -1340,10 +1349,7 @@ export function TargetView() {
                   ariaLabel="Share the framed keepsake"
                   url={api.stackArtifactUrl(
                     safe, latestRun.id, "jpeg", false, false, true, true, true)}
-                  {...sharePictureText(
-                    target.data?.name,
-                    formatStampDate(latestRun.timestamp_utc),
-                  )}
+                  {...sharePictureText(target.data?.name, captureLabel)}
                   filename={keepsakeFilename(
                     sharePictureText(target.data?.name).filename)}
                 />

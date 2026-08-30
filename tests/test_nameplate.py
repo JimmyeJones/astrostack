@@ -5,6 +5,7 @@ import numpy as np
 from seestack.nameplate import (
     NameplateFields,
     _load_font,
+    acquisition_parts,
     draw_nameplate,
     format_acq_date,
     nameplate_line,
@@ -85,6 +86,10 @@ def test_every_caption_character_has_a_glyph_in_the_font_we_draw_with():
         nameplate_line(NameplateFields(
             target="M 31", n_frames=505,
             date_iso="2024-12-28", date_end_iso="2025-01-03")),
+        # …and the span carrying its night count.
+        nameplate_line(NameplateFields(
+            target="M 31", n_frames=505, nights=4,
+            date_iso="2024-11-15", date_end_iso="2024-11-18")),
     ]
     for caption in captions:
         assert caption, "a caption with real data must not be empty"
@@ -214,3 +219,49 @@ def test_the_caption_carries_the_span():
         date_iso="2024-11-15", date_end_iso="2024-11-18",
         camera="ZWO Seestar S50",
     )) == "M 31 · 4h 12m (505x30s) · 15-18 Nov 2024 · ZWO Seestar S50"
+
+
+def test_a_span_says_how_many_nights_when_the_run_recorded_it():
+    """"11-14 Sep 2024" is equally consistent with two nights and with four.
+    The count is the part that says how much work the picture was."""
+    assert nameplate_line(NameplateFields(
+        target="M 31", integration_s=15150, n_frames=505, sub_exposure_s=30,
+        date_iso="2024-11-15", date_end_iso="2024-11-18", nights=4,
+        camera="ZWO Seestar S50",
+    )) == "M 31 · 4h 12m (505x30s) · 15-18 Nov 2024 (4 nights) · ZWO Seestar S50"
+
+
+def test_the_night_count_is_omitted_when_it_would_say_nothing():
+    """One night is already named by the date; an unrecorded count (every run
+    predating the column) captions exactly as it did before."""
+    one_night = dict(target="M 31", n_frames=505, date_iso="2024-11-15")
+    assert nameplate_line(NameplateFields(**one_night, nights=1)) == (
+        "M 31 · (505 subs) · 15 Nov 2024")
+    assert nameplate_line(NameplateFields(**one_night)) == (
+        "M 31 · (505 subs) · 15 Nov 2024")
+    span = dict(target="M 31", date_iso="2024-11-15", date_end_iso="2024-11-18")
+    assert nameplate_line(NameplateFields(**span)) == "M 31 · 15-18 Nov 2024"
+    assert nameplate_line(NameplateFields(**span, nights=1)) == (
+        "M 31 · 15-18 Nov 2024")
+
+
+def test_a_count_never_contradicts_a_single_date():
+    """Defence in depth: a run whose window degraded to one date must not be
+    captioned "15 Nov 2024 (4 nights)", whatever the count says."""
+    assert nameplate_line(NameplateFields(
+        target="M 31", date_iso="2024-11-15", nights=4,
+    )) == "M 31 · 15 Nov 2024"
+    assert nameplate_line(NameplateFields(
+        target="M 31", date_iso="2024-11-15", date_end_iso="2024-11-15",
+        nights=4,
+    )) == "M 31 · 15 Nov 2024"
+
+
+def test_the_keepsake_subtitle_carries_the_night_count_too():
+    """The two captioning surfaces share ``acquisition_parts`` precisely so they
+    cannot drift on a fact like this."""
+    parts = acquisition_parts(NameplateFields(
+        target="M 31", n_frames=505, nights=4,
+        date_iso="2024-11-15", date_end_iso="2024-11-18",
+    ), include_target=False)
+    assert "15-18 Nov 2024 (4 nights)" in parts

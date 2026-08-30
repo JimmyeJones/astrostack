@@ -15,7 +15,7 @@ import { formatStampDate } from "../format";
 import { QueryError } from "../components/QueryError";
 import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
 import { SharePictureButton } from "../components/SharePictureButton";
-import { sharePictureText } from "../share";
+import { shareStillText } from "../share";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
 import { VideoQuickLookCard } from "../components/VideoQuickLookCard";
 import { VideoSharpnessCard } from "../components/VideoSharpnessCard";
@@ -326,10 +326,12 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
                 sees exactly the row it saw before. */}
             <SharePictureButton
               {...(() => {
-                const { title, text, filename } = sharePictureText(
+                // `shareStillText`, not the picture one: `created_utc` is when
+                // the app stacked the clip, never when it was shot, so the date
+                // travels labelled rather than as a capture claim.
+                const { title, text, filename } = shareStillText(
                   capture.label,
                   formatStampDate(result.created_utc),
-                  "png",
                 );
                 return { filename, title, text };
               })()}
