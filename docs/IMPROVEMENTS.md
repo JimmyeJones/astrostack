@@ -9560,6 +9560,31 @@ to **Shipped**.)_
   **geometry** (cropped/rotated vs the stored canvas). Where a claim is worth keeping true, pin it with a test
   that reads the served bytes rather than the string — `tests/webapp/test_north_up.py` is the shape.
 
+- **NEW IDEA (Builder 2026-08-30, spotted at merge time while reconciling the two concurrent North-up
+  implementations — NOT a bug today, filed so it doesn't become one) — there are now *two* ways to ask "is
+  there a North-up turn left to make on this picture?", and only one of them subtracts what a past save
+  already baked in.** *(Pillar: maintainability / trust — PRIORITY 3; size XS; consolidation, no behaviour
+  change intended.)*
+  - `…/annotations` reports `north_up_deg` from **`applied_north_up_deg(fits)`** — the *whole* correction,
+    which knows nothing about the run's `preview_north_up_deg`. v0.308.0's view toggle therefore gates on
+    `typeof north_up_deg === "number" && !run.preview_north_up_deg`: two facts, combined in the **frontend**.
+  - `…/rejection-overlay?north_up=` and `orient_preview_north_up` both go through
+    **`thumbnail.preview_north_up_remainder_deg(fits, already_deg=)`** (added by v0.308.2), which answers the
+    same question in one number, on the server, and is what the renderer actually applies.
+
+  **Why it isn't a bug right now:** the frontend's two-fact form gives the same answer as the remainder in
+  every case reachable today, including the snap (a 89.5° correction saved as a snapped 90.0 makes both
+  "nothing left to turn"). **Why it is worth one XS run anyway:** the second form lives in a component, so the
+  next surface to adopt the toggle — the Gallery lightbox and **Compare**, both already filed — has to
+  *remember* to re-combine the two facts, and Compare is exactly where it would be easy to miss (two runs, two
+  baked angles, one shared preference). **Shape:** have `…/annotations` report the **remainder** instead, from
+  the same helper, and drop the `&& !run.preview_north_up_deg` half of the gate. **Check before doing it:**
+  `annotations` is also read by the object-pin / scale-bar / compass path, which uses `north_up_deg` for the
+  *rose* (`sky_directions` → `rotated(...)`) — that consumer wants the **whole** correction, not the
+  remainder, so this is *not* a one-line swap of the existing field. The honest shape is probably an
+  **additional** field (`north_up_remaining_deg`) rather than changing the meaning of one an older frontend
+  already reads, which also keeps it upgrade-safe (§9). Grep both consumers before touching either.
+
 - **✅ SHIPPED (Builder, v0.308.2, branch `claude/compassionate-galileo-q6uois`) — ~~the "see what stacking
   removed" tint can't be shown over a North-up view~~.** Fixed as the entry asked, and **the alpha caution it
   raised turned out not to apply** — which was worth checking before writing a line, exactly as it said.
