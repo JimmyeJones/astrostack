@@ -43,6 +43,17 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-aj7ysy` — CLAIMED, by site (per the six
+> duplicate-collision process notes, naming the file+function, not just the headline):**
+> 1. **The Adjust panel on a *processed* run shows a picture neither button will save** (filed under
+>    "Autonomy & friendliness", the one thing v0.305.0 deliberately left alone). Sites:
+>    `frontend/src/routes/History.tsx` → `RunCard` (`imgSrc` / `showingStored` / `imageIsNorthUp`), plus the
+>    stored-preview-rotated-on-the-fly source it needs — `webapp/routers/stack.py` → `download_stack_run`
+>    (`kind == "preview"`) and a new `api.stackPreviewNorthUpUrl` in `frontend/src/api/client.ts`.
+> 2. **"Say the sky-coverage stat on the Dashboard"** — slice 1 of the two next taps on v0.306.0 (filed under
+>    "Features that serve real workflows"). Sites: `frontend/src/routes/Dashboard.tsx`, reusing
+>    `describeSkyCoverage` verbatim.
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-1m28nv` — run finished, all claims released.**
 > Shipped three, each its own independently-green commit:
 > **v0.305.0** (under "Autonomy & friendliness") — the **History → "Adjust" → Save trapdoor**: on a
