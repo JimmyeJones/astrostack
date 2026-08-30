@@ -2236,6 +2236,14 @@ export const api = {
     if (scale) params.push("scale=true");
     return params.length ? `${base}?${params.join("&")}` : base;
   },
+  // The run's *stored* preview PNG, turned so celestial North is up — the saved
+  // bytes rotated on the way out, not a re-render. Deliberately its own helper
+  // rather than a flag on `stackArtifactUrl`: the bare artifact URLs stay
+  // WCS-aligned for every surface that embeds them, and only the one caller that
+  // wants to *preview a turn* on a picture it must not replace (History's Adjust
+  // panel on a processed run) asks for this.
+  stackPreviewNorthUpUrl: (safe: string, id: number) =>
+    `/api/targets/${safe}/stack-runs/${id}/preview?north_up=true`,
   // "See what stacking removed" — a transparent PNG tinting where outlier
   // rejection dropped samples, sized to the run's stored preview so it lays
   // straight over it. Only runs whose `rejection.has_map` is true have one.
