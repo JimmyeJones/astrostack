@@ -9835,6 +9835,38 @@ to **Shipped**.)_
   half of this lead**, now with the chroma noise removed from underneath it so a future measurement sees the
   geometry alone.
 
+  **✅ THAT REMAINING HALF IS NOW MEASURED AND FIXED — and with the colour cue out of the way it turned out to
+  move *further* than the chroma one did, and to flip a verdict on its own.** *(Builder 2026-08-30, branch
+  `claude/compassionate-galileo-go263h`; **shipped as v0.318.3**.)* Swept exactly as the entry asked — one
+  unchanging synthetic scene at 4 / 16 / 64 / 128 / 300 / 800 subs (σ = 0.10/√N), printing every cue. On a
+  small galaxy `ext_frac` ran **0.0121 at 4 subs → 0.0254 at 800, a 2.1× swing**, and on a slightly larger one
+  it walked the verdict clean across the `≤ 0.05` galaxy ceiling: **galaxy at 4 and 16 subs, no class at all at
+  64+** — i.e. the deeper the owner's stack got, the *worse* the suggestion. `star_share` was worse still
+  (0.252 → 0.008 on one scene).
+  **The predicted mechanism was only half of it.** The entry named the threshold's `6·sky_sigma` term, and that
+  is real — on the galaxy scene it put `thr` at `sky+0.188` on a thin stack against `sky+0.06` on a deep one,
+  so faint structure simply did not clear the bar. But the **opening's erosion** is the second, unfiled half: a
+  min over 49 samples is biased ≈2.5σ low, so on a thin stack it *depresses the diffuse image* — shrinking
+  `ext_frac` and, because `point_sig = signal & ~ext_sig`, handing the object's own skirt to `pt_frac` as if it
+  were stars. That is why `star_share` drifted 30× on a field with a fixed number of stars in it.
+  **The fix needed no threshold flip either** — same shape as the chroma one, and now sharing its rationale:
+  every geometry cue is measured on a **locally averaged** copy of the luminance (`_GEOM_SMOOTH_PX = 3`), which
+  kills both mechanisms at once (the noise term falls under its own 0.06 floor, and the erosion has almost no
+  grain left to bite on). Measured after: the small galaxy reads **0.0217 → 0.0255 (±8 %)** and is called a
+  galaxy at every depth; the larger scene gives **one** verdict across the whole sweep. The four constants are
+  untouched, and every deep/clean verdict — the reference answer, since that end was already converged — is
+  unchanged.
+  **The cost, stated plainly:** a 3 px box widens a star's above-threshold footprint, so a *clean* star cluster's
+  `pt_frac` reads 0.095 where it read 0.068. Nothing turns on that — the gate is `pt_frac >= 0.0025`, three
+  decades below, and the discriminating cues (`star_share` 1.000, `ext_frac` 0.000) are unmoved — but it is the
+  one number a clean image reports differently, so it is recorded rather than buried. **5 px was measured too
+  and rejected**: it smears a dense star field into 0.0068 of fake *extended* signal and gives a colourless
+  cluster a chroma reading, which is the failure mode the 7 px opening exists to prevent.
+  **Tests (+3 in `tests/test_target_classify.py`, 2 fail before):** the cue-level invariance across the depth
+  sweep (±20 % of the deep answer), the verdict-level regression (a galaxy is a galaxy at every depth, and the
+  bigger scene gives one answer rather than two), and the no-regression guard that the averaging did not blur a
+  cluster into nebulosity.
+
 - **NEW IDEA (Builder 2026-08-30, the half deliberately left out of the Stack-form print line v0.318.0) — make
   the print nudge a *button*, not only a sentence.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size XS;
   frontend-only, no new data.)* The estimate panel now says *"Turning Drizzle on at ×1.3 would print it at A3
