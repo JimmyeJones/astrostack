@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
+import { fullResPngLabel } from "../fullres";
 import { formatIntegration, formatStampDate } from "../format";
 import { integrationReadiness, readinessColor, noiseReductionHint } from "../readiness";
 import { QueryError } from "../components/QueryError";
@@ -1259,7 +1260,7 @@ export function TargetView() {
                 {latestRun.has_fits ? (
                   <Menu.Item leftSection={<IconPhotoDown size={16} />}
                     component="a" href={api.stackFullResPngUrl(safe, latestRun.id)}>
-                    Full-res PNG (native size)
+                    {fullResPngLabel(latestRun.canvas_w, latestRun.canvas_h)}
                   </Menu.Item>
                 ) : null}
                 <Menu.Item leftSection={<IconPhotoDown size={16} />}

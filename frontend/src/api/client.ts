@@ -760,6 +760,11 @@ export interface DashboardStats {
     has_preview: boolean;
     has_fits?: boolean;
     preview_url: string;
+    /** The run's own canvas, so the download menu can word the "Full-res PNG"
+     *  honestly (that render is capped — see `fullres.ts`). Optional: an older
+     *  backend omits them and the copy falls back to the common wording. */
+    canvas_w?: number;
+    canvas_h?: number;
   }[];
   disk: {
     total_gb?: number; used_gb?: number; free_gb?: number;
@@ -1331,11 +1336,6 @@ export interface GalleryItem {
   // thumbnail isn't the user's version. Same server-side decision as `StackRun`;
   // absent on an older backend, which reads as "no unfinished edit".
   unexported_edit?: boolean;
-  // How far a past "Adjust → North up → Save" already turned the stored preview,
-  // in degrees (0/null for every ordinary run). The viewer's "North up" *view*
-  // reads it to know the picture on disk isn't the un-turned one, exactly as the
-  // Target hero reads the same field off `StackRun`.
-  preview_north_up_deg?: number | null;
 }
 
 // A finished Moon/Sun still, as the Gallery lists it alongside stack runs. It is

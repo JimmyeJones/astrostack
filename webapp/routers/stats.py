@@ -44,6 +44,13 @@ class RecentStack(BaseModel):
     # download so it's only offered when there's a FITS to render at native size.
     has_fits: bool = False
     preview_url: str
+    # The run's own canvas, so this strip's download menu can say honestly what
+    # the "Full-res PNG" it offers will contain: that render is capped at
+    # `_FULL_RES_PNG_MAX_LONG_EDGE`, so on a canvas bigger than that it is not
+    # native size and must not claim to be. Additive with 0 defaults, which the
+    # frontend reads as "dimensions unknown" and words the common way.
+    canvas_w: int = 0
+    canvas_h: int = 0
 
 
 class StatsResponse(BaseModel):
@@ -450,6 +457,8 @@ def _rollup_stacks(lib, targets) -> tuple[list[RecentStack], int, int]:
                     has_preview=has_preview,
                     has_fits=has_fits,
                     preview_url=f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview",
+                    canvas_w=run.canvas_w or 0,
+                    canvas_h=run.canvas_h or 0,
                 ))
             n_stack_runs += target_runs
             if target_runs:

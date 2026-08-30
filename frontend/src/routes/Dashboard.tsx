@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
+import { fullResPngLabel } from "../fullres";
 import { formatDiskSize, formatIntegration, formatStampDate } from "../format";
 import { loadDismissedSig, saveDismissedSig } from "../dismissal";
 import { settingsLink } from "../settingsSections";
@@ -324,7 +325,7 @@ export function Dashboard() {
                           {s.has_fits ? (
                             <Menu.Item onClick={() => triggerPictureDownload(
                               api.stackFullResPngUrl(s.safe, s.run_id))}>
-                              Full-res PNG (native size)
+                              {fullResPngLabel(s.canvas_w, s.canvas_h)}
                             </Menu.Item>
                           ) : null}
                           <Menu.Item onClick={() => triggerPictureDownload(

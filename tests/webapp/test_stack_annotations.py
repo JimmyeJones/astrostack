@@ -182,6 +182,56 @@ def test_annotations_offer_no_turn_on_an_already_north_up_picture(
     assert body["north_up_deg"] is None
 
 
+def _bake_north_up(data_root, safe: str, run_id: int, deg: float) -> None:
+    """Record on the run what a past "Adjust → North up → Save" would have: its
+    stored preview bytes already carry ``deg`` of turn."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.set_stack_preview_north_up(run_id, deg)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_annotations_offer_no_turn_on_a_picture_a_past_save_already_turned(
+    client, solved_library,
+):
+    """The field this endpoint reports is "how far would `?north_up=true` turn
+    this picture?", not "how far is this run's data from North up?" — and on a run
+    whose stored preview a past "Adjust → North up → Save" already turned, those
+    two answers differ.
+
+    The renderer passes the baked angle as ``already_deg`` and applies only the
+    remainder, so asking for North up hands back exactly the bytes already on
+    screen — while the master FITS is still just as far from North as it ever was.
+    Reporting the data's angle here put a view toggle on a picture it could not
+    move.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=800, h=600,
+                      arcsec_per_px=3.0)
+
+    # Before the save is recorded the turn is real and is offered.
+    from seestack.render.thumbnail import applied_north_up_deg
+    turn = applied_north_up_deg(_run_fits(solved_library, safe, run_id))
+    assert turn  # the fixture really is turned, or the test proves nothing
+    before = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    assert before["north_up_deg"] is not None
+
+    # …and once those very degrees are baked into the stored bytes, it is not.
+    _bake_north_up(solved_library, safe, run_id, turn)
+    after = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    assert after["north_up_deg"] is None
+    # The rest of the payload is unchanged — this is a question about the stored
+    # preview, not about the field, whose objects and rose are measured on the
+    # un-rotated FITS grid either way.
+    assert after["objects"] == before["objects"]
+    assert after["directions"] == before["directions"]
+
+
 def test_annotations_404_for_unknown_run(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r = client.get(f"/api/targets/{safe}/stack-runs/999999/annotations")

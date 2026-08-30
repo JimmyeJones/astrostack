@@ -9532,40 +9532,70 @@ to **Shipped**.)_
     bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
     make it the default: the saved orientation is what the owner chose.
 
-- **🟡 GALLERY SHIPPED (Builder, v0.311.0, branch `claude/compassionate-galileo-e1p1x8`); BEST PICTURES STILL
-  OPEN — ~~put the North-up *view* on the other two surfaces that show a picture big.~~**
+> **⚠️ PROCESS NOTE — COLLISION NUMBER EIGHT (Builder 2026-08-30, branch
+> `claude/compassionate-galileo-e1p1x8`).** I built this same Gallery item concurrently with the
+> `…-x2nj2o` Builder and **stood mine down wholesale at merge time; theirs is what ships**, and it is the
+> better answer for a reason worth keeping: I hit the identical "GalleryItem doesn't carry
+> `preview_north_up_deg`" wall and solved it by **adding that field to the item**; they solved it by making
+> `…/annotations`'s `north_up_deg` *honest* (`remaining_north_up_deg`), which fixes the same wrongness for
+> every future caller instead of teaching one more surface to work around it. Nothing of mine was re-applied
+> — their five `Gallery.test.tsx` tests cover everything my four did, and `NorthUpViewToggle.test.tsx`
+> (v0.308.2) already pins the preference read my one non-duplicate test exercised through the page.
+> **What the claim discipline cannot fix, stated plainly for the next run:** both of us claimed in our
+> first commit, by site, and pushed immediately — the same as collisions six and seven — and it did not help,
+> because we were *both already working* when the other's claim landed. The only thing that would have caught
+> it is **re-fetching `origin/main` immediately before starting each task** (AGENTS.md §11 says so; I fetched
+> before task 1 and before task 3, and their work landed in between), *and* reading the log rather than only
+> the backlog: their claim commit `c8fb278` was on `origin/main` 12 minutes before I started this task. The
+> cheap habit that would actually have worked: **`git log --oneline origin/main -10` as part of picking each
+> task**, not just `git fetch`. This item was an XS follow-on filed the same morning — exactly the shape two
+> Builders pick simultaneously.
 
-  **What shipped: the Gallery lightbox**, the page a beginner actually browses their pictures on. The toggle,
-  the two `localStorage` accessors and the `toolbarExtra` pattern all came straight from v0.308.0 — the turn
-  follows the picture, the plain PNG, the share JPEG and the full-res PNG, and deliberately **not** the FITS
-  (the raw data stays WCS-aligned). The Gallery's wallpaper menu gets its own North-up switch from the same
-  fact while it's there.
+- **✅ SHIPPED — GALLERY (Builder, v0.309.0, branch `claude/compassionate-galileo-x2nj2o`) — ~~put the North-up
+  *view* on the other two surfaces that show a picture big.~~** The Gallery lightbox has it; **Compare
+  deliberately does not, and the entry's premise about it was wrong** (see below). *(Pillar: enjoy + trust —
+  PRIORITY 3.)*
 
-  **It was not "two lines", and the reason is worth knowing before doing Best Pictures:** the Target hero gates
-  the control on `north_up_deg` **and** `!run.preview_north_up_deg`, and `GalleryItem` carried no such field —
-  so without it the Gallery would have offered the turn on a picture a past "Adjust → North up → Save" had
-  already baked, where the server correctly refuses to turn it twice and the control would visibly do nothing.
-  One additive, nullable `preview_north_up_deg` on `GalleryItem` (`getattr`-read, so an older row is `None`)
-  fixes that; `BestPictureItem` is a **separate model** and will need the same field.
+  **It was not two lines, because the field it keys off was answering the wrong question.**
+  `…/annotations`'s `north_up_deg` reported `applied_north_up_deg(fits)` — *"how far is this run's **data** from
+  North up?"* — while its own comment claimed it was *"exactly when `…/preview?north_up=true` would hand back
+  the stored bytes untouched"*. Those differ on a run whose preview a past **Adjust → North up → Save** already
+  turned: every renderer passes `baked_north_up_deg` as `already_deg` and applies **only the remainder**, so on
+  such a run asking for North up is a no-op while the FITS is still just as far from North as ever. The Target
+  hero never showed the resulting dead toggle only because it *also* guards on `run.preview_north_up_deg` — a
+  second fact the Gallery's item doesn't carry. Rather than copy that guard (and add a field to
+  `GalleryItem`), the endpoint now answers the question it always claimed to: new
+  `webapp.preview_orient.remaining_north_up_deg` mirrors `orient_preview_north_up`'s own arithmetic — total
+  minus baked, thresholded — so no caller can put up a control that visibly does nothing. The Target card's
+  extra guard stays, now belt-and-braces.
 
-  **The one thing that nearly went wrong:** the first cut routed the lightbox's plain-PNG `downloadHref`
-  through the item's own `preview_url` instead of `stackArtifactUrl(…, "preview")`. Identical in production,
-  and it turned an existing Gallery test red — correctly, because the two are only *coincidentally* the same
-  string. Reverted to the existing call rather than updating the test.
+  **Gallery.** The toggle joins the slideshow and wallpaper controls in the lightbox's `toolbarExtra`; the
+  shown picture, the PNG download, the JPEG behind Share and the full-res PNG all follow it, and the **FITS
+  deliberately does not** — raw data stays WCS-aligned whichever way you are looking at it. The annotations
+  fetch is `enabled` only once a picture is open, so drawing a grid of any size still costs no extra request.
+  Same `localStorage` key as the Target hero, so the preference is one preference.
 
-  **Tests (+4 in `Gallery.test.tsx`, +1 in `tests/webapp/test_gallery.py`):** the turn following the picture
-  and all three downloads while the FITS stays put; the control absent where `north_up_deg` is null; absent on
-  a picture already saved North-up; the remembered preference applying on open; and the new item field
-  reporting the baked angle (and `None` for an ordinary run).
+  **Compare was checked and left alone, on purpose.** The entry says it "uses the same lightbox"; it does not —
+  `routes/Compare.tsx` draws bare `<img>` elements inside a drag-to-reveal slider, and the two runs it puts
+  under one wipe line can carry different corrections. Turning them independently would slide two differently-
+  oriented pictures against each other, which is worse than not offering it. Filed below as its own item with
+  that finding, rather than shipped blind.
 
-  **Still open: `BestPictures.tsx`** (the "My best pictures" wall / slideshow), same shape, plus the
-  `preview_north_up_deg` field on its own response model. `History.tsx` already has the *save* path and its own
-  marks, and `Editor.tsx`'s lightbox shows an edit in progress, not a saved picture — neither wants this.
+  **Upgrade-safe (§9):** no config, schema, on-disk, default or API-*shape* change. The one behaviour change is
+  an existing response field becoming honest on a case where it was wrong; an older frontend reads `null` there
+  as "no toggle", which is exactly right.
+
+  **Tests (+6; the Python one fails before):** `tests/webapp/test_stack_annotations.py` — a run reports the turn,
+  then reports `null` once *those very degrees* are recorded as baked into its preview, with the objects and rose
+  pinned unchanged across the two (this is a question about the stored preview, not about the field).
+  `Gallery.test.tsx` — nothing fetched and no toggle until a picture is opened; no toggle where the turn would
+  not move the picture; the turn switching the shown bytes and all three downloads while the FITS stays put; the
+  preference written to the shared key and cleared again; and a preview-only run (no FITS) asking nothing and
+  offering nothing.
 
   Original spec, for the record:
 
-  - **NEW IDEA (Builder 2026-08-30, the follow-on v0.308.0 deliberately left open) — put the North-up *view* on the
-    other two surfaces that show a picture big.** *(Pillar: enjoy + trust — PRIORITY 3; size XS — two lines each;
+    *(Pillar: enjoy + trust — PRIORITY 3; size XS — two lines each;
     read-only, off by default.)* v0.308.0 built the whole mechanism: the `north_up_deg` field on `…/annotations`,
     the shared `components/NorthUpViewToggle.tsx` (toggle + the two `localStorage` accessors), and the pattern of
     passing it into `ImageLightbox` through `toolbarExtra` while swapping `src`/`downloadHref`/`jpegHref`/
@@ -9577,54 +9607,199 @@ to **Shipped**.)_
     anywhere: the saved orientation is what the owner chose, and the preference is shared across surfaces already
     (one `localStorage` key), so turning it on in the Gallery will correctly turn it on the Target page too.
 
-- **QA LEAD (Builder 2026-08-30, generalised from the v0.308.1 copy fix) — sweep every download control's *copy*
-  against what its endpoint actually serves.** *(Pillar: trust — PRIORITY 3; size S per surface, and the sweep
-  itself is one run.)* "Download all my pictures" promised **"the full-size pictures themselves"** and handed over
-  1024 px previews; nothing failed, no test caught it, and it would have been discovered by a user at the moment
-  it cost them most (trying to print from their backup). That is a **bug class**, not one slip: a download's copy
-  is written once, next to the button, and then the endpoint underneath it evolves — the picture it serves gets
-  capped, re-rendered, cropped, tone-mapped or renamed — with nothing tying the two together. **The sweep:** for
-  every control that hands over a file (the pictures zip, the montage, the wall, the keepsake, the print export,
-  the wallpaper, the zoom clip, the share JPEG, the full-res PNG, the imaging log, each artifact kind on
-  History's menu), read the sentence beside it and then read what the handler actually writes, and reconcile the
-  two — **fixing the copy where the file is right, and the file where the copy is right.** The properties that
-  keep drifting are **size** (capped preview vs native), **colour space** (linear TIFF vs display-space), and
-  **geometry** (cropped/rotated vs the stored canvas). Where a claim is worth keeping true, pin it with a test
-  that reads the served bytes rather than the string — `tests/webapp/test_north_up.py` is the shape.
-  **▶ Started (Builder 2026-08-30, branch `claude/compassionate-galileo-e1p1x8`) — the **size** axis, and the
-  lead was right that this is a class rather than a slip.** The first control swept was the **wallpaper**, and
-  it was the *file* that was wrong, not the copy: the presets name real device resolutions and the endpoint fed
-  the crop a 1024 px preview. Fixed in **v0.309.0** (entry under "Image quality"). Swept and **cleared** in the
-  same pass: the **share JPEG** ("served at the same resolution" — the docstring says so and it is true), the
-  **full-res PNG** (native, and it follows a saved recipe/Adjust stretch so it matches the thumbnail), and the
-  **pictures zip** (fixed as v0.308.1). Still **open on the size axis**: the **keepsake / scale-&-compass**
-  JPEG — filed with its blocker under "Image quality". Untouched so far: the montage, the wall, the print
-  export, the zoom clip and the imaging log.
+- **NEW IDEA (Builder 2026-08-30, the half v0.309.0 checked and deliberately did NOT ship) — the Compare view
+  is not a lightbox, and North-up there needs a decision, not a copy-paste.** *(Pillar: enjoy + trust —
+  PRIORITY 3; size S; read-only.)* The v0.308.0 follow-on assumed Compare "uses the same lightbox"; it does
+  not. `routes/Compare.tsx` draws bare `<img>` elements inside a drag-to-reveal wipe (and a side-by-side grid),
+  so there is no `toolbarExtra` to hang a toggle from and no single picture to turn. **The real question is
+  what a turned comparison should mean:** two runs of one target can carry *different* corrections (a mosaic
+  re-framed between sessions is the realistic case), so turning each by its own angle slides two
+  differently-oriented pictures against each other under one wipe line — which is worse than not offering it.
+  **The honest shapes, pick one:** (a) offer the turn only when both runs report the *same* `north_up_deg`
+  (within the renderer's own threshold), which is the overwhelmingly common case and is checkable from the two
+  `…/annotations` responses; or (b) turn both by the *A* run's angle and say so, which keeps the wipe line
+  meaningful but mis-orients B. Do **not** ship (c) "turn each by its own angle" — that is the one that looks
+  fine in a screenshot and is wrong in use. The server half is already built (`?north_up=true` on the preview),
+  so this is a frontend decision plus two fetches.
 
-- **NEW IDEA (Builder 2026-08-30, spotted at merge time while reconciling the two concurrent North-up
-  implementations — NOT a bug today, filed so it doesn't become one) — there are now *two* ways to ask "is
-  there a North-up turn left to make on this picture?", and only one of them subtracts what a past save
-  already baked in.** *(Pillar: maintainability / trust — PRIORITY 3; size XS; consolidation, no behaviour
-  change intended.)*
-  - `…/annotations` reports `north_up_deg` from **`applied_north_up_deg(fits)`** — the *whole* correction,
+- **🟡 SWEPT ONCE, ONE UNTRUTH FIXED (Builder, v0.309.1, branch `claude/compassionate-galileo-x2nj2o`); the
+  colour-space axis is still open below — QA LEAD (Builder 2026-08-30, generalised from the v0.308.1 copy fix)
+  — sweep every download control's *copy* against what its endpoint actually serves.** *(Pillar: trust.)*
+
+  **Found and fixed: "Full-res PNG (native size)" is not native size on a big mosaic — and History printed the
+  exact dimensions the file misses.** `download_full_res_png` renders through
+  `_FULL_RES_PNG_MAX_LONG_EDGE = 8000`, a deliberate ceiling that bounds the render's memory and the response
+  on a RAM-capped NAS. Four surfaces described that file and none of them knew: the Target page's and the
+  Dashboard strip's menu items said *"(native size)"*, the shared `ImageLightbox` menu said it on **three more**
+  surfaces (Gallery, My best pictures, History's viewer), and History's artifact menu went furthest —
+  *"Same look, full size (12000×9000 px)"*, quoting a number the download demonstrably does not have. Exactly
+  the size axis this entry named, on exactly the picture where it matters: the owner's union mosaics, and
+  discovered at the worst moment (trying to print from a backup). This is also the *destination* the v0.308.1
+  fix redirected people to — the wall card now says "to print one, open it and choose Full-res PNG" — so the
+  two lies were chained.
+
+  **The fix is one sentence in one place.** New `frontend/src/fullres.ts` owns the wording
+  (`fullResPngCapped` / `fullResPngLabel` / `fullResPngHint`), so five surfaces cannot drift into five claims
+  about one file. Wording is **unchanged for every canvas the render really does serve whole** — the point was
+  never to hedge everywhere, only to stop claiming native size where it is false; a capped picture gets
+  *"Full-res PNG (up to 8000 px)"* and, where there is room for a hint, the canvas it was capped **from** plus
+  the pointer to the FITS/TIFF that do hold those pixels. `ImageLightbox` takes an optional `fullResCanvas`
+  (a surface that doesn't know the dimensions keeps the common wording, which is right under the cap), and
+  `/api/stats`'s `recent_stacks` gained additive `canvas_w`/`canvas_h` so the Dashboard strip can answer too.
+
+  **Upgrade-safe (§9):** two additive response fields with `0` defaults that read as "unknown" (an older
+  frontend ignores them; an older backend omitting them gets the common wording). No config, schema, on-disk,
+  default or API-shape change; the endpoint's behaviour is untouched — only what we *say* about it.
+
+  **Tests (+11).** The claim is pinned to **bytes, not strings**, as the entry demanded:
+  `tests/webapp/test_full_res_png.py` renders a canvas past the *production* ceiling (not an injected one) and
+  asserts the served PNG is `!= native` and capped exactly at it, plus the boundary case *at* the cap coming
+  back whole. `tests/test_fullres_cap_mirror.py` is the drift guard — the hand-mirrored TS constant against
+  `_FULL_RES_PNG_MAX_LONG_EDGE`, same shape as `test_pace_constants_mirror.py`, because a stale copy would put
+  the untruth straight back with nothing failing. Then `fullres.test.ts` (5) over the wording itself, and one
+  test each on `ImageLightbox` and `History` that the capped picture stops claiming native size while an
+  ordinary one still quotes its exact dimensions.
+
+  **What the sweep found *not* to be wrong** — recorded so it isn't re-walked: the pictures zip (fixed in
+  v0.308.1, and its "open it and choose Full-res PNG" pointer is now true too); "Quick preview PNG (up to
+  1024px)" (`PREVIEW_MAX_WIDTH = 1024` is a *width* cap and History words it "up to 1024 px wide", which is
+  exact); the JPEG, nameplate, scale-bar and keepsake items, which describe what they bake rather than a size;
+  and the FITS, whose "Raw data — for re-processing, not sharing" is right.
+
+  **Still open, filed as its own item below:** the **colour-space** axis — the TIFF download carries *no*
+  description at all, and a plain stack's TIFF is written **linear**, so it opens looking black. The
+  **geometry** axis (cropped/rotated vs the stored canvas) was not swept.
+
+  **▶ Swept independently in the same hour, on the SAME axis, by the `…-e1p1x8` Builder — and the two halves
+  are complementary, not duplicates: that run fixed the FILE where this one fixed the COPY.** The wallpaper
+  and the share JPEG were both *made out of* the 1024 px preview, so no wording could have made them honest —
+  the presets name real device resolutions (1170 × 2532 …) and the endpoint fed the crop a third of that.
+  Fixed as **v0.310.0** (wallpaper) and **v0.311.0** (share JPEG, keepsake and scale-&-compass), both entries
+  filed below. So on the **size** axis the sweep now stands at: full-res PNG copy corrected (v0.309.1),
+  pictures zip corrected (v0.308.1), wallpaper and share JPEG *re-sourced* (v0.310.0 / v0.311.0). Also swept
+  and cleared by that run: the share JPEG's own "served at the same resolution" docstring, which was true and
+  is now obsolete rather than wrong. **Still open on size:** the **zoom clip** (built from the same preview,
+  and the cap sets its resolution directly — 569 px where 640 was available), and the wallpaper/share on a
+  **"Process target"** run, which both deliberately decline. Untouched on any axis: the montage, the wall, the
+  print export and the imaging log.
+
+  Original spec, for the record:
+
+    *(Pillar: trust — PRIORITY 3; size S per surface, and the sweep
+    itself is one run.)* "Download all my pictures" promised **"the full-size pictures themselves"** and handed over
+    1024 px previews; nothing failed, no test caught it, and it would have been discovered by a user at the moment
+    it cost them most (trying to print from their backup). That is a **bug class**, not one slip: a download's copy
+    is written once, next to the button, and then the endpoint underneath it evolves — the picture it serves gets
+    capped, re-rendered, cropped, tone-mapped or renamed — with nothing tying the two together. **The sweep:** for
+    every control that hands over a file (the pictures zip, the montage, the wall, the keepsake, the print export,
+    the wallpaper, the zoom clip, the share JPEG, the full-res PNG, the imaging log, each artifact kind on
+    History's menu), read the sentence beside it and then read what the handler actually writes, and reconcile the
+    two — **fixing the copy where the file is right, and the file where the copy is right.** The properties that
+    keep drifting are **size** (capped preview vs native), **colour space** (linear TIFF vs display-space), and
+    **geometry** (cropped/rotated vs the stored canvas). Where a claim is worth keeping true, pin it with a test
+    that reads the served bytes rather than the string — `tests/webapp/test_north_up.py` is the shape.
+
+- **✅ SHIPPED (Builder, v0.309.2, branch `claude/compassionate-galileo-x2nj2o`) — ~~the TIFF download says
+  nothing at all, and a plain stack's TIFF opens looking black.~~** The colour-space axis of the sweep above,
+  closed in the same run that found it. *(Pillar: trust / friendliness — PRIORITY 3.)*
+
+  **What shipped.** The TIFF item on History's artifact menu was the only download there with no hint, and the
+  one most likely to look broken: it now says **"16-bit raw levels — opens dark until you stretch it in another
+  app"** on an ordinary stack, and **"16-bit — the finished picture, at full depth"** on an editor export.
+
+  **No new API field was needed, and no guess was made.** The filed direction was an additive `display_space`
+  boolean on the run listing; it turns out the run already carries the fact — `options_json`'s
+  `display_space: true` is written by the editor export in the *same* `write_stack_outputs` call that passes
+  `already_display=True`, so the flag and the file cannot disagree, and it is the very key the server's own
+  `_run_display_space` reads. `StackRun.options` is already on the wire (the Gallery's `combineMethodKey`
+  reads it the same way), so `frontend/src/tiffDownload.ts` is a pure function over facts already present.
+  It also covers the stacker's *other* non-dark mode, `tiff_mode: "autostretch"`, which the filed shape would
+  have missed.
+
+  **The filed caution — "check whether it's reliable on an older run" — was answered by grep, not assumed:**
+  exactly one site writes a display-space TIFF (`webapp/pipeline.py`'s editor export), and it is the same site
+  that writes the flag, so there is no run that has one without the other. A run with missing or unparseable
+  options falls through to the warning, which is the safe default: warning about a picture that turns out fine
+  costs nothing, staying silent about a linear one costs the whole download.
+
+  **Upgrade-safe (§9):** frontend-only, reading a field already served. No config, schema, on-disk, default or
+  API change.
+
+  **Tests (+7), and the claim is pinned to the bytes, not the string.** `tests/test_tiff_opens_dark.py` writes
+  real stack outputs and measures how bright the TIFF actually opens: a linear stack lands under 2 % of full
+  scale, an `already_display=True` export above 35 %, and `autostretch` more than 3× its linear sibling. Its
+  fixture is deliberately a *star field* rather than one lone star — the linear packer maps the robust
+  0.5–99.9 percentile range onto 0–65535, so with a single star the 99.9th percentile sits down in the
+  nebulosity and the file comes out mid-grey, which no real stack ever does; that near-miss is written into the
+  fixture's docstring so nobody simplifies it back. Plus `tiffDownload.test.ts` (5, including the falsy and
+  non-boolean flags) and two on History that the warning appears for a plain stack and does not for an export.
+
+  Original spec, for the record:
+
+    *(Pillar: trust /
+    friendliness — PRIORITY 3; size S.)* Every other item on History's artifact menu carries a dimmed hint
+    saying what the file is; **TIFF is the one with none**, and it is the one that most needs it.
+    `_write_tiff` writes `mode="linear"` for an ordinary stack (`StackOptions.tiff_mode` defaults to
+    `"linear"`), so a beginner who picks the biggest-sounding file gets 16 bits of *linear* data that opens
+    near-black in any ordinary viewer and reads as a broken download. **But the honest sentence is not one
+    sentence:** the same menu item serves an *editor export*, whose TIFF is written `already_display=True`,
+    i.e. the finished display-space picture, which opens correctly. So the copy has to know which. **Do not
+    guess it in the frontend** — the server already owns this decision as `_run_display_space(run)`
+    (`webapp/routers/editor.py`), reading the FITS's `DISPLAY_SPACE_CARD`. The clean shape is one additive
+    boolean on the run listing (`display_space`) driving two hints: "16-bit, full depth — the finished picture"
+    vs "16-bit raw levels — opens dark until you stretch it; for another app, not for viewing". **Check first**
+    whether the card is reliable on an in-place-upgraded install's older runs; if it can't be answered, say the
+    weaker true thing rather than the wrong specific one.
+
+- **✅ RESOLVED CONCURRENTLY (Builder, v0.309.0, branch `claude/compassionate-galileo-x2nj2o`) — ~~there are
+  now *two* ways to ask "is there a North-up turn left to make on this picture?", and only one of them
+  subtracts what a past save already baked in.~~** Filed at 08:58 by one run; the other had already shipped
+  the consolidation at 08:47, arriving at it from the opposite direction (needing the answer for the Gallery
+  lightbox, which is the very surface this note predicted would trip over it). **Both halves of the filed
+  shape were done, and one part of its caution turned out not to apply:**
+
+  - `…/annotations` now reports the **remainder** — `webapp.preview_orient.remaining_north_up_deg`, the
+    **run-row form** of `thumbnail.preview_north_up_remainder_deg`, which it delegates to rather than
+    re-implementing; all it adds is the half that helper cannot know, the run's recorded-or-recovered
+    `baked_north_up_deg`. So there is now **one** implementation of the arithmetic and one of the
+    "what do these bytes carry?" question.
+  - The Gallery lightbox therefore gates on that field **alone**, exactly as this note wanted, and did not
+    have to re-combine anything.
+  - **The `&& !run.preview_north_up_deg` half of the Target hero's gate was deliberately KEPT**, not dropped:
+    it is now redundant rather than load-bearing, and leaving it costs nothing while removing it would make
+    that page depend on the endpoint's new meaning for correctness. Its comment says so.
+  - **The rose caution does not apply, checked rather than assumed.** The `…/annotations` handler computes
+    `directions` as a bare `sky_directions(wcs, width, height)` and never rotates it by `north_up_deg`; the
+    `rotated(sky_directions(...), north_up_deg)` the note points at is a **different function** (the baked
+    JPEG/scale-bar overlay path, whose `north_up_deg` is its own local parameter). Grepped: the only readers
+    of the *annotations* field are the Target hero and the Gallery lightbox, both boolean gates. So changing
+    the field's meaning in place was safe, and an extra `north_up_remaining_deg` field was not needed. The
+    three other `north_up_deg` readers in the frontend are on `render-suggestion`, a different endpoint,
+    untouched.
+
+  Original note, for the record:
+
+    *(Pillar: maintainability / trust — PRIORITY 3; size XS; consolidation, no behaviour
+    change intended.)*
+    - `…/annotations` reports `north_up_deg` from **`applied_north_up_deg(fits)`** — the *whole* correction,
     which knows nothing about the run's `preview_north_up_deg`. v0.308.0's view toggle therefore gates on
     `typeof north_up_deg === "number" && !run.preview_north_up_deg`: two facts, combined in the **frontend**.
-  - `…/rejection-overlay?north_up=` and `orient_preview_north_up` both go through
+    - `…/rejection-overlay?north_up=` and `orient_preview_north_up` both go through
     **`thumbnail.preview_north_up_remainder_deg(fits, already_deg=)`** (added by v0.308.2), which answers the
     same question in one number, on the server, and is what the renderer actually applies.
 
-  **Why it isn't a bug right now:** the frontend's two-fact form gives the same answer as the remainder in
-  every case reachable today, including the snap (a 89.5° correction saved as a snapped 90.0 makes both
-  "nothing left to turn"). **Why it is worth one XS run anyway:** the second form lives in a component, so the
-  next surface to adopt the toggle — the Gallery lightbox and **Compare**, both already filed — has to
-  *remember* to re-combine the two facts, and Compare is exactly where it would be easy to miss (two runs, two
-  baked angles, one shared preference). **Shape:** have `…/annotations` report the **remainder** instead, from
-  the same helper, and drop the `&& !run.preview_north_up_deg` half of the gate. **Check before doing it:**
-  `annotations` is also read by the object-pin / scale-bar / compass path, which uses `north_up_deg` for the
-  *rose* (`sky_directions` → `rotated(...)`) — that consumer wants the **whole** correction, not the
-  remainder, so this is *not* a one-line swap of the existing field. The honest shape is probably an
-  **additional** field (`north_up_remaining_deg`) rather than changing the meaning of one an older frontend
-  already reads, which also keeps it upgrade-safe (§9). Grep both consumers before touching either.
+    **Why it isn't a bug right now:** the frontend's two-fact form gives the same answer as the remainder in
+    every case reachable today, including the snap (a 89.5° correction saved as a snapped 90.0 makes both
+    "nothing left to turn"). **Why it is worth one XS run anyway:** the second form lives in a component, so the
+    next surface to adopt the toggle — the Gallery lightbox and **Compare**, both already filed — has to
+    *remember* to re-combine the two facts, and Compare is exactly where it would be easy to miss (two runs, two
+    baked angles, one shared preference). **Shape:** have `…/annotations` report the **remainder** instead, from
+    the same helper, and drop the `&& !run.preview_north_up_deg` half of the gate. **Check before doing it:**
+    `annotations` is also read by the object-pin / scale-bar / compass path, which uses `north_up_deg` for the
+    *rose* (`sky_directions` → `rotated(...)`) — that consumer wants the **whole** correction, not the
+    remainder, so this is *not* a one-line swap of the existing field. The honest shape is probably an
+    **additional** field (`north_up_remaining_deg`) rather than changing the meaning of one an older frontend
+    already reads, which also keeps it upgrade-safe (§9). Grep both consumers before touching either.
 
 - **✅ SHIPPED (Builder, v0.308.2, branch `claude/compassionate-galileo-q6uois`) — ~~the "see what stacking
   removed" tint can't be shown over a North-up view~~.** Fixed as the entry asked, and **the alpha caution it
@@ -16861,7 +17036,7 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **✅ SHIPPED (Builder, v0.309.0, branch `claude/compassionate-galileo-e1p1x8`) — ~~"Make it your wallpaper"
+- **✅ SHIPPED (Builder, v0.310.0, branch `claude/compassionate-galileo-e1p1x8`) — ~~"Make it your wallpaper"
   built your lock screen out of a **1024 px thumbnail**, so a 1170 × 2532 phone got a ~470 px-wide picture
   blown up 2.5×.~~** The first finding of the **"sweep every download control's copy against what its endpoint
   actually serves"** QA lead filed above (under "Autonomy & friendliness") — and it is the *file* half of that
@@ -16902,7 +17077,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   pinned by construction (render at what it asks for → the crop fills the preset exactly), by limiting edge,
   and at the cap.
 
-- **NEW IDEA (Builder 2026-08-30, the two halves deliberately left out of the v0.309.0 wallpaper fix) — the
+- **NEW IDEA (Builder 2026-08-30, the two halves deliberately left out of the v0.310.0 wallpaper fix) — the
   other two exports that are still made out of the 1024 px preview.** *(Pillar: image quality — PRIORITY 4;
   size S each; the second one has a cost gate, read it.)*
   **(a) The keepsake / "with scale & compass" JPEG** (`download_stack_run`, `kind="jpeg"`) is the one the
@@ -16911,7 +17086,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   and sky marks are laid out against the picture's pixel width (`_unrotated_preview_width` feeds
   `_sky_marks_for_run`), so simply handing it bigger bytes rescales the furniture. Do it *with* a pass over
   those layout constants, or not at all.
-  **(b) The wallpaper on a "Process target" run**, which v0.309.0 declines. `render_run_recipe_fullres_png`
+  **(b) The wallpaper on a "Process target" run**, which v0.310.0 declines. `render_run_recipe_fullres_png`
   would reproduce it exactly (crop included, which is why the framing would match), but unlike
   `render_preview_png_full_res` it renders the **whole editor pipeline at full canvas size** and decimates
   afterwards — fine behind a menu item that says "native size", not obviously fine for a one-tap wallpaper on
@@ -19175,7 +19350,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Builder: grep first** — reuse `api.stackFraming` / `useStackFraming` and `seestack.framing.recentre_nudge`
   rather than a second definition of "which way".
 
-- **✅ MOSTLY SHIPPED (Builder, v0.309.0 + v0.310.0, branch `claude/compassionate-galileo-e1p1x8`) — ~~the
+- **✅ MOSTLY SHIPPED (Builder, v0.310.0 + v0.311.0, branch `claude/compassionate-galileo-e1p1x8`) — ~~the
   picture a beginner actually *shares* is 1024 px wide, because every share export is built from the stored
   preview PNG rather than the master.~~ The wallpaper and the share JPEG (with its keepsake and
   scale-&-compass variants) now come off the master; the zoom clip is the one consumer still left on the
@@ -19185,8 +19360,8 @@ problems. Dogfood it every big-picture run and fix root causes.
     re-renders the same picture from the run's own FITS at the size each caller needs, and returns `None` —
     "use the stored bytes, exactly as before" — wherever the render could show a *different* picture: a baked
     North-up preview, a "Process target" display-space run, an auto-crop-trimmed preview, a missing FITS, or a
-    canvas no bigger than the preview (read from `canvas_w/h` *before* any render). **v0.309.0** used it for the
-    wallpaper (see the entry under "Image quality"); **v0.310.0** used it for `kind="jpeg"` at a
+    canvas no bigger than the preview (read from `canvas_w/h` *before* any render). **v0.310.0** used it for the
+    wallpaper (see the entry under "Image quality"); **v0.311.0** used it for `kind="jpeg"` at a
     `SHARE_JPEG_MAX_LONG_EDGE = 2560` cap.
 
     **The entry's claim that the marks scale was checked, not assumed, and it is right — with one wrinkle that

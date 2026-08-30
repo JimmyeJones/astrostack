@@ -142,6 +142,12 @@ export function LatestPictureCard({
   // real correction, and its stored bytes aren't already turned (a picture a
   // past "Adjust → North up → Save" baked is North-up on disk, and asking for
   // it again is a no-op the server correctly refuses to repeat).
+  //
+  // The second half is now belt-and-braces: since v0.309.0 the endpoint reports
+  // the *remainder* — what a `?north_up=true` render would still apply — so it
+  // already returns null on a baked run. Kept deliberately rather than removed:
+  // it costs nothing, and dropping it would make this page depend on that
+  // meaning for correctness rather than merely agree with it.
   const canNorthUp = typeof annotations.data?.north_up_deg === "number"
     && !run.preview_north_up_deg;
   const turned = northUp && canNorthUp;
@@ -242,6 +248,7 @@ export function LatestPictureCard({
         jpegHref={api.stackArtifactUrl(safe, run.id, "jpeg", turned)}
         fullResHref={run.has_fits
           ? api.stackFullResPngUrl(safe, run.id, turned) : undefined}
+        fullResCanvas={{ w: run.canvas_w, h: run.canvas_h }}
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
         toolbarExtra={canNorthUp ? (
           <NorthUpViewToggle
