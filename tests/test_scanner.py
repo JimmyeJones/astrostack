@@ -145,6 +145,68 @@ def test_apply_seestar_convention_sibling_skip_fires_for_true_sibling():
     assert [n for n, _ in units] == ["M31"]
 
 
+def test_apply_seestar_convention_skips_photo_folders():
+    """The Seestar writes single-shot stills into ``*_photo/`` folders
+    (``Scenery_photo``, ``Planetary_photo``) exactly as it writes clips to
+    ``*_video/``. Neither holds stackable deep-sky subs, so both are skipped —
+    without this a ``*_photo`` folder falls through every rule and is ingested
+    as an ordinary deep-sky target."""
+    units = _apply_seestar_convention(_fake(
+        "M 31_sub", "M 31",                        # real subs + on-device output
+        "Scenery_photo", "Planetary_photo",        # single-shot stills
+        "Lunar_video",                             # a clip, for contrast
+    ))
+    assert [n for n, _ in units] == ["M 31"]
+    # Case-insensitive on the suffix, like every other convention test.
+    assert _apply_seestar_convention(_fake("Scenery_PHOTO")) == []
+
+
+def test_apply_seestar_convention_over_the_owners_real_folder_names():
+    """Replay of the owner's live S30 share (the shapes that mattered): the two
+    ``*_photo`` folders and the four ``*_video`` folders are skipped, every
+    ``_sub``/``_mosaic_sub`` maps to its target, and each on-device output is
+    dropped in favour of its raw-subs sibling."""
+    units = _apply_seestar_convention(_fake(
+        "M 3_sub", "M 3",
+        "M 3_mosaic_sub", "M 3_mosaic",
+        "M 44_mosaic_sub", "M 44_mosaic",
+        "Solar_video", "Lunar_video", "Planetary_video", "Scenery_video",
+        "Planetary_photo", "Scenery_photo",
+    ))
+    assert [n for n, _ in units] == ["M 3", "M 3 (mosaic)", "M 44 (mosaic)"]
+
+
+def test_classify_junk_photo_by_target_name():
+    """A target an older scan built from a ``*_photo`` stills folder is junk by
+    name, whatever its frame count — a stills folder holds many snapshots."""
+    v = classify_seestar_junk_target("Scenery_photo", [], n_frames=42)
+    assert v is not None and v.reason == "photo"
+    assert "snapshot" in v.detail.lower()
+    # Case-insensitive on the suffix.
+    assert classify_seestar_junk_target("Planetary_PHOTO", [], 3) is not None
+
+
+def test_classify_junk_photo_by_source_folder(tmp_path):
+    """Even without a ``_photo`` target name, frames sourced entirely from a
+    ``*_photo`` folder are the Seestar's own stills."""
+    photos = tmp_path / "Scenery_photo"
+    photos.mkdir()
+    paths = [str(photos / "IMG_001.fit"), str(photos / "IMG_002.fit")]
+    v = classify_seestar_junk_target("Scenery", paths, n_frames=2)
+    assert v is not None and v.reason == "photo"
+
+
+def test_classify_junk_photo_folder_is_never_the_on_device_output_case(tmp_path):
+    """A tiny ``*_photo`` target must be reported as ``photo``, not silently fall
+    into the bare-output branch (which would need a ``_sub`` sibling that a stills
+    folder never has, and would then report nothing at all)."""
+    photos = tmp_path / "Scenery_photo"
+    photos.mkdir()
+    (tmp_path / "Scenery_photo_sub").mkdir()  # nonsense sibling, must not matter
+    v = classify_seestar_junk_target("Scenery", [str(photos / "one.fit")], n_frames=1)
+    assert v is not None and v.reason == "photo"
+
+
 def test_classify_junk_video_by_target_name():
     """A target named '<T>_video' is a Seestar video capture — flagged as junk
     regardless of what its frames' source folders look like (no disk needed)."""
@@ -282,6 +344,9 @@ def test_scan_is_seestar_aware_end_to_end(tmp_path):
     # A video capture (must be ignored).
     (scan_root / "Lunar_video").mkdir()
     write_seestar_fits(scan_root / "Lunar_video" / "clip_001.fit", n_stars=5, seed=6)
+    # A single-shot stills folder (must be ignored, same as the video).
+    (scan_root / "Scenery_photo").mkdir()
+    write_seestar_fits(scan_root / "Scenery_photo" / "IMG_001.fit", n_stars=5, seed=7)
 
     lib = Library.create(tmp_path / "lib")
     try:
@@ -470,6 +535,28 @@ def test_reject_seestar_output_frames_rejects_a_multi_frame_video_folder(tmp_pat
         ]
         rejected = proj.reject_seestar_output_frames("M 31")
         assert set(rejected) == set(vids)
+    finally:
+        proj.close()
+
+
+def test_reject_seestar_output_frames_rejects_a_multi_frame_photo_folder(tmp_path):
+    """Same family as the ``*_video`` case above: a ``*_photo`` stills folder an
+    old whole-card drop merged into a real target holds many finished snapshots,
+    all junk in a deep-sky stack, so the single-image size guard must not spare
+    them either."""
+    proj = Project.create(tmp_path / "proj", name="M 31")
+    try:
+        root = tmp_path / "incoming"
+        photos = [
+            proj.add_frame(FrameRow(
+                source_path=str(root / "Scenery_photo" / f"IMG_{i:03d}.fit")))
+            for i in range(6)
+        ]
+        keep = proj.add_frame(FrameRow(
+            source_path=str(root / "M 31_sub" / "Light_001.fit")))
+        rejected = proj.reject_seestar_output_frames("M 31")
+        assert set(rejected) == set(photos)      # every snapshot, none spared
+        assert keep not in rejected              # the real subs are untouched
     finally:
         proj.close()
 
