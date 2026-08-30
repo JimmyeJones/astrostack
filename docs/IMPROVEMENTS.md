@@ -10069,8 +10069,16 @@ to **Shipped**.)_
   capture time — "newest run" is the right ordering for History — and where both dates matter, say both
   ("shot 15 Nov 2024 · stacked 30 Aug 2026") rather than silently swapping one for the other.
 
-- **NEW IDEA (Builder 2026-08-30, noted while fixing the sky-coverage line v0.311.4) — the app writes "full
-  moons" in one sentence and "full Moon" in three others.** *(Pillar: friendliness — PRIORITY 3; size XS.)*
+- **✅ SHIPPED (Builder, v0.318.2, branch `claude/compassionate-galileo-cwqy3x`) — ~~the app writes "full
+  moons" in one sentence and "full Moon" in three others.~~** Exactly as filed, and picked up on its own at the
+  end of a run rather than smuggled into an unrelated commit, as the entry asked. `describeSkyCoverage` now
+  says "full Moon"/"full Moons" like `scalebar`, `angularsize` and the framing hint, with the three test
+  assertions (two in `skyCoverage.test.ts`, one in `Sky.test.tsx`) and the docstring moved with it. The Moon is
+  a proper noun; the Dashboard could show both spellings within a screen of each other.
+
+  Original spec, for the record:
+
+  *(Pillar: friendliness — PRIORITY 3; size XS.)*
   `components/skyCoverage.ts` says *"about 6 full moons' worth of sky"*; `scalebar._moon_comparison`,
   `angularsize` and the framing hint all say *"full Moon"*. Same noun, same product, two spellings, and on the
   Dashboard the two can appear within a screen of each other. One line of copy plus its three test assertions.

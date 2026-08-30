@@ -40,7 +40,7 @@ describe("describeSkyCoverage", () => {
     const s = describeSkyCoverage(18.4, 18.4 / 41252.96, 12);
     expect(s).toContain("12 pictures");
     expect(s).toContain("18.4 square degrees");
-    expect(s).toContain(`${Math.round(18.4 / FULL_MOON_DEG2)} full moons`);
+    expect(s).toContain(`${Math.round(18.4 / FULL_MOON_DEG2)} full Moons`);
     expect(s).toContain("0.045% of the whole sky");
   });
 
@@ -52,7 +52,7 @@ describe("describeSkyCoverage", () => {
     const s = describeSkyCoverage(1.3, 1.3 / 41252.96, 1);
     expect(s).toContain("Your picture covers 1.3 square degrees");
     expect(s).not.toContain("picture cover ");
-    expect(s).toContain("full moons");
+    expect(s).toContain("full Moons");
   });
 
   it("keeps the count and the plural verb once there is more than one", () => {
@@ -62,7 +62,7 @@ describe("describeSkyCoverage", () => {
 
   it("drops the plural when the whole library is about one moon", () => {
     expect(describeSkyCoverage(0.21, 0.21 / 41252.96, 1))
-      .toContain("about a full moon's worth of sky");
+      .toContain("about a full Moon's worth of sky");
   });
 
   it("says nothing at all when there is nothing to measure", () => {
