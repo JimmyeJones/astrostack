@@ -56,6 +56,20 @@ export function formatNightDate(iso: string | null | undefined): string {
 }
 
 /**
+ * A date label that is a **capture** date — when the light was collected — and
+ * not when the app did something. Only {@link formatCaptureNights} can make one.
+ *
+ * It is a plain string at runtime (a branded type, erased by the compiler), so
+ * it renders and concatenates like any other. The point is the *input* side:
+ * `sharePictureText` takes one of these, so handing it
+ * `formatStampDate(run.timestamp_utc)` — the moment the stack ran — no longer
+ * type-checks. That mistake was made twice on the Target page and survived a
+ * whole sweep of this class, because a processing stamp reads perfectly
+ * plausibly in the slot a capture date belongs in.
+ */
+export type CaptureLabel = string & { readonly __captureLabel: unique symbol };
+
+/**
  * When a picture's subs were **shot**, from a run's capture window
  * (`capture_night_start` / `capture_night_end` — observing-night dates the
  * server bucketed with the same noon-to-noon rule the Nights card uses).
@@ -74,34 +88,38 @@ export function formatNightDate(iso: string | null | undefined): string {
 export function formatCaptureNights(
   start: string | null | undefined,
   end: string | null | undefined,
-): string {
+): CaptureLabel {
   const a = parseNightDate(start) ?? parseNightDate(end);
   const b = parseNightDate(end) ?? parseNightDate(start);
-  if (!a || !b) return "";
+  if (!a || !b) return "" as CaptureLabel;
   const [first, last] = nightKey(a) <= nightKey(b) ? [a, b] : [b, a];
   const lastLabel = `${last.day} ${MONTHS_ABBR[last.month - 1]} ${last.year}`;
-  if (nightKey(first) === nightKey(last)) return lastLabel;
+  if (nightKey(first) === nightKey(last)) return lastLabel as CaptureLabel;
   if (first.year !== last.year) {
-    return `${first.day} ${MONTHS_ABBR[first.month - 1]} ${first.year} – ${lastLabel}`;
+    return `${first.day} ${MONTHS_ABBR[first.month - 1]} ${first.year} – ${lastLabel}` as CaptureLabel;
   }
   if (first.month !== last.month) {
-    return `${first.day} ${MONTHS_ABBR[first.month - 1]} – ${lastLabel}`;
+    return `${first.day} ${MONTHS_ABBR[first.month - 1]} – ${lastLabel}` as CaptureLabel;
   }
-  return `${first.day}–${lastLabel}`;
+  return `${first.day}–${lastLabel}` as CaptureLabel;
 }
 
 /**
  * The same window as a caption clause: `"on 15 Nov 2024"` for one night,
- * `"between 15 and 18 Nov 2024"` for a run built from several. `""` when
- * unknown, so the caption drops the clause.
+ * `"between 15 and 18 Nov 2024"` for a run built from several — and
+ * `"over 4 nights, between 15 and 18 Nov 2024"` when the run also recorded how
+ * many nights it is made of. `""` when unknown, so the caption drops the clause.
  *
- * Two nights are all a run records — the first and the last — so this never
- * claims a *count* ("over 4 nights") it cannot know; "between … and …" is the
- * strongest thing that is certainly true.
+ * The count is the part a person actually says out loud about their picture, and
+ * a window cannot supply it: 15→18 Nov is equally consistent with two nights and
+ * with four. So it is quoted only when the run *recorded* it (`capture_nights`,
+ * schema 19+) — never inferred from the span, which would turn a two-night stack
+ * into a four-night boast.
  */
 export function captureNightsClause(
   start: string | null | undefined,
   end: string | null | undefined,
+  nights?: number | null,
 ): string {
   const a = parseNightDate(start) ?? parseNightDate(end);
   const b = parseNightDate(end) ?? parseNightDate(start);
@@ -114,7 +132,13 @@ export function captureNightsClause(
     : first.month !== last.month
       ? `${first.day} ${MONTHS_ABBR[first.month - 1]}`
       : `${first.day}`;
-  return `between ${firstLabel} and ${lastLabel}`;
+  const span = `between ${firstLabel} and ${lastLabel}`;
+  // A count of 1 beside a multi-night span would contradict it, and a count is
+  // only ever a whole number of nights — anything else is a backend the app
+  // doesn't understand, so it says nothing rather than something odd.
+  const n = typeof nights === "number" && Number.isInteger(nights) && nights > 1
+    ? nights : null;
+  return n ? `over ${n} nights, ${span}` : span;
 }
 
 /**

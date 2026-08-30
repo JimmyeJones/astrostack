@@ -87,6 +87,29 @@ describe("latestPictureCaption", () => {
     expect(cap).not.toMatch(/Stacked/);
     expect(cap).toContain("128 frames");
   });
+
+  it("says when the subs were SHOT once the run recorded it", () => {
+    // Found by dogfooding the sample: the hero read "Stacked Aug 30, 2026"
+    // directly above a frames table of 2024-11-15 subs, and a date beside a
+    // picture is read as "the night I took this".
+    const cap = latestPictureCaption(mkRun({
+      timestamp_utc: "2026-08-30T12:00:00Z",
+      capture_night_start: "2024-11-15", capture_night_end: "2024-11-18",
+    }));
+    expect(cap).toMatch(/^Shot 15–18 Nov 2024 · /);
+    expect(cap).not.toContain("2026");
+  });
+
+  it("still labels the stack date when there is no capture window", () => {
+    // Every run made before the app recorded one. It keeps saying which date it
+    // is, so the wrong reading stays impossible either way.
+    const cap = latestPictureCaption(mkRun({
+      timestamp_utc: "2026-08-30T12:00:00Z",
+      capture_night_start: null, capture_night_end: null,
+    }));
+    expect(cap).toMatch(/^Stacked /);
+    expect(cap).toContain("2026");
+  });
 });
 
 describe("LatestPictureCard", () => {

@@ -43,6 +43,19 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-7y6nlj` — claim released, shipped as v0.317.0.**
+> The top open item under "Autonomy & friendliness": **record how many *nights* went into a stack**, so a
+> caption can say "over 4 nights" instead of naming two dates. The entry offered two shapes and named the
+> read-time one honest; it is, with one refinement — **night dates cannot be what gets stored**, because a
+> night date is already the answer to "for which longitude?". *Hours* are the smallest thing that still
+> supports re-bucketing, and a 500-sub night is five of them. Full write-up on the entry under "Autonomy &
+> friendliness". Sites touched: `seestack/stack/stacker.py`
+> (`_capture_hours`, the `add_stack_run` call), `seestack/io/project.py` (schema **19**, additive
+> `capture_hours_json`), `webapp/capture_nights.py` (`capture_night_count`), the four run-shaped API payloads
+> (`webapp/schemas.py` `StackRunOut`, `webapp/routers/gallery.py` `GalleryItem`/`BestPicture`,
+> `webapp/routers/stats.py` `RecentStack`), `seestack/nameplate.py` (`NameplateFields.nights`),
+> `webapp/pipeline.py` (`_nameplate_fields`) and `frontend/src/format.ts` (`captureNightsClause`).
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-vsy9vz` (second task) — claim released, shipped
 > as v0.314.0.** The follow-on the v0.313.0 work exposed, filed and taken in the same run: the acquisition
 > **nameplate** — the caption baked into a shared or printed picture — had *no date at all*, on any picture
@@ -346,6 +359,70 @@ _(nothing else claimed — claim an item here with your branch name)_
 ---
 
 ## Bugs (fix these first)
+
+- **✅ SHIPPED (Builder, v0.317.1, branch `claude/compassionate-galileo-7y6nlj`) — ~~the Target page's own
+  **Share** menu still told the OS share sheet a picture was "captured" the day the **stack ran**~~, on both
+  its plain and its keepsake share — the two sites the v0.313.0 sweep missed.** *(Severity: wrong fact on
+  **shared output** — the words a beginner's phone puts under their photo in public. Same class and same
+  severity as the bug v0.313.0 fixed; this is two call sites of it that were left behind. Confidence:
+  reproduced — a run whose subs were shot 2024-11-15 shared as "captured 17 Aug 2026", and the three new tests
+  fail before the fix and pass after.)* **Found by dogfooding** (`scripts/agent-dogfood.sh`): the sample's hero
+  caption read *"Stacked Aug 30, 2026"* directly above a frames table of `2024-11-15 22:10` subs, and pulling
+  that thread found the share menu beneath it.
+
+  **Root cause.** `share.ts::sharePictureText`'s second argument is documented as *"the date the subs were
+  shot — `formatCaptureNights` over a run's capture window — and nothing else"*, and `routes/Target.tsx` passed
+  `formatStampDate(latestRun.timestamp_utc)` to it, twice. Its own comment claimed it was *"the same date
+  `LatestPictureCard`'s share text uses for the same picture"* — which had stopped being true when that card
+  was fixed. One page, one picture, two different dates. **Worth recording as a pattern:** the comment naming
+  the sibling it agreed with is what made the drift invisible; a shared `captureLabel` computed once on the
+  page now makes the two shares agree by construction, and the frozen test that pinned the *old* stamp is why
+  it survived the sweep at all.
+
+  **…and the caption under the picture, which is the same fact.** `latestPictureCaption` printed the stack
+  stamp unconditionally on the app's most prominent picture. It now goes through the existing
+  `pictureDateLabel` — *"Shot 15–18 Nov 2024"* when the run recorded a window, *"Stacked 30 Aug 2026"* when it
+  didn't — so it never asserts a capture date it doesn't have, and never leaves a bare one to be misread. This
+  is the `Target.tsx` half of the date sweep filed under "Autonomy & friendliness"; the Gallery/History
+  *provenance* lines are deliberately still the run stamp, which is right there.
+
+  **Upgrade-safe (§9):** frontend-only. No API, schema, config, on-disk or default change; a run with no
+  recorded window shares with no date clause at all, exactly as every other share surface already did.
+
+  **Tests (+5, 3 fail before):** `Target.test.tsx` (the share sheet naming the shot night and not the stack
+  year, the keepsake share agreeing with the plain one, and a windowless run sharing with no date — the old
+  test that asserted the *stack stamp* is replaced by these, since it pinned the bug) and
+  `LatestPictureCard.test.tsx` (the caption saying "Shot …" once a window exists, and still labelling
+  "Stacked …" when there is none).
+
+- **✅ SHIPPED (Builder, v0.317.2, branch `claude/compassionate-galileo-7y6nlj`) — the recurrence guard for
+  the bug directly above: a share caption's date argument is now a **type**, so a processing stamp cannot
+  reach it.** *(Pillar: trust — PRIORITY 3; frontend-only, no behaviour change on the picture path. Filed and
+  shipped together because the fix above is the *second* time this exact substitution shipped, and a comment
+  saying "use the capture window here" had already failed to stop it once.)*
+
+  **What shipped.** `formatCaptureNights` now returns a branded `CaptureLabel` (a compile-time-only brand — it
+  is a plain string at runtime, so every display use is byte-for-byte unchanged), and `sharePictureText` takes
+  one. Passing `formatStampDate(run.timestamp_utc)` into the capture slot is now a **type error**, which is
+  the same discipline v0.313.0 applied to `postCaption` when it stopped taking a `dateLabel` — the mistake
+  fails to compile rather than reading plausibly. Turning it on found the two remaining call sites
+  immediately, which is the evidence that the guard was worth its weight.
+
+  **…and those two sites were the same wrong claim, on a different picture.** The Gallery lightbox's and the
+  Moon & Sun page's shares of a **video still** passed `created_utc` — set by
+  `webapp/video.py` to `datetime.now(UTC)` when the app stacks the clip — into a slot that renders
+  *"captured …"*. The app never learns when a clip was shot. Rather than dropping the date (which loses a fact
+  the owner may want) or asserting it (which is the bug), a still now goes through a sibling
+  `shareStillText`, which keeps the date and **labels** it: *"Moon · Stacked 30 Aug 2026"* /
+  *"Moon — stacked 30 Aug 2026"*. A separate function rather than an argument, so the two kinds of picture
+  cannot be swapped back by accident.
+
+  **Upgrade-safe (§9):** frontend-only, no API/schema/config/on-disk/default change; the branded type is
+  erased at build time, so the shipped bundle's picture-share captions are identical.
+
+  **Tests (+3):** `share.test.ts` covers `shareStillText`'s labelled date, its no-date fall-through and its
+  PNG-by-default filename; the existing `sharePictureText` cases mint a `CaptureLabel` explicitly, and
+  `Target.test.tsx` now builds its expectation from the real `formatCaptureNights` rather than a literal.
 
 - **✅ SHIPPED (Builder, v0.313.1, branch `claude/compassionate-galileo-p5irbc`) — ~~a mosaic with **no panel
   step in it at all** grows one as you shoot it deeper: `seam_residual` climbed 0.27 → 1.56 grain-widths
@@ -9664,23 +9741,128 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-30, the one thing the v0.313.0 capture window deliberately cannot say) — record
-  how many *nights* went into a stack, so the caption can say "over 4 nights" instead of naming two dates.**
-  *(Pillar: understand + share — PRIORITY 3; size S. Confidence: the limitation is pinned by a test —
-  `captureNightsClause` asserts it "never claims a night count it cannot know".)* A run now records its first
-  and last sub (`capture_start_utc` / `capture_end_utc`), which is enough for "shot between 15 and 18 Nov
-  2024" and **not** enough for the sentence a person actually says out loud: *"600 subs over 4 nights"*. The
-  two are not the same claim — a window of 15→18 Nov is equally consistent with two nights and with four —
-  and the difference is exactly the fact that makes a beginner's picture sound like the work it was.
-  **Shape:** one more additive column, `capture_nights` (an INTEGER), counted in `stacker._capture_window`'s
-  caller as the number of **distinct observing nights** among the frames it combined. **The catch worth
-  stating before anyone starts:** the engine cannot bucket a night without the observer's longitude, which is
-  a `webapp` concern (`resolve_site_lon`), and `seestack/` may not import `webapp` (§6). So either the count
-  is UTC noon-to-noon at stack time and mildly wrong for someone far from Greenwich, or the *set of night
-  dates* is what gets stored (a short JSON array, bucketed at read time like `capture_night_range` already
-  does) — the second is the honest one and barely bigger. Then `postCaption`, `nameplate` and the History
-  card can all say it. **Grep before building:** the per-target Nights card already counts nights *for a
-  target*; this is per **run**, which is a different set the moment anyone re-stacks a subset.
+- **⭐ QA LEAD (Builder 2026-08-30, the ⭐ "normalises against its own subset" lead's *unswept* axis, now with a
+  named candidate and a mechanism) — the Auto preset picker's four scene fractions are thresholded above a
+  **noise-aware** floor, so they are a monotone function of how deep the stack is.** *(Pillar: image quality +
+  trust — PRIORITY 2–4; size M — one measurement session, then a fix only if it moves. Confidence: mechanism
+  read, **not** measured. Filed as a lead, not a bug.)* The lead's own list named "the auto-grade / auto-edit
+  strength pickers that read a fraction of *affected* pixels" as the half a `np.percentile` grep cannot see.
+  This is that half, and the site is `seestack/edit/presets.py::classify_scene`.
+
+  **The mechanism.** It normalises the frame to its own 0.5/99.5 percentiles, measures the sky and the sky's
+  MAD, and calls anything above `thr = sky + max(0.06, 6·sky_sigma)` "signal". Every downstream cue —
+  `sig_frac`, `ext_frac`, `pt_frac`, `star_share` — is a *count of pixels above that threshold*, and
+  `sky_sigma` falls as 1/√N. So on a shallow stack `thr` is set by the noise term and only bright structure
+  clears it; on the owner's 500-sub stack the 0.06 floor takes over and faint nebulosity that was under the
+  noise now counts as extended signal. `ext_frac` therefore **grows with depth on the same sky**, and it is
+  compared against hard constants (`≤ 0.012` → cluster, `≥ 0.06` → nebula, `0.004…0.05` → galaxy). A galaxy
+  that classifies as a galaxy at 16 subs can cross into "nebula" at 300 — and the class picks the **preset the
+  one-click Auto edit applies**, so this is a picture-changing decision, not a chip.
+
+  **Do it the lead's way, and measure before touching anything.** Stack one synthetic scene at 16 / 64 / 300
+  subs, print `cues` at each depth, and look for monotonicity — exactly the method that found the tint bug and
+  (independently, on `main`) the seam-residual bug, which is now **two confirmed instances of this class in two
+  days**. **Care, and why this is filed rather than fixed:** the thresholds are on the on-by-default hot path,
+  and AGENTS.md §1 forbids a blind flip. If it does move, the honest fix is the same shape both confirmed
+  instances took — make the *threshold* depth-invariant (the 0.06 floor already is; it is the `6·sky_sigma`
+  term and the percentile normalisation that are not) rather than re-tuning the constants against one scene.
+
+- **NEW IDEA (Builder 2026-08-30, the obvious next tap on the per-run night count v0.317.0) — say "over 4
+  nights" where a person is *looking at* the picture, not only where they copy a caption.** *(Pillar:
+  understand + enjoy — PRIORITY 3; size XS–S; purely additive on machinery that now exists.)* `capture_nights`
+  is on `/api/targets/{safe}/stack-runs`, `/api/stats` and `/api/gallery` already, and today only the
+  ready-to-post caption and the baked nameplate read it. The obvious surfaces are History's run card and the
+  Target hero caption, both of which currently show a date range and stop. **Do not just append it** — the
+  owner's standing "extremely busy" priority means this should *replace* something in those lines rather than
+  become one more fact, e.g. "Shot over 4 nights, 15–18 Nov 2024" as one clause. **Grep before building:** the
+  per-target Nights card counts nights *for a target*; this is per **run**, and the two legitimately differ the
+  moment anyone re-stacks a subset — a surface showing both at once needs to say which is which.
+
+- **⚠️ PROCESS NOTE (Builder 2026-08-30, the reason the v0.317.1 bug survived a whole sweep of its own class)
+  — a comment that asserts agreement with a *sibling* is a drift hazard, and a test that freezes the current
+  behaviour turns it into a permanent one.** The two Target-page share calls carried the comment *"the same
+  date `LatestPictureCard`'s share text uses for the same picture"*. It was true when written. When that card
+  was fixed the comment stayed, and now read as a reassurance that the site had already been handled — so a
+  sweep that greps for the *bug* finds a site that documents itself as correct. Compounding it,
+  `Target.test.tsx` asserted the caption equalled `sharePictureText("M42", formatStampDate(stamp))`, i.e. it
+  pinned the wrong stamp precisely. **The lesson worth generalising:** where two call sites must agree, make
+  them agree *by construction* — one shared value (the page now computes `captureLabel` once) or a type
+  (v0.317.2) — never by a comment naming the other one. And when a sweep of a class leaves a site untouched,
+  check whether a *test* is asserting the old behaviour there; that is what makes a missed site invisible
+  rather than merely unfixed.
+
+- **⚪ DOGFOOD BASELINE (Builder 2026-08-30, `scripts/agent-dogfood.sh`, recorded so the next IA slice has
+  numbers rather than an impression) — nothing overflows and nothing errors; the tallest page is now the
+  Target page.** Full-page scroll heights on a booted app with the bundled sample loaded and processed:
+  **phone** `/targets/<t>` 3035 px · `/life-list` 3008 px · `/targets/<t>/edit/1` 2775 px · `/` 1813 px ·
+  `/targets/<t>/stack` 1712 px; **desktop** `/targets/<t>` 2010 px · `/targets/<t>/edit/1` 1767 px ·
+  `/life-list` 1453 px. The probe reports **no horizontal overflow on any page and no console errors**. For
+  scale: the life list was **14,584 px** on a phone before v0.307.0 and Settings was 5,827 px before v0.266.0,
+  so the five named IA slices plus those two have taken the app's worst page from ~24 phone screens to ~5.
+  **What this says about "don't start Library/Editor speculatively":** it still holds — neither is the wall.
+  The Target page is the tallest thing left, and it is tall because it is genuinely the page with the most on
+  it, not because anything is stacked badly. One real friction *was* found on it this run and is fixed
+  (v0.317.1); nothing else in the screenshots reads as a layout problem.
+
+- **✅ SHIPPED (Builder, v0.317.0, branch `claude/compassionate-galileo-7y6nlj`) — ~~a picture could name the
+  first and last night it was shot on, but never how many *nights* it took.~~ It can now say "over 4 nights".**
+
+  **What shipped.** Schema **19** adds one additive column, `capture_hours_json`, and
+  `stacker._capture_hours` fills it with the distinct **UTC hours** this run's subs arrived in. A new
+  `capture_night_count` buckets those into observing nights at *read* time, through the very same
+  `night_date_of` the date range already goes through — so the count and the dates beside it can never
+  contradict each other, and both follow the owner's longitude whenever they set one. `/api/targets/{safe}/stack-runs`,
+  `/api/stats`, `/api/gallery` and the best-pictures wall all report `capture_nights`; the ready-to-post caption
+  reads *"a stack of 600 subs (5h total), shot over 4 nights, between 15 and 18 Nov 2024 with a Seestar"*, and the
+  baked acquisition nameplate (share JPEG, editor share export, print export, keepsake) reads
+  *"15-18 Nov 2024 (4 nights)"*.
+
+  **The design call the entry asked for, decided.** The entry offered two shapes — a UTC-bucketed count frozen
+  at stack time, or the *set of nights* stored and bucketed at read time — and named the second the honest one.
+  It is, and this is that, with one refinement the entry did not have: night dates cannot be stored, because a
+  night date is *already* the answer to "for which longitude?" — storing one freezes exactly the guess the
+  entry wanted to avoid. **Hours are the smallest thing that still supports re-bucketing.** A 500-sub night is
+  five entries, not five hundred, and truncating to the hour can only misbucket a frame whose hour *contains*
+  local noon — broad daylight, which is not when subs are taken.
+
+  **Neither caption invents a count.** A count only appears when the run recorded one *and* it is 2 or more
+  *and* the caption is actually showing a span: one night is already named by the date, and "15 Nov 2024
+  (4 nights)" would contradict itself. Inferring the count from the span was never on the table — it would turn
+  every two-night stack into a four-night boast.
+
+  **Upgrade-safe (§9):** one additive column with a migration from any older version (tested by rolling a real
+  DB back to schema 18 and reopening), one optional dataclass field, one optional API field every consumer
+  treats as "say nothing". No config, on-disk-layout, API-shape or default change. A run recorded before the
+  column existed captions byte-for-byte as it did in v0.314.0. An editor export inherits its source run's hours,
+  since it is the same light.
+
+  **Tests (+30):** `tests/test_capture_hours.py` (hours distinct/sorted/on-the-hour, a 500-sub night collapsing
+  to five entries, all three UTC spellings landing in one bucket, undated frames skipped, the DB round trip and
+  the schema-18 → 19 migration keeping its rows); `tests/webapp/test_capture_nights.py` (two nights counted as
+  two, **one window with two truthful counts**, the count following the observer's longitude, and unrecorded /
+  malformed / junk input answering `None` rather than zero); `tests/webapp/test_capture_date_endpoints.py` (a
+  real stack recording its own night, the sparse-vs-dense pair on one identical window, the three surfaces
+  agreeing, and the longitude case); `tests/webapp/test_nameplate_date.py` and `tests/test_nameplate.py` (the
+  baked span with its count, the count kept out of a single-date caption, the keepsake subtitle carrying it, and
+  every span shape added to the glyph-coverage assertion); plus `format.test.ts` and `postCaption.test.ts`.
+
+  Original spec, for the record:
+
+    *(Pillar: understand + share — PRIORITY 3; size S. Confidence: the limitation is pinned by a test —
+    `captureNightsClause` asserts it "never claims a night count it cannot know".)* A run now records its first
+    and last sub (`capture_start_utc` / `capture_end_utc`), which is enough for "shot between 15 and 18 Nov
+    2024" and **not** enough for the sentence a person actually says out loud: *"600 subs over 4 nights"*. The
+    two are not the same claim — a window of 15→18 Nov is equally consistent with two nights and with four —
+    and the difference is exactly the fact that makes a beginner's picture sound like the work it was.
+    **Shape:** one more additive column, `capture_nights` (an INTEGER), counted in `stacker._capture_window`'s
+    caller as the number of **distinct observing nights** among the frames it combined. **The catch worth
+    stating before anyone starts:** the engine cannot bucket a night without the observer's longitude, which is
+    a `webapp` concern (`resolve_site_lon`), and `seestack/` may not import `webapp` (§6). So either the count
+    is UTC noon-to-noon at stack time and mildly wrong for someone far from Greenwich, or the *set of night
+    dates* is what gets stored (a short JSON array, bucketed at read time like `capture_night_range` already
+    does) — the second is the honest one and barely bigger. Then `postCaption`, `nameplate` and the History
+    card can all say it. **Grep before building:** the per-target Nights card already counts nights *for a
+    target*; this is per **run**, which is a different set the moment anyone re-stacks a subset.
 
 - **⚪ AUDIT NOTE (Builder 2026-08-30, first two candidates of the v0.312.1 "normalises against its own
   subset" QA lead — NON-findings, recorded so nobody re-treads them).** The lead directly above asks for a
@@ -9795,9 +9977,11 @@ to **Shipped**.)_
   and `showAndTell.test.ts`.
 
   **What is left of this sweep** (the rest of the entry below still stands): Gallery cards and History rows
-  still print the run stamp in their *provenance* lines, which is arguably right there; the keepsake/poster
-  and the Sky footprint line were not touched; and `Target.tsx`'s hero caption already says "Stacked …",
-  honestly, but could now say both dates.
+  still print the run stamp in their *provenance* lines, which is arguably right there; and the Sky footprint
+  line was not touched. **Two of the listed leftovers are now closed:** the keepsake/poster caption picked up
+  the capture date with the nameplate in **v0.314.0** (they share `acquisition_parts`), and `Target.tsx`'s
+  hero caption now prefers the capture window through `pictureDateLabel` (**v0.317.1**) — which is where
+  dogfooding found the share-menu bug filed at the top of "Bugs".
 
 - **NEW IDEA (Builder 2026-08-30, the generalisation of the v0.311.3 "First light" bug) — sweep every date the
   app shows a beginner and ask whether it means *when you shot this* or *when the app did something*.**

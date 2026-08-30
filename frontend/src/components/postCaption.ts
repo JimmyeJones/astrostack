@@ -49,6 +49,12 @@ export interface PostCaptionInput {
    *  Both null (every run recorded before the app knew) simply drops the clause. */
   captureNightStart?: string | null;
   captureNightEnd?: string | null;
+  /** How many observing nights the run is made of (`capture_nights`), or null.
+   *  The window says *when*; only this says *how much* — and "over 4 nights" is
+   *  the half of the sentence that makes a picture sound like the work it was.
+   *  Null on any run recorded before the app tracked it, which captions exactly
+   *  as it did before. */
+  captureNights?: number | null;
   /** The run's scale bar (from the annotations endpoint), or null. */
   scaleBar?: { moon_comparison?: string | null } | null;
   /** Fallback subject when the target isn't identified (the target's display
@@ -106,7 +112,8 @@ export function postCaption(input: PostCaptionInput): string {
   // Date + gear. The date is the *capture* window, never the stack stamp — and
   // when the run predates the app recording one, the caption says "shot with a
   // Seestar" and stops, rather than reaching for the date it has to hand.
-  const when = captureNightsClause(input.captureNightStart, input.captureNightEnd);
+  const when = captureNightsClause(
+    input.captureNightStart, input.captureNightEnd, input.captureNights);
   clauses.push(when ? `shot ${when} with a Seestar` : "shot with a Seestar");
 
   const first = `${subject} — ${clauses.join(", ")}.`;

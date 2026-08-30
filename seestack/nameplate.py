@@ -62,6 +62,13 @@ class NameplateFields:
     #: naming only the night it started. Optional and ignored when equal,
     #: absent, or unparseable, so a single-night run captions exactly as before.
     date_end_iso: str | None = None
+    #: How many observing **nights** went into the stack, when the app knows.
+    #: A span alone cannot say — "11-14 Sep 2024" is equally consistent with two
+    #: nights and with four — and the number is the part that says how much work
+    #: a picture was. Shown only alongside a span and only when it is 2 or more;
+    #: ``None`` (every run recorded before the app tracked it) captions exactly
+    #: as before.
+    nights: int | None = None
     camera: str | None = None
 
 
@@ -160,7 +167,15 @@ def acquisition_parts(fields: NameplateFields, *,
 
     date = format_acq_range(fields.date_iso, fields.date_end_iso)
     if date:
-        parts.append(date)
+        # The night count rides with the date, never alone: "(4 nights)" beside
+        # a bare integration time would read as a claim about the picture rather
+        # than about when it was taken. One night says nothing — the date has
+        # already said it — and a count beside a *single* date contradicts it,
+        # so the count appears only where the caption actually shows a span.
+        span = date not in (format_acq_date(fields.date_iso),
+                            format_acq_date(fields.date_end_iso))
+        nights = fields.nights if (fields.nights and fields.nights > 1) else None
+        parts.append(f"{date} ({nights} nights)" if (nights and span) else date)
 
     camera = (fields.camera or "").strip()
     if camera:
