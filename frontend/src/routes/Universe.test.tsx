@@ -89,6 +89,31 @@ describe("UniverseObjectCard", () => {
     expect(screen.getByText(/left about 2.5 million years ago/)).toBeTruthy();
   });
 
+  it("says what the object is when the catalogue has a blurb", () => {
+    render(
+      <MantineProvider>
+        <UniverseObjectCard
+          object={{ ...OBJ, blurb: "The nearest big galaxy to our own." }}
+          onOpen={() => {}} onClose={() => {}} />
+      </MantineProvider>,
+    );
+    expect(screen.getByText("The nearest big galaxy to our own.")).toBeTruthy();
+  });
+
+  it("shows no sentence at all when the catalogue has none", () => {
+    // "" and a missing field both read as nothing — never an empty line.
+    for (const blurb of ["", undefined]) {
+      const { unmount } = render(
+        <MantineProvider>
+          <UniverseObjectCard object={{ ...OBJ, blurb }} onOpen={() => {}}
+            onClose={() => {}} />
+        </MantineProvider>,
+      );
+      expect(screen.getByText("2.5 million ly away")).toBeTruthy();
+      unmount();
+    }
+  });
+
   it("opens the target it belongs to", () => {
     const onOpen = vi.fn();
     render(

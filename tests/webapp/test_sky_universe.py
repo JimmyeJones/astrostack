@@ -31,6 +31,17 @@ def test_universe_places_the_captured_targets_by_distance(client, built_library)
     assert m42["ra_deg"] > 80 and m42["dec_deg"] < 0
 
 
+def test_universe_says_what_the_object_actually_is(client, built_library):
+    # Fail-before: the read-out was a distance and a light-travel time about an
+    # object the reader may not recognise. The catalog's one-liner already
+    # existed (the Target page's object card shows it); it just wasn't carried.
+    body = client.get("/api/sky/universe").json()
+    by_safe = {o["safe"]: o for o in body["objects"]}
+    assert "blurb" in by_safe["M_42"]
+    assert by_safe["M_42"]["blurb"].strip()          # M 42 is a curated entry
+    assert all(isinstance(o["blurb"], str) for o in body["objects"])
+
+
 def test_universe_carries_a_labelled_scale_and_its_provenance(client, built_library):
     body = client.get("/api/sky/universe").json()
     assert len(body["shells"]) >= 2

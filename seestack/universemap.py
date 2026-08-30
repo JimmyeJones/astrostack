@@ -87,6 +87,11 @@ class UniverseObject:
     distance_text: str      # "2.5 million ly"
     years_text: str         # "2.5 million years" — how long the light travelled
     depth: float            # 0..1 radial coordinate on the log scale
+    # The catalog's plain-language "what am I looking at?" one-liner — the same
+    # sentence the Target page's object card shows. Carried here so the map's
+    # read-out is *about the object*, not just a distance; "" when the catalog
+    # has no blurb for it, which the viewer renders as nothing rather than a gap.
+    blurb: str = ""
 
 
 @dataclass(frozen=True)
@@ -224,6 +229,7 @@ def build_universe_map(
             distance_text=friendly_light_years(info.light_travel.distance_ly),
             years_text=info.light_travel.years,
             depth=_depth(info.light_travel.distance_ly, lo, hi),
+            blurb=info.blurb or "",
         )
         for t, info in identified
     )
