@@ -75,9 +75,9 @@ describe("MyMap", () => {
     renderMyMap();
     // The map itself can't answer this — it's a non-equal-area projection that
     // draws every picture larger than life — so the number comes off the runs'
-    // own WCS, and the line anchors it in full moons.
+    // own WCS, and the line anchors it in full Moons.
     expect(await screen.findByText(/18\.4 square degrees/)).toBeInTheDocument();
-    expect(screen.getByText(/full moons/)).toBeInTheDocument();
+    expect(screen.getByText(/full Moons/)).toBeInTheDocument();
     expect(screen.getByText(/0\.045% of the whole sky/)).toBeInTheDocument();
   });
 
