@@ -43,6 +43,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-1bqxek` — CLAIMED, in flight. Two items, named by
+> site so a concurrent Builder can see exactly what would collide (the six duplicate-collision process notes all
+> say the lead alone isn't enough):**
+> 1. **The "My life list is 14,584 px tall on a phone" dogfood finding** (under "Friendliness (PRIORITY 3)") —
+>    `frontend/src/routes/LifeList.tsx`, the `Section` component's single eager `SimpleGrid`.
+> 2. **"Let North up be a way to *look* at a picture, not only a way to overwrite it"** (under "Autonomy &
+>    friendliness") — `webapp/routers/stack.py::stack_annotations` (one additive field) plus
+>    `frontend/src/components/target/LatestPictureCard.tsx`'s lightbox (`toolbarExtra`).
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-aj7ysy` — run finished, all three claims
 > released.** Shipped three, each its own independently-green commit:
 > **v0.306.2** (under "Autonomy & friendliness") — the one thing the v0.305.0 Adjust-trapdoor fix deliberately
