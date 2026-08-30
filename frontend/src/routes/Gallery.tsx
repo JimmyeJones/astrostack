@@ -26,6 +26,9 @@ import {
 } from "../components/RejectionBadge";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
+import {
+  NorthUpViewToggle, loadNorthUpView, saveNorthUpView,
+} from "../components/NorthUpViewToggle";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
@@ -35,9 +38,6 @@ import {
 } from "../components/videoFraming";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { runSlideKey, showFromHref, videoSlideKey } from "../showAndTell";
-import {
-  NorthUpViewToggle, loadNorthUpView, saveNorthUpView,
-} from "../components/NorthUpViewToggle";
 
 export type GallerySort = "newest" | "cleanest";
 export type CalFilter = "all" | "calibrated" | "uncalibrated";
@@ -461,27 +461,38 @@ export function GalleryView() {
   const [viewing, setViewing] = useState<GalleryItem | null>(null);
   const [viewingStill, setViewingStill] = useState<VideoStill | null>(null);
   // "Show it the way every reference photo of this object is" — a *view*, not a
-  // save (see `NorthUpViewToggle`). One remembered preference across every
-  // surface that offers it, so turning it on here turns it on the Target page
-  // too; deliberately off by default.
+  // save; nothing on disk changes. Off by default and remembered per viewer, in
+  // the one `localStorage` key the Target page's copy of this control uses, so
+  // turning it on here turns it on there too (see `NorthUpViewToggle`).
   const [northUp, setNorthUp] = useState(loadNorthUpView);
-  // The same annotations read the Target hero uses, and for the same reason: its
-  // `north_up_deg` is the one honest answer to "would turning this actually
-  // change anything?". Fetched only once a picture is open (and only when the
-  // run still has the FITS whose WCS the answer comes off), so browsing the
-  // gallery costs nothing extra — and it shares History's cache key.
+  // The same endpoint, cache key and staleness the Target hero uses, so opening
+  // a picture here warms the answer there instead of asking twice. Only fetched
+  // once a picture is actually open: an ordinary Gallery load makes no extra
+  // request, however many cards it draws.
   const viewingAnnotations = useQuery({
     queryKey: ["annotations", viewing?.safe, viewing?.run_id],
     queryFn: () => api.stackAnnotations(viewing!.safe, viewing!.run_id),
     enabled: !!viewing?.has_fits,
-    staleTime: 5 * 60_000,
+    staleTime: Infinity,
   });
-  // Offer the turn only where it would visibly do something: a real correction
-  // exists, and the stored bytes aren't already turned (a picture a past
-  // "Adjust → North up → Save" baked is North-up on disk).
-  const canNorthUp = typeof viewingAnnotations.data?.north_up_deg === "number"
-    && !viewing?.preview_north_up_deg;
-  const turned = northUp && canNorthUp;
+  // Offer the turn only where it would visibly do something: the run reports a
+  // rotation `?north_up=true` would actually apply (null covers an unsolved run,
+  // a field already sitting North-up, and a picture a past "Adjust → North up →
+  // Save" already turned — asking again for any of those is a no-op).
+  const viewingCanNorthUp =
+    typeof viewingAnnotations.data?.north_up_deg === "number";
+  const viewingTurned = northUp && viewingCanNorthUp;
+  // What the big view is actually showing, and therefore what the PNG download
+  // hands over. The turn is its own helper rather than a flag on
+  // `stackArtifactUrl` on purpose: the bare artifact URLs stay WCS-aligned for
+  // every surface that embeds them.
+  const viewingNorthUpSrc = viewing
+    ? api.stackPreviewNorthUpUrl(viewing.safe, viewing.run_id) : "";
+  const viewingSrc = !viewing ? ""
+    : viewingTurned ? viewingNorthUpSrc : viewing.preview_url;
+  const viewingPngHref = !viewing ? undefined
+    : viewingTurned ? viewingNorthUpSrc
+      : api.stackArtifactUrl(viewing.safe, viewing.run_id, "preview");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<GallerySort>("newest");
   const [calFilter, setCalFilter] = useState<CalFilter>("all");
@@ -709,31 +720,29 @@ export function GalleryView() {
         </SimpleGrid>
       )}
 
-      {/* Everything the viewer shows and hands over follows the turn — the
-          picture, the plain PNG, the JPEG behind Share and the full-res PNG — so
-          a picture you downloaded because you liked how it looked arrives that
-          way. The FITS deliberately does not: the raw data stays WCS-aligned,
-          exactly as the Target page's viewer has it. */}
       <ImageLightbox
-        src={viewing
-          ? (turned ? api.stackPreviewNorthUpUrl(viewing.safe, viewing.run_id)
-                    : viewing.preview_url)
-          : null}
+        src={viewing ? viewingSrc : null}
         title={viewing ? `${viewing.target_name} · ${viewing.output_basename}` : undefined}
-        downloadHref={viewing?.has_preview
-          ? (turned ? api.stackPreviewNorthUpUrl(viewing.safe, viewing.run_id)
-                    : api.stackArtifactUrl(viewing.safe, viewing.run_id, "preview"))
-          : undefined}
+        downloadHref={viewing?.has_preview ? viewingPngHref : undefined}
         jpegHref={viewing?.has_preview
-          ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "jpeg", turned) : undefined}
+          ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "jpeg", viewingTurned)
+          : undefined}
         fullResHref={viewing?.has_fits
-          ? api.stackFullResPngUrl(viewing.safe, viewing.run_id, turned) : undefined}
+          ? api.stackFullResPngUrl(viewing.safe, viewing.run_id, viewingTurned) : undefined}
+        fullResCanvas={viewing ? { w: viewing.canvas_w, h: viewing.canvas_h } : undefined}
+        // The FITS deliberately does not follow the view: the raw data stays
+        // WCS-aligned, whichever way the picture is being looked at.
         rawHref={viewing?.has_fits
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
         toolbarExtra={viewing?.has_preview
           ? (
             <Group gap={4} wrap="nowrap">
-              {canNorthUp ? (
+              {/* Only where the turn would visibly do something — the run reports
+                  a rotation `?north_up=true` would actually apply. Nothing here
+                  is measured against the stored bytes (this lightbox draws a
+                  plain picture, with no pins, scale bar or tint over it), so the
+                  turned view has nothing to fall out of register with. */}
+              {viewingCanNorthUp ? (
                 <NorthUpViewToggle
                   on={northUp}
                   onChange={(on) => { setNorthUp(on); saveNorthUpView(on); }}
@@ -749,8 +758,7 @@ export function GalleryView() {
                   <IconPlayerPlay size={18} />
                 </ActionIcon>
               </Tooltip>
-              <WallpaperMenu safe={viewing.safe} runId={viewing.run_id}
-                variant="subtle" canNorthUp={canNorthUp} />
+              <WallpaperMenu safe={viewing.safe} runId={viewing.run_id} variant="subtle" />
             </Group>
           ) : undefined}
         {...(viewing?.has_preview

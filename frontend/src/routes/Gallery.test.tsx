@@ -851,74 +851,108 @@ describe("Gallery card layout", () => {
   });
 });
 
-describe("Gallery North-up view", () => {
-  function mockGallery(extra: Partial<GalleryItem> = {}) {
+// "North up" as a way to *look* at a picture, not a way to overwrite it. The
+// mechanism shipped on the Target hero in v0.308.0; this is the same control on
+// the surface a beginner actually browses their pictures from. Nothing is
+// written — the server turns the stored bytes on the way out — and it is only
+// offered where turning the picture would actually change it.
+describe("Gallery — North up as a view", () => {
+  function galleryWith(over: Partial<GalleryItem> = {}) {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({
-      items: [{ ...item(1), has_preview: true, preview_url: "/p/1.png", ...extra }],
+      items: [{ ...item(1), has_preview: true, preview_url: "/p/1.png", ...over }],
     });
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
     vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
   }
-  function mockAnnotations(north_up_deg: number | null) {
-    return vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
-      objects: [], width: 100, height: 80, north_up_deg,
-    } as never);
-  }
-  async function openViewer() {
-    renderGallery();
-    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
-    fireEvent.click(screen.getAllByRole("img")[0]);
-  }
+  const annotations = (north_up_deg: number | null) => ({
+    width: 1920, height: 1080, objects: [], scale_bar: null, north_up_deg,
+  });
 
   afterEach(() => window.localStorage.clear());
 
-  it("turns the picture and everything it hands over, but never the raw FITS", async () => {
-    mockGallery();
-    mockAnnotations(31.5);
-    await openViewer();
+  it("asks nothing extra until a picture is actually opened", async () => {
+    galleryWith();
+    const ann = vi.spyOn(client.api, "stackAnnotations")
+      .mockResolvedValue(annotations(118.5));
 
-    fireEvent.click(await screen.findByTestId("north-up-view"));
+    renderGallery();
 
-    const turned = "/api/targets/M_42/stack-runs/1/preview?north_up=true";
-    await waitFor(() =>
-      expect(screen.getByAltText("M_42 · m1")).toHaveAttribute("src", turned));
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    // Drawing the grid must not cost a request per card, however many there are.
+    expect(ann).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
+  });
+
+  it("offers no turn on a picture that turning would not move", async () => {
+    galleryWith();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations(null));
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+
+    await waitFor(() => expect(client.api.stackAnnotations).toHaveBeenCalled());
+    expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
+  });
+
+  it("turns the picture on request and hands over what is on screen", async () => {
+    galleryWith();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations(118.5));
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+
+    const toggle = await screen.findByTestId("north-up-view");
+    const shown = () => screen.getByRole("dialog").querySelector("img")!;
+    // Off by default: the saved orientation is the one the owner chose.
+    expect(shown()).toHaveAttribute("src", "/p/1.png");
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(shown())
+      .toHaveAttribute("src", "/api/targets/M_42/stack-runs/1/preview?north_up=true"));
+    // Every download follows the view, so a picture someone saved *because* they
+    // liked how it looked arrives that way…
     fireEvent.click(screen.getByLabelText("Download picture"));
     expect((await screen.findByText("Full-res PNG (native size)")).closest("a"))
       .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/full-res-png?north_up=true");
+    expect(screen.getByText("Quick preview PNG (up to 1024px)").closest("a"))
+      .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview?north_up=true");
     expect(screen.getByText("JPEG (smaller — best for sharing)").closest("a"))
       .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/jpeg?north_up=true");
-    // The raw data stays WCS-aligned — turning it would misdescribe the file.
+    // …except the raw data, which stays WCS-aligned whichever way you look at it.
     expect(screen.getByLabelText("Download raw data"))
       .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/fits");
   });
 
-  it("does not offer the turn where it would visibly do nothing", async () => {
-    // No usable correction: the annotations report `north_up_deg: null`.
-    mockGallery();
-    mockAnnotations(null);
-    await openViewer();
-    await screen.findByLabelText("Download picture");        // viewer is open
-    expect(screen.queryByTestId("north-up-view")).toBeNull();
+  it("remembers the choice in the one key the Target page's copy reads", async () => {
+    galleryWith();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations(118.5));
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+    fireEvent.click(await screen.findByTestId("north-up-view"));
+
+    await waitFor(() => expect(window.localStorage.getItem("astrostack.northUpView"))
+      .toBe("1"));
+    fireEvent.click(screen.getByTestId("north-up-view"));
+    await waitFor(() => expect(window.localStorage.getItem("astrostack.northUpView"))
+      .toBe("0"));
   });
 
-  it("does not offer the turn on a picture already saved North up", async () => {
-    // The stored bytes are turned already, so asking the server to turn them
-    // again is the no-op it correctly refuses.
-    mockGallery({ preview_north_up_deg: 90 });
-    mockAnnotations(90);
-    await openViewer();
-    await screen.findByLabelText("Download picture");
-    expect(screen.queryByTestId("north-up-view")).toBeNull();
-  });
+  it("offers nothing on a preview-only run, which has no WCS to turn by", async () => {
+    galleryWith({ has_fits: false });
+    const ann = vi.spyOn(client.api, "stackAnnotations")
+      .mockResolvedValue(annotations(118.5));
 
-  it("starts from the viewer's remembered preference, shared with the Target page", async () => {
-    window.localStorage.setItem("astrostack.northUpView", "1");
-    mockGallery();
-    mockAnnotations(31.5);
-    await openViewer();
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
 
-    await waitFor(() => expect(screen.getByAltText("M_42 · m1"))
-      .toHaveAttribute("src", "/api/targets/M_42/stack-runs/1/preview?north_up=true"));
-    expect(screen.getByTestId("north-up-view")).toHaveAttribute("aria-pressed", "true");
+    await screen.findByRole("dialog");
+    expect(ann).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
   });
 });

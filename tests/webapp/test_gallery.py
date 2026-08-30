@@ -85,31 +85,6 @@ def test_gallery_carries_the_panel_flatness_verdict(client, solved_library):
     assert items[single]["seam_verdict"] is None
 
 
-def test_gallery_reports_a_preview_already_saved_north_up(client, solved_library):
-    """The viewer's "North up" *view* asks the server to turn the stored bytes on
-    the way out — which is a no-op on a picture a past "Adjust → North up → Save"
-    already turned. The item carries the baked angle so the control can hide
-    there instead of appearing and doing nothing, exactly as the Target hero
-    reads the same field off the run listing."""
-    safe = client.get("/api/targets").json()[0]["safe_name"]
-    plain = _register_run(solved_library, safe, {"sigma_clip": True})
-    baked = _register_run(solved_library, safe, {"sigma_clip": True})
-    lib = Library.open_or_create(solved_library / "library")
-    try:
-        proj = lib.open_target(safe)
-        try:
-            assert proj.set_stack_preview_north_up(baked, 90.0)
-        finally:
-            proj.close()
-    finally:
-        lib.close()
-
-    items = {it["run_id"]: it for it in client.get("/api/gallery").json()["items"]}
-    assert items[baked]["preview_north_up_deg"] == 90.0
-    # Every ordinary run reports nothing, so the control is offered as before.
-    assert items[plain]["preview_north_up_deg"] is None
-
-
 def test_gallery_reusable_flag_excludes_combine_and_editor(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     stack_id = _register_run(solved_library, safe, {"sigma_clip": True})
