@@ -360,6 +360,52 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.318.1, branch `claude/compassionate-galileo-cwqy3x`) — ~~the target classifier reads
+  a thin stack's **grain as colour**, so a picture with no colour in it is suggested the nebula preset until you
+  stack it deep enough.~~** The **second confirmed instance** of the ⭐ "normalises against its own subset" QA
+  lead's *depth* axis (after `seam_residual`, v0.313.1), found by working the follow-on lead the
+  `…-7y6nlj` Builder filed an hour earlier — with the method it prescribed, and it landed on a different cue
+  than the one that entry predicted. *(Severity: wrong verdict on the owner's exact data shape — every stack is
+  thin before it is deep. It mis-suggests a preset (a click to dismiss) on any install, and on one with a
+  stored per-object-type **taste profile** it silently applies the *nebula* taste to a picture that isn't one,
+  which is a wrong picture. Confidence: reproduced and measured before fixing, at six sub counts.)*
+
+  **The mechanism, in one line: R, G and B carry independent noise, so three noisy samples of one grey pixel
+  differ.** `_extended_chroma` took the median of the **per-pixel** `(max−min)/mean` over the extended-signal
+  region, and for pure grain that quantity is ~1.7σ whatever the pixel actually is. Measured across sub counts
+  on one unchanging, **completely colourless** synthetic field, it ran **0.118 at 4 subs → 0.010 at 800** — so a
+  thin stack of a grey object read nearly twice the `chroma >= 0.06` nebula bar on noise alone. The verdict duly
+  flipped with depth on an unchanging sky: *nebula* at 4 and 16 subs, **no class at all** at 64 and beyond.
+
+  **The fix needed no threshold flip, which is why it was shippable at all.** AGENTS.md §1 forbids blind-flipping
+  a constant on the on-by-default hot path, and the `>= 0.06` bar was calibrated against the noise-inflated
+  measure. Instead the *estimator* now measures the thing its own docstring always claimed — the colour of the
+  **region** — by averaging each channel over a 7 px box (masked to the region itself, so the sky and star wings
+  just outside can't bleed a cast in) before taking the chroma. Colour in a nebula varies over tens of pixels;
+  noise is independent per pixel. So a clean image's answer moves by a few percent and the bar still means what
+  it meant, while the grain term falls ~7×.
+
+  **Measured both ways, because a fix that buys invariance by going deaf is worse than the bug.** A genuinely
+  red emission nebula reads **0.596 → 0.600** across σ = 0.004 / 0.02 / 0.05 (i.e. flat across the depth range)
+  and is still classified `nebula` at every one; its **colourless twin** reads **0.002 → 0.021** and is
+  classified at none. Before the fix that same colourless twin read 0.013 / 0.064 / 0.151 and was called a
+  nebula at the latter two.
+
+  **Deliberately not fixed in the same commit:** `ext_frac`, the cue the filed lead actually named. It *does*
+  grow with depth (0.058 → 0.111 on one scene, for the reason filed), but on every scene swept the colour cue
+  moved the verdict first, and correcting it would mean re-tuning the 0.06/0.012/0.05 class boundaries against a
+  synthetic scene — the blind flip §1 rules out. Left open on the lead's entry under "Autonomy &
+  friendliness", now with the chroma noise removed from underneath it.
+
+  **Upgrade-safe (§9):** one pure engine function, no config, schema, on-disk, API or default change; `scipy`'s
+  `uniform_filter` is already a dependency of the same function's neighbour (`grey_opening`).
+
+  **Tests (+4 in `tests/test_target_classify.py`, 3 fail before):** a colourless object never called a nebula at
+  any of three noise levels; the colour cue flat across the depth range for a real nebula *and* its grey twin,
+  with a floor assertion so invariance can't be bought by flattening the signal; a real nebula still caught on a
+  grainy stack (the no-regression half — it passed before too, on purpose); and the estimator itself at unit
+  level, including the too-small-region refusal. The six existing classifier tests are untouched and pass.
+
 - **✅ SHIPPED (Builder, v0.317.1, branch `claude/compassionate-galileo-7y6nlj`) — ~~the Target page's own
   **Share** menu still told the OS share sheet a picture was "captured" the day the **stack ran**~~, on both
   its plain and its keepsake share — the two sites the v0.313.0 sweep missed.** *(Severity: wrong fact on
@@ -9767,6 +9813,28 @@ to **Shipped**.)_
   instances took — make the *threshold* depth-invariant (the 0.06 floor already is; it is the `6·sky_sigma`
   term and the percentile normalisation that are not) rather than re-tuning the constants against one scene.
 
+  **🔎 MEASURED, WITHIN THE HOUR, AND IT MOVES — but not through the cue this entry names.** *(Builder
+  2026-08-30, branch `claude/compassionate-galileo-cwqy3x`; **fixed as v0.318.1**, see the entry at the top of
+  "Bugs (fix these first)".)* Swept exactly as filed — one unchanging scene at 4 / 16 / 64 / 128 / 300 / 800
+  subs, printing every cue — and the verdict really does flip with depth: a scene the classifier called
+  **nebula** at 4 and 16 subs went to **no class at all** at 64+, and a second scene did the reverse. So the
+  hypothesis is confirmed. **The driver is `chroma`, not `ext_frac`**, and the mechanism is a different (and
+  simpler) one than this entry predicts: `_extended_chroma` took the median of the **per-pixel**
+  `(max−min)/mean`, and R/G/B carry *independent* noise, so on a grey pixel that quantity is ~1.7σ of pure
+  grain. A completely colourless field measured **0.118 at 4 subs → 0.010 at 800** — i.e. a thin stack of a
+  grey object cleared the `chroma >= 0.06` nebula bar on noise alone. The fix needed **no threshold flip**:
+  averaging each channel over a 7 px box inside the region before measuring makes the statistic measure what
+  its own docstring always claimed (the colour of the *region*), leaves a clean image's answer within a few
+  percent, and is depth-invariant by construction — a real red nebula reads 0.596–0.600 across the whole σ
+  sweep while its colourless twin reads 0.002–0.021.
+  **`ext_frac` — this entry's own candidate — was measured too and is a real but *second-order* effect,
+  deliberately left alone.** It does grow with depth (0.058 → 0.111 on one scene), for exactly the reason
+  filed, and on the scenes swept it never on its own moved a verdict across a class boundary; the colour cue
+  got there first every time. Fixing it *would* mean the blind threshold flip AGENTS.md §1 forbids, since the
+  0.06/0.012/0.05 constants were calibrated against the depth-varying measure. **Left open as the remaining
+  half of this lead**, now with the chroma noise removed from underneath it so a future measurement sees the
+  geometry alone.
+
 - **NEW IDEA (Builder 2026-08-30, the obvious next tap on the per-run night count v0.317.0) — say "over 4
   nights" where a person is *looking at* the picture, not only where they copy a caption.** *(Pillar:
   understand + enjoy — PRIORITY 3; size XS–S; purely additive on machinery that now exists.)* `capture_nights`
@@ -10214,11 +10282,30 @@ to **Shipped**.)_
   **One thing found and NOT fixed, filed on its own below** (it is advisory copy, not a wrong picture): the
   `coverage_min / coverage_max` ratio behind `stackhealth`'s ragged-border note. See the entry under
   "Friendliness".
-  **Left for the next sweep** (candidates from the lead that this run did not reach): the auto-*edit* strength
+  **Left for the next sweep** (candidates from the lead that this run did not reach): ~~the auto-*edit* strength
   pickers downstream of `suggest_denoise_strength` on a genuinely noisy deep stack (this scene's Auto never
-  left the clean end, so the denoise branch was never exercised at depth), and `_fwhm_quality_drift` /
-  `best_frame` along this axis (they were swept along the *position* axis and cleared, which says nothing
-  here).
+  left the clean end, so the denoise branch was never exercised at depth)~~ — **swept and CLEARED, see below** —
+  and `_fwhm_quality_drift` / `best_frame` along this axis (they were swept along the *position* axis and
+  cleared, which says nothing here).
+
+  **🔎 SWEPT AGAIN (Builder 2026-08-30, branch `claude/compassionate-galileo-cwqy3x`) — the auto-EDIT strength
+  pickers are CLEARED; a *third* confirmed instance of the class turned up alongside them and is fixed as
+  v0.318.1** (the target classifier's colour cue — entry at the top of "Bugs (fix these first)").
+  **Cleared — measured with the denoise branch genuinely exercised this time**, on a scene noisy enough that
+  Auto starts saturated and works its way down (1 → 800 subs, one unchanging sky, noise scaled 1/√N):
+  `sky_sigma` 0.0968 → 0.0064, `_noise_fraction` 1.0 → 0.0, `suggest_denoise_strength` 1.0 → 0.2,
+  `detail.denoise` 0.6 → 0.0, `detail.chroma_denoise` 0.5 → 0.0, `detail.sharpen` 0.0 → 0.5, saturation
+  1.05 → 1.21. Every one is monotone **in the direction it should be** — deeper stack, less denoise, more
+  sharpen — with no inversion and no plateau, and the crossfade's two ends land where `_NOISE_LO`/`_NOISE_HI`
+  say they should. The denoise branch is exercised at every depth from 1 to 64, which is what the previous
+  sweep could not say.
+  **One caveat worth recording rather than fixing:** `estimate_noise_sigma` normalises by the image's own
+  0.5–99.5 percentile range, and on a **structure-free** field that range *is* the noise — so the ratio is a
+  fixed point (≈0.194 for Gaussian noise) and stays there however deep you stack. Measured: a blank field reads
+  0.194 at 1 sub and 0.194 at 800. It is **not** filed as a bug because the resulting action is right (a frame
+  that is nothing but noise should be denoised hard) and because a real OSC frame always carries stars that set
+  the percentile. Worth knowing if anyone ever reads that σ as an absolute noise figure rather than a fraction
+  of the visible range — it is the latter, and its docstring says so.
 
 - **NEW IDEA (Builder 2026-08-30, the one case the v0.312.1 tint fix deliberately fenced off rather than
   solved) — a many-sub stack whose canvas is no bigger than its preview still gets the cyan wash.**
