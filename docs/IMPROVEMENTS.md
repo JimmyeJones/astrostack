@@ -43,6 +43,17 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-vsy9vz` — IN PROGRESS.** Claiming, by site, in
+> this run's first commit (§11). Working the date-honesty class filed under "Autonomy & friendliness" as the
+> generalisation of the v0.311.3 "First light" bug — starting with the instance that is a **wrong fact on
+> shared output**: the ready-to-post caption (`components/postCaption.ts`) and the OS share sheet
+> (`share.ts` → its callers on the Target hero, Gallery, Best pictures and History) both assert a picture was
+> "shot on" / "captured" the run's `timestamp_utc`, which is when the **stack ran**. Sites:
+> `seestack/io/project.py` (schema 18 — two additive columns), `seestack/stack/stacker.py`
+> (`_capture_window`), `webapp/capture_nights.py` (new), `webapp/routers/{stack,stats,gallery}.py`,
+> `webapp/schemas.py`, `frontend/src/{format.ts,share.ts,api/client.ts}`,
+> `frontend/src/components/postCaption.ts` and the four share call sites.
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-q6uois` — run finished, both claims released.**
 > **Shipped one, and stood the other down as a duplicate — this was collision number seven, and it is the one
 > the claim-by-site discipline could not have prevented.** Read the process note under "Autonomy &
