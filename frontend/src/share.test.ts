@@ -5,7 +5,15 @@ import {
   keepsakeFilename,
   sharePictureText,
   shareClipText,
+  shareStillText,
 } from "./share";
+import type { CaptureLabel } from "./format";
+
+/** A capture date the type system accepts. `sharePictureText` takes a branded
+ *  `CaptureLabel` so a processing stamp cannot reach it (see `format.ts`); these
+ *  are formatting tests, so they mint one directly rather than round-tripping a
+ *  window through `formatCaptureNights`. */
+const shot = (s: string) => s as CaptureLabel;
 
 /** Install a fake Web Share API on `navigator`; returns a cleanup fn. */
 function stubShare(opts: {
@@ -128,7 +136,7 @@ describe("sharePicture", () => {
 
 describe("sharePictureText", () => {
   it("captions with the name and date", () => {
-    const { title, text, filename } = sharePictureText("M 31", "1/15/2026");
+    const { title, text, filename } = sharePictureText("M 31", shot("1/15/2026"));
     expect(title).toBe("M 31 · 1/15/2026");
     expect(text).toBe("M 31 — captured 1/15/2026");
     expect(filename).toBe("m-31.jpg");
@@ -142,7 +150,7 @@ describe("sharePictureText", () => {
   });
 
   it("falls back to a sensible default for a blank name", () => {
-    const { title, filename } = sharePictureText("", "");
+    const { title, filename } = sharePictureText("", shot(""));
     expect(title).toBe("My astrophoto");
     expect(filename).toBe("my-astrophoto.jpg");
   });
@@ -154,7 +162,7 @@ describe("sharePictureText", () => {
   it("names the file for what is actually being shared", () => {
     // A Moon/Sun still has only a PNG — sharing it called `.jpg` would confuse
     // whatever app it lands in. The caption is unaffected by the extension.
-    const { title, filename } = sharePictureText("Moon", "1/15/2026", "png");
+    const { title, filename } = sharePictureText("Moon", shot("1/15/2026"), "png");
     expect(filename).toBe("moon.png");
     expect(title).toBe("Moon · 1/15/2026");
   });
@@ -162,6 +170,34 @@ describe("sharePictureText", () => {
   it("falls back to .jpg for an unusable extension", () => {
     expect(sharePictureText("Moon", null, "").filename).toBe("moon.jpg");
     expect(sharePictureText("Moon", null, "!!").filename).toBe("moon.jpg");
+  });
+});
+
+describe("shareStillText", () => {
+  it("labels the date it has instead of calling it a capture date", () => {
+    // A Moon/Sun still knows only when the app *stacked* the clip. Sharing that
+    // as "captured" was the same wrong claim the picture share was fixed for,
+    // so the still keeps the fact and labels it.
+    const { title, text, filename } = shareStillText("Moon", "30 Aug 2026");
+    expect(title).toBe("Moon · Stacked 30 Aug 2026");
+    expect(text).toBe("Moon — stacked 30 Aug 2026");
+    expect(text).not.toContain("captured");
+    expect(filename).toBe("moon.png");
+  });
+
+  it("says just the name when there is no date", () => {
+    const { title, text } = shareStillText("Sun", null);
+    expect(title).toBe("Sun");
+    expect(text).toBe("Sun");
+  });
+
+  it("shares a still as a PNG unless told otherwise", () => {
+    // A still's picture *is* its PNG; one arriving named `.jpg` confuses the app
+    // it lands in.
+    expect(shareStillText("Moon", null).filename).toBe("moon.png");
+    expect(shareStillText("Moon", null, "jpg").filename).toBe("moon.jpg");
+    expect(shareStillText("***", null).filename).toBe("astrophoto.png");
+    expect(shareStillText("", null).title).toBe("My astrophoto");
   });
 });
 

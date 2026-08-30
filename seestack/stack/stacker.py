@@ -1092,6 +1092,42 @@ def _capture_window(frames: list) -> tuple[str | None, str | None]:
     return min(dated)[1], max(dated)[1]
 
 
+def _capture_hours(frames: list) -> list[str]:
+    """The distinct **UTC hours** this run's subs were shot in, sorted, written
+    as instants on the hour (``"2024-11-15T21:00:00Z"``). ``[]`` when nothing is
+    dated.
+
+    Why this exists rather than a plain night *count*: the sentence a person
+    actually says about a picture is *"600 subs over 4 nights"*, and an observing
+    night is a **local** noon-to-noon bucket, so the count depends on the
+    observer's longitude — which lives in ``webapp`` and which the engine may not
+    import (AGENTS.md §6). Storing when the light arrived, and letting the read
+    side bucket it, keeps the honest answer available for whatever location the
+    owner later sets, instead of freezing a UTC-bucketed guess into the row.
+
+    Why *hours* rather than the stamps themselves: a 500-sub run would otherwise
+    write 500 timestamps into one row. Truncating to the hour caps the list at 24
+    entries per observing day (a year of imaging is a few thousand), and costs
+    nothing in accuracy — truncation can only move a frame across a night
+    boundary if its hour *contains* local noon, which is broad daylight and not
+    when subs are taken.
+
+    Same candidate set as :func:`_capture_window`, for the same reason: it is a
+    date range for a caption, not an accounting of which subs contributed.
+    """
+    from seestack.activity_calendar import parse_utc
+
+    hours = set()
+    for f in frames:
+        raw = getattr(f, "timestamp_utc", None)
+        if not raw:
+            continue
+        parsed = parse_utc(str(raw))
+        if parsed is not None:
+            hours.add(parsed.strftime("%Y-%m-%dT%H:00:00Z"))
+    return sorted(hours)
+
+
 # A mosaic panel needs at least this many measured subs before it counts as a
 # separable pointing group (the same floor the photometric pass uses).
 _TRANSPARENCY_PANEL_MIN_FRAMES = 3
@@ -2565,6 +2601,7 @@ def run_stack(
         if applied_cal in (None, "", "none"):
             applied_cal = None
         capture_start, capture_end = _capture_window(frames)
+        capture_hours = _capture_hours(frames)
         run_id = project.add_stack_run(StackRunRow(
             id=None,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
@@ -2589,6 +2626,12 @@ def run_stack(
             # the only honest source for anything that says "shot on …".
             capture_start_utc=capture_start,
             capture_end_utc=capture_end,
+            # …and how the light was spread out: the hours it arrived in, so the
+            # read side can count the *nights* for the observer's own longitude.
+            # A window of 15→18 Nov is equally consistent with two nights and
+            # with four; only this says which.
+            capture_hours_json=(
+                _json.dumps(capture_hours) if capture_hours else None),
             transparency_ratio=_compute_transparency_ratio(project, frames),
             noise_sigma=noise_sigma,
             calstat=applied_cal,
