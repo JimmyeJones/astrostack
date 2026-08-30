@@ -20,6 +20,7 @@ from seestack.io.scanner import (
     classify_seestar_junk_target,
     container_target_children,
     duplicate_sub_target_base_name,
+    junk_scan_frame_cap,
     run_qc_and_solve,
     scan_and_organize,
 )
@@ -249,6 +250,47 @@ def test_classify_junk_mosaic_output_when_mosaic_sub_sibling_present(tmp_path):
     assert v is not None and v.reason == "on_device_output"
 
 
+def test_classify_junk_mosaic_output_allows_one_image_per_panel(tmp_path):
+    """A mosaic's on-device output is one finished image **per panel**, so the
+    single-image cap that is right for a plain field wrongly spares it. The
+    owner's real library proves the shape: ``M 44_MOSAIC`` = 11 frames,
+    ``NGC 6960_MOSAIC`` = 7 — both sailed past the ≤2 gate and lingered forever."""
+    (tmp_path / "M 44_mosaic_sub").mkdir()
+    output = tmp_path / "M 44_mosaic"
+    output.mkdir()
+    paths = [str(output / f"panel_{i:02d}.fit") for i in range(11)]
+    v = classify_seestar_junk_target("M 44_mosaic", paths, n_frames=11)
+    assert v is not None and v.reason == "on_device_output"
+    assert "mosaic" in v.detail.lower()
+    # The *single-field* cap is untouched: the same 11 frames in a bare "<T>/"
+    # folder are a real session, never junk.
+    (tmp_path / "M 13_sub").mkdir()
+    plain = tmp_path / "M 13"
+    plain.mkdir()
+    plain_paths = [str(plain / f"Light_{i:03d}.fit") for i in range(11)]
+    assert classify_seestar_junk_target("M 13", plain_paths, n_frames=11) is None
+
+
+def test_classify_not_junk_for_a_mosaic_folder_with_a_real_stacks_worth_of_frames(tmp_path):
+    """The widened mosaic cap must still never reach a real light-frame stack —
+    hundreds of frames in a ``*_mosaic/`` folder are somebody's actual subs."""
+    (tmp_path / "M 44_mosaic_sub").mkdir()
+    output = tmp_path / "M 44_mosaic"
+    output.mkdir()
+    paths = [str(output / f"Light_{i:03d}.fit") for i in range(200)]
+    assert classify_seestar_junk_target("M 44_mosaic", paths, n_frames=200) is None
+
+
+def test_junk_scan_frame_cap_widens_only_for_a_mosaic_name():
+    """The public prefilter a library walk uses must agree with the classifier's
+    own caps — gating a mosaic output at the single-image cap is exactly why the
+    owner's 11-frame ``M 44_MOSAIC`` was never even examined."""
+    assert junk_scan_frame_cap("M 31") == 2
+    assert junk_scan_frame_cap("M 31_sub") == 2
+    assert junk_scan_frame_cap("M 44_mosaic") > 11
+    assert junk_scan_frame_cap("M 44_MOSAIC") == junk_scan_frame_cap("M 44_mosaic")
+
+
 def test_classify_not_junk_without_a_sub_sibling(tmp_path):
     """A bare output folder with NO '_sub' sibling is a non-Seestar layout the
     scanner keeps — it must not be flagged (no false positive)."""
@@ -312,10 +354,24 @@ def test_duplicate_sub_base_name_is_none_for_mixed_source_folders():
     assert duplicate_sub_target_base_name("M 31_sub", subs) is None
 
 
-def test_duplicate_sub_base_name_skips_mosaic_sub():
-    """Mosaic ``_mosaic_sub`` naming is device-specific and handled elsewhere."""
+def test_duplicate_sub_base_name_maps_mosaic_sub_to_the_mosaic_target():
+    """The owner's real S30 share settles the mosaic naming the original
+    single-field-only rule was waiting on: the device writes ``<T>_mosaic_sub/``
+    and the convention maps it to ``<T> (mosaic)``, so a leftover target literally
+    named ``<T>_mosaic_sub`` duplicates *that* target — not the single field."""
     subs = [Path("/dump/M 3_mosaic_sub/a.fit"), Path("/dump/M 3_mosaic_sub/b.fit")]
-    assert duplicate_sub_target_base_name("M 3_mosaic_sub", subs) is None
+    assert duplicate_sub_target_base_name("M 3_mosaic_sub", subs) == "M 3 (mosaic)"
+    # Exactly the name ``_apply_seestar_convention`` produces for the same folder.
+    assert _apply_seestar_convention(_fake("M 3_mosaic_sub"))[0][0] == "M 3 (mosaic)"
+    # Case-insensitive on the suffix, and the stem keeps its own casing.
+    assert duplicate_sub_target_base_name(
+        "NGC 6960_MOSAIC_SUB", [Path("/d/NGC 6960_MOSAIC_SUB/a.fit")],
+    ) == "NGC 6960 (mosaic)"
+
+
+def test_duplicate_sub_base_name_is_none_for_a_bare_mosaic_sub_name():
+    """No stem before ``_mosaic_sub`` → nothing to name the base target after."""
+    assert duplicate_sub_target_base_name("_mosaic_sub", [Path("/d/_mosaic_sub/a.fit")]) is None
 
 
 def test_duplicate_sub_base_name_is_none_with_no_frames():

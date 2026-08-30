@@ -21,8 +21,12 @@ export function mergeSuggestionTotalExposureS(s: MergeSuggestion): number {
 }
 
 // Plain-language nudge, e.g.:
-//   "These 3 targets look like the same object (Andromeda Galaxy), shot on
-//    separate nights. Combine them into one deeper picture (3.8 h total)."
+//   "These 3 targets look like the same object (Andromeda Galaxy), in separate
+//    folders. Combine them into one deeper picture (3.8 h total)."
+//
+// It used to say "shot on separate nights", which the backend never established:
+// it clusters on plate-solved *position* alone and knows nothing about when
+// anything was shot. Separate folders is the fact the detection actually has.
 export function describeMergeSuggestion(s: MergeSuggestion): string {
   const n = s.targets.length;
   const obj = s.object_name ? ` (${s.object_name})` : "";
@@ -30,8 +34,8 @@ export function describeMergeSuggestion(s: MergeSuggestion): string {
   const totalClause =
     total === "—" ? "" : ` into one deeper picture (${total} total)`;
   return (
-    `These ${n} targets look like the same object${obj}, shot on separate ` +
-    `nights. Combine them${totalClause}.`
+    `These ${n} targets look like the same object${obj}, in separate ` +
+    `folders. Combine them${totalClause}.`
   );
 }
 

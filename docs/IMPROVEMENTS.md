@@ -507,10 +507,67 @@ _(nothing else claimed — claim an item here with your branch name)_
   cap for mosaics, whose on-device output is one image per panel — the owner's 11 and 7 frame counts being the
   proof). Lower risk than it looked; don't go rewriting the convention mapper.
 
-- **🔴 OWNER-REPORTED WITH SCREENSHOT (2026-08-31) — "Same object in more than one folder?" offers to merge a
-  target with its OWN DUPLICATE, calls it "shot on separate nights", and DOUBLE-COUNTS the integration time in
-  the headline figure. The app already knows these are duplicates — a different feature detects them — but the
-  merge suggester never asks.** *(Severity: high broken-UX / actively misleading, **not** data corruption — see
+- **✅ SHIPPED (Builder, v0.319.3, branch `claude/compassionate-galileo-ehnbid`) — ~~"Same object in more than
+  one folder?" offers to merge a target with its OWN DUPLICATE, calls it "shot on separate nights", and
+  DOUBLE-COUNTS the integration time in the headline figure.~~** All three parts, plus a fourth the tracing
+  turned up. *(Original severity/confidence and the full diagnosis are kept below — read them before touching
+  this code again.)*
+
+  **The root cause was that two features disagreed about the same pair of targets, so the fix is that there is
+  now only one of them.** `cleanup_suggestions`' whole body moved into a shared `_scan_for_leftovers(lib,
+  targets)` that walks the library once and returns *two* things: the cleanup nudges to show, and
+  `leftover_safes` — every target it identified as a leftover, **including the ones cleanup deliberately
+  spares** (a duplicate carrying the user's own stack-run history or notes is still a duplicate; it just isn't
+  disposable). `merge_suggestions` now clusters only over what `_merge_eligible_targets` passes. The two
+  features cannot contradict each other again, because the second reads the first's answer.
+
+  **Part 1 shipped wider than filed, and it is strictly safer that way.** The entry proposed dropping a
+  duplicate only when *its base is in the same group*; the implementation drops a **confirmed** duplicate from
+  any merge nudge, because such a target can never contribute a frame — `merge_projects` dedupes on the
+  canonical realpath, so combining it moves literally nothing. Junk targets are excluded on the same footing,
+  and that one is not cosmetic: the owner's M 3 card offered to fold `M 3_MOSAIC` (the on-device output) into a
+  real target, which would have put a finished low-resolution image straight back into the stack pool that
+  `reject_seestar_output_frames` exists to keep it out of. **The arithmetic fixes itself** once the duplicate
+  members are gone — the headline sums over real members only — and **`NGC 6888` still gets its nudge**: its
+  `_SUB` sibling holds frames the base does *not* own, so it is not a confirmed duplicate. A test pins that.
+
+  **Part 4 — found while tracing, and the reason the owner's M 3 card vanishes completely rather than merely
+  shrinking:** the nudge also offered to merge `M 3` with `M 3 (mosaic)`. `_apply_seestar_convention` creates
+  the mosaic target *deliberately* distinct from the single field "so their differing footprints are never
+  co-stacked **or auto-merged**" — and then position-only clustering paired them every single time, because
+  they are the same object by construction. A mosaic beside its own single field is now ineligible; two
+  *different* same-object mosaic folders still cluster (tested).
+
+  **Part 2 (mosaic duplicates had no cleanup path at all):** `duplicate_sub_target_base_name` no longer bails
+  on `_mosaic_sub`. Its base is the `<T> (mosaic)` target the convention itself produces — a test asserts the
+  two spellings match by calling `_apply_seestar_convention` on the same folder name, so they cannot drift.
+  The gate that blocked this ("device-specific, left to its own bug") is the one the owner's real tree closed.
+
+  **Part 3 (the junk cap is too tight for a mosaic):** a mosaic's on-device output is one image **per panel**,
+  so `_MAX_JUNK_MOSAIC_OUTPUT_FRAMES = 32` now applies to a `<T>_mosaic/` folder while the single-field cap
+  stays at 2. The frame-count *prefilter* in the router had the same bug independently — it gated at 2 before
+  the classifier was ever called, so the owner's 11-frame `M 44_MOSAIC` was never examined — and it now calls
+  the scanner's own `junk_scan_frame_cap()`, so gate and cap cannot drift. The positive-evidence requirement
+  (a `<T>_mosaic_sub/` sibling actually on disk) is untouched, and it is what keeps a real target safe: 200
+  frames in such a folder are still not junk (tested).
+
+  **Copy:** "shot on separate nights" → "in separate folders". The backend clusters on plate-solved **position
+  alone** and knows nothing about when anything was shot; a test asserts the sentence never says "night".
+
+  **Also:** a new `Project.source_paths()` reads the one column these detectors actually want instead of
+  building a `FrameRow` per row — the endpoints now walk the owner's 5,477-frame targets on every Library poll,
+  so it pays for itself twice over.
+
+  **Upgrade-safe (§9):** read-only detection throughout; no config, schema, on-disk, API-shape or default
+  change. Nothing is deleted or merged without the user clicking.
+
+  **Tests (+5 in `tests/webapp/test_merge_suggestions.py`, 3 of them failing before; +5 in
+  `tests/test_scanner.py`):** a target is never offered a merge with its own duplicate *and* the pair shows up
+  under cleanup instead; a genuinely-different second folder still is; a mosaic is never offered its own single
+  field; two mosaic folders of one object still cluster; the owner's whole five-member M 3 card end-to-end,
+  asserting the merge nudge is silent and all three leftovers are routed to cleanup with the right reasons.
+
+  *(Original report.)* *(Severity: high broken-UX / actively misleading, **not** data corruption — see
   the safety note below. Confidence: HIGH, traced end-to-end in code against the owner's real library data.
   Owner's words: "it is still having issues with combining/distinguishing target folders.")*
 
@@ -547,7 +604,8 @@ _(nothing else claimed — claim an item here with your branch name)_
   + double compute)". **The two features disagree about the same pair of targets** — one says "delete the
   duplicate", the other says "combine these two separate nights" — and merge is the louder, more inviting one.
 
-  **Fix direction (all three parts; each is small, and part 1 is the one the owner sees):**
+  **Fix direction (all three parts; each is small, and part 1 is the one the owner sees) — ~~all three
+  shipped~~, see the write-up above:**
   1. **Exclude known-duplicate pairs from merge suggestions and route them to cleanup instead.** Before
      building a group, drop members that `duplicate_sub_target_base_name` flags *whose base target is also in
      the same group* (the base already owns those frames). If a group collapses to one real member, drop the
