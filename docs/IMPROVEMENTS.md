@@ -43,7 +43,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-> **Builder 2026-08-30, branch `claude/compassionate-galileo-vsy9vz` — claim released, shipped as v0.312.0.**
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-vsy9vz` — claim released, shipped as v0.313.0.**
 > The date-honesty class filed under "Autonomy & friendliness" as the generalisation of the v0.311.3 "First
 > light" bug, taken at the instance that was a **wrong fact on shared output**: the ready-to-post caption and
 > the OS share sheet both asserted a picture was "shot on" / "captured" the run's `timestamp_utc`, i.e. when
@@ -182,6 +182,33 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > **The lead is now closed:** the rest of its candidate list — `stackhealth`, `_fwhm_quality_drift`,
 > `best_frame` — was swept and came back clean, recorded on the entry so nobody re-treads it.
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-6jgh4j` — run finished, claim released.**
+> **Shipped two, the second found by measuring the first.**
+> **v0.312.0** (under "Features that serve real workflows") — the filed slice (a): the "what stacking removed"
+> tint on the full-screen viewer, on the Gallery and the Target hero. The entry's "ship the stand-down gate
+> before the feature" was checked first and turned out **not to apply** — History withdraws the tint because
+> opening **Adjust** swaps in a live render of the linear master, and neither of these surfaces has such a
+> state — which is what kept it small. The one real piece of work was geometric, and it is a CSS trap worth
+> knowing: wrapping the picture and the overlay in a shared positioned box makes the picture's
+> `max-height: 100%` resolve against an auto-height ancestor, i.e. no cap, and a tall picture overflows the
+> viewer. The overlay is a **sibling** instead, `inset: 0` + `margin: auto`, sharing one fit object and one
+> transform string with the picture.
+> **v0.312.1** (top of "Bugs") — and then I measured what I had just amplified, and it was **wrong**: the tint
+> normalised its alpha against the map's *non-empty* pixels, which stops being the signal as the sub count
+> rises. On real 64-sub engine output it washed **94 %** of the frame cyan while the caption called those marks
+> satellite trails. Fixed by subtracting the map's own uniform noise floor, inert by construction on every
+> sparse map and fenced off where the resize didn't average.
+> **Two things stood down with numbers rather than left open:** the sibling **"N spots instead of a
+> percentage"** idea (no minimum blob area separates marks from speckle across the sub counts this app is for —
+> the summed map has thrown that information away), and the **Compare North-up** entry, whose argument against
+> "turn each by its own angle" is recorded there as backwards, with the geometric cost that is the real
+> objection and the solved-ness gap that makes its preferred shape harder than it reads.
+> **One QA lead filed**, generalised from the bug: sweep every statistic that normalises against its own
+> non-empty subset, because that subset stops being the signal as the library grows — the same class as the
+> position-dependent-metric sites, along the *how much data went in* axis instead.
+> The bug queue was checked first and was dry when the run started: every entry under "Bugs (fix these first)"
+> was ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
+
 _(nothing else claimed — claim an item here with your branch name)_
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-xkjuvl` — run finished, all claims released.**
@@ -311,6 +338,54 @@ _(nothing else claimed — claim an item here with your branch name)_
 ---
 
 ## Bugs (fix these first)
+
+- **✅ SHIPPED (Builder, v0.312.1, branch `claude/compassionate-galileo-6jgh4j`) — ~~"See what stacking
+  removed" paints a **cyan wash over the whole picture** on a many-sub stack, while the caption underneath
+  calls those marks satellite trails and cosmic rays.~~** Found by measuring the feature I had just put on two
+  more surfaces (v0.312.0), and **reproduced on real engine output before fixing**. *(Severity: wrong-picture +
+  a plain untruth in shipped copy, on the trust feature whose entire job is showing the user what the stack
+  removed — and it gets worse the more subs you have, i.e. exactly on the owner's own targets. Confidence:
+  reproduced, numbers below.)*
+
+  **Reproduced, on maps `run_stack` actually wrote.** A pixel is marked if it lost a sample in **any** frame,
+  so at a fixed per-sample clip rate the share of the canvas that is non-empty climbs with the sub count.
+  Measured over the planted-satellite-trail scene in `tests/test_rejection_map.py`, stacked for real:
+
+  | subs | REJFRAC | canvas non-empty | tinted above ¼ opacity (2× preview) | (4× preview) |
+  |---|---|---|---|---|
+  | 16 | 0.00073 | **1.9 %** | 3.6 % | 13.6 % |
+  | 32 | 0.00145 | **11.5 %** | 34.1 % | 79.5 % |
+  | 64 | 0.00201 | **31.2 %** | **72.9 %** | **94.2 %** |
+
+  At 64 subs and the 4× downsample an ordinary preview uses, **94 % of the frame is tinted** — and the
+  satellite trail's own alpha is *lower* than the sky beside it in places. The owner stacks 500–800.
+
+  **Root cause.** `rejection_overlay_png` normalised alpha by `p90` of the **non-empty** pixels. That is right
+  while the map is sparse (the hit set is then mostly real marks), and exactly wrong once it isn't: past
+  ~25 % coverage the hit set *is* the noise floor, so the floor normalises to opaque. The renderer's docstring
+  claimed the area-average "dilutes isolated speckle toward nothing" — true at 16 subs, false at 64, and the
+  claim had never been checked against a dense map.
+
+  **Fix.** The noise floor is *uniform* — every pixel runs the same risk of losing a sample to the tail — and
+  real marks are local excesses over it, so the map's own floor (`p75` of the density) is subtracted before
+  normalising, and the opaque level is then taken over the whole canvas rather than the residue. Two properties
+  make it safe rather than a restyle: `p75` is **exactly zero**, hence the subtraction is inert, on any map
+  whose canvas is three-quarters untouched (every map a modest stack writes); and it is **gated on the resize
+  having actually averaged**, because at 1:1 a trail pixel and a noise pixel are both "one sample lost here"
+  and a floor there would take the trail with the speckle (measured: it zeroed every count-1 trail pixel).
+  After: the 64-sub wash falls **94 % → 15 %** at 4× and **73 % → 19 %** at 2×, with the trail back at full
+  opacity over a sky whose median alpha is 0; a 300-sub map (83 % of the canvas non-empty) still reads as
+  "here is your satellite".
+
+  **Upgrade-safe (§9):** pure rendering, no config/schema/on-disk/API-shape or default change, and nothing
+  stored — the overlay is computed per request from the `_rejected.fits` the run already wrote.
+
+  **Tests (+4 in `tests/test_rejection_map.py`, 2 fail before / pass after):** a dense 64-sub map is not washed
+  at either preview scale and its trail is still the strongest thing on it; a near-saturated 300-sub map still
+  finds the trail; a sparse map is **byte-identical** to the un-floored arithmetic; and a 1:1 or scaled-up
+  render is byte-identical *however dense the map is*, so the fenced-off case stays fenced. The fixture is a
+  pure array calibrated to the 31.2 % figure measured on real 64-sub engine output, so the property costs
+  milliseconds instead of the minutes a real 64-sub stack takes.
 
 - **✅ SHIPPED (Builder, v0.311.3, branch `claude/compassionate-galileo-y2x4gk`) — ~~"First light" is the date
   you *installed AstroStack*, not the date you first captured — so it is wrong for the exact owner this app is
@@ -9532,7 +9607,7 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **✅ SHIPPED, the wrong-fact half (Builder, v0.312.0, branch `claude/compassionate-galileo-vsy9vz`)
+- **✅ SHIPPED, the wrong-fact half (Builder, v0.313.0, branch `claude/compassionate-galileo-vsy9vz`)
   — ~~a picture's shareable caption said it was "shot on" / "captured" the day the **stack ran**~~, and the
   app now records when the subs were actually taken.** This entry's own worked example — the Dashboard's
   Recent-stacks tile dating a re-stack of 2024 subs to today — shipped with it. *(Severity: wrong fact on
@@ -9773,6 +9848,47 @@ to **Shipped**.)_
     anywhere: the saved orientation is what the owner chose, and the preference is shared across surfaces already
     (one `localStorage` key), so turning it on in the Gallery will correctly turn it on the Target page too.
 
+- **⭐ QA LEAD (Builder 2026-08-30, generalised from the v0.312.1 tint bug) — sweep every statistic that
+  normalises against its own *non-empty* or *selected* subset, because that subset stops being the signal as the
+  library grows.** *(Pillar: trust + image quality — PRIORITY 3–4. Size: M per sweep. This is the same bug class
+  as the four position-dependent-metric sites (v0.270.2 / v0.271.0 / v0.272.1 / v0.304.1) — a statistic that is
+  right on the input the author had and wrong on the owner's — but along a **different axis**: not *where* on the
+  canvas, but *how much data went in*.)*
+
+  **The shape, from the one confirmed instance.** `rejection_overlay_png` normalised its alpha by the 90th
+  percentile of the map's **non-empty** pixels. On a 16-sub stack the non-empty set is mostly satellite trail, so
+  the scale is the trail and the picture reads correctly. On a 64-sub stack the non-empty set is 31 % of the
+  canvas and is mostly *noise floor*, so the scale became the floor and the tint washed 94 % of the frame. The
+  author's mental model — "the pixels that were touched are the interesting ones" — is a **monotone function of
+  the sub count**, and it inverted somewhere between 16 and 64 subs. Nothing in the code said so, and the
+  docstring asserted the opposite.
+
+  **Why this axis is worth its own sweep.** Every synthetic fixture in this repo stacks a handful of frames;
+  the owner stacks 500–800. Any statistic whose meaning depends on *how much of the input is non-trivial* is
+  therefore untested in the regime it actually runs in. Candidates to check, each by measuring the statistic at
+  16 / 64 / 300 subs on the same scene rather than by reading the code:
+  `np.percentile(x[mask], …)` anywhere the mask is data-dependent (grep `[hit]`, `[mask]`, `[sel]`, `> 0]`);
+  the auto-grade and auto-edit strength pickers that read a fraction of "affected" pixels; `stackhealth`'s
+  verdicts; the star-mask coverage fraction; and anything keyed off `REJFRAC` (which is *per sample* and so
+  stays small, while the map's coverage does not — the two are routinely conflated).
+  **Method that worked:** stack the same scene at several sub counts, print the statistic, and look for
+  monotonicity. It took one afternoon and found a wrong-picture bug on the first candidate.
+
+- **NEW IDEA (Builder 2026-08-30, the one case the v0.312.1 tint fix deliberately fenced off rather than
+  solved) — a many-sub stack whose canvas is no bigger than its preview still gets the cyan wash.**
+  *(Pillar: trust — PRIORITY 3; size S–M; **low urgency, and check the case is reachable before building**.)*
+  The fix subtracts the map's own uniform noise floor only where the resize *averaged*, because at 1:1 a trail
+  pixel and a noise-tail pixel are both "one sample lost here" and nothing pointwise separates them — measured,
+  a floor there zeroed every count-1 pixel of the planted trail. So a dense map rendered 1:1 is deliberately
+  byte-identical to the old, washed behaviour. **That needs a canvas no bigger than the stored preview (capped
+  at 1024 px on its long edge), which for a Seestar stack means a small crop** — so it may not be reachable at
+  all, and the *first* thing to do is find a real run where it fires. **If it is reachable, the honest fix is a
+  genuine local density**: area-average the counts over a small neighbourhood before thresholding, instead of
+  relying on the output resize to do it. **Care:** that would dim a lone hot pixel, which
+  `test_pixels_that_lost_nothing_stay_fully_transparent` and `test_a_lone_hot_pixel_does_not_hide_the_trail`
+  both pin — so it needs a shape that keeps a single high-count pixel opaque while spreading a count-1
+  neighbourhood, not a plain box filter.
+
 - **NEW IDEA (Builder 2026-08-30, the half v0.309.0 checked and deliberately did NOT ship) — the Compare view
   is not a lightbox, and North-up there needs a decision, not a copy-paste.** *(Pillar: enjoy + trust —
   PRIORITY 3; size S; read-only.)* The v0.308.0 follow-on assumed Compare "uses the same lightbox"; it does
@@ -9787,6 +9903,27 @@ to **Shipped**.)_
   meaningful but mis-orients B. Do **not** ship (c) "turn each by its own angle" — that is the one that looks
   fine in a screenshot and is wrong in use. The server half is already built (`?north_up=true` on the preview),
   so this is a frontend decision plus two fetches.
+
+  **⚠️ Builder 2026-08-30 (branch `claude/compassionate-galileo-6jgh4j`) — sized it while shipping the same
+  control on the Gallery/Target lightboxes (v0.312.0), and stood down. Read this before picking it up; the
+  argument against (c) above is not as settled as it reads.**
+  **(1) The stated reason to reject (c) is backwards.** "Turning each by its own angle slides two differently-
+  oriented pictures against each other" — but two runs carrying *different* corrections are differently
+  oriented **before** the turn, and turning each by its own remainder is precisely what makes them agree.
+  Post-turn both are North-up, i.e. in the *same* orientation as each other, which is better under a wipe than
+  the untouched state, not worse. **(2) The real cost of (c) is geometric, not angular, and the entry doesn't
+  name it:** the turn is an `expand=True` rotate, so the output canvas grows by an angle-dependent factor; two
+  pictures turned by different angles come back with different aspect ratios and, under `objectFit: contain` in
+  one fixed box, at different *scales*. That is the mismatch a wipe would show. So (c) is wrong for a reason
+  worth measuring (how much does the scale differ for a realistic angle spread?) rather than for the reason
+  given. **(3) Shape (a) is harder than "checkable from the two `…/annotations` responses" suggests:** that
+  field is the **remainder** and is `null` both for a picture that is already North-up *and* for a run with no
+  usable WCS. Reading `null` as 0° silently offers the turn on an unsolved run and then misaligns the pair —
+  exactly the failure (a) exists to avoid. A solved-ness signal has to come from somewhere else on the response
+  (`directions`/`scale_bar` are null without a WCS) before (a) is honest.
+  **Nothing here is blocking** — it is a genuinely shippable S once (3) is wired — it just isn't the
+  copy-paste the surrounding entries make it look like, and the next agent should not take the (c) verdict on
+  trust.
 
 - **🟡 SWEPT ONCE, ONE UNTRUTH FIXED (Builder, v0.309.1, branch `claude/compassionate-galileo-x2nj2o`); the
   colour-space axis is still open below — QA LEAD (Builder 2026-08-30, generalised from the v0.308.1 copy fix)
@@ -19214,14 +19351,57 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
   *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
-  (a) **The Gallery lightbox and the Target hero (S, frontend-only).** v0.299.0 put the toggle on the History
-  run card, because History is where a run gets inspected — but the full-screen lightbox is where a beginner
-  actually studies their picture, and the tint is far more legible large. Everything needed is already built:
-  `AnnotatedImage` takes an `overlaySrc`, `api.stackRejectionOverlayUrl` exists, and `rejection.has_map` on the
-  run-info says whether to offer it. The only real work is that the lightbox shows a *different* rendition in
-  some states (the share JPEG, a north-up render), and the overlay is sized to the **stored preview** — so it
-  must stand down there exactly as the History card does when Adjust is open, rather than laying a tint on a
-  picture it wasn't measured for. Ship the gate before the feature.
+  (a) ~~**The Gallery lightbox and the Target hero.**~~ — **✅ SHIPPED v0.312.0** (Builder 2026-08-30, branch
+  `claude/compassionate-galileo-6jgh4j`), on both surfaces, with the entry's "ship the gate before the feature"
+  taken seriously and then found to be **unnecessary** — which is the design call worth carrying forward.
+
+  **The stand-down the entry demanded doesn't apply here, and checking that first is what kept this small.**
+  The History card has to withdraw the tint because *its* picture can become something else: opening **Adjust**
+  swaps in a live render of the linear master at full canvas, which the tint was never measured against. Neither
+  of these two surfaces has such a state — both show the **stored preview bytes** and nothing else, and the one
+  variation they do offer (the v0.308.0 North-up *view*) is a turn the overlay endpoint already composes, since
+  v0.308.2, from the same `preview_north_up_remainder_deg` the picture itself goes through. So the tint follows
+  the picture instead of standing aside, and a test on each surface pins that both URLs pick up `north_up=true`
+  together. The share JPEG and the full-res PNG the entry worried about are **downloads**, not what the viewer
+  draws.
+
+  **The one real piece of work was the geometry, and it is a CSS trap worth recording.** `ImageLightbox` fits its
+  picture with `max-width/max-height: 100%` inside a flex-centred surface and then applies the zoom/pan transform
+  to the `<img>` itself. Wrapping the picture and the overlay in a shared positioned box — the obvious way to
+  make two images move together — makes the picture's `max-height: 100%` resolve against an **auto-height**
+  ancestor, i.e. indefinite, i.e. no cap, and a tall picture then overflows the viewer. The overlay is therefore
+  a **sibling**, absolutely positioned with `inset: 0` + `margin: auto` (which centres a replaced element on
+  exactly the box `align-items/justify-content: center` puts the picture in), sharing one `imgFit` object and one
+  `transform` string with the picture so the two cannot be fitted or moved differently. A test asserts the fitted
+  style *and* the transform are byte-identical on both elements, **after a zoom** — the case a separately-computed
+  transform would silently get wrong.
+
+  **The gate, and what it cost.** The Target hero needed no new request: `StackRun.has_rejection_map` is already
+  on the run it draws. The Gallery drew its cards from `/api/gallery`, which didn't carry the fact — so
+  `GalleryItem` gained `has_rejection_map`, computed by the *same* one-line stat beside the
+  `has_fits`/`has_preview`/`has_tiff` sweep the item already does (additive, `False` default), rather than a
+  per-picture run-info fetch on every lightbox open. That matters because `record_rejection_map` is **off by
+  default**: on an ordinary library the control is simply absent, and opening a picture costs nothing extra. The
+  run-info fetch that supplies the caption's measured fraction happens only once the tint is actually switched
+  on, and the caption's lead sentence never depends on it — an uncaptioned cyan speckle reads as damage, so it is
+  captioned even when the number can't be read.
+
+  `removedOverlayCaption` moved out of `routes/History.tsx` into a shared `frontend/src/removed.ts` (the
+  `fullres.ts` pattern: one place owns the wording so three surfaces can't drift into three claims about one
+  picture), re-exported from History so its existing readers are untouched. The toggle itself is a shared
+  `ShowRemovedToggle`, so the two lightboxes offer the identical control.
+
+  **Upgrade-safe (§9):** one additive, defaulted response field; no config, schema, on-disk or default change;
+  an older frontend ignores the field and an older backend omitting it reads as "no overlay for this one", which
+  is the right answer for every run that never recorded a map.
+
+  **Tests (+12):** 5 in `ImageLightbox.test.tsx` (no overlay unless given; decorative — `aria-hidden`, empty
+  `alt`, `pointer-events: none` so it can't eat a drag; identical fit *and* transform at 100 % and after a zoom;
+  the caption shown, and not shown when there are no marks), 4 in `LatestPictureCard.test.tsx` and 2 in
+  `Gallery.test.tsx` (nothing offered and nothing fetched on a run with no map; the tint and the measured caption
+  on request; the tint turning with the picture; and — hero — the caption still appearing when the run-info
+  fetch fails), and 1 in `tests/webapp/test_rejection_overlay.py` asserting the Gallery listing's answer both
+  ways *and* that it agrees with the run listing's on the same run.
   (b) **"N spots", instead of a percentage (S–M, engine + one response field).** The caption today reuses the
   run's `REJFRAC` — *"that was about 0.4% of your samples"* — because that number already exists. What the
   Scout's entry actually asked for is more human: *"stacking removed 14 streaks and hot spots"*. That needs a
@@ -19230,6 +19410,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   and the reason it was left out rather than guessed at. Compute it **once, at write time**, into a header card
   beside `REJMAP` (not per-request over a canvas-sized file), and surface it on the run-info the caption already
   reads. Measure the threshold against a real map before picking it.
+
+  **⚠️ MEASURED AND STOOD DOWN (Builder 2026-08-30, branch `claude/compassionate-galileo-6jgh4j`) — do NOT
+  build this from the summed map; the threshold this entry asks for does not exist.** I did exactly what it
+  demanded — measured against real `run_stack` output before picking anything — and the measurement closes the
+  idea rather than sizing it.
+
+  **What a blob count actually reads on real maps.** Connected components (8-connectivity) over the planted
+  satellite-trail scene at 16 subs: **1,296 blobs**, of which the trail is one (1,453 px). The *same scene with
+  no trail at all*: **1,323 blobs**. So counting blobs would tell a user with a perfectly clean night that
+  stacking removed 1,323 things. A minimum area does separate them at 16 subs — the largest pure-noise blob was
+  4 px against the trail's 1,453, and area ≥ 5 px gives **1 blob on the trail scene and 0 on the clean one**.
+
+  **And that separation dies with the sub count, which is the killer.** A pixel is marked if it lost a sample in
+  *any* frame, so the map densifies: non-empty share **1.9 % at 16 subs → 11.5 % at 32 → 31.2 % at 64**, and
+  blobs of ≥ 5 px go **1 → 532 → 2,013**, all noise, with the trail starting to percolate into the speckle
+  (largest blob 1,453 → 2,762 px). Extrapolated to the owner's 500–800-sub stacks the map is effectively
+  saturated and the honest count is a five-figure number. **No minimum area works across the sub counts this app
+  is for**, because the discriminator the entry assumes — a mark is dense, noise is sparse — is a property of the
+  *per-frame* rejection, and the summed map has thrown it away: a satellite crossing one sub contributes a drop
+  count of **1** along its path, pointwise indistinguishable from a noise-tail clip.
+
+  **If anyone ever wants this, the only honest shape is to count it where the information still exists** — at
+  combine time, per frame, before the counts are summed — which is a change inside the memory-bounded hot path,
+  not "a connected-component pass over the sibling". That is an L with real OOM risk, for a caption tweak. **The
+  percentage stays.**
+
+  **The measurement was not wasted:** applied to the *tint* rather than to a count it found a real bug — the
+  overlay washed the whole picture cyan on exactly these dense maps — fixed as **v0.312.1**, at the top of
+  "Bugs (fix these first)".
 
 - **NEW IDEA (Builder 2026-08-29, the follow-ups deliberately left out of "Your universe" v0.296.0) — "fly to
   it", and tell the reader what they're looking at.** *(Pillar: enjoy + understand — PRIORITY 3; size S each;

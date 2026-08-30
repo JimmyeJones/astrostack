@@ -29,6 +29,8 @@ import { ImageLightbox } from "../components/ImageLightbox";
 import {
   NorthUpViewToggle, loadNorthUpView, saveNorthUpView,
 } from "../components/NorthUpViewToggle";
+import { ShowRemovedToggle } from "../components/ShowRemovedToggle";
+import { removedOverlayCaption } from "../removed";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
 import { videoPreviewSrc } from "../components/videoPreviewSrc";
@@ -493,6 +495,24 @@ export function GalleryView() {
   const viewingPngHref = !viewing ? undefined
     : viewingTurned ? viewingNorthUpSrc
       : api.stackArtifactUrl(viewing.safe, viewing.run_id, "preview");
+  // "Show what stacking removed" — the History card's tint, offered where the
+  // picture is big enough to actually read it. This viewer always shows the
+  // *stored* preview bytes (turned on the way out, at most), which is exactly
+  // what the tint is measured against, so it composes rather than standing down
+  // the way the pins and the scale bar have to. Off by default, and only on the
+  // runs that recorded a map at all — `record_rejection_map` is off by default,
+  // so most pictures get no control rather than an inert one.
+  const [showRemoved, setShowRemoved] = useState(false);
+  const viewingHasRemoved = !!viewing?.has_rejection_map;
+  // The caption's measured fraction, on the endpoint and cache key History's
+  // copy of this tint already uses. Fetched only once the tint is switched on,
+  // so opening a picture costs nothing extra.
+  const removedInfo = useQuery({
+    queryKey: ["stack-info", viewing?.safe, viewing?.run_id],
+    queryFn: () => api.stackRunInfo(viewing!.safe, viewing!.run_id),
+    enabled: showRemoved && viewingHasRemoved,
+    staleTime: Infinity,
+  });
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<GallerySort>("newest");
   const [calFilter, setCalFilter] = useState<CalFilter>("all");
@@ -734,19 +754,28 @@ export function GalleryView() {
         // WCS-aligned, whichever way the picture is being looked at.
         rawHref={viewing?.has_fits
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
+        overlaySrc={viewing && showRemoved && viewingHasRemoved
+          ? api.stackRejectionOverlayUrl(viewing.safe, viewing.run_id, viewingTurned)
+          : null}
+        overlayNote={removedOverlayCaption(removedInfo.data?.rejection)}
         toolbarExtra={viewing?.has_preview
           ? (
             <Group gap={4} wrap="nowrap">
               {/* Only where the turn would visibly do something — the run reports
                   a rotation `?north_up=true` would actually apply. Nothing here
-                  is measured against the stored bytes (this lightbox draws a
-                  plain picture, with no pins, scale bar or tint over it), so the
-                  turned view has nothing to fall out of register with. */}
+                  has to fall out of register with the turned view: there are no
+                  pins and no scale bar (both measured on the un-rotated FITS
+                  grid), and the one thing that *is* laid over the picture — the
+                  "what was removed" tint — takes the same turn the picture
+                  itself takes. */}
               {viewingCanNorthUp ? (
                 <NorthUpViewToggle
                   on={northUp}
                   onChange={(on) => { setNorthUp(on); saveNorthUpView(on); }}
                 />
+              ) : null}
+              {viewingHasRemoved ? (
+                <ShowRemovedToggle on={showRemoved} onChange={setShowRemoved} />
               ) : null}
               {/* Same "show me this one" entry point as My best pictures, so the
                   slideshow can start on whatever you're looking at. */}

@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from seestack.edit.proxy import rejection_map_path_for
 from seestack.stackhealth import seam_verdict
 from webapp import deps
 from webapp.capture_nights import capture_night_range
@@ -91,6 +92,14 @@ class GalleryItem(BaseModel):
     # History card use — one definition, so the three surfaces can't drift.
     # Additive with a False default, which is what every ordinary run is.
     unexported_edit: bool = False
+    # Does this run carry the "what stacking removed" map beside its FITS, so the
+    # full-screen viewer can offer the tint? Answered from the same per-item
+    # stat() sweep `has_fits`/`has_preview`/`has_tiff` already do — the identical
+    # decision `StackRun.has_rejection_map` makes for the History card, so the two
+    # surfaces can't disagree about one run. Additive with a False default, which
+    # is what every run recorded without `StackOptions.record_rejection_map` is
+    # (that option is off by default, so today that is nearly all of them).
+    has_rejection_map: bool = False
 
 
 class VideoStillItem(BaseModel):
@@ -266,6 +275,8 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         has_preview=has_preview,
         has_fits=bool(run.fits_path and Path(run.fits_path).exists()),
         has_tiff=bool(run.tiff_path and Path(run.tiff_path).exists()),
+        has_rejection_map=bool(
+            run.fits_path and rejection_map_path_for(run.fits_path).exists()),
         preview_url=(
             f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview"
         ),
