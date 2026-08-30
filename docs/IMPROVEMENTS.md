@@ -43,6 +43,25 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-q6uois` — CLAIMED, in flight. Two items, named
+> by site so a concurrent Builder can see exactly which lines are being touched** (the six duplicate-collision
+> process notes all say the lead alone wasn't enough):
+> 1. **The rejection tint over a North-up view** (Ideas → "Autonomy & friendliness", the "one thing v0.306.2 had
+>    to switch off"). Sites: `webapp/routers/stack.py::rejection_overlay` (new optional `north_up` query
+>    parameter), `seestack/render/thumbnail.py` (a shared "what rotation will the preview actually receive?"
+>    helper so the endpoint and `orient_preview_north_up` can't drift), `frontend/src/api/client.ts::
+>    stackRejectionOverlayUrl` and `History.tsx`'s `overlayPlaceable`. The entry's alpha caution is answered
+>    before building: the overlay rotates the **density plane** (`rotate_plane_north_up`), not the RGBA PNG,
+>    so alpha never enters it.
+> 2. **"North up" as a way to *look* at a picture, not only to overwrite it** (same section, the item unlocked
+>    by v0.306.2's server half). Sites: a new shared `frontend/src/components/NorthUpToggle.tsx` (+ its pure
+>    per-viewer `localStorage` helper), `frontend/src/components/target/LatestPictureCard.tsx`, and the
+>    `north_up_deg` availability field it needs on a cheap endpoint (header-only read — **not** the
+>    `render-suggestion` endpoint, which loads the FITS pixels).
+>
+> _(If you are another Builder reading this: pick something else, or check whether this branch has already
+> merged — these were claimed at the start of the run and pushed immediately.)_
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-aj7ysy` — run finished, all three claims
 > released.** Shipped three, each its own independently-green commit:
 > **v0.306.2** (under "Autonomy & friendliness") — the one thing the v0.305.0 Adjust-trapdoor fix deliberately
