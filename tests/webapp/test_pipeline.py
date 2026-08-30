@@ -270,14 +270,25 @@ def test_auto_edit_on_autostack_finishes_the_picture(client, solved_library):
     assert any(o["id"] == "tone.stretch" for o in saved_ops)
 
 
-def test_auto_edited_run_self_hides_parity_surfaces(client, solved_library):
+def test_auto_edited_run_matches_the_reveal_and_hides_the_stretch_suggestion(
+    client, solved_library,
+):
     # An in-place "Process/auto-edit" run's preview PNG is the tone-mapped Auto
     # recipe result, but its FITS stays linear (the recipe is stored separately and
-    # is reversible). The one-sub-vs-stack reveal (which would show a raw STF sub
-    # beside the recipe-toned stack) and the Adjust stretch suggestion (which
-    # promises to "match the STF preview thumbnail") must therefore self-hide,
-    # exactly as they do for a display-space export. Fail-before: the linear FITS
-    # let both surfaces engage and diverge from the clicked thumbnail.
+    # is reversible). The invariant both parity surfaces protect is the same — never
+    # put something STF-matched beside a recipe-toned picture — but they can honour
+    # it differently, because only one of them has a way out:
+    #
+    #   * the Adjust stretch suggestion promises to "match the STF preview
+    #     thumbnail", and there is no STF curve that matches a recipe result, so it
+    #     still self-hides (as it does for a display-space export);
+    #   * the one-sub-vs-stack reveal used to self-hide for the same reason, but the
+    #     run stores the very recipe its preview shows — so since v0.301.0 the sub
+    #     is put through that *same* recipe and the pairing is honest. Hiding it was
+    #     never the goal; not showing a mismatched pair was.
+    #
+    # This goes through the *watcher* auto-stack rather than the Process button, so
+    # both routes into the same auto-edit are covered.
     client.put("/api/settings",
                json={"auto_stack": True, "auto_edit_on_autostack": True})
     body = _run_scan(client)
@@ -288,7 +299,11 @@ def test_auto_edited_run_self_hides_parity_surfaces(client, solved_library):
 
     info = client.get(
         f"/api/targets/M_42/stack-runs/{rid}/one-sub-vs-stack").json()
-    assert info["available"] is False
+    assert info["available"] is True
+    assert info["matched_by"] == "recipe"
+    # ...and the render really is produced, not just promised.
+    assert client.get(
+        f"/api/targets/M_42/stack-runs/{rid}/reference-sub").status_code == 200
 
     sug = client.get(
         f"/api/targets/M_42/stack-runs/{rid}/render-suggestion").json()
