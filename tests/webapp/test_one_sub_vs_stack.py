@@ -867,3 +867,42 @@ def test_auto_edited_run_with_an_unreadable_recipe_stays_hidden(
         assert client.get(
             f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack",
         ).json()["available"] is False, bad
+
+
+def test_the_real_process_target_auto_edit_leaves_the_reveal_working(
+    client, solved_library,
+):
+    """End-to-end on the *actual* one-click path, not a fabricated marker.
+
+    This is the dogfood finding itself, in the suite: run `_auto_edit_process_run`
+    — the function "Process target" calls — over a real linear master, then ask
+    the app the same two questions the dogfood pass asked. Before this change both
+    answered "no": `{"available": false}` and a 404 reading "This run's picture is
+    an edited export…".
+    """
+    from webapp.pipeline import _auto_edit_process_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "processed.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        n_ops = _auto_edit_process_run(lib, safe, run_id)
+    finally:
+        lib.close()
+    assert n_ops, "the auto-edit must actually have applied ops"
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack").json()
+    assert body["available"] is True
+    assert body["matched_by"] == "recipe"
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/reference-sub").status_code == 200
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg").status_code == 200
