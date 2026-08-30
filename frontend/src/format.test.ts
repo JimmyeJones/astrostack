@@ -274,4 +274,49 @@ describe("pictureDateLabel", () => {
       expect(label).toMatch(/^(Shot|Stacked) /);
     }
   });
+
+  it("says how many nights it took, inside the date clause", () => {
+    // The fact a date range cannot supply: 15→18 Nov is equally consistent with
+    // two nights and with four. It folds into the clause the line already had
+    // rather than becoming another `·` segment.
+    expect(pictureDateLabel("2024-11-15", "2024-11-18", "2026-08-30T12:00:00Z", 4))
+      .toBe("Shot over 4 nights, 15–18 Nov 2024");
+    expect(pictureDateLabel("2024-10-28", "2024-11-03", "2026-08-30T12:00:00Z", 3))
+      .toBe("Shot over 3 nights, 28 Oct – 3 Nov 2024");
+  });
+
+  it("stays silent about the count unless the run recorded a believable one", () => {
+    const range = ["2024-11-15", "2024-11-18", "2026-08-30T12:00:00Z"] as const;
+    // Not recorded at all — every run stacked before schema 19.
+    expect(pictureDateLabel(...range)).toBe("Shot 15–18 Nov 2024");
+    expect(pictureDateLabel(...range, null)).toBe("Shot 15–18 Nov 2024");
+    // A count that contradicts the range beside it, or isn't a count of nights.
+    for (const odd of [0, 1, -2, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(pictureDateLabel(...range, odd)).toBe("Shot 15–18 Nov 2024");
+    }
+    // One night: the count has nothing to add, and "over 4 nights, 15 Nov" would
+    // contradict the very date it introduces.
+    expect(pictureDateLabel("2024-11-15", "2024-11-15", "2026-08-30T12:00:00Z", 4))
+      .toBe("Shot 15 Nov 2024");
+    // No capture window at all — the stack date can't borrow the count.
+    expect(pictureDateLabel(null, null, "2026-08-30T12:00:00Z", 4))
+      .toBe(`Stacked ${formatStampDate("2026-08-30T12:00:00Z")}`);
+  });
+
+  it("agrees with the caption clause about when a count may be spoken", () => {
+    // The two surfaces share `nightCountPhrase`, so this can't drift: whenever
+    // one quotes the count the other does, and vice versa.
+    const cases: [string | null, string | null, number | null][] = [
+      ["2024-11-15", "2024-11-18", 4],
+      ["2024-11-15", "2024-11-18", 1],
+      ["2024-11-15", "2024-11-15", 4],
+      ["2024-11-15", "2024-11-18", null],
+      ["2024-10-28", "2024-11-03", 3],
+    ];
+    for (const [start, end, n] of cases) {
+      const inLabel = pictureDateLabel(start, end, "2026-08-30T12:00:00Z", n).includes("nights");
+      const inClause = captureNightsClause(start, end, n).includes("nights");
+      expect(inLabel).toBe(inClause);
+    }
+  });
 });

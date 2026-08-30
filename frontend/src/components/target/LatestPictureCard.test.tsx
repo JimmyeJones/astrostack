@@ -100,6 +100,31 @@ describe("latestPictureCaption", () => {
     expect(cap).not.toContain("2026");
   });
 
+  it("says how many nights went into it, without a fourth clause", () => {
+    // The count is the part a person says out loud about their own picture, and
+    // the range beside it can't supply it. It rides *inside* the date clause —
+    // the line still has exactly three `·` segments, against the owner's
+    // standing "the UI is extremely busy" priority.
+    const cap = latestPictureCaption(mkRun({
+      timestamp_utc: "2026-08-30T12:00:00Z",
+      capture_night_start: "2024-11-15", capture_night_end: "2024-11-18",
+      capture_nights: 4,
+    }));
+    expect(cap).toMatch(/^Shot over 4 nights, 15–18 Nov 2024 · /);
+    expect(cap.split(" · ")).toHaveLength(3);
+  });
+
+  it("keeps quiet about nights on a run that never recorded a count", () => {
+    // Every stack made before schema 19 — the span alone must never be turned
+    // into a boast, since 15→18 Nov could be two nights or four.
+    const cap = latestPictureCaption(mkRun({
+      timestamp_utc: "2026-08-30T12:00:00Z",
+      capture_night_start: "2024-11-15", capture_night_end: "2024-11-18",
+    }));
+    expect(cap).toMatch(/^Shot 15–18 Nov 2024 · /);
+    expect(cap).not.toContain("nights");
+  });
+
   it("still labels the stack date when there is no capture window", () => {
     // Every run made before the app recorded one. It keeps saying which date it
     // is, so the wrong reading stays impossible either way.

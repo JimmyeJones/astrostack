@@ -51,8 +51,16 @@ export function describeSession(r: SessionRecap, now: Date = new Date()): string
 }
 
 /** A gentle, plain-language heads-up when the newest session is materially softer
- *  than the target's best previous one — a whole-session focus/seeing dip that
+ *  than the target's *typical* previous one — a whole-session focus/seeing dip that
  *  auto-grade (relative *within* a session) can't catch. Pure and unit-testable.
+ *
+ *  It says "usual" and not "best" because the server's baseline is now the median
+ *  of the prior nights, not the sharpest of them. The sharpest kept getting
+ *  sharper as the project grew, so on a long run of unchanging seeing this line
+ *  appeared on more and more perfectly ordinary nights (measured: 14% of them
+ *  after one prior night, 68% after twenty). Both halves had to move together —
+ *  a "softer than your usual best" sentence over a median baseline would be
+ *  quoting a number that isn't anyone's best.
  *
  *  `recent` mirrors the recap sentence above it: once the session it describes
  *  is no longer the night just gone, "last session's stars" becomes "that
@@ -62,11 +70,11 @@ export function describeQualityDrift(
   recent: boolean = true,
 ): string {
   const latest = d.latest_fwhm_px.toFixed(1);
-  const best = d.baseline_fwhm_px.toFixed(1);
+  const usual = d.baseline_fwhm_px.toFixed(1);
   const whose = recent ? "last session's" : "that session's";
   return (
-    `Heads up: ${whose} stars are softer than your usual best ` +
-    `(${latest} px vs ${best} px FWHM) — worth checking focus.`
+    `Heads up: ${whose} stars are softer than this target's usual ` +
+    `(${latest} px vs ${usual} px FWHM) — worth checking focus.`
   );
 }
 

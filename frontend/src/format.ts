@@ -105,6 +105,36 @@ export function formatCaptureNights(
 }
 
 /**
+ * The `"over 4 nights"` phrase for a run's capture window, or `""` — the one
+ * place that decides whether a night count may be spoken at all.
+ *
+ * Every rule that governs it lives here, so the two surfaces that say it (the
+ * caption clause below and the labelled date line under a picture) agree **by
+ * construction** rather than by two copies of the same four conditions. That is
+ * the shape the v0.317.1 bug asked for: where two call sites must match, share
+ * the value, never a comment naming the other one.
+ *
+ * It stays silent unless the run *recorded* the count (`capture_nights`,
+ * schema 19+ — never inferred from the span, since 15→18 Nov is equally
+ * consistent with two nights and four), the count is a whole number above one
+ * (a "1" beside a multi-night range contradicts it; a fraction is a backend
+ * this app doesn't understand), and the window itself spans more than one
+ * night (so a stack that recorded four nights but shows one date can't claim
+ * a range the date beside it denies).
+ */
+function nightCountPhrase(
+  start: string | null | undefined,
+  end: string | null | undefined,
+  nights?: number | null,
+): string {
+  const a = parseNightDate(start) ?? parseNightDate(end);
+  const b = parseNightDate(end) ?? parseNightDate(start);
+  if (!a || !b || nightKey(a) === nightKey(b)) return "";
+  if (typeof nights !== "number" || !Number.isInteger(nights) || nights <= 1) return "";
+  return `over ${nights} nights`;
+}
+
+/**
  * The same window as a caption clause: `"on 15 Nov 2024"` for one night,
  * `"between 15 and 18 Nov 2024"` for a run built from several — and
  * `"over 4 nights, between 15 and 18 Nov 2024"` when the run also recorded how
@@ -133,18 +163,16 @@ export function captureNightsClause(
       ? `${first.day} ${MONTHS_ABBR[first.month - 1]}`
       : `${first.day}`;
   const span = `between ${firstLabel} and ${lastLabel}`;
-  // A count of 1 beside a multi-night span would contradict it, and a count is
-  // only ever a whole number of nights — anything else is a backend the app
-  // doesn't understand, so it says nothing rather than something odd.
-  const n = typeof nights === "number" && Number.isInteger(nights) && nights > 1
-    ? nights : null;
-  return n ? `over ${n} nights, ${span}` : span;
+  const count = nightCountPhrase(start, end, nights);
+  return count ? `${count}, ${span}` : span;
 }
 
 /**
  * The one-line date under a picture, **labelled** — `"Shot 15 Nov 2024"` when
  * the run recorded when its subs were taken, `"Stacked 30 Aug 2026"` when it
- * didn't, and `""` when neither date is usable.
+ * didn't, and `""` when neither date is usable. When the run also recorded how
+ * many nights it is made of, the range says so: `"Shot over 4 nights,
+ * 15–18 Nov 2024"`.
  *
  * The label is the point. A *bare* date beside a picture is read as "the night
  * I took this", and on every strip and slideshow in the app that date was the
@@ -152,14 +180,27 @@ export function captureNightsClause(
  * with today. Naming which date it is costs one word and makes the wrong
  * reading impossible; preferring the capture window means the common case says
  * the thing the reader actually wanted.
+ *
+ * The night count *replaces* nothing and *adds* no field: it is folded into the
+ * date clause the line already carried, because "four nights of it" is the part
+ * a person says out loud about their own picture and a date range cannot supply
+ * it — 15→18 Nov is equally consistent with two nights and with four. Keeping it
+ * inside the existing clause is deliberate against the owner's standing "the UI
+ * is extremely busy" priority: one clause grows by three words rather than the
+ * line gaining a fourth `·` segment. Silent unless the run recorded it
+ * (`capture_nights`) — see {@link nightCountPhrase} for every condition.
  */
 export function pictureDateLabel(
   captureNightStart: string | null | undefined,
   captureNightEnd: string | null | undefined,
   stackedUtc: string | null | undefined,
+  captureNights?: number | null,
 ): string {
   const shot = formatCaptureNights(captureNightStart, captureNightEnd);
-  if (shot) return `Shot ${shot}`;
+  if (shot) {
+    const count = nightCountPhrase(captureNightStart, captureNightEnd, captureNights);
+    return count ? `Shot ${count}, ${shot}` : `Shot ${shot}`;
+  }
   const stacked = formatStampDate(stackedUtc);
   return stacked ? `Stacked ${stacked}` : "";
 }
