@@ -1669,6 +1669,20 @@ async def save_stack_preview(
         # written rather than left alone. A stale crop would have every surface
         # that lines up with the preview correcting for a trim that is gone.
         proj.set_stack_preview_crop(run_id, None)
+        # ...and for the same reason, these bytes are no longer a recipe result.
+        # Saving from Adjust replaces a "Process target" auto-edit's tone-mapped
+        # preview with a plain stretch of the linear FITS (the recipe itself is
+        # untouched and still reopens in the editor), so leaving the marker and the
+        # baked-look stamp behind would have the reveal put its single sub through
+        # an Auto recipe the picture beside it no longer shows — the same
+        # disagreement the stamp exists to catch, reached without ever opening the
+        # editor. Cleared together with the crop, on the same "always written,
+        # never left alone" rule; a linear run is unaffected either way, and the
+        # stretch recorded just above is what the reveal should match against now.
+        if _preview_is_display_space(run.options_json) and not is_display:
+            from webapp.routers.editor import AUTO_EDIT_BAKED_LOOK_PREFIX
+            proj.set_run_preview_display_space(run_id, False)
+            proj.delete_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run_id}")
     finally:
         proj.close()
         lib.close()
@@ -1877,6 +1891,17 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
             pattern = "RGGB"
         src_path = str(src)
         recipe_json = _auto_edit_recipe_json(proj, run)
+        if _display_space_without_recipe(run, recipe_json):
+            # The stack half is tone-mapped and we have no way to put a sub
+            # through the same processing (a display-space export, or an
+            # auto-edited run whose recipe is missing, unreadable, or has drifted
+            # from the one its preview shows). The card already self-hides on
+            # exactly these runs and the download beside it already 404s — say the
+            # same thing here rather than serving a half that doesn't match.
+            raise HTTPException(
+                status_code=404,
+                detail="This run's picture is an edited export, so a raw frame "
+                       "can't be matched to it honestly.")
         # If the run's preview was re-saved with a custom asinh stretch (History
         # "Adjust"), render the sub through that same curve so the reveal's two
         # halves differ only in noise/detail — not a tone offset. Both columns are

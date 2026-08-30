@@ -449,6 +449,12 @@ TRANSPARENCY_TREND_MIN_FRAMES = 6
 # a distribution to fit — same real-data caveat the Scout flagged for this metric.)
 TRANSPARENCY_TREND_DROP_RATIO = 1.4
 
+# A mosaic panel needs at least this many of the session's measured subs before
+# its own median is a trustworthy yardstick to rescale that panel by — the same
+# "≥2 substantial groups or no split at all" gate the engine's per-panel passes
+# use (``pointing_groups``), at the same 3-frame floor as the quality weighting.
+TRANSPARENCY_TREND_MIN_PANEL_FRAMES = 3
+
 
 @dataclass
 class TransparencyTrendPoint:
@@ -484,6 +490,10 @@ class TransparencyTrend:
     start_utc: str | None           # first measured sub this session
     end_utc: str | None             # last measured sub this session
     degraded_after_utc: str | None  # when the sky went murky (only for "degraded")
+    # How many mosaic panels this session's subs split into (0 = one pointing,
+    # the ordinary case). Non-zero means the scores below were rescaled panel by
+    # panel — see :func:`transparency_trend` — so the card can say why.
+    n_pointings: int = 0
 
 
 def transparency_trend(
@@ -493,7 +503,26 @@ def transparency_trend(
     session, or ``None`` when too few of that session's accepted subs carry a
     usable ``transparency_score`` to trend (e.g. an older project predating the
     metric, or a starless field). Read-only aggregation over the ``frames``
-    table — mirrors :func:`focus_trend`, but for *higher = better* transparency."""
+    table — mirrors :func:`focus_trend`, but for *higher = better* transparency.
+
+    **On a mosaic the raw scores can't be trended as they stand.**
+    ``transparency_score`` is the median flux of a frame's *brightest stars*, so
+    it is a property of where the scope pointed as much as of the sky — the same
+    thing that made QC grading (v0.270.2), photometric normalization (v0.271.0)
+    and quality weighting (v0.272.1) each misread a mosaic. A Seestar working
+    through its panels in sequence therefore ends the night on a different patch
+    of sky from the one it started on, and comparing the first third against the
+    last third reads "we moved to an emptier panel" as "clouds rolled in". So when
+    the session's pointings split soundly (``pointing_groups``), each panel's
+    scores are **rescaled onto the session's overall median** before anything is
+    trended: the panel-to-panel offset goes, the within-night change every panel
+    actually saw stays, and the units stay familiar. ``n_pointings`` reports how
+    many panels that was, so the card can say so.
+
+    Fail-neutral by construction: a single-pointing target (the ordinary case),
+    an unsolved one, and a mosaic too tightly packed to separate all get no split
+    and are byte-for-byte unchanged, and a sub in no substantial panel keeps its
+    raw score rather than borrowing another patch of sky's yardstick."""
     dated = [
         (dt, f)
         for f in project.iter_frames()
@@ -513,9 +542,11 @@ def transparency_trend(
     if len(measured) < TRANSPARENCY_TREND_MIN_FRAMES:
         return None
 
+    raw = [float(f.transparency_score) for f in measured]  # type: ignore[arg-type]
+    factors, n_pointings = _panel_rescale_factors(measured, raw)
     points = [
-        TransparencyTrendPoint(t_utc=f.timestamp_utc, transparency=float(f.transparency_score))
-        for f in measured
+        TransparencyTrendPoint(t_utc=f.timestamp_utc, transparency=s * k)
+        for f, s, k in zip(measured, raw, factors, strict=True)
     ]
     scores = [p.transparency for p in points]
     n = len(scores)
@@ -545,7 +576,48 @@ def transparency_trend(
         start_utc=points[0].t_utc,
         end_utc=points[-1].t_utc,
         degraded_after_utc=degraded_after,
+        n_pointings=n_pointings,
     )
+
+
+def _panel_rescale_factors(
+    frames: list[FrameRow], scores: list[float],
+) -> tuple[list[float], int]:
+    """Per-frame multipliers that put a mosaic's panels on one scale, and how many
+    panels there were.
+
+    ``(all 1.0, 0)`` — i.e. "change nothing" — whenever the session's pointings
+    don't split soundly, which is every single-field target and every unsolved
+    one. Where they do, a panel carrying at least
+    ``TRANSPARENCY_TREND_MIN_PANEL_FRAMES`` measured subs is rescaled by
+    ``overall median / that panel's median`` so its subs sit on the session's own
+    scale; anything else (a sub in no substantial panel, a degenerate median) is
+    left alone at 1.0. Pure — see :func:`transparency_trend` for why.
+    """
+    from seestack.stack.pointings import pointing_groups
+
+    labels = pointing_groups(
+        [(f.ra_center_deg, f.dec_center_deg) for f in frames],
+        min_members=TRANSPARENCY_TREND_MIN_PANEL_FRAMES,
+    )
+    if labels is None:
+        return [1.0] * len(frames), 0
+    overall = float(median(scores))
+    per_label: dict[int, list[float]] = {}
+    for label, s in zip(labels, scores, strict=True):
+        if label >= 0:
+            per_label.setdefault(label, []).append(s)
+    gains = {
+        label: overall / float(median(vals))
+        for label, vals in per_label.items()
+        if len(vals) >= TRANSPARENCY_TREND_MIN_PANEL_FRAMES and median(vals) > 0
+    }
+    if not (overall > 0) or len(gains) < 2:
+        # Nothing to level, or only one panel could be measured — treating that
+        # one as the yardstick would move it against un-rescaled neighbours,
+        # which is worse than leaving the night alone.
+        return [1.0] * len(frames), 0
+    return [gains.get(label, 1.0) for label in labels], len(gains)
 
 
 # ---------------------------------------------------------------------------

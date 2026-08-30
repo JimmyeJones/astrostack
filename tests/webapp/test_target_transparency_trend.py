@@ -15,8 +15,12 @@ from seestack.io.library import Library
 from seestack.io.project import FrameRow
 
 
-def _add_night(data_root: Path, safe: str, scores: list[float]) -> None:
-    """Append a run of accepted, measured subs 3 minutes apart (one session)."""
+def _add_night(data_root: Path, safe: str, scores: list[float],
+               ras: list[float] | None = None) -> None:
+    """Append a run of accepted, measured subs 3 minutes apart (one session).
+
+    ``ras`` optionally gives each sub its own solved RA, so a night can be made
+    to work through a mosaic's panels rather than staring at one field."""
     base = datetime(2026, 7, 10, 22, 0, 0)
     lib = Library.open_or_create(data_root / "library")
     try:
@@ -29,6 +33,8 @@ def _add_night(data_root: Path, safe: str, scores: list[float]) -> None:
                     exposure_s=10.0,
                     accept=True,
                     transparency_score=sc,
+                    ra_center_deg=None if ras is None else ras[i],
+                    dec_center_deg=None if ras is None else 41.0,
                 ))
         finally:
             proj.close()
@@ -64,3 +70,32 @@ def test_transparency_trend_clear_night_has_no_marker(client, solved_library, da
     assert body is not None
     assert body["verdict"] == "clear"
     assert body["degraded_after_utc"] is None
+
+
+def test_transparency_trend_reports_the_mosaic_panel_count(
+    client, solved_library, data_root,
+):
+    """A mosaic night: the same "panel pointed at emptier sky" that the engine
+    levels out is reported through the endpoint, so the card can explain itself
+    instead of leaving the reader to wonder why the sparkline is flat.
+
+    The additive `n_pointings` field is 0 on the ordinary single-pointing night,
+    which is what every existing target sends."""
+    _add_night(data_root, "M_42",
+               [1000, 1020, 980, 1010, 990, 455, 445, 460, 450, 440],
+               ras=[10.0] * 5 + [11.0] * 5)
+    body = client.get("/api/targets/M_42/transparency-trend").json()
+    assert body is not None
+    assert body["n_pointings"] == 2
+    # ...and moving to an emptier panel is not reported as weather.
+    assert body["verdict"] == "clear"
+    assert body["degraded_after_utc"] is None
+
+
+def test_transparency_trend_reports_no_panels_on_one_pointing(
+    client, solved_library, data_root,
+):
+    _add_night(data_root, "M_42", [1000, 1030, 980, 1010, 995, 1020, 990, 1005])
+    body = client.get("/api/targets/M_42/transparency-trend").json()
+    assert body is not None
+    assert body["n_pointings"] == 0
