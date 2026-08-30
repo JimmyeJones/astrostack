@@ -9835,6 +9835,22 @@ to **Shipped**.)_
   half of this lead**, now with the chroma noise removed from underneath it so a future measurement sees the
   geometry alone.
 
+- **NEW IDEA (Builder 2026-08-30, the half deliberately left out of the Stack-form print line v0.318.0) — make
+  the print nudge a *button*, not only a sentence.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size XS;
+  frontend-only, no new data.)* The estimate panel now says *"Turning Drizzle on at ×1.3 would print it at A3
+  instead"*, and the scale it names is already **machine-actionable** — `print_plan.bigger_drizzle_scale` is a
+  number the form could just set, and it is already verified to fit the memory budget and to actually reach that
+  paper. But the two knobs it names (`drizzle`, `drizzle_scale`) live inside the collapsed **advanced**
+  disclosure, so a beginner who reads the sentence still has to go find them. The panel two lines up already has
+  exactly this pattern — the one-click `memoryFix` button — so the shape is settled and copyable.
+  **Why it was left out rather than done:** the filed spec said *keep it to one line*, against the owner's
+  standing "extremely busy" priority, and a button is a second element on a dense form. **What would settle it:**
+  it appears only when there is something to reach for *and* the stack has enough frames for drizzle to pay off,
+  which on a beginner's first stacks is rarely — so it is not an always-on control. **Care:** it must set *both*
+  keys (`drizzle: true` and the scale), and the existing `set()` helper takes one key at a time; check whether a
+  two-key set re-queries the estimate once or twice before wiring it, or the panel will flicker between two
+  verdicts.
+
 - **NEW IDEA (Builder 2026-08-30, the obvious next tap on the per-run night count v0.317.0) — say "over 4
   nights" where a person is *looking at* the picture, not only where they copy a caption.** *(Pillar:
   understand + enjoy — PRIORITY 3; size XS–S; purely additive on machinery that now exists.)* `capture_nights`
@@ -19962,6 +19978,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   fix: group placed objects by `object_id` in the viewer, draw one node, and let the card list the targets
   behind it ("2 of your targets are this object"). **Don't** fix it by nudging one aside — a fake offset on a
   map whose whole promise is "placed where they really are" is exactly the wrong trade.
+
+- **⚠️ PROCESS NOTE (Builder 2026-08-30) — collision EIGHT, and this one is the control experiment for note
+  seven: its prescribed fix would have prevented it, and I did not do it.** Note seven, filed hours earlier,
+  says in bold: **`git fetch origin main` again immediately before *starting* each new task, not only before
+  merging** — because claiming is a publication, not a lock, and the §12 checklist only fetches at start of run.
+  This run fetched once at 15:04, shipped the print-size item, then picked up the per-run **night count** off
+  the backlog and built it end to end — engine `_capture_hours`, schema 19 `capture_hours_json`,
+  `capture_night_count`, the caption clause, 16 tests, all green. The `…-7y6nlj` Builder had merged the
+  **identical design** — same column name, same helper name, same read-time bucketing, plus the nameplate,
+  gallery and stats surfaces mine deliberately deferred — as **v0.315.0 at 14:30**, i.e. *before this run even
+  started*. A three-second fetch at the top of the task would have found it on `main`, fully merged, with no
+  ambiguity to reason about.
+  **What that costs and what it buys:** roughly an hour of build time thrown away, against a fix that costs one
+  second. **The failure was not the claim protocol — it was reading the backlog as the source of truth for what
+  is done.** It isn't; `main` is. A backlog entry says what *was* open when someone last wrote to the file, and
+  in a two-Builder-per-hour world that is stale by construction. Two habits follow, and they are cheap enough to
+  be unconditional: (1) fetch before *each* task, as note seven says; and (2) before writing a line, `git log
+  --oneline origin/main -20` and grep it for the item's own nouns — "nights", "capture_hours" would each have
+  hit `1b8daaf` immediately. The stand-down itself followed the established pattern (take `main`'s
+  implementation wholesale, re-apply only what is genuinely additive; theirs was strictly more complete, so
+  nothing was re-applied) — but the cheapest collision is the one you never start.
 
 - **⚠️ PROCESS NOTE (Builder 2026-08-30) — collisions SIX AND SEVEN, in one run, against one other Builder —
   and claiming early did NOT prevent them, because the other run claimed early too.** Branch
