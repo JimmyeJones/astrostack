@@ -16,6 +16,7 @@ from seestack.io.project import (
     count_unreadable_frames,
     readable_frame_path,
 )
+from seestack.qc.bulk_select import worst_frames_by_metric
 from seestack.render.thumbnail import THUMB_VERSION, generate_thumbnail, thumbs_dir
 from seestack.solve.astap import (
     SOLVE_FAILED_TIMEOUT,
@@ -459,18 +460,28 @@ def bulk_frames(safe: str, body: BulkFrameAction, request: Request) -> dict:
                         f"No accepted frames have a {_METRIC_LABELS.get(body.metric, body.metric)} "
                         "measurement yet — run QC / grade first, then try again."
                     )
-                # Higher FWHM/ecc/sky is worse; higher star_count / transparency is
-                # better (so their "worst" are the *lowest* values).
-                higher_is_better = {"star_count", "transparency_score"}
-                reverse = body.metric not in higher_is_better
-                frames.sort(key=lambda f: getattr(f, body.metric), reverse=reverse)
-                n = int(len(frames) * max(0.0, min(1.0, body.fraction)))
-                for f in frames[:n]:
+                # Which frames are "worst" is only meaningful within one patch of
+                # sky for the flux-like metrics, so on a mosaic the cut is taken
+                # per panel — see seestack.qc.bulk_select. A single field, an
+                # unsolved target, and FWHM/eccentricity keep the one target-wide
+                # ranking they have always had.
+                worst, n_panels = worst_frames_by_metric(
+                    frames, body.metric, body.fraction)
+                for f in worst:
                     proj.update_frame(
                         f.id, accept=False, user_override=True,
                         reject_reason=f"bulk:{body.metric}",
                     )
                     changed_ids.append(f.id)
+                if n_panels >= 2 and worst:
+                    # Say it, so a mosaic user isn't left wondering why the count
+                    # isn't a flat percentage of the whole target.
+                    note = (
+                        f"Took the worst {round(body.fraction * 100)}% of each of this "
+                        f"mosaic's {n_panels} panels separately — a panel that frames "
+                        "emptier sky isn't a worse sub, and cutting it target-wide "
+                        "would thin that panel's coverage."
+                    )
             elif body.action == "reject_streaked":
                 # Drop every accepted frame still flagged with a satellite/plane
                 # trail. Pairs with the "N streaked" badge for users who'd rather

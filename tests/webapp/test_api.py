@@ -1115,3 +1115,50 @@ def test_delete_target_removes_it(client, built_library):
 def test_merge_unknown_destination_404(client, built_library):
     r = client.post("/api/targets/merge", json={"into": "does_not_exist", "sources": ["M_42"]})
     assert r.status_code == 404
+
+
+def test_bulk_reject_worst_on_a_mosaic_cuts_each_panel(client, built_library, data_root):
+    """A mosaic ranked target-wide puts the whole of the emptiest-framed panel at
+    the bottom, so "reject the worst third by transparency" would thin one
+    panel's *coverage* instead of dropping the haziest subs. The cut is taken per
+    panel, and the response says so."""
+    from seestack.io.library import Library
+    from seestack.io.project import FrameRow
+
+    panels = [(10.0, 20.0), (11.0, 20.0), (12.0, 20.0)]
+    field = [10000.0, 5000.0, 4000.0]
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            # Set the three fixture frames aside so only the mosaic is in play.
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, accept=False, reject_reason="user")
+            for p, (ra, dec) in enumerate(panels):
+                for k in range(6):
+                    proj.add_frame(FrameRow(
+                        id=None, source_path=f"panel{p}_{k}.fit", accept=True,
+                        ra_center_deg=ra, dec_center_deg=dec,
+                        transparency_score=field[p] + k,
+                    ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    r = client.post(
+        "/api/targets/M_42/frames/bulk",
+        json={"action": "reject_worst", "metric": "transparency_score", "fraction": 1 / 3},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["changed"] == 6
+    assert body["note"] and "3 panels" in body["note"]
+
+    rejected = {
+        f["name"]
+        for f in client.get("/api/targets/M_42/frames").json()
+        if f["reject_reason"] == "bulk:transparency_score"
+    }
+    # Two from each panel — not all six from the sparsest one.
+    assert rejected == {f"panel{p}_{k}.fit" for p in range(3) for k in (0, 1)}

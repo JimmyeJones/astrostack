@@ -47,8 +47,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > "sweep the engine for a POSITION-DEPENDENT metric compared across a whole target" QA lead. Shipped
 > **v0.304.1** (write-up at the top of "Bugs"): the fourth and fifth sites of that class, both reproduced
 > first — a clear mosaic getting a **"Hazy night"** badge (ratio 0.50) and a **"clouds rolled in"** verdict
-> (early 10025 vs late 4025) under a perfectly steady sky.
-
+> (early 10025 vs late 4025) under a perfectly steady sky. Then **v0.304.2** (entry under "Image quality"):
+> the sixth site, the bulk "reject worst N%" cut sending all six of its rejections into the sparsest mosaic
+> panel.
 
 _(nothing else claimed — claim an item here with your branch name)_
 
@@ -16384,7 +16385,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   are fixed in v0.304.1, both reproduced before fixing — the per-run `transparency_ratio` behind the "Hazy
   night" badge, and `session_recap.transparency_trend` behind the "Clouds & haze" card. See the entry at the
   top of "Bugs". The lead stays open: the auto-grade reconsider/reaccept path, `stackhealth`'s trend and drift
-  verdicts, and the session-quality drift endpoint are still unswept. Method note that made the two easy — grep
+  verdicts, and the session-quality drift endpoint are still unswept. A **sixth** site — the bulk "reject worst
+  N%" cut — was found the same way and shipped in v0.304.2 (entry below). Method note that made them easy — grep
   for `transparency_score` / `star_count` / `sky_adu_median` used outside a `pointing_groups` call, then ask
   what claim the number is turned into: both of these turn a *pointing* difference into a **weather** claim,
   which is the tell.)**
@@ -16403,14 +16405,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   settings change — so a historical baseline needs either a gain/exposure guard or a fallback to today's
   within-session levelling. Fail back to the current behaviour whenever it can't be established; never guess.
 
-- **NEW IDEA / SIXTH SITE OF THE SAME CLASS (Builder 2026-08-30, found while fixing v0.304.1 and deliberately
-  left for its own commit) — "reject the worst N% by transparency / star count" ranks a mosaic target-wide, so
-  it sets aside the *sparsest panel* instead of the haziest subs.** *(Pillar: image quality / trust — PRIORITY 4;
-  size S; traced and read, reproduce before fixing as the other five were.)* `webapp/routers/frames.py`
-  `reject_worst` sorts every accepted frame on one metric and rejects the bottom `fraction`; on a mosaic the
-  bottom of the list is whichever panel frames the emptiest patch of sky. **Recommendation:** rank per panel via
-  the shared `pointing_groups` gate, falling back to today's exact global sort when there is no sound split, and
-  say so in the result note. FWHM / eccentricity are NOT affected — those are properties of the night.
+- **✅ SHIPPED (Builder, v0.304.2, branch `claude/compassionate-galileo-ezix3s`) — ~~"reject the worst N% by
+  transparency / star count / sky level" ranks a mosaic target-wide, so it sets aside the *sparsest panel*
+  instead of the haziest subs.~~** The **sixth** site of the position-dependent-metric class, found while fixing
+  v0.304.1 and shipped as its own commit. Reproduced end-to-end first.
+
+  **Reproduced** (`tests/webapp/test_api.py::test_bulk_reject_worst_on_a_mosaic_cuts_each_panel`, which fails on
+  the old code): three panels of six subs, star fields 10000 / 5000 / 4000 under one steady sky, "reject the
+  worst third by transparency" → **all six** rejected frames came from the sparsest panel and none from the
+  richest. That is not "drop my haziest 10%", it is "delete a sixth of this panel's coverage" — and on a mosaic
+  a thinned panel is the one thing that shows in the finished picture.
+
+  **Fix.** New pure `seestack/qc/bulk_select.py` → `worst_frames_by_metric(frames, metric, fraction)`, and the
+  router calls it instead of sorting inline. For the position-dependent metrics only, the cut is taken **per
+  panel** — the same fraction out of each — behind the shared `pointing_groups` gate; the result note says so
+  ("the worst 33% of each of this mosaic's 3 panels separately"), and `Target.tsx` now keeps the "Updated N
+  frames" count (and drops the warning colour) when a note accompanies work that actually happened, instead of
+  replacing it. Subs in no substantial panel form their own bucket rather than being cut against a yardstick
+  from another patch of sky.
+
+  **What is deliberately unchanged:** FWHM and eccentricity are properties of the *seeing*, so they keep the one
+  target-wide ranking they have always had — that is the same line the other five fixes draw, and it now has one
+  home: `grading.PER_POINTING_METRICS`, derived from the `_MetricSpec.per_pointing` flags rather than a second
+  hand-written set. A single field, an unsolved target and a too-tightly-packed mosaic all keep the exact old
+  global sort, truncation included.
+
+  **Upgrade-safe (§9):** pure in-memory ranking of a reversible, explicitly user-initiated action; no
+  config/schema/on-disk/API-shape change (the `note` field already existed and was already optional).
+
+  **Tests (+15 in `tests/test_bulk_select.py`, +1 webapp test that fails before / passes after):** the per-panel
+  cut and its within-panel ordering, all three position-dependent metrics, sky level's opposite direction, FWHM
+  staying target-wide, the single-field / unsolved / stray-sub fallbacks, and the fraction clamp + truncation.
 
 - **IDEA (Builder 2026-08-26, left open by the v0.271.0 per-panel photometric fix) — match a hazy mosaic
   panel's *brightness* to its neighbours using the panel OVERLAPS, not `transparency_score`.**
