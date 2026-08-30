@@ -3174,7 +3174,9 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # re-derived here.
         plate = None
         if nameplate or keepsake:
-            plate = pipeline._nameplate_fields(run.fits_path or "", entry, run)
+            plate = pipeline._nameplate_fields(
+                run.fits_path or "", entry, run,
+                deps.get_settings(request).site_lon)
         # scale bakes the two marks every published astrophoto carries — a scale
         # bar and a North/East rose — along the *top* edge, from the run's own
         # solved WCS. They layer under the caption variants above (the caption
