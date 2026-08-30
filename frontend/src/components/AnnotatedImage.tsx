@@ -206,6 +206,15 @@ export interface PreviewCropBounds { x0: number; y0: number; x1: number; y1: num
  * instead of the stored bytes. Objects whose centre falls outside the trim are
  * dropped (they're no longer in the picture), and a bar that would no longer fit
  * is dropped rather than drawn overflowing.
+ *
+ * `previewScaleBar` is the server's own bar for the cropped picture
+ * (`annotations.preview_scale_bar`). Prefer it when the crop bites: rescaling
+ * `fraction` here fixes the drawn *length*, but leaves `frame_arcmin` and
+ * `moon_comparison` describing the whole canvas — so a trimmed picture claims a
+ * field up to ~1/0.7× wider than it has, in the one sentence a beginner reads and
+ * shares. The server's bar answers for the visible rectangle throughout (and
+ * re-picks its ladder rung for it). Omitted / null — an older backend — falls
+ * back to the rescaled bar, i.e. exactly today's behaviour.
  */
 export function croppedAnnotationView(
   crop: PreviewCropBounds | null | undefined,
@@ -213,6 +222,7 @@ export function croppedAnnotationView(
   scaleBar: ScaleBar | null,
   width: number,
   height: number,
+  previewScaleBar?: ScaleBar | null,
 ): { objects: FieldObject[]; scaleBar: ScaleBar | null; width: number; height: number } {
   const same = { objects, scaleBar, width, height };
   if (!crop || width <= 0 || height <= 0) return same;
@@ -227,13 +237,51 @@ export function croppedAnnotationView(
     .map((o) => ({ ...o, x_px: o.x_px - x0, y_px: o.y_px - y0 }))
     .filter((o) => o.x_px >= 0 && o.x_px < w && o.y_px >= 0 && o.y_px < h);
   let bar: ScaleBar | null = null;
-  if (scaleBar) {
+  if (previewScaleBar) {
+    // Measured on this very rectangle server-side — length, frame width and Moon
+    // sentence all already describe the picture on screen.
+    bar = previewScaleBar;
+  } else if (scaleBar) {
     // The bar's on-sky length is unchanged, so it covers a *larger* share of the
     // narrower picture. Past ~90 % it would run off the edge — drop it instead.
     const fraction = (scaleBar.fraction * width) / w;
     bar = fraction > 0.9 ? null : { ...scaleBar, fraction };
   }
   return { objects: shifted, scaleBar: bar, width: w, height: h };
+}
+
+/**
+ * Which scale bar honestly describes a run's **stored preview** — the bytes every
+ * download, share and pasted caption hands over.
+ *
+ * The caption's Moon sentence ("the whole frame is about 5.4 full Moons wide") is
+ * a claim about the picture someone is looking at, so it has to be measured on
+ * the picture, not on the canvas behind it. Three cases:
+ *
+ * - a **crop** (the auto-edit's border trim) → the server's `preview_scale_bar`,
+ *   measured on the visible rectangle. An older backend that doesn't send one
+ *   gets *no* clause rather than the canvas-sized overstatement.
+ * - a preview whose geometry can't be reconciled with the canvas, or one a past
+ *   "North up → Save" turned (a rotate-with-expand grows the frame around the
+ *   same sky) → nothing measured on the canvas describes those bytes, so say
+ *   nothing. This is what the on-screen note already does for the same reasons.
+ * - anything else — every ordinary run — → the plain `scale_bar`, unchanged.
+ */
+export function storedPreviewScaleBar(
+  annotations:
+    | { scale_bar: ScaleBar | null; preview_scale_bar?: ScaleBar | null }
+    | null
+    | undefined,
+  run: {
+    preview_crop?: PreviewCropBounds | null;
+    preview_geometry_unknown?: boolean | null;
+    preview_north_up_deg?: number | null;
+  },
+): ScaleBar | null {
+  if (!annotations) return null;
+  if (run.preview_geometry_unknown || run.preview_north_up_deg) return null;
+  if (run.preview_crop) return annotations.preview_scale_bar ?? null;
+  return annotations.scale_bar ?? null;
 }
 
 /** A friendly one-word label for an object: its name if it has one, else its id. */

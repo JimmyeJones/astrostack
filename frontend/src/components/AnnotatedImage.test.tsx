@@ -10,6 +10,7 @@ import {
   labelBudget,
   objectMarkerLayout,
   scaleBarLayout,
+  storedPreviewScaleBar,
 } from "./AnnotatedImage";
 import type { FieldObject, ScaleBar } from "../api/client";
 
@@ -278,6 +279,80 @@ describe("croppedAnnotationView", () => {
       .objects).toBe(objs);
     expect(croppedAnnotationView({ x0: 0.2, y0: 0, x1: 0.8, y1: 1 }, objs, bar, 0, 0)
       .objects).toBe(objs);
+  });
+
+  // Re-basing `fraction` here fixes the drawn length but leaves `frame_arcmin`
+  // and `moon_comparison` describing the whole canvas — the untruth in the one
+  // sentence a beginner reads and shares. The server measures a bar on the
+  // visible rectangle instead; prefer it whenever the crop actually bites.
+  const shownBar: ScaleBar = {
+    arcsec: 30, label: "30″", fraction: 0.1, frame_arcmin: 2.5,
+    moon_comparison: "the whole frame is about 8% the width of the full Moon",
+  };
+
+  it("prefers the server's bar for the cropped picture over a rescaled one", () => {
+    const v = croppedAnnotationView(
+      { x0: 0.25, y0: 0.0, x1: 0.75, y1: 1.0 }, [], bar, 1000, 600, shownBar);
+    expect(v.scaleBar).toBe(shownBar);
+    // The whole point: the sentence now describes the trimmed picture (2.5′),
+    // not the canvas it came out of (5′).
+    expect(v.scaleBar?.frame_arcmin).toBe(2.5);
+    expect(v.scaleBar?.moon_comparison).toBe(shownBar.moon_comparison);
+  });
+
+  it("ignores the cropped bar when no crop is actually applied", () => {
+    // Nothing was trimmed, so the canvas bar is the honest one — even if an
+    // older run row still carried a full-canvas rectangle.
+    expect(croppedAnnotationView(null, [], bar, 1000, 600, shownBar).scaleBar).toBe(bar);
+    expect(croppedAnnotationView({ x0: 0, y0: 0, x1: 1, y1: 1 }, [], bar, 1000, 600,
+      shownBar).scaleBar).toBe(bar);
+  });
+
+  it("falls back to rescaling when the backend sends no cropped bar", () => {
+    const v = croppedAnnotationView(
+      { x0: 0.25, y0: 0.0, x1: 0.75, y1: 1.0 }, [], bar, 1000, 600, null);
+    expect(v.scaleBar?.fraction).toBeCloseTo(0.4);   // exactly today's behaviour
+  });
+});
+
+// The caption under a picture — and the one copied to share it — has to describe
+// the *stored preview*, the bytes that actually get handed over.
+describe("storedPreviewScaleBar", () => {
+  const canvasBar: ScaleBar = {
+    arcsec: 1800, label: "30′", fraction: 0.18, frame_arcmin: 166.6,
+    moon_comparison: "the whole frame is about 5.4 full Moons wide",
+  };
+  const croppedBar: ScaleBar = {
+    arcsec: 1800, label: "30′", fraction: 0.26, frame_arcmin: 116.6,
+    moon_comparison: "the whole frame is about 3.8 full Moons wide",
+  };
+  const ann = { scale_bar: canvasBar, preview_scale_bar: croppedBar };
+
+  it("uses the canvas bar on an ordinary run", () => {
+    expect(storedPreviewScaleBar(ann, {})).toBe(canvasBar);
+  });
+
+  it("uses the cropped bar on a picture the auto-edit trimmed", () => {
+    expect(storedPreviewScaleBar(ann, { preview_crop: { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 } }))
+      .toBe(croppedBar);
+  });
+
+  it("says nothing rather than overstating when the backend sends no cropped bar", () => {
+    // An older backend: no clause beats a field width up to ~1.4× too wide.
+    expect(storedPreviewScaleBar({ scale_bar: canvasBar },
+      { preview_crop: { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 } })).toBeNull();
+  });
+
+  it("says nothing about a preview that isn't a plain view of the canvas", () => {
+    // Geometry that can't be reconciled, and a rotate-with-expand that grew the
+    // frame around the same sky — the on-screen note already declines both.
+    expect(storedPreviewScaleBar(ann, { preview_geometry_unknown: true })).toBeNull();
+    expect(storedPreviewScaleBar(ann, { preview_north_up_deg: 30 })).toBeNull();
+  });
+
+  it("says nothing when the annotations haven't loaded", () => {
+    expect(storedPreviewScaleBar(null, {})).toBeNull();
+    expect(storedPreviewScaleBar(undefined, {})).toBeNull();
   });
 });
 

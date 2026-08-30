@@ -440,6 +440,67 @@ describe("HistoryView", () => {
     // jsdom — so it's covered by scaleBarLayout's pure unit test instead.)
   });
 
+  it("describes the trimmed picture, not the canvas behind it", async () => {
+    // The one-click "Process target" auto-edit trims a mosaic's ragged border, so
+    // the stored preview — the picture on screen, downloaded and shared — is
+    // narrower than the canvas. The Moon sentence is a claim about *that*
+    // picture; sized on the canvas it overstates the field by 1/0.7 ≈ 1.43×.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, preview_crop: { x0: 0.15, y0: 0.15, x1: 0.85, y1: 0.85 } }),
+    ]);
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600, objects: [],
+      scale_bar: {
+        arcsec: 1800, label: "30′", fraction: 0.18, frame_arcmin: 166.6,
+        moon_comparison: "the whole frame is about 5.4 full Moons wide",
+      },
+      preview_scale_bar: {
+        arcsec: 1800, label: "30′", fraction: 0.26, frame_arcmin: 116.6,
+        moon_comparison: "the whole frame is about 3.8 full Moons wide",
+      },
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Scale"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/about 3.8 full Moons wide/)).toBeInTheDocument());
+    expect(screen.queryByText(/about 5.4 full Moons wide/)).not.toBeInTheDocument();
+  });
+
+  it("copies a caption sized to the trimmed picture it shares", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, n_frames_used: 240, total_exposure_s: 40 * 60,
+        timestamp_utc: "2026-07-20T22:14:03",
+        preview_crop: { x0: 0.15, y0: 0.15, x1: 0.85, y1: 0.85 } }),
+    ]);
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(mkIdentity());
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600, objects: [],
+      scale_bar: {
+        arcsec: 1800, label: "30′", fraction: 0.18, frame_arcmin: 166.6,
+        moon_comparison: "the whole frame is about 5.4 full Moons wide",
+      },
+      preview_scale_bar: {
+        arcsec: 1800, label: "30′", fraction: 0.26, frame_arcmin: 116.6,
+        moon_comparison: "the whole frame is about 3.8 full Moons wide",
+      },
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    fireEvent.click(await menuItem("Copy caption"));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0][0]).toContain("about 3.8 full Moons wide");
+    expect(writeText.mock.calls[0][0]).not.toContain("5.4");
+  });
+
   it("offers the compass alongside the scale, the pair the shared JPEG bakes", async () => {
     // The download has carried a scale bar *and* a North/East rose since
     // v0.284.0; the on-screen overlay only ever drew the bar. One toggle now

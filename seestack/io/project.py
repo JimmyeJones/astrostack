@@ -911,6 +911,28 @@ class Project:
             out[reason] = n
         return out
 
+    def earliest_frame_utc(self) -> str | None:
+        """When this target's *oldest* sub was captured, or ``None``.
+
+        The answer to "when did I first point a scope at this?", read off the
+        frames' own ``DATE-OBS`` rather than off when the target row happened to
+        be created in AstroStack — which are the same thing only for someone who
+        installed the app before they started imaging. Counts **every** dated
+        frame, accepted or not: a sub the app later set aside as cloudy was still
+        light you went out and collected. Undated frames are skipped, so a target
+        whose subs carry no timestamp answers ``None`` and the caller falls back
+        to whatever it used before.
+
+        One indexed ``MIN`` (``idx_frames_ts``), so it stays cheap on a target
+        with thousands of subs."""
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT MIN(timestamp_utc) FROM frames "
+            "WHERE timestamp_utc IS NOT NULL AND timestamp_utc <> ''"
+        ).fetchone()
+        earliest = row[0] if row else None
+        return str(earliest) if earliest else None
+
     def frame_night_counts(self) -> dict[str, int]:
         """Tally *all* frames (accepted or rejected) by capture night.
 

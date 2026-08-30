@@ -312,6 +312,48 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.311.3, branch `claude/compassionate-galileo-y2x4gk`) — ~~"First light" is the date
+  you *installed AstroStack*, not the date you first captured — so it is wrong for the exact owner this app is
+  built for, on a milestone stat and on the poster they share.~~** Found by **running the app**
+  (`scripts/agent-dogfood.sh`, the §2 big-picture pass), not by reading it: "Your sky, so far" said **First
+  light — August 2026** on a library whose only target's frames table, two clicks away, reads
+  **2024-11-15**. *(Severity: wrong-fact / trust on a pride page and on shared output. Confidence: reproduced
+  in a running app, then in a test.)*
+
+  **Root cause.** `summarize_library` took `first_light_utc = min(t.created_utc …)` — the earliest
+  target-*creation* stamp, i.e. when the row was made **here**. That equals first light only for someone who
+  installed the app before they started imaging. The owner arrives with a back catalogue of Seestar subs, so
+  every target is created on install day and the milestone says *"you started astrophotography this week"* to
+  someone who has been at it for years. It also dates `/api/recap`'s **"Since &lt;date&gt;"** footnote — on the
+  poster they post publicly.
+
+  **Fix.** New `Project.earliest_frame_utc()` — one indexed `MIN` over `frames.timestamp_utc` (the frames' own
+  `DATE-OBS`), counting **every** dated sub including the rejected ones, because a sub the app later set aside
+  was still light someone went out and collected. `summarize_library` grows an optional
+  `first_capture(safe_name)` lookup and takes each imaged target's own oldest capture, falling back to its
+  creation stamp when nothing is dated — so a library the lookup can't answer for is byte-for-byte what it was,
+  and callers that don't pass it (the Gallery wall) are untouched.
+
+  **Two things the fix had to get right beyond the headline.** (1) The comparison is now across *two shapes* of
+  stamp — the registry's `…Z` and a frame's `DATE-OBS` as ingest recorded it — so a lexicographic `min` would
+  pick whichever *spelling* sorts first; `_earliest_stamp` compares parsed instants via the shared
+  `activity_calendar.parse_utc`, with the old string minimum as the last resort so a hand-edited row still
+  yields a date. (2) `library_summary` is deliberately registry-only, and the recap endpoint was calling it
+  **outside** the summary cache (its docstring claimed otherwise). Both stats call sites now go through one
+  `_cached_library_summary`, so the per-target project reads are paid at most once per cache window — and the
+  poster and the stat card can no longer quote different dates.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk-layout, API-shape or default change; one new read-only
+  engine method, one optional keyword, and a value that becomes *more* correct. An unreadable project answers
+  `None` and falls back rather than sinking the summary.
+
+  **Tests (+10, all fail before):** `tests/test_project.py` (the oldest dated sub, a rejected one still
+  counting, undated rows skipped, an all-undated target answering `None`); `tests/test_library_summary.py`
+  (capture beats creation; the undated fallback both ways; an empty target's ancient subs still excluded by the
+  has-light gate; the time-vs-string comparison; an unparseable stamp surviving); `tests/webapp/
+  test_library_summary.py` (the endpoint reporting the fixture's 2024 `DATE-OBS` and it really being older than
+  the rows, the no-dated-subs fallback, and `/api/recap`'s "Since" agreeing with the stat card).
+
 - **✅ SHIPPED (Builder, v0.311.1, branch `claude/compassionate-galileo-e1p1x8`) — ~~"Full-res PNG (native
   size)" hands back a picture **rotated away from the one you clicked** on any run whose preview was saved
   North up.~~** Found by walking the **geometry** axis of the download-copy sweep (the one axis v0.309.1
@@ -9490,6 +9532,32 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-30, the generalisation of the v0.311.3 "First light" bug) — sweep every date the
+  app shows a beginner and ask whether it means *when you shot this* or *when the app did something*.**
+  *(Pillar: understand / trust — PRIORITY 3; size S per surface, M for the sweep. Confidence: the class is
+  confirmed — one instance was reproduced in a running app and fixed this run.)* "First light" quoted the
+  target-row **creation** stamp and so told a Seestar owner with a back catalogue that they took up the hobby
+  the week they installed AstroStack. The bug is fixed; **the class is not swept.** The owner's mental model of
+  a date on a picture is *the night I shot it*, and several surfaces show a **processing** date in a place that
+  reads like a capture date — the clearest is the Dashboard's **Recent stacks** strip, whose tile reads
+  `Sample: Orion Nebula (M42) · 6 FRAMES · Aug 30, 2026` where the 30 Aug is when the *stack ran*, while the
+  subs under it are dated 2024-11-15. On a re-stack of old data that is off by years, on the app's front page.
+  **Shape:** enumerate the surfaces (Dashboard recent strip, Gallery cards, History rows, the Library tile, the
+  keepsake/poster) and for each decide which date the *reader* means, rather than which one is cheapest to
+  reach — a stack run's own timestamp is right for "which run is newest", and wrong as the caption on a
+  picture. `Project.earliest_frame_utc()` (new this run) and the existing per-night rollups already answer the
+  capture side, so most of this is a decision plus a label, not new data. **Care:** don't flip a *sort* to
+  capture time — "newest run" is the right ordering for History — and where both dates matter, say both
+  ("shot 15 Nov 2024 · stacked 30 Aug 2026") rather than silently swapping one for the other.
+
+- **NEW IDEA (Builder 2026-08-30, noted while fixing the sky-coverage line v0.311.4) — the app writes "full
+  moons" in one sentence and "full Moon" in three others.** *(Pillar: friendliness — PRIORITY 3; size XS.)*
+  `components/skyCoverage.ts` says *"about 6 full moons' worth of sky"*; `scalebar._moon_comparison`,
+  `angularsize` and the framing hint all say *"full Moon"*. Same noun, same product, two spellings, and on the
+  Dashboard the two can appear within a screen of each other. One line of copy plus its three test assertions.
+  Deliberately **not** folded into v0.311.4, which was a grammar fix — this is cosmetic churn and should be
+  picked up on its own (or alongside anything else touching that file), not smuggled in.
+
 - **✅ SHIPPED (Builder, v0.308.0, branch `claude/compassionate-galileo-1bqxek`) — ~~let "North up" be a way to
   *look* at a picture, not only a way to overwrite it.~~** First surface built: the Target page's picture, in
   the viewer you get by clicking it. *(Pillar: enjoy + trust — PRIORITY 3.)*
@@ -15040,6 +15108,31 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **✅ SHIPPED (Builder, v0.311.4, branch `claude/compassionate-galileo-y2x4gk`) — ~~"Your 1 picture cover
+  0.29 square degrees" — the sky-coverage line on the Dashboard doesn't agree with itself, in the one state
+  every beginner passes through.~~** Second finding from the same `scripts/agent-dogfood.sh` pass as the
+  "First light" bug above; read straight off the phone Dashboard screenshot. *(Pillar: friendliness —
+  PRIORITY 3.)*
+
+  `describeSkyCoverage` pluralised the *noun* (`1 picture` / `12 pictures`) and left the verb at the plural
+  `cover`, so the singular branch — the state a beginner is in the day they make their first picture, i.e. the
+  most-read state of this sentence — said "Your 1 picture cover". Now: **"Your picture covers 1.3 square
+  degrees — …"** and **"Your 12 pictures cover 18.4 square degrees — …"**. The count is dropped in the
+  singular because "Your 1 picture" is stilted as well as ungrammatical.
+
+  **A test assertion was corrected, and that is worth being explicit about**, since "never weaken a test to go
+  green" is a hard rule. `skyCoverage.test.ts` had a test *named* `reads naturally on a first picture` whose
+  assertion was `expect(s).toContain("Your 1 picture cover")` — it pinned the defect its own name described.
+  The assertion now demands the corrected sentence and adds `not.toContain("picture cover ")`; nothing was
+  deleted, skipped or loosened, and a second test pins the plural branch unchanged.
+
+  **Upgrade-safe (§9):** frontend copy only — no API, schema, config, on-disk or default change. **Tests
+  (+1, and 1 corrected; both fail before.)**
+
+  **Noted, deliberately not changed:** this sentence writes "full moons" while the app's three other Moon
+  comparisons (`scalebar._moon_comparison`, `angularsize`, the framing hint) write "full Moon". One product
+  voice would capitalise it; it is cosmetic churn beyond this fix, so it is filed here rather than folded in.
+
 - **✅ SHIPPED (Builder, v0.296.2, branch `claude/compassionate-galileo-u3wi1n`) — ~~the object overlay draws
   every label at full size with no collision handling, so a rich field degenerates into an unreadable pile
   exactly where the labels are most interesting.~~** Shipped as the filed shape asked, pure and box-size-driven.
@@ -15151,8 +15244,48 @@ problems. Dogfood it every big-picture run and fix root causes.
   appending one more always-on card, and only show it once there are, say, three or more mapped pictures
   (below that the map is mostly empty sky and reads as a bug rather than a milestone).
 
-- **NEW IDEA (Builder 2026-08-29, the one half deliberately left out of the v0.291.0 preview-crop fix) — the
-  History caption's Moon sentence still describes the *un-cropped* frame on a picture the auto-edit trimmed.**
+- **✅ SHIPPED (Builder, v0.311.2, branch `claude/compassionate-galileo-y2x4gk`) — ~~the
+  History caption's Moon sentence still describes the *un-cropped* frame on a picture the auto-edit trimmed.~~**
+  *(Pillar: understand / trust — PRIORITY 3.)*
+
+  **What shipped, close to the filed shape but with the naming inverted — deliberately.** The entry proposed
+  making `scale_bar` mean the *stored preview* and adding `canvas_scale_bar` for the raw grid. That is a
+  **behaviour change on an existing field**, which an older frontend would silently read as the wrong picture's
+  field width (§9: add fields, don't repurpose them). So `scale_bar` keeps meaning exactly what it has always
+  meant — the full FITS canvas, which is what History's live **Adjust** render shows — and the new field is
+  `preview_scale_bar`, the same bar measured on the visible rectangle. `null` unless the run really is cropped,
+  so an ordinary run's payload is byte-for-byte what it was, and an older frontend that ignores the field
+  behaves exactly as it does today.
+
+  **Measured on the visible box, not rescaled.** The server runs the same `scale_bar_for` on the same
+  `crop_pixel_box` the shared JPEG's baked marks already use (`_sky_marks_for_run`), so the two can't drift —
+  and the ladder rung is re-chosen for the trimmed field, making it a complete self-consistent answer rather
+  than a `fraction` scaled off a rung picked for a bigger picture. On a 70 % border trim the sentence goes from
+  "about 5.4 full Moons wide" to "about 3.8", a 1.43× overstatement removed.
+
+  **Two consumers, one helper.** `croppedAnnotationView` takes the cropped bar and prefers it whenever the crop
+  bites (falling back to today's `fraction` rescale when the backend sends none), which fixes the on-screen
+  sentence; and a new pure `storedPreviewScaleBar(annotations, run)` answers "which bar describes the bytes
+  this run hands over?" for the **copied** and **share-sheet** captions, which were reading the raw canvas bar.
+
+  **One thing beyond the filed scope, for the same reason:** that helper also declines on a preview whose
+  geometry is unknown, and on one a past "North up → Save" turned (a rotate-with-expand grows the frame around
+  the same sky). The on-screen note already refuses both — only the caption still spoke — so this makes the two
+  agree. It replaces a wrong clause with no clause, never with a different number.
+
+  **Upgrade-safe (§9):** one additive optional response field, no schema/config/on-disk/default change, and no
+  existing field's meaning touched.
+
+  **Tests (+11; 3 Python + 2 of the 8 frontend fail before):** `tests/webapp/test_stack_annotations.py` — an
+  uncropped run reports `null`; a 70 %-trimmed run's bar pinned **against `scale_bar_for` itself** on the same
+  pixel box (parity, not a re-derivation) plus its shrunk `frame_arcmin` and its self-consistent `fraction`; and
+  a cropped run with no WCS offering neither bar. `AnnotatedImage.test.tsx` — the cropped bar preferred, ignored
+  where no crop applies, and the rescale fallback pinned unchanged; `storedPreviewScaleBar`'s five cases.
+  `History.test.tsx` — the on-screen sentence and the copied caption both quoting the trimmed field and not the
+  canvas.
+
+  Original spec, for the record:
+
   *(Pillar: understand / trust — PRIORITY 3. Size: S. Confidence: certain — I left it, knowingly, this run.)*
   `scale_bar.moon_comparison` ("the whole frame is about 2.5 full Moons wide") is generated server-side from
   the **canvas** width (`_scale_bar_from_wcs(wcs, width, height)` in the `…/annotations` handler), and after

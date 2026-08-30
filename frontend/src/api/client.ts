@@ -1144,8 +1144,15 @@ export interface StackAnnotations {
   height: number;       // the run's FITS pixel height (y_px domain)
   objects: FieldObject[];
   // The scale bar for this run, or null when it has no usable celestial WCS
-  // (older/edited runs) — the overlay then simply doesn't offer it.
+  // (older/edited runs) — the overlay then simply doesn't offer it. Measured on
+  // the full FITS canvas, which is what the *live* Adjust render shows.
   scale_bar: ScaleBar | null;
+  // The same bar measured on the part of the canvas the *stored preview* shows,
+  // for runs the auto-edit trimmed — so the drawn bar, the frame width and the
+  // "N full Moons wide" sentence all describe the picture on screen rather than
+  // the larger canvas behind it. null when the run isn't cropped (use
+  // `scale_bar`) or has no usable WCS; absent on an older backend, same meaning.
+  preview_scale_bar?: ScaleBar | null;
   // Where North/East point, or null when the run has no usable orientation.
   // Absent on an older backend, which reads as "no rose" and shows nothing.
   directions?: SkyDirections | null;
