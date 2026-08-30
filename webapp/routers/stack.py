@@ -1680,6 +1680,16 @@ async def _save_processed_preview(
     from seestack.render.thumbnail import applied_north_up_deg, orient_preview_north_up
     from seestack.stack.output import _write_preview_png
 
+    # Only a run whose picture *is* a processed one has anything to keep. On an
+    # ordinary linear run this would silently turn a saved editor recipe into the
+    # run's thumbnail and mark it display-space — a different feature (the
+    # "unexported edit → finish" flow) reached by a path nothing offers. Refuse
+    # rather than quietly do it.
+    if not _preview_is_display_space(run.options_json):
+        raise HTTPException(
+            status_code=400,
+            detail="This run's picture isn't a processed one — save a stretch instead",
+        )
     lib, proj = deps.open_target_project(request, safe)
     try:
         recipe_json = _saved_recipe_json(proj, run)

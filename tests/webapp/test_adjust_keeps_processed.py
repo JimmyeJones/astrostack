@@ -301,12 +301,31 @@ def test_keep_processed_records_the_recipes_border_trim(client, solved_library):
     assert _run_row(solved_library, safe, run_id).preview_crop_json == baked_crop
 
 
-def test_keep_processed_without_a_recipe_is_refused_not_guessed(
+def test_keep_processed_on_an_ordinary_run_is_refused_not_guessed(
         client, solved_library):
-    """No recipe ⇒ nothing to bake. Say so rather than silently falling back to
-    the stretch save the user was explicitly avoiding."""
+    """A linear run has no processed picture to keep. Doing it anyway would turn
+    a saved editor recipe into the run's thumbnail and mark it display-space —
+    a *different* feature, down a path nothing offers. Refuse instead."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     run_id, preview = _register_run(solved_library, safe)
+    before = preview.read_bytes()
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                    json={"keep_processed": True, "north_up": False})
+    assert r.status_code == 400
+    assert preview.read_bytes() == before
+
+
+def test_keep_processed_without_a_recipe_is_refused_not_guessed(
+        client, solved_library):
+    """Processed, but the recipe is gone ⇒ nothing to bake. Say so rather than
+    silently falling back to the stretch save the user was avoiding."""
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, preview = _register_run(solved_library, safe)
+    assert _auto_edit(solved_library, safe, run_id) is not None
+    _set_meta(solved_library, safe, f"{RECIPE_META_PREFIX}{run_id}", "")
     before = preview.read_bytes()
 
     r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
