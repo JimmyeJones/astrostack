@@ -2,7 +2,13 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NightsCard, formatNightDate, nightDateLabel, verdictBadge } from "./NightsCard";
+import {
+  NightsCard,
+  formatNightDate,
+  nightDateLabel,
+  verdictBadge,
+  verdictTooltip,
+} from "./NightsCard";
 import type { NightSummary } from "../api/client";
 import * as client from "../api/client";
 
@@ -66,6 +72,51 @@ describe("nightDateLabel", () => {
   });
 });
 
+describe("verdictTooltip", () => {
+  it("says what a soft night was compared against", () => {
+    // The yellow word sits beside a button that discards the night, so the
+    // reader needs the comparison, not just the conclusion.
+    expect(verdictTooltip(night({
+      verdict: "soft", median_fwhm_px: 5.2, typical_fwhm_px: 3.4,
+    }))).toBe("5.2 px stars — softer than this target's usual 3.4 px.");
+  });
+
+  it("never calls the baseline a 'best'", () => {
+    // The baseline is the median of the other nights, so quoting it as anyone's
+    // best would be a number nobody achieved (the v0.319.1 fix's whole point).
+    const tip = verdictTooltip(night({
+      verdict: "soft", median_fwhm_px: 5.2, typical_fwhm_px: 3.4,
+    }));
+    expect(tip).not.toMatch(/best|sharpest/i);
+  });
+
+  it("gives a sharp night the same yardstick", () => {
+    expect(verdictTooltip(night({
+      verdict: "sharp", median_fwhm_px: 2.4, typical_fwhm_px: 3.4,
+    }))).toBe("2.4 px stars — this target's usual is 3.4 px.");
+  });
+
+  it("explains a hazy night by its clouds, not by sharpness", () => {
+    const tip = verdictTooltip(night({ verdict: "hazy", typical_fwhm_px: null }));
+    expect(tip).toMatch(/cloudy/i);
+    expect(tip).not.toMatch(/px/);
+  });
+
+  it("stays silent rather than inventing a comparison", () => {
+    // A lone judgeable night (no baseline), an older backend that sends no
+    // baseline at all, an unmeasured night, and junk numbers.
+    expect(verdictTooltip(night({ verdict: "soft", typical_fwhm_px: null }))).toBeNull();
+    expect(verdictTooltip(night({ verdict: "sharp" }))).toBeNull();
+    expect(verdictTooltip(night({
+      verdict: "soft", median_fwhm_px: null, typical_fwhm_px: 3.4,
+    }))).toBeNull();
+    expect(verdictTooltip(night({
+      verdict: "soft", median_fwhm_px: Number.NaN, typical_fwhm_px: 3.4,
+    }))).toBeNull();
+    expect(verdictTooltip(night({ verdict: "", typical_fwhm_px: 3.4 }))).toBeNull();
+  });
+});
+
 describe("verdictBadge", () => {
   it("maps each verdict to a colour + label", () => {
     expect(verdictBadge("sharp")).toEqual({ color: "teal", label: "sharp" });
@@ -91,6 +142,38 @@ describe("NightsCard", () => {
     expect(screen.getByText("soft")).toBeInTheDocument();
     expect(screen.getByText("sharp")).toBeInTheDocument();
     expect(screen.getByText("sharpest")).toBeInTheDocument();
+  });
+
+  it("labels the badge with what it was measured against", async () => {
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([
+      night({
+        start_utc: "2026-07-08T22:00:00+00:00", verdict: "soft",
+        median_fwhm_px: 5.2, typical_fwhm_px: 3.4,
+      }),
+      night({
+        start_utc: "2026-07-01T22:00:00+00:00", verdict: "sharp",
+        median_fwhm_px: 2.4, typical_fwhm_px: 3.4,
+      }),
+    ]);
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Nights")).toBeInTheDocument());
+    expect(screen.getByLabelText(
+      "soft: 5.2 px stars — softer than this target's usual 3.4 px.",
+    )).toBeInTheDocument();
+    // Still a badge, not a fourth column: the sentence is not rendered as text.
+    expect(screen.queryByText(/softer than this target's usual/)).not.toBeInTheDocument();
+  });
+
+  it("leaves the badge bare when an older backend sends no baseline", async () => {
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([
+      night({ start_utc: "2026-07-08T22:00:00+00:00", verdict: "soft", median_fwhm_px: 5.2 }),
+      night({ start_utc: "2026-07-01T22:00:00+00:00", verdict: "sharp", median_fwhm_px: 2.4 }),
+    ]);
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Nights")).toBeInTheDocument());
+    const badge = screen.getByText("soft");
+    expect(badge).toBeInTheDocument();
+    expect(badge.getAttribute("aria-label")).toBeNull();
   });
 
   it("shows the observing night, not the UTC date of the first sub", async () => {

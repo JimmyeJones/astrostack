@@ -823,6 +823,7 @@ def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
             kept_exposure_s=n.kept_exposure_s,
             median_fwhm_px=n.median_fwhm_px,
             verdict=n.verdict,
+            typical_fwhm_px=n.typical_fwhm_px,
             is_best=n.is_best,
             reject_buckets=n.reject_buckets,
         )

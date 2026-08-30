@@ -678,6 +678,11 @@ class NightSummary:
     kept_exposure_s: float          # Σ exposure of the kept subs this night
     median_fwhm_px: float | None    # median FWHM over accepted, measured subs, or None
     verdict: str                    # "sharp" | "soft" | "hazy" | "" (too few measured)
+    # The baseline this night's verdict was judged against — the median of the
+    # OTHER nights' medians (see ``_typical_other_fwhm``), or None when there is
+    # no other judgeable night. Returned so the UI can say what "soft" means
+    # rather than showing a bare yellow word next to a discard button.
+    typical_fwhm_px: float | None
     is_best: bool                   # the target's sharpest night (only when ≥2 judgeable)
     reject_buckets: dict[str, int] = field(default_factory=dict)  # plain bucket → count
 
@@ -803,6 +808,7 @@ def nights_breakdown(
             kept_exposure_s=sum(f.exposure_s or 0.0 for f in kept),
             median_fwhm_px=median_fwhm,
             verdict=verdict,
+            typical_fwhm_px=typical_fwhm,
             is_best=is_best,
             reject_buckets=buckets,
         ))
