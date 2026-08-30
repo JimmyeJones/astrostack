@@ -9403,21 +9403,71 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-30, unlocked by the v0.306.2 preview-rotation server half) — let "North up" be a
-  way to *look* at a picture, not only a way to overwrite it.** *(Pillar: enjoy + trust — PRIORITY 3; size S–M;
-  read-only, off by default.)* Until this run, the only way to see one of your pictures oriented like every
-  reference photo of the object was History → Adjust → tick → **Save**, which rewrites the stored preview and
-  (until v0.305.0) could cost a processed run its look. That is a destructive answer to a purely visual
-  question. `GET …/stack-runs/{id}/preview?north_up=true` now turns the *saved bytes* on the way out and
-  changes nothing on disk (v0.306.2 built it for the Adjust panel), so any surface that shows a picture could
-  offer the same tick as a **view** control: the Target hero (`LatestPictureCard`), the Gallery lightbox, the
-  Compare view. **Shape:** one shared toggle component reading the run's `north_up_deg` from the annotations /
-  suggestion it already fetches, remembered per viewer in `localStorage` (not on the run — this is a viewing
-  preference, not a fact about the picture). **Cautions, both already solved once in `History.tsx` and worth
-  copying rather than re-deriving:** object pins, the scale bar and the compass are measured on the un-rotated
-  FITS grid, so a turned view must hide them (`cantPlaceMarks`); and the rejection tint is sized to the stored
-  bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
-  make it the default: the saved orientation is what the owner chose.
+- **✅ SHIPPED (Builder, v0.308.0, branch `claude/compassionate-galileo-1bqxek`) — ~~let "North up" be a way to
+  *look* at a picture, not only a way to overwrite it.~~** First surface built: the Target page's picture, in
+  the viewer you get by clicking it. *(Pillar: enjoy + trust — PRIORITY 3.)*
+
+  **What shipped.** `…/annotations` gained one additive field, `north_up_deg` — how far a `?north_up=true`
+  render would *actually* turn this run, taken from `applied_north_up_deg`, the helper that already owns the
+  threshold-and-snap rules, so it can never disagree with what the renderer does. `null` when the turn would do
+  nothing (no usable WCS, or a sub-threshold correction), which is the whole point: **a toggle that visibly
+  changes nothing is worse than no toggle**, so the control is only offered where the picture would move.
+
+  Frontend: a shared `components/NorthUpViewToggle.tsx` (the toggle plus the two `localStorage` accessors),
+  wired into `LatestPictureCard`'s `ImageLightbox` through the `toolbarExtra` prop that already existed for
+  exactly this. Off by default; remembered per **viewer**, not on the run, because it is a viewing preference
+  and not a fact about the picture. Storage that throws (a private window, a browser blocking site data) is
+  swallowed — the toggle still works for the session, it just isn't remembered.
+
+  **Everything the viewer hands over follows what's on screen** — the preview, the JPEG behind Share, and the
+  full-res PNG all take the same `north_up`, so a picture someone downloaded *because they liked how it looked*
+  arrives that way. The **FITS deliberately does not**: the raw data stays WCS-aligned. Nothing is written; the
+  bytes on disk are untouched, exactly as before.
+
+  **The entry's two cautions, answered rather than inherited.** Putting the control in the *lightbox* rather
+  than on the card means neither bites: the lightbox draws a plain `<img>` with no pins, scale bar or compass to
+  mis-place, and no rejection tint to fall out of register. The card's own thumbnail keeps its stored
+  orientation and its labels, so `cantPlaceMarks` is untouched. A run whose preview a past **Adjust → Save**
+  already baked North-up gets no toggle at all — it is already turned, and asking again is a no-op.
+
+  **Deliberately one surface, not four.** The Target hero's header row already carries three controls and a
+  fourth wraps badly on the phone the owner reads this on (the reason v0.293.0 kept that row to one toggle), so
+  this went where there is room and where you actually want it. The Gallery lightbox and Compare are the same
+  two lines each — filed as a follow-on below rather than done blind.
+
+  **Upgrade-safe (§9):** one additive response field; an older frontend ignores it and an older backend omitting
+  it reads as "no toggle". No config, schema, on-disk, default or API-shape change, and no new request on an
+  ordinary page load (the annotations fetch that answers this is the one the labels already made, now also
+  enabled when the picture is opened big).
+
+  **Tests (+7; 3 of the 3 Python ones fail before):** `tests/webapp/test_stack_annotations.py` — a real turned
+  field's angle pinned **against `applied_north_up_deg` itself** rather than re-derived from a CD matrix, a
+  field already sitting North-up reporting `null`, and a run with no WCS reporting `null` beside its existing
+  no-rose/no-bar assertions (the fixture grew a `dec_sign` so both orientations are real headers, since the
+  original axis-aligned one is North-*down* on screen — 180° — which is why it can't stand in for "already
+  oriented"). `LatestPictureCard.test.tsx` — no toggle before the picture is opened and none on a run with
+  nothing to turn; the turn switching the shown bytes and both downloads while the FITS stays put; the
+  preference written per viewer and cleared again; and no toggle on a picture a past save already turned.
+
+  **Follow-on left open:** the same two lines on the Gallery lightbox and the Compare view, plus the rejection
+  tint's own `north_up` (the entry directly below) if a surface ever wants both at once.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy + trust — PRIORITY 3; size S–M;
+    read-only, off by default.)* Until this run, the only way to see one of your pictures oriented like every
+    reference photo of the object was History → Adjust → tick → **Save**, which rewrites the stored preview and
+    (until v0.305.0) could cost a processed run its look. That is a destructive answer to a purely visual
+    question. `GET …/stack-runs/{id}/preview?north_up=true` now turns the *saved bytes* on the way out and
+    changes nothing on disk (v0.306.2 built it for the Adjust panel), so any surface that shows a picture could
+    offer the same tick as a **view** control: the Target hero (`LatestPictureCard`), the Gallery lightbox, the
+    Compare view. **Shape:** one shared toggle component reading the run's `north_up_deg` from the annotations /
+    suggestion it already fetches, remembered per viewer in `localStorage` (not on the run — this is a viewing
+    preference, not a fact about the picture). **Cautions, both already solved once in `History.tsx` and worth
+    copying rather than re-deriving:** object pins, the scale bar and the compass are measured on the un-rotated
+    FITS grid, so a turned view must hide them (`cantPlaceMarks`); and the rejection tint is sized to the stored
+    bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
+    make it the default: the saved orientation is what the owner chose.
 
 - **NEW IDEA (Builder 2026-08-30, the one thing v0.306.2 had to switch off) — the "see what stacking removed"
   tint can't be shown over a North-up view, and the same trick that turns the picture would turn the tint.**
