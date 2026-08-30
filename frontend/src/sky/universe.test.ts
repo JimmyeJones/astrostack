@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { SkyImage } from "./projection";
 import {
-  INNER_RADIUS, OUTER_RADIUS, radiusForDepth, scaleCaption, spanSummary,
+  FLY_MARGIN, FLY_MAX_DISTANCE, FLY_MIN_DISTANCE, INNER_RADIUS, OUTER_RADIUS,
+  flyToCameraPosition, radiusForDepth, scaleCaption, spanSummary,
   withPictures, type UniverseObject, type UniverseShell,
 } from "./universe";
 
@@ -104,5 +105,58 @@ describe("spanSummary", () => {
 
   it("is empty with nothing placed", () => {
     expect(spanSummary([])).toBe("");
+  });
+});
+
+describe("flyToCameraPosition", () => {
+  const len = (v: { x: number; y: number; z: number }) =>
+    Math.hypot(v.x, v.y, v.z);
+
+  it("stops just outside the object, on its own radial line", () => {
+    // Same direction as the object (so OrbitControls, still targeting the
+    // origin, frames it dead centre) and a little further out.
+    const at = { x: 0, y: 0, z: 40 };
+    const cam = flyToCameraPosition(at)!;
+    expect(cam.x).toBeCloseTo(0, 6);
+    expect(cam.y).toBeCloseTo(0, 6);
+    expect(cam.z).toBeCloseTo(40 + FLY_MARGIN, 6);
+  });
+
+  it("keeps the object between the camera and the origin", () => {
+    // The property the whole move relies on: |camera| > |object|, and the two
+    // point the same way. Checked on an off-axis object, not just an axis one.
+    const at = { x: 3, y: -4, z: 12 };
+    const cam = flyToCameraPosition(at)!;
+    expect(len(cam)).toBeGreaterThan(len(at));
+    const dot = (cam.x * at.x + cam.y * at.y + cam.z * at.z) / (len(cam) * len(at));
+    expect(dot).toBeCloseTo(1, 6);
+  });
+
+  it("never parks outside the controls' own orbit limits", () => {
+    // A destination the controls would snap out of on the next frame would make
+    // the arrival visibly jump.
+    const near = flyToCameraPosition({ x: 0, y: 0, z: INNER_RADIUS })!;
+    expect(len(near)).toBeGreaterThanOrEqual(FLY_MIN_DISTANCE);
+    const far = flyToCameraPosition({ x: 0, y: 0, z: 5000 })!;
+    expect(len(far)).toBeLessThanOrEqual(FLY_MAX_DISTANCE);
+    // ...and the whole placed range lands inside the limits.
+    for (const d of [0, 0.25, 0.5, 0.75, 1]) {
+      const cam = flyToCameraPosition({ x: 0, y: 0, z: radiusForDepth(d) })!;
+      expect(len(cam)).toBeGreaterThanOrEqual(FLY_MIN_DISTANCE);
+      expect(len(cam)).toBeLessThanOrEqual(FLY_MAX_DISTANCE);
+    }
+  });
+
+  it("declines a degenerate or non-finite position instead of flying to NaN", () => {
+    expect(flyToCameraPosition({ x: 0, y: 0, z: 0 })).toBeNull();
+    expect(flyToCameraPosition({ x: Number.NaN, y: 0, z: 1 })).toBeNull();
+    expect(flyToCameraPosition({ x: 0, y: Number.POSITIVE_INFINITY, z: 1 })).toBeNull();
+  });
+
+  it("a further object really does end up further out", () => {
+    const near = flyToCameraPosition({ x: 0, y: 0, z: radiusForDepth(0.1) })!;
+    const far = flyToCameraPosition({ x: 0, y: 0, z: radiusForDepth(0.9) })!;
+    expect(len(far)).toBeGreaterThan(len(near));
+    expect(len(far)).toBeLessThanOrEqual(OUTER_RADIUS + FLY_MARGIN);
   });
 });

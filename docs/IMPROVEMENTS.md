@@ -43,9 +43,17 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-- **CLAIMED (Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow`) — idea (b) of "fly to it, and
-  tell the reader what they're looking at": carry `CatalogObject.blurb` onto `UniverseObjectOut`** so the
-  universe map's read-out is a sentence about the object, not just a distance.
+_(none — claim an item here with your branch name)_
+
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow` — run finished, all claims released.**
+> Shipped two: the ~~invisible reveal on "Process target"~~ dogfood finding (**v0.301.0**, write-up under
+> "Features that serve real workflows"), taking the *honest full fix* rather than the interim copy slice — the
+> reference sub goes through the run's own stored recipe, so both halves carry identical processing; and both
+> cheap taps on **"Your universe"** (**v0.302.0**) — the catalog blurb on the read-out, and **fly to it**.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
+> Claiming in the run's **first** commit and pushing immediately (per the five duplicate-collision process
+> notes) again cost under a minute; no collision.
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-4txqj1` — run finished, both claims released.**
 > Shipped two: **"Share your glow-up"** (**v0.300.0**, write-up under "Features that serve real workflows") —
@@ -17629,16 +17637,35 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **NEW IDEA (Builder 2026-08-29, the follow-ups deliberately left out of "Your universe" v0.296.0) — "fly to
   it", and tell the reader what they're looking at.** *(Pillar: enjoy + understand — PRIORITY 3; size S each;
   frontend-only, no new data.)* Three cheap taps on the shipped page, in value order:
-  (a) **Fly to this object.** Clicking a picture selects it and stops the drift, but the camera stays where it
-  was — on a five-decade scale the nearest objects are a long way in from the outer ring, so the reader has to
-  orbit and dolly to actually *look* at the thing they clicked. An eased camera tween to a point just outside
-  the object (the classic "fly through your universe" move the owner's SpaceEngine reference is built on) is
-  the single biggest felt improvement left. Keep OrbitControls' target at the origin or the orbit becomes
-  confusing; tween the camera position only.
-  (b) **The blurb is already there.** `CatalogObject.blurb` — the plain-language "what am I looking at?"
-  one-liner the object card on the Target page already shows — is loaded by `identify_object` and simply not
-  carried onto `UniverseObjectOut`. One additive field and one `<Text>`: the read-out goes from a distance to
-  an actual sentence about the object. **Grep first**, don't re-derive the lookup.
+  (a) ~~**Fly to this object.**~~ — **✅ SHIPPED v0.302.0** (Builder 2026-08-30, branch
+  `claude/compassionate-galileo-lcagow`), with the filed caution honoured exactly: OrbitControls' target stays
+  at the origin and only the camera position moves. The trick that makes those two compatible is that the
+  destination sits on the object's **own radial line**, just outside it (`flyToCameraPosition` in
+  `sky/universe.ts`) — with the object *between* camera and origin, looking at the origin frames it dead
+  centre anyway. A `<FlyTo>` component eases the camera there (a fixed fraction of the remaining gap per
+  second, `delta` clamped so a backgrounded tab doesn't teleport on its first frame back) and stands down the
+  instant someone grabs the controls. The controls' own `update()` runs at frame priority **-1**, i.e. before
+  this write, so they follow the camera rather than fight it; the destination is clamped to their own
+  `min`/`maxDistance` so the arrival can't visibly snap.
+  **Tests (5, in `sky/universe.test.ts`):** the destination is on the object's line and outside it; the
+  camera-past-object property on an off-axis object (a unit-dot check, not just an axis case); every placed
+  depth **and** both extremes land inside the orbit limits; a degenerate/non-finite position declines with
+  `null` rather than flying to NaN; and a further object really does end up further out. The `<FlyTo>`
+  component itself is untested, like the rest of the WebGL scene — the maths it runs on is not.
+  (b) ~~**The blurb is already there.**~~ — **✅ SHIPPED v0.302.0** (Builder 2026-08-30, branch
+  `claude/compassionate-galileo-lcagow`), exactly as filed and at the filed size. `UniverseObject` gained a
+  `blurb: str = ""` carried straight off `identify_object`'s `ObjectInfo.blurb` (grepped first — the lookup
+  already loads it), `UniverseObjectOut` an additive field defaulting to `""`, and the object card one
+  `<Text>` rendered only when the sentence is non-empty. So the read-out is now *about the object* rather
+  than two numbers about something the reader may not recognise. **Tests:** three in
+  `tests/test_universemap.py` (the blurb travels; a catalog entry without one yields `""`, never `None`, so
+  no read site needs a guard; and — the measurement, not an assumption — the **real bundled catalog** does
+  carry blurbs for the popular targets), one in `tests/webapp/test_sky_universe.py` pinning the field on the
+  response, and two in `Universe.test.tsx` (shown when present; nothing at all for `""` *and* for a missing
+  field, so an older backend degrades cleanly).
+    *(Original spec: `CatalogObject.blurb` — the plain-language "what am I looking at?" one-liner the object
+    card on the Target page already shows — is loaded by `identify_object` and simply not carried onto
+    `UniverseObjectOut`. One additive field and one `<Text>`. **Grep first**, don't re-derive the lookup.)*
   (c) **Constellation lines at the backdrop radius.** The star backdrop is a bare point cloud at r=420; the
   offline Sky viewer's recognisable-star labelling is the precedent. Only worth it if a constellation-line
   dataset is already bundled — check before scoping, and do **not** add one as a dependency for this.
