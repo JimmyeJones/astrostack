@@ -43,17 +43,30 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-> **Builder 2026-08-30, branch `claude/compassionate-galileo-1m28nv` — CLAIMING two, by *site* (per the
-> collision process notes, naming the file/function, not just the lead):**
-> 1. **The History → "Adjust" → Save trapdoor** on an auto-edited run — `save_stack_preview`
->    (`webapp/routers/stack.py:1599`) + the Adjust panel in `frontend/src/routes/History.tsx` (`RunCard`,
->    the `adjust && run.has_fits` block ~line 1083). Both halves of the filed shape: the warning note, and
->    the **North-up-only save that re-renders through the run's stored recipe** so rotating a finished
->    picture stops costing the user their processed picture.
-> 2. **The "Clouds & haze" card's unconditional *"counted less in your stack"* promise** —
->    `webapp/routers/target.py`'s transparency-trend response + `frontend/src/routes/Target.tsx`'s
->    clouds/haze card copy. Taking the *plumbed* option (the newest genuine run's `quality_weighted`),
->    not the copy-softening one.
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-1m28nv` — run finished, all claims released.**
+> Shipped three, each its own independently-green commit:
+> **v0.305.0** (under "Autonomy & friendliness") — the **History → "Adjust" → Save trapdoor**: on a
+> "Process target" run, saving replaced the processed picture with a plain stretch of the linear master,
+> silently, and a user who opened the panel only to tick **North up** paid the same price. Both filed halves:
+> the warning, and a `keep_processed` save that re-bakes the run's own recipe (rotated, if asked) so the one
+> control anybody wants there stops flattening the picture. It also *mends* a drifted run rather than
+> declining on it. The plain slider save is untouched, and a test pins that beside the new one.
+> **v0.305.1** (same section) — the **"counted less in your stack"** promise. Took the *plumbed* option and
+> found the identical sentence on the sibling **focus** card, so both were fixed together. The key call:
+> `latest_stack_weighting` reads the newest genuine stack's **FITS provenance** (`WGTMODE`), not
+> `options_json` — a run can ask for weighting and have an order-statistic min/max combine ignore it
+> (`WGTSKIP`), which for the reader is the same as never asking. A test pins exactly that case.
+> **v0.306.0** (under "Features that serve real workflows") — the run's new beginner feature, **"how much of
+> the sky have you actually seen?"** under My map. The entry warned it needed an equal-area projection pass;
+> it doesn't — `|det(pixel_scale_matrix)|` is the solid angle of one pixel, so the area is exact *before*
+> anything is projected, and nothing about how the map is drawn can move it (a test renders the map between
+> two reads and asserts it didn't budge).
+> **Confirmed pre-existing, not mine:** the pytest quirk the `…-fj2p70` Builder filed reproduced again — a
+> hand-picked file list interleaving `tests/webapp/…` and `tests/…` paths lost `tests/webapp/conftest.py`
+> and errored every webapp test with `fixture 'client' not found`. Re-running the same files without the
+> interleave passed. It still looks exactly like "my change broke everything"; the note is worth keeping.
+> Claiming in the run's **first** commit, **by site** (file + function, not just the lead), cost under a
+> minute; `main` had not moved by merge time and there was no collision.
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-ezix3s` — run finished, all claims released.**
 > Worked the standing **"sweep the engine for a POSITION-DEPENDENT metric compared across a whole target"** QA
@@ -9351,6 +9364,25 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-30, spotted while shipping the v0.305.0 Adjust trapdoor fix — the one thing that
+  fix deliberately left alone) — on a *processed* run, the Adjust panel shows you a picture that is not the
+  one either button will save.** *(Pillar: editor/trust — PRIORITY 1–3; size S; frontend only.)* Opening
+  Adjust swaps the card's `<img>` from the stored preview to the live `…/render` of the **linear** FITS at
+  the sliders. On an ordinary run that is exactly the point: what you see is what "Save as preview" writes.
+  On a "Process target" run it is now misleading in a new way — the panel offers **"Keep the processed
+  picture"**, whose result is the *recipe* render, i.e. the picture that was on screen a moment before you
+  opened the panel and is not on screen now. v0.305.0 papers over the worst of it by closing the panel on a
+  successful keep-save (so you immediately see what you kept), and the warning text says which is which, but
+  the honest fix is for the *preview* to follow the button: keep showing the stored bytes on a processed run
+  until the user actually touches a slider (`touched.current`, which the panel already tracks for the
+  suggestion), and only then switch to the live render. **Cautions:** don't break the North-up preview — the
+  live render is currently the only way to *see* the rotation before saving it, so if the stored bytes are
+  shown, the rotation preview needs the same `north_up` treatment the share path uses
+  (`orient_preview_north_up` on the stored PNG, which is exactly what that helper is for). Grep first: the
+  card already has three "which picture is on screen?" predicates (`showingStored`, `imageIsNorthUp`,
+  `geometryUnplaceable`) — this belongs with them, not beside them.
+
+
 - **✅ SHIPPED (Builder, v0.305.0, branch `claude/compassionate-galileo-1m28nv`) — ~~History → "Adjust" → Save
   silently throws away a "Process target" run's finished picture.~~** Both halves of the filed shape, and no
   wider.
@@ -17995,6 +18027,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW IDEA (Builder 2026-08-30, the two obvious next taps on the v0.306.0 sky-coverage stat) — put "how much
+  of the sky have you seen" where the owner already looks, and stop it double-counting neighbours.**
+  *(Pillar: enjoy + trust — PRIORITY 3; size S each; both read-only.)*
+  1. **Say it on the Dashboard.** The number is a pride stat, and today it lives one nav click and one mode
+     switch away, under a map most people visit occasionally. `GET /api/sky/coverage` is already cached
+     server-side against the "did a picture change?" fingerprint, so a Dashboard line costs one cheap request
+     and no new machinery. Same sentence, same helper (`describeSkyCoverage`) — do **not** re-word it, or the
+     two surfaces will drift.
+  2. **Overlapping targets are summed twice.** `_measure_sky_coverage` adds each target's area independently.
+     Two library targets aimed at the same patch of sky would be counted twice — the library normally models
+     that as *one* target with more frames, which is why this was shipped as-is, but a deliberately
+     re-framed second target (a wider mosaic over an earlier single field is the realistic case) really does
+     double-count. **Honest fix:** rasterise each run's covered footprint onto one coarse equal-area sky grid
+     (HEALPix-style, or a simple sin(dec) band grid — no new dependency needed at ~0.1° resolution) and count
+     *set* cells. Only worth it if the owner ever has adjacent targets; check before building, and note that
+     the fix makes the number go *down*, which needs a word of explanation if it visibly moves.
+
 
 - **✅ SHIPPED — FIRST SLICE (Builder, v0.296.0, branch `claude/compassionate-galileo-u3wi1n`) —
   ~~⭐ OWNER CLARIFICATION (2026-08-29): the *actual* universe map — the owner's captured objects placed in
