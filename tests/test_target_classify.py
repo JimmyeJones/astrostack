@@ -219,3 +219,89 @@ def test_extended_chroma_reads_the_region_not_its_pixels():
     tiny = np.zeros((80, 80), dtype=bool)
     tiny[0:4, 0:4] = True
     assert _extended_chroma(red, tiny) == 0.0
+
+
+# --- the *geometry* half of the same class ------------------------------------
+# The colour cue above was one half of "a statistic that changes meaning with
+# how much data went in"; the geometry cues were the other, and they moved
+# further. Measured on one unchanging synthetic galaxy at 4…800 subs, ``ext_frac``
+# ran 0.0121 → 0.0254 — a 2.1× swing on a sky that never changed — because the
+# threshold's ``6·sky_sigma`` term sits far above its own 0.06 floor on a thin
+# stack, and because the opening's erosion (a min over 49 samples) is biased
+# ~2.5σ low, so a thin stack's diffuse structure is depressed and the object's
+# own skirt is counted as point sources. On a *bigger* object that swing walked
+# the verdict clean across a class boundary: the scene below classified as a
+# galaxy at 4 and 16 subs and as *nothing at all* at 64+, so deeper data made
+# the suggestion worse. Both mechanisms vanish once the luminance is locally
+# averaged first (``_GEOM_SMOOTH_PX``), which is why the cues are measured on a
+# smoothed copy.
+
+
+def _galaxy_field(noise: float, radius: int = 11, seed: int = 5) -> np.ndarray:
+    """A small, concentrated, neutral extended object on a dark sky, with a
+    scattering of field stars — the galaxy archetype — under per-channel noise
+    of the given σ. ``radius`` sizes the object: 11 sits inside the galaxy band,
+    18 sits at the ``ext_frac <= 0.05`` ceiling where the old drift crossed it."""
+    rng = np.random.default_rng(seed)
+    h = w = 220
+    lum = (np.full((h, w), 0.02, np.float32)
+           + 0.6 * _blob((h, w), 110, 110, radius)
+           + _stars((h, w), 25, rng, sigma=1.0))
+    rgb = np.repeat(lum[..., None], 3, axis=2).astype("float32")
+    return rgb + rng.normal(0, noise, rgb.shape).astype("float32")
+
+
+# σ falls as 1/√N, so sweeping σ *is* sweeping the sub count: 0.10 for a single
+# sub gives 0.05 at 4 subs down to 0.0035 at 800.
+_DEPTHS = {n: 0.10 / float(np.sqrt(n)) for n in (4, 16, 64, 128, 300, 800)}
+
+
+def test_the_geometry_cues_do_not_move_with_how_deep_the_stack_is():
+    """The property the fix is for. One unchanging galaxy must report the same
+    shape whether it is four subs deep or eight hundred."""
+    ext = {}
+    sig = {}
+    for n, noise in _DEPTHS.items():
+        cues = classify_target(_galaxy_field(noise))["cues"]
+        ext[n] = cues["ext_frac"]
+        sig[n] = cues["sig_frac"]
+    # Before the fix this span was 2.1×; the deep end is the honest answer, so
+    # pin the whole sweep close to it rather than to the noisy shallow end.
+    deep = ext[800]
+    assert deep > 0.004, "the object must still register as extended signal"
+    for n, v in ext.items():
+        assert abs(v - deep) <= 0.20 * deep, f"ext_frac moved with depth at {n} subs: {ext}"
+    deep_sig = sig[800]
+    for n, v in sig.items():
+        assert abs(v - deep_sig) <= 0.20 * deep_sig, f"sig_frac moved with depth at {n} subs: {sig}"
+
+
+def test_a_galaxy_is_called_a_galaxy_at_every_depth():
+    """The regression, at the verdict level: the 18 px scene below was called a
+    galaxy at 4 and 16 subs and nothing at all at 64+, purely because ``ext_frac``
+    grew past the 0.05 ceiling as the grain fell away."""
+    for n, noise in _DEPTHS.items():
+        out = classify_target(_galaxy_field(noise))
+        assert out["cls"] == "galaxy", f"lost the galaxy at {n} subs: {out['cues']}"
+        assert out["preset_id"] == "galaxy_broadband"
+
+    # …and whatever the bigger scene is called, it must be called the *same*
+    # thing at every depth — the flip is the bug, not the label.
+    verdicts = {n: classify_target(_galaxy_field(noise, radius=18))["cls"]
+                for n, noise in _DEPTHS.items()}
+    assert len(set(verdicts.values())) == 1, f"verdict flipped with depth: {verdicts}"
+
+
+def test_smoothing_the_geometry_did_not_blur_stars_into_nebulosity():
+    """The cost side: the averaging must stay far narrower than the 7 px opening
+    that separates point sources from diffuse structure, or a dense star field
+    turns into fake extended signal and stops being a cluster."""
+    for n, noise in _DEPTHS.items():
+        rng = np.random.default_rng(4)
+        h = w = 220
+        lum = np.full((h, w), 0.02, np.float32) + _stars((h, w), 180, rng, sigma=1.0)
+        rgb = np.repeat(lum[..., None], 3, axis=2).astype("float32")
+        rgb = rgb + rng.normal(0, noise, rgb.shape).astype("float32")
+        out = classify_target(rgb)
+        assert out["cls"] == "cluster", f"lost the cluster at {n} subs: {out['cues']}"
+        assert out["cues"]["ext_frac"] <= 0.012

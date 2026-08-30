@@ -35,11 +35,27 @@ DEFAULT_SESSION_GAP_HOURS = 6.0
 # Cross-session quality-drift nudge (see ``session_quality_drift``). Auto-grade is
 # relative *within* a session, so a whole night shot soft/out-of-focus passes every
 # frame; this catches it by comparing the newest session's median FWHM against the
-# target's best prior session. Deliberately conservative — it must clear BOTH a
-# relative and an absolute floor — so it never nags on ordinary night-to-night
+# target's **typical** other night. Deliberately conservative — it must clear BOTH
+# a relative and an absolute floor — so it never nags on ordinary night-to-night
 # seeing wobble, only a materially worse whole session.
+#
+# The baseline used to be the *best* (sharpest) other night, and that was a
+# statistic whose meaning changed with how many nights you had: a minimum over N
+# samples falls without limit as N grows, so on a sky whose seeing never changed
+# the same ordinary night got flagged more and more often the longer the owner
+# stayed on the target. Measured (200k trials, nightly median FWHM ~ N(3.5, 0.5)
+# px, identical every night): **13.7 % of ordinary nights flagged after one prior
+# night, 40 % after five, 68 % after twenty, 79 % after forty**. The owner's whole
+# workflow is many nights on one target, so the nudge was aimed squarely at its own
+# blind spot — and on the Nights card the same comparison drives the "soft" badge
+# that sits beside a one-click **Set aside**, i.e. it was nudging toward discarding
+# good nights. The median of the *other* nights is stationary in N by construction,
+# which is the fix: same floors, same copy shape, a baseline that means one thing
+# however long you shoot. Re-measured on the same trials it holds ordinary nights
+# at 13.7 % → 4.4 % across the same sweep while still catching 88.8 % of a
+# genuinely soft (+1.5 px) night at forty nights.
 SESSION_QUALITY_MIN_FRAMES = 4      # need this many measured subs per session to trust its median
-FWHM_DRIFT_RATIO = 1.25             # newest ≥ 25% softer than the best prior session, AND
+FWHM_DRIFT_RATIO = 1.25             # newest ≥ 25% softer than the typical other session, AND
 FWHM_DRIFT_ABS_PX = 0.6             # ≥ 0.6 px worse in absolute terms — both must hold
 
 # Map a raw ``reject_reason`` to a plain-language bucket a beginner understands.
@@ -71,16 +87,16 @@ def bucket_reject_reason(reason: str | None) -> str:
 @dataclass
 class SessionQualityDrift:
     """A gentle heads-up that the most recent session is materially *softer* than
-    the target's best previous session — a whole-session quality dip (e.g. a night
-    shot slightly out of focus or through thin haze) that auto-grade, which only
-    compares frames *within* a session, structurally can't see. Purely
+    the target's **typical** previous session — a whole-session quality dip (e.g. a
+    night shot slightly out of focus or through thin haze) that auto-grade, which
+    only compares frames *within* a session, structurally can't see. Purely
     informational: it never rejects anything, it just tells the user to check."""
 
     kind: str            # which metric drifted — currently always "fwhm"
     latest_fwhm_px: float    # newest session's median FWHM (higher = softer)
-    baseline_fwhm_px: float  # best prior session's median FWHM
+    baseline_fwhm_px: float  # median of the prior sessions' median FWHMs
     n_latest: int            # measured subs behind the newest median
-    n_baseline: int          # measured subs behind the baseline median
+    n_baseline: int          # measured subs behind the baseline, across those sessions
 
 
 @dataclass
@@ -230,25 +246,33 @@ def _session_median_fwhm(
 def _fwhm_quality_drift(
     sessions: list[list[tuple[datetime, FrameRow]]]
 ) -> SessionQualityDrift | None:
-    """Compare the newest session's median FWHM against the *best* (sharpest)
+    """Compare the newest session's median FWHM against the target's **typical**
     prior session and flag a materially softer newest session. Needs at least two
     sessions each with enough measured subs; returns ``None`` otherwise or when
-    the drift doesn't clear both the relative and absolute floors."""
+    the drift doesn't clear both the relative and absolute floors.
+
+    "Typical" is the median of the prior sessions' medians, deliberately, and not
+    the sharpest one — see the constants above for the measurement. On two prior
+    sessions the two answers differ by construction (a min sits at one end of the
+    pair, a median between them), and past that the min keeps falling while the
+    median does not, so only the median means the same thing on the owner's
+    twentieth night as on their second."""
     if len(sessions) < 2:
         return None
     latest_fwhm, n_latest = _session_median_fwhm(sessions[-1])
     if latest_fwhm is None:
         return None
-    best: tuple[float, int] | None = None
+    priors: list[tuple[float, int]] = []
     for prior in sessions[:-1]:
         med, n = _session_median_fwhm(prior)
-        if med is None:
-            continue
-        if best is None or med < best[0]:
-            best = (med, n)
-    if best is None:
+        if med is not None:
+            priors.append((med, n))
+    if not priors:
         return None
-    baseline_fwhm, n_baseline = best
+    baseline_fwhm = float(median([med for med, _n in priors]))
+    # The baseline is built from every judgeable prior night now, not one of them,
+    # so the sub count it reports is the whole population behind it.
+    n_baseline = sum(n for _med, n in priors)
     softer_enough = (
         latest_fwhm >= baseline_fwhm * FWHM_DRIFT_RATIO
         and latest_fwhm - baseline_fwhm >= FWHM_DRIFT_ABS_PX
@@ -658,22 +682,47 @@ class NightSummary:
     reject_buckets: dict[str, int] = field(default_factory=dict)  # plain bucket → count
 
 
+def _typical_other_fwhm(medians: list[float], skip: int) -> float | None:
+    """The median of every judgeable night's median FWHM *except* the one at
+    ``skip`` — the baseline a night is judged "soft" against.
+
+    Leave-one-out, so a night is never compared against itself, and a **median**
+    rather than the minimum the verdict used to use. The minimum was the same
+    grows-with-the-library mistake the drift nudge had (see the constants at the
+    top of this module): the sharpest of N nights keeps getting sharper as N
+    rises, so on a sky whose seeing never changed the share of a target's own
+    nights badged "soft" ran **13.7 % at two nights → 35.9 % at five → 78.6 % at
+    forty** (40k trials, nightly median FWHM ~ N(3.5, 0.5) px). That badge sits
+    directly beside the one-click "Set aside" button, so it was steering a
+    beginner toward discarding perfectly good nights on a long project — the
+    owner's exact workflow. Leave-one-out median holds the same sweep at 13.7 %
+    → 4.5 %, and on a **two-night** target it is bit-for-bit the old answer (the
+    only other night *is* the minimum of the others).
+
+    ``None`` when this is the only judgeable night — nothing to compare against,
+    so nothing may be called soft."""
+    others = medians[:skip] + medians[skip + 1:]
+    return float(median(others)) if others else None
+
+
 def _night_verdict(
-    median_fwhm: float | None, best_fwhm: float | None, cloud_fraction: float
+    median_fwhm: float | None, typical_fwhm: float | None, cloud_fraction: float
 ) -> str:
     """One-word plain verdict for a night, from already-stored metrics only.
 
     Hazy (a big chunk of the night lost to cloud) takes precedence over any
-    sharpness judgement; then a night materially softer than the target's best is
-    "soft" (same floors as the drift nudge); a night with a usable median FWHM
-    that is neither is "sharp"; otherwise "" (not enough measured to judge)."""
+    sharpness judgement; then a night materially softer than the target's
+    *typical other* night is "soft" (same floors, and the same baseline choice,
+    as the drift nudge — see ``_typical_other_fwhm``); a night with a usable
+    median FWHM that is neither is "sharp"; otherwise "" (not enough measured to
+    judge)."""
     if cloud_fraction >= NIGHT_HAZY_CLOUD_FRACTION:
         return "hazy"
     if median_fwhm is None:
         return ""
-    if (best_fwhm is not None
-            and median_fwhm >= best_fwhm * FWHM_DRIFT_RATIO
-            and median_fwhm - best_fwhm >= FWHM_DRIFT_ABS_PX):
+    if (typical_fwhm is not None
+            and median_fwhm >= typical_fwhm * FWHM_DRIFT_RATIO
+            and median_fwhm - typical_fwhm >= FWHM_DRIFT_ABS_PX):
         return "soft"
     return "sharp"
 
@@ -701,14 +750,25 @@ def nights_breakdown(
     dated.sort(key=lambda pair: pair[0])
     sessions = _split_sessions(dated, gap_hours)
 
-    # The target's sharpest night is the baseline both the "soft" verdict and the
-    # "best" nod use — computed once over the nights that carry a usable median.
-    medians = [m for s in sessions if (m := _session_median_fwhm(s)[0]) is not None]
+    # Per-night medians, once, for the two things that need to compare nights.
+    # They want *different* statistics and used to share one: the "best" nod
+    # genuinely means the sharpest night (a minimum), while the "soft" verdict
+    # means "worse than my other nights", which a minimum answers wrongly and
+    # more wrongly the longer the project runs (see ``_typical_other_fwhm``).
+    night_medians = [_session_median_fwhm(s)[0] for s in sessions]
+    medians = [m for m in night_medians if m is not None]
     best_fwhm = min(medians) if medians else None
     n_judgeable = len(medians)
+    # Index into ``medians`` for each judgeable session, so a night can be left
+    # out of its own baseline by position rather than by value (two nights that
+    # measured identically must each still see the other).
+    judgeable_at: dict[int, int] = {}
+    for s_idx, m in enumerate(night_medians):
+        if m is not None:
+            judgeable_at[s_idx] = len(judgeable_at)
 
     out: list[NightSummary] = []
-    for session_pairs in sessions:
+    for s_idx, session_pairs in enumerate(sessions):
         rows = [f for _dt, f in session_pairs]
         kept = [f for f in rows if f.accept]
         set_aside = [f for f in rows if not f.accept]
@@ -716,9 +776,11 @@ def nights_breakdown(
         for f in set_aside:
             b = bucket_reject_reason(f.reject_reason)
             buckets[b] = buckets.get(b, 0) + 1
-        median_fwhm, _n = _session_median_fwhm(session_pairs)
+        median_fwhm = night_medians[s_idx]
         cloud_fraction = buckets.get("cloudy", 0) / len(rows) if rows else 0.0
-        verdict = _night_verdict(median_fwhm, best_fwhm, cloud_fraction)
+        typical_fwhm = (_typical_other_fwhm(medians, judgeable_at[s_idx])
+                        if s_idx in judgeable_at else None)
+        verdict = _night_verdict(median_fwhm, typical_fwhm, cloud_fraction)
         # The "best" nod is a positive highlight, so only a genuinely good
         # ("sharp") night earns it — never a clouded ("hazy") night whose few
         # survivors happen to be sharp. ``best_fwhm`` is the min over the

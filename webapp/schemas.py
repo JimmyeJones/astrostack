@@ -174,7 +174,13 @@ class IntegrationGoalPatch(BaseModel):
 
 class SessionQualityDriftOut(BaseModel):
     """A cross-session softness nudge: the newest session is materially softer
-    than the target's best previous one (higher FWHM = softer stars)."""
+    than the target's *typical* previous one (higher FWHM = softer stars).
+
+    ``baseline_fwhm_px`` is the median of the prior sessions' medians. It used to
+    be the sharpest of them, which was a number that fell as the project grew —
+    so this nudge fired on ordinary nights the longer the owner stayed on one
+    target. The field name and shape are unchanged; only the number it carries is
+    now stationary."""
 
     kind: str
     latest_fwhm_px: float

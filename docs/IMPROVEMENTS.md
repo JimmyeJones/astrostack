@@ -360,6 +360,64 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.319.1, branch `claude/compassionate-galileo-go263h`) — ~~"your last night was
+  softer than usual" gets **more likely the longer you shoot the same target**, because the baseline it
+  compares against is the *sharpest* night you have ever had — and on the Nights card the same comparison
+  badges a night "soft" right next to a one-click **Set aside**.~~** The **fifth confirmed instance** of the ⭐
+  "normalises against its own subset" QA lead's *depth* axis, and the candidate that lead explicitly left
+  unswept (`_fwhm_quality_drift` / the night verdict, "swept along the *position* axis and cleared, which says
+  nothing here"). *(Severity: broken-UX / autonomy — advisory copy, not a wrong picture, **except** that the
+  false badge sits beside the button that discards a night, so at the tail it was steering a beginner toward
+  throwing away good data. Confidence: **measured**, 200k-trial Monte Carlo, plus deterministic regression
+  tests.)*
+
+  **The mechanism, in one line:** a **minimum over N samples** is a monotone decreasing function of N. Both
+  surfaces compared a night's median FWHM against `min` over the *other* nights' medians, so the yardstick kept
+  getting sharper as the owner kept shooting — while the nights themselves did not change at all.
+
+  **Measured, on a sky whose seeing never changes** (nightly median FWHM ~ N(3.5, 0.5) px, identical
+  distribution every night; the numbers hold at other means and spreads, see the module constants):
+
+  | prior nights | share of ordinary nights flagged — **was** | **now** |
+  |---|---|---|
+  | 1 | 13.7 % | 13.7 % |
+  | 2 | 23.2 % | 9.6 % |
+  | 5 | 40.5 % | 7.3 % |
+  | 10 | 55.0 % | 5.6 % |
+  | 20 | 68.1 % | 4.9 % |
+  | 40 | 78.9 % | 4.4 % |
+
+  The Nights-card half is the same curve per night (13.7 % → 78.6 % across 2 → 40 nights), and it is the worse
+  of the two: on a forty-night project **four nights in five** carried a yellow "soft" badge, beside a button
+  offering to set the night aside and re-stack without it.
+
+  **The fix changed no threshold** — the same shape §1 requires and the same shape the other four instances of
+  this class took. The baseline is now the **median of the other nights' medians**, which is stationary in N by
+  construction, with both floors (`FWHM_DRIFT_RATIO` 1.25, `FWHM_DRIFT_ABS_PX` 0.6) untouched. On a **two-night**
+  target the answer is bit-for-bit what it was (the only other night *is* the minimum of the others), which an
+  existing untouched test pins. And it is not bought with deafness: a genuinely soft (+1.5 px) night is still
+  caught **88.8 %** of the time at forty nights, against 78.2 % at one — the detector got *better*, because
+  four-in-five false alarms is not detection.
+
+  **Two statistics were sharing one variable, and they wanted different things.** `nights_breakdown` used one
+  `best_fwhm` for both the "soft" verdict and the positive **"best"** nod. The nod genuinely means *the sharpest
+  night* — a minimum is right there, and it keeps it. Only the verdict moved. The verdict's baseline is also
+  **leave-one-out by position, not by value**, so two nights that measured identically still each see the other.
+
+  **Copy moved with it, deliberately in the same commit:** the nudge said *"softer than your usual **best**"*,
+  which over a median baseline would quote a number that is nobody's best. It now reads *"softer than this
+  target's usual (5.2 px vs 3.4 px FWHM) — worth checking focus."*, with a test asserting the sentence never
+  says "best".
+
+  **Upgrade-safe (§9):** pure engine functions plus one string; no config, schema, on-disk, API-*shape* or
+  default change. `baseline_fwhm_px` keeps its name and type — only the number it carries is now stationary —
+  so an older frontend renders it correctly.
+
+  **Tests (+5 in `tests/test_session_recap.py`, all 5 fail before):** the baseline is the typical prior night
+  (not the sharpest, not the most recent) and reports the whole population behind it; a lucky night no longer
+  makes ten ordinary ones nag, and no longer badges nine of them "soft" while still earning its own "best" nod;
+  a genuinely soft night is still caught and still badged on a long project; and the leave-one-out helper
+  directly, including the identical-twins case.
 - **🟠 VERIFIED AGAINST THE OWNER'S REAL S30 FOLDER TREE (2026-08-31) — the scanner does not recognise the
   Seestar's `*_photo` folders, so they are ingested as ordinary deep-sky targets. Same family as the
   already-fixed `*_video` bug, and it is a one-line-shaped gap.** *(Severity: broken-UX / junk targets — not
@@ -9963,6 +10021,74 @@ to **Shipped**.)_
   half of this lead**, now with the chroma noise removed from underneath it so a future measurement sees the
   geometry alone.
 
+  **✅ THAT REMAINING HALF IS NOW MEASURED AND FIXED — and with the colour cue out of the way it turned out to
+  move *further* than the chroma one did, and to flip a verdict on its own.** *(Builder 2026-08-30, branch
+  `claude/compassionate-galileo-go263h`; **shipped as v0.318.3**.)* Swept exactly as the entry asked — one
+  unchanging synthetic scene at 4 / 16 / 64 / 128 / 300 / 800 subs (σ = 0.10/√N), printing every cue. On a
+  small galaxy `ext_frac` ran **0.0121 at 4 subs → 0.0254 at 800, a 2.1× swing**, and on a slightly larger one
+  it walked the verdict clean across the `≤ 0.05` galaxy ceiling: **galaxy at 4 and 16 subs, no class at all at
+  64+** — i.e. the deeper the owner's stack got, the *worse* the suggestion. `star_share` was worse still
+  (0.252 → 0.008 on one scene).
+  **The predicted mechanism was only half of it.** The entry named the threshold's `6·sky_sigma` term, and that
+  is real — on the galaxy scene it put `thr` at `sky+0.188` on a thin stack against `sky+0.06` on a deep one,
+  so faint structure simply did not clear the bar. But the **opening's erosion** is the second, unfiled half: a
+  min over 49 samples is biased ≈2.5σ low, so on a thin stack it *depresses the diffuse image* — shrinking
+  `ext_frac` and, because `point_sig = signal & ~ext_sig`, handing the object's own skirt to `pt_frac` as if it
+  were stars. That is why `star_share` drifted 30× on a field with a fixed number of stars in it.
+  **The fix needed no threshold flip either** — same shape as the chroma one, and now sharing its rationale:
+  every geometry cue is measured on a **locally averaged** copy of the luminance (`_GEOM_SMOOTH_PX = 3`), which
+  kills both mechanisms at once (the noise term falls under its own 0.06 floor, and the erosion has almost no
+  grain left to bite on). Measured after: the small galaxy reads **0.0217 → 0.0255 (±8 %)** and is called a
+  galaxy at every depth; the larger scene gives **one** verdict across the whole sweep. The four constants are
+  untouched, and every deep/clean verdict — the reference answer, since that end was already converged — is
+  unchanged.
+  **The cost, stated plainly:** a 3 px box widens a star's above-threshold footprint, so a *clean* star cluster's
+  `pt_frac` reads 0.095 where it read 0.068. Nothing turns on that — the gate is `pt_frac >= 0.0025`, three
+  decades below, and the discriminating cues (`star_share` 1.000, `ext_frac` 0.000) are unmoved — but it is the
+  one number a clean image reports differently, so it is recorded rather than buried. **5 px was measured too
+  and rejected**: it smears a dense star field into 0.0068 of fake *extended* signal and gives a colourless
+  cluster a chroma reading, which is the failure mode the 7 px opening exists to prevent.
+  **Tests (+3 in `tests/test_target_classify.py`, 2 fail before):** the cue-level invariance across the depth
+  sweep (±20 % of the deep answer), the verdict-level regression (a galaxy is a galaxy at every depth, and the
+  bigger scene gives one answer rather than two), and the no-regression guard that the averaging did not blur a
+  cluster into nebulosity.
+
+- **⭐ QA LEAD (Builder 2026-08-30, the axis the v0.319.1 fix generalises to) — sweep every judgement made
+  against a "best so far", because a best-so-far is a record and a record only ever moves one way.** *(Pillar:
+  trust + friendliness — PRIORITY 3; size S per candidate — this one is *cheap*, because the arithmetic decides
+  it before any measurement. Confidence: the shape is proven, the remaining sites are not yet found.)*
+  This is a **sibling of the "normalises against its own subset" lead, along a different axis**: not "how much
+  data went into this *stack*", but **how many entries are in the *history* the statistic looks back over**.
+  `min`/`max` over a growing history is monotone in the length of that history by construction, so any
+  *comparison* against it — "softer than your best", "worse than your best", "not as good as usual" — gets
+  easier to trip the longer the owner uses the app, on data that never changed. The confirmed instance
+  (v0.319.1) drifted from 14 % to 79 % false-positive rate across a project's life.
+  **The test that identifies a candidate, without running anything:** is the baseline an **extremum** of a set
+  that *grows with use*, and is something **judged** against it? If both, it is a bug — the extremum's
+  distribution has no fixed point. If the extremum is merely *reported* ("your sharpest night", "your best
+  picture", a personal record), it is fine and must stay a min/max: that is what "best" means. The v0.319.1 fix
+  is the template — the two uses had been sharing one variable, and only the *judging* one moved.
+  **A grep over `= min(` / `= max(` in `seestack/`, `webapp/` and `frontend/src` did not turn up a second
+  live site** (the near-misses are all bounds-clamping, or records that are correctly just reported —
+  `activity_calendar`'s longest streak, `sky_quality`'s dominant setting). **So the value here is in the
+  places a grep can't see:** a *client-side* comparison against `Math.min(...history)` in a React component, a
+  baseline built by sorting and taking `[0]`, an SQL `MIN()`/`ORDER BY … LIMIT 1`, or a "personal best" phrase
+  in copy whose number comes from somewhere else. Those are the four shapes worth an hour.
+
+- **NEW IDEA (Builder 2026-08-30, the natural next tap on the v0.319.1 verdict fix) — let the Nights card's
+  "soft" badge say what it was compared against.** *(Pillar: friendliness + trust — PRIORITY 3; size XS;
+  frontend-only, the number is already on the row.)* The badge is a bare word — `soft`, in yellow — sitting
+  beside a button that offers to discard the night. The Last-session nudge one card up says the whole thing
+  (*"softer than this target's usual (5.2 px vs 3.4 px FWHM)"*), so the app already has the sentence; the badge
+  just doesn't carry it. A tooltip or `title` on the badge reading *"4.6 px stars — softer than this target's
+  usual 3.4 px"* would let a beginner judge the call rather than take it, which matters precisely because the
+  action next to it is destructive-feeling. **Why it is XS:** `median_fwhm_px` is already on every
+  `NightSummary` row, and the baseline is the same `_typical_other_fwhm` the verdict used — it just isn't
+  returned. **The one decision:** either add a nullable `typical_fwhm_px` to `NightSummaryOut` (additive, and
+  the honest source) or have the frontend re-derive the median from the rows it already has — **prefer the
+  former**, since a second derivation of the same statistic is exactly what the v0.317.1 process note warns
+  about. **Care:** it is a tooltip, not a fourth column — the Target page is the "extremely busy" one.
+
 - **NEW IDEA (Builder 2026-08-30, the half deliberately left out of the Stack-form print line v0.318.0) — make
   the print nudge a *button*, not only a sentence.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size XS;
   frontend-only, no new data.)* The estimate panel now says *"Turning Drizzle on at ×1.3 would print it at A3
@@ -9979,16 +10105,53 @@ to **Shipped**.)_
   two-key set re-queries the estimate once or twice before wiring it, or the panel will flicker between two
   verdicts.
 
-- **NEW IDEA (Builder 2026-08-30, the obvious next tap on the per-run night count v0.317.0) — say "over 4
-  nights" where a person is *looking at* the picture, not only where they copy a caption.** *(Pillar:
-  understand + enjoy — PRIORITY 3; size XS–S; purely additive on machinery that now exists.)* `capture_nights`
-  is on `/api/targets/{safe}/stack-runs`, `/api/stats` and `/api/gallery` already, and today only the
-  ready-to-post caption and the baked nameplate read it. The obvious surfaces are History's run card and the
-  Target hero caption, both of which currently show a date range and stop. **Do not just append it** — the
-  owner's standing "extremely busy" priority means this should *replace* something in those lines rather than
-  become one more fact, e.g. "Shot over 4 nights, 15–18 Nov 2024" as one clause. **Grep before building:** the
-  per-target Nights card counts nights *for a target*; this is per **run**, and the two legitimately differ the
-  moment anyone re-stacks a subset — a surface showing both at once needs to say which is which.
+- ~~**NEW IDEA (Builder 2026-08-30, the obvious next tap on the per-run night count v0.317.0) — say "over 4
+  nights" where a person is *looking at* the picture, not only where they copy a caption.**~~ —
+  **SHIPPED v0.319.0** (Builder 2026-08-30, branch `claude/compassionate-galileo-go263h`). *(Pillar:
+  understand + enjoy — PRIORITY 3.)*
+
+  **One helper, three surfaces, no new line anywhere.** The entry's "do not just append it" is the whole design:
+  the count is folded *inside* the date clause every one of these lines already carried, so each grows by three
+  words rather than gaining a fourth `·` segment. `pictureDateLabel` — the app's single "one-line date under a
+  picture" formatter — takes an optional `captureNights` and renders **"Shot over 4 nights, 15–18 Nov 2024"**.
+  That one change lit up all three places a person is *looking at* a picture rather than copying a caption: the
+  **Target hero** (`latestPictureCaption`), the **Dashboard's** newest-pictures grid, and the **Show & Tell
+  slideshow's** acquisition line — which is arguably the best of the three, since it is the surface someone
+  actually shows to another person.
+
+  **The rule about when a count may be spoken is now one function, not two copies.** `nightCountPhrase` holds
+  all four conditions (recorded, integral, >1, and a window that really spans more than one night) and *both*
+  `captureNightsClause` and `pictureDateLabel` call it — so the caption and the picture line agree **by
+  construction**. That is deliberately the shape the ⚠️ process note directly below this entry asks for: the
+  v0.317.1 bug survived a sweep precisely because two sites that had to match were kept in step by a *comment*
+  naming the other one. A test asserts the two surfaces quote the count on exactly the same inputs.
+
+  **What it deliberately does not touch:** `formatCaptureNights`, which produces the `CaptureLabel` branded type
+  behind share filenames and titles — a filename is not a place for "over 4 nights". The count therefore appears
+  only on lines a person reads, never in a name.
+
+  **Grepped as the entry demanded:** the per-target **Nights** card counts nights *for a target* and this is per
+  **run**; no surface changed here shows both, so nothing has to disambiguate them.
+
+  **Upgrade-safe (§9):** frontend-only, one optional trailing parameter, no engine/API/schema/config/default
+  change. A run from before schema 19 carries no `capture_nights` and reads exactly as it did.
+
+  **Tests (+6):** `format.test.ts` (+3 — the phrase inside the clause, the silence on every unbelievable count
+  and on a single-night window, and the agrees-with-the-caption-clause pin), `LatestPictureCard.test.tsx` (+2 —
+  the hero line, asserting it still has exactly three `·` segments; and quiet on a pre-schema-19 run),
+  `showAndTell.test.ts` (+1 — the slideshow line). tsc + vitest 2537 + vite build green.
+
+  Original spec, for the record:
+
+    *(Pillar: understand + enjoy — PRIORITY 3; size XS–S; purely additive on
+    machinery that now exists.)* `capture_nights` is on
+    `/api/targets/{safe}/stack-runs`, `/api/stats` and `/api/gallery` already, and today only the
+    ready-to-post caption and the baked nameplate read it. The obvious surfaces are History's run card and the
+    Target hero caption, both of which currently show a date range and stop. **Do not just append it** — the
+    owner's standing "extremely busy" priority means this should *replace* something in those lines rather than
+    become one more fact, e.g. "Shot over 4 nights, 15–18 Nov 2024" as one clause. **Grep before building:** the
+    per-target Nights card counts nights *for a target*; this is per **run**, and the two legitimately differ the
+    moment anyone re-stacks a subset — a surface showing both at once needs to say which is which.
 
 - **⚠️ PROCESS NOTE (Builder 2026-08-30, the reason the v0.317.1 bug survived a whole sweep of its own class)
   — a comment that asserts agreement with a *sibling* is a drift hazard, and a test that freezes the current
@@ -10458,6 +10621,26 @@ to **Shipped**.)_
   that is nothing but noise should be denoised hard) and because a real OSC frame always carries stars that set
   the percentile. Worth knowing if anyone ever reads that σ as an absolute noise figure rather than a fraction
   of the visible range — it is the latter, and its docstring says so.
+
+  **🔎 SWEPT A THIRD TIME (Builder 2026-08-30, branch `claude/compassionate-galileo-go263h`) — the last
+  candidate this lead named is a CONFIRMED instance, and it is the worst-behaved one yet.**
+  `_fwhm_quality_drift` and the Nights card's "soft" verdict both compared a night against the **minimum** over
+  the other nights' medians, and a minimum over N samples falls without limit as N grows: on unchanging seeing
+  the share of ordinary nights flagged ran **13.7 % at one prior night → 68 % at twenty → 79 % at forty**.
+  Fixed as **v0.319.1** (entry at the top of "Bugs (fix these first)") with the same no-threshold-flip shape as
+  the other four. **That closes every candidate this lead listed.**
+
+  **⚠️ CORRECTION to the first sweep's "cleared" list, worth more than the finding itself.** That sweep reported
+  `classify_target`'s cues as *flat* (`ext_frac` 0.0106/0.0104/0.0104 at 8/32/128 subs) and cleared them. They
+  are not flat: swept on a different scene at 4…800 subs, `ext_frac` moved **2.1×** and flipped a verdict
+  (v0.318.3). Both measurements are correct — the first scene's threshold was already floor-governed
+  (`6·sky_sigma` under the 0.06 floor) at 8 subs, so there was no depth dependence left to see, and its verdict
+  was `None` at every depth so nothing could visibly flip. **The lesson for the next sweep of any candidate:**
+  "measured and flat on one scene at 8/32/128" is not "cleared". This axis needs (a) a scene whose verdict is
+  *near a class boundary*, since a statistic can drift a long way inside one class and change nothing, and (b) a
+  **thin** end — 4–16 subs — because the mechanisms here (a noise-scaled threshold, an erosion's noise bias) are
+  the ones that vanish by 32 subs and are invisible above it. Two of the three confirmed instances would have
+  been missed by a sweep that started at 8.
 
 - **NEW IDEA (Builder 2026-08-30, the one case the v0.312.1 tint fix deliberately fenced off rather than
   solved) — a many-sub stack whose canvas is no bigger than its preview still gets the cyan wash.**
