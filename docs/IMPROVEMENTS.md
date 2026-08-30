@@ -43,7 +43,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+- **Builder 2026-08-30, branch `claude/compassionate-galileo-fj2p70` — CLAIMED this run:**
+  (a) the **recipe-drift stamp** (Autonomy & friendliness, top of Ideas — "a saved recipe on a
+  'Process target' run can quietly drift from the picture that run's preview actually shows");
+  (b) **"Reveal": a one-tap cinematic zoom** of the finished picture (Features that serve real
+  workflows, Scout 2026-08-27 #15) — slices (a) + (b);
+  (c) the two **"Tonight, live" follow-ons** (keep-awake + the other targets that also got subs
+  tonight), if time allows.
+  The bug queue was checked first and is still dry: every entry under "Bugs (fix these first)" is
+  ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow` — run finished, all claims released.**
 > Shipped two: the ~~invisible reveal on "Process target"~~ dogfood finding (**v0.301.0**, write-up under
