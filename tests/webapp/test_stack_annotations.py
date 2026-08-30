@@ -10,16 +10,25 @@ from seestack.io.project import StackRunRow
 
 
 def _add_run(data_root, safe: str, *, ra: float, dec: float, w: int, h: int,
-             arcsec_per_px: float, with_wcs: bool = True) -> int:
+             arcsec_per_px: float, with_wcs: bool = True,
+             dec_sign: float = 1.0) -> int:
     """Register a stack run backed by a real 3-channel master FITS.
 
     When ``with_wcs`` the FITS header carries a TAN WCS centred on (ra, dec) —
     exactly as the stacker merges the canvas WCS into ``master.fits`` — so the
-    endpoint reads the field geometry from the file, as in production."""
+    endpoint reads the field geometry from the file, as in production.
+
+    ``dec_sign`` picks which way up the field sits on screen, because the two
+    cases answer the orientation questions differently and both are real: the
+    default (+1, Dec increasing with row) draws North at the *bottom* of an image
+    whose first row is the top one, so a North-up view is a 180° turn; ``-1``
+    (North up, East left) is the orientation an already-oriented picture has, and
+    needs no turn at all.
+    """
     lib = Library.open_or_create(data_root / "library")
     try:
         tdir = lib.target_dir(lib.find_target(safe))
-        fits_path = tdir / f"annot_{ra}_{w}x{h}.fits"
+        fits_path = tdir / f"annot_{ra}_{w}x{h}_{dec_sign}.fits"
         cube = np.zeros((3, h, w), dtype=np.float32)  # (C, H, W)
         hdu = fits.PrimaryHDU(data=cube)
         if with_wcs:
@@ -33,7 +42,7 @@ def _add_run(data_root, safe: str, *, ra: float, dec: float, w: int, h: int,
             hdr["CD1_1"] = -arcsec_per_px / 3600.0
             hdr["CD1_2"] = 0.0
             hdr["CD2_1"] = 0.0
-            hdr["CD2_2"] = arcsec_per_px / 3600.0
+            hdr["CD2_2"] = dec_sign * arcsec_per_px / 3600.0
         hdu.writeto(fits_path, overwrite=True)
 
         proj = lib.open_target(safe)
@@ -135,6 +144,42 @@ def test_annotations_empty_when_run_has_no_wcs(client, solved_library):
     # rather than drawing a made-up direction).
     assert body["scale_bar"] is None
     assert body["directions"] is None
+    # …and no orientation to offer either, so no "North up" view toggle.
+    assert body["north_up_deg"] is None
+
+
+def test_annotations_say_how_far_north_up_would_turn_this_picture(
+    client, solved_library,
+):
+    """The "North up" *view* toggle needs one number: would turning this picture
+    actually change it? Pinned against `applied_north_up_deg` itself — the helper
+    that owns the threshold-and-snap rules and that the renderer uses — so this
+    asserts parity rather than re-deriving an angle from a CD matrix."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=800, h=600,
+                      arcsec_per_px=3.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    from seestack.render.thumbnail import applied_north_up_deg
+    expected = applied_north_up_deg(_run_fits(solved_library, safe, run_id))
+    assert expected  # the fixture really is turned, or the test proves nothing
+    assert body["north_up_deg"] is not None
+    assert abs(body["north_up_deg"] - expected) < 1e-6
+
+
+def test_annotations_offer_no_turn_on_an_already_north_up_picture(
+    client, solved_library,
+):
+    """A control that visibly does nothing is worse than no control: a field that
+    already sits North-up on screen gets its stored bytes handed back untouched by
+    `?north_up=true` — so the endpoint reports null and the surface shows no
+    toggle."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=800, h=600,
+                      arcsec_per_px=3.0, dec_sign=-1.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    assert body["north_up_deg"] is None
 
 
 def test_annotations_404_for_unknown_run(client, solved_library):
