@@ -304,6 +304,48 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.311.3, branch `claude/compassionate-galileo-y2x4gk`) — ~~"First light" is the date
+  you *installed AstroStack*, not the date you first captured — so it is wrong for the exact owner this app is
+  built for, on a milestone stat and on the poster they share.~~** Found by **running the app**
+  (`scripts/agent-dogfood.sh`, the §2 big-picture pass), not by reading it: "Your sky, so far" said **First
+  light — August 2026** on a library whose only target's frames table, two clicks away, reads
+  **2024-11-15**. *(Severity: wrong-fact / trust on a pride page and on shared output. Confidence: reproduced
+  in a running app, then in a test.)*
+
+  **Root cause.** `summarize_library` took `first_light_utc = min(t.created_utc …)` — the earliest
+  target-*creation* stamp, i.e. when the row was made **here**. That equals first light only for someone who
+  installed the app before they started imaging. The owner arrives with a back catalogue of Seestar subs, so
+  every target is created on install day and the milestone says *"you started astrophotography this week"* to
+  someone who has been at it for years. It also dates `/api/recap`'s **"Since &lt;date&gt;"** footnote — on the
+  poster they post publicly.
+
+  **Fix.** New `Project.earliest_frame_utc()` — one indexed `MIN` over `frames.timestamp_utc` (the frames' own
+  `DATE-OBS`), counting **every** dated sub including the rejected ones, because a sub the app later set aside
+  was still light someone went out and collected. `summarize_library` grows an optional
+  `first_capture(safe_name)` lookup and takes each imaged target's own oldest capture, falling back to its
+  creation stamp when nothing is dated — so a library the lookup can't answer for is byte-for-byte what it was,
+  and callers that don't pass it (the Gallery wall) are untouched.
+
+  **Two things the fix had to get right beyond the headline.** (1) The comparison is now across *two shapes* of
+  stamp — the registry's `…Z` and a frame's `DATE-OBS` as ingest recorded it — so a lexicographic `min` would
+  pick whichever *spelling* sorts first; `_earliest_stamp` compares parsed instants via the shared
+  `activity_calendar.parse_utc`, with the old string minimum as the last resort so a hand-edited row still
+  yields a date. (2) `library_summary` is deliberately registry-only, and the recap endpoint was calling it
+  **outside** the summary cache (its docstring claimed otherwise). Both stats call sites now go through one
+  `_cached_library_summary`, so the per-target project reads are paid at most once per cache window — and the
+  poster and the stat card can no longer quote different dates.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk-layout, API-shape or default change; one new read-only
+  engine method, one optional keyword, and a value that becomes *more* correct. An unreadable project answers
+  `None` and falls back rather than sinking the summary.
+
+  **Tests (+10, all fail before):** `tests/test_project.py` (the oldest dated sub, a rejected one still
+  counting, undated rows skipped, an all-undated target answering `None`); `tests/test_library_summary.py`
+  (capture beats creation; the undated fallback both ways; an empty target's ancient subs still excluded by the
+  has-light gate; the time-vs-string comparison; an unparseable stamp surviving); `tests/webapp/
+  test_library_summary.py` (the endpoint reporting the fixture's 2024 `DATE-OBS` and it really being older than
+  the rows, the no-dated-subs fallback, and `/api/recap`'s "Since" agreeing with the stat card).
+
 - **✅ SHIPPED (Builder, v0.311.1, branch `claude/compassionate-galileo-e1p1x8`) — ~~"Full-res PNG (native
   size)" hands back a picture **rotated away from the one you clicked** on any run whose preview was saved
   North up.~~** Found by walking the **geometry** axis of the download-copy sweep (the one axis v0.309.1
