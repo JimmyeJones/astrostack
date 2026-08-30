@@ -1,19 +1,23 @@
-"""Is this library target a *duplicate* of another one — the same physical raw
-subs registered twice under two folder spellings?
+"""What the app knows about a library target that isn't a real target: is it a
+*duplicate* of another one (the same physical raw subs registered twice under two
+folder spellings), and is it *junk* (built from the Seestar's own output, video or
+photo folder rather than raw subs)?
 
-Two Library features need the same answer and used to disagree about it, which
-is the bug this module exists to make impossible:
+Both facts are shared, and used to be held by only one of the two features that
+needed them — which is the bug this module exists to make impossible:
 
 * **Cleanup suggestions** offers to remove a leftover ``<T>_sub``-named target
-  whose frames the base ``<T>`` now owns ("these are the same raw subs").
+  whose frames the base ``<T>`` now owns, and any junk target.
 * **Merge suggestions** clusters targets by plate-solved sky position and offers
-  to combine them into one deeper picture. Two spellings of one folder sit at
-  *exactly* the same coordinates, so they always cluster — and the nudge invited
-  the owner to "combine" a target with its own duplicate, summing the same
-  integration hours twice in the headline figure.
+  to combine them into one deeper picture. It knew neither fact. Two spellings of
+  one folder sit at *exactly* the same coordinates, so they always cluster — and
+  the nudge invited the owner to "combine" a target with its own duplicate,
+  summing the same integration hours twice in the headline figure; a junk
+  on-device output sits at the same coordinates too, and was offered as a merge
+  partner while the cleanup card was offering to delete it.
 
-The detection is deliberately in two halves so the expensive one is rarely paid:
-a **name-shape** test (:func:`duplicate_base_safe`, pure, no I/O) rules the
+Duplicate detection is deliberately in two halves so the expensive one is rarely
+paid: a **name-shape** test (:func:`duplicate_base_safe`, pure, no I/O) rules the
 question out for all but a handful of targets, and only then does
 :func:`confirm_duplicate_of_base` open both projects to check that the base
 really owns *every* one of the duplicate's frames. That confirmation is what
@@ -28,8 +32,12 @@ from dataclasses import dataclass
 
 from seestack.io.library import make_safe_name
 from seestack.io.scanner import (
+    JunkTargetVerdict,
+    classify_seestar_junk_target,
     duplicate_sub_base_name_from_name,
     duplicate_sub_target_base_name,
+    is_capture_mode_target_name,
+    junk_output_frame_cap,
 )
 
 
@@ -97,3 +105,28 @@ def confirm_duplicate_of_base(lib, entry, base) -> DuplicateOfBase | None:  # no
     return DuplicateOfBase(
         base_safe=base.safe_name, base_name=base.name, has_own_runs=has_own_runs,
     )
+
+
+def junk_verdict(lib, entry) -> JunkTargetVerdict | None:  # noqa: ANN001
+    """The Seestar-junk verdict for one library target, or ``None`` for a real
+    one — the same answer the Library's cleanup nudge shows, so nothing else can
+    offer to *use* a target the app is offering to delete.
+
+    Cheap by construction, because it is called for every target on a poll: a
+    ``_video``/``_photo`` capture target is decided by **name** at any frame
+    count, and anything else must first be small enough to *be* an on-device
+    output (:func:`junk_output_frame_cap`, looser for a mosaic — whose output is
+    one image per panel) before its project is opened at all. A real target of
+    hundreds of subs is never read.
+
+    Read-only: it opens the project, reads source paths and closes it again."""
+    if is_capture_mode_target_name(entry.name):
+        return classify_seestar_junk_target(entry.name, [], entry.n_frames)
+    if entry.n_frames > junk_output_frame_cap(entry.name):
+        return None
+    proj = lib.open_target(entry.safe_name)
+    try:
+        source_paths = [f.source_path for f in proj.iter_frames()]
+    finally:
+        proj.close()
+    return classify_seestar_junk_target(entry.name, source_paths, entry.n_frames)

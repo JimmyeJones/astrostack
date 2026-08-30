@@ -195,3 +195,104 @@ def test_a_real_third_folder_survives_when_a_duplicate_is_dropped(
     body = client.get("/api/targets/merge-suggestions").json()
     assert len(body) == 1
     assert {t["safe"] for t in body[0]["targets"]} == {"M_101", "M_101_night_2"}
+
+
+# --- and never offer a merge the rest of the app already refuses -------------
+
+
+def test_a_mosaic_is_not_offered_beside_the_single_field_of_the_same_object(
+    client, data_root: Path,
+):
+    """``_apply_seestar_convention`` keeps ``<T> (mosaic)`` and ``<T>`` as two
+    targets precisely because their canvases differ — "never co-stacked or
+    auto-merged". They point at the same place, so position clustering fused them
+    anyway and the nudge offered exactly that merge."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _make_target(lib, "M 44", *M31,
+                     source_paths=[data_root / "dump" / "M 44_sub" / "a.fit"])
+        _make_target(lib, "M 44 (mosaic)", M31[0] + 0.001, M31[1],
+                     source_paths=[data_root / "dump" / "M 44_mosaic_sub" / "b.fit"])
+    finally:
+        lib.close()
+
+    assert client.get("/api/targets/merge-suggestions").json() == []
+
+
+def test_two_mosaics_of_the_same_object_are_still_offered(client, data_root: Path):
+    """Splitting the populations must not make mosaics unmergeable: two mosaic
+    folders of one object share a canvas and are a real merge."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _make_target(lib, "M 44 (mosaic)", *M31,
+                     source_paths=[data_root / "dump" / "M 44_mosaic_sub" / "a.fit"])
+        _make_target(lib, "M 44 night 2 (mosaic)", M31[0] + 0.001, M31[1],
+                     source_paths=[data_root / "dump" / "M 44b_mosaic_sub" / "b.fit"])
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/merge-suggestions").json()
+    assert len(body) == 1
+    assert len(body[0]["targets"]) == 2
+
+
+def test_a_junk_on_device_output_is_not_offered_as_a_merge_partner(
+    client, data_root: Path,
+):
+    """The Seestar's own stacked output sits at the same coordinates as the subs
+    it came from, so it clustered with them — and the app offered to *combine* a
+    target the cleanup card was simultaneously offering to *delete*."""
+    incoming = data_root / "dump"
+    (incoming / "M 31_sub").mkdir(parents=True)
+    output = incoming / "M 31"
+    output.mkdir()
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _make_target(lib, "M 31", *M31, source_paths=[output / "Stacked.fit"])
+        _make_target(lib, "M 31 night 2", M31[0] + 0.001, M31[1],
+                     source_paths=[incoming / "M 31 night 2" / "Light_001.fit"])
+    finally:
+        lib.close()
+
+    assert client.get("/api/targets/merge-suggestions").json() == []
+
+
+def test_the_owners_m3_card_produces_no_suggestion_at_all(client, data_root: Path):
+    """End to end on the shape from the owner's screenshot. Their M 3 card listed
+    five targets and headlined "64 h total" over ~31 h of real data. Every one of
+    the five is either a duplicate of another, the on-device output, or a mosaic
+    that must not be fused with the single field — so the honest answer is no
+    merge nudge, and three cleanup nudges instead."""
+    incoming = data_root / "dump"
+    (incoming / "M 3_sub").mkdir(parents=True)
+    (incoming / "M 3_mosaic_sub").mkdir()
+    (incoming / "M 3_mosaic").mkdir()
+    subs = [incoming / "M 3_sub" / f"Light_{i:03d}.fit" for i in range(20)]
+    mosaic_subs = [incoming / "M 3_mosaic_sub" / f"Light_{i:03d}.fit" for i in range(9)]
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _make_target(lib, "M 3", *M31,
+                     source_paths=[*subs, incoming / "M 3" / "Stacked.fit"])
+        _make_target(lib, "M 3_sub", M31[0] + 0.001, M31[1], source_paths=subs)
+        _make_target(lib, "M 3 (mosaic)", M31[0] + 0.002, M31[1],
+                     source_paths=mosaic_subs)
+        _make_target(lib, "M 3_mosaic_sub", M31[0] + 0.001, M31[1] + 0.001,
+                     source_paths=mosaic_subs)
+        _make_target(lib, "M 3_mosaic", M31[0], M31[1] + 0.002,
+                     source_paths=[incoming / "M 3_mosaic" / "Stacked.fit"])
+    finally:
+        lib.close()
+
+    assert client.get("/api/targets/merge-suggestions").json() == []
+    # The three leftovers are all reachable by the cleanup nudge instead. (Keyed
+    # by display name: "M 3 (mosaic)" and "M 3_mosaic" both want the safe name
+    # "M_3_mosaic", so the library suffixes the second one.)
+    cleanup = {s["name"]: s["reason"]
+               for s in client.get("/api/targets/cleanup-suggestions").json()}
+    assert cleanup == {
+        "M 3_sub": "duplicate_sub",
+        "M 3_mosaic_sub": "duplicate_sub",
+        "M 3_mosaic": "on_device_output",
+    }

@@ -546,9 +546,55 @@ _(nothing else claimed — claim an item here with your branch name)_
   **Tests: +4 merge endpoint (3 fail before; the fourth is the `NGC 6888` guard, which must pass both ways),
   +2 cleanup endpoint (both fail before), +5 scanner, +1 frontend.**
 
+  **↳ FOLLOW-ON SHIPPED IN THE SAME RUN (v0.319.4) — the *other two* wrong offers on the owner's own
+  screenshot, found by asking "what does the M 3 card show *after* the fix?"** The answer was: still three
+  members, `M 3` + `M 3 (mosaic)` + `M 3_MOSAIC`. Both remaining offers are the same class — *the merge
+  suggester proposing something the app itself already refuses* — so they are fixed the same way, by giving it
+  the facts the rest of the app holds rather than another special case.
+  1. **A mosaic is never grouped with the single field of the same object.** `_apply_seestar_convention`'s own
+     docstring states the invariant outright: `<T> (mosaic)` is kept a separate target from `<T>` "so their
+     differing footprints are never co-stacked **or auto-merged**". Position clustering cannot see a canvas —
+     the two point at the same place — so it fused them and the nudge offered exactly the merge ingest
+     refused. The two populations are now clustered **separately** (two mosaics of one object are still a real
+     merge; so are two single fields; the pair across the line is not), and the `" (mosaic)"` spelling has one
+     definition, `mosaic_target_name()`, asserted against what the convention actually builds.
+  2. **A junk target is never offered as a merge partner.** The Seestar's on-device output sits at the
+     coordinates of the subs it was stacked from, so it clustered with them — and the app offered to
+     *combine* a target the cleanup card was, on the same screen, offering to *delete*.
+  `webapp/duplicate_targets.py` became **`webapp/library_hygiene.py`**, since it now holds both facts the
+  Library shares, and `cleanup_suggestions` reads its `junk_verdict()` too — so the junk gate, like the
+  duplicate one, has exactly one implementation. The gate stays cheap: capture targets are decided by name,
+  and nothing else is opened unless it is already small enough to *be* an output.
+  **The end-to-end test is the owner's screenshot**: their five-target M 3 card now produces **no merge
+  suggestion at all** — the honest answer — and three cleanup nudges instead. **Tests: +4 merge endpoint
+  (3 fail before; "two mosaics of one object still merge" is the don't-overshoot guard), +1 scanner.**
+
     *(Original spec kept below. Severity: high broken-UX / actively misleading, **not** data corruption — see
     the safety note. Confidence: HIGH, traced end-to-end in code against the owner's real library data.
     Owner's words: "it is still having issues with combining/distinguishing target folders.")*
+
+- **🟡 THE SAME MOSAIC-CAP ASYMMETRY EXISTS ONE LAYER DOWN, ON THE *FRAME* AUTO-REJECT — traced while
+  shipping v0.319.3, deliberately NOT changed in the same run because it is the ingest hot path.**
+  *(Severity: low-moderate — a handful of low-resolution on-device panel images silently join a real mosaic's
+  stack. Confidence: traced in code; NOT reproduced against owner data. Size S.)*
+
+  `seestack/io/project.py:265` defines `_MAX_SEESTAR_OUTPUT_FRAMES = 2` with the comment *"Mirrors the
+  scanner's `_MAX_JUNK_OUTPUT_FRAMES`"* — and as of v0.319.3 it no longer does, because the scanner's cap is
+  now mosaic-aware (`junk_output_frame_cap()`: 2 for a single field, 32 for a `*_mosaic` output whose output
+  is one image *per panel*). That function is the **frame-level** guard: when a target holds frames from a
+  bare `<T>/` output folder it rejects them (`REJECT_REASON_SEESTAR_OUTPUT`, additive and reversible), but
+  only when that folder holds ≤2 frames, so a mosaic's 7- or 11-image output folder sails past it exactly as
+  the target-level cap used to.
+
+  **Why it was left:** the two guards are not the same decision. The target-level one only *suggests* a
+  cleanup the user confirms; this one **auto-rejects frames on ingest**, on by default, on the path the
+  owner's real data flows through nightly. Raising a cap there without a repro is the "blind-flip a threshold
+  on the on-by-default hot path" AGENTS.md §1 warns against — a bare folder of 11 *real* subs that happens to
+  sit beside a `_sub` sibling would start losing whole sessions. **What to do:** mirror the scanner's helper
+  (`junk_output_frame_cap(folder.name)`) rather than inventing a second number, keep the positive-evidence
+  sibling requirement, and add a test that a bare `<T>_mosaic/` of 11 frames beside `<T>_mosaic_sub/` rejects
+  while a bare `<T>/` of 11 frames beside `<T>_sub/` still does **not**. The shared helper already exists, so
+  this is small — it is the *caution*, not the code, that made it a separate item.
 
   **The owner's live library (from the screenshot) — every near-identical pair is the same physical files
   counted twice:**
