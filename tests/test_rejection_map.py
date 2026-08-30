@@ -327,3 +327,141 @@ def test_shrinking_dilutes_speckle_but_keeps_a_trail():
         off[max(0, i // 4 - 1):i // 4 + 2, max(0, i // 4 - 1):i // 4 + 2] = 0
     assert trail.min() > int(off.max()), (
         f"the trail ({trail.min()}) must read stronger than the speckle ({off.max()})")
+
+
+def _many_sub_map(n_subs: int, *, rng_seed: int = 3):
+    """A rejection map with the density a *many-sub* stack really produces, plus
+    the mask of the one satellite trail planted in it.
+
+    Measured on real engine output (``run_stack`` with ``record_rejection_map``
+    over the planted-trail scene at 16 / 32 / 64 subs): a pixel is marked if it
+    lost a sample in **any** frame, so the non-empty share of the canvas climbs
+    with the sub count — 1.9 % at 16 subs, 11.5 % at 32, **31.2 % at 64** — and
+    the Seestar owner this app is for stacks hundreds. ``_PER_FRAME_CLIP`` is set
+    so this pure-array fixture reproduces that 64-sub figure, which lets the
+    property be tested in milliseconds instead of the minutes a real 64-sub stack
+    takes.
+    """
+    rng = np.random.default_rng(rng_seed)
+    h, w = 320, 480
+    rej = rng.binomial(n_subs, _PER_FRAME_CLIP, size=(h, w)).astype(np.uint16)
+    trail = np.zeros((h, w), dtype=bool)
+    ys = np.arange(20, 300)
+    for dx in (0, 1, 2):        # the trail: three pixels wide, in one sub
+        rej[ys, ys + 20 + dx] += 1
+        trail[ys, ys + 20 + dx] = True
+    return rej, trail
+
+
+#: Per-frame, per-pixel noise-tail clip rate. Solves 1-(1-q)**64 = 0.312, the
+#: non-empty share measured on a real 64-sub stack's map.
+_PER_FRAME_CLIP = 0.00583
+
+
+def _trail_and_sky(trail, size):
+    """``(on_trail, sky)`` boolean masks on the *rendered* grid. ``sky`` excludes
+    a one-cell margin around the trail so a block that is part trail doesn't get
+    counted as background."""
+    from PIL import Image
+
+    w, h = size
+    hit = np.asarray(
+        Image.fromarray(trail.astype(np.float32), mode="F").resize((w, h), Image.BOX),
+        dtype=np.float32) > 0
+    from scipy import ndimage
+
+    return hit, ~ndimage.binary_dilation(hit, np.ones((3, 3), bool))
+
+
+def test_a_many_sub_stack_is_not_washed_cyan_from_edge_to_edge():
+    """The regression. Once the map is dense the area-average's dilution stops
+    working: the *hit set* is then mostly noise floor, so a percentile of it
+    normalises the floor itself to opaque. Measured on real 64-sub engine output
+    before the fix — at the downsample an ordinary preview uses — **73 % of the
+    frame sat above quarter opacity at 2x and 94 % at 4x**, with the satellite
+    trail no more prominent than the sky beside it, while the caption underneath
+    told the user those marks were satellite trails and cosmic rays.
+
+    The floor is uniform (every pixel runs the same risk of losing a sample) and
+    real marks are local excesses over it, so subtracting the map's own floor
+    leaves the marks and removes the wash.
+    """
+    rej, trail = _many_sub_map(64)
+    assert (rej > 0).mean() > 0.25, "the fixture must actually be a dense map"
+    for size in ((240, 160), (120, 80)):        # the 2x and 4x a preview really uses
+        alpha = _overlay_alpha(rej, size)
+        on, sky = _trail_and_sky(trail, size)
+        washed = float((alpha[sky] > 64).mean())
+        assert washed < 0.30, (
+            f"at {size}, {washed:.0%} of the picture is tinted — that reads as a "
+            "cyan wash, not as 'here is the satellite that crossed your frame'")
+        # The sky is mostly clear, and the thing the overlay exists to show is
+        # still the strongest thing on it.
+        assert np.median(alpha[sky]) == 0
+        assert np.median(alpha[on]) > 150
+
+
+def test_it_still_finds_the_trail_on_a_stack_of_hundreds():
+    """The owner's real stacks are 500-800 subs, by which point four fifths of
+    the canvas has lost a sample to the noise tail somewhere. The tint must still
+    be *about the satellite*, not about the noise."""
+    rej, trail = _many_sub_map(300)
+    assert (rej > 0).mean() > 0.75, "the fixture must be a near-saturated map"
+    for size in ((240, 160), (120, 80)):
+        alpha = _overlay_alpha(rej, size)
+        on, sky = _trail_and_sky(trail, size)
+        assert np.median(alpha[sky]) == 0
+        assert float((alpha[sky] > 64).mean()) < 0.30
+        assert np.median(alpha[on]) > 100
+
+
+def test_a_sparse_map_is_drawn_with_exactly_the_arithmetic_it_always_was():
+    """The floor subtraction must not restyle the maps the app draws today. It
+    cannot: a canvas that is three-quarters untouched has a 75th percentile of
+    exactly zero, so nothing is subtracted. Pinned as **byte** equality against
+    the un-floored arithmetic rather than as "looks similar", so a later tweak to
+    the floor can't quietly redraw every existing picture."""
+    from PIL import Image
+
+    from seestack.render.thumbnail import (
+        _REJECTION_ALPHA_GAMMA, _REJECTION_SCALE_PERCENTILE,
+    )
+
+    rej, _trail = _many_sub_map(16)
+    assert (rej > 0).mean() < 0.15, "the fixture must actually be a sparse map"
+    dens = np.asarray(
+        Image.fromarray(rej.astype(np.float32), mode="F").resize((480, 320), Image.BOX),
+        dtype=np.float32)
+    assert np.percentile(dens, 75.0) == 0.0, "no floor to subtract here"
+    scale = float(np.percentile(dens[dens > 0], _REJECTION_SCALE_PERCENTILE))
+    want = np.rint(
+        (np.clip(dens / scale, 0.0, 1.0) ** _REJECTION_ALPHA_GAMMA) * 255.0
+    ).astype(np.uint8)
+    assert np.array_equal(_overlay_alpha(rej, (480, 320)), want)
+
+
+def test_the_floor_is_unreachable_when_the_resize_did_not_average():
+    """The one place a floor would do harm, fenced off. At 1:1 (or scaling up) a
+    trail pixel and a noise-tail pixel are both "one sample lost here" and nothing
+    pointwise separates them, so a floor there would take the trail with the
+    speckle — measured: it zeroed every count-1 pixel of the planted trail. The
+    gate is the resize, not the density, so a 1:1 render is byte-identical to what
+    it has always been *however dense the map is*. (Real previews are capped at
+    1024 px on the long edge, so 1:1 needs a canvas no bigger than that.)"""
+    from PIL import Image
+
+    from seestack.render.thumbnail import (
+        _REJECTION_ALPHA_GAMMA, _REJECTION_SCALE_PERCENTILE,
+    )
+
+    rej, trail = _many_sub_map(300)
+    assert (rej > 0).mean() > 0.75
+    for size in ((480, 320), (960, 640)):       # 1:1 and scaled up
+        dens = np.asarray(
+            Image.fromarray(rej.astype(np.float32), mode="F").resize(size, Image.BOX),
+            dtype=np.float32)
+        scale = float(np.percentile(dens[dens > 0], _REJECTION_SCALE_PERCENTILE))
+        want = np.rint(
+            (np.clip(dens / scale, 0.0, 1.0) ** _REJECTION_ALPHA_GAMMA) * 255.0
+        ).astype(np.uint8)
+        assert np.array_equal(_overlay_alpha(rej, size), want)
