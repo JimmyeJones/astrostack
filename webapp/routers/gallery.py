@@ -81,6 +81,13 @@ class GalleryItem(BaseModel):
     # History card use — one definition, so the three surfaces can't drift.
     # Additive with a False default, which is what every ordinary run is.
     unexported_edit: bool = False
+    # How far a past "Adjust → North up → Save" already turned this run's stored
+    # preview, in degrees (0.0 / None for every ordinary run). The lightbox's
+    # "North up" *view* needs it to know the picture on disk isn't the un-turned
+    # one — asking the server to turn it again would be a no-op it correctly
+    # refuses — exactly as the Target page reads it off `StackRun`. Additive and
+    # nullable; an older frontend ignores it.
+    preview_north_up_deg: float | None = None
 
 
 class VideoStillItem(BaseModel):
@@ -257,6 +264,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         noise_sigma=run.noise_sigma,
         calstat=run.calstat,
         seam_verdict=seam_verdict(run.seam_residual),
+        preview_north_up_deg=getattr(run, "preview_north_up_deg", None),
         # Three extra keyed reads on the project DB the caller already has open —
         # the same near-free lookups the run listing does, which is what made
         # this affordable library-wide.

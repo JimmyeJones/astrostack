@@ -9532,18 +9532,50 @@ to **Shipped**.)_
     bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
     make it the default: the saved orientation is what the owner chose.
 
-- **NEW IDEA (Builder 2026-08-30, the follow-on v0.308.0 deliberately left open) — put the North-up *view* on the
-  other two surfaces that show a picture big.** *(Pillar: enjoy + trust — PRIORITY 3; size XS — two lines each;
-  read-only, off by default.)* v0.308.0 built the whole mechanism: the `north_up_deg` field on `…/annotations`,
-  the shared `components/NorthUpViewToggle.tsx` (toggle + the two `localStorage` accessors), and the pattern of
-  passing it into `ImageLightbox` through `toolbarExtra` while swapping `src`/`downloadHref`/`jpegHref`/
-  `fullResHref` for their `north_up` forms. The **Gallery lightbox** and the **Compare** view use the same
-  lightbox and are the same two lines each. **The one thing to check per surface before wiring it:** does that
-  lightbox draw anything *measured against the stored bytes* over the picture (pins, a scale bar, the rejection
-  tint)? The Target hero's does not, which is why it was first. If one does, it must step aside for a turned view
-  exactly as History's already does, or the marks land in the wrong place. **Don't** make it the default
-  anywhere: the saved orientation is what the owner chose, and the preference is shared across surfaces already
-  (one `localStorage` key), so turning it on in the Gallery will correctly turn it on the Target page too.
+- **🟡 GALLERY SHIPPED (Builder, v0.311.0, branch `claude/compassionate-galileo-e1p1x8`); BEST PICTURES STILL
+  OPEN — ~~put the North-up *view* on the other two surfaces that show a picture big.~~**
+
+  **What shipped: the Gallery lightbox**, the page a beginner actually browses their pictures on. The toggle,
+  the two `localStorage` accessors and the `toolbarExtra` pattern all came straight from v0.308.0 — the turn
+  follows the picture, the plain PNG, the share JPEG and the full-res PNG, and deliberately **not** the FITS
+  (the raw data stays WCS-aligned). The Gallery's wallpaper menu gets its own North-up switch from the same
+  fact while it's there.
+
+  **It was not "two lines", and the reason is worth knowing before doing Best Pictures:** the Target hero gates
+  the control on `north_up_deg` **and** `!run.preview_north_up_deg`, and `GalleryItem` carried no such field —
+  so without it the Gallery would have offered the turn on a picture a past "Adjust → North up → Save" had
+  already baked, where the server correctly refuses to turn it twice and the control would visibly do nothing.
+  One additive, nullable `preview_north_up_deg` on `GalleryItem` (`getattr`-read, so an older row is `None`)
+  fixes that; `BestPictureItem` is a **separate model** and will need the same field.
+
+  **The one thing that nearly went wrong:** the first cut routed the lightbox's plain-PNG `downloadHref`
+  through the item's own `preview_url` instead of `stackArtifactUrl(…, "preview")`. Identical in production,
+  and it turned an existing Gallery test red — correctly, because the two are only *coincidentally* the same
+  string. Reverted to the existing call rather than updating the test.
+
+  **Tests (+4 in `Gallery.test.tsx`, +1 in `tests/webapp/test_gallery.py`):** the turn following the picture
+  and all three downloads while the FITS stays put; the control absent where `north_up_deg` is null; absent on
+  a picture already saved North-up; the remembered preference applying on open; and the new item field
+  reporting the baked angle (and `None` for an ordinary run).
+
+  **Still open: `BestPictures.tsx`** (the "My best pictures" wall / slideshow), same shape, plus the
+  `preview_north_up_deg` field on its own response model. `History.tsx` already has the *save* path and its own
+  marks, and `Editor.tsx`'s lightbox shows an edit in progress, not a saved picture — neither wants this.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-08-30, the follow-on v0.308.0 deliberately left open) — put the North-up *view* on the
+    other two surfaces that show a picture big.** *(Pillar: enjoy + trust — PRIORITY 3; size XS — two lines each;
+    read-only, off by default.)* v0.308.0 built the whole mechanism: the `north_up_deg` field on `…/annotations`,
+    the shared `components/NorthUpViewToggle.tsx` (toggle + the two `localStorage` accessors), and the pattern of
+    passing it into `ImageLightbox` through `toolbarExtra` while swapping `src`/`downloadHref`/`jpegHref`/
+    `fullResHref` for their `north_up` forms. The **Gallery lightbox** and the **Compare** view use the same
+    lightbox and are the same two lines each. **The one thing to check per surface before wiring it:** does that
+    lightbox draw anything *measured against the stored bytes* over the picture (pins, a scale bar, the rejection
+    tint)? The Target hero's does not, which is why it was first. If one does, it must step aside for a turned view
+    exactly as History's already does, or the marks land in the wrong place. **Don't** make it the default
+    anywhere: the saved orientation is what the owner chose, and the preference is shared across surfaces already
+    (one `localStorage` key), so turning it on in the Gallery will correctly turn it on the Target page too.
 
 - **QA LEAD (Builder 2026-08-30, generalised from the v0.308.1 copy fix) — sweep every download control's *copy*
   against what its endpoint actually serves.** *(Pillar: trust — PRIORITY 3; size S per surface, and the sweep
