@@ -43,19 +43,35 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-> **Builder 2026-08-30, branch `claude/compassionate-galileo-aj7ysy` — CLAIMED, by site (per the six
-> duplicate-collision process notes, naming the file+function, not just the headline):**
-> 1. **The Adjust panel on a *processed* run shows a picture neither button will save** (filed under
->    "Autonomy & friendliness", the one thing v0.305.0 deliberately left alone). Sites:
->    `frontend/src/routes/History.tsx` → `RunCard` (`imgSrc` / `showingStored` / `imageIsNorthUp`), plus the
->    stored-preview-rotated-on-the-fly source it needs — `webapp/routers/stack.py` → `download_stack_run`
->    (`kind == "preview"`) and a new `api.stackPreviewNorthUpUrl` in `frontend/src/api/client.ts`.
-> 2. **"Say the sky-coverage stat on the Dashboard"** — slice 1 of the two next taps on v0.306.0 (filed under
->    "Features that serve real workflows"). Sites: `frontend/src/routes/Dashboard.tsx`, reusing
->    `describeSkyCoverage` verbatim.
-> 3. **Confine `POST /api/scan`'s client-supplied `root` to the incoming folder** (Scout QA audit #16, filed
->    under "Autonomy & friendliness"). Sites: `webapp/routers/pipeline.py` → `trigger_scan`, and
->    `ScanRequest.root` in `webapp/schemas.py`.
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-aj7ysy` — run finished, all three claims
+> released.** Shipped three, each its own independently-green commit:
+> **v0.306.2** (under "Autonomy & friendliness") — the one thing the v0.305.0 Adjust-trapdoor fix deliberately
+> left alone: on a **processed** run the panel showed a live render of the linear master, i.e. a picture
+> *neither* of its two buttons writes. The picture now follows the button — stored bytes until a slider
+> actually moves — and the North-up caution the entry raised was **answered rather than dodged**:
+> `…/preview` learned an optional `north_up` that turns the *saved bytes* on the way out, so the rotation can
+> be previewed on the picture it belongs to. Deliberately not a flag on `stackArtifactUrl`, whose test pins
+> that the stored PNG/FITS/TIFF stay WCS-aligned.
+> **v0.306.3** (under "Features that serve real workflows") — slice 1 of the sky-coverage follow-up: the
+> sentence is on the Dashboard, asserted **against the shared helper itself** rather than a copy of its
+> wording, so the two surfaces cannot drift. Building it exposed that "See it on My map →" would have landed
+> on the real-sky atlas (the Sky page picks its map from `localStorage`), which is half of what the slice was
+> for — so `/sky` took a `?view=` read once through a new pure `initialSkyMode`.
+> **v0.306.4** (under "Autonomy & friendliness") — the Scout's `POST /api/scan` confinement, with the grep the
+> entry demanded done first (**nothing passes a `root`**: the frontend posts `{}`, and the startup and
+> post-upload scans pass none). The design call worth knowing is that the check is **lexical, not
+> `resolve()`-based** — a symlinked NAS share inside `incoming/` is normal on this box and the scan already
+> follows such links, so a strict resolve check would refuse a real setup to close nothing; a test pins the
+> symlink case so nobody "hardens" it into a break.
+> **Three follow-ons filed**, all turned up by the work rather than invented: North-up as a *view* control
+> anywhere a picture is shown (the server half now exists, and it is read-only — today the only way to see
+> your picture that way is to overwrite it); turning the rejection tint with the same helper, with the alpha
+> question that has to be checked first; and the finding that a **sub-folder scan root files its frames as
+> "Unsorted"**, so `root` reads like a "re-scan one target" shortcut and is not one.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
+> Claiming in the run's **first** commit, **by site**, and pushing it immediately cost under a minute; `main`
+> had not moved by merge time and there was no collision.
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-1m28nv` — run finished, all claims released.**
 > Shipped three, each its own independently-green commit:
@@ -9377,6 +9393,48 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **NEW IDEA (Builder 2026-08-30, unlocked by the v0.306.2 preview-rotation server half) — let "North up" be a
+  way to *look* at a picture, not only a way to overwrite it.** *(Pillar: enjoy + trust — PRIORITY 3; size S–M;
+  read-only, off by default.)* Until this run, the only way to see one of your pictures oriented like every
+  reference photo of the object was History → Adjust → tick → **Save**, which rewrites the stored preview and
+  (until v0.305.0) could cost a processed run its look. That is a destructive answer to a purely visual
+  question. `GET …/stack-runs/{id}/preview?north_up=true` now turns the *saved bytes* on the way out and
+  changes nothing on disk (v0.306.2 built it for the Adjust panel), so any surface that shows a picture could
+  offer the same tick as a **view** control: the Target hero (`LatestPictureCard`), the Gallery lightbox, the
+  Compare view. **Shape:** one shared toggle component reading the run's `north_up_deg` from the annotations /
+  suggestion it already fetches, remembered per viewer in `localStorage` (not on the run — this is a viewing
+  preference, not a fact about the picture). **Cautions, both already solved once in `History.tsx` and worth
+  copying rather than re-deriving:** object pins, the scale bar and the compass are measured on the un-rotated
+  FITS grid, so a turned view must hide them (`cantPlaceMarks`); and the rejection tint is sized to the stored
+  bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
+  make it the default: the saved orientation is what the owner chose.
+
+- **NEW IDEA (Builder 2026-08-30, the one thing v0.306.2 had to switch off) — the "see what stacking removed"
+  tint can't be shown over a North-up view, and the same trick that turns the picture would turn the tint.**
+  *(Pillar: image quality / trust — PRIORITY 4; size XS–S.)* The rejection overlay is rendered server-side sized
+  to the run's stored preview, including a rotation a past save baked in (`baked_north_up_deg`), so it lays
+  straight over those bytes and only those. v0.306.2's on-the-fly turn moves the picture out from under it, so
+  the Adjust panel hides the tint and says why. The endpoint already knows the run's FITS and its baked angle —
+  giving `…/rejection-overlay` the same optional `north_up` and passing it through the same
+  `orient_preview_north_up` (with `already_deg`) would keep the two in register. **Care:** the overlay is a
+  transparent PNG, and `orient_preview_north_up` converts to RGB — so this needs the rotate to preserve alpha,
+  or the tint arrives as an opaque rectangle. Check that before assuming it is a one-line change; if the helper
+  can't be made alpha-safe cheaply, leave the tint stepping aside, which is honest.
+
+- **NEW IDEA (Builder 2026-08-30, turned up by the v0.306.4 scan-root confinement) — `root` on `POST /api/scan`
+  is a "rescan just this folder" shortcut that doesn't actually work, and nothing uses it.** *(Pillar: autonomy
+  / maintainability — PRIORITY 3; size S; decide *which* of the two answers before building either.)*
+  `scan_and_organize` derives a target's name from each file's path **relative to the scan root**, so pointing a
+  scan at `incoming/M_42` files those frames as **Unsorted**, not M_42. Nothing in the app passes a sub-folder
+  root (confirmed by grep while shipping v0.306.4), so this has never fired — but the field reads like a
+  re-scan-one-target shortcut and is not one. **Two honest answers, pick one:** (a) make it work — when the root
+  is a folder *inside* incoming, derive the target from the root's own name so the frames land where a user
+  would expect, which would let a Target page offer a real "re-scan just this target" button (the friendly win,
+  and the reason to prefer this); or (b) drop the field and always scan the configured incoming folder, which is
+  what every caller already does. **Do not do both halves blind:** (a) changes where frames land for a caller
+  that doesn't exist today but might exist on someone's script, so it needs the folder-name derivation pinned by
+  a test either way.
 
 - **✅ SHIPPED (Builder, v0.306.2, branch `claude/compassionate-galileo-aj7ysy`) — ~~on a *processed* run, the
   Adjust panel shows you a picture that is not the one either button will save.~~** Fixed as the entry asked,
