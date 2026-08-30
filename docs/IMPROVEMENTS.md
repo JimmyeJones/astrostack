@@ -43,6 +43,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-7y6nlj` — CLAIMED, by site.** Taking the top open
+> item under "Autonomy & friendliness": **record how many *nights* went into a stack**, so a caption can say
+> "over 4 nights" instead of naming two dates. Sites I will touch: `seestack/stack/stacker.py`
+> (`_capture_hours`, the `add_stack_run` call), `seestack/io/project.py` (schema **19**, additive
+> `capture_hours_json`), `webapp/capture_nights.py` (`capture_night_count`), the four run-shaped API payloads
+> (`webapp/schemas.py` `StackRunOut`, `webapp/routers/gallery.py` `GalleryItem`/`BestPicture`,
+> `webapp/routers/stats.py` `RecentStack`), `seestack/nameplate.py` (`NameplateFields.nights`),
+> `webapp/pipeline.py` (`_nameplate_fields`) and `frontend/src/format.ts` (`captureNightsClause`).
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-vsy9vz` (second task) — claim released, shipped
 > as v0.314.0.** The follow-on the v0.313.0 work exposed, filed and taken in the same run: the acquisition
 > **nameplate** — the caption baked into a shared or printed picture — had *no date at all*, on any picture
