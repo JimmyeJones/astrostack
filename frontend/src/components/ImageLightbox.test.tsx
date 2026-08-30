@@ -268,6 +268,54 @@ describe("ImageLightbox", () => {
   });
 });
 
+describe("ImageLightbox — the \"what stacking removed\" tint", () => {
+  it("lays no overlay over the picture unless one is given", () => {
+    renderLightbox();
+    expect(screen.queryByTestId("lightbox-overlay")).not.toBeInTheDocument();
+  });
+
+  it("lays the tint over the picture, decoratively and without eating a drag", () => {
+    renderLightbox({ overlaySrc: "/api/run/1/rejection-overlay" });
+    const overlay = screen.getByTestId("lightbox-overlay");
+    expect(overlay).toHaveAttribute("src", "/api/run/1/rejection-overlay");
+    // Decorative: the caption is what a screen reader should hear, and the
+    // tint must never swallow the pointer gestures the viewer runs on.
+    expect(overlay).toHaveAttribute("aria-hidden");
+    expect(overlay).toHaveAttribute("alt", "");
+    expect(overlay.style.pointerEvents).toBe("none");
+  });
+
+  it("fits and moves the tint exactly like the picture, at every zoom level", () => {
+    renderLightbox({ overlaySrc: "/api/run/1/rejection-overlay" });
+    const pic = screen.getByAltText("M42");
+    const overlay = screen.getByTestId("lightbox-overlay");
+    const same = (el: HTMLElement) =>
+      [el.style.maxWidth, el.style.maxHeight, el.style.objectFit,
+       el.style.transform, el.style.transformOrigin].join("|");
+    expect(same(overlay)).toBe(same(pic));
+    // …and after a zoom, which is the case a separately-computed transform
+    // would silently get wrong.
+    wheel(surfaceFor(), -100);
+    expect(same(overlay)).toBe(same(pic));
+    expect(overlay.style.transform).toContain("scale(1.2)");
+  });
+
+  it("names what the marks are — a coloured speckle with no caption reads as damage", () => {
+    renderLightbox({
+      overlaySrc: "/api/run/1/rejection-overlay",
+      overlayNote: "The cyan marks are what stacking removed.",
+    });
+    expect(screen.getByText("The cyan marks are what stacking removed."))
+      .toBeInTheDocument();
+  });
+
+  it("says nothing about marks that aren't being shown", () => {
+    renderLightbox({ overlayNote: "The cyan marks are what stacking removed." });
+    expect(screen.queryByText("The cyan marks are what stacking removed."))
+      .not.toBeInTheDocument();
+  });
+});
+
 describe("computePinch", () => {
   it("scales by the finger-distance ratio (spread 100→200px = 2×)", () => {
     const r = computePinch(1, 100, 200, 200, 0, 150, 0);
