@@ -134,12 +134,26 @@ def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
     on a pure name-shape test *and* on the base being in the same group — an
     ordinary library pays nothing. A group that collapses below two real members
     is dropped entirely, and lands in the cleanup nudge instead, which is the
-    correct offer for it."""
+    correct offer for it.
+
+    **Junk targets are dropped too, for the same reason**: the Seestar's own
+    on-device output sits at the same coordinates as the subs it was stacked
+    from, so it clustered with them — and the app was offering to *combine* a
+    target the cleanup card was simultaneously offering to *delete*.
+
+    **And a mosaic is never grouped with the single field of the same object.**
+    The convention keeps them as two targets precisely because their canvases
+    differ ("never co-stacked or auto-merged"); position clustering cannot see
+    that, since they point at the same place. The two populations are therefore
+    clustered separately — two mosaics of one object are still a real merge, and
+    so are two single fields, but the pair across the line is not."""
     from seestack.io.library import find_same_object_target_groups
+    from seestack.io.scanner import is_mosaic_target_name
     from seestack.objectinfo import identify_object
-    from webapp.duplicate_targets import (
+    from webapp.library_hygiene import (
         confirm_duplicate_of_base,
         duplicate_base_safe,
+        junk_verdict,
     )
 
     lib = deps.open_library(request)
@@ -153,13 +167,26 @@ def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
                 if confirm_duplicate_of_base(
                     lib, m, in_group.get(duplicate_base_safe(m.name) or ""),
                 ) is None
+                and junk_verdict(lib, m) is None
             )
         # Re-cluster what survived rather than patching the old groups: the
         # centre and the "all within N′" figure must describe the targets
         # actually being offered, and dropping a member can legitimately split a
         # single-linkage chain in two. Same tested helper, so the two passes
-        # cannot disagree; the second is over a handful of rows.
-        groups = find_same_object_target_groups(survivors)
+        # cannot disagree; the second is over a handful of rows. Mosaics and
+        # single fields are clustered apart so no group can span both.
+        mosaics = [m for m in survivors if is_mosaic_target_name(m.name)]
+        singles = [m for m in survivors if not is_mosaic_target_name(m.name)]
+        groups = (
+            find_same_object_target_groups(mosaics)
+            + find_same_object_target_groups(singles)
+        )
+        # Each call sorts its own result; re-sort so the deepest merge still
+        # leads the nudge across both populations.
+        groups.sort(
+            key=lambda g: sum(m.total_exposure_s or 0.0 for m in g.members),
+            reverse=True,
+        )
     finally:
         lib.close()
 
@@ -206,14 +233,10 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
     engine's own (``junk_output_frame_cap``, looser for a mosaic — whose on-device
     output is one image *per panel*) so the two can't drift. A ``_video``/``_photo``
     capture target is decided by name instead, at any frame count."""
-    from seestack.io.scanner import (
-        classify_seestar_junk_target,
-        is_capture_mode_target_name,
-        junk_output_frame_cap,
-    )
-    from webapp.duplicate_targets import (
+    from webapp.library_hygiene import (
         confirm_duplicate_of_base,
         duplicate_base_safe,
+        junk_verdict,
     )
 
     lib = deps.open_library(request)
@@ -246,31 +269,16 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
                 ))
                 continue
             # --- (1) output/capture junk (cheap: only small targets opened) ---
-            # A ``_video``/``_photo`` name is decided by name alone, at any frame
-            # count (the folder holds clips or stills, however many).
-            is_capture_name = is_capture_mode_target_name(entry.name)
-            if (
-                is_capture_name
-                or entry.n_frames <= junk_output_frame_cap(entry.name)
-            ):
-                source_paths: list[str] = []
-                if not is_capture_name:
-                    proj = lib.open_target(entry.safe_name)
-                    try:
-                        source_paths = [f.source_path for f in proj.iter_frames()]
-                    finally:
-                        proj.close()
-                verdict = classify_seestar_junk_target(
-                    entry.name, source_paths, entry.n_frames)
-                if verdict is not None:
-                    out.append(CleanupSuggestionOut(
-                        safe=entry.safe_name,
-                        name=entry.name,
-                        n_frames=entry.n_frames,
-                        reason=verdict.reason,
-                        detail=verdict.detail,
-                    ))
-                    continue  # a junk target is never also a duplicate
+            verdict = junk_verdict(lib, entry)
+            if verdict is not None:
+                out.append(CleanupSuggestionOut(
+                    safe=entry.safe_name,
+                    name=entry.name,
+                    n_frames=entry.n_frames,
+                    reason=verdict.reason,
+                    detail=verdict.detail,
+                ))
+                continue  # a junk target is never also a duplicate
 
             # --- (2) <T>_sub duplicate of a base target that now owns the subs -
             # Cheap name-shape prefilter (pure, no I/O): only ``*_sub``-named

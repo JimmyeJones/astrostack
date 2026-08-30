@@ -70,6 +70,30 @@ _MOSAIC_SUB_SUFFIX = "_mosaic_sub"
 _VIDEO_SUFFIX = "_video"
 _PHOTO_SUFFIX = "_photo"
 
+# How a mosaic's target is *named* once ingested: "<T> (mosaic)", deliberately
+# distinct from the single-field "<T>" so their differing footprints are never
+# co-stacked or auto-merged. One definition, because three things now depend on
+# the exact spelling — the convention that builds it, the duplicate detector
+# that names a "<T>_mosaic_sub" leftover's base, and the merge suggester that
+# must not offer to combine a mosaic with its single field.
+_MOSAIC_TARGET_SUFFIX = " (mosaic)"
+
+
+def mosaic_target_name(base: str) -> str:
+    """The target name a mosaic's raw-subs folder ``<base>_mosaic_sub/`` becomes."""
+    return f"{base}{_MOSAIC_TARGET_SUFFIX}"
+
+
+def is_mosaic_target_name(target_name: str) -> bool:
+    """True when a target is a **mosaic**, by the name the convention gave it.
+
+    A mosaic and the single field of the same object sit at the same plate-solved
+    centre, so nothing about position can tell them apart — but their canvases
+    differ, which is the whole reason the convention keeps them as two targets.
+    Anything that groups targets by *where they point* needs this to avoid
+    proposing a combination the ingest side deliberately refused to make."""
+    return target_name.strip().lower().endswith(_MOSAIC_TARGET_SUFFIX)
+
 # The capture-mode folders that never hold stackable deep-sky sub-frames, so the
 # scanner skips them and the cleanup nudge offers to remove any a pre-convention
 # scan already ingested. One tuple so the two can never disagree about the family.
@@ -126,7 +150,7 @@ def _apply_seestar_convention(
             continue
         if low.endswith(_MOSAIC_SUB_SUFFIX):
             base = name[: -len(_MOSAIC_SUB_SUFFIX)].rstrip()
-            units.append((f"{base} (mosaic)" if base else name, files))
+            units.append((mosaic_target_name(base) if base else name, files))
             continue
         if low.endswith(_SUB_SUFFIX):
             base = name[: -len(_SUB_SUFFIX)].rstrip()
@@ -483,7 +507,7 @@ def duplicate_sub_base_name_from_name(target_name: str) -> str | None:
         return None
     if low.endswith(_MOSAIC_SUB_SUFFIX):
         base = name[: -len(_MOSAIC_SUB_SUFFIX)].rstrip()
-        return f"{base} (mosaic)" if base else None
+        return mosaic_target_name(base) if base else None
     base = name[: -len(_SUB_SUFFIX)].rstrip()
     return base if base else None
 

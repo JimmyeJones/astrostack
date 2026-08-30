@@ -22,6 +22,7 @@ from seestack.io.scanner import (
     duplicate_sub_base_name_from_name,
     duplicate_sub_target_base_name,
     is_capture_mode_target_name,
+    is_mosaic_target_name,
     junk_output_frame_cap,
     run_qc_and_solve,
     scan_and_organize,
@@ -353,6 +354,20 @@ def test_duplicate_sub_base_name_from_name_matches_the_convention():
     for folder in ("M 31_sub", "M 3_mosaic_sub"):
         [(built, _)] = _apply_seestar_convention(_fake(folder))
         assert duplicate_sub_base_name_from_name(folder) == built
+
+
+def test_is_mosaic_target_name_recognises_what_the_convention_builds():
+    """Anything that groups targets by *where they point* needs this: a mosaic
+    and the single field of the same object share a centre but not a canvas, and
+    the convention keeps them apart on purpose. Asserted against the name the
+    convention actually builds, so the spelling has one definition."""
+    [(built, _)] = _apply_seestar_convention(_fake("M 44_mosaic_sub"))
+    assert is_mosaic_target_name(built)
+    assert is_mosaic_target_name("M 44 night 2 (MOSAIC)")
+    assert not is_mosaic_target_name("M 44")
+    # The device's own output folder is not the mosaic *target* — different name,
+    # and it is junk rather than a target to keep clustered with the mosaic.
+    assert not is_mosaic_target_name("M 44_mosaic")
 
 
 def test_duplicate_sub_base_name_is_none_with_no_frames():
