@@ -43,6 +43,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-vsy9vz` (second task) — claim released, shipped
+> as v0.314.0.** The follow-on the v0.313.0 work exposed, filed and taken in the same run: the acquisition
+> **nameplate** — the caption baked into a shared or printed picture — had *no date at all*, on any picture
+> the app has ever exported. It read a `DATE-OBS` card the stacker never wrote (this module's own docstring
+> claimed it did). Sites: `seestack/nameplate.py` (`format_acq_range`, `NameplateFields.date_end_iso`),
+> `seestack/stack/stacker.py` (`_header_meta` stamps `DATE-OBS`/`DATE-END`), `webapp/pipeline.py`
+> (`_nameplate_fields`) and its three call sites. Full write-up on the entry under "Autonomy & friendliness".
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-vsy9vz` — claim released, shipped as v0.313.0.**
 > The date-honesty class filed under "Autonomy & friendliness" as the generalisation of the v0.311.3 "First
 > light" bug, taken at the instance that was a **wrong fact on shared output**: the ready-to-post caption and
@@ -9606,6 +9614,48 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **✅ SHIPPED (Builder, v0.314.0, branch `claude/compassionate-galileo-vsy9vz`) — ~~the acquisition
+  nameplate baked onto a shared or printed picture never showed a **date**, on any export the app has ever
+  made.~~** Found while sweeping the rest of the date class the v0.313.0 fix opened, and **verified by
+  running a real stack and reading the master's header** rather than by reading the code. *(Severity:
+  missing fact on shared output — the one field an acquisition caption exists for. Confidence: reproduced;
+  the master carried no `DATE-OBS`, `DATE-END` or `MJD-OBS` at all.)*
+
+  **Root cause.** `_nameplate_fields` took its date from the run FITS's `DATE-OBS` card, and
+  `stacker._header_meta` — which stamps `OBJECT`, `NFRAMES`, `EXPOSURE` and `EXPTOTAL` — never wrote one.
+  `nameplate.py`'s own module docstring asserted that it did. So the footer read *"M 31 · 4h 12m (505x30s) ·
+  ZWO Seestar S50"*, silently missing the middle part, and every "best-effort, a missing field is simply
+  omitted" rule in that module was quietly doing its job on a field that was never going to arrive.
+
+  **What shipped, both halves.** (1) The master now records **when its light was collected**: `DATE-OBS` (the
+  first sub combined) and, for a stack spanning more than one instant, `DATE-END` — the FITS convention for a
+  combined frame, so the file self-documents in Siril/PixInsight as well as here. Taken from the same
+  `_capture_window` v0.313.0 added, so the header and the run row cannot disagree. (2) The caption prefers
+  the **run record** over the card and names the *observing night* through `capture_night_range`, the helper
+  every other night surface already goes through — so a baked JPEG and the Nights card cannot date one
+  session differently. All three nameplate call sites (the share JPEG, the editor share export, the print
+  export) pass `Settings.site_lon`, so the three surfaces agree with each other whatever the picture.
+
+  **And a multi-night stack now says so.** `NameplateFields` gains an optional `date_end_iso` and
+  `format_acq_range` writes a span's shared parts once — `15-18 Nov 2024`, `28 Oct-3 Nov 2024`,
+  `28 Dec 2024-3 Jan 2025` — which matters because the owner's stacks are routinely several nights, and
+  naming only the night one started is the same half-truth in a smaller font. **Deliberately ASCII**: the
+  bundled Aileron face has no en dash, and `test_nameplate.py`'s glyph-coverage test (which now feeds it
+  every shape of the span) is what stops the next typographic tidy-up baking a hollow `.notdef` box into
+  someone's shared picture.
+
+  **Upgrade-safe (§9):** two header cards on newly-written masters, one optional dataclass field with a
+  default, one optional function argument. No config, schema, on-disk-layout, API-shape or default change; an
+  existing master is untouched on disk and simply keeps captioning without a date until it is re-stacked, and
+  a run with no window falls back to the header card exactly as before.
+
+  **Tests (+12):** `tests/test_nameplate.py` (the three span shapes, single-night and unusable-end
+  degradation, a reversed span reading forwards, the span inside a full caption, and every span shape added
+  to the glyph-coverage assertion); `tests/webapp/test_nameplate_date.py` (the night named rather than the
+  stack day, a multi-night caption, the observer's own night for a session straddling UTC noon, the FITS-card
+  fallback, the run record beating the card, a tidy date-less caption when nothing is known, and a real stack
+  writing `DATE-OBS` into its master).
 
 - **✅ SHIPPED, the wrong-fact half (Builder, v0.313.0, branch `claude/compassionate-galileo-vsy9vz`)
   — ~~a picture's shareable caption said it was "shot on" / "captured" the day the **stack ran**~~, and the
