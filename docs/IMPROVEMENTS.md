@@ -9615,6 +9615,41 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-30, the one thing the v0.313.0 capture window deliberately cannot say) — record
+  how many *nights* went into a stack, so the caption can say "over 4 nights" instead of naming two dates.**
+  *(Pillar: understand + share — PRIORITY 3; size S. Confidence: the limitation is pinned by a test —
+  `captureNightsClause` asserts it "never claims a night count it cannot know".)* A run now records its first
+  and last sub (`capture_start_utc` / `capture_end_utc`), which is enough for "shot between 15 and 18 Nov
+  2024" and **not** enough for the sentence a person actually says out loud: *"600 subs over 4 nights"*. The
+  two are not the same claim — a window of 15→18 Nov is equally consistent with two nights and with four —
+  and the difference is exactly the fact that makes a beginner's picture sound like the work it was.
+  **Shape:** one more additive column, `capture_nights` (an INTEGER), counted in `stacker._capture_window`'s
+  caller as the number of **distinct observing nights** among the frames it combined. **The catch worth
+  stating before anyone starts:** the engine cannot bucket a night without the observer's longitude, which is
+  a `webapp` concern (`resolve_site_lon`), and `seestack/` may not import `webapp` (§6). So either the count
+  is UTC noon-to-noon at stack time and mildly wrong for someone far from Greenwich, or the *set of night
+  dates* is what gets stored (a short JSON array, bucketed at read time like `capture_night_range` already
+  does) — the second is the honest one and barely bigger. Then `postCaption`, `nameplate` and the History
+  card can all say it. **Grep before building:** the per-target Nights card already counts nights *for a
+  target*; this is per **run**, which is a different set the moment anyone re-stacks a subset.
+
+- **⚪ AUDIT NOTE (Builder 2026-08-30, first two candidates of the v0.312.1 "normalises against its own
+  subset" QA lead — NON-findings, recorded so nobody re-treads them).** The lead directly above asks for a
+  sweep of every statistic whose normalising subset is data-dependent. Two of its named candidates were read
+  this run and are **not** instances; both were traced to *why* their subset is stable rather than merely
+  looking plausible. (1) `edit/starmask.py:67` — `np.percentile(tophat[cover], 99.9)`: `cover` is
+  `np.isfinite(lum)`, i.e. "pixels that have data at all", which is a property of the **canvas** and not of
+  how much data went in. A fixed quantile over it does not drift with the sub count the way the tint's
+  `p90(non-empty)` did, because the non-empty set there *grew into* the noise floor as subs accumulated
+  while `cover` does not change at all. (2) A repo-wide grep for the lead's own pattern
+  (`np.percentile(x[…])` with a data-dependent mask) finds **only** that one site across `seestack/` and
+  `webapp/` — 35 percentile calls, 34 of them over a whole array. *(Confidence: read and grepped, not
+  measured — the lead's own method is to measure at 16 / 64 / 300 subs, and these two were ruled out on the
+  stronger ground that their subset is not a function of the sub count at all. The **unswept** half is the
+  lead's other axis: the auto-grade / auto-edit strength pickers and `stackhealth`'s verdicts, which reach
+  for a fraction of "affected" pixels rather than a percentile, and which a `np.percentile` grep does not
+  see.)*
+
 - **✅ SHIPPED (Builder, v0.314.0, branch `claude/compassionate-galileo-vsy9vz`) — ~~the acquisition
   nameplate baked onto a shared or printed picture never showed a **date**, on any export the app has ever
   made.~~** Found while sweeping the rest of the date class the v0.313.0 fix opened, and **verified by
