@@ -429,7 +429,7 @@ def channel_combine(safe: str, body: dict[str, Any], request: Request) -> dict[s
 @router.get("/api/targets/{safe}/stack-runs", response_model=list[StackRunOut])
 def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
     from webapp.routers.editor import (
-        AUTO_EDIT_BAKED_PREFIX,
+        AUTO_EDIT_BAKED_LOOK_PREFIX,
         EXPORTED_RECIPE_META_PREFIX,
         RECIPE_META_PREFIX,
     )
@@ -443,14 +443,14 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
         # Three small meta reads per run, so every surface that shows a run's
         # picture can tell an un-exported saved edit from a finished one (see
         # ``_unexported_edit``): the saved recipe, the one an export of this run
-        # already rendered, and the look an unattended auto-edit baked into the
+        # already rendered, and the look an in-place auto-edit baked into the
         # preview. All live in the same already-open DB.
         unexported = {
             r.id: _unexported_edit(
                 r.options_json,
                 proj.get_meta(f"{RECIPE_META_PREFIX}{r.id}"),
                 proj.get_meta(f"{EXPORTED_RECIPE_META_PREFIX}{r.id}"),
-                proj.get_meta(f"{AUTO_EDIT_BAKED_PREFIX}{r.id}"),
+                proj.get_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{r.id}"),
             )
             for r in runs
         }
@@ -573,31 +573,22 @@ def _recipe_look(recipe_json: str | None) -> list | None:
             continue
         params = op.get("params")
         # Sorted by key so two recipes that differ only in JSON key order match.
-        # Keys are unique, so no value is ever compared during the sort. Built out
-        # of lists rather than tuples so a look survives a JSON round-trip
-        # unchanged — ``AUTO_EDIT_BAKED_PREFIX`` stores one and compares it back.
-        items = ([[k, v] for k, v in sorted(params.items())]
-                 if isinstance(params, dict) else [])
+        # Keys are unique, so no value is ever compared during the sort.
+        items = sorted(params.items()) if isinstance(params, dict) else []
         look.append([op.get("id"), items])
     return look
 
 
-def _recipe_drifted(recipe_json: str | None, baked_look_json: str | None) -> bool:
-    """True when a run's **saved recipe no longer describes its stored preview**.
+def _baked_look_disagrees(baked_look_json: str | None, look: list | None) -> bool:
+    """True when an auto-edit's **stamped** baked look (``AUTO_EDIT_BAKED_LOOK_PREFIX``)
+    says the run's stored preview shows a *different* picture from the recipe now
+    saved on it — i.e. the user re-opened a "Process target" run, changed something
+    and pressed Save, so the recipe and the baked bytes have drifted apart.
 
-    ``baked_look_json`` is the ``_recipe_look`` an unattended auto-edit stamped
-    beside the recipe it had just baked into the preview PNG
-    (``editor.AUTO_EDIT_BAKED_PREFIX``, written by ``pipeline._auto_edit_process_run``).
-    Re-opening such a run in the editor, changing a parameter and pressing **Save**
-    rewrites the recipe but *not* the preview, and this is the only thing on disk
-    that can tell afterwards.
-
-    ``False`` whenever it cannot honestly say otherwise — no stamp (every run
-    auto-edited before the stamp existed, and every run that was never auto-edited),
-    an unreadable stamp, or no readable recipe to compare it against. So this never
-    fires on an upgrading install's existing runs; the guard only ever speaks where
-    it can actually tell. Compared by *look*, so re-saving an unchanged edit — which
-    re-stamps ``updated_utc`` and re-rolls no op uid — stays quiet.
+    ``False`` whenever we can't tell — no stamp (every run auto-edited before the
+    stamp existed, and every run that was never auto-edited at all), or a stamp that
+    won't parse. That is deliberately the pre-stamp behaviour: the guard only ever
+    fires where it has evidence, so an upgrading install sees no change.
     """
     if not baked_look_json:
         return False
@@ -607,10 +598,12 @@ def _recipe_drifted(recipe_json: str | None, baked_look_json: str | None) -> boo
         return False
     if not isinstance(baked, list):
         return False
-    look = _recipe_look(recipe_json)
-    if look is None:
-        return False
-    return look != baked
+    # Compared as JSON, not as Python objects: a look's per-op params are
+    # ``(key, value)`` *tuples*, which survive a round-trip through the stamp as
+    # lists, so `==` would call every stamp a mismatch. Both sides serialise
+    # identically, and the ordering ``_recipe_look`` imposes makes the text
+    # canonical.
+    return json.dumps(baked) != json.dumps(look)
 
 
 def _unexported_edit(options_json: str | None, recipe_json: str | None,
@@ -632,12 +625,7 @@ def _unexported_edit(options_json: str | None, recipe_json: str | None,
     False when there is no recipe, when the recipe is unparseable, when every op
     in it is disabled — a recipe that changes nothing is not an unfinished edit —
     and for an in-place "Process target" Auto edit, whose recipe *is* what its
-    preview shows *while the two still agree*. ``baked_look_json`` is what makes
-    that last clause checkable rather than assumed: pass the stamp the auto-edit
-    left (``editor.AUTO_EDIT_BAKED_PREFIX``) and a run whose recipe has since been
-    re-saved with a different look is flagged again, because that second-round edit
-    is exactly as invisible as a first-round one. Without the stamp — every run
-    auto-edited before it existed — the answer is exactly what it always was.
+    preview shows.
 
     Note which display-space marker is checked and which is not, because the two
     are written by different paths and only one of them bakes the stored recipe:
@@ -659,23 +647,23 @@ def _unexported_edit(options_json: str | None, recipe_json: str | None,
     thing the app asked for has to be able to stop it asking. Compared by
     :func:`_recipe_look`, so re-saving an unchanged edit (which re-stamps
     ``updated_utc``) stays quiet, while changing a parameter and saving speaks up
-    again — that second-round edit is as invisible as the first one was."""
+    again — that second-round edit is as invisible as the first one was.
+
+    ``baked_look_json`` is the look the in-place Auto edit actually baked into the
+    preview (``editor_auto_baked_look:<run_id>``). The ``preview_display_space``
+    exemption above assumes the saved recipe *is* what the preview shows, which stops
+    being true the moment the user re-opens such a run, tweaks it and saves — and
+    that second-round edit is exactly as invisible as any other. With the stamp in
+    hand we can tell the two apart, so a drifted run loses the exemption and is
+    flagged like any other unfinished edit. Without it (a run auto-edited before the
+    stamp existed) the answer is exactly what it always was."""
     look = _recipe_look(recipe_json)
-    opts = _parse_options(options_json)
-    if opts.get("preview_display_space"):
-        # An in-place Auto edit: its recipe *is* what its preview shows — unless
-        # the two have since drifted apart, which only the baked stamp can tell
-        # (see :func:`_recipe_drifted`). Where they still agree, nothing is
-        # unfinished, exactly as before. Where they don't, this run falls through
-        # to the same already-exported test as any other, so finishing the export
-        # still stops the app asking. The drift test deliberately replaces the
-        # "recipe changes nothing" one below rather than following it: on these
-        # runs a recipe that changes nothing still disagrees with a preview that
-        # plainly does.
-        if not _recipe_drifted(recipe_json, baked_look_json):
-            return False
-    elif not look:
+    if not look:
         # No recipe, unreadable, or every op disabled — nothing unfinished.
+        return False
+    opts = _parse_options(options_json)
+    if opts.get("preview_display_space") and not _baked_look_disagrees(
+            baked_look_json, look):
         return False
     # Already exported *this* look ⇒ finished. Anything else ⇒ still unfinished.
     return not (exported_recipe_json and _recipe_look(exported_recipe_json) == look)
@@ -1367,6 +1355,187 @@ async def deepening_reel(safe: str, request: Request) -> FileResponse:
     return FileResponse(reel, media_type=media, filename=reel.name)
 
 
+# --- Share-ready "zoom clip" -------------------------------------------------
+# A short looping push-in on ONE finished picture, for posting. Unlike the two
+# animations above (the progress reel and the deepening reel, both of which show a
+# stack accumulating *over time*) this is a purely spatial camera move over the
+# finished frame — see seestack.render.zoomclip. Rendered on demand from the run's
+# stored preview PNG (the same bytes the wallpaper/share exports use, so it matches
+# the picture on screen for every kind of run) and cached beside the outputs with a
+# content signature, so a repeat download is a plain file read.
+
+_ZOOM_CLIP_SUFFIXES = ("_zoom.webp", "_zoom.png")
+
+
+def _target_pixel_in_preview(run: Any, entry: Any,
+                             preview_png: bytes) -> tuple[float, float] | None:
+    """Where the catalogued target sits in a run's **stored preview bytes**, or
+    ``None`` to centre on the image instead.
+
+    Two things can put those bytes on a different grid from the master, and both
+    have to be undone before the WCS answer means anything: an auto-edit border
+    trim (``preview_crop``), and a North-up turn a past "Adjust → Save" baked in
+    (``preview_north_up_deg``) — so the mapping is done on the un-rotated grid and
+    the answer turned by the same angle. One definition, two callers (the wallpaper
+    crop and the zoom clip), because getting either half wrong re-centres the
+    picture on empty sky.
+    """
+    from seestack.wallpaper import (
+        png_size,
+        rotate_point_north_up,
+        wallpaper_target_pixel,
+    )
+
+    ra = entry.ra_deg if entry is not None else None
+    dec = entry.dec_deg if entry is not None else None
+    if ra is None or dec is None or not run.fits_path:
+        return None
+    baked = baked_north_up_deg(run)
+    flat_size = png_size(preview_png)
+    if baked:
+        flat_size = _unrotated_preview_size(run.fits_path) or flat_size
+    if flat_size is None:
+        return None
+    target_px = wallpaper_target_pixel(
+        run.fits_path, ra, dec, flat_size[0], flat_size[1],
+        parse_preview_crop(run.preview_crop_json))
+    if target_px is not None and baked:
+        target_px = rotate_point_north_up(
+            target_px[0], target_px[1], flat_size[0], flat_size[1], baked)
+    return target_px
+
+
+def _zoom_clip_signature(preview_path: Path,
+                         focus_xy: tuple[float, float] | None) -> str:
+    """Content signature of a run's clip — the preview bytes it was made from plus
+    the point it zooms onto, so a re-edited preview (or a target that has since
+    been plate-solved) rebuilds rather than serving yesterday's move."""
+    import hashlib
+
+    # Version tag: bump when the *render output* changes for an unchanged preview,
+    # so cached clips are rebuilt in place instead of serving the old schedule.
+    parts = ["v1"]
+    try:
+        st = os.stat(preview_path)
+        parts.append(f"{st.st_mtime_ns}:{st.st_size}")
+    except OSError:
+        parts.append("0:0")
+    parts.append("centre" if focus_xy is None
+                 else f"{focus_xy[0]:.1f},{focus_xy[1]:.1f}")
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()
+
+
+def _build_or_get_zoom_clip(preview_path: Path, basename: str,
+                            focus_xy: tuple[float, float] | None) -> Path | None:
+    """Return the cached zoom clip for this run's preview, rebuilding it when the
+    signature has changed. Blocking (decodes + encodes an animation), so callers
+    dispatch it to a threadpool."""
+    out_dir = preview_path.parent
+    sig = _zoom_clip_signature(preview_path, focus_xy)
+    sig_file = out_dir / f"{basename}_zoom.sig"
+    for suffix in _ZOOM_CLIP_SUFFIXES:
+        cand = out_dir / f"{basename}{suffix}"
+        if cand.exists() and sig_file.exists():
+            with contextlib.suppress(OSError):
+                if sig_file.read_text().strip() == sig:
+                    return cand
+    # (Re)build: clear any stale clip of either format first, so a format change
+    # (WEBP↔APNG) can't leave two files the resolver disagrees on.
+    for suffix in _ZOOM_CLIP_SUFFIXES:
+        with contextlib.suppress(OSError):
+            (out_dir / f"{basename}{suffix}").unlink()
+    from seestack.render.zoomclip import build_zoom_clip
+
+    try:
+        data = preview_path.read_bytes()
+    except OSError:
+        return None
+    path = build_zoom_clip(data, out_dir, basename, focus_xy=focus_xy)
+    if path is None:
+        return None
+    with contextlib.suppress(OSError):
+        sig_file.write_text(sig)
+    return path
+
+
+def _zoom_clip_inputs(request: Request, safe: str,
+                      run_id: int) -> tuple[Any, Path | None, tuple[float, float] | None]:
+    """``(run, preview_path, focus_xy)`` for a run's zoom clip — the one DB read
+    both endpoints below need. ``preview_path`` is ``None`` when the run has no
+    stored picture to move the camera over, which is what makes the card self-hide
+    rather than 404 at the user."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        entry = lib.find_target(safe)
+    finally:
+        proj.close()
+        lib.close()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    if not run.preview_path or not Path(run.preview_path).exists():
+        return (run, None, None)
+    preview_path = Path(run.preview_path)
+    focus_xy = None
+    with contextlib.suppress(OSError):
+        focus_xy = _target_pixel_in_preview(run, entry, preview_path.read_bytes())
+    return (run, preview_path, focus_xy)
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/zoom-clip/info")
+def zoom_clip_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
+    """Whether a share-ready zoom clip can be made of this run, and how it will be
+    framed. Lightweight (no render): ``available`` is false — not a 404 — when the
+    run has no stored preview, so the button simply doesn't appear.
+
+    ``centred_on_target`` says whether the move aims at the plate-solved object or
+    at the picture's own brightest part, so the UI can be honest about it in one
+    short line rather than implying a solve it doesn't have."""
+    _run, preview_path, focus_xy = _zoom_clip_inputs(request, safe, run_id)
+    if preview_path is None:
+        return {"available": False}
+    from PIL import features
+
+    from seestack.render.zoomclip import (
+        CLIP_HOLD_SECONDS,
+        CLIP_IN_SECONDS,
+        CLIP_ZOOM,
+        zoom_clip_size,
+    )
+    from seestack.wallpaper import png_size
+
+    size = None
+    with contextlib.suppress(OSError):
+        size = png_size(preview_path.read_bytes())
+    out = zoom_clip_size(*size) if size else None
+    return {
+        "available": True,
+        "format": "webp" if features.check("webp") else "png",
+        "centred_on_target": focus_xy is not None,
+        "zoom": CLIP_ZOOM,
+        # The whole loop: in, hold, and back out again.
+        "seconds": round(2 * CLIP_IN_SECONDS + CLIP_HOLD_SECONDS, 1),
+        "width": out[0] if out else None,
+        "height": out[1] if out else None,
+    }
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/zoom-clip")
+async def zoom_clip(safe: str, run_id: int, request: Request) -> FileResponse:
+    """Serve this run's looping zoom clip (WEBP, or APNG where Pillow has no WEBP),
+    building and caching it on demand. 404 when the run has no stored preview."""
+    run, preview_path, focus_xy = _zoom_clip_inputs(request, safe, run_id)
+    if preview_path is None:
+        raise HTTPException(status_code=404, detail="No preview for this run")
+    basename = run.output_basename or "master"
+    clip = await run_in_threadpool(_build_or_get_zoom_clip, preview_path,
+                                   basename, focus_xy)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Could not build a zoom clip")
+    media = _PROGRESS_MEDIA.get(clip.suffix, "application/octet-stream")
+    return FileResponse(clip, media_type=media, filename=clip.name)
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/render-suggestion")
 async def render_stretch_suggestion(
     safe: str, run_id: int, request: Request,
@@ -1505,14 +1674,15 @@ async def save_stack_preview(
         # preview with a plain stretch of the linear FITS (the recipe itself is
         # untouched and still reopens in the editor), so leaving the marker and the
         # baked-look stamp behind would have the reveal put its single sub through
-        # an Auto recipe the picture beside it no longer shows. Cleared together
-        # with the crop, on the same "always written, never left alone" rule — a
-        # linear run is unaffected either way, and the stretch just recorded above
-        # is what the reveal should match against now.
+        # an Auto recipe the picture beside it no longer shows — the same
+        # disagreement the stamp exists to catch, reached without ever opening the
+        # editor. Cleared together with the crop, on the same "always written,
+        # never left alone" rule; a linear run is unaffected either way, and the
+        # stretch recorded just above is what the reveal should match against now.
         if _preview_is_display_space(run.options_json) and not is_display:
-            from webapp.routers.editor import AUTO_EDIT_BAKED_PREFIX
+            from webapp.routers.editor import AUTO_EDIT_BAKED_LOOK_PREFIX
             proj.set_run_preview_display_space(run_id, False)
-            proj.delete_meta(f"{AUTO_EDIT_BAKED_PREFIX}{run_id}")
+            proj.delete_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run_id}")
     finally:
         proj.close()
         lib.close()
@@ -1560,21 +1730,21 @@ def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
     * a genuine editor **export** — its FITS is itself display-space
       (``fits_is_display_space``), so there is no linear picture to reason about and
       the recipe on it, if any, describes a *second-round* edit of the export;
-    * an ordinary linear run, which already has the honest STF/asinh match; and
+    * an ordinary linear run, which already has the honest STF/asinh match;
     * an auto-edited run whose recipe is missing or unreadable, where we'd be
       guessing at what its preview shows; and
-    * an auto-edited run whose recipe has **drifted** from the one its preview was
-      baked from — the user re-opened it, changed something and pressed Save, which
-      rewrites the recipe and leaves the preview alone. Rendering the sub through
-      the *new* recipe would make the two halves of the reveal differ by an edit as
-      well as by frame count, which is the one thing that comparison must never
-      show, so it stands down to hidden exactly as a missing recipe does.
+    * an auto-edited run whose recipe has since **drifted** from the picture its
+      preview shows — the user re-opened it, changed a parameter and saved, which
+      rewrites the recipe but not the baked bytes. Rendering the sub through the new
+      recipe would then differ from the stack half by an *edit* as well as by frame
+      count, which is the one thing this comparison must never show, so the reveal
+      stands down to hidden exactly as it does for a missing recipe.
 
     Like every other surface that reads this marker (see ``_unexported_edit``), it
     takes the stored recipe to *be* what the stored preview shows — which is what
-    ``_auto_edit_process_run`` writes, in one step, for these runs. The drift check
-    is what keeps that true afterwards, and it only speaks where it can tell: a run
-    auto-edited before the stamp existed has none, and behaves exactly as before.
+    ``_auto_edit_process_run`` writes, in one step, for these runs — but only as far
+    as the baked-look stamp it writes alongside them agrees. No stamp (a run
+    auto-edited before it existed) means "can't tell", and the assumption stands.
     """
     from seestack.stack.output import fits_is_display_space
 
@@ -1582,7 +1752,7 @@ def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
         return None
     if run.fits_path and Path(run.fits_path).exists() and fits_is_display_space(run.fits_path):
         return None
-    from webapp.routers.editor import AUTO_EDIT_BAKED_PREFIX, RECIPE_META_PREFIX
+    from webapp.routers.editor import AUTO_EDIT_BAKED_LOOK_PREFIX, RECIPE_META_PREFIX
 
     raw = proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}")
     if not raw:
@@ -1593,7 +1763,9 @@ def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
         return None
     if not isinstance(parsed, dict) or not isinstance(parsed.get("ops"), list):
         return None
-    if _recipe_drifted(raw, proj.get_meta(f"{AUTO_EDIT_BAKED_PREFIX}{run.id}")):
+    if _baked_look_disagrees(
+            proj.get_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run.id}"),
+            _recipe_look(raw)):
         return None
     return raw
 
@@ -1724,8 +1896,8 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
             # through the same processing (a display-space export, or an
             # auto-edited run whose recipe is missing, unreadable, or has drifted
             # from the one its preview shows). The card already self-hides on
-            # exactly these runs, and the download beside it already 404s — say
-            # the same thing here rather than serving a half that doesn't match.
+            # exactly these runs and the download beside it already 404s — say the
+            # same thing here rather than serving a half that doesn't match.
             raise HTTPException(
                 status_code=404,
                 detail="This run's picture is an edited export, so a raw frame "
@@ -2426,7 +2598,6 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
         png_size,
         render_wallpaper_jpeg,
         rotate_point_north_up,
-        wallpaper_target_pixel,
     )
 
     preset = WALLPAPER_PRESETS.get(aspect)
@@ -2453,26 +2624,8 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
     # preview is still on it.
     baked_north_up = baked_north_up_deg(run)
     # Locate the target in the preview grid from the run's own WCS; None → centre.
-    # `wallpaper_target_pixel` maps onto a *uniform downscale* of the master, so
-    # on a preview a past save rotated it has to be given that un-rotated grid and
-    # the answer turned by the same angle — otherwise the crop re-centres on the
-    # wrong spot even when North-up isn't asked for.
-    target_px = None
-    ra = entry.ra_deg if entry is not None else None
-    dec = entry.dec_deg if entry is not None else None
-    flat_size = png_size(preview)
-    if baked_north_up and run.fits_path:
-        flat_size = _unrotated_preview_size(run.fits_path) or flat_size
-    if ra is not None and dec is not None and run.fits_path and flat_size is not None:
-        # ...and the other way the stored bytes can leave the canvas grid: an
-        # auto-edit border trim, which shifts and shrinks the mapping.
-        target_px = wallpaper_target_pixel(
-            run.fits_path, ra, dec, flat_size[0], flat_size[1],
-            parse_preview_crop(run.preview_crop_json))
-        if target_px is not None and baked_north_up:
-            target_px = rotate_point_north_up(
-                target_px[0], target_px[1], flat_size[0], flat_size[1],
-                baked_north_up)
+    # Shared with the zoom clip, which has to frame on the identical point.
+    target_px = _target_pixel_in_preview(run, entry, preview)
 
     # North-up rotates the picture *and* moves the target pixel, so re-centre the
     # crop on the rotated position. Only the rotation still *missing* from the

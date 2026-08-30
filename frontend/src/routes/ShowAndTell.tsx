@@ -10,8 +10,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { QueryError } from "../components/QueryError";
-import { useKeepAwake } from "../components/useKeepAwake";
 import { SLIDE_MS, buildSlides, nextIndex, startIndexFor } from "../showAndTell";
+// One definition, two pages: the slideshow across the room and "Tonight, live"
+// propped up outdoors both need the screen to stay on, and both want the same
+// guarded, nothing-persisted behaviour.
+import { useKeepAwake } from "../useKeepAwake";
 
 /**
  * "Show and tell" — a hands-off, room-filling slideshow of your best pictures.
