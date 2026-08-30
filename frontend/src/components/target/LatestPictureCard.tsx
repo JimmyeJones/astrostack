@@ -7,6 +7,7 @@ import { api, type FieldObject, type StackRun } from "../../api/client";
 import { formatIntegration, formatStampDate } from "../../format";
 import { AnnotatedImage, croppedAnnotationView, objectLabel } from "../AnnotatedImage";
 import { ImageLightbox } from "../ImageLightbox";
+import { NorthUpViewToggle, loadNorthUpView, saveNorthUpView } from "../NorthUpViewToggle";
 import { isJobPollAbort, pollJobUntilDone } from "../editor/pollJob";
 import { sharePictureText } from "../../share";
 
@@ -74,6 +75,10 @@ export function LatestPictureCard({
   // annotations are only fetched once they ask, so an ordinary page load makes
   // no extra request.
   const [identify, setIdentify] = useState(false);
+  // "Show it the way every reference photo of this object is" — a *view*, not a
+  // save. Remembered per viewer, off by default: the saved orientation is the
+  // one the owner chose (see `NorthUpViewToggle`).
+  const [northUp, setNorthUp] = useState(loadNorthUpView);
   const qc = useQueryClient();
   // Hooks must run unconditionally, so this is declared before the early return.
   // `run` is captured lazily inside the mutation, which only fires from a button
@@ -106,10 +111,14 @@ export function LatestPictureCard({
   // Same endpoint and cache key History uses, so asking here warms the answer
   // there (and vice versa) instead of solving the field twice. Needs the run's
   // FITS-header WCS, hence the `has_fits` gate.
+  // Also fetched when the picture is opened big, because the same response now
+  // answers "would turning this to North up actually change anything?" — the
+  // one question the lightbox's view toggle needs, and one this handler already
+  // reads the WCS for. Still nothing on an ordinary page load.
   const annotations = useQuery({
     queryKey: ["annotations", safe, run?.id],
     queryFn: () => api.stackAnnotations(safe, run!.id),
-    enabled: identify && !!run?.has_fits,
+    enabled: (identify || light) && !!run?.has_fits,
     staleTime: Infinity,
   });
   if (!run || !run.has_preview) return null;
@@ -129,6 +138,19 @@ export function LatestPictureCard({
   );
   const cantPlaceMarks = !!run.preview_north_up_deg || !!run.preview_geometry_unknown;
   const sentence = inThisPictureSentence(view.objects);
+  // Offer the turn only where it would visibly do something: the run reports a
+  // real correction, and its stored bytes aren't already turned (a picture a
+  // past "Adjust → North up → Save" baked is North-up on disk, and asking for
+  // it again is a no-op the server correctly refuses to repeat).
+  const canNorthUp = typeof annotations.data?.north_up_deg === "number"
+    && !run.preview_north_up_deg;
+  const turned = northUp && canNorthUp;
+  // Everything the lightbox hands over follows what's on screen — the preview
+  // it shows, the JPEG behind Share, and the full-res PNG — so a picture you
+  // downloaded because you liked how it looked arrives that way. The FITS
+  // deliberately does not: the raw data stays WCS-aligned.
+  const lightboxSrc = turned
+    ? api.stackPreviewNorthUpUrl(safe, run.id) : previewSrc;
   return (
     <Paper withBorder p="sm" radius="md" data-testid="latest-picture">
       <Group justify="space-between" gap="xs" mb={6} wrap="nowrap">
@@ -214,12 +236,19 @@ export function LatestPictureCard({
         </Alert>
       )}
       <ImageLightbox
-        src={light ? previewSrc : null}
+        src={light ? lightboxSrc : null}
         title={run.output_basename}
-        downloadHref={previewSrc}
-        jpegHref={api.stackArtifactUrl(safe, run.id, "jpeg")}
-        fullResHref={run.has_fits ? api.stackFullResPngUrl(safe, run.id) : undefined}
+        downloadHref={lightboxSrc}
+        jpegHref={api.stackArtifactUrl(safe, run.id, "jpeg", turned)}
+        fullResHref={run.has_fits
+          ? api.stackFullResPngUrl(safe, run.id, turned) : undefined}
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
+        toolbarExtra={canNorthUp ? (
+          <NorthUpViewToggle
+            on={northUp}
+            onChange={(on) => { setNorthUp(on); saveNorthUpView(on); }}
+          />
+        ) : undefined}
         shareFilename={share.filename}
         shareTitle={share.title}
         shareText={share.text}
