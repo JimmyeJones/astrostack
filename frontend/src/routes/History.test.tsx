@@ -1771,6 +1771,74 @@ describe("HistoryView adjustable render", () => {
     expect(screen.queryByText("Keep the processed picture")).toBeNull();
   });
 
+  it("keeps a processed picture on screen until a slider is actually moved", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true }),
+    ]);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: 0.5, black: 0.35,
+      processed_preview: true, can_keep_processed: true,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
+    // The panel is open (its warning is up) — and the picture is still the
+    // processed one "Keep the processed picture" would save, not a live render
+    // of the raw stack that neither button writes.
+    expect(await screen.findByText(/This picture was processed for you/))
+      .toBeInTheDocument();
+    const src = () => screen.getByAltText("M42_stack_01").getAttribute("src") || "";
+    expect(src()).toContain("/stack-runs/1/preview");
+    expect(src()).not.toContain("/render?");
+
+    // Move a slider and the panel switches to the live render — which is now
+    // exactly what "Save as preview" would write.
+    fireEvent.keyDown(screen.getAllByRole("slider")[0], { key: "ArrowRight" });
+    await waitFor(() => expect(src()).toContain("/render?"));
+  });
+
+  it("previews the North-up turn on the processed picture itself", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true }),
+    ]);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: 0.5, black: 0.35, north_up_deg: 33.0,
+      processed_preview: true, can_keep_processed: true,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
+    fireEvent.click(await screen.findByText("Rotate so North is up"));
+
+    // The turn is shown on the *stored* bytes (rotated server-side on the way
+    // out), so the rotation preview doesn't cost the processed look.
+    const src = () => screen.getByAltText("M42_stack_01").getAttribute("src") || "";
+    await waitFor(() => expect(src()).toContain("/preview?north_up=true"));
+    expect(src()).not.toContain("/render");
+  });
+
+  it("still renders live from the master on an ordinary linear run", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true }),
+    ]);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: 0.5, black: 0.35,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
+    // No slider touched, but nothing is being kept here — the sliders *are* what
+    // Save writes, so the picture follows them from the moment the panel opens.
+    const src = () => screen.getByAltText("M42_stack_01").getAttribute("src") || "";
+    await waitFor(() => expect(src()).toContain("/render?"));
+  });
+
   it("ends the sample tour here — where a beginner's finished pictures live", async () => {
     localStorage.clear();
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);

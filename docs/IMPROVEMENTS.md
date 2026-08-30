@@ -43,6 +43,36 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-aj7ysy` — run finished, all three claims
+> released.** Shipped three, each its own independently-green commit:
+> **v0.306.2** (under "Autonomy & friendliness") — the one thing the v0.305.0 Adjust-trapdoor fix deliberately
+> left alone: on a **processed** run the panel showed a live render of the linear master, i.e. a picture
+> *neither* of its two buttons writes. The picture now follows the button — stored bytes until a slider
+> actually moves — and the North-up caution the entry raised was **answered rather than dodged**:
+> `…/preview` learned an optional `north_up` that turns the *saved bytes* on the way out, so the rotation can
+> be previewed on the picture it belongs to. Deliberately not a flag on `stackArtifactUrl`, whose test pins
+> that the stored PNG/FITS/TIFF stay WCS-aligned.
+> **v0.306.3** (under "Features that serve real workflows") — slice 1 of the sky-coverage follow-up: the
+> sentence is on the Dashboard, asserted **against the shared helper itself** rather than a copy of its
+> wording, so the two surfaces cannot drift. Building it exposed that "See it on My map →" would have landed
+> on the real-sky atlas (the Sky page picks its map from `localStorage`), which is half of what the slice was
+> for — so `/sky` took a `?view=` read once through a new pure `initialSkyMode`.
+> **v0.306.4** (under "Autonomy & friendliness") — the Scout's `POST /api/scan` confinement, with the grep the
+> entry demanded done first (**nothing passes a `root`**: the frontend posts `{}`, and the startup and
+> post-upload scans pass none). The design call worth knowing is that the check is **lexical, not
+> `resolve()`-based** — a symlinked NAS share inside `incoming/` is normal on this box and the scan already
+> follows such links, so a strict resolve check would refuse a real setup to close nothing; a test pins the
+> symlink case so nobody "hardens" it into a break.
+> **Three follow-ons filed**, all turned up by the work rather than invented: North-up as a *view* control
+> anywhere a picture is shown (the server half now exists, and it is read-only — today the only way to see
+> your picture that way is to overwrite it); turning the rejection tint with the same helper, with the alpha
+> question that has to be checked first; and the finding that a **sub-folder scan root files its frames as
+> "Unsorted"**, so `root` reads like a "re-scan one target" shortcut and is not one.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
+> Claiming in the run's **first** commit, **by site**, and pushing it immediately cost under a minute; `main`
+> had not moved by merge time and there was no collision.
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-1m28nv` — run finished, all claims released.**
 > Shipped three, each its own independently-green commit:
 > **v0.305.0** (under "Autonomy & friendliness") — the **History → "Adjust" → Save trapdoor**: on a
@@ -9364,23 +9394,107 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-30, spotted while shipping the v0.305.0 Adjust trapdoor fix — the one thing that
-  fix deliberately left alone) — on a *processed* run, the Adjust panel shows you a picture that is not the
-  one either button will save.** *(Pillar: editor/trust — PRIORITY 1–3; size S; frontend only.)* Opening
-  Adjust swaps the card's `<img>` from the stored preview to the live `…/render` of the **linear** FITS at
-  the sliders. On an ordinary run that is exactly the point: what you see is what "Save as preview" writes.
-  On a "Process target" run it is now misleading in a new way — the panel offers **"Keep the processed
-  picture"**, whose result is the *recipe* render, i.e. the picture that was on screen a moment before you
-  opened the panel and is not on screen now. v0.305.0 papers over the worst of it by closing the panel on a
-  successful keep-save (so you immediately see what you kept), and the warning text says which is which, but
-  the honest fix is for the *preview* to follow the button: keep showing the stored bytes on a processed run
-  until the user actually touches a slider (`touched.current`, which the panel already tracks for the
-  suggestion), and only then switch to the live render. **Cautions:** don't break the North-up preview — the
-  live render is currently the only way to *see* the rotation before saving it, so if the stored bytes are
-  shown, the rotation preview needs the same `north_up` treatment the share path uses
-  (`orient_preview_north_up` on the stored PNG, which is exactly what that helper is for). Grep first: the
-  card already has three "which picture is on screen?" predicates (`showingStored`, `imageIsNorthUp`,
-  `geometryUnplaceable`) — this belongs with them, not beside them.
+- **NEW IDEA (Builder 2026-08-30, unlocked by the v0.306.2 preview-rotation server half) — let "North up" be a
+  way to *look* at a picture, not only a way to overwrite it.** *(Pillar: enjoy + trust — PRIORITY 3; size S–M;
+  read-only, off by default.)* Until this run, the only way to see one of your pictures oriented like every
+  reference photo of the object was History → Adjust → tick → **Save**, which rewrites the stored preview and
+  (until v0.305.0) could cost a processed run its look. That is a destructive answer to a purely visual
+  question. `GET …/stack-runs/{id}/preview?north_up=true` now turns the *saved bytes* on the way out and
+  changes nothing on disk (v0.306.2 built it for the Adjust panel), so any surface that shows a picture could
+  offer the same tick as a **view** control: the Target hero (`LatestPictureCard`), the Gallery lightbox, the
+  Compare view. **Shape:** one shared toggle component reading the run's `north_up_deg` from the annotations /
+  suggestion it already fetches, remembered per viewer in `localStorage` (not on the run — this is a viewing
+  preference, not a fact about the picture). **Cautions, both already solved once in `History.tsx` and worth
+  copying rather than re-deriving:** object pins, the scale bar and the compass are measured on the un-rotated
+  FITS grid, so a turned view must hide them (`cantPlaceMarks`); and the rejection tint is sized to the stored
+  bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
+  make it the default: the saved orientation is what the owner chose.
+
+- **NEW IDEA (Builder 2026-08-30, the one thing v0.306.2 had to switch off) — the "see what stacking removed"
+  tint can't be shown over a North-up view, and the same trick that turns the picture would turn the tint.**
+  *(Pillar: image quality / trust — PRIORITY 4; size XS–S.)* The rejection overlay is rendered server-side sized
+  to the run's stored preview, including a rotation a past save baked in (`baked_north_up_deg`), so it lays
+  straight over those bytes and only those. v0.306.2's on-the-fly turn moves the picture out from under it, so
+  the Adjust panel hides the tint and says why. The endpoint already knows the run's FITS and its baked angle —
+  giving `…/rejection-overlay` the same optional `north_up` and passing it through the same
+  `orient_preview_north_up` (with `already_deg`) would keep the two in register. **Care:** the overlay is a
+  transparent PNG, and `orient_preview_north_up` converts to RGB — so this needs the rotate to preserve alpha,
+  or the tint arrives as an opaque rectangle. Check that before assuming it is a one-line change; if the helper
+  can't be made alpha-safe cheaply, leave the tint stepping aside, which is honest.
+
+- **NEW IDEA (Builder 2026-08-30, turned up by the v0.306.4 scan-root confinement) — `root` on `POST /api/scan`
+  is a "rescan just this folder" shortcut that doesn't actually work, and nothing uses it.** *(Pillar: autonomy
+  / maintainability — PRIORITY 3; size S; decide *which* of the two answers before building either.)*
+  `scan_and_organize` derives a target's name from each file's path **relative to the scan root**, so pointing a
+  scan at `incoming/M_42` files those frames as **Unsorted**, not M_42. Nothing in the app passes a sub-folder
+  root (confirmed by grep while shipping v0.306.4), so this has never fired — but the field reads like a
+  re-scan-one-target shortcut and is not one. **Two honest answers, pick one:** (a) make it work — when the root
+  is a folder *inside* incoming, derive the target from the root's own name so the frames land where a user
+  would expect, which would let a Target page offer a real "re-scan just this target" button (the friendly win,
+  and the reason to prefer this); or (b) drop the field and always scan the configured incoming folder, which is
+  what every caller already does. **Do not do both halves blind:** (a) changes where frames land for a caller
+  that doesn't exist today but might exist on someone's script, so it needs the folder-name derivation pinned by
+  a test either way.
+
+- **✅ SHIPPED (Builder, v0.306.2, branch `claude/compassionate-galileo-aj7ysy`) — ~~on a *processed* run, the
+  Adjust panel shows you a picture that is not the one either button will save.~~** Fixed as the entry asked,
+  plus the one piece of server it turned out to need. *(Pillar: editor/trust — PRIORITY 1–3.)*
+
+  **What shipped.** On a run whose picture is a "Process target" Auto edit, opening Adjust now leaves the
+  **stored** picture on screen — the one "Keep the processed picture" writes — and only switches to the live
+  render of the linear master once a slider actually moves. The predicate is the panel's own existing "has
+  anyone touched a slider?" fact: `touched` stayed a ref (so the suggestion effect still doesn't re-run on
+  it) and gained a state mirror, because which picture is shown is now a *render*-time question. An ordinary
+  linear run is untouched — there the sliders **are** what Save writes, so the picture follows them from the
+  moment the panel opens.
+
+  **The North-up caution, honestly answered.** The live render was the only way to *see* the turn before
+  saving it, so hiding it would have cost the one control anybody wants on a finished picture. Instead
+  `GET …/stack-runs/{id}/preview` learned `north_up` (default false): it rotates the **saved bytes** on the
+  way out through the same `orient_preview_north_up` the share/download path uses, with the run's recorded
+  `already_deg` so a preview a past save already turned isn't turned twice. Nothing on disk changes, and the
+  bare URL every other surface embeds is byte-for-byte what it always was — a test asserts both. It is
+  deliberately **not** a flag on `stackArtifactUrl`: that helper's test pins "the stored PNG/FITS/TIFF must
+  stay WCS-aligned, so they never take north_up", which is still true of every surface that embeds them, so
+  the one caller that wants to preview a turn asks through its own `api.stackPreviewNorthUpUrl`.
+
+  **The three "which picture is on screen?" predicates moved with it**, as the entry insisted, rather than a
+  fourth being bolted on beside them: `showingStored` is now stated (`!adjustOpen || holdProcessed`) instead
+  of inferred from URL equality, `imageIsNorthUp` grew the third way a picture can be turned, and the
+  rejection tint — the one overlay measured against the stored bytes *as they sit on disk* — steps aside for
+  an on-the-fly turn with its own line saying so, exactly as it already did for the live render.
+
+  **One coherence fix the trace implied:** either save can change whether the run's picture is still a
+  processed one, and the panel's warning (and now its picture) read that flag from a `staleTime: Infinity`
+  query. It is invalidated on save, so a plain save stops leaving a warning about a picture it just replaced.
+
+  **Upgrade-safe (§9):** one optional query parameter defaulting to the old behaviour on an existing
+  endpoint; no config, schema, on-disk, default or API-shape change, and an older client never sends it.
+
+  **Tests (+6; 3 fail before / pass after):** `frontend/src/routes/History.test.tsx` — the processed run
+  holds its picture until a slider moves and then follows the render; the North-up tick previews on
+  `/preview?north_up=true` and never on `/render`; and the linear run still renders live from the master
+  with nothing touched. `tests/webapp/test_north_up.py` — the stored preview served North-up is larger and
+  the file on disk is unmoved (and the bare URL still returns exactly those bytes); a run with no WCS serves
+  the saved bytes untouched; and the FITS still refuses the turn.
+
+  Original spec, for the record:
+
+    *(Pillar: editor/trust — PRIORITY 1–3; size S; frontend only.)* Opening
+    Adjust swaps the card's `<img>` from the stored preview to the live `…/render` of the **linear** FITS at
+    the sliders. On an ordinary run that is exactly the point: what you see is what "Save as preview" writes.
+    On a "Process target" run it is now misleading in a new way — the panel offers **"Keep the processed
+    picture"**, whose result is the *recipe* render, i.e. the picture that was on screen a moment before you
+    opened the panel and is not on screen now. v0.305.0 papers over the worst of it by closing the panel on a
+    successful keep-save (so you immediately see what you kept), and the warning text says which is which, but
+    the honest fix is for the *preview* to follow the button: keep showing the stored bytes on a processed run
+    until the user actually touches a slider (`touched.current`, which the panel already tracks for the
+    suggestion), and only then switch to the live render. **Cautions:** don't break the North-up preview — the
+    live render is currently the only way to *see* the rotation before saving it, so if the stored bytes are
+    shown, the rotation preview needs the same `north_up` treatment the share path uses
+    (`orient_preview_north_up` on the stored PNG, which is exactly what that helper is for). Grep first: the
+    card already has three "which picture is on screen?" predicates (`showingStored`, `imageIsNorthUp`,
+    `geometryUnplaceable`) — this belongs with them, not beside them.
 
 
 - **✅ SHIPPED (Builder, v0.305.0, branch `claude/compassionate-galileo-1m28nv`) — ~~History → "Adjust" → Save
@@ -10139,21 +10253,62 @@ to **Shipped**.)_
   on a phone; and the picker must never re-render or re-export anything — if there is no exported file, fall
   back, don't build one.
 
-- **IMPROVEMENT IDEA (Scout QA audit 2026-08-27 #16, secondary finding — hardening, low severity) — `POST
-  /api/scan` accepts a raw client-supplied filesystem `root` and scans/ingests from it unconfined, the one
-  ingest endpoint that isn't confined to `incoming/`.** *(Pillar: friendliness / security posture — PRIORITY 3.
-  Size: S — one confinement check + a test. Not a data-loss bug: the scan is read-only over the source and this
-  is a local single-user app, so severity is low; filed as defence-in-depth, not urgent.)*
-  **Where:** `webapp/routers/pipeline.py` (`/api/scan`) → `ScanRequest.root: str | None` (`webapp/schemas.py`)
-  is passed straight to `scan_and_organize(lib, scan_root, ...)`. Every *other* ingest/target endpoint resolves
-  through a DB `safe_name` lookup and is traversal-safe; this one takes an arbitrary server-readable directory,
-  so a client can point a scan at any path (registering its FITS into the library, and copying them if
-  `copy_to_cache` is on). **Fix direction:** confine `root` to live under `Settings.resolved_incoming_dir`
-  (resolve + `is_relative_to` check, 400 otherwise), mirroring how the upload router's `confined_dest`
-  re-confirms every path — or drop the field entirely and always scan the configured incoming dir (check the
-  frontend still has a use for a sub-path first). Keep `incoming/` strictly read-only either way. **Builder:
-  grep first** — confirm no caller passes a legitimately-out-of-tree `root` (e.g. a one-off import flow) before
-  tightening; if one exists, allow-list it rather than break it.
+- **✅ SHIPPED (Builder, v0.306.4, branch `claude/compassionate-galileo-aj7ysy`) — ~~`POST /api/scan` accepts a
+  raw client-supplied filesystem `root` and scans/ingests from it unconfined, the one ingest endpoint that
+  isn't confined to `incoming/`.~~** Confined, exactly as the fix direction's first option asked, with the
+  grep done first. *(Pillar: friendliness / security posture — PRIORITY 3.)*
+
+  **The grep the entry demanded, answered:** nothing in the app passes a `root` at all. The frontend's
+  `api.scan()` posts a literal `{}`, `main.py`'s startup scan and the upload router's post-upload scan both
+  call `submit_pipeline(settings, jm)` with no root, and the only other `scan_and_organize` caller is the
+  legacy desktop dialog, which never goes through the API. So there was no out-of-tree caller to allow-list,
+  and confining costs the app nothing.
+
+  **What shipped.** `_confined_scan_root` in `webapp/routers/pipeline.py`: a non-empty `root` must be the
+  incoming folder or a folder inside it, else **400** with a sentence that says the rule and the way on
+  ("Leave the folder out to scan all of it"). An empty or absent `root` means "the whole incoming folder" and
+  is untouched, which is every existing caller.
+
+  **The one design call worth knowing — the check is *lexical*, not `resolve()`-based.** An incoming folder
+  (or a target folder inside it) that *is* a symlinked NAS share is normal on the box this runs on, and the
+  scan already follows such links when it walks the default root — so a strict `resolve()` containment check,
+  like the upload router's `confined_dest` uses for *writes*, would refuse a real setup to close nothing.
+  `normpath` over the absolute paths rejects what actually matters (an absolute path elsewhere, or a `..`
+  climb out), and a caller who names the fully-resolved form of a symlinked incoming folder is accepted too,
+  so neither spelling of the same folder is refused. A test pins the symlink case so nobody "hardens" it into
+  a break.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk or response-shape change; the request field keeps its
+  type and its default. It is a narrowing of one input's accepted range — deliberately, and the only callers
+  it could have affected don't exist (see the grep above). Strictly read-only: this decides *where a scan may
+  look*, and `incoming/` stays read-and-create-new only (§10).
+
+  **Tests (+6 in `tests/webapp/test_scan_root_confined.py`, 2 fail before / pass after):** an outside root and
+  a `..` traversal are both refused with no job queued; the incoming folder itself and a folder inside it
+  still scan; no root at all still scans the whole tree and finds both targets; and a symlinked share inside
+  incoming is not refused.
+
+  **One older thing this turned up, filed rather than changed:** a *sub-folder* root loses the folder-name
+  target — `scan_and_organize` derives a target from the path relative to its scan root, so scanning
+  `incoming/M_42` files those frames as **Unsorted** rather than M_42. Nothing in the app passes a sub-folder
+  root, so this has never fired; it is recorded here so the next person to reach for `root` as a "re-scan just
+  this target" shortcut knows it isn't one yet.
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness / security posture — PRIORITY 3.
+    Size: S — one confinement check + a test. Not a data-loss bug: the scan is read-only over the source and this
+    is a local single-user app, so severity is low; filed as defence-in-depth, not urgent.)*
+    **Where:** `webapp/routers/pipeline.py` (`/api/scan`) → `ScanRequest.root: str | None` (`webapp/schemas.py`)
+    is passed straight to `scan_and_organize(lib, scan_root, ...)`. Every *other* ingest/target endpoint resolves
+    through a DB `safe_name` lookup and is traversal-safe; this one takes an arbitrary server-readable directory,
+    so a client can point a scan at any path (registering its FITS into the library, and copying them if
+    `copy_to_cache` is on). **Fix direction:** confine `root` to live under `Settings.resolved_incoming_dir`
+    (resolve + `is_relative_to` check, 400 otherwise), mirroring how the upload router's `confined_dest`
+    re-confirms every path — or drop the field entirely and always scan the configured incoming dir (check the
+    frontend still has a use for a sub-path first). Keep `incoming/` strictly read-only either way. **Builder:
+    grep first** — confirm no caller passes a legitimately-out-of-tree `root` (e.g. a one-off import flow) before
+    tightening; if one exists, allow-list it rather than break it.
 
 - **NEW IDEA (Builder 2026-08-27, spotted while independently building the same nudge) — the v0.283.0
   grainier-restack note states its gap as a percentage, which stops reading as a quantity past a doubling.**
@@ -18028,14 +18183,36 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-08-30, the two obvious next taps on the v0.306.0 sky-coverage stat) — put "how much
-  of the sky have you seen" where the owner already looks, and stop it double-counting neighbours.**
-  *(Pillar: enjoy + trust — PRIORITY 3; size S each; both read-only.)*
-  1. **Say it on the Dashboard.** The number is a pride stat, and today it lives one nav click and one mode
-     switch away, under a map most people visit occasionally. `GET /api/sky/coverage` is already cached
-     server-side against the "did a picture change?" fingerprint, so a Dashboard line costs one cheap request
-     and no new machinery. Same sentence, same helper (`describeSkyCoverage`) — do **not** re-word it, or the
-     two surfaces will drift.
+- **🟡 SLICE 1 SHIPPED (Builder, v0.306.3, branch `claude/compassionate-galileo-aj7ysy`); SLICE 2 STILL OPEN —
+  ~~put "how much of the sky have you seen" where the owner already looks~~, and stop it double-counting
+  neighbours.** *(Pillar: enjoy + trust — PRIORITY 3; size S each; both read-only.)*
+
+  **Slice 1 — shipped.** The line is on the Dashboard, directly under the stat grid it belongs with: one
+  quiet dimmed line, not another card, because the standing owner priority is that the page is already busy
+  and a new fact should join a grouping rather than become one more block. The wording is
+  `describeSkyCoverage` **verbatim** — the Dashboard test asserts against the helper itself rather than a
+  copy of its sentence, so the two surfaces cannot drift into two different claims without that test going
+  red. It shares the map's own `["sky-coverage"]` query key, so on an install where both have been visited
+  it costs nothing at all, and it self-hides (`""`) until a finished picture actually carries a position, so
+  a fresh library sees nothing and no number is invented.
+
+  **…and the link now lands on the map it describes.** "See it on My map →" would otherwise have dropped the
+  reader on the real-sky atlas, because the Sky page picks its map from `localStorage` — the stat's own map
+  was still a mode switch away, which is half of what this slice was for. `/sky` now takes `?view=`, read
+  once as the *initial* mode through a new pure `initialSkyMode(asked, stored)`: an explicit view wins, then
+  the remembered one, then the atlas. It deliberately does **not** write the remembered default — following
+  a link shows you a map without changing the one you come back to — and an unknown value falls through
+  rather than rendering nothing, which also hardens the old `localStorage.getItem(...) as SkyMode` cast
+  against a stored value from a build that named its modes differently.
+
+  **Upgrade-safe (§9):** read-only; one new optional query parameter on an existing route, no config, schema,
+  on-disk, default or API change, and the remembered mode keeps working untouched.
+
+  **Tests (+5):** `Dashboard.test.tsx` — the line matches the shared helper and links to `/sky?view=mine`;
+  it is absent on a library with no located picture. `Sky.test.tsx` — `initialSkyMode` over the link, the
+  remembered default, and three junk values.
+
+  **Slice 2 is still open, unchanged, and still gated on the same check:**
   2. **Overlapping targets are summed twice.** `_measure_sky_coverage` adds each target's area independently.
      Two library targets aimed at the same patch of sky would be counted twice — the library normally models
      that as *one* target with more frames, which is why this was shipped as-is, but a deliberately
@@ -18043,8 +18220,17 @@ problems. Dogfood it every big-picture run and fix root causes.
      double-count. **Honest fix:** rasterise each run's covered footprint onto one coarse equal-area sky grid
      (HEALPix-style, or a simple sin(dec) band grid — no new dependency needed at ~0.1° resolution) and count
      *set* cells. Only worth it if the owner ever has adjacent targets; check before building, and note that
-     the fix makes the number go *down*, which needs a word of explanation if it visibly moves.
+     the fix makes the number go *down*, which needs a word of explanation if it visibly moves. **Now that
+     the sentence is on the Dashboard too, a visible move would be seen in two places** — so if this is ever
+     built, both surfaces get the explanation from the one helper, not a second sentence.
 
+  Original slice 1 spec, for the record:
+
+    1. **Say it on the Dashboard.** The number is a pride stat, and today it lives one nav click and one mode
+       switch away, under a map most people visit occasionally. `GET /api/sky/coverage` is already cached
+       server-side against the "did a picture change?" fingerprint, so a Dashboard line costs one cheap request
+       and no new machinery. Same sentence, same helper (`describeSkyCoverage`) — do **not** re-word it, or the
+       two surfaces will drift.
 
 - **✅ SHIPPED — FIRST SLICE (Builder, v0.296.0, branch `claude/compassionate-galileo-u3wi1n`) —
   ~~⭐ OWNER CLARIFICATION (2026-08-29): the *actual* universe map — the owner's captured objects placed in

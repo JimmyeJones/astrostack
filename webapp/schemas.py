@@ -684,7 +684,10 @@ class CleanupSuggestionOut(BaseModel):
 
 
 class ScanRequest(BaseModel):
-    root: str | None = None  # default: settings.incoming_dir
+    # Default: settings.incoming_dir. When given, it must name that folder or one
+    # inside it — the router confines it (`_confined_scan_root`), because this is
+    # the one ingest input that isn't a database `safe_name`.
+    root: str | None = None
 
 
 # ---------------------------------------------------------------------------

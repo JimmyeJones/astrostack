@@ -31,6 +31,7 @@ import { VideoCapturesCard } from "../components/VideoCapturesCard";
 import { BestPicturesStrip } from "../components/BestPicturesStrip";
 import { ImagingLogButton } from "../components/ImagingLogButton";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
+import { describeSkyCoverage } from "../components/skyCoverage";
 import { InsightTabs } from "../components/InsightTabs";
 
 // Dismissal of the first-run readiness banners, keyed to the *specific* problem
@@ -100,6 +101,15 @@ export function Dashboard() {
     queryKey: ["stats"], queryFn: api.getStats, refetchInterval: 10_000,
   });
   const system = useQuery({ queryKey: ["system"], queryFn: api.getSystem, staleTime: 60_000 });
+  // "How much of the sky have you actually seen?" — a pride stat that lived one
+  // nav click and one mode switch away, under My map. It's measured server-side
+  // off each run's own WCS and cached against the same "did a picture change?"
+  // fingerprint the map uses, so saying it here costs one cheap request and no
+  // new machinery. Same key as the map's own query, so the two share a cache —
+  // and the same helper, verbatim, so the two sentences can never drift.
+  const coverage = useQuery({
+    queryKey: ["sky-coverage"], queryFn: () => api.skyCoverage(), staleTime: 60_000,
+  });
   const [astapDismissedSig, setAstapDismissedSig] = useState(() => loadDismissedSig(ASTAP_DISMISS_KEY));
   const [folderDismissedSig, setFolderDismissedSig] = useState(() => loadDismissedSig(FOLDER_DISMISS_KEY));
 
@@ -126,6 +136,10 @@ export function Dashboard() {
     ? formatDiskSize(data.disk.total_bytes)
     : data.disk.total_gb != null ? `${data.disk.total_gb} GB` : null;
   const usedSub = total ? `of ${total}` : undefined;
+  const coverageLine = coverage.data
+    ? describeSkyCoverage(coverage.data.deg2, coverage.data.sky_fraction,
+                          coverage.data.n_pictures)
+    : "";
 
   return (
     <Stack>
@@ -245,6 +259,20 @@ export function Dashboard() {
         <StatCard icon={<IconLayoutGrid size={22} color="var(--mantine-color-violet-4)" />}
           label="Free disk" value={free} sub={usedSub} to="/storage" />
       </SimpleGrid>
+
+      {/* One quiet line rather than another card: it belongs with the counts
+          above it, and the busy-page rule says a new fact joins a grouping
+          instead of becoming one more block. Self-hides until a finished
+          picture actually carries a position, so a fresh install sees nothing
+          and no number is invented. */}
+      {coverageLine ? (
+        <Text size="sm" c="dimmed" mt={-4} data-testid="sky-coverage-line">
+          {coverageLine}{" "}
+          <Text component={Link} to="/sky?view=mine" size="sm" c="violet" span>
+            See it on My map →
+          </Text>
+        </Text>
+      ) : null}
 
       <Group justify="space-between" mt="sm">
         <Title order={4}>Recent stacks</Title>
