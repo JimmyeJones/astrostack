@@ -1164,12 +1164,28 @@ def _carry_provenance(fits_path: str) -> dict[str, Any]:
 _SEESTAR_CAMERA = "ZWO Seestar S50"
 
 
-def _nameplate_fields(fits_path: str, entry: Any, run: Any) -> Any:
+def _nameplate_fields(fits_path: str, entry: Any, run: Any,
+                      lon_deg: float | None = None) -> Any:
     """Build a :class:`NameplateFields` for a run's share export, preferring the
     stamped FITS provenance and falling back to the library/run record. Every
     field is best-effort — a missing/unparseable one is simply left ``None`` and
-    the nameplate omits that part (never a blank line)."""
+    the nameplate omits that part (never a blank line).
+
+    The **date** is the exception that reads the run record *first*: it is the
+    app's own answer to "when was this shot" (``capture_start_utc`` /
+    ``capture_end_utc``), named as the observing night through the same helper
+    every other night surface uses, so a baked caption and the Nights card cannot
+    date one session differently. The header card is the fallback — it is what a
+    FITS from elsewhere, or one written before the stacker stamped a capture
+    time, has to offer.
+
+    ``lon_deg`` is the observer's longitude for that bucketing; every caller
+    passes ``Settings.site_lon`` so all three nameplate surfaces agree. Unset
+    (the common case — a beginner rarely fills a location in) falls back to UTC
+    noon-to-noon, exactly as the rest of the app does.
+    """
     from seestack.nameplate import NameplateFields
+    from webapp.capture_nights import capture_night_range
 
     prov = _carry_provenance(fits_path)  # key -> (value, comment)
 
@@ -1193,10 +1209,20 @@ def _nameplate_fields(fits_path: str, entry: Any, run: Any) -> Any:
     except (TypeError, ValueError):
         n_frames = getattr(run, "n_frames_used", None)
 
-    date_iso = None
-    date_card = prov.get("DATE-OBS")
-    if date_card is not None and str(date_card[0]).strip():
-        date_iso = str(date_card[0]).strip()
+    date_iso, date_end_iso = capture_night_range(
+        getattr(run, "capture_start_utc", None),
+        getattr(run, "capture_end_utc", None),
+        lon_deg,
+    )
+    if date_iso is None:
+        for key in ("DATE-OBS", "DATE-END"):
+            card = prov.get(key)
+            value = str(card[0]).strip() if card is not None else ""
+            if value:
+                if date_iso is None:
+                    date_iso = value
+                else:
+                    date_end_iso = value
 
     return NameplateFields(
         target=target,
@@ -1204,6 +1230,7 @@ def _nameplate_fields(fits_path: str, entry: Any, run: Any) -> Any:
         n_frames=n_frames,
         sub_exposure_s=_num("EXPOSURE"),
         date_iso=date_iso,
+        date_end_iso=date_end_iso,
         camera=_SEESTAR_CAMERA,
     )
 
@@ -1545,7 +1572,8 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
                     option = options[0]
                 img = render_print(out, option)
                 if nameplate:
-                    plate = _nameplate_fields(run.fits_path, entry, run)
+                    plate = _nameplate_fields(
+                        run.fits_path, entry, run, settings.site_lon)
                     if plate is not None:
                         from seestack.nameplate import draw_nameplate
                         img = draw_nameplate(img, plate)
@@ -1606,7 +1634,8 @@ def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: i
                 ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 jpeg = (Path(proj.project_dir) / "output"
                         / f"{safe_basename(run.output_basename)}_share_{ts}.jpg")
-                plate = _nameplate_fields(run.fits_path, entry, run) if nameplate else None
+                plate = _nameplate_fields(
+                    run.fits_path, entry, run, settings.site_lon) if nameplate else None
                 write_share_jpeg(jpeg, out, nameplate=plate)
                 blurb = share_blurb(entry.name, run.n_frames_used, run.total_exposure_s)
             finally:

@@ -43,6 +43,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-vsy9vz` (second task) — claim released, shipped
+> as v0.314.0.** The follow-on the v0.313.0 work exposed, filed and taken in the same run: the acquisition
+> **nameplate** — the caption baked into a shared or printed picture — had *no date at all*, on any picture
+> the app has ever exported. It read a `DATE-OBS` card the stacker never wrote (this module's own docstring
+> claimed it did). Sites: `seestack/nameplate.py` (`format_acq_range`, `NameplateFields.date_end_iso`),
+> `seestack/stack/stacker.py` (`_header_meta` stamps `DATE-OBS`/`DATE-END`), `webapp/pipeline.py`
+> (`_nameplate_fields`) and its three call sites. Full write-up on the entry under "Autonomy & friendliness".
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-vsy9vz` — claim released, shipped as v0.313.0.**
 > The date-honesty class filed under "Autonomy & friendliness" as the generalisation of the v0.311.3 "First
 > light" bug, taken at the instance that was a **wrong fact on shared output**: the ready-to-post caption and
@@ -9655,6 +9663,83 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **NEW IDEA (Builder 2026-08-30, the one thing the v0.313.0 capture window deliberately cannot say) — record
+  how many *nights* went into a stack, so the caption can say "over 4 nights" instead of naming two dates.**
+  *(Pillar: understand + share — PRIORITY 3; size S. Confidence: the limitation is pinned by a test —
+  `captureNightsClause` asserts it "never claims a night count it cannot know".)* A run now records its first
+  and last sub (`capture_start_utc` / `capture_end_utc`), which is enough for "shot between 15 and 18 Nov
+  2024" and **not** enough for the sentence a person actually says out loud: *"600 subs over 4 nights"*. The
+  two are not the same claim — a window of 15→18 Nov is equally consistent with two nights and with four —
+  and the difference is exactly the fact that makes a beginner's picture sound like the work it was.
+  **Shape:** one more additive column, `capture_nights` (an INTEGER), counted in `stacker._capture_window`'s
+  caller as the number of **distinct observing nights** among the frames it combined. **The catch worth
+  stating before anyone starts:** the engine cannot bucket a night without the observer's longitude, which is
+  a `webapp` concern (`resolve_site_lon`), and `seestack/` may not import `webapp` (§6). So either the count
+  is UTC noon-to-noon at stack time and mildly wrong for someone far from Greenwich, or the *set of night
+  dates* is what gets stored (a short JSON array, bucketed at read time like `capture_night_range` already
+  does) — the second is the honest one and barely bigger. Then `postCaption`, `nameplate` and the History
+  card can all say it. **Grep before building:** the per-target Nights card already counts nights *for a
+  target*; this is per **run**, which is a different set the moment anyone re-stacks a subset.
+
+- **⚪ AUDIT NOTE (Builder 2026-08-30, first two candidates of the v0.312.1 "normalises against its own
+  subset" QA lead — NON-findings, recorded so nobody re-treads them).** The lead directly above asks for a
+  sweep of every statistic whose normalising subset is data-dependent. Two of its named candidates were read
+  this run and are **not** instances; both were traced to *why* their subset is stable rather than merely
+  looking plausible. (1) `edit/starmask.py:67` — `np.percentile(tophat[cover], 99.9)`: `cover` is
+  `np.isfinite(lum)`, i.e. "pixels that have data at all", which is a property of the **canvas** and not of
+  how much data went in. A fixed quantile over it does not drift with the sub count the way the tint's
+  `p90(non-empty)` did, because the non-empty set there *grew into* the noise floor as subs accumulated
+  while `cover` does not change at all. (2) A repo-wide grep for the lead's own pattern
+  (`np.percentile(x[…])` with a data-dependent mask) finds **only** that one site across `seestack/` and
+  `webapp/` — 35 percentile calls, 34 of them over a whole array. *(Confidence: read and grepped, not
+  measured — the lead's own method is to measure at 16 / 64 / 300 subs, and these two were ruled out on the
+  stronger ground that their subset is not a function of the sub count at all. The **unswept** half is the
+  lead's other axis: the auto-grade / auto-edit strength pickers and `stackhealth`'s verdicts, which reach
+  for a fraction of "affected" pixels rather than a percentile, and which a `np.percentile` grep does not
+  see.)*
+
+- **✅ SHIPPED (Builder, v0.314.0, branch `claude/compassionate-galileo-vsy9vz`) — ~~the acquisition
+  nameplate baked onto a shared or printed picture never showed a **date**, on any export the app has ever
+  made.~~** Found while sweeping the rest of the date class the v0.313.0 fix opened, and **verified by
+  running a real stack and reading the master's header** rather than by reading the code. *(Severity:
+  missing fact on shared output — the one field an acquisition caption exists for. Confidence: reproduced;
+  the master carried no `DATE-OBS`, `DATE-END` or `MJD-OBS` at all.)*
+
+  **Root cause.** `_nameplate_fields` took its date from the run FITS's `DATE-OBS` card, and
+  `stacker._header_meta` — which stamps `OBJECT`, `NFRAMES`, `EXPOSURE` and `EXPTOTAL` — never wrote one.
+  `nameplate.py`'s own module docstring asserted that it did. So the footer read *"M 31 · 4h 12m (505x30s) ·
+  ZWO Seestar S50"*, silently missing the middle part, and every "best-effort, a missing field is simply
+  omitted" rule in that module was quietly doing its job on a field that was never going to arrive.
+
+  **What shipped, both halves.** (1) The master now records **when its light was collected**: `DATE-OBS` (the
+  first sub combined) and, for a stack spanning more than one instant, `DATE-END` — the FITS convention for a
+  combined frame, so the file self-documents in Siril/PixInsight as well as here. Taken from the same
+  `_capture_window` v0.313.0 added, so the header and the run row cannot disagree. (2) The caption prefers
+  the **run record** over the card and names the *observing night* through `capture_night_range`, the helper
+  every other night surface already goes through — so a baked JPEG and the Nights card cannot date one
+  session differently. All three nameplate call sites (the share JPEG, the editor share export, the print
+  export) pass `Settings.site_lon`, so the three surfaces agree with each other whatever the picture.
+
+  **And a multi-night stack now says so.** `NameplateFields` gains an optional `date_end_iso` and
+  `format_acq_range` writes a span's shared parts once — `15-18 Nov 2024`, `28 Oct-3 Nov 2024`,
+  `28 Dec 2024-3 Jan 2025` — which matters because the owner's stacks are routinely several nights, and
+  naming only the night one started is the same half-truth in a smaller font. **Deliberately ASCII**: the
+  bundled Aileron face has no en dash, and `test_nameplate.py`'s glyph-coverage test (which now feeds it
+  every shape of the span) is what stops the next typographic tidy-up baking a hollow `.notdef` box into
+  someone's shared picture.
+
+  **Upgrade-safe (§9):** two header cards on newly-written masters, one optional dataclass field with a
+  default, one optional function argument. No config, schema, on-disk-layout, API-shape or default change; an
+  existing master is untouched on disk and simply keeps captioning without a date until it is re-stacked, and
+  a run with no window falls back to the header card exactly as before.
+
+  **Tests (+12):** `tests/test_nameplate.py` (the three span shapes, single-night and unusable-end
+  degradation, a reversed span reading forwards, the span inside a full caption, and every span shape added
+  to the glyph-coverage assertion); `tests/webapp/test_nameplate_date.py` (the night named rather than the
+  stack day, a multi-night caption, the observer's own night for a session straddling UTC noon, the FITS-card
+  fallback, the run record beating the card, a tidy date-less caption when nothing is known, and a real stack
+  writing `DATE-OBS` into its master).
 
 - **✅ SHIPPED, the wrong-fact half (Builder, v0.313.0, branch `claude/compassionate-galileo-vsy9vz`)
   — ~~a picture's shareable caption said it was "shot on" / "captured" the day the **stack ran**~~, and the
