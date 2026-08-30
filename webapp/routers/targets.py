@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -51,9 +48,6 @@ from webapp.schemas import (
     TransparencyTrendPointOut,
 )
 from webapp.site_location import detect_site_cached, resolve_site_lon
-
-if TYPE_CHECKING:  # import-time-free typing for the two library helpers below
-    from seestack.io.library import Library, TargetEntry
 
 log = logging.getLogger(__name__)
 
@@ -122,35 +116,86 @@ def merge_targets(body: MergeRequest, request: Request) -> dict:
 def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
     """Detect targets that look like the *same sky object* split across separate
     folders/nights (the Seestar writes a new folder per night), so the Library can
-    offer a one-click "combine into one deep stack" nudge. Read-only: it reads
-    each target's plate-solved centre + integration figures and clusters by sky
-    position; it never merges anything (the user confirms via ``POST /merge``).
-    Returns ``[]`` when nothing clusters.
+    offer a one-click "combine into one deep stack" nudge. Read-only: it only
+    reads each target's plate-solved centre + integration figures and clusters by
+    sky position; it never merges anything (the user confirms via ``POST
+    /merge``). Returns ``[]`` when nothing clusters.
 
-    Clusters only over targets the app does **not** already know to be leftovers
-    — it runs the same :func:`_scan_for_leftovers` walk the cleanup nudge does
-    (see :func:`_merge_eligible_targets` for why). Position alone cannot tell one
-    folder of a two-night project from a target's own duplicate, and the app has
-    a better answer for the second case a few lines below; the two features
-    disagreeing about the same pair of targets is exactly what made this nudge
-    offer to "combine" a target with its own shadow."""
+    **Known duplicates are dropped from a group before it is offered.** Position
+    clustering alone cannot tell "the same object shot on two nights" from "the
+    same *files* registered twice under two folder spellings" — the two sit at
+    identical coordinates, so a leftover ``<T>_sub``/``<T>_mosaic_sub`` duplicate
+    always clustered with its own base target. The nudge then invited the owner to
+    combine a target with itself and summed the same hours twice in the headline
+    figure ("64 h total" for ~31 h of real data). Cleanup-suggestions already
+    detects exactly this pair and calls it a duplicate; the two features
+    contradicting each other about the same two targets is what read as the app
+    being broken. Confirming a duplicate costs two project reads, so it is gated
+    on a pure name-shape test *and* on the base being in the same group — an
+    ordinary library pays nothing. A group that collapses below two real members
+    is dropped entirely, and lands in the cleanup nudge instead, which is the
+    correct offer for it.
+
+    **Junk targets are dropped too, for the same reason**: the Seestar's own
+    on-device output sits at the same coordinates as the subs it was stacked
+    from, so it clustered with them — and the app was offering to *combine* a
+    target the cleanup card was simultaneously offering to *delete*.
+
+    **And a mosaic is never grouped with the single field of the same object.**
+    The convention keeps them as two targets precisely because their canvases
+    differ ("never co-stacked or auto-merged"); position clustering cannot see
+    that, since they point at the same place. The two populations are therefore
+    clustered separately — two mosaics of one object are still a real merge, and
+    so are two single fields, but the pair across the line is not."""
     from seestack.io.library import find_same_object_target_groups
+    from seestack.io.scanner import is_mosaic_target_name
     from seestack.objectinfo import identify_object
+    from webapp.library_hygiene import (
+        confirm_duplicate_of_base,
+        duplicate_base_safe,
+        junk_verdict,
+    )
 
     lib = deps.open_library(request)
     try:
-        targets = lib.list_targets()
-        leftovers = _scan_for_leftovers(lib, targets).leftover_safes
-        groups = find_same_object_target_groups(
-            _merge_eligible_targets(targets, leftovers))
+        groups = find_same_object_target_groups(lib.list_targets())
+        survivors = []
+        for g in groups:
+            in_group = {m.safe_name: m for m in g.members}
+            survivors.extend(
+                m for m in g.members
+                if confirm_duplicate_of_base(
+                    lib, m, in_group.get(duplicate_base_safe(m.name) or ""),
+                ) is None
+                and junk_verdict(lib, m) is None
+            )
+        # Re-cluster what survived rather than patching the old groups: the
+        # centre and the "all within N′" figure must describe the targets
+        # actually being offered, and dropping a member can legitimately split a
+        # single-linkage chain in two. Same tested helper, so the two passes
+        # cannot disagree; the second is over a handful of rows. Mosaics and
+        # single fields are clustered apart so no group can span both.
+        mosaics = [m for m in survivors if is_mosaic_target_name(m.name)]
+        singles = [m for m in survivors if not is_mosaic_target_name(m.name)]
+        groups = (
+            find_same_object_target_groups(mosaics)
+            + find_same_object_target_groups(singles)
+        )
+        # Each call sorts its own result; re-sort so the deepest merge still
+        # leads the nudge across both populations.
+        groups.sort(
+            key=lambda g: sum(m.total_exposure_s or 0.0 for m in g.members),
+            reverse=True,
+        )
     finally:
         lib.close()
 
     out: list[MergeSuggestionOut] = []
     for g in groups:
+        members = g.members
         # Name the cluster from its deepest member (offline catalog), best-effort —
         # a null name just drops the "(M 31)" clause in the nudge, never errors.
-        info = identify_object(g.members[0].name, g.center_ra_deg, g.center_dec_deg)
+        info = identify_object(members[0].name, g.center_ra_deg, g.center_dec_deg)
         object_name = (info.name or info.id) if info else None
         out.append(MergeSuggestionOut(
             object_name=object_name,
@@ -164,103 +209,68 @@ def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
                     n_frames_accepted=m.n_frames_accepted,
                     total_exposure_s=m.total_exposure_s,
                 )
-                for m in g.members
+                for m in members
             ],
         ))
     return out
 
 
-# The name a mosaic target carries — ``_apply_seestar_convention`` maps
-# ``<T>_mosaic_sub/`` to ``"<T> (mosaic)"``, kept deliberately distinct from the
-# single-field ``<T>`` "so their differing footprints are never co-stacked or
-# auto-merged".
-_MOSAIC_TARGET_SUFFIX = " (mosaic)"
+@router.get("/cleanup-suggestions", response_model=list[CleanupSuggestionOut])
+def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
+    """Detect leftover targets a pre-v0.184.9 scan built before the scanner learned
+    the Seestar folder convention, so the Library can offer a one-click "remove
+    these" cleanup. Two kinds: (1) *junk* targets built from the Seestar's own
+    output / ``_video`` / ``_photo`` folders (not raw subs, cannot be stacked); (2)
+    ``<T>_sub`` / ``<T>_mosaic_sub``-named *duplicates* holding the same raw subs
+    the base target (``<T>`` / ``<T> (mosaic)``) now owns (clutter + double
+    compute, not corrupt data). Read-only: it never deletes anything (the user
+    confirms via ``DELETE /api/targets/{safe}``), and never touches the real
+    ``_sub`` data or the base target. Returns ``[]`` when the library is clean.
 
-
-@dataclass(frozen=True)
-class _LeftoverScan:
-    """What one walk of the library found: the cleanup nudges worth showing, and
-    the full set of targets the app *knows* are leftovers.
-
-    The two deliberately differ. ``suggestions`` is what cleanup offers to
-    remove, which spares a duplicate carrying the user's own stack-run history or
-    notes. ``leftover_safes`` is every target identified as a leftover, spared or
-    not — the wider set merge suggestions need, because a *spared* duplicate is
-    still a duplicate and still the wrong thing to offer combining.
-    """
-
-    suggestions: list[CleanupSuggestionOut]
-    leftover_safes: set[str]
-
-
-def _scan_for_leftovers(
-    lib: Library, targets: Sequence[TargetEntry],
-) -> _LeftoverScan:
-    """Walk a library once and identify every target a pre-v0.184.9 scan left
-    behind: the Seestar's own output / ``_video`` / ``_photo`` folders ingested as
-    if they were subs, the legacy whole-card drops, and the ``*_sub``-named
-    duplicates whose base target now owns the very same frames.
-
-    Read-only — it opens projects but never writes. Two cheap prefilters keep it
-    off the hot path of a big library: a junk target is only *examined* when its
-    frame count is within :func:`junk_scan_frame_cap` (or its name is a capture
-    folder's), and only a ``*_sub``-named target reaches the duplicate
-    confirmation. On the owner's real library that is a handful of small opens
-    plus one pass over each confirmed pair.
-    """
-    from seestack.io.library import make_safe_name
-    from seestack.io.scanner import (
-        classify_seestar_junk_target,
-        duplicate_sub_target_base_name,
-        junk_scan_frame_cap,
+    A real light-frame stack has many subs, so only a *tiny* target can be an
+    on-device output. Skipping the big ones by frame count avoids opening their
+    projects and scanning thousands of source paths on every poll; the cap is the
+    engine's own (``junk_output_frame_cap``, looser for a mosaic — whose on-device
+    output is one image *per panel*) so the two can't drift. A ``_video``/``_photo``
+    capture target is decided by name instead, at any frame count."""
+    from webapp.library_hygiene import (
+        confirm_duplicate_of_base,
+        duplicate_base_safe,
+        junk_verdict,
     )
 
+    lib = deps.open_library(request)
     out: list[CleanupSuggestionOut] = []
-    leftovers: set[str] = set()
-    by_safe = {t.safe_name: t for t in targets}
-    for entry in targets:
-        # --- (0) legacy whole-device / mixed-folder container drop ---------
-        # Flagged at scan time (a registry column) when a container-expansion
-        # re-scan found the pre-existing giant target an old scan built from
-        # the same container. It's a *large* target (all several objects'
-        # subs), so the cheap frame-count-gated detectors below never open it —
-        # the flag lets us surface it here without re-reading source paths.
-        if entry.legacy_mixed_drop:
-            leftovers.add(entry.safe_name)
-            out.append(CleanupSuggestionOut(
-                safe=entry.safe_name,
-                name=entry.name,
-                n_frames=entry.n_frames,
-                reason="legacy_mixed_drop",
-                detail=(
-                    "A leftover from an older scan that lumped a whole Seestar "
-                    "card or share into one target — it mixes several different "
-                    "objects' subs (plus the Seestar's own finished images and "
-                    "videos), so stacking it just makes a mess. The app has "
-                    "since re-sorted those frames into their own proper targets, "
-                    "so this jumbled one is now a stale duplicate. Removing it "
-                    "leaves your raw sub folders on disk untouched."
-                ),
-            ))
-            continue
-        # --- (1) output/video/photo junk (cheap: only small targets opened) -
-        # A "_video"/"_photo" capture folder is junk by name whatever its
-        # frame count, so those bypass the count gate (and need no sources).
-        # The gate itself is the scanner's, so it cannot drift from the caps the
-        # classifier applies — a mosaic's output is one image *per panel*.
-        is_capture_name = entry.name.strip().lower().endswith(("_video", "_photo"))
-        if is_capture_name or entry.n_frames <= junk_scan_frame_cap(entry.name):
-            source_paths: list[str] = []
-            if not is_capture_name:
-                proj = lib.open_target(entry.safe_name)
-                try:
-                    source_paths = proj.source_paths()
-                finally:
-                    proj.close()
-            verdict = classify_seestar_junk_target(
-                entry.name, source_paths, entry.n_frames)
+    try:
+        targets = lib.list_targets()
+        by_safe = {t.safe_name: t for t in targets}
+        for entry in targets:
+            # --- (0) legacy whole-device / mixed-folder container drop ---------
+            # Flagged at scan time (a registry column) when a container-expansion
+            # re-scan found the pre-existing giant target an old scan built from
+            # the same container. It's a *large* target (all several objects'
+            # subs), so the cheap frame-count-gated detectors below never open it —
+            # the flag lets us surface it here without re-reading source paths.
+            if entry.legacy_mixed_drop:
+                out.append(CleanupSuggestionOut(
+                    safe=entry.safe_name,
+                    name=entry.name,
+                    n_frames=entry.n_frames,
+                    reason="legacy_mixed_drop",
+                    detail=(
+                        "A leftover from an older scan that lumped a whole Seestar "
+                        "card or share into one target — it mixes several different "
+                        "objects' subs (plus the Seestar's own finished images and "
+                        "videos), so stacking it just makes a mess. The app has "
+                        "since re-sorted those frames into their own proper targets, "
+                        "so this jumbled one is now a stale duplicate. Removing it "
+                        "leaves your raw sub folders on disk untouched."
+                    ),
+                ))
+                continue
+            # --- (1) output/capture junk (cheap: only small targets opened) ---
+            verdict = junk_verdict(lib, entry)
             if verdict is not None:
-                leftovers.add(entry.safe_name)
                 out.append(CleanupSuggestionOut(
                     safe=entry.safe_name,
                     name=entry.name,
@@ -270,123 +280,39 @@ def _scan_for_leftovers(
                 ))
                 continue  # a junk target is never also a duplicate
 
-        # --- (2) <T>_sub duplicate of a base target that now owns the subs -
-        # Cheap name-shape prefilter: only ``_sub``-named targets (rare) reach
-        # the project-opening confirmation below. ``_mosaic_sub`` is included:
-        # its base is the ``<T> (mosaic)`` target the convention creates.
-        low = entry.name.strip().lower()
-        if not low.endswith("_sub"):
-            continue
-        proj = lib.open_target(entry.safe_name)
-        try:
-            dup_sources = proj.source_paths()
-            # A genuine leftover duplicate holds nothing but re-registered raw
-            # subs. If this target *also* carries the user's own data — a
-            # stack-run history — then it is not disposable: the frontend's
-            # one-click cleanup deletes the registry target (keeping the files
-            # on disk), which would silently drop that history from the UI.
-            # Never offer such a target for removal (the base owns the subs,
-            # but the runs live only here). See the notes check below for the
-            # matching free-text-notes guard.
-            dup_has_runs = next(proj.iter_stack_runs(), None) is not None
-        finally:
-            proj.close()
-        base_name = duplicate_sub_target_base_name(entry.name, dup_sources)
-        if base_name is None:
-            continue
-        base = by_safe.get(make_safe_name(base_name))
-        if base is None or base.safe_name == entry.safe_name:
-            continue
-        base_proj = lib.open_target(base.safe_name)
-        try:
-            base_sources = set(base_proj.source_paths())
-        finally:
-            base_proj.close()
-        # The base already owns *every* one of these subs, so this target adds
-        # nothing anywhere: that is what makes it a duplicate, and it is settled
-        # before the user-data guards below, which decide only whether cleanup
-        # may offer to *remove* it.
-        if not (dup_sources and all(s in base_sources for s in dup_sources)):
-            continue
-        leftovers.add(entry.safe_name)
-        # Offer removal only when this duplicate carries no user-owned data of
-        # its own (stack-run history or free-text notes), which a one-click
-        # removal would drop from the UI even though the files stay on disk.
-        dup_has_notes = bool((entry.notes or "").strip())
-        if not dup_has_runs and not dup_has_notes:
-            out.append(CleanupSuggestionOut(
-                safe=entry.safe_name,
-                name=entry.name,
-                n_frames=entry.n_frames,
-                reason="duplicate_sub",
-                detail=(
-                    "A leftover from an older scan — these are the same raw "
-                    f"subs, now already in your “{base.name}” target. Removing "
-                    "this duplicate tidies your library and saves re-stacking "
-                    "the same frames twice; your files on disk are untouched."
-                ),
-            ))
-    return _LeftoverScan(suggestions=out, leftover_safes=leftovers)
-
-
-def _merge_eligible_targets(
-    targets: Sequence[TargetEntry], leftover_safes: set[str],
-) -> list[TargetEntry]:
-    """The targets a "same object in more than one folder?" nudge may cluster.
-
-    Position-only clustering cannot tell a second night's folder from a target's
-    own shadow, so two kinds are dropped here — both cases the app already knows
-    better about, and both of which the nudge otherwise described as "shot on
-    separate nights" while counting the same subs twice in its headline total:
-
-    * **known leftovers** (``leftover_safes``) — a Seestar output/video/photo
-      target, a legacy whole-card drop, or a *confirmed* duplicate whose base
-      already owns every one of its frames. Combining one in is a no-op:
-      ``merge_projects`` dedupes on the canonical realpath, so not a single sub
-      would move. Worse, folding an on-device **output** into a real target would
-      put a finished low-resolution image back into the very stack pool
-      ``reject_seestar_output_frames`` exists to keep it out of.
-    * **a mosaic beside its own single field** — the convention creates
-      ``"<T> (mosaic)"`` as a target *deliberately* kept distinct from ``<T>``
-      "so their differing footprints are never co-stacked or auto-merged"
-      (``_apply_seestar_convention``). The two sit at the same sky position by
-      definition, so clustering always pairs them, and offering that merge
-      contradicts the rule that separated them in the first place.
-
-    A ``<T>_sub``-named target the base does **not** fully own is *not* a
-    confirmed duplicate and still clusters — that is a real two-folder case the
-    owner has (``NGC 6888`` 4815 subs beside ``NGC 6888_SUB`` 3110), and
-    combining it genuinely deepens the picture.
-    """
-    kept = [t for t in targets if t.safe_name not in leftover_safes]
-    present = {t.name.strip().lower() for t in kept}
-    eligible: list[TargetEntry] = []
-    for t in kept:
-        low = t.name.strip().lower()
-        if low.endswith(_MOSAIC_TARGET_SUFFIX):
-            stem = low[: -len(_MOSAIC_TARGET_SUFFIX)].strip()
-            if stem and stem in present:
+            # --- (2) <T>_sub duplicate of a base target that now owns the subs -
+            # Cheap name-shape prefilter (pure, no I/O): only ``*_sub``-named
+            # targets — including ``*_mosaic_sub``, whose base is the
+            # ``<T> (mosaic)`` target — reach the project-opening confirmation.
+            base_safe = duplicate_base_safe(entry.name)
+            if base_safe is None:
                 continue
-        eligible.append(t)
-    return eligible
-
-
-@router.get("/cleanup-suggestions", response_model=list[CleanupSuggestionOut])
-def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
-    """Detect leftover targets a pre-v0.184.9 scan built before the scanner learned
-    the Seestar folder convention, so the Library can offer a one-click "remove
-    these" cleanup. Two kinds: (1) *junk* targets built from the Seestar's own
-    output / ``_video`` / ``_photo`` folders (not raw subs, cannot be stacked); (2)
-    ``*_sub``-named *duplicates* holding the same raw subs the base target
-    now owns (clutter + double compute, not corrupt data). Read-only: it never
-    deletes anything (the user confirms via ``DELETE /api/targets/{safe}``), and
-    never touches the real ``_sub`` data or the base target. Returns ``[]`` when
-    the library is clean."""
-    lib = deps.open_library(request)
-    try:
-        return _scan_for_leftovers(lib, lib.list_targets()).suggestions
+            dup = confirm_duplicate_of_base(lib, entry, by_safe.get(base_safe))
+            if dup is None:
+                continue
+            # The base owns *every* one of these subs, so nothing real is lost and
+            # the message is truthful. Offer removal only when this duplicate also
+            # carries no user-owned data of its own (stack-run history or free-text
+            # notes), which a one-click removal would drop from the UI even though
+            # the files stay on disk.
+            dup_has_notes = bool((entry.notes or "").strip())
+            if not dup.has_own_runs and not dup_has_notes:
+                out.append(CleanupSuggestionOut(
+                    safe=entry.safe_name,
+                    name=entry.name,
+                    n_frames=entry.n_frames,
+                    reason="duplicate_sub",
+                    detail=(
+                        "A leftover from an older scan — these are the same raw "
+                        f"subs, now already in your “{dup.base_name}” target. "
+                        "Removing this duplicate tidies your library and saves "
+                        "re-stacking the same frames twice; your files on disk are "
+                        "untouched."
+                    ),
+                ))
     finally:
         lib.close()
+    return out
 
 
 @router.get("/{safe}", response_model=TargetOut)
