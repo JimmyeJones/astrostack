@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote, removedOverlayCaption } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
+import { FULL_RES_PNG_MAX_LONG_EDGE } from "../fullres";
 import { SAMPLE_TOUR_COPY } from "../components/SampleTourNote";
 import type { StackRun } from "../api/client";
 
@@ -571,6 +572,34 @@ describe("HistoryView", () => {
     // Distinct from the small quick-preview PNG.
     const png = await menuItem("PNG");
     expect(png).toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview");
+  });
+
+  it("tells the truth about what the full-res PNG contains", async () => {
+    // This menu used to print the canvas dimensions beside the item — "Same
+    // look, full size (12000×9000 px)" — on a download the server caps on its
+    // long edge, so it quoted a number the file demonstrably misses.
+    const w = FULL_RES_PNG_MAX_LONG_EDGE + 4000;
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, has_fits: true, canvas_w: w, canvas_h: 9000 }),
+    ]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    await menuItem("Full-res PNG");
+    expect(screen.queryByText(`Same look, full size (${w}×9000 px)`)).not.toBeInTheDocument();
+    expect(screen.getByText(
+      new RegExp(`up to ${FULL_RES_PNG_MAX_LONG_EDGE} px`))).toBeInTheDocument();
+  });
+
+  it("still quotes the exact size for a canvas the render does serve whole", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, has_fits: true, canvas_w: 1080, canvas_h: 1920 }),
+    ]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    await menuItem("Full-res PNG");
+    expect(screen.getByText("Same look, full size (1080×1920 px)")).toBeInTheDocument();
   });
 
   it("does not offer a picture download when the run has no preview", async () => {

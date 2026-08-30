@@ -729,6 +729,7 @@ export function GalleryView() {
           : undefined}
         fullResHref={viewing?.has_fits
           ? api.stackFullResPngUrl(viewing.safe, viewing.run_id, viewingTurned) : undefined}
+        fullResCanvas={viewing ? { w: viewing.canvas_w, h: viewing.canvas_h } : undefined}
         // The FITS deliberately does not follow the view: the raw data stays
         // WCS-aligned, whichever way the picture is being looked at.
         rawHref={viewing?.has_fits

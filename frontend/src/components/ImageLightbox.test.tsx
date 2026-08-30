@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ImageLightbox, computePinch } from "./ImageLightbox";
 import { ScanToPhoneButton } from "./ScanToPhoneButton";
+import { FULL_RES_PNG_MAX_LONG_EDGE } from "../fullres";
 
 function renderLightbox(props: Partial<React.ComponentProps<typeof ImageLightbox>> = {}) {
   return render(
@@ -90,6 +91,32 @@ describe("ImageLightbox", () => {
     expect(preview.closest("a")).toHaveAttribute("href", "/api/run/1/preview");
     expect(screen.getByText("JPEG (smaller — best for sharing)").closest("a"))
       .toHaveAttribute("href", "/api/run/1/jpeg");
+  });
+
+  it("stops calling the full-res PNG native size on a canvas the render caps", async () => {
+    // The endpoint decimates anything past its long-edge ceiling, so on a big
+    // union mosaic "native size" was a promise the file didn't keep. Given the
+    // canvas, the item says what it will actually hand over.
+    renderLightbox({
+      downloadHref: "/api/run/1/preview",
+      fullResHref: "/api/run/1/full-res-png",
+      fullResCanvas: { w: FULL_RES_PNG_MAX_LONG_EDGE + 2000, h: 6000 },
+    });
+    fireEvent.click(screen.getByLabelText("Download picture"));
+    expect((await screen.findByText(
+      `Full-res PNG (up to ${FULL_RES_PNG_MAX_LONG_EDGE} px)`)).closest("a"))
+      .toHaveAttribute("href", "/api/run/1/full-res-png");
+    expect(screen.queryByText("Full-res PNG (native size)")).not.toBeInTheDocument();
+  });
+
+  it("keeps the plain wording for an ordinary canvas, and when it isn't known", async () => {
+    renderLightbox({
+      downloadHref: "/api/run/1/preview",
+      fullResHref: "/api/run/1/full-res-png",
+      fullResCanvas: { w: 1080, h: 1920 },
+    });
+    fireEvent.click(screen.getByLabelText("Download picture"));
+    expect(await screen.findByText("Full-res PNG (native size)")).toBeInTheDocument();
   });
 
   it("shows a full-res menu even without a jpeg href", async () => {
