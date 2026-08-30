@@ -1,9 +1,24 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { describe, expect, it, vi } from "vitest";
 import { MyMap, myMapFilename, skyFootprintLine } from "./Sky";
 import { MantineProvider } from "@mantine/core";
 import { api } from "../api/client";
+import * as client from "../api/client";
 import { formatStampDate } from "../format";
+
+/** MyMap asks the server how much sky its pictures cover, so it needs a query
+ *  client. Kept in one helper so every case renders it the same way. */
+function renderMyMap() {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <MantineProvider>
+      <QueryClientProvider client={qc}><MyMap /></QueryClientProvider>
+    </MantineProvider>,
+  );
+}
 
 function image(timestamp_utc: string | null) {
   return { ra_deg: 83.8221, dec_deg: -5.3911, timestamp_utc };
@@ -36,7 +51,7 @@ describe("skyFootprintLine", () => {
 
 describe("MyMap", () => {
   it("shows the all-sky picture built from the owner's own data", () => {
-    render(<MantineProvider><MyMap /></MantineProvider>);
+    renderMyMap();
     const img = screen.getByRole("img");
     expect(img.getAttribute("src")).toBe(api.myMapUrl());
     expect(img.getAttribute("src")).toBe("/api/sky/my-map.png");
@@ -45,12 +60,34 @@ describe("MyMap", () => {
   });
 
   it("invites the owner to keep it, from the bytes already on screen", () => {
-    render(<MantineProvider><MyMap /></MantineProvider>);
+    renderMyMap();
     const save = screen.getByRole("link", { name: /save this map/i });
     // The same endpoint the <img> is showing — never a second render.
     expect(save).toHaveAttribute("href", api.myMapUrl());
     expect(save.getAttribute("download")).toMatch(
       /^astrostack-my-map-\d{4}-\d{2}-\d{2}\.png$/);
+  });
+  it("says how much of the sky those pictures actually cover", async () => {
+    vi.spyOn(client.api, "skyCoverage").mockResolvedValue({
+      deg2: 18.4, sky_fraction: 18.4 / 41252.96, n_pictures: 12,
+      whole_sky_deg2: 41252.96,
+    });
+    renderMyMap();
+    // The map itself can't answer this — it's a non-equal-area projection that
+    // draws every picture larger than life — so the number comes off the runs'
+    // own WCS, and the line anchors it in full moons.
+    expect(await screen.findByText(/18\.4 square degrees/)).toBeInTheDocument();
+    expect(screen.getByText(/full moons/)).toBeInTheDocument();
+    expect(screen.getByText(/0\.045% of the whole sky/)).toBeInTheDocument();
+  });
+
+  it("stays quiet on a fresh install rather than claiming 0% of the sky", async () => {
+    vi.spyOn(client.api, "skyCoverage").mockResolvedValue({
+      deg2: 0, sky_fraction: 0, n_pictures: 0, whole_sky_deg2: 41252.96,
+    });
+    renderMyMap();
+    await waitFor(() => expect(client.api.skyCoverage).toHaveBeenCalled());
+    expect(screen.queryByText(/square degrees/)).toBeNull();
   });
 });
 

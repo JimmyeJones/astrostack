@@ -2443,6 +2443,16 @@ export const api = {
   getSky: () => req<SkyData>("/api/sky"),
   /** The all-sky "My map" PNG, built server-side from the owner's own pictures. */
   myMapUrl: () => "/api/sky/my-map.png",
+  /**
+   * How much sky those pictures actually cover, measured from each run's own
+   * WCS — never by counting pixels on the map, which is a non-equal-area
+   * projection that also draws every picture larger than life.
+   */
+  skyCoverage: () =>
+    req<{
+      deg2: number; sky_fraction: number; n_pictures: number;
+      whole_sky_deg2: number;
+    }>("/api/sky/coverage"),
   /** "Your universe" — the captured objects placed in depth by catalog distance. */
   getUniverse: () => req<UniverseData>("/api/sky/universe"),
 

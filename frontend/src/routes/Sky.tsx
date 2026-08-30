@@ -8,6 +8,7 @@ import { IconDownload, IconStars } from "@tabler/icons-react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
+import { describeSkyCoverage } from "../components/skyCoverage";
 import { formatStampDate } from "../format";
 import { AladinSky } from "./AladinSky";
 import {
@@ -239,6 +240,21 @@ function OfflineSky({ stars, images, onSelect }: {
  * that fills the stage; the interactive views above are what you pan and zoom.
  */
 export function MyMap() {
+  // "How much of the sky is that?" — the question the map itself can't answer,
+  // because it's an Aitoff projection drawing every picture larger than life.
+  // Measured server-side off each run's own WCS instead, so the stat can't
+  // quietly disagree with the picture it sits under. Read-only and cached
+  // server-side against the same "did a picture change?" fingerprint the map
+  // uses, so it costs a page view nothing after the first.
+  const coverage = useQuery({
+    queryKey: ["sky-coverage"],
+    queryFn: () => api.skyCoverage(),
+    staleTime: 60_000,
+  });
+  const coverageLine = coverage.data
+    ? describeSkyCoverage(coverage.data.deg2, coverage.data.sky_fraction,
+                          coverage.data.n_pictures)
+    : "";
   return (
     <div
       style={{
@@ -267,6 +283,17 @@ export function MyMap() {
       >
         Save this map
       </Button>
+      {coverageLine ? (
+        <Text
+          size="xs" c="dimmed" ta="center"
+          style={{
+            position: "absolute", left: 12, right: 12, bottom: 10,
+            textShadow: "0 1px 3px rgba(0,0,0,0.9)",
+          }}
+        >
+          {coverageLine}
+        </Text>
+      ) : null}
     </div>
   );
 }

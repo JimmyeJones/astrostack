@@ -18341,16 +18341,58 @@ problems. Dogfood it every big-picture run and fix root causes.
     with:** the map's own subtitle already names the owner's totals, so a saved map explains itself with no
     extra work. **Grep first:** the map's URL builder already exists in `api`; don't write a second one.
 
-- **NEW IDEA (Builder 2026-08-29) — "how much of the sky have you actually seen?" — cheap, but only on an
-  equal-area projection.** *(Pillar: enjoy + understand — PRIORITY 3; size S; read-only.)* Painted-pixels ÷
-  in-projection-pixels is a genuinely honest "you have photographed 0.04 % of the sky" — one
-  `np.count_nonzero`, no new geometry — **but only if the projection is equal-area.** The shipped map is
-  **Aitoff, which is not**, so counting pixels off it over-weights the centre and under-weights the rim; a
-  Hammer (or Mollweide) pass, or an area-weighted count, is the honest version. **The second trap:** the map
-  exaggerates small pictures so they stay visible, which inflates any pixel count several-fold — so measure
-  on an *unexaggerated* pass, never off the picture the owner is looking at. A stat that silently disagrees
-  with the map beside it is worse than no stat at all. Deep-sky imagers love this number and a beginner
-  understands it immediately, so it is worth doing properly rather than approximately.
+- **✅ SHIPPED (Builder, v0.306.0, branch `claude/compassionate-galileo-1m28nv`) — ~~"how much of the sky have
+  you actually seen?"~~** Shipped as the line under **My map** — and it sidesteps *both* traps the entry
+  names by never touching the projection at all.
+
+  **The insight that made it S rather than M.** The entry's shape was "count painted pixels ÷ in-projection
+  pixels, but you'll need an equal-area pass". You don't: the area is exactly known *before* anything is
+  projected. The determinant of a run's WCS `pixel_scale_matrix` **is** the solid angle one pixel subtends,
+  so covered area is "how many pixels did enough frames reach" × that. No Hammer pass, no un-exaggerated
+  re-render, and — the point — **nothing about how the map is drawn can move the number**, which is what the
+  entry was really protecting. A test renders the map between two reads of the stat and asserts it didn't
+  budge.
+
+  **What shipped.**
+  * `seestack/skyarea.py` (new, pure): `stack_sky_area_deg2(fits)` — well-covered pixel count ×
+    `|det(pixel_scale_matrix)|` — plus `WHOLE_SKY_DEG2` and `sky_fraction`. "Well-covered" is the existing
+    `stack_detail_mask`, i.e. *the same definition that masks a mosaic's ragged fringe off the map*, so the
+    stat and the picture agree about what counts as photographed. A run with no celestial WCS contributes
+    **nothing** rather than a nominal field: guessing would claim sky the owner never pointed at.
+  * `GET /api/sky/coverage` → `{deg2, sky_fraction, n_pictures, whole_sky_deg2}`, summing each target's
+    newest master. Cached in the app's own `state/my_map_area.json` against the same "has any target's newest
+    picture changed?" fingerprint the map uses — and the fingerprint walk (one `stat` per target) is
+    deliberately separated from the measurement, so a cache hit skips every coverage-map read.
+  * `frontend/src/components/skyCoverage.ts` (pure) + one line under the map: *"Your 12 pictures cover 18.4
+    square degrees — about 91 full moons' worth of sky, and 0.045% of the whole sky."* The **full moon** is
+    the only patch of sky a beginner already has a feel for, so it carries the number; the percentage is the
+    part that makes people grin. `formatSkyFraction` exists because `toFixed(1)` renders every real library
+    as "0.0%".
+
+  **Beginner bar:** understood on sight, no setting, nothing to configure, and it is about enjoying your own
+  data — not a pro measurement.
+
+  **Upgrade-safe (§9):** one new read-only endpoint, one new cache file inside the app's own state dir
+  (overwritten in place, never grows); no config, schema, on-disk-layout, default or API-shape change.
+
+  **Tests (+15):** `tests/webapp/test_sky_coverage.py` (7) pins the area against hand-computed square degrees,
+  that NaN *and* thinly-covered fringe pixels don't count, that a WCS-less run contributes nothing, a fresh
+  install answering zero rather than erroring, the cache both hitting and invalidating, two targets summing,
+  and the render-can't-move-it property above. `skyCoverage.test.ts` (8) covers the phrasing, including the
+  singular/plural moon and staying silent with nothing to measure; two `Sky.test.tsx` cases render the line.
+
+  Original spec:
+
+  - **NEW IDEA (Builder 2026-08-29) — "how much of the sky have you actually seen?" — cheap, but only on an
+    equal-area projection.** *(Pillar: enjoy + understand — PRIORITY 3; size S; read-only.)* Painted-pixels ÷
+    in-projection-pixels is a genuinely honest "you have photographed 0.04 % of the sky" — one
+    `np.count_nonzero`, no new geometry — **but only if the projection is equal-area.** The shipped map is
+    **Aitoff, which is not**, so counting pixels off it over-weights the centre and under-weights the rim; a
+    Hammer (or Mollweide) pass, or an area-weighted count, is the honest version. **The second trap:** the map
+    exaggerates small pictures so they stay visible, which inflates any pixel count several-fold — so measure
+    on an *unexaggerated* pass, never off the picture the owner is looking at. A stat that silently disagrees
+    with the map beside it is worse than no stat at all. Deep-sky imagers love this number and a beginner
+    understands it immediately, so it is worth doing properly rather than approximately.
 
 - **✅ SHIPPED — FIRST SLICE (Builder, v0.292.0, branch `claude/compassionate-galileo-4drm6t`) —
   ~~⭐ OWNER-REQUESTED (2026-08-28) — "Universe map": an all-sky view built ONLY from the owner's own captured
