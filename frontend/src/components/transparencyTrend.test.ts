@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   describeTransparencyTrend,
   formatClockUtc,
+  mosaicPanelsNote,
   sparklinePoints,
   transparencyVerdictBadge,
 } from "./transparencyTrend";
@@ -89,5 +90,22 @@ describe("sparklinePoints", () => {
 
   it("returns an empty string with no points", () => {
     expect(sparklinePoints([], 100, 40)).toBe("");
+  });
+});
+
+describe("mosaicPanelsNote", () => {
+  it("says nothing on the ordinary single-pointing night", () => {
+    // Absent (an older backend), zero, and one pointing all mean "one patch of
+    // sky" — the note would only be noise.
+    expect(mosaicPanelsNote(trend())).toBe("");
+    expect(mosaicPanelsNote(trend({ n_pointings: 0 }))).toBe("");
+    expect(mosaicPanelsNote(trend({ n_pointings: 1 }))).toBe("");
+  });
+
+  it("explains the levelling when the night was a mosaic", () => {
+    const note = mosaicPanelsNote(trend({ n_pointings: 4 }));
+    expect(note).toContain("4 mosaic panels");
+    // The point the reader needs: a dimmer panel is geometry, not weather.
+    expect(note).toContain("emptier sky isn't haze");
   });
 });
