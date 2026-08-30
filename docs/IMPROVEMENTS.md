@@ -26436,6 +26436,35 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Infra / maintainability
 
+- **NEW IDEA (Builder 2026-08-30, the shape the v0.311.1 bug had, and the reason it existed) — there are now
+  **two** answers to "render this run's picture at size N, exactly as it is shown", and the bug was the gap
+  between them.** *(Pillar: correctness by construction / maintainability — PRIORITY 3; size S; pure
+  consolidation, no behaviour change intended.)* `stack._native_picture_source` (v0.310.0) knows the full list
+  of ways a stored preview can differ from a fresh FITS render — a baked North-up turn, a display-space
+  "Process target" edit, an auto-crop trim, a missing master — and **declines** when it can't reproduce the
+  picture faithfully. `download_full_res_png` answers the same question independently: it handles the recipe
+  and the saved `stretch`/`black`, silently didn't handle the baked turn (that was v0.311.1), and does not
+  consider the crop at all. Two implementations of one question is exactly how the rotation went missing from
+  one of them. **Shape:** one function — `run_picture_png(run, recipe_json, *, max_long_edge)` — that returns
+  the render *and* what it could not reproduce, with `_native_picture_source` becoming "call it, and decline
+  when it reports anything unreproduced" and the full-res endpoint becoming "call it, and serve what comes
+  back". **Do it as a pure refactor with the existing tests as the gate** (`test_full_res_png.py`,
+  `test_share_native_resolution.py`, `test_wallpaper.py` between them pin every branch), and check the **crop**
+  case explicitly while there: a plain run should never carry a `preview_crop_json` (only the auto-edit writes
+  one, and it sets `preview_display_space` too), but nothing asserts that, and if it can happen the full-res
+  download is showing a differently-*framed* picture the same way it was showing a differently-rotated one.
+
+- **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by v0.310.0 / v0.311.0) — the wallpaper and the
+  share JPEG are now real renders, and nothing caches them.** *(Size S if it ever bites; **do not build it on
+  spec** — AGENTS.md §6 says optimise a *measured* hot spot.)* Both were a file read plus a re-encode; each is
+  now a decimated FITS load and stretch (≤ 2560 px for a share, ≤ the device size for a wallpaper) on every
+  request, and the browser has no way to revalidate — the responses carry no `ETag` or `Last-Modified`. A
+  beginner tapping Share three times pays for three renders. The cheap fix if it is ever felt is a validator
+  keyed on the master's `(mtime_ns, size)` plus the request's own parameters, exactly as
+  `_zoom_clip_signature` already keys its cache; the expensive one is a stored derivative, which is what the
+  "Process target" half of the same feature would need anyway. **Measure first:** on the owner's box the
+  interesting number is a share tap on their largest mosaic, not a synthetic frame.
+
 - **⚪ PRE-EXISTING TEST-HARNESS QUIRK (Builder 2026-08-29, tripped over while spot-checking a merge; recorded
   so nobody spends a run thinking their change broke it) — naming an engine test file and a `tests/webapp/` one
   on the SAME pytest command line can make `tests/webapp/conftest.py` not apply, so every `client` fixture in
