@@ -1281,6 +1281,37 @@ describe("See what stacking removed", () => {
     // …and the caption that stops cyan speckle reading as damage.
     expect(screen.getByText(/what stacking removed/)).toBeInTheDocument();
   });
+
+  it("keeps the tint on the picture when the view is turned North-up", async () => {
+    // The one case that used to make the tint step aside: a processed run whose
+    // stored bytes are being turned on the way out. The overlay endpoint takes
+    // the same turn now, so both move together instead of the user being told
+    // to untick the rotation to see what was removed.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true, has_rejection_map: true })]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue(withMap);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: 0.5, black: 0.35, north_up_deg: 33.0,
+      processed_preview: true, can_keep_processed: true,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Show what was removed"));
+    await waitFor(() => expect(screen.getByTestId("image-overlay")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
+    fireEvent.click(await screen.findByText("Rotate so North is up"));
+
+    // The picture is the stored bytes, turned; so is the tint over it.
+    const img = () => screen.getByAltText("M42_stack_01").getAttribute("src") || "";
+    await waitFor(() => expect(img()).toContain("/preview?north_up=true"));
+    await waitFor(() => expect(screen.getByTestId("image-overlay")).toHaveAttribute(
+      "src", "/api/targets/M_42/stack-runs/1/rejection-overlay?north_up=true"));
+    expect(screen.queryByText(/Turn off .Rotate so North is up. to see what stacking removed/))
+      .toBeNull();
+  });
 });
 
 describe("removedOverlayCaption", () => {

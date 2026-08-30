@@ -1006,9 +1006,12 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   // placed on it honestly, so hide the pins/bar like a North-up save does.
   const geometryUnplaceable = showingStored && !!run.preview_geometry_unknown;
   const cantPlaceMarks = imageIsNorthUp || geometryUnplaceable;
-  // The rejection tint is the one overlay measured against the stored bytes *as
-  // they sit on disk*, so an on-the-fly turn moves the picture out from under it.
-  const overlayPlaceable = showingStored && !storedNorthUp;
+  // The rejection tint is measured against the stored bytes, so it lands only
+  // while those bytes are what's on screen — but it no longer has to step aside
+  // for an on-the-fly North-up turn: the overlay endpoint takes the same turn
+  // (on the drop-count plane, before the tint is built), so the two move
+  // together. Unlike the pins and the scale bar, this one composes.
+  const overlayPlaceable = showingStored;
 
   return (
     <Card withBorder padding="md" radius="md">
@@ -1028,13 +1031,13 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             directions={annotations.data?.directions ?? null}
             showCompass={scale && !cantPlaceMarks}
             // The server sizes the tint to the *stored* preview — including any
-            // North-up turn a past save baked into it — so it only lands true on
-            // those bytes as they sit on disk. The live Adjust render is a
-            // different picture (full canvas, possibly rotated), and so is the
-            // stored preview turned on the fly by this request, so the overlay
-            // steps aside in both rather than landing somewhere the trail isn't.
+            // North-up turn a past save baked into it, and now the one this
+            // request asks for on the way out — so it lands true on those bytes
+            // however they are turned. The live Adjust render is a different
+            // picture (full canvas, its own stretch), so the overlay still steps
+            // aside there rather than landing somewhere the trail isn't.
             overlaySrc={showRemoved && hasRejectionMap && overlayPlaceable
-              ? api.stackRejectionOverlayUrl(safe, run.id)
+              ? api.stackRejectionOverlayUrl(safe, run.id, storedNorthUp)
               : null}
             onClick={() => setLight(true)}
           />
@@ -1062,8 +1065,6 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         <Text size="xs" c={overlayPlaceable ? "cyan.4" : "dimmed"} mt={6}>
           {overlayPlaceable
             ? removedOverlayCaption(removedInfo.data?.rejection)
-            : storedNorthUp
-            ? "Turn off “Rotate so North is up” to see what stacking removed — the marks are measured on the un-rotated picture."
             : "Close Adjust to see what stacking removed — the marks are measured on the saved picture, not on the live render."}
         </Text>
       ) : null}

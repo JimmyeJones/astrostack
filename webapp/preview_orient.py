@@ -128,22 +128,27 @@ def remaining_north_up_deg(run) -> float:  # noqa: ANN001
     however far its WCS is from North. A surface deciding whether to *offer* the
     turn needs this one, or it puts up a control that visibly does nothing.
 
-    Mirrors :func:`~seestack.render.thumbnail.orient_preview_north_up`'s own
-    arithmetic rather than re-deriving it: the run's total correction, minus what
-    the bytes carry, thresholded — with no usable WCS (or no master FITS to read
-    one from) reading as "nothing to do", exactly as that renderer does.
+    This is the **run-row form** of
+    :func:`~seestack.render.thumbnail.preview_north_up_remainder_deg`, which is
+    where the arithmetic actually lives (and which the renderer and the rejection
+    tint already go through). All this adds is the half that helper cannot know:
+    what a run's stored bytes already carry, which is :func:`baked_north_up_deg`'s
+    recorded-or-recovered answer. Deliberately a delegation and not a second
+    implementation — two ways to ask "is there a turn left?" is exactly the drift
+    the backlog flagged at merge time.
+
+    No master FITS to read a WCS from reads as "nothing to do", the same as an
+    unusable one does inside that helper.
     """
     if not run.fits_path:
         return 0.0
-    from seestack.render.orient import NORTH_UP_MIN_DEG
-    from seestack.render.thumbnail import applied_north_up_deg
+    from seestack.render.thumbnail import preview_north_up_remainder_deg
 
     try:
-        total = applied_north_up_deg(run.fits_path)
+        return preview_north_up_remainder_deg(
+            run.fits_path, already_deg=baked_north_up_deg(run))
     except Exception:  # noqa: BLE001 — an unreadable master simply offers nothing
         return 0.0
-    remaining = total - baked_north_up_deg(run)
-    return remaining if abs(remaining) >= NORTH_UP_MIN_DEG else 0.0
 
 
 def baked_north_up_deg(run) -> float:  # noqa: ANN001
