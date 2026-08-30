@@ -235,6 +235,29 @@ export function LatestPictureCard({
             ? "Working out what’s in this picture…"
             : sentence
             || "No catalog objects landed in this picture — it’s a patch of sky between the famous ones."}
+          {/* The names are drawn in the browser, so they vanish the moment the
+              picture leaves the app — and "here's the Running Man Nebula, just
+              above Orion" is a far better post than an unlabelled smudge. Offered
+              *here*, while the labels are on screen, rather than as a seventh item
+              in the page's Save/share menu: the owner's standing complaint is that
+              these pages are too busy, and this is the one moment the option is
+              obviously wanted. Shown only when there is actually something to
+              label — the server would hand back the plain picture otherwise. */}
+          {!cantPlaceMarks && view.objects.length ? (
+            <>
+              {" "}
+              <Anchor
+                component="a"
+                data-testid="save-labelled"
+                href={api.stackArtifactUrl(
+                  safe, run.id, "jpeg", false, false, false, false, true)}
+                download
+                size="xs"
+              >
+                Save it with the names on it
+              </Anchor>
+            </>
+          ) : null}
         </Text>
       ) : null}
       {/* The honest half of "your picture": a saved-but-never-exported edit lives
