@@ -479,7 +479,8 @@ def write_share_jpeg(path: Path, rgb: np.ndarray, *, max_long_edge: int = 2048,
 def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
                       nameplate: Any | None = None,
                       keepsake: Any | None = None,
-                      sky_marks: Any | None = None) -> bytes:
+                      sky_marks: Any | None = None,
+                      object_labels: Any | None = None) -> bytes:
     """Transcode an already-rendered display PNG (e.g. the stored stack preview)
     to a smaller, more share-friendly JPEG at the **same** resolution.
 
@@ -507,7 +508,12 @@ def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
     keepsake mats an already-marked picture and a nameplate's footer sits below
     marks that live along the top edge. A ``SkyMarks`` with nothing to draw is a
     clean no-op, so a run with no usable WCS is byte-for-byte the plain
-    download."""
+    download.
+
+    ``object_labels`` is a :class:`seestack.objectlabels.ObjectLabels` and
+    layers the same way — the named catalog objects in the field are drawn onto
+    the picture before any caption or matte, so a shared file says what is *in*
+    it. Empty labels are a clean no-op too."""
     from io import BytesIO
 
     from PIL import Image
@@ -520,6 +526,17 @@ def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
             img = flat
         else:
             img = src.convert("RGB")
+        if object_labels is not None:
+            from seestack.objectlabels import draw_object_labels
+            # The names go on first so the marks (drawn next) sit over them
+            # rather than under — but a name buried under the compass rose is a
+            # name nobody can read, so hand the placement the boxes those marks
+            # are about to occupy and let it route around them.
+            avoid = ()
+            if sky_marks is not None:
+                from seestack.skymarks import mark_zones
+                avoid = mark_zones(img.width, img.height, sky_marks)
+            img = draw_object_labels(img, object_labels, avoid=avoid)
         if sky_marks is not None:
             from seestack.skymarks import draw_sky_marks
             img = draw_sky_marks(img, sky_marks)

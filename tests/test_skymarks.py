@@ -273,3 +273,44 @@ def test_every_character_the_marks_draw_has_a_glyph_in_the_font():
             )
     # And the guard is real: the prime the *on-screen* label uses is not.
     assert not drawable("′")
+
+
+# ---- telling another overlay where the marks will be ------------------------
+
+def test_the_declared_mark_zones_really_do_cover_where_the_marks_land():
+    """``mark_zones`` exists so a second overlay on the same picture (the object
+    labels, v0.315.0) can route around the bar and the rose instead of being
+    silently buried under them. It is derived from the drawing's own constants
+    rather than measured, so the property that matters is that it doesn't
+    *under*-claim: every pixel the drawing actually inks has to fall inside one
+    of the declared boxes.
+    """
+    from seestack.skymarks import mark_zones
+
+    src = _picture(640, 480)
+    marks = SkyMarks(bar_px=150.0, bar_label="15'",
+                     directions=SkyDirections(north_deg=104.0, east_deg=194.0))
+    out = draw_sky_marks(src, marks)
+    diff = np.abs(np.asarray(out, dtype=np.int16)
+                  - np.asarray(src, dtype=np.int16)).sum(axis=2)
+    ys, xs = np.nonzero(diff)
+    assert ys.size, "the marks should have drawn something"
+    zones = mark_zones(640, 480, marks)
+    assert len(zones) == 2
+    inside = np.zeros(ys.shape, dtype=bool)
+    for x0, y0, x1, y1 in zones:
+        inside |= (xs >= x0) & (xs <= x1) & (ys >= y0) & (ys <= y1)
+    assert inside.all(), (
+        f"{int((~inside).sum())} inked pixels fell outside the declared zones")
+
+
+def test_a_mark_that_is_not_drawn_claims_no_zone():
+    """Half-present marks are the common case — a run with a scale but no usable
+    orientation — so the boxes have to follow what will actually be drawn."""
+    from seestack.skymarks import mark_zones
+
+    assert mark_zones(640, 480, SkyMarks()) == ()
+    assert len(mark_zones(640, 480, SkyMarks(bar_px=100.0, bar_label="15'"))) == 1
+    assert len(mark_zones(640, 480, SkyMarks(
+        directions=SkyDirections(north_deg=90.0, east_deg=180.0)))) == 1
+    assert mark_zones(0, 0, SkyMarks(bar_px=100.0, bar_label="15'")) == ()
