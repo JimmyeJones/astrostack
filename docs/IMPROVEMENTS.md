@@ -10068,6 +10068,39 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by the v0.319.3 merge/cleanup unification) — the
+  Library page now pays for the same library walk twice per refresh.** *(Pillar: performance — file, don't
+  pre-optimise. Size: S. Confidence: certain by construction; the cost is unmeasured on real data.)*
+  `merge_suggestions` and `cleanup_suggestions` both call `_scan_for_leftovers`, and they are polled by the
+  same page, so each refresh opens every confirmed duplicate pair's two projects twice and reads their
+  `source_paths` twice. On the owner's library that is the `M 3`/`M 3_SUB` pair at ~5,477 + ~5,455 rows, plus
+  the mosaic pair — call it ~22k single-column reads per refresh instead of ~11k. **This was the right trade**:
+  the alternative was the two endpoints keeping separate notions of "is this a duplicate?", which is exactly
+  the bug v0.319.3 fixed. `Project.source_paths()` (added in the same commit) already cut the per-row cost by
+  not building a `FrameRow`, which is most of what a naive fix would have bought.
+  **If it ever shows up:** `webapp/registry_cache.py` already exists for precisely this shape — a short-TTL
+  `app.state` cache keyed on the library's mtime would serve both endpoints from one walk. **Measure first**:
+  time `GET /api/targets/cleanup-suggestions` on a library with several thousand-frame duplicate pairs before
+  adding a cache, because a stale cleanup list after a scan is its own (worse) bug.
+
+- **LATENT HAZARD (Builder 2026-08-30, spotted while wiring mosaic duplicates to their base target in
+  v0.319.3 — traced, NOT reproduced, do not "fix" it blind) — a lowercase `<T>_mosaic/` folder would collide
+  with the `<T> (mosaic)` target's safe name.** *(Pillar: correctness / data integrity — PRIORITY 4. Size: M,
+  and most of that is deciding what is even safe to do. Confidence: the collision is arithmetic;
+  whether any device produces the input is unknown.)*
+  `make_safe_name` replaces every non-`[A-Za-z0-9._-]` run with `_`, so `"M 3 (mosaic)"` → `M_3_mosaic` — and a
+  target literally named `M 3_mosaic` maps to **the same safe name**. Two different targets, one project
+  directory. It does **not** bite the owner today only because `make_safe_name` deliberately preserves case and
+  their device writes the output folder as `M 3_MOSAIC` → `M_3_MOSAIC`. A firmware (or a hand-renamed folder)
+  that spelled it lowercase would land the on-device mosaic output and the real mosaic target on one another.
+  **Why not to fix it here:** changing `make_safe_name`'s output is a rename of on-disk directories, which §9
+  rules out outright, and the registry's own collision handling is the thing to read first
+  (`Library.create_target` raises `FileExistsError`; what an *ingest* does with that is the real question).
+  **The cheap, safe slice if this is ever taken:** detect the collision at scan time and *report* it (a
+  cleanup-style nudge naming both folders) rather than silently merging two objects into one project.
+  **Grep before starting:** `make_safe_name`, `open_or_create_target`, and the `(mosaic)` suffix in
+  `_apply_seestar_convention`.
+
 - **⭐ QA LEAD (Builder 2026-08-30, the ⭐ "normalises against its own subset" lead's *unswept* axis, now with a
   named candidate and a mechanism) — the Auto preset picker's four scene fractions are thresholded above a
   **noise-aware** floor, so they are a monotone function of how deep the stack is.** *(Pillar: image quality +
@@ -10170,7 +10203,33 @@ to **Shipped**.)_
   baseline built by sorting and taking `[0]`, an SQL `MIN()`/`ORDER BY … LIMIT 1`, or a "personal best" phrase
   in copy whose number comes from somewhere else. Those are the four shapes worth an hour.
 
-- **NEW IDEA (Builder 2026-08-30, the natural next tap on the v0.319.1 verdict fix) — let the Nights card's
+- **✅ SHIPPED (Builder, v0.319.4, branch `claude/compassionate-galileo-ehnbid`) — ~~let the Nights card's
+  "soft" badge say what it was compared against.~~** Built as filed, with the entry's own decision taken the
+  way it recommended: a **nullable `typical_fwhm_px` on `NightSummaryOut`**, additive and optional, so an older
+  frontend simply ignores it and a lone judgeable night sends `null` (there *is* no baseline, and the UI must
+  stay silent rather than invent one). The number is the same leave-one-out median `_typical_other_fwhm`
+  already computed for the verdict — it was thrown away a line later — so the badge and the verdict can never
+  quote different yardsticks.
+
+  **Kept to a tooltip, not a fourth column**, exactly as the entry's Care note demanded: a Mantine `Tooltip`
+  plus an `aria-label` carrying the same sentence, so it is reachable by keyboard and screen reader without
+  adding a pixel to the busiest page in the app. A test asserts the sentence is *not* rendered as row text.
+
+  **Copy, and one thing it must never say:** *"5.2 px stars — softer than this target's usual 3.4 px."* A test
+  asserts the sentence never says "best" or "sharpest" — the baseline is the median of the other nights, so
+  quoting it as anyone's best would be a number nobody achieved, which is exactly the untruth the v0.319.1 fix
+  removed from the sibling nudge one card up. A `sharp` night gets the same yardstick without the judgement;
+  `hazy` explains itself by its clouds (it is a cloud verdict, not a sharpness one) and quotes no pixels.
+
+  **Upgrade-safe (§9):** one additive nullable API field and one dataclass field; no config, schema, on-disk or
+  default change.
+
+  **Tests (+2 engine, +1 endpoint, +7 frontend):** the baseline reported on each row is the leave-one-out median and never
+  the night's own number (three nights, 5.0/3.4/3.0 → baselines 3.2/4.0/4.2); a lone night reports `None`;
+  the endpoint serialises both cases; the four tooltip shapes; and the card renders the label on the badge,
+  stays bare when an older backend sends no baseline, and never inlines the sentence.
+
+  *(Original spec.)* **NEW IDEA (Builder 2026-08-30, the natural next tap on the v0.319.1 verdict fix) — let the Nights card's
   "soft" badge say what it was compared against.** *(Pillar: friendliness + trust — PRIORITY 3; size XS;
   frontend-only, the number is already on the row.)* The badge is a bare word — `soft`, in yellow — sitting
   beside a button that offers to discard the night. The Last-session nudge one card up says the whole thing

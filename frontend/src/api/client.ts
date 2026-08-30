@@ -572,6 +572,10 @@ export interface NightSummary {
   kept_exposure_s: number;
   median_fwhm_px: number | null;
   verdict: string; // "sharp" | "soft" | "hazy" | "" (too few measured)
+  // What the verdict was measured against — the median of the target's OTHER
+  // nights' median FWHMs. Optional: an older backend doesn't send it, and it is
+  // null when this is the only judgeable night.
+  typical_fwhm_px?: number | null;
   is_best: boolean;
   reject_buckets: Record<string, number>;
 }
