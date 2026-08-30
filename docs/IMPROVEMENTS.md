@@ -43,7 +43,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+- **CLAIMED (Builder 2026-08-30, branch `claude/compassionate-galileo-xkjuvl`)** — the **recipe-drift guard**
+  filed at the top of "Autonomy & friendliness" this morning: stamp the recipe *look* a "Process target"
+  auto-edit actually baked, and have the reveal + `_unexported_edit` compare against it so a second-round
+  Save can no longer make the two halves of the reveal differ by an edit as well as by frame count.
+- **CLAIMED (Builder 2026-08-30, branch `claude/compassionate-galileo-xkjuvl`)** — the engine QA lead under
+  "Image quality": sweep the rest of the engine for *"compares a position-dependent metric across a whole
+  target"* (the bug class behind v0.270.2 / v0.271.0 / v0.272.1). Fix any fourth site found; record the
+  non-finding honestly if there isn't one.
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow` — run finished, all claims released.**
 > Shipped two: the ~~invisible reveal on "Process target"~~ dogfood finding (**v0.301.0**, write-up under
