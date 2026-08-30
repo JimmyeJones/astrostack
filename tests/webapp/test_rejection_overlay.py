@@ -231,3 +231,73 @@ def test_the_run_listing_says_which_runs_have_a_map(client, solved_library):
         lib.close()
     rows = {r["id"]: r for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
     assert rows[with_id]["has_rejection_map"] is False
+
+
+def test_overlay_can_follow_an_on_the_fly_north_up_view(client, solved_library):
+    """``?north_up=true`` composes the same turn ``…/preview?north_up=true``
+    applies to the stored bytes, so a viewer looking at their picture North-up
+    still sees the trail highlighted *on the trail* — instead of the tint having
+    to step aside because the picture moved out from under it."""
+    from PIL import Image
+
+    safe = _safe(client)
+    run_id, fits_path, preview_path = _make_run(solved_library, safe)
+    plain = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/rejection-overlay")
+    turned = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/rejection-overlay?north_up=true")
+    assert turned.status_code == 200
+
+    from seestack.render.orient import rotate_plane_north_up
+    from seestack.render.thumbnail import (
+        orient_preview_north_up,
+        preview_north_up_remainder_deg,
+    )
+
+    # The picture this overlay has to lay over: the *stored* bytes turned on the
+    # way out, which is exactly what the preview endpoint serves.
+    rotated = orient_preview_north_up(Path(preview_path).read_bytes(), fits_path)
+    with Image.open(BytesIO(rotated)) as im:
+        size = im.size
+    alpha = _alpha(turned)
+    assert alpha.shape == (size[1], size[0]), "must land on the turned picture's grid"
+    assert alpha.shape != _alpha(plain).shape, (
+        "the fixture's WCS must really turn the picture, or this proves nothing")
+
+    deg = preview_north_up_remainder_deg(fits_path)
+    assert abs(deg) > 1.0
+    src = np.zeros((_H, _W), dtype=np.float32)
+    for y, x in _TRAIL:
+        src[y, x] = 1.0
+    hit = np.asarray(Image.fromarray(rotate_plane_north_up(src, deg), mode="F")
+                     .resize(size, Image.BOX)) > 0
+    assert hit.sum() > 0
+    assert (alpha[hit] > 0).all()
+    assert alpha[~hit].max() == 0
+
+
+def test_a_preview_already_saved_north_up_is_not_turned_twice(client, solved_library):
+    """The remainder, not the whole correction: a run whose stored bytes a past
+    "Adjust → North up → Save" already rotated is exactly as North-up as it can
+    get, so asking for the view turn on it must be a no-op — the same bytes the
+    bare URL serves, not a picture 2× the angle round."""
+    safe = _safe(client)
+    run_id, _f, _p = _make_run(solved_library, safe)
+    r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                    json={"stretch": 0.5, "black": 0.0, "north_up": True})
+    assert r.status_code == 200
+
+    base = f"/api/targets/{safe}/stack-runs/{run_id}/rejection-overlay"
+    plain = client.get(base)
+    turned = client.get(f"{base}?north_up=true")
+    assert plain.status_code == turned.status_code == 200
+    assert turned.content == plain.content
+
+
+def test_the_bare_overlay_url_is_unchanged_by_the_new_parameter(client, solved_library):
+    """`north_up` defaults off, so every surface that already embeds the bare URL
+    gets byte-for-byte what it got before."""
+    safe = _safe(client)
+    run_id, _f, _p = _make_run(solved_library, safe)
+    base = f"/api/targets/{safe}/stack-runs/{run_id}/rejection-overlay"
+    assert client.get(base).content == client.get(f"{base}?north_up=false").content

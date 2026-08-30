@@ -363,3 +363,38 @@ def test_orient_preview_north_up_noop_without_a_meaningful_correction(tmp_path):
         hdr["CD2_1"] = 0.0
         hdr["CD2_2"] = -cdelt
     assert orient_preview_north_up(preview, aligned) is preview
+
+
+def test_preview_north_up_remainder_is_what_the_picture_actually_gets(tmp_path):
+    """The helper anything laying something *over* a turned preview has to read.
+
+    It must agree with :func:`orient_preview_north_up` in all three cases, or the
+    rejection tint (a separate PNG sized to the preview) lands on a grid the
+    picture isn't on.
+    """
+    from astropy.io import fits
+
+    from seestack.render.thumbnail import (
+        orient_preview_north_up,
+        preview_north_up_remainder_deg,
+    )
+
+    preview = _preview_png()
+
+    fp = tmp_path / "master.fits"
+    _fits_with_rotated_wcs(fp, rot_deg=30.0)
+    deg = preview_north_up_remainder_deg(fp)
+    assert abs(deg) > 2.0
+    assert orient_preview_north_up(preview, fp) is not preview
+
+    # Already saved at that rotation → nothing left to turn, and the bytes come
+    # back untouched. The two answers have to agree, hence one assertion each.
+    assert preview_north_up_remainder_deg(fp, already_deg=deg) == 0.0
+    assert orient_preview_north_up(preview, fp, already_deg=deg) is preview
+
+    # No usable WCS → "don't turn", whatever was already baked in.
+    plain = tmp_path / "plain.fits"
+    fits.PrimaryHDU(data=np.zeros((3, 30, 20), np.float32)).writeto(plain, overwrite=True)
+    assert preview_north_up_remainder_deg(plain) == 0.0
+    assert preview_north_up_remainder_deg(plain, already_deg=90.0) == 0.0
+    assert orient_preview_north_up(preview, plain, already_deg=90.0) is preview
