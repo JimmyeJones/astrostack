@@ -43,15 +43,27 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-- **Builder 2026-08-30, branch `claude/compassionate-galileo-fj2p70` — CLAIMED this run:**
-  (a) the **recipe-drift stamp** (Autonomy & friendliness, top of Ideas — "a saved recipe on a
-  'Process target' run can quietly drift from the picture that run's preview actually shows");
-  (b) **"Reveal": a one-tap cinematic zoom** of the finished picture (Features that serve real
-  workflows, Scout 2026-08-27 #15) — slices (a) + (b);
-  (c) the two **"Tonight, live" follow-ons** (keep-awake + the other targets that also got subs
-  tonight), if time allows.
-  The bug queue was checked first and is still dry: every entry under "Bugs (fix these first)" is
-  ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
+_(none — claim an item here with your branch name)_
+
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-fj2p70` — run finished, all three claims
+> released.** Shipped all three: the **recipe-drift stamp** (**v0.302.1**, write-up under "Autonomy &
+> friendliness") so nothing silently assumes a re-edited "Process target" run's preview still shows its saved
+> recipe; the run's new beginner feature, the **zoom clip** (**v0.303.0**, under "Features that serve real
+> workflows") — the backlog's "Reveal", renamed because that word already means the one-frame-vs-stack card
+> everywhere here — slices (a)+(b), engine → two endpoints → a Save/share item on History and the Target
+> page; and both **"Tonight, live" follow-ons** (**v0.304.0**, under "Autonomy & friendliness"), the
+> keep-awake reusing the slideshow's helper by *extracting* it rather than copying, and the one line naming
+> the other targets from the same night.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
+> **Three notes filed for whoever comes next:** the first zoom clip on a run is a silent lazy build behind a
+> plain link (fix shape filed); a corner target can't be centred in its own clip, by design, and the shape
+> that would fix it; and a ⚠️ process note about a **pre-existing** pytest quirk — a hand-picked file list that
+> interleaves `tests/webapp/…` and `tests/…` paths can lose `tests/webapp/conftest.py` and make every later
+> webapp test error `fixture 'client' not found`. It reproduces on untouched `origin/main`, it looks exactly
+> like "my change broke everything", and it cost real time this run.
+> Claiming in the run's **first** commit and pushing immediately (per the five duplicate-collision process
+> notes) again cost under a minute; no collision.
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow` — run finished, all claims released.**
 > Shipped two: the ~~invisible reveal on "Process target"~~ dogfood finding (**v0.301.0**, write-up under
@@ -9317,6 +9329,34 @@ to **Shipped**.)_
     which is a real but uncommon path; the reveal is the first surface where the disagreement becomes *visible*
     rather than merely latent, which is why it is worth closing now rather than when it bites.
 
+- **NEW IDEA (Builder 2026-08-30, the one rough edge left by the v0.303.0 zoom clip, and the honest cost of
+  building it lazily behind a plain link) — the *first* zoom clip on a target is a silent wait.** *(Pillar:
+  friendliness — PRIORITY 3; size S; frontend-only in its cheapest form.)* The **Zoom clip** menu item is an
+  `<a download>` straight at `…/zoom-clip`, which is what makes it free to offer (no info request per card,
+  no state) — but the first tap for a run builds ~24 LANCZOS crops and encodes an animated WEBP before a byte
+  comes back. On a NAS that is a second or three of *nothing*: no spinner, no progress, and a browser that
+  shows a download only once it starts. Every later tap is a file read, so this is a first-use-only problem —
+  which is exactly the kind that reads as "broken" and gets clicked three times. **Cheapest honest fix:** the
+  `…/zoom-clip/info` endpoint already exists and is cheap; have the menu (or the card, on open) fire it once
+  and turn the item into a button showing a `Loader` while the fetch is in flight, falling back to today's
+  plain link when the browser has no `fetch`-to-blob path. **Don't** pre-build clips at stack time to dodge
+  this — that would spend CPU on every run for an artefact most are never asked for, which is exactly why it
+  was built lazily.
+
+- **NEW IDEA (Builder 2026-08-30, the deliberate limitation pinned in the v0.303.0 zoom-clip tests) — a target
+  sitting in the corner of the frame can't be centred in its own zoom clip.** *(Pillar: enjoy + share —
+  PRIORITY 3; size S; pure, engine-only, fully testable.)* `crop_box_for_scale` slides the crop back inside
+  the picture rather than letting it hang off the edge, because a black margin in a share clip looks broken.
+  The consequence, measured in `test_an_object_near_the_edge_keeps_the_frame_full_of_picture`: an object at
+  0.96 W ends the move at 0.93 W — the camera pushes in but never actually arrives on it. **Shape:** let the
+  *zoom* adapt instead of the position — solve for the largest zoom at which the focus point can still be the
+  crop's true centre (bounded below by, say, 1.3× so it stays a move, and above by today's 1.8×), so a
+  corner object gets a gentler push-in that genuinely lands on it, while a centred one is unchanged. It stays
+  one pure function of `(width, height, focus_xy)` with no new I/O, and the existing tests already pin both
+  ends of the behaviour it would change. **Worth checking first** whether it matters in practice: the crop
+  centre is the *plate-solved catalogue position*, which for the owner's Seestar framing is usually near the
+  middle, so this may be a nicety for mosaics and mis-framed nights only.
+
 - **⚠️ PROCESS NOTE (Builder 2026-08-30, measured on a *pristine* checkout after it cost a chunk of a run) —
   running a hand-picked list of test files that **interleaves `tests/webapp/…` and `tests/…` paths** can make
   pytest lose `tests/webapp/conftest.py`, and every later webapp test errors with `fixture 'client' not
@@ -9342,21 +9382,53 @@ to **Shipped**.)_
   representative sub), which would key here on the sub *and* the recipe look, so a re-edit invalidates it.
   Don't add a cache on speculation; a stale "before" is worse than a slow one.
 
-- **NEW IDEA (Builder 2026-08-29, the two follow-ons "Tonight, live" v0.298.0 deliberately left out) — keep the
-  screen awake on the live page, and cover a night that shot more than one target.** *(Pillar: understand +
-  enjoy — PRIORITY 3; size S each; both frontend-only, no new data.)*
-  (a) **Keep-awake.** `/live` is the second page in the app designed to be *left open* — outdoors, on a phone,
-  for hours — and it is the one where the screen sleeping actually costs something (you walk over to check and
-  it's black). v0.296.6 already shipped a wake-lock for the slideshow; **grep for it and reuse that exact
-  helper**, don't write a second one, and hold the lock only while the session reads `active` so a finished
-  night releases it. Same fail-soft posture: a browser without the Wake Lock API simply doesn't get it.
-  (b) **A night that shot two targets shows only one.** The page opens on whichever target's frames arrived
-  most recently, which is right — but a Seestar that re-points mid-night (or a mosaic split across panels)
-  leaves the earlier target invisible unless the reader knows to use the picker. Cheapest honest fix: one line
-  under the card naming the *other* targets that also got subs inside the same window ("NGC 7000 got 40 subs
-  earlier tonight"), each a link that sets `?target=`. `last_activity_utc` on the target list already carries
-  everything needed, so this stays a zero-extra-request change. **Don't** turn it into a full multi-target
-  dashboard — the page's value is that it answers two questions about *one* night at a glance.
+- **✅ SHIPPED — BOTH HALVES (Builder, v0.304.0, branch `claude/compassionate-galileo-fj2p70`) — ~~keep the
+  screen awake on the live page, and cover a night that shot more than one target.~~** Shipped exactly as
+  filed, including the "reuse that exact helper, don't write a second one" instruction.
+
+  **(a) Keep-awake.** `useKeepAwake` was lifted out of `routes/ShowAndTell.tsx` into
+  `frontend/src/useKeepAwake.ts` **verbatim** — same guards, same `visibilitychange` re-request, same
+  nothing-persisted posture — and both pages now import the one definition. `/live` holds it on
+  `!!live.data?.active`, so a finished night lets the phone sleep rather than draining a battery on a page
+  with nothing left to watch.
+
+  **(b) The other targets from the same night.** One dimmed line under the card, rendered only when it is
+  true: `alsoActiveTonight(targets, currentSafe)` (pure, in `live/liveSession.ts`) takes the targets whose
+  `last_activity_utc` sits within `SAME_NIGHT_HOURS = 14` **either side** of the one on screen, newest first,
+  capped at 3 — and each is a link that sets `?target=`, i.e. the picker's own action. Zero extra requests: it
+  reads the target list the page already loaded. Deliberately *not* the multi-target dashboard the idea warned
+  against.
+
+  **One honest deviation from the filed copy:** the line says *"Also shot around the same time: NGC 7000"*
+  rather than *"NGC 7000 got 40 subs earlier tonight"*. The sub count for **that window** isn't on the target
+  list (`n_frames` is the target's all-time total), so quoting one would have meant either a second request
+  per neighbour or a number that is quietly wrong. The window is symmetric for the same reason it is honest:
+  pinning `?target=` to an earlier target must still find the ones shot *after* it.
+
+  **Tests (+9):** 5 pure (`alsoActiveTonight` ordering, the exclusions — last week, the current target, a null
+  and an unparseable stamp — the window boundary just inside and just outside, the cap, and the four
+  nothing-to-say cases) and 4 on the page (the lock taken while capturing and released on unmount, *not* taken
+  on a finished night, the neighbour named and last week's session not, and no line at all for a
+  single-target night). `ShowAndTell`'s existing wake-lock tests were left untouched and still pass against
+  the extracted helper, which is the point of extracting rather than copying.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-08-29, the two follow-ons "Tonight, live" v0.298.0 deliberately left out) — keep the
+    screen awake on the live page, and cover a night that shot more than one target.** *(Pillar: understand +
+    enjoy — PRIORITY 3; size S each; both frontend-only, no new data.)*
+    (a) **Keep-awake.** `/live` is the second page in the app designed to be *left open* — outdoors, on a phone,
+    for hours — and it is the one where the screen sleeping actually costs something (you walk over to check and
+    it's black). v0.296.6 already shipped a wake-lock for the slideshow; **grep for it and reuse that exact
+    helper**, don't write a second one, and hold the lock only while the session reads `active` so a finished
+    night releases it. Same fail-soft posture: a browser without the Wake Lock API simply doesn't get it.
+    (b) **A night that shot two targets shows only one.** The page opens on whichever target's frames arrived
+    most recently, which is right — but a Seestar that re-points mid-night (or a mosaic split across panels)
+    leaves the earlier target invisible unless the reader knows to use the picker. Cheapest honest fix: one line
+    under the card naming the *other* targets that also got subs inside the same window ("NGC 7000 got 40 subs
+    earlier tonight"), each a link that sets `?target=`. `last_activity_utc` on the target list already carries
+    everything needed, so this stays a zero-extra-request change. **Don't** turn it into a full multi-target
+    dashboard — the page's value is that it answers two questions about *one* night at a glance.
 
 - **✅ SHIPPED (Builder, v0.297.1, branch `claude/compassionate-galileo-1i6x9x`) — ~~a target that needs 4+
   good nights gets no finish date at all, because the planner is only ever asked for three windows.~~**
@@ -18068,6 +18140,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   screen — even though the master holds the full canvas and the "Download full-res PNG" button beside it
   serves it. *(Note for whoever picks this up: an old Builder investigation elsewhere in this file describes
   the share JPEG as having a "2048px cap". That is stale — it is the 1024 px preview, re-encoded.)*
+  **Builder 2026-08-30 — one more consumer, and the first that *measurably* pays for the cap.** The **Zoom
+  clip** (v0.303.0) is built from the same stored preview, and because it must not upscale, the cap sets its
+  resolution directly: `zoom_clip_size` yields **569 px** from a 1024-wide preview (1024 ÷ the 1.8× zoom)
+  where the same clip off a native-res source would be the full 640. So fixing this makes the shared *clip*
+  visibly sharper too, not just the shared still — worth weighing against the **L** sizing below. Nothing
+  about the clip needs changing when it lands: it takes whatever pixels it is handed.
   **Why it is newly cheap:** the parity problem that made this awkward is gone. As of v0.287.4
   `render_preview_png_full_res` takes the run's saved `stretch`/`black`, so a share render can reproduce the
   *exact* look of the stored preview at any size — the share and the thumbnail can't drift.
