@@ -9487,7 +9487,8 @@ to **Shipped**.)_
     bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
     make it the default: the saved orientation is what the owner chose.
 
-- **NEW IDEA (Builder 2026-08-30, the follow-on v0.308.0 deliberately left open) — put the North-up *view* on the
+- **🚧 IN PROGRESS (Builder 2026-08-30, branch `claude/compassionate-galileo-x2nj2o`) — NEW IDEA (Builder
+  2026-08-30, the follow-on v0.308.0 deliberately left open) — put the North-up *view* on the
   other two surfaces that show a picture big.** *(Pillar: enjoy + trust — PRIORITY 3; size XS — two lines each;
   read-only, off by default.)* v0.308.0 built the whole mechanism: the `north_up_deg` field on `…/annotations`,
   the shared `components/NorthUpViewToggle.tsx` (toggle + the two `localStorage` accessors), and the pattern of
@@ -9500,7 +9501,8 @@ to **Shipped**.)_
   anywhere: the saved orientation is what the owner chose, and the preference is shared across surfaces already
   (one `localStorage` key), so turning it on in the Gallery will correctly turn it on the Target page too.
 
-- **QA LEAD (Builder 2026-08-30, generalised from the v0.308.1 copy fix) — sweep every download control's *copy*
+- **🚧 IN PROGRESS (Builder 2026-08-30, branch `claude/compassionate-galileo-x2nj2o`) — QA LEAD (Builder
+  2026-08-30, generalised from the v0.308.1 copy fix) — sweep every download control's *copy*
   against what its endpoint actually serves.** *(Pillar: trust — PRIORITY 3; size S per surface, and the sweep
   itself is one run.)* "Download all my pictures" promised **"the full-size pictures themselves"** and handed over
   1024 px previews; nothing failed, no test caught it, and it would have been discovered by a user at the moment
