@@ -305,6 +305,80 @@ describe("LatestPictureCard — North up as a view", () => {
   });
 });
 
+// "See what stacking removed" has existed on the History run card since
+// v0.299.0, where it tints a 180 px thumbnail — at which size a satellite trail
+// is a couple of cyan pixels. These pin it on the surface where a beginner
+// actually studies the picture: offered only where there is a map, off until
+// asked for, captioned, and in register with the North-up *view*.
+describe("LatestPictureCard — what stacking removed, full screen", () => {
+  afterEach(() => window.localStorage.clear());
+
+  const openBig = async () => {
+    fireEvent.click((await screen.findByAltText("Latest stacked picture of M42")).parentElement!);
+    return screen.findByRole("dialog");
+  };
+
+  it("offers nothing on a run that recorded no map", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations());
+    renderCard(mkRun());
+    await openBig();
+    expect(screen.queryByTestId("show-removed-view")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("lightbox-overlay")).not.toBeInTheDocument();
+  });
+
+  it("tints the picture on request, and names the marks with the run's own number", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations());
+    const info = vi.spyOn(client.api, "stackRunInfo")
+      .mockResolvedValue({ rejection: { mode: "sigma-clip", fraction: 0.004 } } as never);
+    renderCard(mkRun({ has_rejection_map: true }));
+    await openBig();
+    const toggle = await screen.findByTestId("show-removed-view");
+    // Off by default — the picture is the point; the tint answers a question
+    // the viewer has to ask. Nothing is fetched until they do.
+    expect(screen.queryByTestId("lightbox-overlay")).not.toBeInTheDocument();
+    expect(info).not.toHaveBeenCalled();
+
+    fireEvent.click(toggle);
+
+    expect(await screen.findByTestId("lightbox-overlay")).toHaveAttribute(
+      "src", "/api/targets/M_42/stack-runs/7/rejection-overlay");
+    expect(await screen.findByText(/about 0\.4% of your samples/)).toBeInTheDocument();
+  });
+
+  it("turns the tint with the picture, so the two can't slide apart", async () => {
+    vi.spyOn(client.api, "stackAnnotations")
+      .mockResolvedValue(annotations({ north_up_deg: 118.5 }));
+    vi.spyOn(client.api, "stackRunInfo")
+      .mockResolvedValue({ rejection: { mode: "sigma-clip", fraction: 0.004 } } as never);
+    renderCard(mkRun({ has_rejection_map: true }));
+    await openBig();
+    fireEvent.click(await screen.findByTestId("show-removed-view"));
+    expect(await screen.findByTestId("lightbox-overlay")).toHaveAttribute(
+      "src", "/api/targets/M_42/stack-runs/7/rejection-overlay");
+
+    fireEvent.click(await screen.findByTestId("north-up-view"));
+
+    // The picture takes the on-the-fly turn — and so does the tint, through the
+    // same remainder the server computes for the bytes underneath it.
+    await waitFor(() => expect(screen.getByTestId("lightbox-overlay")).toHaveAttribute(
+      "src", "/api/targets/M_42/stack-runs/7/rejection-overlay?north_up=true"));
+    expect(screen.getByRole("dialog").querySelector("img")).toHaveAttribute(
+      "src", "/api/targets/M_42/stack-runs/7/preview?north_up=true");
+  });
+
+  it("still says what the marks are when the run's fraction can't be read", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations());
+    vi.spyOn(client.api, "stackRunInfo").mockRejectedValue(new Error("nope"));
+    renderCard(mkRun({ has_rejection_map: true }));
+    await openBig();
+    fireEvent.click(await screen.findByTestId("show-removed-view"));
+    // The lead sentence never depends on the number — an uncaptioned cyan
+    // speckle reads as damage.
+    expect(await screen.findByText(/cyan marks are what stacking removed/))
+      .toBeInTheDocument();
+  });
+});
+
 describe("LatestPictureCard — a saved edit that was never exported", () => {
   it("says nothing on an ordinary run", () => {
     renderCard(mkRun());

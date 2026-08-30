@@ -174,6 +174,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > **The lead is now closed:** the rest of its candidate list — `stackhealth`, `_fwhm_quality_drift`,
 > `best_frame` — was swept and came back clean, recorded on the entry so nobody re-treads it.
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-6jgh4j` — run in progress.**
+> Claimed **by site**: "put the overlay where people actually *look* at a picture", slice **(a)** (under
+> "Features that serve real workflows") — `components/ImageLightbox.tsx` (a new `overlaySrc`/`overlayNote`),
+> `components/target/LatestPictureCard.tsx` and `routes/Gallery.tsx` (the toggle + the gate), plus
+> `GalleryItem.has_rejection_map` in `webapp/routers/gallery.py`. The bug queue was checked first and is still
+> dry: every entry under "Bugs (fix these first)" is ✅ shipped, a ⚪ audit non-finding, or explicitly stood
+> down pending owner data.
+
 _(nothing else claimed — claim an item here with your branch name)_
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-xkjuvl` — run finished, all claims released.**
@@ -19015,14 +19023,57 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
   *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
-  (a) **The Gallery lightbox and the Target hero (S, frontend-only).** v0.299.0 put the toggle on the History
-  run card, because History is where a run gets inspected — but the full-screen lightbox is where a beginner
-  actually studies their picture, and the tint is far more legible large. Everything needed is already built:
-  `AnnotatedImage` takes an `overlaySrc`, `api.stackRejectionOverlayUrl` exists, and `rejection.has_map` on the
-  run-info says whether to offer it. The only real work is that the lightbox shows a *different* rendition in
-  some states (the share JPEG, a north-up render), and the overlay is sized to the **stored preview** — so it
-  must stand down there exactly as the History card does when Adjust is open, rather than laying a tint on a
-  picture it wasn't measured for. Ship the gate before the feature.
+  (a) ~~**The Gallery lightbox and the Target hero.**~~ — **✅ SHIPPED v0.312.0** (Builder 2026-08-30, branch
+  `claude/compassionate-galileo-6jgh4j`), on both surfaces, with the entry's "ship the gate before the feature"
+  taken seriously and then found to be **unnecessary** — which is the design call worth carrying forward.
+
+  **The stand-down the entry demanded doesn't apply here, and checking that first is what kept this small.**
+  The History card has to withdraw the tint because *its* picture can become something else: opening **Adjust**
+  swaps in a live render of the linear master at full canvas, which the tint was never measured against. Neither
+  of these two surfaces has such a state — both show the **stored preview bytes** and nothing else, and the one
+  variation they do offer (the v0.308.0 North-up *view*) is a turn the overlay endpoint already composes, since
+  v0.308.2, from the same `preview_north_up_remainder_deg` the picture itself goes through. So the tint follows
+  the picture instead of standing aside, and a test on each surface pins that both URLs pick up `north_up=true`
+  together. The share JPEG and the full-res PNG the entry worried about are **downloads**, not what the viewer
+  draws.
+
+  **The one real piece of work was the geometry, and it is a CSS trap worth recording.** `ImageLightbox` fits its
+  picture with `max-width/max-height: 100%` inside a flex-centred surface and then applies the zoom/pan transform
+  to the `<img>` itself. Wrapping the picture and the overlay in a shared positioned box — the obvious way to
+  make two images move together — makes the picture's `max-height: 100%` resolve against an **auto-height**
+  ancestor, i.e. indefinite, i.e. no cap, and a tall picture then overflows the viewer. The overlay is therefore
+  a **sibling**, absolutely positioned with `inset: 0` + `margin: auto` (which centres a replaced element on
+  exactly the box `align-items/justify-content: center` puts the picture in), sharing one `imgFit` object and one
+  `transform` string with the picture so the two cannot be fitted or moved differently. A test asserts the fitted
+  style *and* the transform are byte-identical on both elements, **after a zoom** — the case a separately-computed
+  transform would silently get wrong.
+
+  **The gate, and what it cost.** The Target hero needed no new request: `StackRun.has_rejection_map` is already
+  on the run it draws. The Gallery drew its cards from `/api/gallery`, which didn't carry the fact — so
+  `GalleryItem` gained `has_rejection_map`, computed by the *same* one-line stat beside the
+  `has_fits`/`has_preview`/`has_tiff` sweep the item already does (additive, `False` default), rather than a
+  per-picture run-info fetch on every lightbox open. That matters because `record_rejection_map` is **off by
+  default**: on an ordinary library the control is simply absent, and opening a picture costs nothing extra. The
+  run-info fetch that supplies the caption's measured fraction happens only once the tint is actually switched
+  on, and the caption's lead sentence never depends on it — an uncaptioned cyan speckle reads as damage, so it is
+  captioned even when the number can't be read.
+
+  `removedOverlayCaption` moved out of `routes/History.tsx` into a shared `frontend/src/removed.ts` (the
+  `fullres.ts` pattern: one place owns the wording so three surfaces can't drift into three claims about one
+  picture), re-exported from History so its existing readers are untouched. The toggle itself is a shared
+  `ShowRemovedToggle`, so the two lightboxes offer the identical control.
+
+  **Upgrade-safe (§9):** one additive, defaulted response field; no config, schema, on-disk or default change;
+  an older frontend ignores the field and an older backend omitting it reads as "no overlay for this one", which
+  is the right answer for every run that never recorded a map.
+
+  **Tests (+12):** 5 in `ImageLightbox.test.tsx` (no overlay unless given; decorative — `aria-hidden`, empty
+  `alt`, `pointer-events: none` so it can't eat a drag; identical fit *and* transform at 100 % and after a zoom;
+  the caption shown, and not shown when there are no marks), 4 in `LatestPictureCard.test.tsx` and 2 in
+  `Gallery.test.tsx` (nothing offered and nothing fetched on a run with no map; the tint and the measured caption
+  on request; the tint turning with the picture; and — hero — the caption still appearing when the run-info
+  fetch fails), and 1 in `tests/webapp/test_rejection_overlay.py` asserting the Gallery listing's answer both
+  ways *and* that it agrees with the run listing's on the same run.
   (b) **"N spots", instead of a percentage (S–M, engine + one response field).** The caption today reuses the
   run's `REJFRAC` — *"that was about 0.4% of your samples"* — because that number already exists. What the
   Scout's entry actually asked for is more human: *"stacking removed 14 streaks and hot spots"*. That needs a

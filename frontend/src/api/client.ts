@@ -1336,6 +1336,12 @@ export interface GalleryItem {
   // thumbnail isn't the user's version. Same server-side decision as `StackRun`;
   // absent on an older backend, which reads as "no unfinished edit".
   unexported_edit?: boolean;
+  // True when this run recorded the "what stacking removed" map beside its FITS,
+  // so the full-screen viewer can offer the tint. Same server-side stat as
+  // `StackRun.has_rejection_map`; absent on an older backend, which reads as
+  // "no overlay for this one" — the correct answer for every run that didn't
+  // record one.
+  has_rejection_map?: boolean;
 }
 
 // A finished Moon/Sun still, as the Gallery lists it alongside stack runs. It is
