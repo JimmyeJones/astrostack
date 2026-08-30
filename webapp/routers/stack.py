@@ -1547,10 +1547,22 @@ async def render_stretch_suggestion(
     the History ``…/render`` surface (measures the identical pixels that endpoint
     stretches). Returns ``{stretch, black}`` null when there's no useful
     suggestion (too little dynamic range) or the run is a display-space export /
-    in-place Auto edit (its sliders are a no-op — nothing to anchor)."""
+    in-place Auto edit (its sliders are a no-op — nothing to anchor).
+
+    It also answers *what saving here would cost*: ``processed_preview`` is true
+    when the stored picture is an in-place "Process target" Auto edit, whose
+    tone-mapped bytes a plain slider save replaces with a stretch of the linear
+    FITS, and ``can_keep_processed`` is true when that run's recipe is still on
+    disk, so the save can re-bake the processed picture instead (see
+    ``save_stack_preview``'s ``keep_processed``). Both default false, which is
+    every ordinary run.
+    """
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        # One cheap meta read while the DB is open: is the recipe that made this
+        # picture still there to re-bake?
+        recipe_json = _saved_recipe_json(proj, run) if run is not None else None
     finally:
         proj.close()
         lib.close()
@@ -1576,23 +1588,143 @@ async def render_stretch_suggestion(
         # only surface it when there's a real, more-than-trivial correction.
         angle = stack_north_up_deg(fits_path)
         north_up_deg = angle if (angle is not None and abs(angle) >= NORTH_UP_MIN_DEG) else None
+        # Only a run whose *FITS is still linear* loses anything to a slider save:
+        # an editor export's own preview is a plain render of its display-space
+        # FITS, so re-rendering it reproduces the same picture.
+        processed = bool(preview_ds and not _run_fits_is_display_space(run))
+        warn = {"processed_preview": processed,
+                "can_keep_processed": processed and bool(recipe_json)}
         if preview_ds:
-            return {"stretch": None, "black": None, "north_up_deg": north_up_deg}
+            return {"stretch": None, "black": None, "north_up_deg": north_up_deg, **warn}
         rgb, display_space = load_stack_rgb(fits_path, max_width=1024)
         if display_space:
-            return {"stretch": None, "black": None, "north_up_deg": north_up_deg}
+            return {"stretch": None, "black": None, "north_up_deg": north_up_deg, **warn}
         # Anchor the asinh sky target to the *export* grey (the value the History/
         # Gallery thumbnail the user just clicked is rendered at), not the editor's
         # brighter default, so opening Adjust starts on that thumbnail's look
         # instead of jumping ~2× brighter.
         sug = suggest_asinh_stretch(rgb, target_bg=EXPORT_AUTOSTRETCH_TARGET_BG)
         if sug is None:
-            return {"stretch": None, "black": None, "north_up_deg": north_up_deg}
+            return {"stretch": None, "black": None, "north_up_deg": north_up_deg, **warn}
         return {"stretch": sug[0], "black": sug[1],
                 "target_bg": EXPORT_AUTOSTRETCH_TARGET_BG,
-                "north_up_deg": north_up_deg}
+                "north_up_deg": north_up_deg, **warn}
 
     return await run_in_threadpool(work)
+
+
+def _run_fits_is_display_space(run: Any) -> bool:
+    """True when the run's own master FITS is already tone-mapped (an editor
+    export). Best-effort: an unreadable/absent FITS answers False, which is the
+    linear assumption every caller here already makes."""
+    from seestack.stack.output import fits_is_display_space
+
+    if not run.fits_path or not Path(run.fits_path).exists():
+        return False
+    try:
+        return bool(fits_is_display_space(run.fits_path))
+    except Exception:  # noqa: BLE001 — a broken header just means "assume linear"
+        return False
+
+
+def _saved_recipe_json(proj: Any, run: Any) -> str | None:
+    """This run's stored editor recipe, if it's there and parses — or ``None``.
+
+    Deliberately **drift-blind**, unlike :func:`_auto_edit_recipe_json`: this
+    answers "is there a recipe we could bake into a preview", not "does the
+    stored preview show this recipe". Re-baking a drifted run *ends* the drift
+    (the render and the look stamped beside it come from the same recipe, which
+    is what the stamp means), so the drift is a reason to re-render, not to
+    decline.
+    """
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    raw = proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}")
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("ops"), list):
+        return None
+    return raw
+
+
+async def _save_processed_preview(
+    request: Request, safe: str, run: Any, *, north_up: bool,
+) -> dict[str, Any]:
+    """The "keep my processed picture" half of ``save_stack_preview``.
+
+    Re-bakes the run's stored **recipe** into its preview PNG — optionally rotated
+    North-up — instead of rendering a plain stretch of the linear FITS. That makes
+    the Adjust panel's one genuinely wanted control on an already-finished picture
+    (rotation) stop costing the user the picture: before this, ticking "North up"
+    and saving replaced their processed image — on the Target hero, in the Gallery,
+    on the Library tile and possibly as the target's cover — with a flat stretch,
+    silently, and only someone who knew to re-export from the editor could get it
+    back.
+
+    Writes exactly what ``pipeline._auto_edit_process_run`` writes for these runs
+    (the recipe render, its crop, the baked-look stamp, the display-space marker),
+    plus the rotation this save applied — so the picture, the marker and the stamp
+    can't disagree afterwards. The stretch columns are cleared, because these bytes
+    are not an asinh render and nothing should match against one.
+    """
+    from webapp.pipeline import _rendered_preview_crop
+    from webapp.routers.editor import (
+        AUTO_EDIT_BAKED_LOOK_PREFIX,
+        render_run_display_array,
+    )
+    from seestack.edit.recipe import recipe_from_json
+    from seestack.render.thumbnail import applied_north_up_deg, orient_preview_north_up
+    from seestack.stack.output import _write_preview_png
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        recipe_json = _saved_recipe_json(proj, run)
+        project_dir = proj.project_dir
+    finally:
+        proj.close()
+        lib.close()
+    if not recipe_json:
+        raise HTTPException(
+            status_code=400,
+            detail="This run has no saved edit to re-apply — save a stretch instead",
+        )
+    recipe = recipe_from_json(recipe_json)
+    preview_path = Path(run.preview_path)
+
+    def work() -> tuple[str | None, float]:
+        out = render_run_display_array(project_dir, run, recipe)
+        # Measured on the *un-rotated* render, the way every consumer composes it
+        # (crop the canvas-grid quantity first, then turn it).
+        crop_json = _rendered_preview_crop(project_dir, run.id, recipe, out.shape[:2])
+        _write_preview_png(preview_path, out, already_display=True)
+        if not north_up:
+            return crop_json, 0.0
+        # Turn the bytes we just wrote rather than the array, so the rotation goes
+        # through the one helper the share/download path uses — and record the
+        # angle from the same rules, so the two can never disagree.
+        rotated = orient_preview_north_up(preview_path.read_bytes(), run.fits_path)
+        preview_path.write_bytes(rotated)
+        return crop_json, applied_north_up_deg(run.fits_path)
+
+    crop_json, north_up_deg = await run_in_threadpool(work)
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        proj.set_stack_preview_stretch(run.id, None, None)
+        proj.set_stack_preview_north_up(run.id, north_up_deg)
+        proj.set_stack_preview_crop(run.id, crop_json)
+        proj.set_run_preview_display_space(run.id)
+        proj.set_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run.id}",
+                      json.dumps(_recipe_look(recipe_json)))
+    finally:
+        proj.close()
+        lib.close()
+    return {"ok": True, "kept_processed": True, "stretch": None, "black": None,
+            "north_up": north_up, "north_up_deg": north_up_deg}
 
 
 @router.post("/api/targets/{safe}/stack-runs/{run_id}/preview")
@@ -1612,6 +1744,13 @@ async def save_stack_preview(
     map has to follow these pixels: without it the map placed the *un-rotated*
     canvas geometry (and an un-rotated coverage footprint) against a rotated
     picture, tilting the tile and putting its transparent gaps in the wrong place.
+
+    ``keep_processed`` (default false — every existing client and every ordinary
+    run is byte-for-byte unchanged) takes the other path for a run whose picture
+    is an in-place "Process target" Auto edit: the preview is re-baked from that
+    run's own stored recipe instead of from the sliders, so ticking "North up" on
+    a finished picture rotates it rather than replacing it with a plain stretch.
+    See :func:`_save_processed_preview`.
     """
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -1626,13 +1765,17 @@ async def save_stack_preview(
     if not run.preview_path:
         raise HTTPException(status_code=400, detail="Run has no preview path to overwrite")
 
+    north_up_req = bool(body.get("north_up", False))
+    if bool(body.get("keep_processed", False)):
+        return await _save_processed_preview(request, safe, run, north_up=north_up_req)
+
     try:
         stretch = _clamp(float(body.get("stretch", _STRETCH_DEFAULT)), _STRETCH_MIN, _STRETCH_MAX)
         black = _clamp(float(body.get("black", _BLACK_DEFAULT)), _BLACK_MIN, _BLACK_MAX)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400,
                             detail=f"stretch/black must be numbers: {exc}") from exc
-    north_up = bool(body.get("north_up", False))
+    north_up = north_up_req
 
     from seestack.render.thumbnail import applied_north_up_deg, render_stack_png
     from seestack.stack.output import fits_is_display_space
