@@ -9558,21 +9558,85 @@ to **Shipped**.)_
   fine in a screenshot and is wrong in use. The server half is already built (`?north_up=true` on the preview),
   so this is a frontend decision plus two fetches.
 
-- **🚧 IN PROGRESS (Builder 2026-08-30, branch `claude/compassionate-galileo-x2nj2o`) — QA LEAD (Builder
-  2026-08-30, generalised from the v0.308.1 copy fix) — sweep every download control's *copy*
-  against what its endpoint actually serves.** *(Pillar: trust — PRIORITY 3; size S per surface, and the sweep
-  itself is one run.)* "Download all my pictures" promised **"the full-size pictures themselves"** and handed over
-  1024 px previews; nothing failed, no test caught it, and it would have been discovered by a user at the moment
-  it cost them most (trying to print from their backup). That is a **bug class**, not one slip: a download's copy
-  is written once, next to the button, and then the endpoint underneath it evolves — the picture it serves gets
-  capped, re-rendered, cropped, tone-mapped or renamed — with nothing tying the two together. **The sweep:** for
-  every control that hands over a file (the pictures zip, the montage, the wall, the keepsake, the print export,
-  the wallpaper, the zoom clip, the share JPEG, the full-res PNG, the imaging log, each artifact kind on
-  History's menu), read the sentence beside it and then read what the handler actually writes, and reconcile the
-  two — **fixing the copy where the file is right, and the file where the copy is right.** The properties that
-  keep drifting are **size** (capped preview vs native), **colour space** (linear TIFF vs display-space), and
-  **geometry** (cropped/rotated vs the stored canvas). Where a claim is worth keeping true, pin it with a test
-  that reads the served bytes rather than the string — `tests/webapp/test_north_up.py` is the shape.
+- **🟡 SWEPT ONCE, ONE UNTRUTH FIXED (Builder, v0.309.1, branch `claude/compassionate-galileo-x2nj2o`); the
+  colour-space axis is still open below — QA LEAD (Builder 2026-08-30, generalised from the v0.308.1 copy fix)
+  — sweep every download control's *copy* against what its endpoint actually serves.** *(Pillar: trust.)*
+
+  **Found and fixed: "Full-res PNG (native size)" is not native size on a big mosaic — and History printed the
+  exact dimensions the file misses.** `download_full_res_png` renders through
+  `_FULL_RES_PNG_MAX_LONG_EDGE = 8000`, a deliberate ceiling that bounds the render's memory and the response
+  on a RAM-capped NAS. Four surfaces described that file and none of them knew: the Target page's and the
+  Dashboard strip's menu items said *"(native size)"*, the shared `ImageLightbox` menu said it on **three more**
+  surfaces (Gallery, My best pictures, History's viewer), and History's artifact menu went furthest —
+  *"Same look, full size (12000×9000 px)"*, quoting a number the download demonstrably does not have. Exactly
+  the size axis this entry named, on exactly the picture where it matters: the owner's union mosaics, and
+  discovered at the worst moment (trying to print from a backup). This is also the *destination* the v0.308.1
+  fix redirected people to — the wall card now says "to print one, open it and choose Full-res PNG" — so the
+  two lies were chained.
+
+  **The fix is one sentence in one place.** New `frontend/src/fullres.ts` owns the wording
+  (`fullResPngCapped` / `fullResPngLabel` / `fullResPngHint`), so five surfaces cannot drift into five claims
+  about one file. Wording is **unchanged for every canvas the render really does serve whole** — the point was
+  never to hedge everywhere, only to stop claiming native size where it is false; a capped picture gets
+  *"Full-res PNG (up to 8000 px)"* and, where there is room for a hint, the canvas it was capped **from** plus
+  the pointer to the FITS/TIFF that do hold those pixels. `ImageLightbox` takes an optional `fullResCanvas`
+  (a surface that doesn't know the dimensions keeps the common wording, which is right under the cap), and
+  `/api/stats`'s `recent_stacks` gained additive `canvas_w`/`canvas_h` so the Dashboard strip can answer too.
+
+  **Upgrade-safe (§9):** two additive response fields with `0` defaults that read as "unknown" (an older
+  frontend ignores them; an older backend omitting them gets the common wording). No config, schema, on-disk,
+  default or API-shape change; the endpoint's behaviour is untouched — only what we *say* about it.
+
+  **Tests (+11).** The claim is pinned to **bytes, not strings**, as the entry demanded:
+  `tests/webapp/test_full_res_png.py` renders a canvas past the *production* ceiling (not an injected one) and
+  asserts the served PNG is `!= native` and capped exactly at it, plus the boundary case *at* the cap coming
+  back whole. `tests/test_fullres_cap_mirror.py` is the drift guard — the hand-mirrored TS constant against
+  `_FULL_RES_PNG_MAX_LONG_EDGE`, same shape as `test_pace_constants_mirror.py`, because a stale copy would put
+  the untruth straight back with nothing failing. Then `fullres.test.ts` (5) over the wording itself, and one
+  test each on `ImageLightbox` and `History` that the capped picture stops claiming native size while an
+  ordinary one still quotes its exact dimensions.
+
+  **What the sweep found *not* to be wrong** — recorded so it isn't re-walked: the pictures zip (fixed in
+  v0.308.1, and its "open it and choose Full-res PNG" pointer is now true too); "Quick preview PNG (up to
+  1024px)" (`PREVIEW_MAX_WIDTH = 1024` is a *width* cap and History words it "up to 1024 px wide", which is
+  exact); the JPEG, nameplate, scale-bar and keepsake items, which describe what they bake rather than a size;
+  and the FITS, whose "Raw data — for re-processing, not sharing" is right.
+
+  **Still open, filed as its own item below:** the **colour-space** axis — the TIFF download carries *no*
+  description at all, and a plain stack's TIFF is written **linear**, so it opens looking black. The
+  **geometry** axis (cropped/rotated vs the stored canvas) was not swept.
+
+  Original spec, for the record:
+
+    *(Pillar: trust — PRIORITY 3; size S per surface, and the sweep
+    itself is one run.)* "Download all my pictures" promised **"the full-size pictures themselves"** and handed over
+    1024 px previews; nothing failed, no test caught it, and it would have been discovered by a user at the moment
+    it cost them most (trying to print from their backup). That is a **bug class**, not one slip: a download's copy
+    is written once, next to the button, and then the endpoint underneath it evolves — the picture it serves gets
+    capped, re-rendered, cropped, tone-mapped or renamed — with nothing tying the two together. **The sweep:** for
+    every control that hands over a file (the pictures zip, the montage, the wall, the keepsake, the print export,
+    the wallpaper, the zoom clip, the share JPEG, the full-res PNG, the imaging log, each artifact kind on
+    History's menu), read the sentence beside it and then read what the handler actually writes, and reconcile the
+    two — **fixing the copy where the file is right, and the file where the copy is right.** The properties that
+    keep drifting are **size** (capped preview vs native), **colour space** (linear TIFF vs display-space), and
+    **geometry** (cropped/rotated vs the stored canvas). Where a claim is worth keeping true, pin it with a test
+    that reads the served bytes rather than the string — `tests/webapp/test_north_up.py` is the shape.
+
+- **NEW IDEA (Builder 2026-08-30, the colour-space half the v0.309.1 sweep found and left) — the TIFF
+  download says nothing at all, and a plain stack's TIFF opens looking black.** *(Pillar: trust /
+  friendliness — PRIORITY 3; size S.)* Every other item on History's artifact menu carries a dimmed hint
+  saying what the file is; **TIFF is the one with none**, and it is the one that most needs it.
+  `_write_tiff` writes `mode="linear"` for an ordinary stack (`StackOptions.tiff_mode` defaults to
+  `"linear"`), so a beginner who picks the biggest-sounding file gets 16 bits of *linear* data that opens
+  near-black in any ordinary viewer and reads as a broken download. **But the honest sentence is not one
+  sentence:** the same menu item serves an *editor export*, whose TIFF is written `already_display=True`,
+  i.e. the finished display-space picture, which opens correctly. So the copy has to know which. **Do not
+  guess it in the frontend** — the server already owns this decision as `_run_display_space(run)`
+  (`webapp/routers/editor.py`), reading the FITS's `DISPLAY_SPACE_CARD`. The clean shape is one additive
+  boolean on the run listing (`display_space`) driving two hints: "16-bit, full depth — the finished picture"
+  vs "16-bit raw levels — opens dark until you stretch it; for another app, not for viewing". **Check first**
+  whether the card is reliable on an in-place-upgraded install's older runs; if it can't be answered, say the
+  weaker true thing rather than the wrong specific one.
 
 - **NEW IDEA (Builder 2026-08-30, the one thing v0.306.2 had to switch off) — the "see what stacking removed"
   tint can't be shown over a North-up view, and the same trick that turns the picture would turn the tint.**

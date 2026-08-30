@@ -242,6 +242,7 @@ export function LatestPictureCard({
         jpegHref={api.stackArtifactUrl(safe, run.id, "jpeg", turned)}
         fullResHref={run.has_fits
           ? api.stackFullResPngUrl(safe, run.id, turned) : undefined}
+        fullResCanvas={{ w: run.canvas_w, h: run.canvas_h }}
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
         toolbarExtra={canNorthUp ? (
           <NorthUpViewToggle

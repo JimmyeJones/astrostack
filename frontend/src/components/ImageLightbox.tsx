@@ -3,6 +3,7 @@ import { ActionIcon, Group, Menu, Modal, Text, Tooltip } from "@mantine/core";
 import {
   IconArrowsMaximize, IconDatabase, IconPhotoDown, IconZoomIn, IconZoomOut,
 } from "@tabler/icons-react";
+import { fullResPngLabel } from "../fullres";
 import { SharePictureButton } from "./SharePictureButton";
 import { ScanToPhoneButton } from "./ScanToPhoneButton";
 
@@ -51,7 +52,7 @@ export function computePinch(
  *    effect keyed on `src` couldn't reliably find the node.
  */
 export function ImageLightbox({
-  src, title, downloadHref, jpegHref, fullResHref, rawHref, rawLabel,
+  src, title, downloadHref, jpegHref, fullResHref, fullResCanvas, rawHref, rawLabel,
   shareFilename, shareTitle, shareText, toolbarExtra, onClose,
 }: {
   src: string | null;
@@ -67,12 +68,18 @@ export function ImageLightbox({
    * offering PNG or JPEG; when absent it stays a single PNG download. Also the
    * source for the OS "Share" control (small, share-friendly). */
   jpegHref?: string;
-  /** Optional full-resolution PNG of the same picture (native output size — the
-   * same look as `downloadHref`, just not capped at 1024px). When given, the
+  /** Optional full-resolution PNG of the same picture (the same look as
+   * `downloadHref`, just not capped at 1024px). When given, the
    * picture-download menu leads with it, so a beginner's main "download this
    * picture" action gives a genuinely full-resolution image, not the small
    * preview. */
   fullResHref?: string;
+  /** The run's canvas, so that item can say honestly what it hands over: the
+   * full-res render is itself capped on its long edge (see `fullres.ts`), so on
+   * a big union mosaic it is *not* native size. Optional — a surface that
+   * doesn't know the dimensions gets the common wording, which is right for
+   * every canvas under the cap. */
+  fullResCanvas?: { w?: number | null; h?: number | null };
   /** Optional secondary download for the raw scientific data (FITS), offered
    * next to the picture download so power users keep access to it. */
   rawHref?: string;
@@ -272,7 +279,9 @@ export function ImageLightbox({
               </Menu.Target>
               <Menu.Dropdown>
                 {fullResHref ? (
-                  <Menu.Item component="a" href={fullResHref}>Full-res PNG (native size)</Menu.Item>
+                  <Menu.Item component="a" href={fullResHref}>
+                    {fullResPngLabel(fullResCanvas?.w, fullResCanvas?.h)}
+                  </Menu.Item>
                 ) : null}
                 <Menu.Item component="a" href={downloadHref}>
                   {fullResHref ? "Quick preview PNG (up to 1024px)" : "PNG (best quality)"}

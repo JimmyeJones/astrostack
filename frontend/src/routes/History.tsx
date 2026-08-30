@@ -36,6 +36,7 @@ import { ScanToPhoneModal } from "../components/ScanToPhoneButton";
 import { SampleTourNote } from "../components/SampleTourNote";
 import { WallpaperMenuItems } from "../components/WallpaperMenu";
 import { sharePictureText } from "../share";
+import { fullResPngHint } from "../fullres";
 import { Sparkline } from "../components/Sparkline";
 import { DownloadMenuItem } from "../components/DownloadMenuItem";
 
@@ -1277,7 +1278,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                   >
                     Full-res PNG
                     <span style={MENU_HINT}>
-                      Same look, full size ({run.canvas_w}×{run.canvas_h} px)
+                      {fullResPngHint(run.canvas_w, run.canvas_h)}
                     </span>
                   </Menu.Item>
                 )}
@@ -1526,6 +1527,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         downloadHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "preview") : undefined}
         jpegHref={run.has_preview ? api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate) : undefined}
         fullResHref={run.has_fits ? api.stackFullResPngUrl(safe, run.id, applyNorthUp) : undefined}
+        fullResCanvas={{ w: run.canvas_w, h: run.canvas_h }}
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
         {...(run.has_preview
           ? (() => {

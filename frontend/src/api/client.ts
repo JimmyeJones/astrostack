@@ -760,6 +760,11 @@ export interface DashboardStats {
     has_preview: boolean;
     has_fits?: boolean;
     preview_url: string;
+    /** The run's own canvas, so the download menu can word the "Full-res PNG"
+     *  honestly (that render is capped — see `fullres.ts`). Optional: an older
+     *  backend omits them and the copy falls back to the common wording. */
+    canvas_w?: number;
+    canvas_h?: number;
   }[];
   disk: {
     total_gb?: number; used_gb?: number; free_gb?: number;
