@@ -15744,8 +15744,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   exactly as they are today — this is about making them available and consistent, not about decorating the
   picture for everyone.
 
-- **NEW IDEA (Builder 2026-08-27, the half deliberately left out of "Scale & compass" v0.284.0) — the marked
-  picture is a *download* only; the **share** sheet still sends the bare one.** *(Pillar: enjoy / share —
+- ~~**NEW IDEA (Builder 2026-08-27, the half deliberately left out of "Scale & compass" v0.284.0) — the marked
+  picture is a *download* only; the **share** sheet still sends the bare one.**~~ — **SHIPPED v0.316.0**
+  (Builder 2026-08-30, branch `claude/compassionate-galileo-p5irbc`), **taking this entry's own preferred
+  answer**: the **keepsake** share — the one meant for other people — gains the marks, rather than a fourth
+  share item; the plain share stays naked. Decided and shipped *together* with the sibling question the
+  object labels raised (under "Features that serve real workflows": *"the names reach the download, not yet
+  the share sheet"*), because two entries asking "which share gets the marks?" must not get two answers —
+  so the keepsake share now carries the scale bar, the compass **and** the names in one flag change, and the
+  "Framed keepsake" download is untouched for anyone who wants the bare frame.
+  **This entry's "look at it rather than reason about it" instruction was followed, and it earned its keep:**
+  the render showed the marks are drawn *after* the names, so a name under the bar or the rose was silently
+  buried. Fixed at the root with a new `skymarks.mark_zones` the label placement routes around — full
+  write-up, measurements and tests on the shipped half of the sibling entry.
+  *(Original spec kept below for provenance.)*
+  *(Pillar: enjoy / share —
   PRIORITY 3. Size: S.)* `?scale=true` composes with everything and is one query param, and
   `SharePictureButton` already takes a `url` plus a `filename` override — the keepsake share is exactly this
   shape (`keepsakeFilename`). But sharing is where the marks matter *most*: a picture posted with a scale bar
@@ -21182,10 +21195,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   North-up-saved run returns the plain picture unchanged (never a mis-plot); a cropped run's labels land inside
   the trim.
 
-- **NEW IDEA (Builder 2026-08-30, the two halves deliberately left out of the labelled share v0.314.0) — the
-  names reach the *download*, not yet the **share sheet**; and a North-up picture still refuses them.**
+- **🟡 SLICE (a) SHIPPED v0.316.0 — slice (b) still open. NEW IDEA (Builder 2026-08-30, the two halves
+  deliberately left out of the labelled share v0.315.0) — the names reach the *download*, not yet the
+  **share sheet**; and a North-up picture still refuses them.**
   *(Pillar: understand + share — PRIORITY 3.)* Two independent slices, in value order.
-  **(a) Put the names on the picture the share sheet sends (S).** v0.314.0's offer is a `download` link, and
+
+  **✅ (a) SHIPPED v0.316.0** (Builder 2026-08-30, branch `claude/compassionate-galileo-p5irbc`), **decided
+  together with the "Friendliness" sibling exactly as this entry demanded** — the two questions had one
+  answer, so both were answered at once and neither can now contradict the other.
+  **The answer: the *keepsake* share — the one meant for other people — carries the scale bar, the compass
+  and the object names.** Not a fourth share item (the menu is already what the owner calls busy), and the
+  plain "Share the picture" above it stays naked for anyone who wants the bare file. The **"Framed keepsake"
+  *download*** is deliberately untouched too, so the un-marked frame is still one click away — a test pins
+  both halves of that. The item now says what you get: *"Framed, with its scale, which way is North, and
+  what's in it."*
+  **Confirmed by rendering and looking, as the sibling entry insisted** (*"worth looking at rather than
+  reasoning about — that is exactly how the v0.282.1 tofu box was found"*), and the look found a real
+  problem the reasoning had missed: **the marks are drawn *after* the names, so a name under the bar or the
+  rose is silently buried.** Fixed at the root rather than by nudging constants — a new
+  `skymarks.mark_zones(width, height, marks)` declares the boxes `draw_sky_marks` will ink, derived from the
+  drawing's *own* constants so the two cannot drift, and `draw_object_labels` takes an `avoid=` sequence it
+  seeds its placement with. Measured on a scene with an object planted under each mark: 574 + 872 inked
+  pixels inside the two zones before, **0 after** (one chip routed to the other side of its dot, one dropped).
+  The dot still never moves — only the name is nudged.
+  **Upgrade-safe:** `avoid` defaults to `()` (byte-identical drawing for every existing caller, pinned);
+  `SharePictureButton.label` widened from `string` to `ReactNode` so a menu item can carry the same one-line
+  hint its neighbours do — `ariaLabel` already names it for assistive tech. No schema, config, API-shape or
+  server default change; every added flag is a clean server-side no-op on a run that can't supply it (no
+  solve, a rotated or reshaped preview, an empty field), so the share never *fails*, it just carries less.
+  **Tests (+8):** `test_skymarks.py` (+2 — every pixel the marks ink falls inside a declared zone, so the
+  boxes can't under-claim; a mark that isn't drawn claims none); `test_object_labels.py` (+3 — a chip routes
+  around a zone, a chip with nowhere left goes undrawn rather than buried, and `avoid=()` is byte-identical);
+  `tests/webapp/test_share_object_labels.py` (+2 — keepsake / keepsake+marks / keepsake+marks+names are three
+  distinct files, and nothing readable survives inside a mark zone); `Target.test.tsx` (+1 — the share sends
+  all three flags and the plain framed download is unchanged).
+
+  **(a) Put the names on the picture the share sheet sends (S).** v0.315.0's offer is a `download` link, and
   sharing is where the names matter most — a post is read by people who have no idea what a smudge is, while
   a download is usually for the owner's own archive. The server half is done and *composes*: the labels are
   drawn on the picture before any caption or matte, so `keepsake=true&label_objects=true` already works and is

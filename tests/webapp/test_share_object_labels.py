@@ -221,3 +221,52 @@ def test_a_cropped_preview_shifts_its_pins_into_the_trim(client, solved_library)
         assert lab.x == pytest.approx((before.x - 0.25) / 0.5, abs=1e-6)
         assert lab.y == pytest.approx((before.y - 0.25) / 0.5, abs=1e-6)
         assert 0.0 <= lab.x <= 1.0 and 0.0 <= lab.y <= 1.0
+
+
+def test_the_shared_keepsake_carries_the_marks_and_the_names_together(
+        client, solved_library):
+    """The share meant for other people. A scale bar, a compass and the names of
+    what's in the field are what make a picture read as a real astrophoto to
+    someone who wasn't there — and all three compose in one request, each a
+    clean no-op on a run that can't supply it."""
+    safe = _safe(client)
+    run_id, _fits_path, _preview = _make_orion_run(solved_library, safe)
+    plain_keepsake = _jpeg(client, safe, run_id, "?keepsake=true").content
+    everything = _jpeg(
+        client, safe, run_id,
+        "?keepsake=true&scale=true&label_objects=true").content
+    marks_only = _jpeg(client, safe, run_id, "?keepsake=true&scale=true").content
+    assert len({plain_keepsake, marks_only, everything}) == 3, (
+        "each overlay has to actually add something of its own")
+    assert _pixels(everything).shape == _pixels(marks_only).shape
+
+
+def test_a_name_is_never_left_buried_under_the_sky_marks(client, solved_library):
+    """The marks are drawn *after* the names, so a collision is silent: the bar
+    or the rose simply covers a name nobody can then read. The drawing is handed
+    the boxes the marks will occupy (`skymarks.mark_zones`) so it routes the chip
+    elsewhere — or drops it — instead."""
+    import numpy as np
+    from PIL import Image
+
+    from seestack.objectlabels import ObjectLabel, ObjectLabels, draw_object_labels
+    from seestack.skymarks import SkyDirections, SkyMarks, mark_zones
+
+    img = Image.new("RGB", (600, 450), (8, 8, 8))
+    marks = SkyMarks(bar_px=140.0, bar_label="15'",
+                     directions=SkyDirections(north_deg=104.0, east_deg=194.0))
+    zones = mark_zones(600, 450, marks)
+    # Two objects planted exactly under the two marks.
+    labels = ObjectLabels((
+        ObjectLabel("Under the bar", 0.10, 0.05, 0.95),
+        ObjectLabel("Under the rose", 0.90, 0.05, 0.96),
+    ))
+    out = draw_object_labels(img, labels, avoid=zones)
+    diff = np.abs(np.asarray(out, dtype=np.int16)
+                  - np.asarray(img, dtype=np.int16)).sum(axis=2)
+    ys, xs = np.nonzero(diff)
+    for x0, y0, x1, y1 in zones:
+        inside = (xs >= x0) & (xs <= x1) & (ys >= y0) & (ys <= y1)
+        # Only a dot may remain inside a zone — it never moves, by design — so
+        # what's left there must be far too small to be a name.
+        assert int(inside.sum()) < 200, (x0, y0, x1, y1, int(inside.sum()))

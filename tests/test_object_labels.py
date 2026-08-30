@@ -204,3 +204,55 @@ def test_the_canvas_is_not_resized():
     out = draw_object_labels(
         img, ObjectLabels((ObjectLabel("M42", 0.5, 0.5, 0.0),)))
     assert out.size == img.size
+
+
+# ---- sharing the picture with the sky marks too ------------------------------
+
+def test_a_label_routes_around_a_zone_it_is_told_to_avoid():
+    """The sky marks are drawn *after* the names, so a collision doesn't
+    mislead — it just buries a name nobody can then read. Told where the bar and
+    the rose will land, the placement moves the chip instead."""
+    img = _picture(600, 450)
+    # An object right where a compass rose would sit, top-right.
+    lab = ObjectLabels((ObjectLabel("NGC 1981", 0.86, 0.10, 0.9),))
+    rose = (500.0, 0.0, 600.0, 100.0)
+
+    free = np.abs(np.asarray(draw_object_labels(img, lab), dtype=np.int16)
+                  - np.asarray(img, dtype=np.int16)).sum(axis=2)
+    avoided = np.abs(
+        np.asarray(draw_object_labels(img, lab, avoid=(rose,)), dtype=np.int16)
+        - np.asarray(img, dtype=np.int16)).sum(axis=2)
+
+    assert free.any(), "the control has to draw something"
+    ys, xs = np.nonzero(avoided)
+    if ys.size:
+        # The chip moved out of the zone. The *dot* may still sit inside it —
+        # it never moves, by design; only the name is nudged.
+        chip = (xs >= rose[0]) & (xs <= rose[2]) & (ys >= rose[1]) & (ys <= rose[3])
+        assert int(chip.sum()) < int(
+            ((np.nonzero(free)[1] >= rose[0]) & (np.nonzero(free)[1] <= rose[2])
+             & (np.nonzero(free)[0] >= rose[1]) & (np.nonzero(free)[0] <= rose[3])
+             ).sum())
+
+
+def test_a_label_with_nowhere_left_to_go_is_dropped_not_buried():
+    """When the avoided zone swallows every spot a chip could take, the name is
+    given up. A name drawn under the scale bar is worse than no name."""
+    img = _picture(600, 450)
+    lab = ObjectLabels((ObjectLabel("NGC 1980", 0.12, 0.06, 0.99),))
+    assert np.abs(np.asarray(draw_object_labels(img, lab), dtype=np.int16)
+                  - np.asarray(img, dtype=np.int16)).sum() > 0
+    whole_top = (0.0, 0.0, 600.0, 200.0)
+    buried = np.abs(
+        np.asarray(draw_object_labels(img, lab, avoid=(whole_top,)), dtype=np.int16)
+        - np.asarray(img, dtype=np.int16)).sum()
+    assert buried == 0
+
+
+def test_avoiding_nothing_is_exactly_todays_drawing():
+    """The default is a no-op, so every caller that doesn't pass zones — and the
+    plain labelled share — is byte-for-byte unchanged."""
+    img = _picture()
+    lab = ObjectLabels((ObjectLabel("Orion Nebula", 0.5, 0.5, 0.0),))
+    assert np.array_equal(np.asarray(draw_object_labels(img, lab)),
+                          np.asarray(draw_object_labels(img, lab, avoid=())))

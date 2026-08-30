@@ -190,9 +190,15 @@ def _fits(rect, others, width, height, margin) -> bool:  # noqa: ANN001
     return True
 
 
-def draw_object_labels(img, labels: ObjectLabels):  # noqa: ANN001, ANN201
+def draw_object_labels(img, labels: ObjectLabels, *, avoid=()):  # noqa: ANN001, ANN201
     """Return a new RGB ``PIL.Image``: ``img`` with a dot and a name on each
     object that fits.
+
+    ``avoid`` is a sequence of ``(x0, y0, x1, y1)`` pixel rectangles no chip may
+    land in — the caller passes the boxes any *other* overlay on the same picture
+    will occupy (:func:`seestack.skymarks.mark_zones`). A name half-hidden under
+    the compass rose is a name the beginner can't read, and the marks are drawn
+    after these, so without it the collision is silent.
 
     The canvas size is unchanged — these are marks *on* the picture, like the
     sky marks, not a frame around it. When there is nothing to draw the image
@@ -220,7 +226,10 @@ def draw_object_labels(img, labels: ObjectLabels):  # noqa: ANN001, ANN201
     draw = ImageDraw.Draw(picture)
 
     budget = label_budget(width, height)
-    taken: list[tuple[float, float, float, float]] = []
+    # Seeded with whatever else is going on this picture, so the placement below
+    # treats another overlay's furniture exactly as it treats an earlier chip.
+    taken: list[tuple[float, float, float, float]] = [
+        (float(a), float(b), float(c), float(d)) for a, b, c, d in avoid]
     drawn = 0
     for lab in labels.labels:
         if drawn >= budget:
