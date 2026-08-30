@@ -304,6 +304,38 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.311.1, branch `claude/compassionate-galileo-e1p1x8`) — ~~"Full-res PNG (native
+  size)" hands back a picture **rotated away from the one you clicked** on any run whose preview was saved
+  North up.~~** Found by walking the **geometry** axis of the download-copy sweep (the one axis v0.309.1
+  explicitly recorded as unswept), and **reproduced before fixing**. *(Severity: wrong-picture on the
+  print-and-keep download — the one the app now points people at for printing (v0.308.1). Bounded: it only
+  fires on a run someone used History's "Adjust → North up → Save" on, which until v0.308.0 was the **only**
+  way to see a picture North up. Confidence: reproduced, numbers below.)*
+
+  **Reproduced.** A 1600 × 1200 master with a 30° field rotation, saved North up: the picture on screen —
+  thumbnail, Gallery, Target hero, share JPEG, wallpaper, zoom clip, all of which serve the **stored preview
+  bytes** — is **1024 × 948** (aspect 1.08, the expand-rotate's grid). The full-res PNG came back
+  **1600 × 1200** (aspect 1.33): the canvas grid, i.e. the same picture turned back 30°. Every other consumer
+  is right, because they start from the bytes; this one is the only one that starts from the **FITS**, which
+  is deliberately WCS-aligned.
+
+  **Fix.** `download_full_res_png` renders with `north_up = asked or baked_north_up_deg(run)` — the same
+  recorded-or-recovered angle every other reader of those bytes already goes through, so the render lands on
+  the grid the preview is on. Both branches (the plain STF/asinh render and the saved-recipe render) take it,
+  because v0.305.0's `keep_processed` save can bake a turn into a **processed** run too. Asking for
+  `?north_up=true` on such a run is now the *same* render rather than a second rotation: both mean "the run's
+  own full North-up correction". Read in the threadpool, since the recovered-angle path reads a PNG header and
+  the master's WCS and the endpoint is `async`.
+
+  **Upgrade-safe (§9):** no config/schema/on-disk/API-shape or default change; one render argument, on runs
+  that carry a recorded (or arithmetically recovered) turn. A run nothing ever turned is byte-for-byte
+  unchanged, and a test pins exactly that.
+
+  **Tests (+3 in `tests/webapp/test_full_res_png.py`, 2 fail before / pass after):** the download's aspect now
+  matches the *served preview's* aspect and not the canvas's, and is grown by the rotation; `?north_up=true`
+  and the bare URL return identical bytes on such a run; and an unturned run's download still equals
+  `render_preview_png_full_res(fits)` exactly.
+
 - **✅ SHIPPED (Builder, v0.304.2, branch `claude/compassionate-galileo-ezix3s`) — ~~a perfectly clear
   **mosaic** run is stamped "Hazy night", on every screen that shows it.~~** The **fifth** site of the
   position-dependent-metric class (the QA lead under "Image quality"), reproduced before fixing. Sibling of the
@@ -9669,6 +9701,10 @@ to **Shipped**.)_
   **Still open, filed as its own item below:** the **colour-space** axis — the TIFF download carries *no*
   description at all, and a plain stack's TIFF is written **linear**, so it opens looking black. The
   **geometry** axis (cropped/rotated vs the stored canvas) was not swept.
+  **▶ The geometry axis was then swept by the `…-e1p1x8` Builder and turned up a real one straight away:**
+  "Full-res PNG (native size)" served a picture **rotated away from the one on screen** on any run saved North
+  up — fixed as **v0.311.1**, entry at the top of "Bugs (fix these first)". The *crop* half of that axis (a
+  preview that shows only part of the canvas) is still unswept.
 
   **▶ Swept independently in the same hour, on the SAME axis, by the `…-e1p1x8` Builder — and the two halves
   are complementary, not duplicates: that run fixed the FILE where this one fixed the COPY.** The wallpaper

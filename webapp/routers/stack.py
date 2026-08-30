@@ -762,7 +762,13 @@ async def download_full_res_png(
     as the run's editor recipe, so for such a run the plain STF render would serve
     the *un-edited* master. When the run's preview is a baked display-space edit and
     a saved recipe exists, render that recipe at native resolution instead, so the
-    download matches the preview the user clicked."""
+    download matches the preview the user clicked.
+
+    For the same reason the render also takes the North-up turn a past "Adjust →
+    North up → Save" baked into the stored preview, whether or not ``north_up``
+    was asked for: those bytes are what every other surface shows, and this render
+    starts from the canvas-grid FITS, so without it the download comes back
+    rotated away from the picture it claims to be."""
     from webapp.routers.editor import RECIPE_META_PREFIX
 
     lib, proj = deps.open_target_project(request, safe)
@@ -790,10 +796,25 @@ async def download_full_res_png(
             if isinstance(parsed, dict):
                 recipe_dict = parsed
 
+    # A run whose preview a past "Adjust → North up → Save" turned shows that
+    # turned picture *everywhere* — the thumbnail, the big view, the share JPEG,
+    # the wallpaper — because all of them serve the stored bytes. This render
+    # starts from the FITS instead, which is on the canvas grid, so without this
+    # it would hand back the same picture rotated back: a download that visibly
+    # disagrees with the picture the user clicked on, under a menu item that says
+    # it is that picture at full size. The turn is applied whenever the stored
+    # bytes carry one, whether or not this request asked for it — and asking for
+    # it as well is the same render, not a second rotation, because both mean
+    # "the run's own full North-up correction".
+    # In the threadpool because the recovered-angle path reads the preview's PNG
+    # header and the master's WCS, and this endpoint is async.
+    render_north_up = bool(north_up) or bool(
+        await run_in_threadpool(baked_north_up_deg, run))
+
     if recipe_dict is not None:
         png = await run_in_threadpool(
             pipeline.render_run_recipe_fullres_png, fits_path, recipe_dict,
-            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=bool(north_up),
+            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=render_north_up,
         )
     else:
         # A run the user tuned in History's "Adjust" has its stored preview baked
@@ -805,7 +826,7 @@ async def download_full_res_png(
         from seestack.render.thumbnail import render_preview_png_full_res
         png = await run_in_threadpool(
             render_preview_png_full_res, fits_path,
-            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=bool(north_up),
+            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=render_north_up,
             stretch=preview_stretch, black=preview_black,
         )
     filename = f"{basename}_fullres.png"
