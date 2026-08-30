@@ -60,6 +60,7 @@ import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadg
 import { nextBestMove } from "../components/target/nextBestMove";
 import { softerThanUsual } from "../components/target/softStars";
 import { detectMixedPointings } from "../components/target/mixedPointings";
+import { DownloadMenuItem } from "../components/DownloadMenuItem";
 
 // Re-exported for existing tests that import it from this route module.
 export { describeObject };
@@ -520,8 +521,13 @@ export function TargetView() {
     onSuccess: (r, body) => {
       // When the backend explains a no-op (e.g. "Reject worst" with no QC metric
       // measured yet), surface that guidance instead of a bare "Updated 0 frames".
+      // A note can also accompany work that *did* happen (e.g. a mosaic cut taken
+      // per panel), so keep the count and drop the warning colour in that case.
       if (r.note) {
-        notifications.show({ message: r.note, color: "yellow" });
+        notifications.show({
+          message: r.changed ? `Updated ${r.changed} frames — ${r.note}` : r.note,
+          color: r.changed ? "violet" : "yellow",
+        });
       } else {
         notifications.show({ message: `Updated ${r.changed} frames`, color: "violet" });
       }
@@ -1337,14 +1343,16 @@ export function TargetView() {
                     cached server-side from this run's own preview, so it needs no
                     extra request to decide whether to offer it: every run with a
                     picture has one. */}
-                <Menu.Item leftSection={<IconVideo size={16} />}
-                  component="a" href={api.stackZoomClipUrl(safe, latestRun.id)}
-                  download>
-                  Zoom clip
-                  <span style={MENU_HINT}>
-                    A few seconds gliding into your target — for posting
-                  </span>
-                </Menu.Item>
+                <DownloadMenuItem
+                  icon={<IconVideo size={16} />}
+                  url={api.stackZoomClipUrl(safe, latestRun.id)}
+                  filename={`${latestRun.output_basename || "stack"}_zoom.webp`}
+                  label="Zoom clip"
+                  hint="A few seconds gliding into your target — for posting"
+                  busyHint="Building your clip — a few seconds the first time"
+                  errorMessage="Couldn't build a zoom clip for this run."
+                  hintStyle={MENU_HINT}
+                />
                 <Menu.Divider />
                 <WallpaperMenuItems safe={safe} runId={latestRun.id}
                   canNorthUp={wallpaperCanNorthUp} />

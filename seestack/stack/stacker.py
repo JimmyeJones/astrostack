@@ -965,6 +965,60 @@ def _integration_time_s(frames: list, n_used: int) -> float | None:
     return round(per_sub * n_used, 2)
 
 
+# A mosaic panel needs at least this many measured subs before it counts as a
+# separable pointing group (the same floor the photometric pass uses).
+_TRANSPARENCY_PANEL_MIN_FRAMES = 3
+
+
+def _panel_transparency_ratios(all_rows: list, run_rows: list) -> list[float]:
+    """Per-**mosaic-panel** ``median(run) / p90(all)`` ratios, or ``[]``.
+
+    ``transparency_score`` is the median flux of a frame's brightest stars, so it
+    is a property of where the scope pointed as much as of the sky. A mosaic's
+    panels are different star fields, so one target-wide p90 baseline is set by
+    the richest panel and every other panel reads as haze — measured on a
+    synthetic 3-panel mosaic shot under a perfectly steady sky: ratio **0.50**,
+    i.e. a "Hazy night" badge claiming "~50% below this target's clearest
+    nights". (Same class of mistake as the target-wide QC grading fixed in
+    v0.270.2 and the target-wide photometric reference fixed in v0.271.0.)
+
+    Returns ``[]`` — meaning "use the one target-wide baseline, exactly as
+    before" — unless the pointings split soundly (the shared
+    :func:`~seestack.stack.pointings.pointing_groups` gate) *and* at least two
+    panels carry the same sample this function has always demanded on both sides
+    (5 baseline frames, 3 run frames). So a single-field target, an unsolved
+    target and a too-tightly-packed mosaic are all bit-for-bit unaffected.
+    """
+    from seestack.stack.pointings import pointing_groups
+
+    radecs = [(f.ra_center_deg, f.dec_center_deg) for f in all_rows + run_rows]
+    labels = pointing_groups(radecs, min_members=_TRANSPARENCY_PANEL_MIN_FRAMES)
+    if labels is None:
+        return []
+    n_all = len(all_rows)
+    base: dict[int, list[float]] = {}
+    for label, f in zip(labels[:n_all], all_rows, strict=True):
+        if label >= 0:
+            base.setdefault(label, []).append(float(f.transparency_score))
+    run: dict[int, list[float]] = {}
+    for label, f in zip(labels[n_all:], run_rows, strict=True):
+        if label >= 0:
+            run.setdefault(label, []).append(float(f.transparency_score))
+
+    ratios: list[float] = []
+    for label, run_scores in run.items():
+        base_scores = base.get(label, [])
+        if len(base_scores) < 5 or len(run_scores) < 3:
+            continue
+        baseline = float(np.percentile(base_scores, 90))
+        if baseline <= 0:
+            continue
+        ratios.append(float(np.percentile(run_scores, 50)) / baseline)
+    # One panel's ratio is just the target-wide answer with a smaller sample —
+    # only a real split (≥2 measurable panels) is worth preferring over it.
+    return ratios if len(ratios) >= 2 else []
+
+
 def _compute_transparency_ratio(project: Project, frames: list) -> float | None:
     """Median transparency of the stacked frames vs this target's clear-sky
     baseline, normalised within the target (the raw ``transparency_score`` isn't
@@ -975,19 +1029,26 @@ def _compute_transparency_ratio(project: Project, frames: list) -> float | None:
     Mirrors the Stack form's pre-run hint so a completed run can carry the same
     verdict for an at-a-glance "hazy night" badge. ``None`` when there isn't a
     meaningful sample on both sides. Best-effort: never raises into the caller.
+
+    On a **mosaic** the comparison is made panel by panel and the panels' ratios
+    combined (median), because comparing one panel's star field against another's
+    is not a measure of the sky — see :func:`_panel_transparency_ratios`.
     """
     try:
-        run = [f.transparency_score for f in frames
-               if getattr(f, "transparency_score", None) and f.transparency_score > 0]
-        all_scores = [f.transparency_score for f in project.iter_frames()
-                      if f.transparency_score is not None and f.transparency_score > 0]
+        run_rows = [f for f in frames
+                    if getattr(f, "transparency_score", None) and f.transparency_score > 0]
+        all_rows = [f for f in project.iter_frames()
+                    if f.transparency_score is not None and f.transparency_score > 0]
         # Need a reasonable sample on both sides to say anything meaningful.
-        if len(all_scores) < 5 or len(run) < 3:
+        if len(all_rows) < 5 or len(run_rows) < 3:
             return None
-        baseline = float(np.percentile(all_scores, 90))
+        per_panel = _panel_transparency_ratios(all_rows, run_rows)
+        if per_panel:
+            return round(float(np.median(per_panel)), 4)
+        baseline = float(np.percentile([f.transparency_score for f in all_rows], 90))
         if baseline <= 0:
             return None
-        run_med = float(np.percentile(run, 50))
+        run_med = float(np.percentile([f.transparency_score for f in run_rows], 50))
         return round(run_med / baseline, 4)
     except Exception:  # noqa: BLE001 — a diagnostic must never break the stack
         return None
