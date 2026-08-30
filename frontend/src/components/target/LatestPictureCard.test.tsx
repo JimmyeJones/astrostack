@@ -236,6 +236,75 @@ describe("LatestPictureCard — object labels", () => {
 // The picture on this card is the run's baked preview. When the user saved an
 // edit and never exported it, that preview is NOT the picture they made — so the
 // card has to say so rather than quietly present the auto-stretch as theirs.
+// "North up" used to be reachable only through History → Adjust → Save, which
+// rewrites the stored preview on disk. These pin it as a *view*: nothing is
+// written, it is off until asked for, and it is only offered where turning the
+// picture would actually change it.
+describe("LatestPictureCard — North up as a view", () => {
+  const turned = () => annotations({ north_up_deg: 118.5 });
+
+  afterEach(() => window.localStorage.clear());
+
+  it("offers no turn until the picture is open, and none at all on a run with nothing to turn", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations());
+    renderCard(mkRun());
+    // Not in the card's own header — the toggle belongs to the big view.
+    expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
+    fireEvent.click((await screen.findByAltText("Latest stacked picture of M42")).parentElement!);
+    await screen.findByRole("dialog");
+    // The run reports no correction, so a toggle here would visibly do nothing.
+    await waitFor(() => expect(client.api.stackAnnotations).toHaveBeenCalled());
+    expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
+  });
+
+  it("turns the picture on request and hands over what's on screen", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(turned());
+    renderCard(mkRun());
+    fireEvent.click((await screen.findByAltText("Latest stacked picture of M42")).parentElement!);
+    const toggle = await screen.findByTestId("north-up-view");
+    // Off by default: the saved orientation is the one the owner chose.
+    const shown = () => screen.getByRole("dialog").querySelector("img")!;
+    expect(shown()).toHaveAttribute("src", "/api/targets/M_42/stack-runs/7/preview");
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(shown())
+      .toHaveAttribute("src", "/api/targets/M_42/stack-runs/7/preview?north_up=true"));
+    // The downloads follow the view, so a picture you liked arrives that way…
+    fireEvent.click(screen.getByLabelText("Download picture"));
+    expect((await screen.findByText("Full-res PNG (native size)")).closest("a"))
+      .toHaveAttribute("href", "/api/targets/M_42/stack-runs/7/full-res-png?north_up=true");
+    expect(screen.getByText("JPEG (smaller — best for sharing)").closest("a"))
+      .toHaveAttribute("href", "/api/targets/M_42/stack-runs/7/jpeg?north_up=true");
+    // …except the raw data, which stays WCS-aligned.
+    expect(screen.getByLabelText("Download raw data"))
+      .toHaveAttribute("href", "/api/targets/M_42/stack-runs/7/fits");
+  });
+
+  it("remembers the choice for this viewer, and nothing on the run", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(turned());
+    renderCard(mkRun());
+    fireEvent.click((await screen.findByAltText("Latest stacked picture of M42")).parentElement!);
+    fireEvent.click(await screen.findByTestId("north-up-view"));
+
+    await waitFor(() => expect(window.localStorage.getItem("astrostack.northUpView"))
+      .toBe("1"));
+    // It is a viewing preference, so it must not have written to the picture.
+    fireEvent.click(screen.getByTestId("north-up-view"));
+    await waitFor(() => expect(window.localStorage.getItem("astrostack.northUpView"))
+      .toBe("0"));
+  });
+
+  it("does not offer to turn a picture that was already saved turned", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(turned());
+    renderCard(mkRun({ preview_north_up_deg: 118.5 }));
+    fireEvent.click((await screen.findByAltText("Latest stacked picture of M42")).parentElement!);
+    await screen.findByRole("dialog");
+    await waitFor(() => expect(client.api.stackAnnotations).toHaveBeenCalled());
+    expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
+  });
+});
+
 describe("LatestPictureCard — a saved edit that was never exported", () => {
   it("says nothing on an ordinary run", () => {
     renderCard(mkRun());
