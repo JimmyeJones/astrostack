@@ -1215,6 +1215,23 @@ async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dic
         # re-deriving the threshold here to save it is exactly the drift the
         # shared helpers exist to prevent.
         north_up_deg = remaining_north_up_deg(run)
+        # The picture a user actually looks at (and shares) can be a *crop* of
+        # this canvas — the one-click "Process target" auto-edit trims a mosaic's
+        # ragged border. The drawn bar is already re-based client-side, but the
+        # sentence beside it ("the whole frame is about 5.4 full Moons wide") is a
+        # claim about the *field*, and a canvas-sized one overstates a trimmed
+        # picture by up to ~1/0.7×. So measure a second, honest bar on the visible
+        # rectangle — the same helper and the same pixel box the shared JPEG's
+        # baked marks already use (:func:`_sky_marks_for_run`) — and let the
+        # frontend pick whichever matches what is on screen (History's live Adjust
+        # render is the *full* canvas, so both answers have to be available).
+        # ``None`` unless the run really is cropped, so an uncropped run's payload
+        # is byte-for-byte what it was.
+        crop = parse_preview_crop(run.preview_crop_json)
+        preview_bar = None
+        if isinstance(crop, PreviewCrop):
+            cx0, cy0, cx1, cy1 = crop_pixel_box(crop, width, height)
+            preview_bar = _scale_bar_from_wcs(wcs, cx1 - cx0, cy1 - cy0)
         return {
             "width": width,
             "height": height,
@@ -1239,6 +1256,17 @@ async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dic
                 sb.to_dict()
                 if (sb := _scale_bar_from_wcs(wcs, width, height)) is not None
                 else None
+            ),
+            # The same bar measured on the part of the canvas the *stored preview*
+            # actually shows, for the surfaces that display those bytes (and for
+            # the caption that describes them). Its ladder rung is re-chosen for
+            # the visible field, so it is a complete, self-consistent answer rather
+            # than a rescaled fraction — and its `frame_arcmin` / `moon_comparison`
+            # describe the picture on screen instead of the canvas behind it.
+            # ``null`` when the run isn't cropped (use `scale_bar`) or has no
+            # usable WCS. Absent on an older backend, which reads the same way.
+            "preview_scale_bar": (
+                preview_bar.to_dict() if preview_bar is not None else None
             ),
             "objects": [
                 {

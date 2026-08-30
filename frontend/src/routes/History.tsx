@@ -26,7 +26,9 @@ import { focusChips, type FocusVerdict } from "../components/target/focusChips";
 import { integrationTrend } from "../components/target/integrationTrend";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
-import { AnnotatedImage, croppedAnnotationView } from "../components/AnnotatedImage";
+import {
+  AnnotatedImage, croppedAnnotationView, storedPreviewScaleBar,
+} from "../components/AnnotatedImage";
 import { describeFieldObjects } from "../components/fieldObjectList";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
@@ -901,7 +903,9 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const copyCaption = async () => {
     setCopyingCaption(true);
     try {
-      let scaleBar = annotations.data?.scale_bar ?? null;
+      // The caption describes the *stored preview* — the picture being shared —
+      // so it takes that picture's own bar, not the full canvas's.
+      let scaleBar = storedPreviewScaleBar(annotations.data, run);
       if (run.has_fits && !annotations.data) {
         try {
           const data = await qc.fetchQuery({
@@ -909,7 +913,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             queryFn: () => api.stackAnnotations(safe, run.id),
             staleTime: Infinity,
           });
-          scaleBar = data.scale_bar ?? null;
+          scaleBar = storedPreviewScaleBar(data, run);
         } catch {
           scaleBar = null;  // no WCS / read failed → caption omits the scale clause
         }
@@ -952,7 +956,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     nFrames: run.n_frames_used,
     integrationS: run.total_exposure_s,
     dateLabel: formatCaptionDate(run.timestamp_utc),
-    scaleBar: annotations.data?.scale_bar ?? null,
+    scaleBar: storedPreviewScaleBar(annotations.data, run),
     fallbackName: safe,
   });
 
@@ -1000,6 +1004,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     objects, scaleBar,
     annotations.data?.width ?? run.canvas_w,
     annotations.data?.height ?? run.canvas_h,
+    annotations.data?.preview_scale_bar ?? null,
   );
   // …and the one case that *can't* be composed: a stored preview whose geometry
   // isn't a crop of the canvas at all. Nothing measured on the FITS grid can be
@@ -1096,10 +1101,14 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
       ) : null}
 
       {scale && !cantPlaceMarks && !annotations.isLoading && annotations.isSuccess ? (
-        <Text size="xs" c={scaleBar ? "grape.3" : "dimmed"} mt={6}>
-          {scaleBar
+        <Text size="xs" c={view.scaleBar ? "grape.3" : "dimmed"} mt={6}>
+          {/* `view.scaleBar`, not the raw one: on a picture the auto-edit trimmed
+              this sentence has to describe the *visible* field, the same
+              rectangle the bar above it is drawn on. */}
+          {view.scaleBar
             // Capitalise the plain-language Moon sentence for the caption.
-            ? scaleBar.moon_comparison.charAt(0).toUpperCase() + scaleBar.moon_comparison.slice(1)
+            ? view.scaleBar.moon_comparison.charAt(0).toUpperCase()
+              + view.scaleBar.moon_comparison.slice(1)
             : "This picture has no sky coordinates, so its scale can't be measured"}
         </Text>
       ) : null}

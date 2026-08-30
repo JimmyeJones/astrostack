@@ -194,6 +194,28 @@ def test_frame_night_counts_buckets_by_capture_date(proj):
     assert counts == {"2026-07-20": 3, "2026-07-21": 1}
 
 
+def test_earliest_frame_utc_is_the_oldest_dated_sub(proj):
+    """"First light" reads off the frames' own capture stamps, so this must be
+    the oldest one — counting a sub the app later set aside (it was still light
+    the owner went out and collected) and skipping undated rows."""
+    assert proj.earliest_frame_utc() is None      # nothing ingested yet
+    proj.add_frame(FrameRow(source_path="b.fit", timestamp_utc="2026-07-21T21:10:00Z"))
+    proj.add_frame(FrameRow(source_path="e.fit", timestamp_utc=None))
+    assert proj.earliest_frame_utc() == "2026-07-21T21:10:00Z"
+
+    # An older sub the app rejected still counts — it was still a night out.
+    fid = proj.add_frame(FrameRow(source_path="a.fit",
+                                  timestamp_utc="2024-11-15T22:12:00Z"))
+    proj.update_frame(fid, accept=False, reject_reason="qc:fwhm")
+    assert proj.earliest_frame_utc() == "2024-11-15T22:12:00Z"
+
+
+def test_earliest_frame_utc_is_none_when_nothing_is_dated(proj):
+    proj.add_frame(FrameRow(source_path="a.fit", timestamp_utc=None))
+    proj.add_frame(FrameRow(source_path="b.fit", timestamp_utc=""))
+    assert proj.earliest_frame_utc() is None
+
+
 def test_unique_source_path(proj):
     import sqlite3
 
