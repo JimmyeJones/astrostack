@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
-import { MyMap, myMapFilename, skyFootprintLine } from "./Sky";
+import { MyMap, initialSkyMode, myMapFilename, skyFootprintLine } from "./Sky";
 import { MantineProvider } from "@mantine/core";
 import { api } from "../api/client";
 import * as client from "../api/client";
@@ -97,5 +97,27 @@ describe("myMapFilename", () => {
     // to the person saving it, the same rule every other picture surface uses.
     expect(myMapFilename(new Date(2026, 7, 9, 23, 30)))
       .toBe("astrostack-my-map-2026-08-09.png");
+  });
+});
+
+describe("initialSkyMode", () => {
+  it("opens on the map a link asked for, so 'My map' is one click away", () => {
+    // The Dashboard's sky-coverage line links here; without this it landed on
+    // the real-sky atlas and the stat's own map was another switch away.
+    expect(initialSkyMode("mine", null)).toBe("mine");
+    expect(initialSkyMode("offline", "mine")).toBe("offline");
+  });
+
+  it("leaves the remembered default alone when no link asked for one", () => {
+    expect(initialSkyMode(null, "mine")).toBe("mine");
+    expect(initialSkyMode(null, null)).toBe("online");
+  });
+
+  it("ignores a value that isn't a map, rather than showing nothing", () => {
+    // A hand-typed URL, an old bookmark, or a stored value from a build that
+    // named its modes differently — all fall through to something that renders.
+    expect(initialSkyMode("universe", "mine")).toBe("mine");
+    expect(initialSkyMode("", null)).toBe("online");
+    expect(initialSkyMode(null, "nonsense")).toBe("online");
   });
 });

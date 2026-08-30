@@ -18081,14 +18081,36 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-08-30, the two obvious next taps on the v0.306.0 sky-coverage stat) — put "how much
-  of the sky have you seen" where the owner already looks, and stop it double-counting neighbours.**
-  *(Pillar: enjoy + trust — PRIORITY 3; size S each; both read-only.)*
-  1. **Say it on the Dashboard.** The number is a pride stat, and today it lives one nav click and one mode
-     switch away, under a map most people visit occasionally. `GET /api/sky/coverage` is already cached
-     server-side against the "did a picture change?" fingerprint, so a Dashboard line costs one cheap request
-     and no new machinery. Same sentence, same helper (`describeSkyCoverage`) — do **not** re-word it, or the
-     two surfaces will drift.
+- **🟡 SLICE 1 SHIPPED (Builder, v0.306.3, branch `claude/compassionate-galileo-aj7ysy`); SLICE 2 STILL OPEN —
+  ~~put "how much of the sky have you seen" where the owner already looks~~, and stop it double-counting
+  neighbours.** *(Pillar: enjoy + trust — PRIORITY 3; size S each; both read-only.)*
+
+  **Slice 1 — shipped.** The line is on the Dashboard, directly under the stat grid it belongs with: one
+  quiet dimmed line, not another card, because the standing owner priority is that the page is already busy
+  and a new fact should join a grouping rather than become one more block. The wording is
+  `describeSkyCoverage` **verbatim** — the Dashboard test asserts against the helper itself rather than a
+  copy of its sentence, so the two surfaces cannot drift into two different claims without that test going
+  red. It shares the map's own `["sky-coverage"]` query key, so on an install where both have been visited
+  it costs nothing at all, and it self-hides (`""`) until a finished picture actually carries a position, so
+  a fresh library sees nothing and no number is invented.
+
+  **…and the link now lands on the map it describes.** "See it on My map →" would otherwise have dropped the
+  reader on the real-sky atlas, because the Sky page picks its map from `localStorage` — the stat's own map
+  was still a mode switch away, which is half of what this slice was for. `/sky` now takes `?view=`, read
+  once as the *initial* mode through a new pure `initialSkyMode(asked, stored)`: an explicit view wins, then
+  the remembered one, then the atlas. It deliberately does **not** write the remembered default — following
+  a link shows you a map without changing the one you come back to — and an unknown value falls through
+  rather than rendering nothing, which also hardens the old `localStorage.getItem(...) as SkyMode` cast
+  against a stored value from a build that named its modes differently.
+
+  **Upgrade-safe (§9):** read-only; one new optional query parameter on an existing route, no config, schema,
+  on-disk, default or API change, and the remembered mode keeps working untouched.
+
+  **Tests (+5):** `Dashboard.test.tsx` — the line matches the shared helper and links to `/sky?view=mine`;
+  it is absent on a library with no located picture. `Sky.test.tsx` — `initialSkyMode` over the link, the
+  remembered default, and three junk values.
+
+  **Slice 2 is still open, unchanged, and still gated on the same check:**
   2. **Overlapping targets are summed twice.** `_measure_sky_coverage` adds each target's area independently.
      Two library targets aimed at the same patch of sky would be counted twice — the library normally models
      that as *one* target with more frames, which is why this was shipped as-is, but a deliberately
@@ -18096,8 +18118,17 @@ problems. Dogfood it every big-picture run and fix root causes.
      double-count. **Honest fix:** rasterise each run's covered footprint onto one coarse equal-area sky grid
      (HEALPix-style, or a simple sin(dec) band grid — no new dependency needed at ~0.1° resolution) and count
      *set* cells. Only worth it if the owner ever has adjacent targets; check before building, and note that
-     the fix makes the number go *down*, which needs a word of explanation if it visibly moves.
+     the fix makes the number go *down*, which needs a word of explanation if it visibly moves. **Now that
+     the sentence is on the Dashboard too, a visible move would be seen in two places** — so if this is ever
+     built, both surfaces get the explanation from the one helper, not a second sentence.
 
+  Original slice 1 spec, for the record:
+
+    1. **Say it on the Dashboard.** The number is a pride stat, and today it lives one nav click and one mode
+       switch away, under a map most people visit occasionally. `GET /api/sky/coverage` is already cached
+       server-side against the "did a picture change?" fingerprint, so a Dashboard line costs one cheap request
+       and no new machinery. Same sentence, same helper (`describeSkyCoverage`) — do **not** re-word it, or the
+       two surfaces will drift.
 
 - **✅ SHIPPED — FIRST SLICE (Builder, v0.296.0, branch `claude/compassionate-galileo-u3wi1n`) —
   ~~⭐ OWNER CLARIFICATION (2026-08-29): the *actual* universe map — the owner's captured objects placed in
