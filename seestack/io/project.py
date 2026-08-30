@@ -835,6 +835,21 @@ class Project:
         for row in self._conn.execute(sql):
             yield _row_to_frame(row)
 
+    def source_paths(self) -> list[str]:
+        """Every registered frame's ``source_path``, in id order.
+
+        A narrow, cheap alternative to ``iter_frames()`` for the folder-shape
+        questions the library-cleanup detectors ask ("do all these frames sit in
+        one ``*_sub/`` folder?", "does the base target already own every one of
+        them?"): one column, no ``FrameRow`` built per row — which matters on a
+        real target with thousands of subs, polled from the Library page.
+        """
+        assert self._conn is not None
+        return [
+            row[0] for row in self._conn.execute(
+                "SELECT source_path FROM frames ORDER BY id")
+        ]
+
     def count(self, accepted_only: bool = False) -> int:
         assert self._conn is not None
         sql = "SELECT COUNT(*) FROM frames"
