@@ -53,6 +53,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > 2. **"Say the sky-coverage stat on the Dashboard"** — slice 1 of the two next taps on v0.306.0 (filed under
 >    "Features that serve real workflows"). Sites: `frontend/src/routes/Dashboard.tsx`, reusing
 >    `describeSkyCoverage` verbatim.
+> 3. **Confine `POST /api/scan`'s client-supplied `root` to the incoming folder** (Scout QA audit #16, filed
+>    under "Autonomy & friendliness"). Sites: `webapp/routers/pipeline.py` → `trigger_scan`, and
+>    `ScanRequest.root` in `webapp/schemas.py`.
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-1m28nv` — run finished, all claims released.**
 > Shipped three, each its own independently-green commit:
@@ -10192,21 +10195,62 @@ to **Shipped**.)_
   on a phone; and the picker must never re-render or re-export anything — if there is no exported file, fall
   back, don't build one.
 
-- **IMPROVEMENT IDEA (Scout QA audit 2026-08-27 #16, secondary finding — hardening, low severity) — `POST
-  /api/scan` accepts a raw client-supplied filesystem `root` and scans/ingests from it unconfined, the one
-  ingest endpoint that isn't confined to `incoming/`.** *(Pillar: friendliness / security posture — PRIORITY 3.
-  Size: S — one confinement check + a test. Not a data-loss bug: the scan is read-only over the source and this
-  is a local single-user app, so severity is low; filed as defence-in-depth, not urgent.)*
-  **Where:** `webapp/routers/pipeline.py` (`/api/scan`) → `ScanRequest.root: str | None` (`webapp/schemas.py`)
-  is passed straight to `scan_and_organize(lib, scan_root, ...)`. Every *other* ingest/target endpoint resolves
-  through a DB `safe_name` lookup and is traversal-safe; this one takes an arbitrary server-readable directory,
-  so a client can point a scan at any path (registering its FITS into the library, and copying them if
-  `copy_to_cache` is on). **Fix direction:** confine `root` to live under `Settings.resolved_incoming_dir`
-  (resolve + `is_relative_to` check, 400 otherwise), mirroring how the upload router's `confined_dest`
-  re-confirms every path — or drop the field entirely and always scan the configured incoming dir (check the
-  frontend still has a use for a sub-path first). Keep `incoming/` strictly read-only either way. **Builder:
-  grep first** — confirm no caller passes a legitimately-out-of-tree `root` (e.g. a one-off import flow) before
-  tightening; if one exists, allow-list it rather than break it.
+- **✅ SHIPPED (Builder, v0.306.4, branch `claude/compassionate-galileo-aj7ysy`) — ~~`POST /api/scan` accepts a
+  raw client-supplied filesystem `root` and scans/ingests from it unconfined, the one ingest endpoint that
+  isn't confined to `incoming/`.~~** Confined, exactly as the fix direction's first option asked, with the
+  grep done first. *(Pillar: friendliness / security posture — PRIORITY 3.)*
+
+  **The grep the entry demanded, answered:** nothing in the app passes a `root` at all. The frontend's
+  `api.scan()` posts a literal `{}`, `main.py`'s startup scan and the upload router's post-upload scan both
+  call `submit_pipeline(settings, jm)` with no root, and the only other `scan_and_organize` caller is the
+  legacy desktop dialog, which never goes through the API. So there was no out-of-tree caller to allow-list,
+  and confining costs the app nothing.
+
+  **What shipped.** `_confined_scan_root` in `webapp/routers/pipeline.py`: a non-empty `root` must be the
+  incoming folder or a folder inside it, else **400** with a sentence that says the rule and the way on
+  ("Leave the folder out to scan all of it"). An empty or absent `root` means "the whole incoming folder" and
+  is untouched, which is every existing caller.
+
+  **The one design call worth knowing — the check is *lexical*, not `resolve()`-based.** An incoming folder
+  (or a target folder inside it) that *is* a symlinked NAS share is normal on the box this runs on, and the
+  scan already follows such links when it walks the default root — so a strict `resolve()` containment check,
+  like the upload router's `confined_dest` uses for *writes*, would refuse a real setup to close nothing.
+  `normpath` over the absolute paths rejects what actually matters (an absolute path elsewhere, or a `..`
+  climb out), and a caller who names the fully-resolved form of a symlinked incoming folder is accepted too,
+  so neither spelling of the same folder is refused. A test pins the symlink case so nobody "hardens" it into
+  a break.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk or response-shape change; the request field keeps its
+  type and its default. It is a narrowing of one input's accepted range — deliberately, and the only callers
+  it could have affected don't exist (see the grep above). Strictly read-only: this decides *where a scan may
+  look*, and `incoming/` stays read-and-create-new only (§10).
+
+  **Tests (+6 in `tests/webapp/test_scan_root_confined.py`, 2 fail before / pass after):** an outside root and
+  a `..` traversal are both refused with no job queued; the incoming folder itself and a folder inside it
+  still scan; no root at all still scans the whole tree and finds both targets; and a symlinked share inside
+  incoming is not refused.
+
+  **One older thing this turned up, filed rather than changed:** a *sub-folder* root loses the folder-name
+  target — `scan_and_organize` derives a target from the path relative to its scan root, so scanning
+  `incoming/M_42` files those frames as **Unsorted** rather than M_42. Nothing in the app passes a sub-folder
+  root, so this has never fired; it is recorded here so the next person to reach for `root` as a "re-scan just
+  this target" shortcut knows it isn't one yet.
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness / security posture — PRIORITY 3.
+    Size: S — one confinement check + a test. Not a data-loss bug: the scan is read-only over the source and this
+    is a local single-user app, so severity is low; filed as defence-in-depth, not urgent.)*
+    **Where:** `webapp/routers/pipeline.py` (`/api/scan`) → `ScanRequest.root: str | None` (`webapp/schemas.py`)
+    is passed straight to `scan_and_organize(lib, scan_root, ...)`. Every *other* ingest/target endpoint resolves
+    through a DB `safe_name` lookup and is traversal-safe; this one takes an arbitrary server-readable directory,
+    so a client can point a scan at any path (registering its FITS into the library, and copying them if
+    `copy_to_cache` is on). **Fix direction:** confine `root` to live under `Settings.resolved_incoming_dir`
+    (resolve + `is_relative_to` check, 400 otherwise), mirroring how the upload router's `confined_dest`
+    re-confirms every path — or drop the field entirely and always scan the configured incoming dir (check the
+    frontend still has a use for a sub-path first). Keep `incoming/` strictly read-only either way. **Builder:
+    grep first** — confirm no caller passes a legitimately-out-of-tree `root` (e.g. a one-off import flow) before
+    tightening; if one exists, allow-list it rather than break it.
 
 - **NEW IDEA (Builder 2026-08-27, spotted while independently building the same nudge) — the v0.283.0
   grainier-restack note states its gap as a percentage, which stops reading as a quantity past a doubling.**
