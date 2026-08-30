@@ -870,7 +870,9 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/rejection-overlay")
-async def rejection_overlay(safe: str, run_id: int, request: Request) -> Response:
+async def rejection_overlay(
+    safe: str, run_id: int, request: Request, north_up: bool = False,
+) -> Response:
     """A transparent PNG showing *where* outlier rejection dropped samples, sized
     to the run's stored preview so it lays straight over the picture.
 
@@ -887,6 +889,17 @@ async def rejection_overlay(safe: str, run_id: int, request: Request) -> Respons
     would otherwise highlight a trail where the trail no longer is. A preview
     whose geometry can't be reconciled with the canvas (``CROP_UNKNOWN``) serves
     no overlay at all rather than a misaligned one.
+
+    ``north_up`` composes the *same* on-the-fly turn ``…/preview?north_up=true``
+    applies to the stored bytes (nothing on disk changes there either), so the
+    tint can stay in register with a picture the viewer is looking at North-up
+    instead of stepping aside. It is the **remainder** — a preview a past save
+    already baked the rotation into is turned no further — read from the one
+    helper that decides what the picture itself gets
+    (:func:`~seestack.render.thumbnail.preview_north_up_remainder_deg`), so the
+    two can't drift. The turn is applied to the drop-count *plane*, before the
+    RGBA tint is built, which is why the overlay's alpha is never at risk: the
+    transparent PNG is rendered at the rotated size rather than rotated itself.
     """
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -910,8 +923,22 @@ async def rejection_overlay(safe: str, run_id: int, request: Request) -> Respons
                             detail="Preview geometry can't be matched to the map")
     north_up_deg = baked_north_up_deg(run)
 
-    from seestack.render.orient import rotate_plane_north_up
-    from seestack.render.thumbnail import rejection_overlay_png
+    from seestack.render.orient import north_up_pixel_transform, rotate_plane_north_up
+    from seestack.render.thumbnail import (
+        preview_north_up_remainder_deg,
+        rejection_overlay_png,
+    )
+
+    # The extra turn this request wants on top of whatever the stored bytes
+    # already carry — 0.0 (a no-op) unless asked for, so the bare URL every
+    # existing surface embeds is byte-for-byte unchanged. An unreadable FITS
+    # degrades to "don't turn", the same way the preview endpoint's own turn
+    # does, rather than failing a request that has a perfectly good map.
+    extra_deg = 0.0
+    if north_up:
+        with contextlib.suppress(Exception):
+            extra_deg = preview_north_up_remainder_deg(
+                run.fits_path, already_deg=north_up_deg)
 
     def work() -> bytes:
         import io
@@ -929,6 +956,15 @@ async def rejection_overlay(safe: str, run_id: int, request: Request) -> Respons
             dens = rotate_plane_north_up(dens, north_up_deg)
         with Image.open(io.BytesIO(Path(preview_path).read_bytes())) as im:
             size = im.size
+        if extra_deg:
+            # Two turns, exactly as the picture takes them: the stored bytes were
+            # rotated by `north_up_deg` when they were saved, and this request
+            # rotates *those* bytes again. Composing them into one angle would
+            # land on a different pixel grid than the picture does.
+            dens = rotate_plane_north_up(dens, extra_deg)
+            geom = north_up_pixel_transform(size[0], size[1], extra_deg)
+            if geom is not None:
+                size = (geom[2], geom[3])
         return rejection_overlay_png(dens, size)
 
     try:
