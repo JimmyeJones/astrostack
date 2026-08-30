@@ -217,6 +217,23 @@ _CLASS_REASON: dict[str, str] = {
 #: without measurably moving a clean image's answer (see ``_extended_chroma``).
 _CHROMA_SMOOTH_PX = 7
 
+#: Side of the box the *luminance* is averaged over before any of the geometry
+#: cues are measured. Same principle as ``_CHROMA_SMOOTH_PX``, applied to the
+#: other half of ``classify_target``: structure is a property of a *region*
+#: (nebulosity and a galaxy's disc vary over tens of pixels, a star over a few),
+#: shot noise is not, so averaging first measures the geometry rather than the
+#: grain. Without it every cue below moves with how deep the stack is — measured
+#: on one unchanging synthetic galaxy at 4…800 subs, ``ext_frac`` ran
+#: 0.0121 → 0.0254 (a **2.1× swing**) and duly walked a scene across the
+#: ``≤ 0.05`` galaxy ceiling; with it the same sweep reads 0.0217 → 0.0255
+#: (±8 %) and lands on the *deep* answer at every depth. 3 px is the smallest box
+#: that gets there: it cuts the noise ~3× — enough that the ``6·sky_sigma`` term
+#: of the threshold below falls under its own 0.06 floor on realistic data — while
+#: staying far narrower than the 7 px opening footprint that separates stars from
+#: diffuse structure, so a star is still a star. (5 px was measured too and is
+#: worse: it smears a dense star field into fake "extended" signal.)
+_GEOM_SMOOTH_PX = 3
+
 
 def _extended_chroma(arr: np.ndarray, ext_sig: np.ndarray) -> float:
     """Median chroma ``(max−min)/mean`` of the extended-signal region.
@@ -271,7 +288,11 @@ def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
     preset-suggestion chip; it never changes the Auto recipe (§ AGENTS.md autonomy).
 
     The cues are cheap and geometry-first (colour only refines the nebula/galaxy
-    margin, since the proxy is linear and OSC colour is uncalibrated here):
+    margin, since the proxy is linear and OSC colour is uncalibrated here). All
+    of them are measured on a **locally averaged** copy of the luminance
+    (``_GEOM_SMOOTH_PX``) so that one unchanging sky gives one answer however
+    many subs went into it — see that constant for the two mechanisms that made
+    them depth-dependent before:
 
     * ``star_share`` — how much of the above-sky *signal* is compact point sources
       (from the same white-top-hat ``star_mask`` the editor uses). A field that is
@@ -305,15 +326,31 @@ def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
     if hi <= lo:
         return none
     norm = np.clip((lum - lo) / (hi - lo), 0.0, 1.0)
-    norm_c = norm[cover]
-    sky = float(np.median(norm_c))
-    sky_pop = norm_c[norm_c <= sky]
+
+    # Every geometry cue below is measured on a locally averaged copy, and that
+    # is load-bearing (see _GEOM_SMOOTH_PX): taken pointwise they are all
+    # monotone functions of how deep the stack is, through two mechanisms that
+    # both vanish once the grain is averaged out — the ``6·sky_sigma`` term of
+    # the threshold, which on a thin stack sits far above its own 0.06 floor and
+    # hides faint structure; and the opening's erosion, whose min-over-49-samples
+    # is biased ~2.5σ low, so on a thin stack it depresses the *diffuse* image
+    # and the object's own skirt gets counted as point sources.
+    from scipy.ndimage import grey_opening, uniform_filter
+
+    # Fill the uncovered gaps with a provisional sky before averaging so the
+    # canvas edge can't drag the measurement down (the opening already did this).
+    filled = np.where(cover, norm, float(np.median(norm[cover]))).astype(np.float32, copy=False)
+    meas = uniform_filter(filled, size=_GEOM_SMOOTH_PX, mode="nearest")
+
+    meas_c = meas[cover]
+    sky = float(np.median(meas_c))
+    sky_pop = meas_c[meas_c <= sky]
     sky_sigma = (float(1.4826 * np.median(np.abs(sky_pop - np.median(sky_pop))))
                  if sky_pop.size else 0.0)
 
     # "Signal" = clearly above the sky floor (robust, noise-aware threshold).
     thr = sky + max(0.06, 6.0 * sky_sigma)
-    signal = (norm > thr) & cover
+    signal = (meas > thr) & cover
     n_sig = int(signal.sum())
     sig_frac = n_sig / n_cov
     if sig_frac < 0.0015:
@@ -324,9 +361,7 @@ def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
     # Gaussian wings) but leaves anything larger — nebulosity, a galaxy — intact.
     # So the opened image, thresholded above sky, is the extended signal; whatever
     # is bright in the raw image but *not* in the opened image is a point source.
-    from scipy.ndimage import grey_opening
-    filled = np.where(cover, norm, sky).astype(np.float32, copy=False)
-    opened = grey_opening(filled, footprint=np.ones((7, 7), dtype=bool))
+    opened = grey_opening(meas, footprint=np.ones((7, 7), dtype=bool))
     ext_sig = (opened > thr) & cover
     point_sig = signal & ~ext_sig
     n_pt = int(point_sig.sum())
