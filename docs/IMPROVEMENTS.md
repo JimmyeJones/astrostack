@@ -9415,17 +9415,57 @@ to **Shipped**.)_
     since rotation is the one thing a user genuinely wants from that panel on an already-finished picture.
     Don't remove Adjust — it is legitimate; just stop it being a silent trapdoor.
 
-- **NEW IDEA (Builder 2026-08-30, read while fixing the mosaic half of the same card in v0.304.1) — the
-  "Clouds & haze" card promises something it can't check: *"those later subs … were automatically counted
-  less in your stack"*.** *(Pillar: trust — PRIORITY 3; size S; copy only, but it needs one datum plumbed.)*
-  That sentence is only true when the stack that used those subs had **quality weighting on**. The auto
-  chain does enable it, so on the walk-away path the claim usually holds — but an interactive stack with the
-  box unticked, and a target that has never been stacked at all, both get the same confident reassurance. The
-  card is a *capture-night* card and knows nothing about any run. **Fix shape:** either soften it to what is
-  actually known (*"hazy subs are counted less when quality weighting is on — it is on by default for
-  hands-off stacks"*), or plumb the newest genuine run's `quality_weighted` flag onto the response and only
-  make the promise when it was really used. The first is a five-minute honesty fix and probably the right
-  size; the second is better if the card ever grows.
+- **✅ SHIPPED (Builder, v0.305.1, branch `claude/compassionate-galileo-1m28nv`) — ~~the "Clouds & haze" card
+  promises something it can't check: *"those later subs … were automatically counted less in your stack"*.~~**
+  Took the **plumbed** option, not the copy-softening one — and found the *same sentence* on the sibling
+  card, so both were fixed together.
+
+  **What shipped.** `routers.targets.latest_stack_weighting(proj)` answers the one question the promise
+  rests on, and both trend endpoints carry it as `weighting`:
+  * **`"applied"`** — the target's newest *genuine* stack (via the existing `_newest_genuine_stack_run`, so
+    the card can't disagree with what reprocess calls "the current image's stack") stamped **`WGTMODE`** on
+    its master: weights were computed **and** honoured. This is the only state that earns the sentence.
+  * **`"not_applied"`** — there is a stack and it didn't weight. Deliberately read from the FITS provenance
+    rather than `options_json`, because the options flag is *not* the claim: a run can ask for weighting and
+    have the order-statistic min/max combine ignore it entirely (`WGTSKIP`), which for the reader is the same
+    outcome as never asking. A test pins exactly that case.
+  * **`"unstacked"`** — no genuine run yet, so nothing has counted anything. This was the worst case the old
+    copy papered over.
+  * **`"unknown"`** — a run whose master can't be read; say nothing rather than guess.
+
+  **The copy follows it** through one shared pure helper, `weightingClause(weighting, subject)` in
+  `focusTrend.ts` (which `transparencyTrend.ts` already imports from): "were automatically counted less in
+  your stack" only on `applied`; "counted just as much as the rest, though: your latest stack of this target
+  didn't weight subs by quality" on `not_applied`; "haven't been stacked yet — when AstroStack stacks for
+  you, it weights subs like these down automatically" on `unstacked`; and the general, always-true "are
+  counted less automatically when quality weighting is on, which it is whenever AstroStack stacks for you"
+  otherwise — which is also what an **older backend** produces, since the field is then absent.
+
+  **Cost:** one FITS *header* read (the same cheap read the History Info panel does), taken only when the
+  card is actually going to be drawn — a target with too few measured subs to trend pays nothing.
+
+  **Upgrade-safe (§9):** one additive response field on each of two endpoints, defaulting to `"unknown"`; no
+  config, schema, on-disk, default or API-shape change.
+
+  **Tests (+9):** `tests/webapp/test_trend_weighting_promise.py` walks both endpoints through all four states
+  — never stacked, really weighted, not weighted, *asked for but ignored* (options say `quality_weighted`,
+  header says otherwise), an editor-export row that must be looked past, an unreadable master, and a
+  weighted run superseded by an unweighted one — plus a copy assertion per card that only `applied` produces
+  "were automatically counted less".
+
+  Original spec:
+
+  - **NEW IDEA (Builder 2026-08-30, read while fixing the mosaic half of the same card in v0.304.1) — the
+    "Clouds & haze" card promises something it can't check: *"those later subs … were automatically counted
+    less in your stack"*.** *(Pillar: trust — PRIORITY 3; size S; copy only, but it needs one datum plumbed.)*
+    That sentence is only true when the stack that used those subs had **quality weighting on**. The auto
+    chain does enable it, so on the walk-away path the claim usually holds — but an interactive stack with the
+    box unticked, and a target that has never been stacked at all, both get the same confident reassurance. The
+    card is a *capture-night* card and knows nothing about any run. **Fix shape:** either soften it to what is
+    actually known (*"hazy subs are counted less when quality weighting is on — it is on by default for
+    hands-off stacks"*), or plumb the newest genuine run's `quality_weighted` flag onto the response and only
+    make the promise when it was really used. The first is a five-minute honesty fix and probably the right
+    size; the second is better if the card ever grows.
 
 - **✅ SHIPPED (Builder, v0.302.1, branch `claude/compassionate-galileo-fj2p70`) — ~~a saved recipe on a
   "Process target" run can quietly drift from the picture that run's preview actually shows.~~** Shipped
