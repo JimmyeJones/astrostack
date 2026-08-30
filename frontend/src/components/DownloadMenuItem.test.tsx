@@ -127,7 +127,7 @@ describe("DownloadMenuItem", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: /Zoom clip/ }));
 
     await waitFor(() => expect(click).toHaveBeenCalled());
-    const anchor = click.mock.instances[0] as HTMLAnchorElement;
+    const anchor = click.mock.instances[0] as unknown as HTMLAnchorElement;
     expect(anchor.download).toBe("M42_zoom.png");
     expect(anchor.href).toContain("blob:mock");
   });
@@ -140,7 +140,7 @@ describe("DownloadMenuItem", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: /Zoom clip/ }));
 
     await waitFor(() => expect(click).toHaveBeenCalled());
-    expect((click.mock.instances[0] as HTMLAnchorElement).download).toBe("fallback.webp");
+    expect((click.mock.instances[0] as unknown as HTMLAnchorElement).download).toBe("fallback.webp");
   });
 
   it("explains a failed build instead of leaving the spinner spinning", async () => {
