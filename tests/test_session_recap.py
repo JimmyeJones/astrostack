@@ -189,8 +189,14 @@ def test_quality_drift_ignores_a_thin_newest_session(tmp_path):
         proj.close()
 
 
-def test_quality_drift_uses_the_best_prior_session_as_baseline(tmp_path):
-    """Baseline is the *sharpest* prior night, not the most recent prior one."""
+def test_quality_drift_uses_the_typical_prior_session_as_baseline(tmp_path):
+    """Baseline is the *typical* prior night — the median of the prior nights'
+    medians — not the most recent one and not the sharpest one.
+
+    It used to be the sharpest, and that is the bug fixed in v0.319.1: a minimum
+    over N samples keeps falling as N grows, so the same ordinary night got
+    flagged more and more often the longer the owner stayed on one target.
+    """
     proj = Project.create(tmp_path / "p", name="t")
     try:
         _add_session(proj, datetime(2026, 7, 1, 22, 0, 0), n=8, fwhm=3.0)  # sharpest ever
@@ -200,7 +206,56 @@ def test_quality_drift_uses_the_best_prior_session_as_baseline(tmp_path):
         assert recap is not None
         d = recap.quality_drift
         assert d is not None
-        assert d.baseline_fwhm_px == 3.0  # compares against the best, not 4.5
+        # Median of {3.0, 4.5} — neither the most recent prior (4.5) nor the
+        # sharpest ever (3.0).
+        assert d.baseline_fwhm_px == 3.75
+        # …and it is built from every judgeable prior night, not one of them.
+        assert d.n_baseline == 16
+    finally:
+        proj.close()
+
+
+def test_a_lucky_night_does_not_make_every_later_night_look_soft(tmp_path):
+    """The regression. One exceptional night used to become the yardstick for
+    every night after it, so an ordinary night on unchanging seeing read as a
+    focus problem — and the more nights the owner shot, the more likely that
+    became (measured: 13.7 % of ordinary nights flagged after one prior night,
+    68 % after twenty). The baseline is now the typical night, so one lucky one
+    can't move it."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        # Nine ordinary nights at 3.6 px … and one exceptional 2.4 px night.
+        _add_session(proj, datetime(2026, 7, 1, 22, 0, 0), n=8, fwhm=2.4)
+        for day in range(2, 11):
+            _add_session(proj, datetime(2026, 7, day, 22, 0, 0), n=8, fwhm=3.6)
+        # The newest night is entirely ordinary: same seeing as the other eight.
+        _add_session(proj, datetime(2026, 7, 12, 22, 0, 0), n=8, fwhm=3.6)
+        recap = session_recap(proj)
+        assert recap is not None
+        # 3.6 vs the old min-baseline 2.4 is 1.5× and +1.2 px — it cleared both
+        # floors comfortably and nagged about focus on a night nothing was wrong
+        # with. Against the typical 3.6 px night it says nothing.
+        assert recap.quality_drift is None
+    finally:
+        proj.close()
+
+
+def test_a_genuinely_soft_night_is_still_caught_on_a_long_project(tmp_path):
+    """The other half: the fix must not buy quiet by going deaf. Ten ordinary
+    nights and one that really is soft — still flagged, and against the honest
+    baseline."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _add_session(proj, datetime(2026, 7, 1, 22, 0, 0), n=8, fwhm=2.4)
+        for day in range(2, 11):
+            _add_session(proj, datetime(2026, 7, day, 22, 0, 0), n=8, fwhm=3.6)
+        _add_session(proj, datetime(2026, 7, 12, 22, 0, 0), n=8, fwhm=5.4)  # really soft
+        recap = session_recap(proj)
+        assert recap is not None
+        d = recap.quality_drift
+        assert d is not None
+        assert d.latest_fwhm_px == 5.4
+        assert d.baseline_fwhm_px == 3.6
     finally:
         proj.close()
 
@@ -535,6 +590,72 @@ def test_night_frame_ids_empty_on_unparseable_bounds(tmp_path):
         assert night_frame_ids(proj, None, None) == []  # type: ignore[arg-type]
     finally:
         proj.close()
+
+
+def test_one_lucky_night_does_not_badge_the_rest_of_a_long_project_soft(tmp_path):
+    """The Nights-card half of the same regression, and the one that mattered
+    more: the "soft" badge sits directly beside a one-click **Set aside**, so a
+    baseline that drifts down as the project grows steers a beginner toward
+    discarding good nights. Measured on unchanging seeing, the share of a
+    target's own nights badged soft ran 13.7 % at two nights → 78.6 % at forty.
+    """
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        # One exceptional night, then nine entirely ordinary ones.
+        base = datetime(2026, 7, 1, 22, 0, 0)
+        for i in range(5):
+            proj.add_frame(_frame(base + timedelta(seconds=30 * i), fwhm_px=2.4))
+        for day in range(2, 11):
+            night = datetime(2026, 7, day, 22, 0, 0)
+            for i in range(5):
+                proj.add_frame(_frame(night + timedelta(seconds=30 * i), fwhm_px=3.6))
+        nights = nights_breakdown(proj)
+        assert len(nights) == 10
+        # 3.6 against the old min-baseline of 2.4 is 1.5× and +1.2 px — every one
+        # of the nine ordinary nights used to be badged "soft" beside a Set-aside
+        # button. Not one of them is now.
+        assert [n.verdict for n in nights] == ["sharp"] * 10
+        # The lucky night still earns its positive nod — that one *is* a minimum.
+        assert sum(n.is_best for n in nights) == 1
+        assert nights[-1].median_fwhm_px == 2.4 and nights[-1].is_best
+    finally:
+        proj.close()
+
+
+def test_a_genuinely_soft_night_is_still_badged_on_a_long_project(tmp_path):
+    """…and the fix didn't buy that quiet by going blind: among nine ordinary
+    nights, one that really is soft is still badged, judged against the typical
+    night rather than the luckiest one."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for day in range(1, 10):
+            night = datetime(2026, 7, day, 22, 0, 0)
+            for i in range(5):
+                proj.add_frame(_frame(night + timedelta(seconds=30 * i), fwhm_px=3.2))
+        bad = datetime(2026, 7, 11, 22, 0, 0)
+        for i in range(5):
+            proj.add_frame(_frame(bad + timedelta(seconds=30 * i), fwhm_px=4.6))
+        nights = nights_breakdown(proj)
+        assert nights[0].start_utc.startswith("2026-07-11")
+        assert nights[0].verdict == "soft"
+        assert [n.verdict for n in nights[1:]] == ["sharp"] * 9
+    finally:
+        proj.close()
+
+
+def test_a_nights_baseline_never_includes_the_night_being_judged(tmp_path):
+    """Leave-one-out, by position rather than by value: two nights that measured
+    *identically* must each still see the other, or a target whose nights all
+    read the same would have an empty baseline."""
+    from seestack.session_recap import _typical_other_fwhm
+
+    assert _typical_other_fwhm([3.4], 0) is None          # nothing to compare to
+    assert _typical_other_fwhm([3.4, 3.4], 0) == 3.4      # its identical twin, not itself
+    assert _typical_other_fwhm([2.4, 3.6, 3.6, 3.6], 0) == 3.6
+    # Dropping the outlier leaves the other three unmoved …
+    assert _typical_other_fwhm([2.4, 3.6, 3.6, 3.6], 1) == 3.6
+    # … and the statistic is a median, so one extreme value can't drag it.
+    assert _typical_other_fwhm([0.5, 3.5, 3.6, 3.7, 3.8], 4) == 3.55
 
 
 def test_night_verdict_pure_helper():
