@@ -37,6 +37,7 @@ import { SampleTourNote } from "../components/SampleTourNote";
 import { WallpaperMenuItems } from "../components/WallpaperMenu";
 import { sharePictureText } from "../share";
 import { Sparkline } from "../components/Sparkline";
+import { DownloadMenuItem } from "../components/DownloadMenuItem";
 
 export type RunSort = "newest" | "cleanest";
 
@@ -1303,16 +1304,16 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                     {/* Motion, for the places a still gets swiped past. Built and
                         cached server-side from this run's own preview, so it costs
                         no extra request to offer: every run with a picture has one. */}
-                    <Menu.Item
-                      leftSection={<IconVideo size={16} />}
-                      component="a" href={api.stackZoomClipUrl(safe, run.id)}
-                      download
-                    >
-                      Zoom clip
-                      <span style={MENU_HINT}>
-                        A few seconds gliding into your target — for posting
-                      </span>
-                    </Menu.Item>
+                    <DownloadMenuItem
+                      icon={<IconVideo size={16} />}
+                      url={api.stackZoomClipUrl(safe, run.id)}
+                      filename={`${run.output_basename || "stack"}_zoom.webp`}
+                      label="Zoom clip"
+                      hint="A few seconds gliding into your target — for posting"
+                      busyHint="Building your clip — a few seconds the first time"
+                      errorMessage="Couldn't build a zoom clip for this run."
+                      hintStyle={MENU_HINT}
+                    />
                     <Menu.Divider />
                     <WallpaperMenuItems safe={safe} runId={run.id} />
                   </>
