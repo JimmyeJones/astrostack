@@ -75,7 +75,10 @@ def confirm_duplicate_of_base(lib, entry, base) -> DuplicateOfBase | None:  # no
 
     Read-only: it opens each project, reads source paths (and, for ``entry``,
     whether any stack run exists) and closes it again. Nothing is written and
-    nothing on disk is touched."""
+    nothing on disk is touched. The reads go through ``Project.source_paths()``,
+    which selects the one column this needs rather than building a ``FrameRow``
+    per row — the confirmation runs over the owner's thousand-frame targets on
+    every Library poll."""
     if base is None or base.safe_name == entry.safe_name:
         return None
     if duplicate_base_safe(entry.name) != base.safe_name:
@@ -83,7 +86,7 @@ def confirm_duplicate_of_base(lib, entry, base) -> DuplicateOfBase | None:  # no
 
     proj = lib.open_target(entry.safe_name)
     try:
-        dup_sources = [f.source_path for f in proj.iter_frames()]
+        dup_sources = proj.source_paths()
         has_own_runs = next(proj.iter_stack_runs(), None) is not None
     finally:
         proj.close()
@@ -97,7 +100,7 @@ def confirm_duplicate_of_base(lib, entry, base) -> DuplicateOfBase | None:  # no
 
     base_proj = lib.open_target(base.safe_name)
     try:
-        base_sources = {f.source_path for f in base_proj.iter_frames()}
+        base_sources = set(base_proj.source_paths())
     finally:
         base_proj.close()
     if not all(s in base_sources for s in dup_sources):
@@ -126,7 +129,7 @@ def junk_verdict(lib, entry) -> JunkTargetVerdict | None:  # noqa: ANN001
         return None
     proj = lib.open_target(entry.safe_name)
     try:
-        source_paths = [f.source_path for f in proj.iter_frames()]
+        source_paths = proj.source_paths()
     finally:
         proj.close()
     return classify_seestar_junk_target(entry.name, source_paths, entry.n_frames)

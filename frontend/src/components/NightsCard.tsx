@@ -1,4 +1,15 @@
-import { Alert, Badge, Button, Group, Paper, Stack, Table, Text, ThemeIcon } from "@mantine/core";
+import {
+  Alert,
+  Badge,
+  Button,
+  Group,
+  Paper,
+  Stack,
+  Table,
+  Text,
+  ThemeIcon,
+  Tooltip,
+} from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconCalendarStar } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,6 +34,39 @@ export { formatNightDate };
  */
 export function nightDateLabel(n: Pick<NightSummary, "night_date" | "start_utc">): string {
   return formatNightDate(n.night_date ?? n.start_utc);
+}
+
+/** What a night's verdict badge was actually measured against, as one sentence
+ *  for its tooltip — or null when there is nothing honest to say.
+ *
+ *  The badge is a bare coloured word sitting beside a button that offers to
+ *  discard the night, so "soft" in yellow is a judgement a beginner has no way
+ *  to check. The comparison behind it is not a secret: a night is "soft" when
+ *  its median FWHM is materially worse than the median of the target's *other*
+ *  nights (`_typical_other_fwhm` in `session_recap.py`), and that baseline now
+ *  comes back on the row. Saying it lets the reader judge the call instead of
+ *  taking it. Pure/testable.
+ *
+ *  Silent when the numbers aren't there (an older backend, or the target's only
+ *  judgeable night — nothing to compare against, and the verdict says so too).
+ *  "hazy" is about cloud, not sharpness, so it explains itself instead. */
+export function verdictTooltip(n: NightSummary): string | null {
+  if (n.verdict === "hazy") {
+    return "A large share of this night's subs were set aside as cloudy.";
+  }
+  const px = n.median_fwhm_px;
+  const usual = n.typical_fwhm_px;
+  if (px == null || usual == null || !Number.isFinite(px) || !Number.isFinite(usual)) {
+    return null;
+  }
+  const stars = `${px.toFixed(1)} px stars`;
+  if (n.verdict === "soft") {
+    return `${stars} — softer than this target's usual ${usual.toFixed(1)} px.`;
+  }
+  if (n.verdict === "sharp") {
+    return `${stars} — this target's usual is ${usual.toFixed(1)} px.`;
+  }
+  return null;
 }
 
 /** Colour + label for a night's one-word verdict badge, or null (no badge) when
@@ -50,6 +94,7 @@ function NightRow({
   busy: boolean;
 }) {
   const badge = verdictBadge(n.verdict);
+  const tip = verdictTooltip(n);
   const subs = n.n_set_aside > 0 ? `${n.n_kept}/${n.n_frames}` : String(n.n_frames);
   // Only offer "Set aside" when the night still has kept subs to drop and its
   // bounds are known (a night with no datable frames can't be targeted).
@@ -77,7 +122,18 @@ function NightRow({
       </Table.Td>
       <Table.Td>
         {badge ? (
-          <Badge size="sm" variant="light" color={badge.color}>{badge.label}</Badge>
+          // A tooltip, deliberately not another column: the Target page is the
+          // "extremely busy" one, so the explanation is there when asked for.
+          <Tooltip label={tip} multiline w={240} disabled={!tip}>
+            <Badge
+              size="sm"
+              variant="light"
+              color={badge.color}
+              aria-label={tip ? `${badge.label}: ${tip}` : undefined}
+            >
+              {badge.label}
+            </Badge>
+          </Tooltip>
         ) : null}
       </Table.Td>
       <Table.Td>
