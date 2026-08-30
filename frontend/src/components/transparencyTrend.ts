@@ -45,6 +45,24 @@ export function describeTransparencyTrend(t: TransparencyTrend): string {
 }
 
 /**
+ * One extra line, only on a mosaic, saying why the plotted line isn't the raw
+ * numbers. Transparency is measured from the brightest stars in the frame, so
+ * each panel of a mosaic starts from a different star field; without levelling,
+ * simply moving to a sparser panel reads as "clouds rolled in". Returns `null`
+ * for a single-field night (and for an older backend that doesn't send the
+ * count), where the line is the raw scores. Pure/testable.
+ */
+export function panelLevellingNote(t: TransparencyTrend): string | null {
+  const n = t.n_panels_levelled ?? 0;
+  if (n < 2) return null;
+  return (
+    `Levelled across this mosaic's ${n} panels — each panel frames a different ` +
+    `patch of sky, and having fewer bright stars in it isn't the same as a ` +
+    `hazier night, so that step is taken out of the line.`
+  );
+}
+
+/**
  * Map a run of transparency values to an SVG polyline `points` string inside a
  * `width`×`height` box. Higher transparency (clearer) plots *higher* (smaller y)
  * so the intuitive "up = clearer" reading holds. Pure/testable.

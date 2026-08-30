@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import {
   describeTransparencyTrend,
+  panelLevellingNote,
   sparklinePoints,
   transparencyVerdictBadge,
 } from "./transparencyTrend";
@@ -34,6 +35,7 @@ export function TransparencyTrendCard({ safe }: { safe: string }) {
   const scores = t.points.map((p) => p.transparency);
   const poly = sparklinePoints(scores, SPARK_W, SPARK_H);
   const badge = transparencyVerdictBadge(t.verdict);
+  const panelNote = panelLevellingNote(t);
 
   return (
     <Paper withBorder p="sm" radius="md" mt="xs">
@@ -73,6 +75,7 @@ export function TransparencyTrendCard({ safe }: { safe: string }) {
             </Group>
           </Box>
           <Text size="xs" c="dimmed">{describeTransparencyTrend(t)}</Text>
+          {panelNote && <Text size="xs" c="dimmed">{panelNote}</Text>}
         </Stack>
       </Group>
     </Paper>

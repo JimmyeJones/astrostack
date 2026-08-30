@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   describeTransparencyTrend,
   formatClockUtc,
+  panelLevellingNote,
   sparklinePoints,
   transparencyVerdictBadge,
 } from "./transparencyTrend";
@@ -89,5 +90,24 @@ describe("sparklinePoints", () => {
 
   it("returns an empty string with no points", () => {
     expect(sparklinePoints([], 100, 40)).toBe("");
+  });
+});
+
+describe("panelLevellingNote", () => {
+  it("says nothing for a single-field night", () => {
+    expect(panelLevellingNote(trend())).toBeNull();
+    expect(panelLevellingNote(trend({ n_panels_levelled: 0 }))).toBeNull();
+  });
+
+  it("says nothing when an older backend omits the count", () => {
+    const t = trend();
+    delete (t as { n_panels_levelled?: number }).n_panels_levelled;
+    expect(panelLevellingNote(t)).toBeNull();
+  });
+
+  it("explains the levelling on a mosaic, naming the panel count", () => {
+    const s = panelLevellingNote(trend({ n_panels_levelled: 3 }));
+    expect(s).toContain("3 panels");
+    expect(s).toContain("hazier night");
   });
 });

@@ -372,6 +372,10 @@ class TransparencyTrendOut(BaseModel):
     start_utc: str | None = None
     end_utc: str | None = None
     degraded_after_utc: str | None = None
+    # Mosaic panels levelled out of the series before trending (0 = a single
+    # field, i.e. the raw scores). A panel's star field is not the weather —
+    # see ``seestack.session_recap._level_panels``.
+    n_panels_levelled: int = 0
 
 
 class HealthNoteOut(BaseModel):

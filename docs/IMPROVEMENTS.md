@@ -43,7 +43,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-ezix3s` — run in progress.** Working the standing
+> "sweep the engine for a POSITION-DEPENDENT metric compared across a whole target" QA lead. Shipped
+> **v0.304.1** (write-up at the top of "Bugs"): the fourth and fifth sites of that class, both reproduced
+> first — a clear mosaic getting a **"Hazy night"** badge (ratio 0.50) and a **"clouds rolled in"** verdict
+> (early 10025 vs late 4025) under a perfectly steady sky.
+
+
+_(nothing else claimed — claim an item here with your branch name)_
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-fj2p70` — run finished, all three claims
 > released.** Shipped all three: the **recipe-drift stamp** (**v0.302.1**, write-up under "Autonomy &
@@ -154,6 +161,52 @@ _(none — claim an item here with your branch name)_
 ---
 
 ## Bugs (fix these first)
+
+- **✅ SHIPPED (Builder, v0.304.1, branch `claude/compassionate-galileo-ezix3s`) — ~~a perfectly clear **mosaic**
+  night is told it was shot through cloud, twice: a "Hazy night" badge on every run, and "clouds rolled in" on
+  the Clouds & haze card.~~** Found by working the standing QA lead "sweep the rest of the engine for *compares a
+  POSITION-DEPENDENT metric across a whole target*" (filed under Image quality after three fixes of the same bug);
+  **reproduced before fixing**, so this is the fourth and fifth site of that class.
+
+  **Reproduced.** Three mosaic panels 1° apart, six subs each, one steady sky, `transparency_score` differing only
+  by the panels' star fields (10000 / 5000 / 4000 — well inside the 2.23× cross-panel gain error measured for
+  v0.271.0):
+  - `_compute_transparency_ratio` → **0.5008**. That is below the `HAZY_RATIO = 0.6` threshold, so History,
+    Gallery and Compare all stamp the run **"Hazy night"** with a tooltip claiming "median transparency ~50%
+    below this target's clearest nights" and advising the user to reject their haziest subs. The baseline is
+    `p90(all frames)`, which on a mosaic is set by whichever panel has the richest star field; every other panel
+    then reads as haze.
+  - `transparency_trend` → verdict **`degraded`**, early 10025 vs late 4025, with a fabricated
+    `degraded_after_utc`. A Seestar shoots a mosaic panel by panel, so the night's series is a staircase of star
+    fields; read as a time series, "we moved to a sparser panel" becomes "clouds rolled in".
+
+  **Fix (both sites, through the shared `pointing_groups` gate so all five sites of this class now mean exactly
+  the same thing by "panel").**
+  - `stacker._panel_transparency_ratios` compares each panel's run median against **its own** p90 baseline and
+    combines the panels' ratios by median. It returns `[]` — "use the one target-wide baseline, exactly as
+    before" — unless the pointings split soundly *and* ≥2 panels each carry the same sample the function has
+    always demanded on both sides (5 baseline / 3 run frames).
+  - `session_recap._level_panels` rescales each substantial panel to the series' own overall median before
+    trending, so the between-panel step goes and the *within*-panel variation — the actual sky — stays. A sub in
+    no substantial panel keeps its raw score rather than being rescaled by a yardstick from another patch of sky.
+    New `n_panels_levelled` on the trend (0 = untouched) surfaces as one plain-language line on the card, so the
+    number a beginner sees is never silently not the raw one.
+
+  **The one honest limitation, deliberately accepted:** on a strictly *sequential* single-pass mosaic, haze that
+  rolls in exactly at a panel boundary is now levelled away with the panel step — the two are genuinely
+  indistinguishable from within one session. It costs nothing on the common case because a Seestar **revisits**
+  its panels, so real haze shows up inside every panel and survives levelling (pinned by
+  `test_haze_rolling_in_across_a_mosaic_still_reads_degraded`). The disambiguator, if it ever matters, is each
+  panel's own *history* — filed as an idea under "Image quality".
+
+  **Upgrade-safe (§9):** pure read-only aggregation, no config/schema/on-disk change; the API only *gains*
+  `n_panels_levelled` (defaulted, and optional in the TS type so an older backend reads 0); a single-field target,
+  an unsolved target and a too-tightly-packed mosaic are all bit-for-bit unchanged.
+
+  **Tests (+9 in `tests/test_transparency_mosaic.py`, 4 fail before / pass after; +3 vitest):** the clear mosaic
+  is not called hazy and not called degraded; a genuinely hazy mosaic run still reads hazy; one hazy panel of
+  three still drags the number below clear; haze rolling in across revisited panels still reads degraded; and the
+  three no-split fallbacks (single field, unsolved, raw points) are pinned unchanged.
 
 - **✅ SHIPPED (Builder, v0.300.2, branch `claude/compassionate-galileo-4txqj1`) — ~~`Target.test.tsx`'s note-board
   test asserts the fold *synchronously* off the first note's arrival, so it races `NoticeBoard`'s
@@ -16327,6 +16380,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   endpoints, and any "best frame" / reference-frame picker that ranks on star count. **Note the asymmetry
   that makes this quietly harmful:** several of these factors *clip at 1.0*, so a wrongly-compared panel can
   only ever be penalised, never compensated — the loss is one-way and silent.
+  **(Builder 2026-08-30 — this lead paid out: two of the "candidate sites worth checking first" were real and
+  are fixed in v0.304.1, both reproduced before fixing — the per-run `transparency_ratio` behind the "Hazy
+  night" badge, and `session_recap.transparency_trend` behind the "Clouds & haze" card. See the entry at the
+  top of "Bugs". The lead stays open: the auto-grade reconsider/reaccept path, `stackhealth`'s trend and drift
+  verdicts, and the session-quality drift endpoint are still unswept. Method note that made the two easy — grep
+  for `transparency_score` / `star_count` / `sky_adu_median` used outside a `pointing_groups` call, then ask
+  what claim the number is turned into: both of these turn a *pointing* difference into a **weather** claim,
+  which is the tell.)**
+
+- **NEW IDEA (Builder 2026-08-30, the one limitation deliberately accepted by the v0.304.1 panel-levelling fix)
+  — tell "this panel is sparse" from "this panel was hazy" using the panel's own *history*.** *(Pillar: image
+  quality / trust — PRIORITY 4; size M; do NOT start it without deciding the cross-night comparability question
+  below.)* `session_recap._level_panels` levels a mosaic's panels against each other **within one session**,
+  which is the only signal available there — so a sky that closes in exactly at a panel boundary of a strictly
+  sequential single-pass mosaic is levelled away with the panel step. It costs nothing on the common case (a
+  Seestar revisits its panels, so real haze shows up *inside* each panel and survives), which is why the fix
+  shipped as-is. The disambiguator is each panel's **own median over the target's whole history**: a panel
+  scoring well below what that same panel usually scores was hazy, not sparse. `_compute_transparency_ratio`
+  already does exactly this per panel, so the machinery exists. **The question to settle first:** the raw
+  `transparency_score` is not comparable across gain/exposure changes, and a target's history can span a
+  settings change — so a historical baseline needs either a gain/exposure guard or a fallback to today's
+  within-session levelling. Fail back to the current behaviour whenever it can't be established; never guess.
+
+- **NEW IDEA / SIXTH SITE OF THE SAME CLASS (Builder 2026-08-30, found while fixing v0.304.1 and deliberately
+  left for its own commit) — "reject the worst N% by transparency / star count" ranks a mosaic target-wide, so
+  it sets aside the *sparsest panel* instead of the haziest subs.** *(Pillar: image quality / trust — PRIORITY 4;
+  size S; traced and read, reproduce before fixing as the other five were.)* `webapp/routers/frames.py`
+  `reject_worst` sorts every accepted frame on one metric and rejects the bottom `fraction`; on a mosaic the
+  bottom of the list is whichever panel frames the emptiest patch of sky. **Recommendation:** rank per panel via
+  the shared `pointing_groups` gate, falling back to today's exact global sort when there is no sound split, and
+  say so in the result note. FWHM / eccentricity are NOT affected — those are properties of the night.
 
 - **IDEA (Builder 2026-08-26, left open by the v0.271.0 per-panel photometric fix) — match a hazy mosaic
   panel's *brightness* to its neighbours using the panel OVERLAPS, not `transparency_score`.**

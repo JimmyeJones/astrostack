@@ -603,6 +603,10 @@ export interface TransparencyTrend {
   start_utc: string | null;
   end_utc: string | null;
   degraded_after_utc: string | null;
+  // Mosaic panels levelled out of the line before trending (0 = a single field,
+  // i.e. the raw scores). A panel's star field is not the weather. Optional so
+  // an older backend simply reads as 0.
+  n_panels_levelled?: number;
 }
 
 export interface LibrarySessionRecap {
