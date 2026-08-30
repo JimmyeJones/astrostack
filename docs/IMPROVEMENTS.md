@@ -9375,23 +9375,65 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-30, spotted while shipping the v0.305.0 Adjust trapdoor fix — the one thing that
-  fix deliberately left alone) — on a *processed* run, the Adjust panel shows you a picture that is not the
-  one either button will save.** *(Pillar: editor/trust — PRIORITY 1–3; size S; frontend only.)* Opening
-  Adjust swaps the card's `<img>` from the stored preview to the live `…/render` of the **linear** FITS at
-  the sliders. On an ordinary run that is exactly the point: what you see is what "Save as preview" writes.
-  On a "Process target" run it is now misleading in a new way — the panel offers **"Keep the processed
-  picture"**, whose result is the *recipe* render, i.e. the picture that was on screen a moment before you
-  opened the panel and is not on screen now. v0.305.0 papers over the worst of it by closing the panel on a
-  successful keep-save (so you immediately see what you kept), and the warning text says which is which, but
-  the honest fix is for the *preview* to follow the button: keep showing the stored bytes on a processed run
-  until the user actually touches a slider (`touched.current`, which the panel already tracks for the
-  suggestion), and only then switch to the live render. **Cautions:** don't break the North-up preview — the
-  live render is currently the only way to *see* the rotation before saving it, so if the stored bytes are
-  shown, the rotation preview needs the same `north_up` treatment the share path uses
-  (`orient_preview_north_up` on the stored PNG, which is exactly what that helper is for). Grep first: the
-  card already has three "which picture is on screen?" predicates (`showingStored`, `imageIsNorthUp`,
-  `geometryUnplaceable`) — this belongs with them, not beside them.
+- **✅ SHIPPED (Builder, v0.306.2, branch `claude/compassionate-galileo-aj7ysy`) — ~~on a *processed* run, the
+  Adjust panel shows you a picture that is not the one either button will save.~~** Fixed as the entry asked,
+  plus the one piece of server it turned out to need. *(Pillar: editor/trust — PRIORITY 1–3.)*
+
+  **What shipped.** On a run whose picture is a "Process target" Auto edit, opening Adjust now leaves the
+  **stored** picture on screen — the one "Keep the processed picture" writes — and only switches to the live
+  render of the linear master once a slider actually moves. The predicate is the panel's own existing "has
+  anyone touched a slider?" fact: `touched` stayed a ref (so the suggestion effect still doesn't re-run on
+  it) and gained a state mirror, because which picture is shown is now a *render*-time question. An ordinary
+  linear run is untouched — there the sliders **are** what Save writes, so the picture follows them from the
+  moment the panel opens.
+
+  **The North-up caution, honestly answered.** The live render was the only way to *see* the turn before
+  saving it, so hiding it would have cost the one control anybody wants on a finished picture. Instead
+  `GET …/stack-runs/{id}/preview` learned `north_up` (default false): it rotates the **saved bytes** on the
+  way out through the same `orient_preview_north_up` the share/download path uses, with the run's recorded
+  `already_deg` so a preview a past save already turned isn't turned twice. Nothing on disk changes, and the
+  bare URL every other surface embeds is byte-for-byte what it always was — a test asserts both. It is
+  deliberately **not** a flag on `stackArtifactUrl`: that helper's test pins "the stored PNG/FITS/TIFF must
+  stay WCS-aligned, so they never take north_up", which is still true of every surface that embeds them, so
+  the one caller that wants to preview a turn asks through its own `api.stackPreviewNorthUpUrl`.
+
+  **The three "which picture is on screen?" predicates moved with it**, as the entry insisted, rather than a
+  fourth being bolted on beside them: `showingStored` is now stated (`!adjustOpen || holdProcessed`) instead
+  of inferred from URL equality, `imageIsNorthUp` grew the third way a picture can be turned, and the
+  rejection tint — the one overlay measured against the stored bytes *as they sit on disk* — steps aside for
+  an on-the-fly turn with its own line saying so, exactly as it already did for the live render.
+
+  **One coherence fix the trace implied:** either save can change whether the run's picture is still a
+  processed one, and the panel's warning (and now its picture) read that flag from a `staleTime: Infinity`
+  query. It is invalidated on save, so a plain save stops leaving a warning about a picture it just replaced.
+
+  **Upgrade-safe (§9):** one optional query parameter defaulting to the old behaviour on an existing
+  endpoint; no config, schema, on-disk, default or API-shape change, and an older client never sends it.
+
+  **Tests (+6; 3 fail before / pass after):** `frontend/src/routes/History.test.tsx` — the processed run
+  holds its picture until a slider moves and then follows the render; the North-up tick previews on
+  `/preview?north_up=true` and never on `/render`; and the linear run still renders live from the master
+  with nothing touched. `tests/webapp/test_north_up.py` — the stored preview served North-up is larger and
+  the file on disk is unmoved (and the bare URL still returns exactly those bytes); a run with no WCS serves
+  the saved bytes untouched; and the FITS still refuses the turn.
+
+  Original spec, for the record:
+
+    *(Pillar: editor/trust — PRIORITY 1–3; size S; frontend only.)* Opening
+    Adjust swaps the card's `<img>` from the stored preview to the live `…/render` of the **linear** FITS at
+    the sliders. On an ordinary run that is exactly the point: what you see is what "Save as preview" writes.
+    On a "Process target" run it is now misleading in a new way — the panel offers **"Keep the processed
+    picture"**, whose result is the *recipe* render, i.e. the picture that was on screen a moment before you
+    opened the panel and is not on screen now. v0.305.0 papers over the worst of it by closing the panel on a
+    successful keep-save (so you immediately see what you kept), and the warning text says which is which, but
+    the honest fix is for the *preview* to follow the button: keep showing the stored bytes on a processed run
+    until the user actually touches a slider (`touched.current`, which the panel already tracks for the
+    suggestion), and only then switch to the live render. **Cautions:** don't break the North-up preview — the
+    live render is currently the only way to *see* the rotation before saving it, so if the stored bytes are
+    shown, the rotation preview needs the same `north_up` treatment the share path uses
+    (`orient_preview_north_up` on the stored PNG, which is exactly what that helper is for). Grep first: the
+    card already has three "which picture is on screen?" predicates (`showingStored`, `imageIsNorthUp`,
+    `geometryUnplaceable`) — this belongs with them, not beside them.
 
 
 - **✅ SHIPPED (Builder, v0.305.0, branch `claude/compassionate-galileo-1m28nv`) — ~~History → "Adjust" → Save

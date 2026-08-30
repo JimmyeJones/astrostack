@@ -828,7 +828,12 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const defBlack = typeof sugBlack === "number" ? sugBlack : DEFAULT_BLACK;
   // Apply the suggestion the first time it arrives, but only while the user
   // hasn't touched the sliders yet (so it never yanks a value out from under them).
+  // The ref answers that question inside the effect without re-running it; the
+  // state mirrors it for *rendering*, because which picture the panel shows on a
+  // processed run turns on the same "has anyone moved a slider?" fact.
   const touched = useRef(false);
+  const [sliderTouched, setSliderTouched] = useState(false);
+  const markTouched = (v: boolean) => { touched.current = v; setSliderTouched(v); };
   useEffect(() => {
     if (!touched.current && (typeof sugStretch === "number" || typeof sugBlack === "number")) {
       if (typeof sugStretch === "number") setStretch(sugStretch);
@@ -846,6 +851,10 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
       qc.invalidateQueries({ queryKey: ["runs", safe] });
       qc.invalidateQueries({ queryKey: ["sky"] });
       qc.invalidateQueries({ queryKey: ["gallery"] });
+      // Either save can change whether this run's picture is still a processed
+      // one, and the panel's warning — and which picture it shows — read that
+      // flag. It's cached forever, so it has to be told.
+      qc.invalidateQueries({ queryKey: ["render-suggestion", safe, run.id] });
       if (keepProcessed) {
         // The saved bytes are the processed picture, which the live slider
         // render on screen is not — so step out of the way and show it.
@@ -949,22 +958,41 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   // While the first suggestion fetch is still in flight, keep showing the STF
   // preview thumbnail rather than briefly rendering at the fixed defaults and
   // then jumping to the anchored sliders.
-  const imgSrc = adjust && run.has_fits && !suggestion.isLoading
+  const adjustOpen = adjust && run.has_fits && !suggestion.isLoading;
+  // …and on a *processed* run, keep showing it until the user actually moves a
+  // slider. The panel's two buttons save two different pictures there, and only
+  // one of them is a slider render: someone who opens Adjust purely to turn the
+  // picture (the one control anybody wants on a finished one) was being shown a
+  // flat stretch of the raw stack, which is exactly what "Keep the processed
+  // picture" does *not* write. Show the stored bytes — the picture that button
+  // keeps — and switch to the live render the moment a slider says otherwise.
+  const holdProcessed = adjustOpen && processedPreview && !sliderTouched;
+  // The one thing the stored bytes can't show by themselves is the North-up
+  // turn, so ask the server to rotate them on the way out (nothing on disk
+  // changes) rather than falling back to a render of the linear master.
+  const storedNorthUp = holdProcessed && applyNorthUp;
+  const imgSrc = holdProcessed
+    ? (storedNorthUp ? api.stackPreviewNorthUpUrl(safe, run.id)
+       + (cacheBust ? `&v=${cacheBust}` : "") : previewSrc)
+    : adjustOpen
     ? api.stackRenderUrl(safe, run.id, dStretch, dBlack, applyNorthUp)
     : previewSrc;
-  // Is the picture *on screen* North-up? Two ways it can be, and the toggle only
-  // knows one of them: the live adjustable render is rotating it now, or an
-  // earlier save baked the rotation into the stored preview — which a fresh page
-  // load has no memory of (`northUp` starts false). The pins and scale bar are
-  // measured on the un-rotated FITS grid, so both cases must suppress them.
-  const savedNorthUp = !!run.preview_north_up_deg;
-  const imageIsNorthUp = imgSrc === previewSrc ? savedNorthUp : applyNorthUp;
   // The *stored* preview can also be a crop of the canvas (the one-click
   // "Process target" auto-edit trims a mosaic's ragged border), which the pins
   // and bar are not measured on. Unlike a rotation this composes exactly, so
   // shift them into the trim rather than hiding them — and only while the stored
   // bytes are what's on screen; the live Adjust render is the full canvas.
-  const showingStored = imgSrc === previewSrc;
+  const showingStored = !adjustOpen || holdProcessed;
+  // Is the picture *on screen* North-up? Three ways it can be, and the toggle
+  // only knows one of them: the live adjustable render is rotating it now, this
+  // request is rotating the stored bytes, or an earlier save baked the rotation
+  // into the stored preview — which a fresh page load has no memory of
+  // (`northUp` starts false). The pins and scale bar are measured on the
+  // un-rotated FITS grid, so every case must suppress them.
+  const savedNorthUp = !!run.preview_north_up_deg;
+  const imageIsNorthUp = showingStored
+    ? savedNorthUp || storedNorthUp
+    : applyNorthUp;
   const view = croppedAnnotationView(
     showingStored ? run.preview_crop : null,
     objects, scaleBar,
@@ -976,6 +1004,9 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   // placed on it honestly, so hide the pins/bar like a North-up save does.
   const geometryUnplaceable = showingStored && !!run.preview_geometry_unknown;
   const cantPlaceMarks = imageIsNorthUp || geometryUnplaceable;
+  // The rejection tint is the one overlay measured against the stored bytes *as
+  // they sit on disk*, so an on-the-fly turn moves the picture out from under it.
+  const overlayPlaceable = showingStored && !storedNorthUp;
 
   return (
     <Card withBorder padding="md" radius="md">
@@ -994,11 +1025,13 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             // rotation/unreconcilable cases hide it with everything else.
             directions={annotations.data?.directions ?? null}
             showCompass={scale && !cantPlaceMarks}
-            // The server sizes the tint to the *stored* preview, so it only lands
-            // true on those bytes — the live Adjust render is a different picture
-            // (full canvas, possibly rotated), so the overlay steps aside there
-            // rather than landing somewhere the trail isn't.
-            overlaySrc={showRemoved && hasRejectionMap && showingStored
+            // The server sizes the tint to the *stored* preview — including any
+            // North-up turn a past save baked into it — so it only lands true on
+            // those bytes as they sit on disk. The live Adjust render is a
+            // different picture (full canvas, possibly rotated), and so is the
+            // stored preview turned on the fly by this request, so the overlay
+            // steps aside in both rather than landing somewhere the trail isn't.
+            overlaySrc={showRemoved && hasRejectionMap && overlayPlaceable
               ? api.stackRejectionOverlayUrl(safe, run.id)
               : null}
             onClick={() => setLight(true)}
@@ -1024,9 +1057,11 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
       ) : null}
 
       {showRemoved && hasRejectionMap ? (
-        <Text size="xs" c={showingStored ? "cyan.4" : "dimmed"} mt={6}>
-          {showingStored
+        <Text size="xs" c={overlayPlaceable ? "cyan.4" : "dimmed"} mt={6}>
+          {overlayPlaceable
             ? removedOverlayCaption(removedInfo.data?.rejection)
+            : storedNorthUp
+            ? "Turn off “Rotate so North is up” to see what stacking removed — the marks are measured on the un-rotated picture."
             : "Close Adjust to see what stacking removed — the marks are measured on the saved picture, not on the live render."}
         </Text>
       ) : null}
@@ -1103,7 +1138,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             </Group>
             <Slider
               min={0} max={1} step={0.01} value={stretch}
-              onChange={(v) => { touched.current = true; setStretch(v); }}
+              onChange={(v) => { markTouched(true); setStretch(v); }}
               label={(v) => v.toFixed(2)} size="sm"
             />
           </div>
@@ -1114,7 +1149,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             </Group>
             <Slider
               min={0} max={1} step={0.01} value={black}
-              onChange={(v) => { touched.current = true; setBlack(v); }}
+              onChange={(v) => { markTouched(true); setBlack(v); }}
               label={(v) => v.toFixed(2)} size="sm"
             />
           </div>
@@ -1165,7 +1200,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             </Button>
             <Button
               size="xs" variant="subtle"
-              onClick={() => { touched.current = false; setStretch(defStretch); setBlack(defBlack); }}
+              onClick={() => { markTouched(false); setStretch(defStretch); setBlack(defBlack); }}
             >
               Reset
             </Button>
