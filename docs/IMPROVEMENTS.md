@@ -174,13 +174,32 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > **The lead is now closed:** the rest of its candidate list — `stackhealth`, `_fwhm_quality_drift`,
 > `best_frame` — was swept and came back clean, recorded on the entry so nobody re-treads it.
 
-> **Builder 2026-08-30, branch `claude/compassionate-galileo-6jgh4j` — run in progress.**
-> Claimed **by site**: "put the overlay where people actually *look* at a picture", slice **(a)** (under
-> "Features that serve real workflows") — `components/ImageLightbox.tsx` (a new `overlaySrc`/`overlayNote`),
-> `components/target/LatestPictureCard.tsx` and `routes/Gallery.tsx` (the toggle + the gate), plus
-> `GalleryItem.has_rejection_map` in `webapp/routers/gallery.py`. The bug queue was checked first and is still
-> dry: every entry under "Bugs (fix these first)" is ✅ shipped, a ⚪ audit non-finding, or explicitly stood
-> down pending owner data.
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-6jgh4j` — run finished, claim released.**
+> **Shipped two, the second found by measuring the first.**
+> **v0.312.0** (under "Features that serve real workflows") — the filed slice (a): the "what stacking removed"
+> tint on the full-screen viewer, on the Gallery and the Target hero. The entry's "ship the stand-down gate
+> before the feature" was checked first and turned out **not to apply** — History withdraws the tint because
+> opening **Adjust** swaps in a live render of the linear master, and neither of these surfaces has such a
+> state — which is what kept it small. The one real piece of work was geometric, and it is a CSS trap worth
+> knowing: wrapping the picture and the overlay in a shared positioned box makes the picture's
+> `max-height: 100%` resolve against an auto-height ancestor, i.e. no cap, and a tall picture overflows the
+> viewer. The overlay is a **sibling** instead, `inset: 0` + `margin: auto`, sharing one fit object and one
+> transform string with the picture.
+> **v0.312.1** (top of "Bugs") — and then I measured what I had just amplified, and it was **wrong**: the tint
+> normalised its alpha against the map's *non-empty* pixels, which stops being the signal as the sub count
+> rises. On real 64-sub engine output it washed **94 %** of the frame cyan while the caption called those marks
+> satellite trails. Fixed by subtracting the map's own uniform noise floor, inert by construction on every
+> sparse map and fenced off where the resize didn't average.
+> **Two things stood down with numbers rather than left open:** the sibling **"N spots instead of a
+> percentage"** idea (no minimum blob area separates marks from speckle across the sub counts this app is for —
+> the summed map has thrown that information away), and the **Compare North-up** entry, whose argument against
+> "turn each by its own angle" is recorded there as backwards, with the geometric cost that is the real
+> objection and the solved-ness gap that makes its preferred shape harder than it reads.
+> **One QA lead filed**, generalised from the bug: sweep every statistic that normalises against its own
+> non-empty subset, because that subset stops being the signal as the library grows — the same class as the
+> position-dependent-metric sites, along the *how much data went in* axis instead.
+> The bug queue was checked first and was dry when the run started: every entry under "Bugs (fix these first)"
+> was ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
 
 _(nothing else claimed — claim an item here with your branch name)_
 
@@ -9763,6 +9782,47 @@ to **Shipped**.)_
     anywhere: the saved orientation is what the owner chose, and the preference is shared across surfaces already
     (one `localStorage` key), so turning it on in the Gallery will correctly turn it on the Target page too.
 
+- **⭐ QA LEAD (Builder 2026-08-30, generalised from the v0.312.1 tint bug) — sweep every statistic that
+  normalises against its own *non-empty* or *selected* subset, because that subset stops being the signal as the
+  library grows.** *(Pillar: trust + image quality — PRIORITY 3–4. Size: M per sweep. This is the same bug class
+  as the four position-dependent-metric sites (v0.270.2 / v0.271.0 / v0.272.1 / v0.304.1) — a statistic that is
+  right on the input the author had and wrong on the owner's — but along a **different axis**: not *where* on the
+  canvas, but *how much data went in*.)*
+
+  **The shape, from the one confirmed instance.** `rejection_overlay_png` normalised its alpha by the 90th
+  percentile of the map's **non-empty** pixels. On a 16-sub stack the non-empty set is mostly satellite trail, so
+  the scale is the trail and the picture reads correctly. On a 64-sub stack the non-empty set is 31 % of the
+  canvas and is mostly *noise floor*, so the scale became the floor and the tint washed 94 % of the frame. The
+  author's mental model — "the pixels that were touched are the interesting ones" — is a **monotone function of
+  the sub count**, and it inverted somewhere between 16 and 64 subs. Nothing in the code said so, and the
+  docstring asserted the opposite.
+
+  **Why this axis is worth its own sweep.** Every synthetic fixture in this repo stacks a handful of frames;
+  the owner stacks 500–800. Any statistic whose meaning depends on *how much of the input is non-trivial* is
+  therefore untested in the regime it actually runs in. Candidates to check, each by measuring the statistic at
+  16 / 64 / 300 subs on the same scene rather than by reading the code:
+  `np.percentile(x[mask], …)` anywhere the mask is data-dependent (grep `[hit]`, `[mask]`, `[sel]`, `> 0]`);
+  the auto-grade and auto-edit strength pickers that read a fraction of "affected" pixels; `stackhealth`'s
+  verdicts; the star-mask coverage fraction; and anything keyed off `REJFRAC` (which is *per sample* and so
+  stays small, while the map's coverage does not — the two are routinely conflated).
+  **Method that worked:** stack the same scene at several sub counts, print the statistic, and look for
+  monotonicity. It took one afternoon and found a wrong-picture bug on the first candidate.
+
+- **NEW IDEA (Builder 2026-08-30, the one case the v0.312.1 tint fix deliberately fenced off rather than
+  solved) — a many-sub stack whose canvas is no bigger than its preview still gets the cyan wash.**
+  *(Pillar: trust — PRIORITY 3; size S–M; **low urgency, and check the case is reachable before building**.)*
+  The fix subtracts the map's own uniform noise floor only where the resize *averaged*, because at 1:1 a trail
+  pixel and a noise-tail pixel are both "one sample lost here" and nothing pointwise separates them — measured,
+  a floor there zeroed every count-1 pixel of the planted trail. So a dense map rendered 1:1 is deliberately
+  byte-identical to the old, washed behaviour. **That needs a canvas no bigger than the stored preview (capped
+  at 1024 px on its long edge), which for a Seestar stack means a small crop** — so it may not be reachable at
+  all, and the *first* thing to do is find a real run where it fires. **If it is reachable, the honest fix is a
+  genuine local density**: area-average the counts over a small neighbourhood before thresholding, instead of
+  relying on the output resize to do it. **Care:** that would dim a lone hot pixel, which
+  `test_pixels_that_lost_nothing_stay_fully_transparent` and `test_a_lone_hot_pixel_does_not_hide_the_trail`
+  both pin — so it needs a shape that keeps a single high-count pixel opaque while spreading a count-1
+  neighbourhood, not a plain box filter.
+
 - **NEW IDEA (Builder 2026-08-30, the half v0.309.0 checked and deliberately did NOT ship) — the Compare view
   is not a lightbox, and North-up there needs a decision, not a copy-paste.** *(Pillar: enjoy + trust —
   PRIORITY 3; size S; read-only.)* The v0.308.0 follow-on assumed Compare "uses the same lightbox"; it does
@@ -9777,6 +9837,27 @@ to **Shipped**.)_
   meaningful but mis-orients B. Do **not** ship (c) "turn each by its own angle" — that is the one that looks
   fine in a screenshot and is wrong in use. The server half is already built (`?north_up=true` on the preview),
   so this is a frontend decision plus two fetches.
+
+  **⚠️ Builder 2026-08-30 (branch `claude/compassionate-galileo-6jgh4j`) — sized it while shipping the same
+  control on the Gallery/Target lightboxes (v0.312.0), and stood down. Read this before picking it up; the
+  argument against (c) above is not as settled as it reads.**
+  **(1) The stated reason to reject (c) is backwards.** "Turning each by its own angle slides two differently-
+  oriented pictures against each other" — but two runs carrying *different* corrections are differently
+  oriented **before** the turn, and turning each by its own remainder is precisely what makes them agree.
+  Post-turn both are North-up, i.e. in the *same* orientation as each other, which is better under a wipe than
+  the untouched state, not worse. **(2) The real cost of (c) is geometric, not angular, and the entry doesn't
+  name it:** the turn is an `expand=True` rotate, so the output canvas grows by an angle-dependent factor; two
+  pictures turned by different angles come back with different aspect ratios and, under `objectFit: contain` in
+  one fixed box, at different *scales*. That is the mismatch a wipe would show. So (c) is wrong for a reason
+  worth measuring (how much does the scale differ for a realistic angle spread?) rather than for the reason
+  given. **(3) Shape (a) is harder than "checkable from the two `…/annotations` responses" suggests:** that
+  field is the **remainder** and is `null` both for a picture that is already North-up *and* for a run with no
+  usable WCS. Reading `null` as 0° silently offers the turn on an unsolved run and then misaligns the pair —
+  exactly the failure (a) exists to avoid. A solved-ness signal has to come from somewhere else on the response
+  (`directions`/`scale_bar` are null without a WCS) before (a) is honest.
+  **Nothing here is blocking** — it is a genuinely shippable S once (3) is wired — it just isn't the
+  copy-paste the surrounding entries make it look like, and the next agent should not take the (c) verdict on
+  trust.
 
 - **🟡 SWEPT ONCE, ONE UNTRUTH FIXED (Builder, v0.309.1, branch `claude/compassionate-galileo-x2nj2o`); the
   colour-space axis is still open below — QA LEAD (Builder 2026-08-30, generalised from the v0.308.1 copy fix)
