@@ -44,6 +44,11 @@ def test_stats_rolls_up_library(client, solved_library):
     assert 0.0 <= b["acceptance_rate"] <= 1.0
     assert len(b["recent_stacks"]) == 1
     assert b["recent_stacks"][0]["safe"] == safe
+    # The run's own canvas travels, so the strip's download menu can say honestly
+    # what its "Full-res PNG" contains — that render caps its long edge, so on a
+    # canvas past the cap it must not claim native size (see fullres.ts).
+    assert b["recent_stacks"][0]["canvas_w"] == 480
+    assert b["recent_stacks"][0]["canvas_h"] == 320
     assert "integration_hours" in b
 
 
