@@ -1144,6 +1144,12 @@ export interface StackAnnotations {
   // Where North/East point, or null when the run has no usable orientation.
   // Absent on an older backend, which reads as "no rose" and shows nothing.
   directions?: SkyDirections | null;
+  // How far a `?north_up=true` render would actually turn this picture, or null
+  // when it wouldn't turn it at all (no usable WCS, or a correction below the
+  // renderer's threshold). A surface offers the "North up" *view* only when this
+  // is a number — otherwise the toggle would do visibly nothing. Absent on an
+  // older backend, which reads the same way: no toggle.
+  north_up_deg?: number | null;
 }
 
 /** "Did I frame it well?" — the post-stack verdict on how a finished picture

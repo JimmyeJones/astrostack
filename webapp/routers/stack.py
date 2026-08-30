@@ -1162,14 +1162,28 @@ async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dic
     def work() -> dict[str, Any]:
         from seestack.annotate import objects_in_field
         from seestack.io.wcs_io import celestial_wcs_from_fits
+        from seestack.render.thumbnail import applied_north_up_deg
         from seestack.skymarks import sky_directions
 
         wcs, width, height = celestial_wcs_from_fits(fits_path) if fits_path else (None, 0, 0)
         objs = objects_in_field(wcs, width, height)
         directions = sky_directions(wcs, width, height)
+        # "How far would we have to turn this to put North up?" — 0.0 when the run
+        # has no usable WCS or the correction is below the renderer's threshold,
+        # i.e. exactly when `…/preview?north_up=true` would hand back the stored
+        # bytes untouched. Reported as null in that case so a surface can decide
+        # whether offering the turn is worth a control at all, and taken from
+        # `applied_north_up_deg` — the one helper that already owns the
+        # threshold-and-snap rules — so this can never disagree with what a
+        # rotated render actually does. That helper re-reads the header rather
+        # than taking the `wcs` above; a second header read is cheap, and
+        # re-deriving the threshold here to save it is exactly the drift the
+        # helper exists to prevent.
+        north_up_deg = applied_north_up_deg(fits_path) if fits_path else 0.0
         return {
             "width": width,
             "height": height,
+            "north_up_deg": north_up_deg or None,
             # "Which way is up?" — where North and East point on this run's own
             # pixel grid, so the in-app overlay can draw the same rose the shared
             # JPEG bakes (v0.284.0) instead of the file and the screen disagreeing.

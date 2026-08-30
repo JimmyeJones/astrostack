@@ -151,6 +151,70 @@ describe("LifeListView", () => {
     ).toBeInTheDocument());
   });
 
+  // The page rendered every catalog tile eagerly, which made it the tallest
+  // screen in the app by nearly 3× (14,584 px on a 420 px phone) — and all of
+  // that height was objects the owner hasn't shot yet, scrolled past to reach
+  // the ones they have. Nothing may be removed, so the tail collapses behind a
+  // count instead.
+  const many = (n: number, captured: boolean) =>
+    Array.from({ length: n }, (_, i) =>
+      obj({ catalog_id: `M${i + 1}`, name: `Object ${i + 1}`, captured,
+            safe_name: captured ? `M_${i + 1}` : null }));
+
+  it("collapses the not-yet-shot tail behind a count, and opens it on request", async () => {
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list({
+      messier: many(30, false), other: [],
+      counts: { messier_captured: 0, messier_total: 30, other_captured: 0, other_total: 0 },
+    }));
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("M1 · Object 1")).toBeInTheDocument());
+    // Only the first dozen are drawn...
+    expect(screen.getByText("M12 · Object 12")).toBeInTheDocument();
+    expect(screen.queryByText("M13 · Object 13")).not.toBeInTheDocument();
+    expect(screen.queryByText("M30 · Object 30")).not.toBeInTheDocument();
+
+    // ...and the rest are one tap away, never gone.
+    fireEvent.click(screen.getByText("Show all 30 still to shoot"));
+    expect(screen.getByText("M13 · Object 13")).toBeInTheDocument();
+    expect(screen.getByText("M30 · Object 30")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Show fewer"));
+    expect(screen.queryByText("M30 · Object 30")).not.toBeInTheDocument();
+  });
+
+  it("puts what you've already got above what's still ahead of you", async () => {
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list({
+      messier: [
+        obj({ catalog_id: "M1", name: "Crab" }),
+        ...many(3, true).map((o, i) => obj({ ...o, catalog_id: `M${i + 40}`,
+                                            name: `Got ${i + 1}` })),
+      ],
+      other: [],
+      counts: { messier_captured: 3, messier_total: 110, other_captured: 0, other_total: 0 },
+    }));
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Got it · 3")).toBeInTheDocument());
+    expect(screen.getByText("Still to shoot · 1")).toBeInTheDocument();
+    const titles = screen.getAllByText(/^M\d+ · (Crab|Got \d)$/).map((e) => e.textContent);
+    expect(titles).toEqual(["M40 · Got 1", "M41 · Got 2", "M42 · Got 3", "M1 · Crab"]);
+  });
+
+  it("never shortens the list the user explicitly asked for", async () => {
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list({
+      messier: many(30, false), other: [],
+      counts: { messier_captured: 0, messier_total: 30, other_captured: 0, other_total: 0 },
+    }));
+    renderList();
+    await waitFor(() => expect(screen.getByText("M1 · Object 1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("Still to shoot"));
+
+    expect(screen.getByText("M30 · Object 30")).toBeInTheDocument();
+    expect(screen.queryByText(/Show all 30/)).not.toBeInTheDocument();
+  });
+
   it("shows a fetch failure instead of spinning forever", async () => {
     vi.spyOn(client.api, "getLifeList").mockRejectedValue(new Error("boom"));
     renderList();

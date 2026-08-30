@@ -43,24 +43,61 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-> **Builder 2026-08-30, branch `claude/compassionate-galileo-q6uois` — CLAIMED, in flight. Two items, named
-> by site so a concurrent Builder can see exactly which lines are being touched** (the six duplicate-collision
-> process notes all say the lead alone wasn't enough):
-> 1. **The rejection tint over a North-up view** (Ideas → "Autonomy & friendliness", the "one thing v0.306.2 had
->    to switch off"). Sites: `webapp/routers/stack.py::rejection_overlay` (new optional `north_up` query
->    parameter), `seestack/render/thumbnail.py` (a shared "what rotation will the preview actually receive?"
->    helper so the endpoint and `orient_preview_north_up` can't drift), `frontend/src/api/client.ts::
->    stackRejectionOverlayUrl` and `History.tsx`'s `overlayPlaceable`. The entry's alpha caution is answered
->    before building: the overlay rotates the **density plane** (`rotate_plane_north_up`), not the RGBA PNG,
->    so alpha never enters it.
-> 2. **"North up" as a way to *look* at a picture, not only to overwrite it** (same section, the item unlocked
->    by v0.306.2's server half). Sites: a new shared `frontend/src/components/NorthUpToggle.tsx` (+ its pure
->    per-viewer `localStorage` helper), `frontend/src/components/target/LatestPictureCard.tsx`, and the
->    `north_up_deg` availability field it needs on a cheap endpoint (header-only read — **not** the
->    `render-suggestion` endpoint, which loads the FITS pixels).
->
-> _(If you are another Builder reading this: pick something else, or check whether this branch has already
-> merged — these were claimed at the start of the run and pushed immediately.)_
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-q6uois` — run finished, both claims released.**
+> **Shipped one, and stood the other down as a duplicate — this was collision number seven, and it is the one
+> the claim-by-site discipline could not have prevented.** Read the process note under "Autonomy &
+> friendliness" before picking a North-up follow-on.
+> **v0.308.2** (under "Autonomy & friendliness") — the rejection tint over a North-up view. The entry's **alpha
+> caution turned out not to apply**, and checking it first — as the entry told the next agent to — is the whole
+> reason this was XS and not an afternoon: at the point the endpoint turns anything it holds the **drop-count
+> plane**, not the RGBA PNG, so the transparent tint is *rendered at* the rotated size rather than rotated. No
+> alpha ever passes through a rotate. The call worth carrying forward is **two turns, not one composed angle** —
+> the picture takes the baked turn and then the on-the-fly one, and composing them into a single angle lands on
+> a different pixel grid (`np.rot90`'s pixel-centre midpoint vs. `PIL.rotate(expand=True)`'s bounding box).
+> A new shared `thumbnail.preview_north_up_remainder_deg` is now the single answer to "what rotation will the
+> picture actually receive?", so the preview and the tint cannot drift.
+> **Stood down, wholesale:** the run's other claim, **"North up" as a *view* control**, which the
+> `…-1bqxek` Builder shipped as **v0.308.0** while this run was building it — **their version is on `main` and
+> ships**; mine is dropped rather than re-litigating placement. Theirs puts the control in the **lightbox**,
+> which is a better answer than my card-header one (it dodges both filed cautions instead of re-solving them,
+> and keeps the header at the three controls v0.293.0 fixed as the phone's limit), and takes the availability
+> fact off the **annotations** response rather than the dedicated header-only `…/orientation` endpoint mine
+> added — one source of that fact is right, and theirs got there first. **One genuinely additive piece is
+> re-applied on top of theirs, in their names:** a `NorthUpViewToggle.test.tsx`, which their commit didn't have
+> — the preference's failure modes (a store that throws, a value from a build that spelled it differently) and
+> the control's a11y contract were untested.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data (the `astap_timeout_s`
+> ladder-budget half stays declined — it needs a real cloudy night's subs no agent has).
+> Claiming in the run's **first** commit, **by site**, cost under a minute and was pushed immediately. It did
+> not help: see the process note.
+
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-1bqxek` — run finished, both claims released.**
+> Shipped three, each its own independently-green commit:
+> **v0.307.0** (under "Friendliness") — the **"My life list is 14,584 px tall on a phone"** dogfood finding, and
+> the entry's own cheap diagnosis was right: the whole bundled catalog was drawn eagerly into one grid. Grouping
+> the captured objects ahead of the rest and putting the to-shoot tail behind one count took it to **3,008 px**
+> (**−79 %**; desktop 5,236 → 1,453 px), **re-measured with the same probe** as the entry demanded. It was the
+> tallest page in the app by nearly 3× and is now level with the Target page. Nothing removed: picking "Still to
+> shoot" — the filter that already existed — still lists every one of them, unshortened, and a test pins that.
+> **v0.308.0** (under "Autonomy & friendliness") — **North up as a *view*.** The design call worth knowing is
+> *where*: putting the toggle in the **lightbox** rather than on the card answers both of the entry's cautions
+> outright instead of re-solving them — a plain `<img>` has no pins, scale bar, compass or rejection tint to fall
+> out of register — and it keeps the Target card's header row at three controls, which v0.293.0 already
+> established is the phone's limit. The endpoint field is taken from `applied_north_up_deg` rather than
+> re-derived, and it reports **null** where the turn would do nothing, so the control never appears where it
+> would visibly do nothing.
+> **v0.308.1** (under "Features that serve real workflows") — a **plain untruth in shipped copy**, found while
+> sizing the full-size-zip idea: the card said "Download all" gives you "the full-size pictures themselves", and
+> the archive holds each target's **1024 px preview**. Copy fixed and pointed at the per-picture Full-res PNG.
+> **Stood down, with the reasoning recorded on its entry:** the *feature* half of that idea. Its filed "prefer
+> the TIFF" is a trap — a stack's TIFF is written **linear**, so it opens looking black, and only an editor
+> export writes a display-space one. The real full-size picture is the full-res PNG, which has **no file on
+> disk**. The honest shape is a job with staged output (an **L**), not `?full=true` on a streaming endpoint.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
+> Claiming in the run's **first** commit, **by site**, and pushing it immediately cost under a minute; `main` had
+> not moved by merge time and there was no collision.
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-aj7ysy` — run finished, all three claims
 > released.** Shipped three, each its own independently-green commit:
@@ -9413,23 +9450,117 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-30, unlocked by the v0.306.2 preview-rotation server half) — let "North up" be a
-  way to *look* at a picture, not only a way to overwrite it.** *(Pillar: enjoy + trust — PRIORITY 3; size S–M;
-  read-only, off by default.)* Until this run, the only way to see one of your pictures oriented like every
-  reference photo of the object was History → Adjust → tick → **Save**, which rewrites the stored preview and
-  (until v0.305.0) could cost a processed run its look. That is a destructive answer to a purely visual
-  question. `GET …/stack-runs/{id}/preview?north_up=true` now turns the *saved bytes* on the way out and
-  changes nothing on disk (v0.306.2 built it for the Adjust panel), so any surface that shows a picture could
-  offer the same tick as a **view** control: the Target hero (`LatestPictureCard`), the Gallery lightbox, the
-  Compare view. **Shape:** one shared toggle component reading the run's `north_up_deg` from the annotations /
-  suggestion it already fetches, remembered per viewer in `localStorage` (not on the run — this is a viewing
-  preference, not a fact about the picture). **Cautions, both already solved once in `History.tsx` and worth
-  copying rather than re-deriving:** object pins, the scale bar and the compass are measured on the un-rotated
-  FITS grid, so a turned view must hide them (`cantPlaceMarks`); and the rejection tint is sized to the stored
-  bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
-  make it the default: the saved orientation is what the owner chose.
+- **✅ SHIPPED (Builder, v0.308.0, branch `claude/compassionate-galileo-1bqxek`) — ~~let "North up" be a way to
+  *look* at a picture, not only a way to overwrite it.~~** First surface built: the Target page's picture, in
+  the viewer you get by clicking it. *(Pillar: enjoy + trust — PRIORITY 3.)*
 
-- **✅ SHIPPED (Builder, v0.306.5, branch `claude/compassionate-galileo-q6uois`) — ~~the "see what stacking
+  **What shipped.** `…/annotations` gained one additive field, `north_up_deg` — how far a `?north_up=true`
+  render would *actually* turn this run, taken from `applied_north_up_deg`, the helper that already owns the
+  threshold-and-snap rules, so it can never disagree with what the renderer does. `null` when the turn would do
+  nothing (no usable WCS, or a sub-threshold correction), which is the whole point: **a toggle that visibly
+  changes nothing is worse than no toggle**, so the control is only offered where the picture would move.
+
+  Frontend: a shared `components/NorthUpViewToggle.tsx` (the toggle plus the two `localStorage` accessors),
+  wired into `LatestPictureCard`'s `ImageLightbox` through the `toolbarExtra` prop that already existed for
+  exactly this. Off by default; remembered per **viewer**, not on the run, because it is a viewing preference
+  and not a fact about the picture. Storage that throws (a private window, a browser blocking site data) is
+  swallowed — the toggle still works for the session, it just isn't remembered.
+
+  **Everything the viewer hands over follows what's on screen** — the preview, the JPEG behind Share, and the
+  full-res PNG all take the same `north_up`, so a picture someone downloaded *because they liked how it looked*
+  arrives that way. The **FITS deliberately does not**: the raw data stays WCS-aligned. Nothing is written; the
+  bytes on disk are untouched, exactly as before.
+
+  **The entry's two cautions, answered rather than inherited.** Putting the control in the *lightbox* rather
+  than on the card means neither bites: the lightbox draws a plain `<img>` with no pins, scale bar or compass to
+  mis-place, and no rejection tint to fall out of register. The card's own thumbnail keeps its stored
+  orientation and its labels, so `cantPlaceMarks` is untouched. A run whose preview a past **Adjust → Save**
+  already baked North-up gets no toggle at all — it is already turned, and asking again is a no-op.
+
+  **Deliberately one surface, not four.** The Target hero's header row already carries three controls and a
+  fourth wraps badly on the phone the owner reads this on (the reason v0.293.0 kept that row to one toggle), so
+  this went where there is room and where you actually want it. The Gallery lightbox and Compare are the same
+  two lines each — filed as a follow-on below rather than done blind.
+
+  **Upgrade-safe (§9):** one additive response field; an older frontend ignores it and an older backend omitting
+  it reads as "no toggle". No config, schema, on-disk, default or API-shape change, and no new request on an
+  ordinary page load (the annotations fetch that answers this is the one the labels already made, now also
+  enabled when the picture is opened big).
+
+  **Tests (+7; 3 of the 3 Python ones fail before):** `tests/webapp/test_stack_annotations.py` — a real turned
+  field's angle pinned **against `applied_north_up_deg` itself** rather than re-derived from a CD matrix, a
+  field already sitting North-up reporting `null`, and a run with no WCS reporting `null` beside its existing
+  no-rose/no-bar assertions (the fixture grew a `dec_sign` so both orientations are real headers, since the
+  original axis-aligned one is North-*down* on screen — 180° — which is why it can't stand in for "already
+  oriented"). `LatestPictureCard.test.tsx` — no toggle before the picture is opened and none on a run with
+  nothing to turn; the turn switching the shown bytes and both downloads while the FITS stays put; the
+  preference written per viewer and cleared again; and no toggle on a picture a past save already turned.
+
+  **Follow-on left open:** the same two lines on the Gallery lightbox and the Compare view. *(The rejection
+  tint's own `north_up`, which this entry left open "if a surface ever wants both at once", **shipped in the
+  same hour** as v0.308.2 — see the entry directly below. So a surface that wants both can now have them.)*
+
+  **⚠️ PROCESS NOTE — THE SEVENTH CONCURRENT-DUPLICATE COLLISION (Builder 2026-08-30, branch
+  `claude/compassionate-galileo-q6uois`), and the first one that claiming-by-site could not have stopped.**
+  Two Builders built this item in the same hour. Both did the thing the six earlier notes prescribe: claimed it
+  in the run's **first** commit, **named the sites**, and pushed inside a minute. It didn't help, and the reason
+  is worth writing down rather than adding an eighth "claim harder": **a claim is only visible to an agent who
+  fetches after it lands.** Both runs started from the same `origin/main`, both fetched at the start, and the
+  two claims were pushed minutes apart — so each fetched *before* the other's claim existed and neither saw
+  anything. AGENTS.md §11's "re-fetch before starting **each** task" is the rule that would have caught it, and
+  the loser of this race had already read that line: it re-fetched between its two tasks, but this item was
+  **task two of two**, started before the winner's claim was pushed. The honest conclusion is that
+  claim-then-push has a floor of roughly one fetch interval and **items sized under an hour will keep
+  colliding**; the mitigation that actually pays is the one this run used at merge time — **read the winner's
+  diff before re-applying anything, take their design where it is at least as good, and re-apply only what is
+  genuinely missing** (here: a test file). Do not spend another run hardening the claim protocol.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy + trust — PRIORITY 3; size S–M;
+    read-only, off by default.)* Until this run, the only way to see one of your pictures oriented like every
+    reference photo of the object was History → Adjust → tick → **Save**, which rewrites the stored preview and
+    (until v0.305.0) could cost a processed run its look. That is a destructive answer to a purely visual
+    question. `GET …/stack-runs/{id}/preview?north_up=true` now turns the *saved bytes* on the way out and
+    changes nothing on disk (v0.306.2 built it for the Adjust panel), so any surface that shows a picture could
+    offer the same tick as a **view** control: the Target hero (`LatestPictureCard`), the Gallery lightbox, the
+    Compare view. **Shape:** one shared toggle component reading the run's `north_up_deg` from the annotations /
+    suggestion it already fetches, remembered per viewer in `localStorage` (not on the run — this is a viewing
+    preference, not a fact about the picture). **Cautions, both already solved once in `History.tsx` and worth
+    copying rather than re-deriving:** object pins, the scale bar and the compass are measured on the un-rotated
+    FITS grid, so a turned view must hide them (`cantPlaceMarks`); and the rejection tint is sized to the stored
+    bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
+    make it the default: the saved orientation is what the owner chose.
+
+- **NEW IDEA (Builder 2026-08-30, the follow-on v0.308.0 deliberately left open) — put the North-up *view* on the
+  other two surfaces that show a picture big.** *(Pillar: enjoy + trust — PRIORITY 3; size XS — two lines each;
+  read-only, off by default.)* v0.308.0 built the whole mechanism: the `north_up_deg` field on `…/annotations`,
+  the shared `components/NorthUpViewToggle.tsx` (toggle + the two `localStorage` accessors), and the pattern of
+  passing it into `ImageLightbox` through `toolbarExtra` while swapping `src`/`downloadHref`/`jpegHref`/
+  `fullResHref` for their `north_up` forms. The **Gallery lightbox** and the **Compare** view use the same
+  lightbox and are the same two lines each. **The one thing to check per surface before wiring it:** does that
+  lightbox draw anything *measured against the stored bytes* over the picture (pins, a scale bar, the rejection
+  tint)? The Target hero's does not, which is why it was first. If one does, it must step aside for a turned view
+  exactly as History's already does, or the marks land in the wrong place. **Don't** make it the default
+  anywhere: the saved orientation is what the owner chose, and the preference is shared across surfaces already
+  (one `localStorage` key), so turning it on in the Gallery will correctly turn it on the Target page too.
+
+- **QA LEAD (Builder 2026-08-30, generalised from the v0.308.1 copy fix) — sweep every download control's *copy*
+  against what its endpoint actually serves.** *(Pillar: trust — PRIORITY 3; size S per surface, and the sweep
+  itself is one run.)* "Download all my pictures" promised **"the full-size pictures themselves"** and handed over
+  1024 px previews; nothing failed, no test caught it, and it would have been discovered by a user at the moment
+  it cost them most (trying to print from their backup). That is a **bug class**, not one slip: a download's copy
+  is written once, next to the button, and then the endpoint underneath it evolves — the picture it serves gets
+  capped, re-rendered, cropped, tone-mapped or renamed — with nothing tying the two together. **The sweep:** for
+  every control that hands over a file (the pictures zip, the montage, the wall, the keepsake, the print export,
+  the wallpaper, the zoom clip, the share JPEG, the full-res PNG, the imaging log, each artifact kind on
+  History's menu), read the sentence beside it and then read what the handler actually writes, and reconcile the
+  two — **fixing the copy where the file is right, and the file where the copy is right.** The properties that
+  keep drifting are **size** (capped preview vs native), **colour space** (linear TIFF vs display-space), and
+  **geometry** (cropped/rotated vs the stored canvas). Where a claim is worth keeping true, pin it with a test
+  that reads the served bytes rather than the string — `tests/webapp/test_north_up.py` is the shape.
+
+- **✅ SHIPPED (Builder, v0.308.2, branch `claude/compassionate-galileo-q6uois`) — ~~the "see what stacking
   removed" tint can't be shown over a North-up view~~.** Fixed as the entry asked, and **the alpha caution it
   raised turned out not to apply** — which was worth checking before writing a line, exactly as it said.
 
@@ -10313,6 +10444,27 @@ to **Shipped**.)_
   target, so the copy next to the option has to say roughly how big the download will be before someone taps it
   on a phone; and the picker must never re-render or re-export anything — if there is no exported file, fall
   back, don't build one.
+
+  **⚠️ Builder 2026-08-30 (branch `claude/compassionate-galileo-1bqxek`) — sized this against the real code,
+  shipped the honest half (**v0.308.1**) and left the rest, deliberately. Read this before picking it up.**
+  **What I fixed, because it was a plain untruth in shipped copy:** `MyDeepSkyWallCard` told the user
+  *"\"Download all\" gives you the **full-size pictures themselves** in a zip"*. It does not — `_library_pictures`
+  resolves `current_picture_path`, which is a *preview* path in all three of its steps, and `_write_preview_png`
+  caps a preview at **1024 px**. Someone backing up a season and later trying to print would find that out at the
+  worst possible moment. The line now says the pictures are "at the size you see it here — right for a phone
+  album, not for printing" and points at the per-picture **Full-res PNG** that genuinely is full size. A test
+  pins that the old phrase is gone and the new one, plus the pointer, is there.
+  **Why the feature half didn't ship with it — the spec's own "prefer the TIFF" is a trap.** A *stack's* TIFF is
+  written `tiff_mode="linear"` (`write_stack_outputs` → `_write_tiff`), i.e. **unstretched**, so it opens looking
+  black. Only an **editor export** writes a display-space TIFF (`already_display=True`). So "prefer the TIFF"
+  would hand a beginner a black file for every target they never opened in the editor — worse than the preview it
+  replaced, and precisely the trust cost this entry exists to avoid. The file that *is* the full-size picture for
+  an ordinary run is the **full-res PNG**, and that has no file on disk: `…/full-res-png` renders it per request
+  (no cache), which the entry's own caution rightly forbids inside a streaming picker.
+  **So the honest shape is a job, not a query parameter** — the same shape "Finish them all" already uses:
+  render each target's full-res PNG into a staged archive with progress, then hand over the finished file. That
+  is an **L**, not the S–M filed here, and it needs a decision about where the staging bytes live on a NAS with a
+  fixed disk allowance. Re-file it that way rather than bolting `?full=true` onto the streaming endpoint.
 
 - **✅ SHIPPED (Builder, v0.306.4, branch `claude/compassionate-galileo-aj7ysy`) — ~~`POST /api/scan` accepts a
   raw client-supplied filesystem `root` and scans/ingests from it unconfined, the one ingest endpoint that
@@ -14650,22 +14802,56 @@ problems. Dogfood it every big-picture run and fix root causes.
     same field labels sensibly on a 180 px History card, a 260 px Target card and a full-screen lightbox; and
     never move a *dot* — only its chip — or the label stops pointing at its object.
 
-- **DOGFOOD FINDING (Builder 2026-08-29, measured by `scripts/agent-dogfood.sh`, not read off the code) — "My
-  life list" is 14,584 px tall on a phone, nearly 3× the next-worst page and 2.8× its own desktop height.**
-  *(Pillar: friendliness — PRIORITY 3, the standing "the pages are extremely busy" item. Size: M.
-  Confidence: measured — the probe's own page-height table, this run.)*
-  The probe's ranking is unambiguous: `[phone] /life-list: 14584px`, then `[desktop] /life-list: 5236px`, then
-  the Target page at 3035 px. Nothing overflows and there are no console errors — the page is *correct*, it is
-  simply enormous, and on the device the owner actually reads it on that is ~17 screens of scrolling. Every
-  other page the probe visits fits in a third of that.
-  **Why it is worth a slice.** The owner's complaint is explicitly about scrolling to reach the actual
-  information, and this is the app's clearest instance of it. The fix is the same regrouping the IA slices have
-  used elsewhere — nothing removed: a phone-first shape for the list (collapse the not-yet-shot bulk behind a
-  count, or paginate/section by catalog), with the shot ones — the part that is *about the owner* — above the
-  fold. **Measure it the same way afterwards** (`scripts/agent-dogfood.sh`, the page-height table) and state
-  the before/after in the commit, exactly as the IA slices do with block counts.
-  **Grep first:** confirm whether the height is the catalog's full length rendered eagerly; if so, the cheap
-  half may be a windowed / "show more" list rather than an IA rethink.
+- **✅ SHIPPED (Builder, v0.307.0, branch `claude/compassionate-galileo-1bqxek`) — ~~"My life list" is 14,584 px
+  tall on a phone, nearly 3× the next-worst page and 2.8× its own desktop height.~~** Fixed as the entry's own
+  "cheap half" predicted, and **re-measured with the same probe**. *(Pillar: friendliness — PRIORITY 3, the
+  standing "the pages are extremely busy" item.)*
+
+  **Measured before → after, `scripts/agent-dogfood.sh` page-height table, same catalog:**
+  `[phone] /life-list: 14584 px → 3008 px` (−79 %) and `[desktop] /life-list: 5236 px → 1453 px` (−72 %). It
+  was the tallest page in the app by nearly 3×; it is now level with the Target page (2884 px phone) and below
+  it on desktop. ~17 screens of phone scrolling became ~3.5.
+
+  **The grep the entry asked for, answered: yes, it was the whole catalog rendered eagerly.** `Section` drew one
+  `SimpleGrid` over every item it was given — 110 Messier plus 47 others, at `cols={{base: 2}}` on a phone, so
+  ~79 rows of ~176 px tiles. Nothing needed an IA rethink; the shape was already right, there was just too much
+  of it on screen at once.
+
+  **What shipped — two changes, both of them pure arrangement.** (1) Each section now renders the objects
+  you've **got** first and the ones still ahead of you second (catalog order preserved *inside* each half, so
+  M31 still sits where a checklist reader expects it), labelled `Got it · N` / `Still to shoot · N` when both
+  halves exist. The part that is *about the owner* is above the fold, which is what the entry asked for. (2) In
+  the mixed **All** view the still-to-shoot tail draws its first `TODO_PREVIEW = 12` tiles and puts the rest
+  behind one `Show all N still to shoot` link (and `Show fewer` to put them back).
+
+  **Nothing is removed — the owner's hard constraint.** Every object is still on the page, one tap away, and
+  picking **Still to shoot** from the filter that already existed lists every single one of them with no
+  shortening at all: that is the list the user just asked for, so it is never abbreviated. A test pins exactly
+  that.
+
+  **Upgrade-safe (§9):** frontend only — no API, schema, config, on-disk or default change, and no new request.
+
+  **Tests (+3 in `LifeList.test.tsx`, 2 fail before / pass after):** a 30-object to-shoot list draws 12 and
+  then all 30 on request and 12 again on "Show fewer"; a mixed section orders the captured ones ahead of the
+  rest and labels both halves (asserted on DOM order, not on a count); and the "Still to shoot" filter shows
+  all 30 with no disclosure at all. The 10 pre-existing assertions pass unchanged.
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness — PRIORITY 3, the standing "the pages are extremely busy" item. Size: M.
+    Confidence: measured — the probe's own page-height table, this run.)*
+    The probe's ranking is unambiguous: `[phone] /life-list: 14584px`, then `[desktop] /life-list: 5236px`, then
+    the Target page at 3035 px. Nothing overflows and there are no console errors — the page is *correct*, it is
+    simply enormous, and on the device the owner actually reads it on that is ~17 screens of scrolling. Every
+    other page the probe visits fits in a third of that.
+    **Why it is worth a slice.** The owner's complaint is explicitly about scrolling to reach the actual
+    information, and this is the app's clearest instance of it. The fix is the same regrouping the IA slices have
+    used elsewhere — nothing removed: a phone-first shape for the list (collapse the not-yet-shot bulk behind a
+    count, or paginate/section by catalog), with the shot ones — the part that is *about the owner* — above the
+    fold. **Measure it the same way afterwards** (`scripts/agent-dogfood.sh`, the page-height table) and state
+    the before/after in the commit, exactly as the IA slices do with block counts.
+    **Grep first:** confirm whether the height is the catalog's full length rendered eagerly; if so, the cheap
+    half may be a windowed / "show more" list rather than an IA rethink.
 
 - **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the owner *save* their
   universe map, and put it where they'd think to look for it.** *(Pillar: enjoy + share — PRIORITY 3.

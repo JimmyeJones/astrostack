@@ -57,6 +57,22 @@ describe("MyDeepSkyWallCard", () => {
     expect(link).toHaveAttribute("download");
   });
 
+  it("does not call the zip's contents full-size, because they aren't", async () => {
+    // The archive ships each target's stored *preview*, capped at 1024 px by
+    // `_write_preview_png`. This line used to promise "the full-size pictures
+    // themselves", which someone backing up a season would only discover was
+    // wrong when they tried to print one.
+    vi.spyOn(client.api, "getLibrarySummary")
+      .mockResolvedValue(summary([hero("m_42"), hero("m_31")]));
+    renderCard();
+
+    await screen.findByRole("link", { name: /Download all 2 pictures/ });
+    expect(screen.queryByText(/full-size pictures themselves/)).toBeNull();
+    expect(screen.getByText(/at the size you see it here/)).toBeInTheDocument();
+    // …and it says where a print-size copy actually lives.
+    expect(screen.getByText(/Full-res PNG/)).toBeInTheDocument();
+  });
+
   it("says how many it is showing when the library holds more than fit", async () => {
     vi.spyOn(client.api, "getLibrarySummary").mockResolvedValue(
       summary(Array.from({ length: 14 }, (_, i) => hero(`t_${i}`))));
