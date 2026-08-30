@@ -164,7 +164,8 @@ def test_gallery_reuses_the_run_listings_predicate(client, solved_library, monke
     assert next(x for x in client.get("/api/gallery").json()["items"]
                 if x["run_id"] == rid)["unexported_edit"] is False
 
-    monkeypatch.setattr(stack_mod, "_unexported_edit", lambda options, recipe, exported=None: True)
+    monkeypatch.setattr(stack_mod, "_unexported_edit",
+                        lambda options, recipe, exported=None, baked=None: True)
     assert next(x for x in client.get("/api/gallery").json()["items"]
                 if x["run_id"] == rid)["unexported_edit"] is True
     # …and no second copy has crept into the gallery module itself.
@@ -241,7 +242,8 @@ def test_unexported_edits_reuses_the_one_predicate(client, solved_library, monke
     _make_run(solved_library, safe, basename="count_one_definition")
     assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
 
-    monkeypatch.setattr(stack_mod, "_unexported_edit", lambda options, recipe, exported=None: True)
+    monkeypatch.setattr(stack_mod, "_unexported_edit",
+                        lambda options, recipe, exported=None, baked=None: True)
     # Still 0: a run with no recipe at all is never even looked up, which is the
     # cheapness the endpoint is built around.
     assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
@@ -568,3 +570,75 @@ def test_finish_them_all_exports_only_what_the_note_counted(client, solved_libra
     # Exactly one "counted_done_edit" — the batch did not make a second copy.
     assert bases.count("counted_done_edit") == 1
     assert "counted_waiting_edit" in bases
+
+
+# ---- the drift guard: has the auto-edit's recipe stopped describing its
+# ---- preview? (`AUTO_EDIT_BAKED_PREFIX`)  ----------------------------------
+
+AUTO_EDITED = '{"preview_display_space": true}'
+
+
+def _look(recipe: dict) -> str:
+    """The baked stamp `pipeline._auto_edit_process_run` writes for `recipe`."""
+    from webapp.routers.stack import _recipe_look
+
+    return json.dumps(_recipe_look(json.dumps(recipe)))
+
+
+def test_recipe_drifted_only_speaks_where_it_can_tell():
+    from webapp.routers.stack import _recipe_drifted
+
+    saved = json.dumps(STRETCH)
+    baked = _look(STRETCH)
+    # Written together by the auto-edit ⇒ they agree.
+    assert _recipe_drifted(saved, baked) is False
+    # No stamp at all — every run auto-edited before the stamp existed. The guard
+    # must stay silent rather than guess.
+    assert _recipe_drifted(saved, None) is False
+    assert _recipe_drifted(saved, "") is False
+    # An unreadable or wrong-shaped stamp is the same "can't tell".
+    assert _recipe_drifted(saved, "not json") is False
+    assert _recipe_drifted(saved, '{"ops": []}') is False
+    # Nothing to compare the stamp against.
+    assert _recipe_drifted(None, baked) is False
+    assert _recipe_drifted("not json", baked) is False
+    # A second-round Save that changes a parameter *is* drift.
+    changed = json.dumps({"ops": [{"id": "tone.stretch", "params": {"stretch": 0.9}}]})
+    assert _recipe_drifted(changed, baked) is True
+    # ...as is turning the whole recipe off, which leaves a plainly-edited
+    # preview described by a recipe that changes nothing.
+    assert _recipe_drifted(json.dumps(
+        {"ops": [{"id": "tone.stretch", "enabled": False,
+                  "params": {"stretch": 0.6}}]}), baked) is True
+
+
+def test_recipe_drifted_ignores_a_re_save_that_changes_nothing():
+    """Save re-stamps `updated_utc` and the editor re-rolls op uids, so only a
+    *look* comparison can tell an unchanged re-save from a real edit."""
+    from webapp.routers.stack import _recipe_drifted
+
+    baked = _look(STRETCH)
+    resaved = json.dumps({
+        "version": 3,
+        "updated_utc": "2026-08-30T12:00:00Z",
+        "base_run_id": 7,
+        "ops": [{"id": "tone.stretch", "uid": "a-fresh-uid",
+                 "enabled": True, "params": {"stretch": 0.6}}],
+    })
+    assert _recipe_drifted(resaved, baked) is False
+
+
+def test_an_auto_edited_run_is_flagged_once_its_recipe_drifts():
+    saved = json.dumps(STRETCH)
+    baked = _look(STRETCH)
+    changed = json.dumps({"ops": [{"id": "tone.stretch", "params": {"stretch": 0.9}}]})
+    # The shipped behaviour, unchanged: the recipe *is* what the preview shows.
+    assert _unexported_edit(AUTO_EDITED, saved, None, baked) is False
+    # A second-round edit on the same run is as invisible as a first-round one.
+    assert _unexported_edit(AUTO_EDITED, changed, None, baked) is True
+    # ...but finishing the export has to stop the app asking, exactly as it does
+    # for an ordinary run.
+    assert _unexported_edit(AUTO_EDITED, changed, changed, baked) is False
+    # And an install upgrading from before the stamp behaves exactly as before.
+    assert _unexported_edit(AUTO_EDITED, changed, None, None) is False
+    assert _unexported_edit(AUTO_EDITED, None, None, baked) is False

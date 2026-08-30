@@ -906,3 +906,129 @@ def test_the_real_process_target_auto_edit_leaves_the_reveal_working(
         f"/api/targets/{safe}/stack-runs/{run_id}/reference-sub").status_code == 200
     assert client.get(
         f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg").status_code == 200
+
+
+def _stored_recipe(data_root, safe: str, run_id: int) -> str:
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_the_auto_edit_stamps_the_look_it_baked(client, solved_library):
+    """The stamp is what makes "this run's recipe *is* its preview" checkable
+    later instead of merely assumed — so it must be written, and must describe
+    the recipe that was actually rendered."""
+    from webapp.pipeline import _auto_edit_process_run
+    from webapp.routers.editor import AUTO_EDIT_BAKED_PREFIX
+    from webapp.routers.stack import _recipe_look
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "processed.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        assert _auto_edit_process_run(lib, safe, run_id)
+        proj = lib.open_target(safe)
+        try:
+            stamp = proj.get_meta(f"{AUTO_EDIT_BAKED_PREFIX}{run_id}")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert stamp, "the auto-edit must stamp the look it baked"
+    assert json.loads(stamp) == _recipe_look(
+        _stored_recipe(solved_library, safe, run_id))
+
+
+def test_a_second_round_edit_stands_the_reveal_down(client, solved_library):
+    """The failure this guard exists to prevent: re-open a processed run, change a
+    parameter and press Save. The recipe changes; the stored preview does not. If
+    the reveal kept rendering its "before" through the *new* recipe, the two halves
+    would differ by an edit as well as by frame count — the one thing that
+    comparison must never show. It self-hides instead, exactly as it does when the
+    recipe is missing."""
+    from webapp.pipeline import _auto_edit_process_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "processed.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        assert _auto_edit_process_run(lib, safe, run_id)
+    finally:
+        lib.close()
+    base = f"/api/targets/{safe}/stack-runs/{run_id}"
+    assert client.get(f"{base}/one-sub-vs-stack").json()["available"] is True
+
+    # Re-saving the *same* look (a no-op Save re-stamps `updated_utc` and re-rolls
+    # op uids) must stay available — the guard compares looks, not bytes.
+    recipe = json.loads(_stored_recipe(solved_library, safe, run_id))
+    recipe["updated_utc"] = "2026-08-30T23:59:59Z"
+    for op in recipe["ops"]:
+        op["uid"] = f"re-rolled-{op['id']}"
+    _mark_auto_edited(solved_library, safe, run_id, json.dumps(recipe))
+    assert client.get(f"{base}/one-sub-vs-stack").json()["available"] is True
+
+    # Now genuinely change one enabled op's parameters.
+    changed = json.loads(_stored_recipe(solved_library, safe, run_id))
+    enabled = [o for o in changed["ops"] if o.get("enabled", True)]
+    assert enabled, "the auto recipe must have an enabled op to change"
+    enabled[0]["params"]["__drifted__"] = 1.0
+    _mark_auto_edited(solved_library, safe, run_id, json.dumps(changed))
+
+    assert client.get(f"{base}/one-sub-vs-stack").json()["available"] is False
+    assert client.get(f"{base}/reference-sub").status_code == 404
+    assert client.get(f"{base}/before-after.jpg").status_code == 404
+
+
+def test_saving_from_adjust_stops_the_run_claiming_a_recipe_preview(
+    client, solved_library,
+):
+    """Adjust → Save replaces an auto-edited preview with a plain stretch of the
+    linear FITS. The recipe is untouched (it still reopens in the editor), but the
+    bytes on screen are no longer its result — so the run must stop being marked as
+    a recipe preview, or the reveal would match its sub to an edit the picture no
+    longer carries. It falls back to the honest stretch match instead."""
+    from webapp.pipeline import _auto_edit_process_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "processed.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        assert _auto_edit_process_run(lib, safe, run_id)
+    finally:
+        lib.close()
+    base = f"/api/targets/{safe}/stack-runs/{run_id}"
+    assert client.get(f"{base}/one-sub-vs-stack").json()["matched_by"] == "recipe"
+
+    assert client.post(f"{base}/preview",
+                       json={"stretch": 0.5, "black": 0.02}).status_code == 200
+
+    body = client.get(f"{base}/one-sub-vs-stack").json()
+    assert body["available"] is True
+    assert body["matched_by"] == "stretch"
+    assert client.get(f"{base}/reference-sub").status_code == 200

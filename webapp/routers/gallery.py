@@ -179,6 +179,7 @@ def get_gallery(request: Request) -> GalleryResponse:
     try:
         from seestack.io.project import Project
         from webapp.routers.editor import (
+            AUTO_EDIT_BAKED_PREFIX,
             EXPORTED_RECIPE_META_PREFIX,
             RECIPE_META_PREFIX,
         )
@@ -203,6 +204,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                         items.append(_gallery_item(
                             t, run, proj, RECIPE_META_PREFIX,
                             EXPORTED_RECIPE_META_PREFIX, _unexported_edit,
+                            AUTO_EDIT_BAKED_PREFIX,
                         ))
                     except Exception:  # noqa: BLE001 — one bad run must not hide the rest
                         # Every required field is NOT NULL today, so nothing here
@@ -227,7 +229,8 @@ def get_gallery(request: Request) -> GalleryResponse:
 
 
 def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
-                  unexported_edit) -> GalleryItem:  # noqa: ANN001
+                  unexported_edit,
+                  baked_prefix: str | None = None) -> GalleryItem:  # noqa: ANN001
     """One finished stack's gallery card. Split out so the loop above can skip a
     single unreadable run without losing every other target's pictures."""
     has_preview = bool(run.preview_path and Path(run.preview_path).exists())
@@ -255,13 +258,14 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         noise_sigma=run.noise_sigma,
         calstat=run.calstat,
         seam_verdict=seam_verdict(run.seam_residual),
-        # Two extra keyed reads on the project DB the caller already has open —
+        # A few extra keyed reads on the project DB the caller already has open —
         # the same near-free lookups the run listing does, which is what made
         # this affordable library-wide.
         unexported_edit=unexported_edit(
             run.options_json,
             proj.get_meta(f"{recipe_prefix}{run.id}"),
             proj.get_meta(f"{exported_prefix}{run.id}"),
+            proj.get_meta(f"{baked_prefix}{run.id}") if baked_prefix else None,
         ),
     )
 
@@ -546,7 +550,11 @@ def _scan_unexported_edits(lib) -> list[UnexportedEditItem]:
     can't cost the whole answer.
     """
     from seestack.io.project import Project
-    from webapp.routers.editor import EXPORTED_RECIPE_META_PREFIX, RECIPE_META_PREFIX
+    from webapp.routers.editor import (
+        AUTO_EDIT_BAKED_PREFIX,
+        EXPORTED_RECIPE_META_PREFIX,
+        RECIPE_META_PREFIX,
+    )
     from webapp.routers.stack import _unexported_edit
 
     def _by_run_id(proj: Project, prefix: str) -> dict[int, str]:
@@ -571,6 +579,9 @@ def _scan_unexported_edits(lib) -> list[UnexportedEditItem]:
             exported = (
                 _by_run_id(proj, EXPORTED_RECIPE_META_PREFIX) if recipes else {}
             )
+            baked = (
+                _by_run_id(proj, AUTO_EDIT_BAKED_PREFIX) if recipes else {}
+            )
             summaries = (
                 proj.stack_run_options(recipes) if recipes else {}
             )
@@ -581,7 +592,7 @@ def _scan_unexported_edits(lib) -> list[UnexportedEditItem]:
                 proj.close()
         for run_id, (timestamp_utc, options_json) in summaries.items():
             if _unexported_edit(options_json, recipes.get(run_id),
-                                exported.get(run_id)):
+                                exported.get(run_id), baked.get(run_id)):
                 found.append(UnexportedEditItem(
                     safe=t.safe_name,
                     target_name=t.name,

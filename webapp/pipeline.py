@@ -2739,6 +2739,7 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
     recipe, so an unattended auto-edit frames the picture the same way clicking Auto
     in the editor would."""
     from webapp.routers.editor import (
+        AUTO_EDIT_BAKED_PREFIX,
         AUTO_EDIT_COLORCAL_PREFIX,
         AUTO_EDIT_NOTE_PREFIX,
         AUTO_EDIT_SKYCAST_PREFIX,
@@ -2748,6 +2749,7 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
         build_auto_recipe_for_run,
         render_run_display_array,
     )
+    from webapp.routers.stack import _recipe_look
     from seestack.edit import presets as presets_mod
     from seestack.edit.histogram import measure_sky_cast
     from seestack.io.project import Project
@@ -2770,7 +2772,8 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
             recipe = build_auto_recipe_for_run(
                 proj.project_dir, run, median_fwhm, prefs=prefs,
                 auto_crop=auto_crop)
-            proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe.to_json())
+            recipe_json = recipe.to_json()
+            proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe_json)
             # Stamp a plain-language "what Auto did (and why)" note so the History
             # Info panel can explain this silently-applied edit — the same reasoning
             # the interactive editor shows when a user clicks Auto themselves.
@@ -2813,6 +2816,15 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                 # of comparing a raw STF sub / anchoring an asinh curve to this
                 # recipe-toned thumbnail (they already do for a display-space export).
                 proj.set_run_preview_display_space(run_id)
+                # ...and stamp *which* recipe those bytes show. The marker above
+                # only says "tone-mapped"; every surface that then reads the run's
+                # saved recipe as a description of the preview is relying on the
+                # two having been written together, here. A later Save from the
+                # editor changes the recipe and leaves the preview alone, and
+                # without this stamp nothing downstream can tell. Written last, so
+                # it can only ever claim a render that actually happened.
+                proj.set_meta(f"{AUTO_EDIT_BAKED_PREFIX}{run_id}",
+                              json.dumps(_recipe_look(recipe_json)))
                 # Stamp which colour-calibration (white-balance) path Auto actually
                 # ran and on how many stars — star-based, the v0.107.9
                 # background-neutral fallback, or a no-op — so the History Info panel
