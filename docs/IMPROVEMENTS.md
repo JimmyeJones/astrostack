@@ -10312,6 +10312,27 @@ to **Shipped**.)_
   on a phone; and the picker must never re-render or re-export anything — if there is no exported file, fall
   back, don't build one.
 
+  **⚠️ Builder 2026-08-30 (branch `claude/compassionate-galileo-1bqxek`) — sized this against the real code,
+  shipped the honest half (**v0.308.1**) and left the rest, deliberately. Read this before picking it up.**
+  **What I fixed, because it was a plain untruth in shipped copy:** `MyDeepSkyWallCard` told the user
+  *"\"Download all\" gives you the **full-size pictures themselves** in a zip"*. It does not — `_library_pictures`
+  resolves `current_picture_path`, which is a *preview* path in all three of its steps, and `_write_preview_png`
+  caps a preview at **1024 px**. Someone backing up a season and later trying to print would find that out at the
+  worst possible moment. The line now says the pictures are "at the size you see it here — right for a phone
+  album, not for printing" and points at the per-picture **Full-res PNG** that genuinely is full size. A test
+  pins that the old phrase is gone and the new one, plus the pointer, is there.
+  **Why the feature half didn't ship with it — the spec's own "prefer the TIFF" is a trap.** A *stack's* TIFF is
+  written `tiff_mode="linear"` (`write_stack_outputs` → `_write_tiff`), i.e. **unstretched**, so it opens looking
+  black. Only an **editor export** writes a display-space TIFF (`already_display=True`). So "prefer the TIFF"
+  would hand a beginner a black file for every target they never opened in the editor — worse than the preview it
+  replaced, and precisely the trust cost this entry exists to avoid. The file that *is* the full-size picture for
+  an ordinary run is the **full-res PNG**, and that has no file on disk: `…/full-res-png` renders it per request
+  (no cache), which the entry's own caution rightly forbids inside a streaming picker.
+  **So the honest shape is a job, not a query parameter** — the same shape "Finish them all" already uses:
+  render each target's full-res PNG into a staged archive with progress, then hand over the finished file. That
+  is an **L**, not the S–M filed here, and it needs a decision about where the staging bytes live on a NAS with a
+  fixed disk allowance. Re-file it that way rather than bolting `?full=true` onto the streaming endpoint.
+
 - **✅ SHIPPED (Builder, v0.306.4, branch `claude/compassionate-galileo-aj7ysy`) — ~~`POST /api/scan` accepts a
   raw client-supplied filesystem `root` and scans/ingests from it unconfined, the one ingest endpoint that
   isn't confined to `incoming/`.~~** Confined, exactly as the fix direction's first option asked, with the

@@ -72,9 +72,9 @@ export function MyDeepSkyWallCard() {
               Download wall
             </Button>
           )}
-          {/* The other half of "get my pictures out": the full-size files
-              themselves. Sits in this card rather than adding a block to the
-              page — it's the same moment, one tap along. */}
+          {/* The other half of "get my pictures out": the pictures themselves
+              rather than a montage of them. Sits in this card rather than adding
+              a block to the page — it's the same moment, one tap along. */}
           <Button size="xs" variant={canWall ? "light" : "filled"} color="teal"
             leftSection={<IconFileZip size={14} />}
             component="a" href={api.galleryPicturesZipUrl()} download>
@@ -84,12 +84,21 @@ export function MyDeepSkyWallCard() {
         <Text size="xs" c="dimmed">
           {canWall
             ? "The wall is one image to post. \"Download all\" gives you the "
-              + "full-size pictures themselves in a zip — "
-            : "\"Download all\" gives you the full-size pictures themselves in a zip — "}
+              + "pictures themselves in a zip — "
+            : "\"Download all\" gives you the pictures themselves in a zip — "}
           {stills > 0
             ? "one per target plus every Moon and Sun picture you've stacked, each "
               + "named for it — to back up or drop into a phone album."
             : "one per target, named for it — to back up or drop into a phone album."}
+          {" "}
+          {/* Said plainly, because the zip holds each target's stored *preview*
+              (`_write_preview_png` caps it at 1024 px), and this line used to
+              call them "the full-size pictures themselves". Someone who backs
+              their season up and later tries to print from it would find that
+              out at the worst possible moment. */}
+          Each one is the picture at the size you see it here — right for a phone
+          album, not for printing. To print one, open it and choose
+          "Full-res PNG".
         </Text>
       </Stack>
     </Card>
