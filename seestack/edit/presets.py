@@ -208,16 +208,58 @@ _CLASS_REASON: dict[str, str] = {
 }
 
 
-def _extended_chroma(ext_px: np.ndarray) -> float:
-    """Median per-pixel chroma ``(max−min)/mean`` over the extended-signal pixels.
+#: Side of the box the extended region's channels are averaged over before its
+#: colour is measured. Colour in a nebula is a property of the *region* — it
+#: varies over tens of pixels, not between neighbours — while shot noise is
+#: independent per pixel, so averaging first is what separates the two. 7 px
+#: matches the opening footprint that defined the region and cuts the noise term
+#: ~7×, which is enough to put a colourless thin stack well under the nebula bar
+#: without measurably moving a clean image's answer (see ``_extended_chroma``).
+_CHROMA_SMOOTH_PX = 7
+
+
+def _extended_chroma(arr: np.ndarray, ext_sig: np.ndarray) -> float:
+    """Median chroma ``(max−min)/mean`` of the extended-signal region.
     Scale-invariant (works on the linear proxy), so a coloured emission nebula
-    reads high and a neutral galaxy reads low. ``ext_px`` is ``(N, 3)``."""
-    if ext_px.shape[0] < 50:
+    reads high and a neutral galaxy reads low.
+
+    **Measured on a locally averaged copy, and that is load-bearing.** Taken
+    pointwise on the raw pixels this reads a stack's *noise* as colour: R, G and
+    B are independent, so ``max−min`` over three noisy samples of one grey pixel
+    is ~1.7σ whatever the pixel actually is. Measured across sub counts on one
+    unchanging, **completely colourless** synthetic field, the pointwise number
+    ran 0.118 at 4 subs → 0.010 at 800 — i.e. a thin stack of a grey object read
+    nearly twice the ``chroma >= 0.06`` nebula bar purely from grain, and
+    ``classify_target`` duly called it a nebula until it was stacked deep enough.
+    That is the "statistic that changes meaning with how much data went in" class
+    (docs/IMPROVEMENTS.md), and the depth-invariant fix is to measure the thing
+    the docstring always claimed — the colour of the *region* — rather than the
+    colour of single pixels.
+
+    The average is masked to the region itself (``uniform_filter`` over
+    ``channel × mask`` divided by the same filter over ``mask``), so the sky and
+    the star wings just outside it can't bleed a false cast in. ``0.0`` when the
+    region is too small to say anything.
+    """
+    from scipy.ndimage import uniform_filter
+
+    if int(ext_sig.sum()) < 50:
         return 0.0
-    px = np.clip(ext_px.astype(np.float32), 0.0, None)
-    mx = px.max(axis=1)
-    mn = px.min(axis=1)
-    mean = px.mean(axis=1)
+    px = np.clip(np.asarray(arr[..., :3], dtype=np.float32), 0.0, None)
+    mask = ext_sig.astype(np.float32)
+    weight = uniform_filter(mask, size=_CHROMA_SMOOTH_PX, mode="constant")
+    smooth = np.empty_like(px)
+    for c in range(3):
+        smooth[..., c] = uniform_filter(
+            np.where(ext_sig, px[..., c], 0.0).astype(np.float32),
+            size=_CHROMA_SMOOTH_PX, mode="constant")
+    # ``weight`` is ≥ 1/size² wherever the mask is set, so this never divides by
+    # zero on a pixel we go on to read.
+    smooth /= np.maximum(weight, 1e-6)[..., None]
+    sel = smooth[ext_sig]
+    mx = sel.max(axis=1)
+    mn = sel.min(axis=1)
+    mean = sel.mean(axis=1)
     chroma = (mx - mn) / (mean + 1e-6)
     return float(np.median(chroma))
 
@@ -292,7 +334,7 @@ def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
     pt_frac = n_pt / n_cov
     ext_frac = n_ext / n_cov
     star_share = n_pt / max(n_sig, 1)
-    chroma = _extended_chroma(arr[ext_sig]) if n_ext else 0.0
+    chroma = _extended_chroma(arr, ext_sig) if n_ext else 0.0
 
     cues = {
         "sig_frac": round(sig_frac, 4), "ext_frac": round(ext_frac, 4),

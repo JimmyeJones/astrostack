@@ -1241,6 +1241,76 @@ describe("StackView", () => {
     expect(screen.getByText(/GB peak memory/)).toBeInTheDocument();
   });
 
+  // The print line — the canvas said in a unit a human has an intuition for,
+  // while the knob that fixes it is still on screen.
+  const PRINT_PLAN = {
+    name: "A4", dpi: 210, text: "This stack would print sharply up to A4.",
+    bigger_name: "A3", bigger_drizzle_scale: 1.4,
+    bigger_text: "Raising Drizzle to ×1.4 would print it at A3 instead — "
+      + "super-resolution needs plenty of well-dithered subs to pay off.",
+  };
+
+  function printEstimate(
+    over: boolean, nFrames: number,
+    plan: client.StackEstimate["print_plan"] = PRINT_PLAN,
+  ): client.StackEstimate {
+    return {
+      n_frames: nFrames, canvas_w: 3000, canvas_h: 2000,
+      output_w: 3000, output_h: 2000, is_mosaic: false,
+      peak_bytes: 2.3e9, peak_gb: 2.3,
+      budget_bytes: over ? 1.4e9 : 8e9, budget_gb: over ? 1.4 : 8,
+      would_exceed: over,
+      suggested_drizzle_scale: null, suggested_reference_canvas: false,
+      memory_fix: null, auto_reject_resolved: null, print_plan: plan,
+    };
+  }
+
+  function mockPrintForm(est: client.StackEstimate) {
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue(est);
+  }
+
+  it("says what the stack would print at, and the drizzle scale that prints bigger", async () => {
+    mockPrintForm(printEstimate(false, 250));
+    renderStack();
+    await waitFor(() =>
+      expect(screen.getByText(/print sharply up to A4/)).toBeInTheDocument());
+    expect(screen.getByText(/Raising Drizzle to ×1.4 would print it at A3/))
+      .toBeInTheDocument();
+  });
+
+  it("withholds the bigger-print nudge on a stack with too few frames for drizzle", async () => {
+    // The form already warns that drizzle needs 200+ dithered subs; recommending
+    // it a line above that warning would be the panel arguing with itself.
+    mockPrintForm(printEstimate(false, 12));
+    renderStack();
+    await waitFor(() =>
+      expect(screen.getByText(/print sharply up to A4/)).toBeInTheDocument());
+    expect(screen.queryByText(/Raising Drizzle/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing about printing when the run is over budget", async () => {
+    // The over-budget alert replaces the sizing line entirely — a print nudge
+    // beside a refusal is two answers to one question.
+    mockPrintForm(printEstimate(true, 250));
+    renderStack();
+    await waitFor(() =>
+      expect(screen.getByText(/over the ~1.4 GB budget/)).toBeInTheDocument());
+    expect(screen.queryByText(/print sharply up to A4/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Raising Drizzle/)).not.toBeInTheDocument();
+  });
+
+  it("degrades quietly when the backend sends no print plan", async () => {
+    mockPrintForm(printEstimate(false, 250, null));
+    renderStack();
+    await waitFor(() =>
+      expect(screen.getByText(/2 accepted, solved frames/)).toBeInTheDocument());
+    expect(screen.queryByText(/print sharply/)).not.toBeInTheDocument();
+  });
+
   it("warns in red when the estimate exceeds the memory budget", async () => {
     mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
