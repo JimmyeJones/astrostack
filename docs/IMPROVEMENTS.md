@@ -135,6 +135,39 @@ _(none — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.300.2, branch `claude/compassionate-galileo-4txqj1`) — ~~`Target.test.tsx`'s note-board
+  test asserts the fold *synchronously* off the first note's arrival, so it races `NoticeBoard`'s
+  measure-then-fold commit and goes red on a loaded runner.~~** Found by CI going red on main (run 1228,
+  `TargetView note board > keeps the urgent notes inline and folds the rest behind one line`) right after the
+  v0.300.0/.1 merge — **a test-timing defect, not a flake to re-run and not a product bug.** *(Severity: CI
+  health only; no user-visible behaviour. Confidence: mechanism traced in the component; the failing assertion
+  is structurally one render early.)*
+
+  **Root cause.** `NoticeBoard` cannot ask its caller which notes will speak — most are self-hiding components
+  that fetch their own data — so it renders them all and **measures the DOM** (`useEffect(measure)` plus a
+  `MutationObserver`), then re-renders with `display: none` on the demoted ones. Its own comment states the
+  deliberate consequence: *"before the first measurement everything is inline, so a note is never invisible on
+  first paint"*. The demote therefore lands **one commit after** a note's text appears. The test did
+  `await findByText(<first note>)` and then immediately asserted the *third* note `.not.toBeVisible()` — a claim
+  that is only true once that later commit has flushed. Locally it always had; on a runner sharing four cores
+  with 195 other test files, it hadn't, and "Ready to process?" was still inline. Nothing about the shipped diff
+  touched this page (it changed `OneFrameVsStackCard`, on History) — the merge just paid for a latent race.
+
+  **Fix (same claim, no assertion weakened).** Wait for the `"1 more note"` disclosure — the measurement's own
+  observable signal — before asserting the fold: `const more = await screen.findByRole("button", …)`, then the
+  identical `expect(offer).not.toBeVisible()`. This is exactly what `NoticeBoard.test.tsx` already does for the
+  same measurement (`…waits for /1 more note$/, then asserts not.toBeVisible()`), so the two now agree on how
+  this component settles. The `fireEvent.click` assertions after it are direct `setOpen` state, which flushes
+  synchronously, and stay as they were. **The component is deliberately left alone:** showing every note until
+  the board has measured is the right behaviour for a real user (a note is never briefly invisible), so the test
+  must tolerate it rather than the product being reshaped to suit a test.
+
+  **Honest limitation:** the failure is load-dependent and did **not** reproduce locally (the file passes
+  standalone, 90/90, four consecutive runs, and passed in the full local suite of 2377 before the merge too), so
+  the evidence is the traced mechanism plus the sibling test's precedent, not a local red→green. If this test
+  ever goes red again, it is *not* to be re-run: the next thing to check is whether another assertion in it
+  reads board state synchronously off a `findBy*`.
+
 - **✅ SHIPPED (Builder, v0.292.1, branch `claude/compassionate-galileo-4drm6t`) — ~~the Tonight planner's
   "nudge your scope this way" row can keep quoting the picture *before* the newest one for up to a minute,
   because the registry-signature cache behind it can't see a stack.~~** Found by CI going red on main
@@ -9215,6 +9248,41 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **NEW IDEA (Builder 2026-08-30, found while building the v0.301.0 recipe-matched reveal — a real gap in an
+  assumption the app already relies on in several places) — a saved recipe on a "Process target" run can
+  quietly drift from the picture that run's preview actually shows.** *(Pillar: trust — PRIORITY 3; size S–M;
+  additive, no behaviour change until something disagrees.)* `_auto_edit_process_run` bakes the Auto recipe
+  into the run's preview PNG and stores the recipe at `editor_recipe:<run_id>` **in one step**, so at that
+  moment the two agree — and `_unexported_edit` says so out loud: it deliberately does *not* flag a
+  `preview_display_space` run, "whose recipe *is* what its preview shows". But a user can re-open that run in
+  the editor, change a parameter, press **Save**, and the stored preview is **not** re-rendered. From then on
+  the assumption is false, and nothing notices: the run isn't flagged as an unfinished edit (it is excluded by
+  design), and as of v0.301.0 the reveal's "before" is rendered through the *stored* recipe while the "after"
+  is still the *old* baked preview — so the two halves would differ by an edit as well as by frame count,
+  which is exactly what that feature must never show. **Fix shape (small, additive, no migration):** stamp the
+  recipe *look* that was baked — `_recipe_look()` already exists in `routers/stack.py` and is exactly the
+  "does this describe the same picture?" comparison, uid- and timestamp-blind — into a meta key beside the
+  recipe at auto-edit time, and have the surfaces that rely on the assumption compare against it: the reveal
+  (stand down to hidden on a mismatch, as it does for a missing recipe today) and `_unexported_edit` (flag the
+  run again, since a second-round edit on an auto-edited run really *is* unfinished). Runs from before the
+  stamp exists have no stamp, so they behave exactly as they do now — the guard only ever fires where it can
+  actually tell. **Reachability, honestly:** it needs a Save on an already-processed run without an export,
+  which is a real but uncommon path; the reveal is the first surface where the disagreement becomes *visible*
+  rather than merely latent, which is why it is worth closing now rather than when it bites.
+
+- **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by the v0.301.0 recipe-matched reveal) — the
+  reveal's "before" is now a full edit pipeline per request, and nothing caches it.** *(Pillar: friendliness —
+  PRIORITY 3; size S; measure before building.)* `reference-sub` has always debayered a full sub per request
+  and answered `Cache-Control: no-store`; on an auto-edited run it now *also* runs the whole Auto recipe
+  (gradient fit → colour calibrate → STF stretch → SCNR → saturation → auto curve, plus denoise/sharpen when
+  the recipe carries them) over that sub, at the 1024-wide proxy scale. That is comparable to one live-preview
+  render, in a threadpool, and only when the card is revealed — so it is very unlikely to matter, and it was
+  shipped without a cache deliberately rather than guessing at one. **But measure it on the owner's box before
+  assuming:** if a reveal on a big target is visibly slow, the pattern to copy is already in the same file —
+  the noise-ratio endpoint's fingerprinted meta stamp (`NOISE_RATIO_META_PREFIX`, keyed on the master and the
+  representative sub), which would key here on the sub *and* the recipe look, so a re-edit invalidates it.
+  Don't add a cache on speculation; a stale "before" is worse than a slow one.
 
 - **NEW IDEA (Builder 2026-08-29, the two follow-ons "Tonight, live" v0.298.0 deliberately left out) — keep the
   screen awake on the live page, and cover a night that shot more than one target.** *(Pillar: understand +
