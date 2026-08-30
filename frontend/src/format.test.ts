@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatDiskSize, formatIntegration, formatMonthYear, formatNightDate,
-  formatNightDayMonth, formatStampDate, isRecentNight, nightAgeDays,
+  captureNightsClause, formatCaptureNights, formatDiskSize, formatIntegration,
+  formatMonthYear, formatNightDate, formatNightDayMonth, formatStampDate,
+  isRecentNight, nightAgeDays, pictureDateLabel,
 } from "./format";
 
 describe("formatIntegration", () => {
@@ -156,5 +157,96 @@ describe("formatNightDayMonth", () => {
   it("is null when the night can't be dated", () => {
     expect(formatNightDayMonth(null, new Date("2026-07-23T09:00:00Z"))).toBeNull();
     expect(formatNightDayMonth("nope", new Date("2026-07-23T09:00:00Z"))).toBeNull();
+  });
+});
+
+
+// When a picture's subs were *shot* — read off a run's capture window, never off
+// `timestamp_utc`, which is when the stack ran. Both helpers answer "" for an
+// absent or unusable window so every caller drops the clause instead of printing
+// a placeholder or, as the bug did, the processing date.
+describe("formatCaptureNights", () => {
+  it("names one night when the whole stack came from one", () => {
+    expect(formatCaptureNights("2024-11-15", "2024-11-15")).toBe("15 Nov 2024");
+  });
+
+  it("writes the shared parts of a range once", () => {
+    expect(formatCaptureNights("2024-11-15", "2024-11-18")).toBe("15–18 Nov 2024");
+    expect(formatCaptureNights("2024-10-28", "2024-11-03")).toBe("28 Oct – 3 Nov 2024");
+    expect(formatCaptureNights("2024-12-28", "2025-01-03"))
+      .toBe("28 Dec 2024 – 3 Jan 2025");
+  });
+
+  it("copes with one end missing, and with the two arriving reversed", () => {
+    expect(formatCaptureNights("2024-11-15", null)).toBe("15 Nov 2024");
+    expect(formatCaptureNights(null, "2024-11-15")).toBe("15 Nov 2024");
+    expect(formatCaptureNights("2024-11-18", "2024-11-15")).toBe("15–18 Nov 2024");
+  });
+
+  it("is empty — not a dash — when there is no window", () => {
+    expect(formatCaptureNights(null, null)).toBe("");
+    expect(formatCaptureNights("", "")).toBe("");
+    expect(formatCaptureNights("not-a-date", "2024-13-40")).toBe("");
+  });
+
+  it("reads the date off the string, so it can't shift a timezone", () => {
+    // A night is a date already: rendering it through `Date` would move it a day
+    // west of Greenwich, and the app shows these beside server-named nights.
+    expect(formatCaptureNights("2024-01-01", "2024-01-01")).toBe("1 Jan 2024");
+    expect(formatCaptureNights("2024-12-31", "2024-12-31")).toBe("31 Dec 2024");
+  });
+});
+
+describe("captureNightsClause", () => {
+  it("reads as a sentence clause", () => {
+    expect(captureNightsClause("2024-11-15", "2024-11-15")).toBe("on 15 Nov 2024");
+    expect(captureNightsClause("2024-11-15", "2024-11-18"))
+      .toBe("between 15 and 18 Nov 2024");
+    expect(captureNightsClause("2024-10-28", "2024-11-03"))
+      .toBe("between 28 Oct and 3 Nov 2024");
+    expect(captureNightsClause("2024-12-28", "2025-01-03"))
+      .toBe("between 28 Dec 2024 and 3 Jan 2025");
+  });
+
+  it("never claims a night count it cannot know", () => {
+    // A run records its first and last night, not how many it shot in between.
+    expect(captureNightsClause("2024-11-15", "2024-11-18")).not.toContain("nights");
+  });
+
+  it("is empty when there is no window", () => {
+    expect(captureNightsClause(null, null)).toBe("");
+    expect(captureNightsClause("junk", null)).toBe("");
+  });
+});
+
+
+describe("pictureDateLabel", () => {
+  it("prefers the night the subs were shot, and says so", () => {
+    expect(pictureDateLabel("2024-11-15", "2024-11-15", "2026-08-30T12:00:00Z"))
+      .toBe("Shot 15 Nov 2024");
+    expect(pictureDateLabel("2024-11-15", "2024-11-18", "2026-08-30T12:00:00Z"))
+      .toBe("Shot 15–18 Nov 2024");
+  });
+
+  it("falls back to the stack date — labelled as the stack date", () => {
+    // Every run made before the app recorded a capture window. The label is the
+    // whole point: a bare stamp here reads as "the night I took this".
+    expect(pictureDateLabel(null, null, "2026-08-30T12:00:00Z"))
+      .toBe(`Stacked ${formatStampDate("2026-08-30T12:00:00Z")}`);
+  });
+
+  it("is empty when neither date is usable, so the caller prints nothing", () => {
+    expect(pictureDateLabel(null, null, null)).toBe("");
+    expect(pictureDateLabel(null, null, "not-a-date")).toBe("");
+    expect(pictureDateLabel("junk", "junk", "")).toBe("");
+  });
+
+  it("never prints an unlabelled date", () => {
+    for (const label of [
+      pictureDateLabel("2024-11-15", "2024-11-15", "2026-08-30T12:00:00Z"),
+      pictureDateLabel(null, null, "2026-08-30T12:00:00Z"),
+    ]) {
+      expect(label).toMatch(/^(Shot|Stacked) /);
+    }
   });
 });

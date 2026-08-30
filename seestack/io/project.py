@@ -30,7 +30,7 @@ from typing import Any, Iterable, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -70,7 +70,9 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     stack_fwhm_px REAL,
     seam_residual REAL,
     preview_north_up_deg REAL,
-    preview_crop_json TEXT
+    preview_crop_json TEXT,
+    capture_start_utc TEXT,
+    capture_end_utc TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -590,6 +592,21 @@ class Project:
                     "ALTER TABLE stack_runs ADD COLUMN preview_crop_json TEXT")
             except sqlite3.OperationalError:
                 pass  # already present
+        if from_version < 18:
+            # Recorded *when the subs in this stack were actually shot* — the
+            # earliest and latest ``DATE-OBS`` among the frames the run combined.
+            # Nothing used to record it, so every surface that wanted a capture
+            # date had only ``timestamp_utc`` (when the stack *ran*) to reach for,
+            # and the shareable caption asserted "shot on <the day the stack
+            # ran>" — off by years on a re-stack of a back catalogue. Additive;
+            # runs recorded before this column existed stay NULL, and every
+            # caller drops the clause rather than guessing.
+            for col in ("capture_start_utc", "capture_end_utc"):
+                try:
+                    self._conn.execute(
+                        f"ALTER TABLE stack_runs ADD COLUMN {col} TEXT")
+                except sqlite3.OperationalError:
+                    pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -981,8 +998,9 @@ class Project:
             "  options_json, notes, total_exposure_s, transparency_ratio,"
             "  noise_sigma, calstat, is_mosaic, engine_version,"
             "  rejection_fraction, rejection_mode, n_roughly_aligned, stack_fwhm_px,"
-            "  seam_residual"
-            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  seam_residual, capture_start_utc, capture_end_utc"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            "         ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -993,6 +1011,7 @@ class Project:
                 run.engine_version, run.rejection_fraction, run.rejection_mode,
                 None if run.n_roughly_aligned is None else int(run.n_roughly_aligned),
                 run.stack_fwhm_px, run.seam_residual,
+                run.capture_start_utc, run.capture_end_utc,
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -1075,6 +1094,14 @@ class Project:
                 preview_crop_json=(
                     row["preview_crop_json"]
                     if "preview_crop_json" in row.keys() else None
+                ),
+                capture_start_utc=(
+                    row["capture_start_utc"]
+                    if "capture_start_utc" in row.keys() else None
+                ),
+                capture_end_utc=(
+                    row["capture_end_utc"]
+                    if "capture_end_utc" in row.keys() else None
                 ),
             )
 
@@ -1276,6 +1303,16 @@ class StackRunRow:
     # common case, and every run predating schema 17) means "the whole canvas",
     # exactly as before. See :mod:`seestack.previewcrop` for the encoding.
     preview_crop_json: str | None = None
+    # When the subs that went into this stack were *shot*: the earliest and
+    # latest ``DATE-OBS`` among the frames the run combined, as recorded. NULL
+    # for runs from before these columns existed (schema < 18), for a run whose
+    # frames carry no capture time, and for the derived runs (an editor export
+    # inherits its source run's window; a channel combine has no single one).
+    # Distinct from ``timestamp_utc``, which is when the stack *ran* — the two
+    # differ by years on a re-stack of a back catalogue, and anything that says
+    # "shot on …" must use these.
+    capture_start_utc: str | None = None
+    capture_end_utc: str | None = None
     # How many contributing subs sub-pixel refine had to leave *only roughly
     # aligned* (its measured shift exceeded the cap, so the frame stacked
     # unshifted → possibly soft/doubled stars). None when refine was off, not

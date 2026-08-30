@@ -132,9 +132,9 @@ def test_stats_caches_rollup_until_activity_changes(client, solved_library, monk
     calls = {"n": 0}
     real = stats_mod._rollup_stacks
 
-    def counting(lib, targets):
+    def counting(lib, targets, lon_deg=None):
         calls["n"] += 1
-        return real(lib, targets)
+        return real(lib, targets, lon_deg)
 
     monkeypatch.setattr(stats_mod, "_rollup_stacks", counting)
 

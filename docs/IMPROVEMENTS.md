@@ -43,6 +43,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-vsy9vz` — claim released, shipped as v0.313.0.**
+> The date-honesty class filed under "Autonomy & friendliness" as the generalisation of the v0.311.3 "First
+> light" bug, taken at the instance that was a **wrong fact on shared output**: the ready-to-post caption and
+> the OS share sheet both asserted a picture was "shot on" / "captured" the run's `timestamp_utc`, i.e. when
+> the **stack ran**. The app now records when a stack's subs were taken (schema 18) and every caption reads
+> that or says nothing. Full write-up on the entry under "Autonomy & friendliness"; the rest of the sweep
+> (provenance lines, the keepsake, the Sky footprint line) is still open there.
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-q6uois` — run finished, both claims released.**
 > **Shipped one, and stood the other down as a duplicate — this was collision number seven, and it is the one
 > the claim-by-site discipline could not have prevented.** Read the process note under "Autonomy &
@@ -9598,6 +9606,64 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **✅ SHIPPED, the wrong-fact half (Builder, v0.313.0, branch `claude/compassionate-galileo-vsy9vz`)
+  — ~~a picture's shareable caption said it was "shot on" / "captured" the day the **stack ran**~~, and the
+  app now records when the subs were actually taken.** This entry's own worked example — the Dashboard's
+  Recent-stacks tile dating a re-stack of 2024 subs to today — shipped with it. *(Severity: wrong fact on
+  **shared output**, i.e. the words a beginner pastes under their photo in public. Confidence: reproduced in
+  the test suite — the bundled fixtures carry `DATE-OBS 2024-09-12` and the caption named the run day.)*
+
+  **What was wrong.** Nothing in the app knew when a picture's light was collected. A stack run recorded only
+  `timestamp_utc` — when it was *processed* — so every surface that wanted a capture date reached for that,
+  and two of them asserted it outright: `postCaption` ("… shot on 30 Aug 2026 with a Seestar", the
+  ready-to-post caption behind History's **Copy caption**) and `sharePictureText` ("M42 — captured 30 Aug
+  2026", the OS share sheet from the Target hero, Gallery, Best pictures and History). Those two dates are the
+  same day only if you stack the night you shoot. **The owner is the exact person for whom they are not**: a
+  Seestar owner arriving with a back catalogue gets a whole library captioned with install week, and any
+  re-stack is out by however long ago the data was taken.
+
+  **What shipped.** Schema **18** adds two additive columns, `capture_start_utc` / `capture_end_utc`, and
+  `stacker._capture_window` fills them from the frames the run combined — comparing **parsed instants**, not
+  strings, because the app writes UTC in three spellings and a lexicographic `min` would pick whichever
+  *spelling* sorts first (the same trap the v0.311.3 fix hit). The API does not hand those raw stamps out:
+  a new `webapp/capture_nights.py` turns them into the **observing nights** they belong to via the shared
+  `night_date_of`, so a caption cannot name a session a different night from the Nights card — an evening's
+  subs straddle a UTC boundary for most of the world, and a date sliced off the stamp would have split one
+  session in two. `/api/targets/{safe}/stack-runs`, `/api/stats` and `/api/gallery` (+ the best-pictures wall)
+  all report the pair; a test pins that the three surfaces showing one picture date it identically.
+
+  **The design call worth carrying forward:** `postCaption` no longer takes a `dateLabel` at all — it takes
+  the **window**. Every caller filled the old parameter with `run.timestamp_utc`, so the wrong stamp now
+  fails to type-check rather than reading plausibly. `formatCaptionDate`, whose only job was to render that
+  stamp for the caption, is gone with it (it was also a second copy of `formatNightDate`); its coverage moved
+  to the two new helpers. **Where there is no window — every run on the owner's install until the next
+  stack — the clause is *dropped*, never back-filled from the run stamp:** "shot with a Seestar", full stop.
+  An editor export inherits its source run's window, since it is the same light.
+
+  **…and the unlabelled dates beside a picture.** A bare date under a thumbnail is read as "the
+  night I took this". `pictureDateLabel` now prefers the capture window and *names which date it is* either
+  way — "Shot 15–18 Nov 2024", else "Stacked 30 Aug 2026" — on the Dashboard's Recent-stacks strip (this
+  entry's own example) and on the "Show and tell" slideshow's line, which calls itself an acquisition line.
+  A Moon/Sun still says "Stacked …": the app never learns when a clip was shot.
+
+  **Upgrade-safe (§9):** additive columns with a migration from any older version (tested by rolling a real
+  DB back to schema 17 and reopening); no config, on-disk-layout or default change; every new API field is
+  optional and every consumer treats absent as "say nothing". A run recorded before the columns existed is
+  byte-for-byte what it was.
+
+  **Tests (+42):** `tests/test_capture_window.py` (the window's instant-vs-spelling ordering, verbatim
+  storage, undated/unparseable frames, the DB round trip, and the schema-17 → 18 migration keeping its rows);
+  `tests/webapp/test_capture_nights.py` (one night vs a range, an evening far from UTC bucketed as one night
+  rather than two, one-sided and reversed windows); `tests/webapp/test_capture_date_endpoints.py` (a real
+  stack recording its subs' 2024 night while running today, the three surfaces agreeing, and a windowless run
+  reporting `null`); plus `format.test.ts`, `postCaption.test.ts`, `History.test.tsx`, `Dashboard.test.tsx`
+  and `showAndTell.test.ts`.
+
+  **What is left of this sweep** (the rest of the entry below still stands): Gallery cards and History rows
+  still print the run stamp in their *provenance* lines, which is arguably right there; the keepsake/poster
+  and the Sky footprint line were not touched; and `Target.tsx`'s hero caption already says "Stacked …",
+  honestly, but could now say both dates.
 
 - **NEW IDEA (Builder 2026-08-30, the generalisation of the v0.311.3 "First light" bug) — sweep every date the
   app shows a beginner and ask whether it means *when you shot this* or *when the app did something*.**
