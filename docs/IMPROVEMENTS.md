@@ -43,10 +43,23 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-- **CLAIMED (Builder 2026-08-30, branch `claude/compassionate-galileo-xkjuvl`)** — the engine QA lead under
-  "Image quality": sweep the rest of the engine for *"compares a position-dependent metric across a whole
-  target"* (the bug class behind v0.270.2 / v0.271.0 / v0.272.1). Fix any fourth site found; record the
-  non-finding honestly if there isn't one.
+_(none — claim an item here with your branch name)_
+
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-xkjuvl` — run finished, all claims released.**
+> Shipped three: the **recipe-drift guard** (**v0.302.1**, write-up at the top of "Autonomy & friendliness") —
+> the filed shape *plus* a second, more reachable instance found while building it (History → Adjust → Save
+> leaves an auto-edit's display-space marker behind); and the **position-dependent-metric sweep**
+> (**v0.302.2**, under "Image quality"), which found a real **fourth site** in the bug class behind v0.270.2 /
+> v0.271.0 / v0.272.1: the "Clouds & haze" card called a mosaic's move to an emptier panel *"clouds rolled in
+> after 22:21 UTC"* (measured 1000 → 450 before, 720 → 720 after). Everything else the QA lead named was swept
+> and is recorded as cleared, with the reasoning, in that entry — don't re-tread it. Then both **"Tonight,
+> live" follow-ons** (**v0.302.3**, also under "Autonomy & friendliness") — keep-awake, reusing the
+> slideshow's helper rather than writing a second one, and the line naming the other target a re-pointing
+> night also shot.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
+> Claiming in the run's **first** commit and pushing immediately (per the five duplicate-collision process
+> notes) again cost under a minute; no collision.
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow` — run finished, all claims released.**
 > Shipped two: the ~~invisible reveal on "Process target"~~ dogfood finding (**v0.301.0**, write-up under
@@ -9252,6 +9265,38 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-30, found while shipping the v0.302.1 recipe-drift guard — the *behaviour*
+  behind the stale marker I fixed, which the fix deliberately did not change) — History → "Adjust" → Save
+  silently throws away a "Process target" run's finished picture.** *(Pillar: friendliness / trust —
+  PRIORITY 3; size S; copy + one guard, no engine work.)* `save_stack_preview` re-renders the preview from
+  the **linear** FITS at the chosen stretch/black. On an ordinary run that is exactly right and is the point
+  of the feature. On an **auto-edited** run it replaces the Auto-toned picture — the one on the Target hero,
+  in the Gallery, on the Library tile, and possibly pinned as the target's cover — with a plain stretch, and
+  says nothing at all about having done so. The recipe survives (re-opening the editor still finds it, and
+  as of v0.302.1 the run stops *claiming* to be a recipe preview), so the loss is recoverable — but only by
+  someone who knows to go to the editor and export, which is precisely not the beginner this app is for. The
+  reachable path is innocent: the History menu offers **Adjust** on any run with a FITS, and its own hint
+  ("Stretch / black point, from the full-range FITS") reads like a *view* control, not a destructive one —
+  and a user who opens it just to tick **North up** (the same panel) pays the same price. **Fix shape:** the
+  run listing already carries the marker (`preview_display_space`), so the panel can say so before the fact —
+  a one-line note on Adjust ("This picture was processed for you; saving here replaces it with a plain
+  stretch of the raw stack. Your edit is kept — re-open the editor to get it back.") and, better, a
+  **North-up-only** save on those runs that re-renders through the stored recipe instead of the sliders,
+  since rotation is the one thing a user genuinely wants from that panel on an already-finished picture.
+  Don't remove Adjust — it is legitimate; just stop it being a silent trapdoor.
+
+- **NEW IDEA (Builder 2026-08-30, read while fixing the mosaic half of the same card in v0.302.2) — the
+  "Clouds & haze" card promises something it can't check: *"those later subs … were automatically counted
+  less in your stack"*.** *(Pillar: trust — PRIORITY 3; size S; copy only, but it needs one datum plumbed.)*
+  That sentence is only true when the stack that used those subs had **quality weighting on**. The auto
+  chain does enable it, so on the walk-away path the claim usually holds — but an interactive stack with the
+  box unticked, and a target that has never been stacked at all, both get the same confident reassurance. The
+  card is a *capture-night* card and knows nothing about any run. **Fix shape:** either soften it to what is
+  actually known (*"hazy subs are counted less when quality weighting is on — it is on by default for
+  hands-off stacks"*), or plumb the newest genuine run's `quality_weighted` flag onto the response and only
+  make the promise when it was really used. The first is a five-minute honesty fix and probably the right
+  size; the second is better if the card ever grows.
+
 - **✅ SHIPPED (Builder, v0.302.1, branch `claude/compassionate-galileo-xkjuvl`) — ~~NEW IDEA (Builder
   2026-08-30, found while building the v0.301.0 recipe-matched reveal) — a saved recipe on a "Process target"
   run can quietly drift from the picture that run's preview actually shows.~~** Shipped exactly as the fix
@@ -9329,21 +9374,51 @@ to **Shipped**.)_
   representative sub), which would key here on the sub *and* the recipe look, so a re-edit invalidates it.
   Don't add a cache on speculation; a stale "before" is worse than a slow one.
 
-- **NEW IDEA (Builder 2026-08-29, the two follow-ons "Tonight, live" v0.298.0 deliberately left out) — keep the
-  screen awake on the live page, and cover a night that shot more than one target.** *(Pillar: understand +
-  enjoy — PRIORITY 3; size S each; both frontend-only, no new data.)*
-  (a) **Keep-awake.** `/live` is the second page in the app designed to be *left open* — outdoors, on a phone,
-  for hours — and it is the one where the screen sleeping actually costs something (you walk over to check and
-  it's black). v0.296.6 already shipped a wake-lock for the slideshow; **grep for it and reuse that exact
-  helper**, don't write a second one, and hold the lock only while the session reads `active` so a finished
-  night releases it. Same fail-soft posture: a browser without the Wake Lock API simply doesn't get it.
-  (b) **A night that shot two targets shows only one.** The page opens on whichever target's frames arrived
-  most recently, which is right — but a Seestar that re-points mid-night (or a mosaic split across panels)
-  leaves the earlier target invisible unless the reader knows to use the picker. Cheapest honest fix: one line
-  under the card naming the *other* targets that also got subs inside the same window ("NGC 7000 got 40 subs
-  earlier tonight"), each a link that sets `?target=`. `last_activity_utc` on the target list already carries
-  everything needed, so this stays a zero-extra-request change. **Don't** turn it into a full multi-target
-  dashboard — the page's value is that it answers two questions about *one* night at a glance.
+- **✅ SHIPPED — BOTH HALVES (Builder, v0.302.3, branch `claude/compassionate-galileo-xkjuvl`) — ~~NEW IDEA
+  (Builder 2026-08-29, the two follow-ons "Tonight, live" v0.298.0 deliberately left out) — keep the screen
+  awake on the live page, and cover a night that shot more than one target.~~** Shipped exactly as the spec
+  below asked, including its "grep for it and reuse that exact helper" instruction.
+
+  **(a) Keep-awake.** `useKeepAwake` moved out of `routes/ShowAndTell.tsx` into
+  `components/useKeepAwake.ts` **unchanged** — one implementation, two callers, rather than the second copy the
+  entry warned against. `/live` holds it only while `live.data?.active === true`, so a finished night releases
+  the lock and the phone goes back to its own battery rules. Same fail-soft posture throughout: no Wake Lock
+  API (or a rejected request, or a hidden page) simply means no lock, and the re-request on `visibilitychange`
+  comes along for free.
+
+  **(b) The other target the night shot.** One dimmed line under the card — *"Also got subs tonight: NGC
+  7000"* — each name a link that sets `?target=`. Backed by a pure `alsoActiveTonight(targets, safe)` over the
+  target list the page **already fetched**, so it is a zero-extra-request change as the entry required.
+  Anchored on the *watched* target's own `last_activity_utc` rather than on the clock (so reading the page next
+  morning still shows what shared that night), with the window set to `SAME_NIGHT_HOURS = 6` — the same gap the
+  backend's session split uses, so "tonight" means the same thing here as in the recap and the Nights card. It
+  renders nothing at all when the night was one target, which is the common case, and it stays a *line*: no
+  measurements, no second dashboard.
+
+  **Upgrade-safe (§9):** frontend-only, no new endpoint, no config/schema/API/default change.
+
+  **Tests (+7):** `liveSession.test.ts` (+3 — the mid-night re-point named newest-first; last week's target and
+  the watched one excluded; the three no-anchor cases), `Live.test.tsx` (+3 — the line links through to the
+  other target, says nothing on a one-target night, and the wake lock is taken while capturing, released on
+  unmount, and never asked for on a finished session), and `ShowAndTell.test.tsx`'s existing 13 still green
+  across the extraction.
+
+  Original spec, for the record:
+
+    *(Pillar: understand +
+    enjoy — PRIORITY 3; size S each; both frontend-only, no new data.)*
+    (a) **Keep-awake.** `/live` is the second page in the app designed to be *left open* — outdoors, on a phone,
+    for hours — and it is the one where the screen sleeping actually costs something (you walk over to check and
+    it's black). v0.296.6 already shipped a wake-lock for the slideshow; **grep for it and reuse that exact
+    helper**, don't write a second one, and hold the lock only while the session reads `active` so a finished
+    night releases it. Same fail-soft posture: a browser without the Wake Lock API simply doesn't get it.
+    (b) **A night that shot two targets shows only one.** The page opens on whichever target's frames arrived
+    most recently, which is right — but a Seestar that re-points mid-night (or a mosaic split across panels)
+    leaves the earlier target invisible unless the reader knows to use the picker. Cheapest honest fix: one line
+    under the card naming the *other* targets that also got subs inside the same window ("NGC 7000 got 40 subs
+    earlier tonight"), each a link that sets `?target=`. `last_activity_utc` on the target list already carries
+    everything needed, so this stays a zero-extra-request change. **Don't** turn it into a full multi-target
+    dashboard — the page's value is that it answers two questions about *one* night at a glance.
 
 - **✅ SHIPPED (Builder, v0.297.1, branch `claude/compassionate-galileo-1i6x9x`) — ~~a target that needs 4+
   good nights gets no finish date at all, because the planner is only ever asked for three windows.~~**
@@ -16226,22 +16301,81 @@ problems. Dogfood it every big-picture run and fix root causes.
   subs + unrelated container `<T>_sub` → the 2 root subs stay accepted. Only worth doing if the owner actually
   hits a mixed drop; the many-sub data-loss case (the real harm) is already fixed.
 
-- **IDEA / QA LEAD (Builder 2026-08-26, generalised from three fixes of the same bug) — sweep the rest of the
-  engine for "compares a POSITION-DEPENDENT metric across a whole target".** *(Pillar: image quality /
-  correctness — PRIORITY 4; size S to audit, unknown to fix; a good Scout run.)*
-  Three separate passes shipped the identical mistake and each one was found only after the previous fix made
-  it obvious: QC grading (v0.270.2), photometric normalization (v0.271.0) and quality weighting (v0.272.1)
-  all compared `star_count` / `sky_adu_median` / `transparency_score` against a **target-wide** median, which
-  on a mosaic reads "this panel points at emptier sky" as "this sub is bad". The shared gate now exists
-  (`pointing_groups`, `seestack/stack/pointings.py`), so a fourth site would be a one-line fix — the work is
-  *finding* it. **Method:** grep every `np.median(` / `np.percentile(` / `mean(` taken over a whole frame
-  list, and for each ask "is this metric a property of the night, or of where the scope pointed?" Night-wide
-  (FWHM, eccentricity, and anything derived from the *time* of capture) is correct target-wide; anything
-  flux-like or sky-brightness-like is not. Candidate sites worth checking first: the auto-grade reconsider /
-  reaccept path, `stackhealth`'s trend and drift verdicts, the session-quality drift and transparency-trend
-  endpoints, and any "best frame" / reference-frame picker that ranks on star count. **Note the asymmetry
-  that makes this quietly harmful:** several of these factors *clip at 1.0*, so a wrongly-compared panel can
-  only ever be penalised, never compensated — the loss is one-way and silent.
+- **✅ SWEPT, AND A FOURTH SITE FOUND AND FIXED (Builder, v0.302.2, branch
+  `claude/compassionate-galileo-xkjuvl`) — ~~IDEA / QA LEAD (Builder 2026-08-26) — sweep the rest of the engine
+  for "compares a POSITION-DEPENDENT metric across a whole target".~~** The sweep was run exactly as the
+  method below prescribes, and the fourth site was one of the candidates it named: **`transparency_trend`**
+  (`seestack/session_recap.py`), the "Clouds & haze through the night" card.
+
+  **The bug, measured on a synthetic mosaic night.** `transparency_score` is the median flux of a frame's
+  *brightest stars*, so it is a property of where the scope pointed as much as of the sky. The card compared
+  the session's **first third** against its **last third** — and a Seestar works through its mosaic panels in
+  sequence, so it ends the night on a different patch of sky from the one it started on. Two panels, steady
+  within themselves, the second simply a 2.2× emptier star field (the same order as the **2.23× relative panel
+  gain error** measured for the photometric pass in v0.276.0): **before — verdict `degraded`, early/late
+  1000 → 450, "the sky got hazier after 22:21 UTC — clouds or haze rolling in"; after — verdict `clear`,
+  720 → 720, no marker.** On a night where, by construction, nothing about the weather changed. Worse, the
+  copy went on to tell the reader *"those later subs … were automatically counted less in your stack"* —
+  which, since the per-panel quality weighting shipped in v0.272.1, is **no longer true on a mosaic**. So the
+  card was confidently wrong twice about the same night.
+
+  **The fix, in the shape the other three used.** When the session's pointings split soundly
+  (`pointing_groups`, the shared gate, at the 3-frame floor the quality weighting uses), each panel's scores
+  are **rescaled onto the session's overall median** before anything is trended: the panel-to-panel offset
+  goes, the within-night change every panel actually saw stays, and the numbers stay in familiar units.
+  Fail-neutral at every edge — a single-pointing target, an unsolved one, and a mosaic too tightly packed to
+  separate get **no split and are byte-for-byte unchanged**; a sub in no substantial panel keeps its raw
+  score rather than borrowing another patch of sky's yardstick; and a split where only *one* panel can be
+  measured levels **nothing**, since moving that one against un-rescaled neighbours is worse than leaving the
+  night alone.
+
+  **Said out loud, not silently.** An additive `n_pointings` (0 on every ordinary target) reaches the card,
+  which adds one line — *"This night's subs came from 3 mosaic panels. Each panel points at a different patch
+  of sky, so they're compared against themselves — a panel aimed at emptier sky isn't haze."* — so the flat
+  sparkline and the verdict agree with each other and with what the reader knows the scope did.
+
+  **Also swept, and cleared (recorded so nobody re-treads them):**
+  * `stack/weighting.py`, `stack/photometric.py`, `qc/grading.py` — already per-pointing (v0.270.2 /
+    v0.271.0 / v0.272.1 / v0.276.0).
+  * `session_recap.focus_trend` and `session_quality_drift` — **FWHM**, a property of the *night* (seeing,
+    focus, tracking), correctly target-wide. Same for `frames.trailed_frame_ids` (eccentricity).
+  * `stack/reference.pick_reference_frame` — ranks on *distance to the median pointing*, which is
+    position-dependent **on purpose**; FWHM is only the tiebreak. Correct as written.
+  * `qc/grading.best_frame` — ranks FWHM first and only tie-breaks on star count; a float-FWHM tie is
+    vanishingly rare and the pick is a thumbnail, not data.
+  * `qc/sky_quality.sky_brightness` — compares a night's median **sky rate** against the target's own
+    multi-night baseline. Sky brightness *is* position-dependent, but across a mosaic's ~1° panel steps the
+    sky-dome difference is negligible next to the star-flux one, a night normally covers every panel, and
+    `SkySample` carries no RA/Dec at all. Left alone deliberately; if it is ever revisited, it needs the
+    pointing plumbed through first.
+
+  **Upgrade-safe (§9):** one additive response field an older frontend ignores, one optional frontend line, no
+  config/schema/on-disk/default change, and the single-pointing path (every non-mosaic target — i.e. almost
+  every install) is provably unchanged, pinned by its own test.
+
+  **Tests (+9, 2 fail before):** `tests/test_session_recap.py` (+4 — the emptier panel not called clouds; a
+  mosaic night that *really* clouded over still caught; the single-pointing/unsolved night byte-for-byte
+  unchanged including its exact point values; the one-measurable-panel no-op), `tests/webapp/…transparency_trend`
+  (+2 — `n_pointings` through the endpoint, both ways), `transparencyTrend.test.ts` (+2) and
+  `TransparencyTrendCard.test.tsx` (+2 — the line appears only on a mosaic).
+
+  Original spec, for the record:
+
+    *(Pillar: image quality /
+    correctness — PRIORITY 4; size S to audit, unknown to fix; a good Scout run.)*
+    Three separate passes shipped the identical mistake and each one was found only after the previous fix made
+    it obvious: QC grading (v0.270.2), photometric normalization (v0.271.0) and quality weighting (v0.272.1)
+    all compared `star_count` / `sky_adu_median` / `transparency_score` against a **target-wide** median, which
+    on a mosaic reads "this panel points at emptier sky" as "this sub is bad". The shared gate now exists
+    (`pointing_groups`, `seestack/stack/pointings.py`), so a fourth site would be a one-line fix — the work is
+    *finding* it. **Method:** grep every `np.median(` / `np.percentile(` / `mean(` taken over a whole frame
+    list, and for each ask "is this metric a property of the night, or of where the scope pointed?" Night-wide
+    (FWHM, eccentricity, and anything derived from the *time* of capture) is correct target-wide; anything
+    flux-like or sky-brightness-like is not. Candidate sites worth checking first: the auto-grade reconsider /
+    reaccept path, `stackhealth`'s trend and drift verdicts, the session-quality drift and transparency-trend
+    endpoints, and any "best frame" / reference-frame picker that ranks on star count. **Note the asymmetry
+    that makes this quietly harmful:** several of these factors *clip at 1.0*, so a wrongly-compared panel can
+    only ever be penalised, never compensated — the loss is one-way and silent.
 
 - **IDEA (Builder 2026-08-26, left open by the v0.271.0 per-panel photometric fix) — match a hazy mosaic
   panel's *brightness* to its neighbours using the panel OVERLAPS, not `transparency_score`.**

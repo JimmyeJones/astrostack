@@ -45,6 +45,27 @@ export function describeTransparencyTrend(t: TransparencyTrend): string {
 }
 
 /**
+ * One extra plain-language line when the night's subs came from a mosaic's
+ * panels, or `""` when they didn't (the ordinary single-pointing target, and any
+ * older backend that doesn't send the count).
+ *
+ * A mosaic's panels look at *different patches of sky*, so a panel aimed at an
+ * emptier field genuinely records fainter stars — nothing to do with haze. The
+ * backend levels the panels onto one scale before reading the trend; this says so,
+ * because a reader who knows the scope moved deserves to know the card accounted
+ * for it. Pure/testable.
+ */
+export function mosaicPanelsNote(t: TransparencyTrend): string {
+  const n = t.n_pointings ?? 0;
+  if (n < 2) return "";
+  return (
+    `This night's subs came from ${n} mosaic panels. Each panel points at a ` +
+    `different patch of sky, so they're compared against themselves — a panel ` +
+    `aimed at emptier sky isn't haze.`
+  );
+}
+
+/**
  * Map a run of transparency values to an SVG polyline `points` string inside a
  * `width`×`height` box. Higher transparency (clearer) plots *higher* (smaller y)
  * so the intuitive "up = clearer" reading holds. Pure/testable.
