@@ -20,16 +20,28 @@ export function subExposureLabel(seconds: number | null | undefined): string | n
 /** The caption sentence for the reveal. Degrades gracefully as fields drop:
  *  - both present → "One 30-second frame vs your 505-frame stack — …"
  *  - only frames  → "One frame vs your 505-frame stack — …"
- *  - neither      → "One frame vs your stack — …" */
+ *  - neither      → "One frame vs your stack — …"
+ *
+ * `matchedBy` says how the two halves were made comparable. On a "Process
+ * target" run both sides go through that run's *own* edit ("recipe"), which is
+ * worth saying out loud: a beginner looking at an edited picture beside a grainy
+ * frame should know the grain is the only difference, not the editing. A plain
+ * stack ("stretch", the default) needs no such line — the tone match is the
+ * uninteresting default there. */
 export function oneFrameCaption(
   subExposureS: number | null | undefined,
   nFrames: number | null | undefined,
+  matchedBy?: string | null,
 ): string {
   const exp = subExposureLabel(subExposureS);
   const frame = exp ? `One ${exp} frame` : "One frame";
   const hasCount = nFrames != null && Number.isFinite(nFrames) && nFrames > 0;
   const stack = hasCount ? `your ${nFrames}-frame stack` : "your stack";
-  return `${frame} vs ${stack} — stacking cut the noise and pulled out faint detail.`;
+  const same =
+    matchedBy === "recipe"
+      ? " Both sides went through the same edit, so the only difference is the extra frames."
+      : "";
+  return `${frame} vs ${stack} — stacking cut the noise and pulled out faint detail.${same}`;
 }
 
 /** The quantitative "stacking cut your noise ~N×" badge line, or null to omit it.

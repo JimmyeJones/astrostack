@@ -34,6 +34,22 @@ describe("oneFrameCaption", () => {
     expect(oneFrameCaption(null, null)).toBe(
       "One frame vs your stack — stacking cut the noise and pulled out faint detail.");
   });
+  it("says both sides carry the same edit on a recipe-matched run", () => {
+    // A "Process target" run shows an *edited* picture, so a beginner looking at
+    // it beside a grainy frame has to be told the editing isn't the difference.
+    expect(oneFrameCaption(30, 505, "recipe")).toBe(
+      "One 30-second frame vs your 505-frame stack — stacking cut the noise " +
+      "and pulled out faint detail. Both sides went through the same edit, " +
+      "so the only difference is the extra frames.");
+  });
+  it("stays silent about matching on a plain stack, and on an older backend", () => {
+    const plain =
+      "One 30-second frame vs your 505-frame stack — stacking cut the noise " +
+      "and pulled out faint detail.";
+    expect(oneFrameCaption(30, 505, "stretch")).toBe(plain);
+    expect(oneFrameCaption(30, 505, null)).toBe(plain);
+    expect(oneFrameCaption(30, 505, undefined)).toBe(plain);
+  });
 });
 
 describe("noiseReductionBadge", () => {

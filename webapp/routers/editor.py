@@ -289,6 +289,33 @@ def render_run_display_array(
     return out
 
 
+def render_sub_display_array(fits_path: str | Path, recipe: Recipe, *,
+                             bayer_pattern: str | None = None,
+                             max_width: int = 1024):
+    """Render a recipe over **one raw sub** and return the display-space RGB array
+    (0..1), the same shape :func:`render_run_display_array` returns for a stack.
+
+    This is the "before" half of the one-frame-vs-your-stack reveal on a run whose
+    picture is an in-place Auto edit: putting the single sub through the run's own
+    recipe is the only honest match for a recipe-toned stack, because both halves
+    then carry *identical* processing and differ only in how many frames went in.
+    (Matching a raw STF sub against a recipe-toned stack would sell a tone
+    difference as what stacking bought you — the one thing the reveal must never
+    do.)
+
+    The sub has no coverage map and is not a stacked canvas, so ``coverage`` /
+    ``frame_coverage`` are ``None`` — which the coverage-leveling op treats as "no
+    coverage to level" and skips, exactly as it does on a single-field export.
+    Pure inputs/outputs, so it can run in a worker thread.
+    """
+    from seestack.render.thumbnail import load_sub_linear_rgb
+
+    rgb, scale = load_sub_linear_rgb(
+        fits_path, bayer_pattern=bayer_pattern, max_width=max_width)
+    ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None)
+    return apply_recipe(rgb, recipe, ctx, for_preview=True)
+
+
 def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
     import io
 

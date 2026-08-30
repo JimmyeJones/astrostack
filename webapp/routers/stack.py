@@ -1474,6 +1474,88 @@ def _pick_reference_sub(proj: Any) -> Any | None:
     return frames[0]
 
 
+def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
+    """The editor recipe an **in-place "Process target" Auto edit** baked into this
+    run's stored preview — or ``None`` when the run isn't one of those.
+
+    This is what lets the reveal survive the one-click path. A "Process target" run
+    keeps a **linear** FITS and rewrites only its preview PNG to the Auto recipe's
+    result (``pipeline._auto_edit_process_run``), stamping ``preview_display_space``
+    and storing the recipe under ``editor_recipe:<run_id>``. Given that recipe, the
+    single sub can be rendered through the *same* ops, so the two halves of the
+    reveal differ only in how many frames went in — a fairer comparison than the
+    STF match a plain linear run gets, not a looser one.
+
+    ``None`` (⇒ the reveal stays hidden, as before) for:
+
+    * a genuine editor **export** — its FITS is itself display-space
+      (``fits_is_display_space``), so there is no linear picture to reason about and
+      the recipe on it, if any, describes a *second-round* edit of the export;
+    * an ordinary linear run, which already has the honest STF/asinh match; and
+    * an auto-edited run whose recipe is missing or unreadable, where we'd be
+      guessing at what its preview shows.
+
+    Like every other surface that reads this marker (see ``_unexported_edit``), it
+    takes the stored recipe to *be* what the stored preview shows — which is what
+    ``_auto_edit_process_run`` writes, in one step, for these runs.
+    """
+    from seestack.stack.output import fits_is_display_space
+
+    if not _preview_is_display_space(run.options_json):
+        return None
+    if run.fits_path and Path(run.fits_path).exists() and fits_is_display_space(run.fits_path):
+        return None
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    raw = proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}")
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("ops"), list):
+        return None
+    return raw
+
+
+def _display_space_without_recipe(run: Any, recipe_json: str | None) -> bool:
+    """True when this run's stored preview is tone-mapped and we have **no** way to
+    put a single sub through the same processing — i.e. the reveal (and the
+    before/after download, gated identically) must stay hidden.
+
+    Falls to ``False`` for an in-place Auto edit once its recipe is in hand, which
+    is what makes the reveal reachable on the one-click path."""
+    from seestack.stack.output import fits_is_display_space
+
+    if recipe_json:
+        return False
+    return _preview_is_display_space(run.options_json) or bool(
+        run.fits_path and Path(run.fits_path).exists()
+        and fits_is_display_space(run.fits_path)
+    )
+
+
+def _render_sub_through_recipe(src_path: str, pattern: str, recipe_json: str) -> bytes:
+    """PNG bytes of one raw sub put through a saved editor recipe — the "before"
+    half of the reveal on an auto-edited run. Threadpool-safe (pure inputs)."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    from seestack.edit.recipe import recipe_from_dict
+    from webapp.routers.editor import render_sub_display_array
+
+    recipe = recipe_from_dict(json.loads(recipe_json))
+    out = render_sub_display_array(src_path, recipe, bayer_pattern=pattern,
+                                   max_width=1024)
+    u8 = (np.clip(np.nan_to_num(out), 0.0, 1.0) * 255).astype(np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
+    return buf.getvalue()
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack")
 def one_sub_vs_stack_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     """Whether a "one frame vs your stack" reveal is available for this run, plus
@@ -1490,23 +1572,26 @@ def one_sub_vs_stack_info(safe: str, run_id: int, request: Request) -> dict[str,
     the same runs), so the card self-hides rather than showing two mismatched tone
     curves. Every caption field is best-effort (``null`` when its datum is missing) so
     the card degrades to a shorter line rather than printing blanks.
-    """
-    from seestack.stack.output import fits_is_display_space
 
+    The **one-click "Process target"** run is the exception, and the reason this is
+    worth more than its narrow gate suggests: its preview is a recipe result too,
+    but its FITS stays linear and the recipe is stored on the run, so the sub can be
+    put through that *same* recipe (``matched_by: "recipe"``). Without that, the app's
+    most convincing moment was missing from the one journey a beginner is most likely
+    to take. A plain linear run keeps the stretch match (``matched_by: "stretch"``).
+    """
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
         if run is None:
             raise HTTPException(status_code=404, detail="No such run")
         has_preview = bool(run.preview_path and Path(run.preview_path).exists())
-        # A display-space export is tone-mapped verbatim; a raw sub STF/asinh
-        # render can't match it, so don't offer the reveal for those runs. An
-        # in-place Auto-edited run's preview is likewise a recipe result (its FITS
-        # stays linear, so only the run marker catches it).
-        display_space = _preview_is_display_space(run.options_json) or bool(
-            run.fits_path and Path(run.fits_path).exists()
-            and fits_is_display_space(run.fits_path)
-        )
+        # A display-space *export* is tone-mapped verbatim with no linear picture
+        # behind it; a raw sub can't be matched to it either way, so those runs
+        # stay hidden. An in-place Auto edit is display-space too, but recoverable
+        # — see _auto_edit_recipe_json.
+        recipe_json = _auto_edit_recipe_json(proj, run) if has_preview else None
+        display_space = _display_space_without_recipe(run, recipe_json)
         ref = _pick_reference_sub(proj) if (has_preview and not display_space) else None
         sub_exposure_s = ref.exposure_s if ref is not None else None
     finally:
@@ -1517,18 +1602,27 @@ def one_sub_vs_stack_info(safe: str, run_id: int, request: Request) -> dict[str,
         "n_frames": run.n_frames_used,
         "sub_exposure_s": sub_exposure_s,
         "integration_s": run.total_exposure_s,
+        # Additive: how the two halves were made comparable, so the card can say
+        # "put through the same edit" where that is what actually happened.
+        "matched_by": "recipe" if recipe_json else "stretch",
     }
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/reference-sub")
 async def reference_sub_png(safe: str, run_id: int, request: Request) -> Response:
-    """Render the run's representative single sub, stretched to match the stack
+    """Render the run's representative single sub, processed to match the stack
     preview, as PNG — the "before" half of the one-frame-vs-stack reveal.
 
-    Debayers the sharpest accepted frame and applies the identical export
-    autostretch that produced the run's stored preview, so the only visible
-    difference between this and the stack is noise/detail (never brightness). Runs
-    in a threadpool so it never blocks the job worker.
+    Debayers the sharpest accepted frame and puts it through whatever produced the
+    run's stored preview, so the only visible difference between this and the stack
+    is noise/detail (never brightness):
+
+      * a plain linear run — the identical export autostretch, or the run's saved
+        asinh curve if History "Adjust" overwrote its preview;
+      * an in-place "Process target" **Auto edit** — the run's own stored recipe
+        (``_auto_edit_recipe_json``), so both halves carry identical processing.
+
+    Runs in a threadpool so it never blocks the job worker.
     """
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -1545,6 +1639,7 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
         if pattern not in _BAYER_PATTERNS:
             pattern = "RGGB"
         src_path = str(src)
+        recipe_json = _auto_edit_recipe_json(proj, run)
         # If the run's preview was re-saved with a custom asinh stretch (History
         # "Adjust"), render the sub through that same curve so the reveal's two
         # halves differ only in noise/detail — not a tone offset. Both columns are
@@ -1554,6 +1649,12 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
     finally:
         proj.close()
         lib.close()
+
+    if recipe_json:
+        png = await run_in_threadpool(
+            _render_sub_through_recipe, src_path, pattern, recipe_json)
+        return Response(content=png, media_type="image/png",
+                        headers={"Cache-Control": "no-store"})
 
     from seestack.render.thumbnail import render_sub_preview
 
@@ -1581,12 +1682,12 @@ async def before_after_jpeg(safe: str, run_id: int, request: Request,
     Gated **identically to the reveal** — 404 (rather than an unfair pairing) when
     the run has no stored preview, no frame to render, or is a display-space
     editor export whose bespoke tone curve a raw sub can't honestly match — so the
-    download button self-hides on exactly the runs the card already hides on.
+    download button self-hides on exactly the runs the card already hides on. That
+    includes the in-place Auto edit, where "identically" now means *available*: the
+    sub goes through the run's own recipe, like the reveal's left half.
     Composed in a threadpool, like every other render here, so it never blocks
     the job worker.
     """
-    from seestack.stack.output import fits_is_display_space
-
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
@@ -1596,10 +1697,8 @@ async def before_after_jpeg(safe: str, run_id: int, request: Request,
         preview_path = run.preview_path
         if not preview_path or not Path(preview_path).exists():
             raise HTTPException(status_code=404, detail="No preview for this run")
-        if _preview_is_display_space(run.options_json) or (
-            run.fits_path and Path(run.fits_path).exists()
-            and fits_is_display_space(run.fits_path)
-        ):
+        recipe_json = _auto_edit_recipe_json(proj, run)
+        if _display_space_without_recipe(run, recipe_json):
             raise HTTPException(
                 status_code=404,
                 detail="This run's picture is an edited export, so a raw frame "
@@ -1643,8 +1742,11 @@ async def before_after_jpeg(safe: str, run_id: int, request: Request,
 
         from seestack.render.thumbnail import render_sub_preview
 
-        sub_png = render_sub_preview(src_path, bayer_pattern=pattern,
-                                     max_width=1024, stretch=stretch, black=black)
+        if recipe_json:
+            sub_png = _render_sub_through_recipe(src_path, pattern, recipe_json)
+        else:
+            sub_png = render_sub_preview(src_path, bayer_pattern=pattern,
+                                         max_width=1024, stretch=stretch, black=black)
         with Image.open(io.BytesIO(sub_png)) as raw:
             before = raw.convert("RGB")
         with Image.open(preview_path) as stored:
