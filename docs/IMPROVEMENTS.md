@@ -43,6 +43,18 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-1m28nv` — CLAIMING two, by *site* (per the
+> collision process notes, naming the file/function, not just the lead):**
+> 1. **The History → "Adjust" → Save trapdoor** on an auto-edited run — `save_stack_preview`
+>    (`webapp/routers/stack.py:1599`) + the Adjust panel in `frontend/src/routes/History.tsx` (`RunCard`,
+>    the `adjust && run.has_fits` block ~line 1083). Both halves of the filed shape: the warning note, and
+>    the **North-up-only save that re-renders through the run's stored recipe** so rotating a finished
+>    picture stops costing the user their processed picture.
+> 2. **The "Clouds & haze" card's unconditional *"counted less in your stack"* promise** —
+>    `webapp/routers/target.py`'s transparency-trend response + `frontend/src/routes/Target.tsx`'s
+>    clouds/haze card copy. Taking the *plumbed* option (the newest genuine run's `quality_weighted`),
+>    not the copy-softening one.
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-ezix3s` — run finished, all claims released.**
 > Worked the standing **"sweep the engine for a POSITION-DEPENDENT metric compared across a whole target"** QA
 > lead, and shipped three, each reproduced before fixing:
