@@ -143,6 +143,16 @@ _METRICS: list[_MetricSpec] = [
 
 METRIC_LABELS: dict[str, str] = {m.attr: m.label for m in _METRICS}
 
+# The metrics that are a property of **where the scope pointed** as much as of
+# the night — flux-like or sky-brightness-like — so comparing them across a
+# mosaic's panels reads "this panel frames emptier sky" as "this sub is bad".
+# The single source of truth for that line: every caller that ranks or compares
+# frames must split by pointing for these and only these (FWHM and eccentricity
+# are properties of the seeing, and are correctly compared target-wide).
+PER_POINTING_METRICS: frozenset[str] = frozenset(
+    m.attr for m in _METRICS if m.per_pointing
+)
+
 
 def _reason_text(metric: str, value: float, typical: float) -> str:
     """Plain-language explanation a beginner can act on."""

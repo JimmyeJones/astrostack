@@ -520,8 +520,13 @@ export function TargetView() {
     onSuccess: (r, body) => {
       // When the backend explains a no-op (e.g. "Reject worst" with no QC metric
       // measured yet), surface that guidance instead of a bare "Updated 0 frames".
+      // A note can also accompany work that *did* happen (e.g. a mosaic cut taken
+      // per panel), so keep the count and drop the warning colour in that case.
       if (r.note) {
-        notifications.show({ message: r.note, color: "yellow" });
+        notifications.show({
+          message: r.changed ? `Updated ${r.changed} frames — ${r.note}` : r.note,
+          color: r.changed ? "violet" : "yellow",
+        });
       } else {
         notifications.show({ message: `Updated ${r.changed} frames`, color: "violet" });
       }
