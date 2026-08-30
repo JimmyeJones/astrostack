@@ -906,3 +906,110 @@ def test_the_real_process_target_auto_edit_leaves_the_reveal_working(
         f"/api/targets/{safe}/stack-runs/{run_id}/reference-sub").status_code == 200
     assert client.get(
         f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg").status_code == 200
+
+
+def test_a_re_edited_auto_run_hides_the_reveal_again(client, solved_library):
+    """The stored recipe stops describing the stored preview the moment the user
+    re-opens a "Process target" run, changes something and presses **Save** — the
+    recipe is rewritten, the baked preview PNG is not.
+
+    Without the baked-look stamp nothing could tell, so the reveal happily rendered
+    the "before" through the *new* recipe against a preview showing the *old* one:
+    the two halves would then differ by an edit as well as by frame count, which is
+    the one thing this comparison must never show. With the stamp it stands down to
+    hidden, exactly as it does when the recipe is missing entirely.
+    """
+    from webapp.pipeline import _auto_edit_process_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "redited.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        assert _auto_edit_process_run(lib, safe, run_id)
+    finally:
+        lib.close()
+
+    # Straight off the auto-edit the two agree, so the reveal is offered.
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack",
+    ).json()["available"] is True
+
+    # Now the second-round edit: a different look, saved and never exported.
+    r = client.put(
+        f"/api/targets/{safe}/stack-runs/{run_id}/editor/recipe",
+        json={"ops": [{"id": "tone.saturation", "params": {"amount": 1.9}}]})
+    assert r.status_code == 200
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack").json()
+    assert body["available"] is False
+    # ...and the before/after share, gated on the same decision, goes with it.
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg",
+    ).status_code == 404
+
+
+def test_re_saving_the_same_look_keeps_the_reveal(client, solved_library):
+    """The guard must fire on a *changed* picture, not on a Save. Re-saving the
+    recipe the auto-edit already baked re-stamps its ``updated_utc`` and gives every
+    op a fresh ``uid``; compared by look (as everywhere else), that is the same
+    picture and the reveal stays open."""
+    from webapp.pipeline import _auto_edit_process_run
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "resaved.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        assert _auto_edit_process_run(lib, safe, run_id)
+        proj = lib.open_target(safe)
+        try:
+            baked = json.loads(proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}"))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    r = client.put(f"/api/targets/{safe}/stack-runs/{run_id}/editor/recipe",
+                   json={"ops": baked["ops"]})
+    assert r.status_code == 200
+
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack",
+    ).json()["available"] is True
+
+
+def test_an_auto_edit_from_before_the_stamp_is_unchanged(client, solved_library):
+    """Upgrade safety: a run auto-edited by an older build carries a recipe and the
+    display-space marker but **no** baked-look stamp. "Can't tell" must read as
+    "assume they agree" — the behaviour that shipped in v0.301.0 — so the reveal is
+    still offered on every picture the owner already has."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "prestamp.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+    # _mark_auto_edited writes exactly what the old build wrote: marker + recipe.
+    _mark_auto_edited(solved_library, safe, run_id, _auto_recipe_json())
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack").json()
+    assert body["available"] is True
+    assert body["matched_by"] == "recipe"

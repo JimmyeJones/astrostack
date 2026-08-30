@@ -9257,27 +9257,65 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-30, found while building the v0.301.0 recipe-matched reveal — a real gap in an
-  assumption the app already relies on in several places) — a saved recipe on a "Process target" run can
-  quietly drift from the picture that run's preview actually shows.** *(Pillar: trust — PRIORITY 3; size S–M;
-  additive, no behaviour change until something disagrees.)* `_auto_edit_process_run` bakes the Auto recipe
-  into the run's preview PNG and stores the recipe at `editor_recipe:<run_id>` **in one step**, so at that
-  moment the two agree — and `_unexported_edit` says so out loud: it deliberately does *not* flag a
-  `preview_display_space` run, "whose recipe *is* what its preview shows". But a user can re-open that run in
-  the editor, change a parameter, press **Save**, and the stored preview is **not** re-rendered. From then on
-  the assumption is false, and nothing notices: the run isn't flagged as an unfinished edit (it is excluded by
-  design), and as of v0.301.0 the reveal's "before" is rendered through the *stored* recipe while the "after"
-  is still the *old* baked preview — so the two halves would differ by an edit as well as by frame count,
-  which is exactly what that feature must never show. **Fix shape (small, additive, no migration):** stamp the
-  recipe *look* that was baked — `_recipe_look()` already exists in `routers/stack.py` and is exactly the
-  "does this describe the same picture?" comparison, uid- and timestamp-blind — into a meta key beside the
-  recipe at auto-edit time, and have the surfaces that rely on the assumption compare against it: the reveal
-  (stand down to hidden on a mismatch, as it does for a missing recipe today) and `_unexported_edit` (flag the
-  run again, since a second-round edit on an auto-edited run really *is* unfinished). Runs from before the
-  stamp exists have no stamp, so they behave exactly as they do now — the guard only ever fires where it can
-  actually tell. **Reachability, honestly:** it needs a Save on an already-processed run without an export,
-  which is a real but uncommon path; the reveal is the first surface where the disagreement becomes *visible*
-  rather than merely latent, which is why it is worth closing now rather than when it bites.
+- **✅ SHIPPED (Builder, v0.302.1, branch `claude/compassionate-galileo-fj2p70`) — ~~a saved recipe on a
+  "Process target" run can quietly drift from the picture that run's preview actually shows.~~** Shipped
+  exactly as the fix shape below asked, and no wider.
+
+  **What shipped.** `_auto_edit_process_run` now stamps `editor_auto_baked_look:<run_id>` — the
+  `stack._recipe_look` of the recipe it just baked — in the same block that writes the preview PNG, so the
+  stamp can only ever exist for bytes that were actually rendered from it. One new predicate,
+  `stack._baked_look_disagrees(stamp, look)`, is the single place that decides "the preview shows something
+  else", and the two surfaces that leaned on the assumption now ask it:
+  * **the reveal** (`_auto_edit_recipe_json`) returns `None` on a mismatch, so "One frame vs your stack" —
+    and the before/after share gated on the same decision — stands down to hidden exactly as it does for a
+    missing recipe. This is the half that mattered: rendering the "before" through the *new* recipe against a
+    preview baked from the *old* one would show two halves differing by an **edit** as well as by frame
+    count, which is the one thing that comparison must never do.
+  * **`_unexported_edit`** loses its `preview_display_space` exemption on a drifted run, so a second-round
+    edit is flagged (and offered a finish) like any other. All three callers pass the stamp — the run
+    listing, the Gallery card, and the library-wide "finish them all" scan — the last one as a third prefix
+    scan taken only for a target that already carries recipes, so the cheap path stays cheap.
+
+  **Compared as JSON, not as Python objects** (the one thing that bit during the build): a look's params are
+  `(key, value)` *tuples*, which come back from the stamp as lists, so `==` called every stamp a mismatch.
+  `_recipe_look`'s ordering makes the text canonical, so `json.dumps` on both sides is the honest comparison.
+
+  **Upgrade-safe (§9):** one new per-run meta key, absent everywhere on an upgrading install and read as
+  "can't tell" ⇒ the assumption stands ⇒ byte-for-byte today's behaviour on every picture the owner already
+  has. No config, schema, on-disk, default or API-shape change (`_unexported_edit`'s new argument is
+  keyword-optional and defaults to the old answer).
+
+  **Tests (+7; 4 fail before):** the predicate table (stamped-and-agreeing, stamped-and-disagreeing, absent,
+  empty, four kinds of junk, an ordinary linear run, and a drifted run since exported at its new look); the
+  reveal hiding after a real `_auto_edit_process_run` followed by a changed Save — with the before/after
+  download 404ing with it; a re-Save of the *same* look (fresh uids, new `updated_utc`) keeping the reveal
+  open; a pre-stamp auto-edit still offering it; and the flag appearing on both the run listing and the
+  gallery scan after a second-round edit, then clearing on export. The "one definition" runtime test's stub
+  gained the same fourth argument the real function did, with its assertion untouched.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-08-30, found while building the v0.301.0 recipe-matched reveal — a real gap in an
+    assumption the app already relies on in several places) — a saved recipe on a "Process target" run can
+    quietly drift from the picture that run's preview actually shows.** *(Pillar: trust — PRIORITY 3; size S–M;
+    additive, no behaviour change until something disagrees.)* `_auto_edit_process_run` bakes the Auto recipe
+    into the run's preview PNG and stores the recipe at `editor_recipe:<run_id>` **in one step**, so at that
+    moment the two agree — and `_unexported_edit` says so out loud: it deliberately does *not* flag a
+    `preview_display_space` run, "whose recipe *is* what its preview shows". But a user can re-open that run in
+    the editor, change a parameter, press **Save**, and the stored preview is **not** re-rendered. From then on
+    the assumption is false, and nothing notices: the run isn't flagged as an unfinished edit (it is excluded by
+    design), and as of v0.301.0 the reveal's "before" is rendered through the *stored* recipe while the "after"
+    is still the *old* baked preview — so the two halves would differ by an edit as well as by frame count,
+    which is exactly what that feature must never show. **Fix shape (small, additive, no migration):** stamp the
+    recipe *look* that was baked — `_recipe_look()` already exists in `routers/stack.py` and is exactly the
+    "does this describe the same picture?" comparison, uid- and timestamp-blind — into a meta key beside the
+    recipe at auto-edit time, and have the surfaces that rely on the assumption compare against it: the reveal
+    (stand down to hidden on a mismatch, as it does for a missing recipe today) and `_unexported_edit` (flag the
+    run again, since a second-round edit on an auto-edited run really *is* unfinished). Runs from before the
+    stamp exists have no stamp, so they behave exactly as they do now — the guard only ever fires where it can
+    actually tell. **Reachability, honestly:** it needs a Save on an already-processed run without an export,
+    which is a real but uncommon path; the reveal is the first surface where the disagreement becomes *visible*
+    rather than merely latent, which is why it is worth closing now rather than when it bites.
 
 - **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by the v0.301.0 recipe-matched reveal) — the
   reveal's "before" is now a full edit pipeline per request, and nothing caches it.** *(Pillar: friendliness —

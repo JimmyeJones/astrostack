@@ -2739,6 +2739,7 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
     recipe, so an unattended auto-edit frames the picture the same way clicking Auto
     in the editor would."""
     from webapp.routers.editor import (
+        AUTO_EDIT_BAKED_LOOK_PREFIX,
         AUTO_EDIT_COLORCAL_PREFIX,
         AUTO_EDIT_NOTE_PREFIX,
         AUTO_EDIT_SKYCAST_PREFIX,
@@ -2786,6 +2787,17 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                 out, render_ctx = render_run_display_array(
                     proj.project_dir, run, recipe, return_ctx=True)
                 _write_preview_png(Path(run.preview_path), out, already_display=True)
+                # Record *which* look these bytes show. The recipe stamped above and
+                # this preview agree right now, and several surfaces lean on that —
+                # but a later "open in editor, tweak, Save" rewrites the recipe and
+                # leaves these bytes untouched, and nothing else on disk can tell.
+                # Stored as the look rather than the recipe so it is compared the
+                # same uid-/timestamp-blind way everywhere else (``_recipe_look``).
+                # Imported here, not at module scope: ``routers.stack`` imports this
+                # module.
+                from webapp.routers.stack import _recipe_look
+                proj.set_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run_id}",
+                              json.dumps(_recipe_look(recipe.to_json())))
                 # This render is on the master's own (un-rotated) grid, so any
                 # North-up rotation an earlier "Adjust → North up → Save" baked
                 # into the old bytes is gone. Clear the recorded angle with them:

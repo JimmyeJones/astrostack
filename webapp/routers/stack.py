@@ -428,7 +428,11 @@ def channel_combine(safe: str, body: dict[str, Any], request: Request) -> dict[s
 
 @router.get("/api/targets/{safe}/stack-runs", response_model=list[StackRunOut])
 def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
-    from webapp.routers.editor import EXPORTED_RECIPE_META_PREFIX, RECIPE_META_PREFIX
+    from webapp.routers.editor import (
+        AUTO_EDIT_BAKED_LOOK_PREFIX,
+        EXPORTED_RECIPE_META_PREFIX,
+        RECIPE_META_PREFIX,
+    )
 
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -436,15 +440,17 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
         # The pinned "cover" run (library-level), so the History card can mark it.
         entry = lib.find_target(safe)
         cover_id = entry.cover_stack_run_id if entry is not None else None
-        # Two small meta reads per run, so every surface that shows a run's
+        # Three small meta reads per run, so every surface that shows a run's
         # picture can tell an un-exported saved edit from a finished one (see
-        # ``_unexported_edit``): the saved recipe, and the one an export of this
-        # run already rendered. Both live in the same already-open DB.
+        # ``_unexported_edit``): the saved recipe, the one an export of this run
+        # already rendered, and the look an in-place auto-edit baked into the
+        # preview. All live in the same already-open DB.
         unexported = {
             r.id: _unexported_edit(
                 r.options_json,
                 proj.get_meta(f"{RECIPE_META_PREFIX}{r.id}"),
                 proj.get_meta(f"{EXPORTED_RECIPE_META_PREFIX}{r.id}"),
+                proj.get_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{r.id}"),
             )
             for r in runs
         }
@@ -573,8 +579,36 @@ def _recipe_look(recipe_json: str | None) -> list | None:
     return look
 
 
+def _baked_look_disagrees(baked_look_json: str | None, look: list | None) -> bool:
+    """True when an auto-edit's **stamped** baked look (``AUTO_EDIT_BAKED_LOOK_PREFIX``)
+    says the run's stored preview shows a *different* picture from the recipe now
+    saved on it — i.e. the user re-opened a "Process target" run, changed something
+    and pressed Save, so the recipe and the baked bytes have drifted apart.
+
+    ``False`` whenever we can't tell — no stamp (every run auto-edited before the
+    stamp existed, and every run that was never auto-edited at all), or a stamp that
+    won't parse. That is deliberately the pre-stamp behaviour: the guard only ever
+    fires where it has evidence, so an upgrading install sees no change.
+    """
+    if not baked_look_json:
+        return False
+    try:
+        baked = json.loads(baked_look_json)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    if not isinstance(baked, list):
+        return False
+    # Compared as JSON, not as Python objects: a look's per-op params are
+    # ``(key, value)`` *tuples*, which survive a round-trip through the stamp as
+    # lists, so `==` would call every stamp a mismatch. Both sides serialise
+    # identically, and the ordering ``_recipe_look`` imposes makes the text
+    # canonical.
+    return json.dumps(baked) != json.dumps(look)
+
+
 def _unexported_edit(options_json: str | None, recipe_json: str | None,
-                     exported_recipe_json: str | None = None) -> bool:
+                     exported_recipe_json: str | None = None,
+                     baked_look_json: str | None = None) -> bool:
     """True when this run carries a **saved editor recipe that its stored preview
     does not show** — the user edited the picture, pressed Save, and never
     exported.
@@ -613,13 +647,23 @@ def _unexported_edit(options_json: str | None, recipe_json: str | None,
     thing the app asked for has to be able to stop it asking. Compared by
     :func:`_recipe_look`, so re-saving an unchanged edit (which re-stamps
     ``updated_utc``) stays quiet, while changing a parameter and saving speaks up
-    again — that second-round edit is as invisible as the first one was."""
+    again — that second-round edit is as invisible as the first one was.
+
+    ``baked_look_json`` is the look the in-place Auto edit actually baked into the
+    preview (``editor_auto_baked_look:<run_id>``). The ``preview_display_space``
+    exemption above assumes the saved recipe *is* what the preview shows, which stops
+    being true the moment the user re-opens such a run, tweaks it and saves — and
+    that second-round edit is exactly as invisible as any other. With the stamp in
+    hand we can tell the two apart, so a drifted run loses the exemption and is
+    flagged like any other unfinished edit. Without it (a run auto-edited before the
+    stamp existed) the answer is exactly what it always was."""
     look = _recipe_look(recipe_json)
     if not look:
         # No recipe, unreadable, or every op disabled — nothing unfinished.
         return False
     opts = _parse_options(options_json)
-    if opts.get("preview_display_space"):
+    if opts.get("preview_display_space") and not _baked_look_disagrees(
+            baked_look_json, look):
         return False
     # Already exported *this* look ⇒ finished. Anything else ⇒ still unfinished.
     return not (exported_recipe_json and _recipe_look(exported_recipe_json) == look)
@@ -1491,13 +1535,21 @@ def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
     * a genuine editor **export** — its FITS is itself display-space
       (``fits_is_display_space``), so there is no linear picture to reason about and
       the recipe on it, if any, describes a *second-round* edit of the export;
-    * an ordinary linear run, which already has the honest STF/asinh match; and
+    * an ordinary linear run, which already has the honest STF/asinh match;
     * an auto-edited run whose recipe is missing or unreadable, where we'd be
-      guessing at what its preview shows.
+      guessing at what its preview shows; and
+    * an auto-edited run whose recipe has since **drifted** from the picture its
+      preview shows — the user re-opened it, changed a parameter and saved, which
+      rewrites the recipe but not the baked bytes. Rendering the sub through the new
+      recipe would then differ from the stack half by an *edit* as well as by frame
+      count, which is the one thing this comparison must never show, so the reveal
+      stands down to hidden exactly as it does for a missing recipe.
 
     Like every other surface that reads this marker (see ``_unexported_edit``), it
     takes the stored recipe to *be* what the stored preview shows — which is what
-    ``_auto_edit_process_run`` writes, in one step, for these runs.
+    ``_auto_edit_process_run`` writes, in one step, for these runs — but only as far
+    as the baked-look stamp it writes alongside them agrees. No stamp (a run
+    auto-edited before it existed) means "can't tell", and the assumption stands.
     """
     from seestack.stack.output import fits_is_display_space
 
@@ -1505,7 +1557,7 @@ def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
         return None
     if run.fits_path and Path(run.fits_path).exists() and fits_is_display_space(run.fits_path):
         return None
-    from webapp.routers.editor import RECIPE_META_PREFIX
+    from webapp.routers.editor import AUTO_EDIT_BAKED_LOOK_PREFIX, RECIPE_META_PREFIX
 
     raw = proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}")
     if not raw:
@@ -1515,6 +1567,10 @@ def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
     except (json.JSONDecodeError, TypeError, ValueError):
         return None
     if not isinstance(parsed, dict) or not isinstance(parsed.get("ops"), list):
+        return None
+    if _baked_look_disagrees(
+            proj.get_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run.id}"),
+            _recipe_look(raw)):
         return None
     return raw
 
