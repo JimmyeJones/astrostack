@@ -15143,8 +15143,48 @@ problems. Dogfood it every big-picture run and fix root causes.
   appending one more always-on card, and only show it once there are, say, three or more mapped pictures
   (below that the map is mostly empty sky and reads as a bug rather than a milestone).
 
-- **NEW IDEA (Builder 2026-08-29, the one half deliberately left out of the v0.291.0 preview-crop fix) — the
-  History caption's Moon sentence still describes the *un-cropped* frame on a picture the auto-edit trimmed.**
+- **✅ SHIPPED (Builder, v0.311.2, branch `claude/compassionate-galileo-y2x4gk`) — ~~the
+  History caption's Moon sentence still describes the *un-cropped* frame on a picture the auto-edit trimmed.~~**
+  *(Pillar: understand / trust — PRIORITY 3.)*
+
+  **What shipped, close to the filed shape but with the naming inverted — deliberately.** The entry proposed
+  making `scale_bar` mean the *stored preview* and adding `canvas_scale_bar` for the raw grid. That is a
+  **behaviour change on an existing field**, which an older frontend would silently read as the wrong picture's
+  field width (§9: add fields, don't repurpose them). So `scale_bar` keeps meaning exactly what it has always
+  meant — the full FITS canvas, which is what History's live **Adjust** render shows — and the new field is
+  `preview_scale_bar`, the same bar measured on the visible rectangle. `null` unless the run really is cropped,
+  so an ordinary run's payload is byte-for-byte what it was, and an older frontend that ignores the field
+  behaves exactly as it does today.
+
+  **Measured on the visible box, not rescaled.** The server runs the same `scale_bar_for` on the same
+  `crop_pixel_box` the shared JPEG's baked marks already use (`_sky_marks_for_run`), so the two can't drift —
+  and the ladder rung is re-chosen for the trimmed field, making it a complete self-consistent answer rather
+  than a `fraction` scaled off a rung picked for a bigger picture. On a 70 % border trim the sentence goes from
+  "about 5.4 full Moons wide" to "about 3.8", a 1.43× overstatement removed.
+
+  **Two consumers, one helper.** `croppedAnnotationView` takes the cropped bar and prefers it whenever the crop
+  bites (falling back to today's `fraction` rescale when the backend sends none), which fixes the on-screen
+  sentence; and a new pure `storedPreviewScaleBar(annotations, run)` answers "which bar describes the bytes
+  this run hands over?" for the **copied** and **share-sheet** captions, which were reading the raw canvas bar.
+
+  **One thing beyond the filed scope, for the same reason:** that helper also declines on a preview whose
+  geometry is unknown, and on one a past "North up → Save" turned (a rotate-with-expand grows the frame around
+  the same sky). The on-screen note already refuses both — only the caption still spoke — so this makes the two
+  agree. It replaces a wrong clause with no clause, never with a different number.
+
+  **Upgrade-safe (§9):** one additive optional response field, no schema/config/on-disk/default change, and no
+  existing field's meaning touched.
+
+  **Tests (+11; 3 Python + 2 of the 8 frontend fail before):** `tests/webapp/test_stack_annotations.py` — an
+  uncropped run reports `null`; a 70 %-trimmed run's bar pinned **against `scale_bar_for` itself** on the same
+  pixel box (parity, not a re-derivation) plus its shrunk `frame_arcmin` and its self-consistent `fraction`; and
+  a cropped run with no WCS offering neither bar. `AnnotatedImage.test.tsx` — the cropped bar preferred, ignored
+  where no crop applies, and the rescale fallback pinned unchanged; `storedPreviewScaleBar`'s five cases.
+  `History.test.tsx` — the on-screen sentence and the copied caption both quoting the trimmed field and not the
+  canvas.
+
+  Original spec, for the record:
+
   *(Pillar: understand / trust — PRIORITY 3. Size: S. Confidence: certain — I left it, knowingly, this run.)*
   `scale_bar.moon_comparison` ("the whole frame is about 2.5 full Moons wide") is generated server-side from
   the **canvas** width (`_scale_bar_from_wcs(wcs, width, height)` in the `…/annotations` handler), and after
