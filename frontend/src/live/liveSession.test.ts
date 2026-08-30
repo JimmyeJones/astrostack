@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  conditionsCause, conditionsLine, freshnessLine, goalLine, mostRecentlyActive,
-  sharpnessLine, tonightHeadline,
+  SAME_NIGHT_HOURS, alsoActiveTonight, conditionsCause, conditionsLine,
+  freshnessLine, goalLine, mostRecentlyActive, sharpnessLine, tonightHeadline,
 } from "./liveSession";
 import type { LiveSession, Target } from "../api/client";
 
@@ -198,5 +198,57 @@ describe("mostRecentlyActive", () => {
     expect(mostRecentlyActive(null)).toBeNull();
     expect(mostRecentlyActive(undefined)).toBeNull();
     expect(mostRecentlyActive([target({ last_activity_utc: null })])).toBeNull();
+  });
+});
+
+describe("alsoActiveTonight", () => {
+  const at = (safe: string, iso: string | null) =>
+    target({ safe_name: safe, name: safe, last_activity_utc: iso });
+  const REF = "2026-07-08T23:29:00+00:00";
+
+  it("names the other targets from the same night, newest first", () => {
+    const found = alsoActiveTonight([
+      at("A", REF),
+      at("B", "2026-07-08T21:40:00+00:00"),
+      at("C", "2026-07-09T01:10:00+00:00"),
+    ], "A");
+    expect(found.map((t) => t.safe_name)).toEqual(["C", "B"]);
+  });
+
+  it("leaves out last week's session, the current target, and unstamped ones", () => {
+    const found = alsoActiveTonight([
+      at("A", REF),
+      at("OLD", "2026-01-01T00:00:00+00:00"),
+      at("NEVER", null),
+      at("JUNK", "not a date"),
+    ], "A");
+    expect(found).toEqual([]);
+  });
+
+  it("uses the window either side of the target on screen", () => {
+    const justInside = new Date(
+      Date.parse(REF) - (SAME_NIGHT_HOURS - 0.5) * 3600_000).toISOString();
+    const justOutside = new Date(
+      Date.parse(REF) - (SAME_NIGHT_HOURS + 0.5) * 3600_000).toISOString();
+    expect(alsoActiveTonight([at("A", REF), at("IN", justInside)], "A")
+      .map((t) => t.safe_name)).toEqual(["IN"]);
+    expect(alsoActiveTonight([at("A", REF), at("OUT", justOutside)], "A"))
+      .toEqual([]);
+  });
+
+  it("caps the list rather than becoming a second dashboard", () => {
+    const many = [at("A", REF)];
+    for (let i = 0; i < 6; i += 1) {
+      many.push(at(`T${i}`, new Date(Date.parse(REF) - i * 600_000).toISOString()));
+    }
+    expect(alsoActiveTonight(many, "A")).toHaveLength(3);
+  });
+
+  it("says nothing when there is nothing to say", () => {
+    expect(alsoActiveTonight(null, "A")).toEqual([]);
+    expect(alsoActiveTonight([at("A", REF)], "A")).toEqual([]);
+    // No stamp on the target being watched ⇒ no window to compare against.
+    expect(alsoActiveTonight([at("A", null), at("B", REF)], "A")).toEqual([]);
+    expect(alsoActiveTonight([at("A", REF)], null)).toEqual([]);
   });
 });

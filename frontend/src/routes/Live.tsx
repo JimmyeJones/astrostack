@@ -1,16 +1,17 @@
 import {
-  Alert, Badge, Card, Center, Group, Image, Loader, Progress, Select, Stack, Text,
-  Title,
+  Alert, Anchor, Badge, Card, Center, Group, Image, Loader, Progress, Select,
+  Stack, Text, Title,
 } from "@mantine/core";
 import { IconAntenna, IconMoonStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, type LiveSession } from "../api/client";
+import { api, type LiveSession, type Target } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import {
-  conditionsCause, conditionsLine, freshnessLine, goalLine, mostRecentlyActive,
-  sharpnessLine, tonightHeadline,
+  alsoActiveTonight, conditionsCause, conditionsLine, freshnessLine, goalLine,
+  mostRecentlyActive, sharpnessLine, tonightHeadline,
 } from "../live/liveSession";
+import { useKeepAwake } from "../useKeepAwake";
 
 // How often to re-ask while the page is open. A capture night moves in minutes,
 // not seconds, and the endpoint is a read-only aggregation over the frames table
@@ -60,6 +61,12 @@ export function LiveView() {
     enabled: !!safe,
     refetchInterval: POLL_MS,
   });
+
+  // This page is meant to be propped up outdoors for hours, and a phone dimming
+  // three minutes in is the whole reason you'd walk back over to it. Held only
+  // while the session is still running, so a finished night lets the screen
+  // sleep; the same best-effort helper the slideshow uses (see useKeepAwake).
+  useKeepAwake(!!live.data?.active);
 
   if (targets.isError) {
     return <QueryError error={targets.error} onRetry={() => targets.refetch()} />;
@@ -113,9 +120,46 @@ export function LiveView() {
           </Text>
         </Alert>
       ) : (
-        <LiveCard safe={safe} name={target?.name ?? safe} live={live.data} />
+        <>
+          <LiveCard safe={safe} name={target?.name ?? safe} live={live.data} />
+          <AlsoTonight targets={targets.data} currentSafe={safe}
+            onPick={(s) => setParams({ target: s })} />
+        </>
       )}
     </Stack>
+  );
+}
+
+/**
+ * "You also shot these around the same time" — one line, only when it's true.
+ *
+ * The page opens on whichever target's frames arrived most recently, which is
+ * right, but a Seestar that re-points mid-night (or a mosaic split across panels)
+ * would otherwise leave the earlier target invisible unless the reader knows to
+ * use the picker above. Costs no extra request: it reads the same target list the
+ * page already loaded. Renders nothing when the night only had one target, which
+ * is the common case.
+ */
+function AlsoTonight({ targets, currentSafe, onPick }: {
+  targets: Target[] | undefined;
+  currentSafe: string;
+  onPick: (safe: string) => void;
+}) {
+  const others = alsoActiveTonight(targets, currentSafe);
+  if (!others.length) return null;
+  return (
+    <Text size="sm" c="dimmed">
+      Also shot around the same time:{" "}
+      {others.map((t, i) => (
+        <span key={t.safe_name}>
+          {i ? ", " : ""}
+          <Anchor component="button" type="button" inherit
+            onClick={() => onPick(t.safe_name)}>
+            {t.name}
+          </Anchor>
+        </span>
+      ))}
+    </Text>
   );
 }
 

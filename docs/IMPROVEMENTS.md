@@ -45,6 +45,26 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 _(none — claim an item here with your branch name)_
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-fj2p70` — run finished, all three claims
+> released.** Shipped all three: the **recipe-drift stamp** (**v0.302.1**, write-up under "Autonomy &
+> friendliness") so nothing silently assumes a re-edited "Process target" run's preview still shows its saved
+> recipe; the run's new beginner feature, the **zoom clip** (**v0.303.0**, under "Features that serve real
+> workflows") — the backlog's "Reveal", renamed because that word already means the one-frame-vs-stack card
+> everywhere here — slices (a)+(b), engine → two endpoints → a Save/share item on History and the Target
+> page; and both **"Tonight, live" follow-ons** (**v0.304.0**, under "Autonomy & friendliness"), the
+> keep-awake reusing the slideshow's helper by *extracting* it rather than copying, and the one line naming
+> the other targets from the same night.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
+> **Three notes filed for whoever comes next:** the first zoom clip on a run is a silent lazy build behind a
+> plain link (fix shape filed); a corner target can't be centred in its own clip, by design, and the shape
+> that would fix it; and a ⚠️ process note about a **pre-existing** pytest quirk — a hand-picked file list that
+> interleaves `tests/webapp/…` and `tests/…` paths can lose `tests/webapp/conftest.py` and make every later
+> webapp test error `fixture 'client' not found`. It reproduces on untouched `origin/main`, it looks exactly
+> like "my change broke everything", and it cost real time this run.
+> Claiming in the run's **first** commit and pushing immediately (per the five duplicate-collision process
+> notes) again cost under a minute; no collision.
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow` — run finished, all claims released.**
 > Shipped two: the ~~invisible reveal on "Process target"~~ dogfood finding (**v0.301.0**, write-up under
 > "Features that serve real workflows"), taking the *honest full fix* rather than the interim copy slice — the
@@ -9249,27 +9269,105 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-30, found while building the v0.301.0 recipe-matched reveal — a real gap in an
-  assumption the app already relies on in several places) — a saved recipe on a "Process target" run can
-  quietly drift from the picture that run's preview actually shows.** *(Pillar: trust — PRIORITY 3; size S–M;
-  additive, no behaviour change until something disagrees.)* `_auto_edit_process_run` bakes the Auto recipe
-  into the run's preview PNG and stores the recipe at `editor_recipe:<run_id>` **in one step**, so at that
-  moment the two agree — and `_unexported_edit` says so out loud: it deliberately does *not* flag a
-  `preview_display_space` run, "whose recipe *is* what its preview shows". But a user can re-open that run in
-  the editor, change a parameter, press **Save**, and the stored preview is **not** re-rendered. From then on
-  the assumption is false, and nothing notices: the run isn't flagged as an unfinished edit (it is excluded by
-  design), and as of v0.301.0 the reveal's "before" is rendered through the *stored* recipe while the "after"
-  is still the *old* baked preview — so the two halves would differ by an edit as well as by frame count,
-  which is exactly what that feature must never show. **Fix shape (small, additive, no migration):** stamp the
-  recipe *look* that was baked — `_recipe_look()` already exists in `routers/stack.py` and is exactly the
-  "does this describe the same picture?" comparison, uid- and timestamp-blind — into a meta key beside the
-  recipe at auto-edit time, and have the surfaces that rely on the assumption compare against it: the reveal
-  (stand down to hidden on a mismatch, as it does for a missing recipe today) and `_unexported_edit` (flag the
-  run again, since a second-round edit on an auto-edited run really *is* unfinished). Runs from before the
-  stamp exists have no stamp, so they behave exactly as they do now — the guard only ever fires where it can
-  actually tell. **Reachability, honestly:** it needs a Save on an already-processed run without an export,
-  which is a real but uncommon path; the reveal is the first surface where the disagreement becomes *visible*
-  rather than merely latent, which is why it is worth closing now rather than when it bites.
+- **✅ SHIPPED (Builder, v0.302.1, branch `claude/compassionate-galileo-fj2p70`) — ~~a saved recipe on a
+  "Process target" run can quietly drift from the picture that run's preview actually shows.~~** Shipped
+  exactly as the fix shape below asked, and no wider.
+
+  **What shipped.** `_auto_edit_process_run` now stamps `editor_auto_baked_look:<run_id>` — the
+  `stack._recipe_look` of the recipe it just baked — in the same block that writes the preview PNG, so the
+  stamp can only ever exist for bytes that were actually rendered from it. One new predicate,
+  `stack._baked_look_disagrees(stamp, look)`, is the single place that decides "the preview shows something
+  else", and the two surfaces that leaned on the assumption now ask it:
+  * **the reveal** (`_auto_edit_recipe_json`) returns `None` on a mismatch, so "One frame vs your stack" —
+    and the before/after share gated on the same decision — stands down to hidden exactly as it does for a
+    missing recipe. This is the half that mattered: rendering the "before" through the *new* recipe against a
+    preview baked from the *old* one would show two halves differing by an **edit** as well as by frame
+    count, which is the one thing that comparison must never do.
+  * **`_unexported_edit`** loses its `preview_display_space` exemption on a drifted run, so a second-round
+    edit is flagged (and offered a finish) like any other. All three callers pass the stamp — the run
+    listing, the Gallery card, and the library-wide "finish them all" scan — the last one as a third prefix
+    scan taken only for a target that already carries recipes, so the cheap path stays cheap.
+
+  **Compared as JSON, not as Python objects** (the one thing that bit during the build): a look's params are
+  `(key, value)` *tuples*, which come back from the stamp as lists, so `==` called every stamp a mismatch.
+  `_recipe_look`'s ordering makes the text canonical, so `json.dumps` on both sides is the honest comparison.
+
+  **Upgrade-safe (§9):** one new per-run meta key, absent everywhere on an upgrading install and read as
+  "can't tell" ⇒ the assumption stands ⇒ byte-for-byte today's behaviour on every picture the owner already
+  has. No config, schema, on-disk, default or API-shape change (`_unexported_edit`'s new argument is
+  keyword-optional and defaults to the old answer).
+
+  **Tests (+7; 4 fail before):** the predicate table (stamped-and-agreeing, stamped-and-disagreeing, absent,
+  empty, four kinds of junk, an ordinary linear run, and a drifted run since exported at its new look); the
+  reveal hiding after a real `_auto_edit_process_run` followed by a changed Save — with the before/after
+  download 404ing with it; a re-Save of the *same* look (fresh uids, new `updated_utc`) keeping the reveal
+  open; a pre-stamp auto-edit still offering it; and the flag appearing on both the run listing and the
+  gallery scan after a second-round edit, then clearing on export. The "one definition" runtime test's stub
+  gained the same fourth argument the real function did, with its assertion untouched.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-08-30, found while building the v0.301.0 recipe-matched reveal — a real gap in an
+    assumption the app already relies on in several places) — a saved recipe on a "Process target" run can
+    quietly drift from the picture that run's preview actually shows.** *(Pillar: trust — PRIORITY 3; size S–M;
+    additive, no behaviour change until something disagrees.)* `_auto_edit_process_run` bakes the Auto recipe
+    into the run's preview PNG and stores the recipe at `editor_recipe:<run_id>` **in one step**, so at that
+    moment the two agree — and `_unexported_edit` says so out loud: it deliberately does *not* flag a
+    `preview_display_space` run, "whose recipe *is* what its preview shows". But a user can re-open that run in
+    the editor, change a parameter, press **Save**, and the stored preview is **not** re-rendered. From then on
+    the assumption is false, and nothing notices: the run isn't flagged as an unfinished edit (it is excluded by
+    design), and as of v0.301.0 the reveal's "before" is rendered through the *stored* recipe while the "after"
+    is still the *old* baked preview — so the two halves would differ by an edit as well as by frame count,
+    which is exactly what that feature must never show. **Fix shape (small, additive, no migration):** stamp the
+    recipe *look* that was baked — `_recipe_look()` already exists in `routers/stack.py` and is exactly the
+    "does this describe the same picture?" comparison, uid- and timestamp-blind — into a meta key beside the
+    recipe at auto-edit time, and have the surfaces that rely on the assumption compare against it: the reveal
+    (stand down to hidden on a mismatch, as it does for a missing recipe today) and `_unexported_edit` (flag the
+    run again, since a second-round edit on an auto-edited run really *is* unfinished). Runs from before the
+    stamp exists have no stamp, so they behave exactly as they do now — the guard only ever fires where it can
+    actually tell. **Reachability, honestly:** it needs a Save on an already-processed run without an export,
+    which is a real but uncommon path; the reveal is the first surface where the disagreement becomes *visible*
+    rather than merely latent, which is why it is worth closing now rather than when it bites.
+
+- **NEW IDEA (Builder 2026-08-30, the one rough edge left by the v0.303.0 zoom clip, and the honest cost of
+  building it lazily behind a plain link) — the *first* zoom clip on a target is a silent wait.** *(Pillar:
+  friendliness — PRIORITY 3; size S; frontend-only in its cheapest form.)* The **Zoom clip** menu item is an
+  `<a download>` straight at `…/zoom-clip`, which is what makes it free to offer (no info request per card,
+  no state) — but the first tap for a run builds ~24 LANCZOS crops and encodes an animated WEBP before a byte
+  comes back. On a NAS that is a second or three of *nothing*: no spinner, no progress, and a browser that
+  shows a download only once it starts. Every later tap is a file read, so this is a first-use-only problem —
+  which is exactly the kind that reads as "broken" and gets clicked three times. **Cheapest honest fix:** the
+  `…/zoom-clip/info` endpoint already exists and is cheap; have the menu (or the card, on open) fire it once
+  and turn the item into a button showing a `Loader` while the fetch is in flight, falling back to today's
+  plain link when the browser has no `fetch`-to-blob path. **Don't** pre-build clips at stack time to dodge
+  this — that would spend CPU on every run for an artefact most are never asked for, which is exactly why it
+  was built lazily.
+
+- **NEW IDEA (Builder 2026-08-30, the deliberate limitation pinned in the v0.303.0 zoom-clip tests) — a target
+  sitting in the corner of the frame can't be centred in its own zoom clip.** *(Pillar: enjoy + share —
+  PRIORITY 3; size S; pure, engine-only, fully testable.)* `crop_box_for_scale` slides the crop back inside
+  the picture rather than letting it hang off the edge, because a black margin in a share clip looks broken.
+  The consequence, measured in `test_an_object_near_the_edge_keeps_the_frame_full_of_picture`: an object at
+  0.96 W ends the move at 0.93 W — the camera pushes in but never actually arrives on it. **Shape:** let the
+  *zoom* adapt instead of the position — solve for the largest zoom at which the focus point can still be the
+  crop's true centre (bounded below by, say, 1.3× so it stays a move, and above by today's 1.8×), so a
+  corner object gets a gentler push-in that genuinely lands on it, while a centred one is unchanged. It stays
+  one pure function of `(width, height, focus_xy)` with no new I/O, and the existing tests already pin both
+  ends of the behaviour it would change. **Worth checking first** whether it matters in practice: the crop
+  centre is the *plate-solved catalogue position*, which for the owner's Seestar framing is usually near the
+  middle, so this may be a nicety for mosaics and mis-framed nights only.
+
+- **⚠️ PROCESS NOTE (Builder 2026-08-30, measured on a *pristine* checkout after it cost a chunk of a run) —
+  running a hand-picked list of test files that **interleaves `tests/webapp/…` and `tests/…` paths** can make
+  pytest lose `tests/webapp/conftest.py`, and every later webapp test errors with `fixture 'client' not
+  found`.** *(Not a bug in the app, not a bug you introduced, and NOT a reason to touch conftest.)* Reproduced
+  on `origin/main` with nothing of mine in the tree:
+  `pytest -q tests/webapp/test_deepening_reel.py tests/test_output_archive.py tests/webapp/test_wallpaper.py`
+  → *7 errors*, while the same three files in a different order, or the whole suite in one go
+  (`pytest -q`, one `tests/` argument), are green. It is an argument-ordering quirk of conftest resolution
+  across the two package dirs, and it looks exactly like "my change broke every webapp test", which is how it
+  eats time. **What to do:** if a targeted run errors like this, re-run it with the webapp files *last* (or on
+  their own) before believing it — and treat the full-suite run as the only authority, which §5 already says.
 
 - **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by the v0.301.0 recipe-matched reveal) — the
   reveal's "before" is now a full edit pipeline per request, and nothing caches it.** *(Pillar: friendliness —
@@ -9284,21 +9382,53 @@ to **Shipped**.)_
   representative sub), which would key here on the sub *and* the recipe look, so a re-edit invalidates it.
   Don't add a cache on speculation; a stale "before" is worse than a slow one.
 
-- **NEW IDEA (Builder 2026-08-29, the two follow-ons "Tonight, live" v0.298.0 deliberately left out) — keep the
-  screen awake on the live page, and cover a night that shot more than one target.** *(Pillar: understand +
-  enjoy — PRIORITY 3; size S each; both frontend-only, no new data.)*
-  (a) **Keep-awake.** `/live` is the second page in the app designed to be *left open* — outdoors, on a phone,
-  for hours — and it is the one where the screen sleeping actually costs something (you walk over to check and
-  it's black). v0.296.6 already shipped a wake-lock for the slideshow; **grep for it and reuse that exact
-  helper**, don't write a second one, and hold the lock only while the session reads `active` so a finished
-  night releases it. Same fail-soft posture: a browser without the Wake Lock API simply doesn't get it.
-  (b) **A night that shot two targets shows only one.** The page opens on whichever target's frames arrived
-  most recently, which is right — but a Seestar that re-points mid-night (or a mosaic split across panels)
-  leaves the earlier target invisible unless the reader knows to use the picker. Cheapest honest fix: one line
-  under the card naming the *other* targets that also got subs inside the same window ("NGC 7000 got 40 subs
-  earlier tonight"), each a link that sets `?target=`. `last_activity_utc` on the target list already carries
-  everything needed, so this stays a zero-extra-request change. **Don't** turn it into a full multi-target
-  dashboard — the page's value is that it answers two questions about *one* night at a glance.
+- **✅ SHIPPED — BOTH HALVES (Builder, v0.304.0, branch `claude/compassionate-galileo-fj2p70`) — ~~keep the
+  screen awake on the live page, and cover a night that shot more than one target.~~** Shipped exactly as
+  filed, including the "reuse that exact helper, don't write a second one" instruction.
+
+  **(a) Keep-awake.** `useKeepAwake` was lifted out of `routes/ShowAndTell.tsx` into
+  `frontend/src/useKeepAwake.ts` **verbatim** — same guards, same `visibilitychange` re-request, same
+  nothing-persisted posture — and both pages now import the one definition. `/live` holds it on
+  `!!live.data?.active`, so a finished night lets the phone sleep rather than draining a battery on a page
+  with nothing left to watch.
+
+  **(b) The other targets from the same night.** One dimmed line under the card, rendered only when it is
+  true: `alsoActiveTonight(targets, currentSafe)` (pure, in `live/liveSession.ts`) takes the targets whose
+  `last_activity_utc` sits within `SAME_NIGHT_HOURS = 14` **either side** of the one on screen, newest first,
+  capped at 3 — and each is a link that sets `?target=`, i.e. the picker's own action. Zero extra requests: it
+  reads the target list the page already loaded. Deliberately *not* the multi-target dashboard the idea warned
+  against.
+
+  **One honest deviation from the filed copy:** the line says *"Also shot around the same time: NGC 7000"*
+  rather than *"NGC 7000 got 40 subs earlier tonight"*. The sub count for **that window** isn't on the target
+  list (`n_frames` is the target's all-time total), so quoting one would have meant either a second request
+  per neighbour or a number that is quietly wrong. The window is symmetric for the same reason it is honest:
+  pinning `?target=` to an earlier target must still find the ones shot *after* it.
+
+  **Tests (+9):** 5 pure (`alsoActiveTonight` ordering, the exclusions — last week, the current target, a null
+  and an unparseable stamp — the window boundary just inside and just outside, the cap, and the four
+  nothing-to-say cases) and 4 on the page (the lock taken while capturing and released on unmount, *not* taken
+  on a finished night, the neighbour named and last week's session not, and no line at all for a
+  single-target night). `ShowAndTell`'s existing wake-lock tests were left untouched and still pass against
+  the extracted helper, which is the point of extracting rather than copying.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-08-29, the two follow-ons "Tonight, live" v0.298.0 deliberately left out) — keep the
+    screen awake on the live page, and cover a night that shot more than one target.** *(Pillar: understand +
+    enjoy — PRIORITY 3; size S each; both frontend-only, no new data.)*
+    (a) **Keep-awake.** `/live` is the second page in the app designed to be *left open* — outdoors, on a phone,
+    for hours — and it is the one where the screen sleeping actually costs something (you walk over to check and
+    it's black). v0.296.6 already shipped a wake-lock for the slideshow; **grep for it and reuse that exact
+    helper**, don't write a second one, and hold the lock only while the session reads `active` so a finished
+    night releases it. Same fail-soft posture: a browser without the Wake Lock API simply doesn't get it.
+    (b) **A night that shot two targets shows only one.** The page opens on whichever target's frames arrived
+    most recently, which is right — but a Seestar that re-points mid-night (or a mosaic split across panels)
+    leaves the earlier target invisible unless the reader knows to use the picker. Cheapest honest fix: one line
+    under the card naming the *other* targets that also got subs inside the same window ("NGC 7000 got 40 subs
+    earlier tonight"), each a link that sets `?target=`. `last_activity_utc` on the target list already carries
+    everything needed, so this stays a zero-extra-request change. **Don't** turn it into a full multi-target
+    dashboard — the page's value is that it answers two questions about *one* night at a glance.
 
 - **✅ SHIPPED (Builder, v0.297.1, branch `claude/compassionate-galileo-1i6x9x`) — ~~a target that needs 4+
   good nights gets no finish date at all, because the planner is only ever asked for three windows.~~**
@@ -18010,6 +18140,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   screen — even though the master holds the full canvas and the "Download full-res PNG" button beside it
   serves it. *(Note for whoever picks this up: an old Builder investigation elsewhere in this file describes
   the share JPEG as having a "2048px cap". That is stale — it is the 1024 px preview, re-encoded.)*
+  **Builder 2026-08-30 — one more consumer, and the first that *measurably* pays for the cap.** The **Zoom
+  clip** (v0.303.0) is built from the same stored preview, and because it must not upscale, the cap sets its
+  resolution directly: `zoom_clip_size` yields **569 px** from a 1024-wide preview (1024 ÷ the 1.8× zoom)
+  where the same clip off a native-res source would be the full 640. So fixing this makes the shared *clip*
+  visibly sharper too, not just the shared still — worth weighing against the **L** sizing below. Nothing
+  about the clip needs changing when it lands: it takes whatever pixels it is handed.
   **Why it is newly cheap:** the parity problem that made this awkward is gone. As of v0.287.4
   `render_preview_png_full_res` takes the run's saved `stretch`/`black`, so a share render can reproduce the
   *exact* look of the stored preview at any size — the share and the thumbnail can't drift.
@@ -18581,46 +18717,102 @@ problems. Dogfood it every big-picture run and fix root causes.
   endpoint slipped in since this was filed, and that `/api/gallery/best` still exposes the artifact paths this
   reuses.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready *cinematic zoom* of your
-  finished picture — a short looping clip that glides from the whole frame into the target and back out, so a
-  galaxy or nebula makes a scroll-stopping post instead of a still that's easy to swipe past.** *(Pillar: enjoy +
-  share, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network, no schema/config
-  change.)*
-  **Why a beginner wants it.** After the app has done its job the owner has a genuinely beautiful frame, and the
-  *only* thing they want to do with it is show people. The app already exports it well as a still (share JPEG,
-  wallpaper, keepsake, recap poster) — but the platforms a Seestar beginner actually posts to (Instagram Reels,
-  TikTok, WhatsApp status) reward **motion**: a slow push-in on a spiral galaxy reads as "look what I made" in a
-  way a static image never does, and it's the format a non-expert has no tool to produce. A one-tap "Reveal"
-  turns the finished picture into that clip with zero craft required.
-  **What it is (and is deliberately NOT).** A short (~6 s) looping **Ken-Burns** animation of the *already
-  display-stretched* result: ease-in from the full field to a centred, ~2× crop on the target, hold a beat, ease
-  back out. That's it — no music, no text overlay, no multi-clip edit. It is **not** the existing "deepening"
-  reel (`render/deepening.py`, a *temporal* cross-run "getting deeper night after night" animation) nor the
-  in-stack "watch it appear" progress reel (`stacker.py` `_progress.webp`) — both show the stack *accumulating
-  over time*; Reveal is a purely **spatial** camera move over one finished frame, a different artefact answering
-  a different want (grepped 2026-08-27: no ken-burns / cinematic / zoom-reveal / pan feature filed or shipped —
-  the only "zoom" hit is the Gallery lightbox's manual pan/zoom, which is interactive viewing, not an export).
-  **Sane auto-default (no knobs).** The crop centre is the target: use the run WCS to project the catalogued
-  object's RA/Dec to pixels (the same `identify`/`objects_in_field`/scale-bar WCS path already read on the
-  result), falling back to the picture's brightness centroid (or plain image centre) when there's no solve — so
-  a beginner never frames anything. Fixed timing, fixed ~2× zoom, fixed easing. NaN/uncovered pixels render black
-  exactly like every other export.
-  **Reuses existing machinery — almost no new surface.** The frames are Pillow crops+resizes of the stored
-  display-space preview/FITS (no re-stretch — `already_display` semantics), and the encoder is the **same
-  animated-WEBP-with-APNG-fallback** path `render/deepening.py` and `stacker.py` already use
-  (`img.save(..., save_all=True, append_images=..., loop=0)`). The core is a pure, unit-testable
-  `render/reveal.py::build_reveal(rgb, focus_xy, *, seconds, zoom, size) -> list[PIL.Image]` (deterministic
-  keyframe schedule; assert frame count, that frame 0 ≈ full-frame and the mid frame is a tighter crop centred on
-  `focus_xy`, and that a NaN canvas stays finite/black). Cached beside the outputs as `{base}_reveal.webp`
-  (add to `RUN_ARTEFACT_SUFFIXES` so archive/delete already sweep it), served through the existing result/History
-  download menu next to Share/To-phone/Wallpaper.
-  **Guardrails/feasibility.** Additive and reversible; nothing on by default changes; incoming/ untouched;
-  offline and deterministic (no `Date.now`/RNG in the schedule — timing is index-derived), so it's fully
-  testable. Memory-bounded: one downscaled crop frame at a time, at share resolution (≤~1080 px long edge), never
-  the full 100-MP mosaic. **Builder slices:** (a) pure `build_reveal(...)` + unit tests; (b) wire the cached
-  `_reveal.webp` write into the output writer + `RUN_ARTEFACT_SUFFIXES` + a result-menu download button
-  (self-hiding until the file exists); (c) optional later — a portrait (9:16) variant for phone-native posting,
-  mirroring the existing wallpaper-aspect crops.
+- **✅ SHIPPED — SLICES (a)+(b) (Builder, v0.303.0, branch `claude/compassionate-galileo-fj2p70`) —
+  ~~"Reveal": a one-tap, share-ready *cinematic zoom* of your finished picture.~~** Shipped as **"Zoom clip"**
+  — renamed on purpose: "the reveal" already means the one-frame-vs-stack card everywhere in this codebase and
+  backlog, and a second feature under that name would make every future grep ambiguous.
+
+  **What shipped.** A new pure `seestack/render/zoomclip.py`: `build_zoom_frames(img, focus_xy, ...)` renders the
+  push-in (raised-cosine easing, index-derived — no clock, no RNG), `write_zoom_clip` encodes it with the same
+  animated-WEBP/APNG-fallback call the deepening reel uses, and `build_zoom_clip` wires the two together from a
+  preview's bytes. Two endpoints on the run — `…/zoom-clip/info` (lightweight, `available: false` rather than a
+  404, plus `centred_on_target` so the UI never implies a solve it doesn't have) and `…/zoom-clip` (builds,
+  caches, serves) — and one **Zoom clip** item in the Save/share menu on both History and the Target page, a
+  plain download link gated on the same `has_preview` the rest of the Share section is, so it costs no extra
+  request per card.
+
+  **Three decisions worth carrying forward:**
+  * **The way out is the way in, reversed.** The loop closes by construction (no seam to tune), only the
+    push-in half is ever rendered, and the hold at the far end is *one* frame with a long duration rather than
+    many identical ones — which is what keeps both the file and the peak memory small.
+  * **It never upscales.** `zoom_clip_size` caps the output at 640 px *and* at what the deepest frame actually
+    contains (`source / 1.8`), so a 1024-wide preview yields a 569 px clip that is sharp end to end rather than
+    a soft 1080 one. Same "never upsample" rule the wallpaper export follows.
+  * **The crop slides back inside the frame instead of hanging off it.** The deliberate consequence, pinned in
+    a test: an object right in the corner cannot be centred, and is left where it is rather than framed against
+    a black margin.
+
+  **Framed on the object, from the preview's own grid.** The focus point is the plate-solved target, and the
+  two things that put the stored preview on a different grid from the master — an auto-edit border trim and a
+  North-up turn a past "Adjust → Save" baked in — both have to be undone first. That logic already existed
+  inside the wallpaper endpoint, so it was lifted out as `_target_pixel_in_preview` and is now shared by both
+  (getting either half wrong re-centres the picture on empty sky). With no solve, `brightness_centroid` aims at
+  the picture's own brightest concentration; with neither, the centre.
+
+  **Sourced from the stored preview PNG**, like the wallpaper and share exports — the only rendering that is
+  right for *every* kind of run, an in-place "Process target" Auto edit included (its recipe is baked nowhere
+  else). Cached beside the outputs with a signature over those bytes plus the focus point, so a re-edited
+  picture rebuilds rather than serving yesterday's move, and the three artefacts are in `RUN_ARTEFACT_SUFFIXES`
+  so a re-stack archives them with the run instead of leaving a clip of a picture that no longer exists.
+
+  **Upgrade-safe (§9):** additive endpoints, one new engine module, three new `RUN_ARTEFACT_SUFFIXES` entries
+  (caches, rebuilt on demand). No config, schema, on-disk layout, default or API-shape change; nothing runs
+  unless the user asks for the file; `incoming/` untouched.
+
+  **Tests (+20):** 11 engine (easing pinned at both ends and monotonic; the never-upscale size rule at three
+  scales; the crop box centred, clamped, NaN-focus and sub-1 scale; the loop closing as the reverse of the
+  push-in; the far end measurably tighter; the camera travelling to an off-centre object *and* the corner case
+  above; the centroid finding a blob and giving up on a flat frame; a written clip's frame count and size; and
+  an unreadable preview being "no clip", not a crash) and 9 webapp/frontend (info offering + self-hiding + 404s;
+  the served animation looping; the move centred on the WCS-solved target; the cache reused and *rebuilt* when
+  the preview changes; the artefacts archiving with their run; and the menu item's href/`download` on a run
+  with a picture, absent on one without).
+
+  **Slice (c) — the 9:16 portrait variant — is deliberately not built**, and shouldn't be until someone wants
+  it: it needs a second crop rule and doubles the cache, for a shape only one platform needs.
+
+  Original spec, for the record:
+
+  - **NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready *cinematic zoom* of your
+    finished picture — a short looping clip that glides from the whole frame into the target and back out, so a
+    galaxy or nebula makes a scroll-stopping post instead of a still that's easy to swipe past.** *(Pillar: enjoy +
+    share, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network, no schema/config
+    change.)*
+    **Why a beginner wants it.** After the app has done its job the owner has a genuinely beautiful frame, and the
+    *only* thing they want to do with it is show people. The app already exports it well as a still (share JPEG,
+    wallpaper, keepsake, recap poster) — but the platforms a Seestar beginner actually posts to (Instagram Reels,
+    TikTok, WhatsApp status) reward **motion**: a slow push-in on a spiral galaxy reads as "look what I made" in a
+    way a static image never does, and it's the format a non-expert has no tool to produce. A one-tap "Reveal"
+    turns the finished picture into that clip with zero craft required.
+    **What it is (and is deliberately NOT).** A short (~6 s) looping **Ken-Burns** animation of the *already
+    display-stretched* result: ease-in from the full field to a centred, ~2× crop on the target, hold a beat, ease
+    back out. That's it — no music, no text overlay, no multi-clip edit. It is **not** the existing "deepening"
+    reel (`render/deepening.py`, a *temporal* cross-run "getting deeper night after night" animation) nor the
+    in-stack "watch it appear" progress reel (`stacker.py` `_progress.webp`) — both show the stack *accumulating
+    over time*; Reveal is a purely **spatial** camera move over one finished frame, a different artefact answering
+    a different want (grepped 2026-08-27: no ken-burns / cinematic / zoom-reveal / pan feature filed or shipped —
+    the only "zoom" hit is the Gallery lightbox's manual pan/zoom, which is interactive viewing, not an export).
+    **Sane auto-default (no knobs).** The crop centre is the target: use the run WCS to project the catalogued
+    object's RA/Dec to pixels (the same `identify`/`objects_in_field`/scale-bar WCS path already read on the
+    result), falling back to the picture's brightness centroid (or plain image centre) when there's no solve — so
+    a beginner never frames anything. Fixed timing, fixed ~2× zoom, fixed easing. NaN/uncovered pixels render black
+    exactly like every other export.
+    **Reuses existing machinery — almost no new surface.** The frames are Pillow crops+resizes of the stored
+    display-space preview/FITS (no re-stretch — `already_display` semantics), and the encoder is the **same
+    animated-WEBP-with-APNG-fallback** path `render/deepening.py` and `stacker.py` already use
+    (`img.save(..., save_all=True, append_images=..., loop=0)`). The core is a pure, unit-testable
+    `render/reveal.py::build_reveal(rgb, focus_xy, *, seconds, zoom, size) -> list[PIL.Image]` (deterministic
+    keyframe schedule; assert frame count, that frame 0 ≈ full-frame and the mid frame is a tighter crop centred on
+    `focus_xy`, and that a NaN canvas stays finite/black). Cached beside the outputs as `{base}_reveal.webp`
+    (add to `RUN_ARTEFACT_SUFFIXES` so archive/delete already sweep it), served through the existing result/History
+    download menu next to Share/To-phone/Wallpaper.
+    **Guardrails/feasibility.** Additive and reversible; nothing on by default changes; incoming/ untouched;
+    offline and deterministic (no `Date.now`/RNG in the schedule — timing is index-derived), so it's fully
+    testable. Memory-bounded: one downscaled crop frame at a time, at share resolution (≤~1080 px long edge), never
+    the full 100-MP mosaic. **Builder slices:** (a) pure `build_reveal(...)` + unit tests; (b) wire the cached
+    `_reveal.webp` write into the output writer + `RUN_ARTEFACT_SUFFIXES` + a result-menu download button
+    (self-hiding until the file exists); (c) optional later — a portrait (9:16) variant for phone-native posting,
+    mirroring the existing wallpaper-aspect crops.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #14) — "Is more time worth it?": a plain-language, *measured*
   grain projection that tells a beginner how much cleaner their picture would actually get with more light —
