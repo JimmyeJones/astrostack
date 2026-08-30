@@ -956,3 +956,71 @@ describe("Gallery — North up as a view", () => {
     expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
   });
 });
+
+// "See what stacking removed" tints the pixels outlier rejection dropped. It has
+// been on the History run card since v0.299.0, at 180 px — where a satellite
+// trail is a couple of cyan pixels. These pin the same tint on the full-screen
+// viewer the Gallery opens, which is where a beginner actually looks closely.
+describe("Gallery — what stacking removed, full screen", () => {
+  function galleryWith(over: Partial<GalleryItem> = {}) {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), has_preview: true, preview_url: "/p/1.png", ...over }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1920, height: 1080, objects: [], scale_bar: null, north_up_deg: 118.5,
+    } as never);
+  }
+
+  afterEach(() => window.localStorage.clear());
+
+  const openFirst = async () => {
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+    return screen.findByRole("dialog");
+  };
+
+  it("offers nothing on a run that recorded no map", async () => {
+    galleryWith();
+    const info = vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({} as never);
+    await openFirst();
+    expect(screen.queryByTestId("show-removed-view")).not.toBeInTheDocument();
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it("tints on request, captions it, and asks for the number only then", async () => {
+    galleryWith({ has_rejection_map: true });
+    const info = vi.spyOn(client.api, "stackRunInfo")
+      .mockResolvedValue({ rejection: { mode: "sigma-clip", fraction: 0.004 } } as never);
+    await openFirst();
+
+    const toggle = await screen.findByTestId("show-removed-view");
+    // Opening a picture must cost nothing extra: off by default, nothing fetched.
+    expect(screen.queryByTestId("lightbox-overlay")).not.toBeInTheDocument();
+    expect(info).not.toHaveBeenCalled();
+
+    fireEvent.click(toggle);
+
+    expect(await screen.findByTestId("lightbox-overlay")).toHaveAttribute(
+      "src", "/api/targets/M_42/stack-runs/1/rejection-overlay");
+    expect(await screen.findByText(/about 0\.4% of your samples/)).toBeInTheDocument();
+  });
+
+  it("turns the tint with the picture rather than letting the two slide apart", async () => {
+    galleryWith({ has_rejection_map: true });
+    vi.spyOn(client.api, "stackRunInfo")
+      .mockResolvedValue({ rejection: { mode: "sigma-clip", fraction: 0.004 } } as never);
+    await openFirst();
+    fireEvent.click(await screen.findByTestId("show-removed-view"));
+    await screen.findByTestId("lightbox-overlay");
+
+    fireEvent.click(screen.getByTestId("north-up-view"));
+
+    await waitFor(() => expect(screen.getByTestId("lightbox-overlay")).toHaveAttribute(
+      "src", "/api/targets/M_42/stack-runs/1/rejection-overlay?north_up=true"));
+    expect(screen.getByRole("dialog").querySelector("img")).toHaveAttribute(
+      "src", "/api/targets/M_42/stack-runs/1/preview?north_up=true");
+  });
+});
