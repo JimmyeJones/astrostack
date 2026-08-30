@@ -4,7 +4,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type FieldObject, type StackRun } from "../../api/client";
-import { formatCaptureNights, formatIntegration, formatStampDate } from "../../format";
+import { formatCaptureNights, formatIntegration, pictureDateLabel } from "../../format";
 import { AnnotatedImage, croppedAnnotationView, objectLabel } from "../AnnotatedImage";
 import { ImageLightbox } from "../ImageLightbox";
 import { NorthUpViewToggle, loadNorthUpView, saveNorthUpView } from "../NorthUpViewToggle";
@@ -16,15 +16,22 @@ import { sharePictureText } from "../../share";
 /**
  * The one-line provenance caption under the picture. Pure/testable.
  *
- * Deliberately plain: when it was stacked, how many subs went in, and how much
- * light that is — the three things a beginner uses to tell "is this the picture
- * I think it is?". Anything measured or diagnostic belongs in the insight tabs,
- * not here.
+ * Deliberately plain: when the light was collected, how many subs went in, and
+ * how much light that is — the three things a beginner uses to tell "is this
+ * the picture I think it is?". Anything measured or diagnostic belongs in the
+ * insight tabs, not here.
+ *
+ * The date goes through `pictureDateLabel`, which prefers the run's capture
+ * window and *names which date it is* either way — "Shot 15 Nov 2024", else
+ * "Stacked 30 Aug 2026". This card used to print the stack stamp unconditionally
+ * and it is the app's most prominent picture: dogfooding the sample showed
+ * "Stacked Aug 30, 2026" directly above a frames table of 2024-11-15 subs.
  */
 export function latestPictureCaption(run: StackRun): string {
   const parts: string[] = [];
-  const stacked = formatStampDate(run.timestamp_utc);
-  if (stacked) parts.push(`Stacked ${stacked}`);
+  const when = pictureDateLabel(
+    run.capture_night_start, run.capture_night_end, run.timestamp_utc);
+  if (when) parts.push(when);
   parts.push(`${run.n_frames_used} frame${run.n_frames_used === 1 ? "" : "s"}`);
   if (run.total_exposure_s) parts.push(`${formatIntegration(run.total_exposure_s)} of light`);
   return parts.join(" · ");

@@ -155,3 +155,51 @@ def test_the_master_carries_the_capture_time(client, solved_library):
         # instant and no span to record.
         assert hdul[0].header["DATE-OBS"].startswith("2024-09-12T03:14:55")
         assert "DATE-END" not in hdul[0].header
+
+
+def test_the_baked_caption_says_how_many_nights_it_took():
+    """A span alone cannot: "15-18 Nov 2024" is equally consistent with two
+    nights and with four, and the count is what says how much work it was."""
+    plate = _nameplate_fields("", _Entry(), _run(
+        capture_start_utc="2024-11-15T22:01:00Z",
+        capture_end_utc="2024-11-18T21:40:00Z",
+        capture_hours_json=json.dumps([
+            "2024-11-15T22:00:00Z", "2024-11-16T22:00:00Z",
+            "2024-11-17T22:00:00Z", "2024-11-18T21:00:00Z"]),
+    ))
+    assert plate.nights == 4
+
+    from seestack.nameplate import nameplate_line
+    assert "15-18 Nov 2024 (4 nights)" in nameplate_line(plate)
+
+
+def test_a_run_with_no_recorded_hours_captions_exactly_as_before():
+    """Every run on the owner's install predates the column: the span alone,
+    with no invented count."""
+    plate = _nameplate_fields("", _Entry(), _run(
+        capture_start_utc="2024-11-15T22:01:00Z",
+        capture_end_utc="2024-11-18T21:40:00Z",
+    ))
+    assert plate.nights is None
+
+    from seestack.nameplate import nameplate_line
+    assert "nights" not in nameplate_line(plate)
+
+
+def test_the_captioned_count_is_bucketed_for_the_same_observer_as_the_dates():
+    """Both facts go through one helper, so the caption cannot say "1 night"
+    beside a two-date span, or the reverse."""
+    kw = dict(capture_start_utc="2024-11-15T10:00:00Z",
+              capture_end_utc="2024-11-15T18:00:00Z",
+              capture_hours_json=json.dumps(
+                  ["2024-11-15T10:00:00Z", "2024-11-15T18:00:00Z"]))
+    utc = _nameplate_fields("", _Entry(), _run(**kw))
+    assert (utc.date_iso, utc.date_end_iso, utc.nights) == (
+        "2024-11-14", "2024-11-15", 2)
+    local = _nameplate_fields("", _Entry(), _run(**kw), 150.0)
+    assert (local.date_iso, local.date_end_iso, local.nights) == (
+        "2024-11-15", "2024-11-15", 1)
+
+    from seestack.nameplate import nameplate_line
+    # One night: the date says it, so the count stays out of the caption.
+    assert "nights" not in nameplate_line(local)

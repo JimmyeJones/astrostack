@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from seestack.edit.proxy import rejection_map_path_for
 from seestack.stackhealth import seam_verdict
 from webapp import deps
-from webapp.capture_nights import capture_night_range
+from webapp.capture_nights import capture_night_count, capture_night_range
 from webapp.site_location import resolve_site_lon
 
 log = logging.getLogger(__name__)
@@ -69,6 +69,12 @@ class GalleryItem(BaseModel):
     # "captured", which is the same day only if you stacked the night you shot.
     capture_night_start: str | None = None
     capture_night_end: str | None = None
+    # How many observing **nights** those subs came from — the fact the window
+    # above cannot supply (15→18 Nov is equally consistent with two nights and
+    # with four), and the one a caption wants: "600 subs over 4 nights". None for
+    # a run recorded before the app tracked it, so a caller says nothing rather
+    # than claiming a count it does not have. Additive.
+    capture_nights: int | None = None
     # Median transparency of the stacked frames ÷ the target's clear-sky baseline
     # (< ~0.6 ⇒ hazy). None for pre-schema-5 runs; drives a "hazy night" badge.
     transparency_ratio: float | None = None
@@ -261,6 +267,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
     options = _parse_options(run.options_json)
     night_start, night_end = capture_night_range(
         run.capture_start_utc, run.capture_end_utc, lon_deg)
+    nights = capture_night_count(getattr(run, "capture_hours_json", None), lon_deg)
     return GalleryItem(
         safe=t.safe_name,
         target_name=t.name,
@@ -284,6 +291,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         reusable=_is_reusable(options),
         capture_night_start=night_start,
         capture_night_end=night_end,
+        capture_nights=nights,
         transparency_ratio=run.transparency_ratio,
         noise_sigma=run.noise_sigma,
         calstat=run.calstat,
@@ -394,6 +402,12 @@ class BestPicture(BaseModel):
     # ``timestamp_utc`` is when the stack ran, which is not when it was shot.
     capture_night_start: str | None = None
     capture_night_end: str | None = None
+    # How many observing **nights** those subs came from — the fact the window
+    # above cannot supply (15→18 Nov is equally consistent with two nights and
+    # with four), and the one a caption wants: "600 subs over 4 nights". None for
+    # a run recorded before the app tracked it, so a caller says nothing rather
+    # than claiming a count it does not have. Additive.
+    capture_nights: int | None = None
     # True when this picture is the one the user pinned as its target's cover
     # ("Set as cover" in History). A pinned picture represents its target here
     # instead of the newest stack, and is floated above the ranked tail so the
@@ -506,6 +520,8 @@ def get_best_pictures(
                 info = identify_object(t.name, t.ra_deg, t.dec_deg, catalog=catalog)
                 night_start, night_end = capture_night_range(
                     pick.capture_start_utc, pick.capture_end_utc, lon)
+                nights = capture_night_count(
+                    getattr(pick, "capture_hours_json", None), lon)
                 by_key[key] = BestPicture(
                     safe=t.safe_name,
                     target_name=t.name,
@@ -519,6 +535,7 @@ def get_best_pictures(
                     noise_sigma=pick.noise_sigma,
                     capture_night_start=night_start,
                     capture_night_end=night_end,
+                    capture_nights=nights,
                     has_preview=True,
                     has_fits=bool(pick.fits_path and Path(pick.fits_path).exists()),
                     has_tiff=bool(pick.tiff_path and Path(pick.tiff_path).exists()),
