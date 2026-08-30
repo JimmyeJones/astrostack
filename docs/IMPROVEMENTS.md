@@ -360,6 +360,65 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.319.1, branch `claude/compassionate-galileo-go263h`) — ~~"your last night was
+  softer than usual" gets **more likely the longer you shoot the same target**, because the baseline it
+  compares against is the *sharpest* night you have ever had — and on the Nights card the same comparison
+  badges a night "soft" right next to a one-click **Set aside**.~~** The **fifth confirmed instance** of the ⭐
+  "normalises against its own subset" QA lead's *depth* axis, and the candidate that lead explicitly left
+  unswept (`_fwhm_quality_drift` / the night verdict, "swept along the *position* axis and cleared, which says
+  nothing here"). *(Severity: broken-UX / autonomy — advisory copy, not a wrong picture, **except** that the
+  false badge sits beside the button that discards a night, so at the tail it was steering a beginner toward
+  throwing away good data. Confidence: **measured**, 200k-trial Monte Carlo, plus deterministic regression
+  tests.)*
+
+  **The mechanism, in one line:** a **minimum over N samples** is a monotone decreasing function of N. Both
+  surfaces compared a night's median FWHM against `min` over the *other* nights' medians, so the yardstick kept
+  getting sharper as the owner kept shooting — while the nights themselves did not change at all.
+
+  **Measured, on a sky whose seeing never changes** (nightly median FWHM ~ N(3.5, 0.5) px, identical
+  distribution every night; the numbers hold at other means and spreads, see the module constants):
+
+  | prior nights | share of ordinary nights flagged — **was** | **now** |
+  |---|---|---|
+  | 1 | 13.7 % | 13.7 % |
+  | 2 | 23.2 % | 9.6 % |
+  | 5 | 40.5 % | 7.3 % |
+  | 10 | 55.0 % | 5.6 % |
+  | 20 | 68.1 % | 4.9 % |
+  | 40 | 78.9 % | 4.4 % |
+
+  The Nights-card half is the same curve per night (13.7 % → 78.6 % across 2 → 40 nights), and it is the worse
+  of the two: on a forty-night project **four nights in five** carried a yellow "soft" badge, beside a button
+  offering to set the night aside and re-stack without it.
+
+  **The fix changed no threshold** — the same shape §1 requires and the same shape the other four instances of
+  this class took. The baseline is now the **median of the other nights' medians**, which is stationary in N by
+  construction, with both floors (`FWHM_DRIFT_RATIO` 1.25, `FWHM_DRIFT_ABS_PX` 0.6) untouched. On a **two-night**
+  target the answer is bit-for-bit what it was (the only other night *is* the minimum of the others), which an
+  existing untouched test pins. And it is not bought with deafness: a genuinely soft (+1.5 px) night is still
+  caught **88.8 %** of the time at forty nights, against 78.2 % at one — the detector got *better*, because
+  four-in-five false alarms is not detection.
+
+  **Two statistics were sharing one variable, and they wanted different things.** `nights_breakdown` used one
+  `best_fwhm` for both the "soft" verdict and the positive **"best"** nod. The nod genuinely means *the sharpest
+  night* — a minimum is right there, and it keeps it. Only the verdict moved. The verdict's baseline is also
+  **leave-one-out by position, not by value**, so two nights that measured identically still each see the other.
+
+  **Copy moved with it, deliberately in the same commit:** the nudge said *"softer than your usual **best**"*,
+  which over a median baseline would quote a number that is nobody's best. It now reads *"softer than this
+  target's usual (5.2 px vs 3.4 px FWHM) — worth checking focus."*, with a test asserting the sentence never
+  says "best".
+
+  **Upgrade-safe (§9):** pure engine functions plus one string; no config, schema, on-disk, API-*shape* or
+  default change. `baseline_fwhm_px` keeps its name and type — only the number it carries is now stationary —
+  so an older frontend renders it correctly.
+
+  **Tests (+5 in `tests/test_session_recap.py`, all 5 fail before):** the baseline is the typical prior night
+  (not the sharpest, not the most recent) and reports the whole population behind it; a lucky night no longer
+  makes ten ordinary ones nag, and no longer badges nine of them "soft" while still earning its own "best" nod;
+  a genuinely soft night is still caught and still badged on a long project; and the leave-one-out helper
+  directly, including the identical-twins case.
+
 - **✅ SHIPPED (Builder, v0.318.1, branch `claude/compassionate-galileo-cwqy3x`) — ~~the target classifier reads
   a thin stack's **grain as colour**, so a picture with no colour in it is suggested the nebula preset until you
   stack it deep enough.~~** The **second confirmed instance** of the ⭐ "normalises against its own subset" QA
@@ -10399,6 +10458,26 @@ to **Shipped**.)_
   that is nothing but noise should be denoised hard) and because a real OSC frame always carries stars that set
   the percentile. Worth knowing if anyone ever reads that σ as an absolute noise figure rather than a fraction
   of the visible range — it is the latter, and its docstring says so.
+
+  **🔎 SWEPT A THIRD TIME (Builder 2026-08-30, branch `claude/compassionate-galileo-go263h`) — the last
+  candidate this lead named is a CONFIRMED instance, and it is the worst-behaved one yet.**
+  `_fwhm_quality_drift` and the Nights card's "soft" verdict both compared a night against the **minimum** over
+  the other nights' medians, and a minimum over N samples falls without limit as N grows: on unchanging seeing
+  the share of ordinary nights flagged ran **13.7 % at one prior night → 68 % at twenty → 79 % at forty**.
+  Fixed as **v0.319.1** (entry at the top of "Bugs (fix these first)") with the same no-threshold-flip shape as
+  the other four. **That closes every candidate this lead listed.**
+
+  **⚠️ CORRECTION to the first sweep's "cleared" list, worth more than the finding itself.** That sweep reported
+  `classify_target`'s cues as *flat* (`ext_frac` 0.0106/0.0104/0.0104 at 8/32/128 subs) and cleared them. They
+  are not flat: swept on a different scene at 4…800 subs, `ext_frac` moved **2.1×** and flipped a verdict
+  (v0.318.3). Both measurements are correct — the first scene's threshold was already floor-governed
+  (`6·sky_sigma` under the 0.06 floor) at 8 subs, so there was no depth dependence left to see, and its verdict
+  was `None` at every depth so nothing could visibly flip. **The lesson for the next sweep of any candidate:**
+  "measured and flat on one scene at 8/32/128" is not "cleared". This axis needs (a) a scene whose verdict is
+  *near a class boundary*, since a statistic can drift a long way inside one class and change nothing, and (b) a
+  **thin** end — 4–16 subs — because the mechanisms here (a noise-scaled threshold, an erosion's noise bias) are
+  the ones that vanish by 32 subs and are invisible above it. Two of the three confirmed instances would have
+  been missed by a sweep that started at 8.
 
 - **NEW IDEA (Builder 2026-08-30, the one case the v0.312.1 tint fix deliberately fenced off rather than
   solved) — a many-sub stack whose canvas is no bigger than its preview still gets the cyan wash.**

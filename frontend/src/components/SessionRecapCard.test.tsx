@@ -99,9 +99,22 @@ describe("describeQualityDrift", () => {
         n_latest: 8, n_baseline: 8,
       }),
     ).toBe(
-      "Heads up: last session's stars are softer than your usual best " +
+      "Heads up: last session's stars are softer than this target's usual " +
         "(5.2 px vs 3.4 px FWHM) — worth checking focus.",
     );
+  });
+
+  it("calls the baseline a usual night, never a best one", () => {
+    // The server's baseline is the *median* of the prior nights, not the
+    // sharpest of them (the sharpest kept getting sharper as a project grew, so
+    // this nudge fired on ordinary nights). A sentence saying "your usual best"
+    // over a median would be quoting a number that is nobody's best.
+    const line = describeQualityDrift({
+      kind: "fwhm", latest_fwhm_px: 5.2, baseline_fwhm_px: 3.4,
+      n_latest: 8, n_baseline: 40,
+    });
+    expect(line).toContain("usual");
+    expect(line).not.toContain("best");
   });
 
   it("says 'that session' once the session it describes is no longer last night", () => {
