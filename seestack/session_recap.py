@@ -449,6 +449,64 @@ TRANSPARENCY_TREND_MIN_FRAMES = 6
 # a distribution to fit — same real-data caveat the Scout flagged for this metric.)
 TRANSPARENCY_TREND_DROP_RATIO = 1.4
 
+# A mosaic panel needs at least this many measured subs before it can be levelled
+# against the rest (see ``_level_panels``). Matches the photometric pass's
+# ``_MIN_MEASURED_FRAMES`` — a median from one or two subs isn't a reference.
+TRANSPARENCY_PANEL_MIN_FRAMES = 3
+
+
+def _level_panels(
+    frames: list[FrameRow], scores: list[float],
+) -> tuple[list[float], int]:
+    """Level a **mosaic**'s per-panel star fields out of a transparency series.
+
+    ``transparency_score`` is the median flux of a frame's *brightest stars*, so
+    it is a property of **where the scope pointed** as much as of the sky: a
+    panel aimed at an emptier patch genuinely has fainter "brightest" stars. A
+    Seestar shoots a mosaic panel by panel, so the night's series is really a
+    staircase of star fields, and reading it as a time series turns "we moved to
+    a sparser panel" into "clouds rolled in" — measured on a synthetic 3-panel
+    mosaic shot under a perfectly steady sky: verdict ``degraded``, early 10025
+    vs late 4025. (Same class of mistake as the target-wide QC grading fixed in
+    v0.270.2 and the target-wide photometric reference fixed in v0.271.0.)
+
+    So each substantial panel is rescaled to the series' own overall median,
+    which removes the between-panel step while leaving *within*-panel variation —
+    the actual sky — untouched. Returns ``(scores, n_panels)`` unchanged with
+    ``n_panels == 0`` unless the pointings split soundly (the shared
+    :func:`~seestack.stack.pointings.pointing_groups` gate: ≥2 panels each
+    carrying ``TRANSPARENCY_PANEL_MIN_FRAMES`` measured subs), so a single-field
+    target, an unsolved target and a too-tightly-packed mosaic are all bit-for-bit
+    unaffected. A sub in no substantial panel keeps its raw score rather than
+    being rescaled by a yardstick from another patch of sky.
+    """
+    from seestack.stack.pointings import pointing_groups
+
+    labels = pointing_groups(
+        [(f.ra_center_deg, f.dec_center_deg) for f in frames],
+        min_members=TRANSPARENCY_PANEL_MIN_FRAMES,
+    )
+    if labels is None:
+        return scores, 0
+    by_panel: dict[int, list[float]] = {}
+    for label, s in zip(labels, scores, strict=True):
+        if label >= 0:
+            by_panel.setdefault(label, []).append(s)
+    panel_med = {
+        label: float(median(vals)) for label, vals in by_panel.items()
+        if median(vals) > 0
+    }
+    if len(panel_med) < 2:
+        return scores, 0
+    overall = float(median(scores))
+    if overall <= 0:
+        return scores, 0
+    levelled = [
+        s * (overall / panel_med[label]) if label in panel_med else s
+        for label, s in zip(labels, scores, strict=True)
+    ]
+    return levelled, len(panel_med)
+
 
 @dataclass
 class TransparencyTrendPoint:
@@ -484,6 +542,9 @@ class TransparencyTrend:
     start_utc: str | None           # first measured sub this session
     end_utc: str | None             # last measured sub this session
     degraded_after_utc: str | None  # when the sky went murky (only for "degraded")
+    # Mosaic panels levelled out of the series (0 = single field / no sound
+    # split, i.e. the raw scores). See :func:`_level_panels`.
+    n_panels_levelled: int = 0
 
 
 def transparency_trend(
@@ -513,11 +574,14 @@ def transparency_trend(
     if len(measured) < TRANSPARENCY_TREND_MIN_FRAMES:
         return None
 
+    # A mosaic's panels are different star fields, not different skies — level
+    # them out before trending, or moving to a sparser panel reads as cloud.
+    raw = [float(f.transparency_score) for f in measured]
+    scores, n_panels = _level_panels(measured, raw)
     points = [
-        TransparencyTrendPoint(t_utc=f.timestamp_utc, transparency=float(f.transparency_score))
-        for f in measured
+        TransparencyTrendPoint(t_utc=f.timestamp_utc, transparency=s)
+        for f, s in zip(measured, scores, strict=True)
     ]
-    scores = [p.transparency for p in points]
     n = len(scores)
     third = n // 3  # ≥ 2 since n ≥ TRANSPARENCY_TREND_MIN_FRAMES (6)
     early = float(median(scores[:third]))
@@ -545,6 +609,7 @@ def transparency_trend(
         start_utc=points[0].t_utc,
         end_utc=points[-1].t_utc,
         degraded_after_utc=degraded_after,
+        n_panels_levelled=n_panels,
     )
 
 
