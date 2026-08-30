@@ -277,6 +277,36 @@ def _seestar_output_bases(
 # while never flagging a real light-frame stack (dozens–thousands of subs).
 _MAX_JUNK_OUTPUT_FRAMES = 2
 
+# ...except for a MOSAIC, whose on-device output is one stacked image **per
+# panel**, not one image. The owner's real S30 library proves the single-image
+# cap is wrong there: "M 44_mosaic" holds 11 frames and "NGC 6960_mosaic" 7,
+# so both sail past the ≤2 gate and linger as junk targets forever. This cap is
+# still an order of magnitude below any real light-frame target (hundreds to
+# thousands of subs), and the positive-evidence requirement is unchanged — the
+# folder must be a bare "<T>_mosaic/" whose "<T>_mosaic_sub/" raw-subs sibling
+# is actually present on disk — so a real target is still never mistaken for junk.
+_MAX_JUNK_MOSAIC_OUTPUT_FRAMES = 32
+
+# The bare on-device output folder of a mosaic ("<T>_mosaic/", beside its raw
+# subs in "<T>_mosaic_sub/"). Confirmed as this device's real naming from the
+# owner's live S30 share — the bare "<T>/" shape never occurs for a mosaic.
+_MOSAIC_SUFFIX = "_mosaic"
+
+
+def junk_output_frame_cap(target_name: str) -> int:
+    """The largest frame count worth *examining* as a possible on-device output
+    target, given only its name. Two values, because a single field's on-device
+    output is one stacked image while a mosaic's is one image per panel (see
+    :data:`_MAX_JUNK_MOSAIC_OUTPUT_FRAMES`).
+
+    Exists so a caller can skip opening a big target's project without keeping —
+    and drifting from — its own copy of the engine's limits. It only decides
+    *whether to look*; :func:`classify_seestar_junk_target` still requires the
+    positive on-disk evidence before anything is flagged."""
+    if target_name.strip().lower().endswith(_MOSAIC_SUFFIX):
+        return _MAX_JUNK_MOSAIC_OUTPUT_FRAMES
+    return _MAX_JUNK_OUTPUT_FRAMES
+
 
 @dataclass(frozen=True)
 class JunkTargetVerdict:
@@ -357,24 +387,40 @@ def classify_seestar_junk_target(
         if all(n.endswith(suffix) for n in folder_names):
             return _capture_folder_verdict(suffix)
 
-    if n_frames <= _MAX_JUNK_OUTPUT_FRAMES and len(folders) == 1:
+    if len(folders) == 1:
         folder = next(iter(folders))
         low = folder.name.lower()
         # A raw-subs folder ("_sub"/"_mosaic_sub") is never junk — only a *bare*
         # output folder is. "_mosaic_sub" ends with "_sub", so one test covers both.
-        if not low.endswith((_SUB_SUFFIX, *_CAPTURE_SUFFIXES)):
+        # The cap comes from the FOLDER's name, which is the actual evidence: a
+        # mosaic's output holds one image per panel, a single field's holds one.
+        if (
+            not low.endswith((_SUB_SUFFIX, *_CAPTURE_SUFFIXES))
+            and n_frames <= junk_output_frame_cap(folder.name)
+        ):
             sibling = folder.parent / f"{folder.name}{_SUB_SUFFIX}"
             try:
                 is_output = sibling.is_dir()
             except OSError:
                 is_output = False
             if is_output:
+                is_mosaic = low.endswith(_MOSAIC_SUFFIX)
+                what = (
+                    "its own stacked image of each mosaic panel"
+                    if is_mosaic
+                    else "the Seestar's own single stacked image"
+                )
+                consequence = (
+                    "stacking them just reproduces those few lower-resolution "
+                    "panel images."
+                    if is_mosaic
+                    else "stacking it just reproduces that one lower-resolution "
+                    "frame."
+                )
                 return JunkTargetVerdict(
                     "on_device_output",
-                    "Looks like the Seestar's own single stacked image (its "
-                    f"“{folder.name}_sub” raw-subs folder is right beside it), not "
-                    "raw subs — stacking it just reproduces that one "
-                    "lower-resolution frame.",
+                    f"Looks like {what} (its “{folder.name}_sub” raw-subs folder "
+                    f"is right beside it), not raw subs — {consequence}",
                 )
     return None
 
@@ -395,19 +441,22 @@ def duplicate_sub_target_base_name(
     correct raw subs, so this is **not** the ``on_device_output`` junk case; it is
     a de-duplication hint.
 
+    **A mosaic is the same story with a different base name.** A leftover
+    ``<T>_mosaic_sub``-named target duplicates the ``<T> (mosaic)`` target the
+    convention now builds from that folder — *not* the single-field ``<T>``, whose
+    footprint is different. (The owner's live library has three of these:
+    ``M 3_MOSAIC_SUB``, ``M 44_MOSAIC_SUB``, ``NGC 6960_MOSAIC_SUB``.) The
+    ``(mosaic)`` suffix is taken from :func:`_apply_seestar_convention` so the two
+    can never disagree about what the duplicate's base is called.
+
     Pure and side-effect-free: it only recognises the *shape* (name ends ``_sub``
     and every frame sits under a single ``*_sub/`` folder). The caller must confirm
-    the base target ``<T>`` actually exists and already owns these subs before
-    offering removal, so a legitimately-named standalone ``…_sub`` target (or one
-    whose subs the base doesn't yet own) is never flagged. Single-field only —
-    ``_mosaic_sub`` naming is device-specific and deliberately left to its own bug.
+    the base target actually exists and already owns these subs before offering
+    removal, so a legitimately-named standalone ``…_sub`` target (or one whose subs
+    the base doesn't yet own) is never flagged.
     """
-    name = target_name.strip()
-    low = name.lower()
-    if not low.endswith(_SUB_SUFFIX) or low.endswith(_MOSAIC_SUB_SUFFIX):
-        return None
-    base = name[: -len(_SUB_SUFFIX)].rstrip()
-    if not base:
+    base = duplicate_sub_base_name_from_name(target_name)
+    if base is None:
         return None
     folders = {Path(p).parent for p in source_paths}
     if len(folders) != 1:
@@ -416,6 +465,27 @@ def duplicate_sub_target_base_name(
     if not folder.name.lower().endswith(_SUB_SUFFIX):
         return None
     return base
+
+
+def duplicate_sub_base_name_from_name(target_name: str) -> str | None:
+    """The *name-shape* half of :func:`duplicate_sub_target_base_name`: given only
+    a target's name, the name of the target the convention would fold its folder
+    into (``<T>_sub`` → ``<T>``, ``<T>_mosaic_sub`` → ``<T> (mosaic)``), or
+    ``None`` if the name isn't that shape.
+
+    Split out because a caller that has a *set* of target names — the merge
+    suggester, deciding whether two members of one sky-position cluster are the
+    same physical files under two spellings — can rule the question out by name
+    alone, and only pay to open both projects for the pairs that could be it."""
+    name = target_name.strip()
+    low = name.lower()
+    if not low.endswith(_SUB_SUFFIX):
+        return None
+    if low.endswith(_MOSAIC_SUB_SUFFIX):
+        base = name[: -len(_MOSAIC_SUB_SUFFIX)].rstrip()
+        return f"{base} (mosaic)" if base else None
+    base = name[: -len(_SUB_SUFFIX)].rstrip()
+    return base if base else None
 
 
 @dataclass
