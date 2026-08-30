@@ -573,8 +573,36 @@ _(nothing else claimed — claim an item here with your branch name)_
     the safety note. Confidence: HIGH, traced end-to-end in code against the owner's real library data.
     Owner's words: "it is still having issues with combining/distinguishing target folders.")*
 
-- **🟡 THE SAME MOSAIC-CAP ASYMMETRY EXISTS ONE LAYER DOWN, ON THE *FRAME* AUTO-REJECT — traced while
-  shipping v0.319.3, deliberately NOT changed in the same run because it is the ingest hot path.**
+- **✅ SHIPPED (Builder, v0.319.5, branch `claude/compassionate-galileo-isitva`) — ~~the same mosaic-cap
+  asymmetry exists one layer down, on the *frame* auto-reject.~~** Both halves, with the caution the entry
+  asked for. The cap half is exactly as specified: `reject_seestar_output_frames` no longer carries its own
+  `2`, it asks `junk_output_frame_cap(<the folder's own name>)` through a deferred import (the scanner imports
+  `project`, so the cycle is real), which is the same call the scanner's junk-target guard makes — the two
+  cannot drift apart again. A bare `<T>/` of 11 frames is still untouched; only a `<T>_mosaic/` gets the
+  looser panel cap, and 64 frames in a `<T>_mosaic/` is still spared.
+
+  **The entry's premise needed one correction before the fix could reach anything, and finding it was the
+  work.** As written, the cap fix was dead code: `_seestar_output_bases` **skipped mosaics outright**
+  (`if low.endswith(_MOSAIC_SUB_SUFFIX): continue`), so no mosaic target ever got an output base and the cap
+  was never consulted. Extending it looked at first like the blind hot-path change the entry warns against —
+  the obvious pollution story doesn't hold up, because `_allocate_safe_name` deliberately keeps `"M 44_mosaic"`
+  (an old scan's folder-derived name) and `"M 44 (mosaic)"` (the convention's name) in *separate* project
+  directories, which is why the owner's screenshot shows them as two live targets. **But that disambiguation
+  shipped later than `make_safe_name`, and its own docstring says a library the pre-fix code already merged
+  "can't be retro-split"** — so a library scanned before it has both sets of frames in one project, under the
+  safe name both names fold to (`M_44_mosaic`). That is a real, reachable legacy shape, it is the exact mosaic
+  twin of the single-field pre-v0.184.9 pollution the code already heals, and it is what the new end-to-end
+  test reproduces: 11 panel images seeded into `M_44_mosaic`, re-scan, all 11 rejected, nothing deleted,
+  the 3 real subs still accepted. The positive-evidence requirement is unchanged — the base only registers
+  when this scan is *not* ingesting that bare folder as real subs.
+
+  Sites: `seestack/io/project.py` (`_seestar_output_frame_cap` replaces `_MAX_SEESTAR_OUTPUT_FRAMES`, per-folder
+  lookup in `reject_seestar_output_frames`), `seestack/io/scanner.py` (`_seestar_output_bases` maps
+  `<T>_mosaic_sub` → target `<T> (mosaic)` → folder `<T>_mosaic`). Three regression tests in
+  `tests/test_scanner.py`, all failing before and passing after.
+
+    *(Original entry, kept for the reasoning:)* traced while
+  shipping v0.319.3, deliberately NOT changed in the same run because it is the ingest hot path.
   *(Severity: low-moderate — a handful of low-resolution on-device panel images silently join a real mosaic's
   stack. Confidence: traced in code; NOT reproduced against owner data. Size S.)*
 

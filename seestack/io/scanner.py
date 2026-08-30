@@ -247,16 +247,26 @@ def _seestar_output_bases(
     subdirs_with_fits: list[tuple[str, list[Path]]],
     parents: list[str] | None = None,
 ) -> dict[str, str]:
-    """Map each single-field ``<T>_sub`` target name to the bare ``<T>`` folder
-    basename whose already-registered frames (the Seestar's on-device stacked
-    output) must be additively rejected from that target on a re-scan.
+    """Map each raw-subs target name to the bare output-folder basename whose
+    already-registered frames (the Seestar's on-device stacked output) must be
+    additively rejected from that target on a re-scan — ``<T>_sub`` → ``<T>`` for
+    a single field, ``<T>_mosaic_sub`` → ``<T>_mosaic`` for a mosaic.
 
     This is the *upgrade-path* companion to ``_apply_seestar_convention``: the
     convention stops us ingesting a bare ``<T>/`` output folder going forward,
     but a library first scanned before v0.184.9 already merged that output frame
     into the ``<T>`` target (both fold to the same safe name). See
-    ``Project.reject_seestar_output_frames``. Mosaics are skipped here — their
-    on-device output naming is device-specific and tracked as a separate bug.
+    ``Project.reject_seestar_output_frames``.
+
+    **The mosaic case folds the same way**, which is why it is handled here
+    rather than skipped: an old scan named the target after the folder, so
+    ``<T>_mosaic/`` became target ``"<T>_mosaic"`` → safe name ``<T>_mosaic``,
+    and the convention now names the subs' target ``"<T> (mosaic)"`` → the *same*
+    safe name. So the panel outputs and the real subs land in one target exactly
+    as the single-field ones do. The only difference is how many there are: a
+    mosaic's on-device output is one stacked image **per panel**, so the
+    frame-count guard downstream reads its cap from the folder name
+    (``junk_output_frame_cap``) instead of assuming a single image.
 
     ``parents`` is the same optional parallel list ``_apply_seestar_convention``
     takes, and it is what keeps the two halves telling the same story. A bare
@@ -287,6 +297,10 @@ def _seestar_output_bases(
     for name, _ in subdirs_with_fits:
         low = name.lower()
         if low.endswith(_MOSAIC_SUB_SUFFIX):
+            base = name[: -len(_MOSAIC_SUB_SUFFIX)].rstrip()
+            folder = f"{base}{_MOSAIC_SUFFIX}"
+            if base and folder.lower() not in ingested_bare:
+                bases[mosaic_target_name(base)] = folder
             continue
         if low.endswith(_SUB_SUFFIX):
             base = name[: -len(_SUB_SUFFIX)].rstrip()

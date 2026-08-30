@@ -411,11 +411,17 @@ def test_scan_is_seestar_aware_end_to_end(tmp_path):
         lib.close()
 
 
-def test_seestar_output_bases_maps_single_field_sub_only():
-    """``_sub`` single-field folders yield a bare-output base to reject; mosaic
-    ``_mosaic_sub`` and plain non-Seestar folders yield nothing."""
+def test_seestar_output_bases_maps_both_sub_shapes_not_plain_folders():
+    """Every raw-subs folder yields the output-folder basename to reject from its
+    target: ``<T>_sub`` → ``<T>`` for a single field, ``<T>_mosaic_sub`` →
+    ``<T>_mosaic`` for a mosaic (whose target is ``<T> (mosaic)``). Plain
+    non-Seestar folders yield nothing.
+
+    Regression: the mosaic shape used to be skipped outright, so an old library
+    whose ``<T>_mosaic/`` panel outputs folded into the same safe name as the
+    mosaic target never got them out of its stack."""
     bases = _seestar_output_bases(_fake("M 31_sub", "M 31", "M 3_mosaic_sub", "Andromeda"))
-    assert bases == {"M 31": "M 31"}
+    assert bases == {"M 31": "M 31", "M 3 (mosaic)": "M 3_mosaic"}
 
 
 def test_seestar_output_bases_leaves_a_bare_folder_it_is_ingesting_alone():
@@ -571,6 +577,72 @@ def test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_
         proj.close()
 
 
+def test_reject_seestar_output_frames_size_guard_is_mosaic_aware(tmp_path):
+    """Regression: the per-folder frame-count guard must read its cap from the
+    *folder's* name, exactly as the scanner's junk-target guard does.
+
+    A mosaic's on-device output folder holds one stacked image **per panel** (the
+    owner's real S30 library has an 11-frame ``M 44_MOSAIC/`` and a 7-frame
+    ``NGC 6960_MOSAIC/``), so a hard-coded "output folders hold one image" cap let
+    those low-resolution panel images sail straight into the mosaic's stack. A
+    bare single-field ``<T>/`` of the same size is still a user's real subs and
+    must keep its frames — that asymmetry is the whole point of the two caps."""
+    proj = Project.create(tmp_path / "proj", name="M 44 (mosaic)")
+    try:
+        root = tmp_path / "incoming"
+        subs = [
+            proj.add_frame(FrameRow(
+                source_path=str(root / "M 44_mosaic_sub" / f"Light_{i:03d}.fit")))
+            for i in range(5)
+        ]
+        panels = [
+            proj.add_frame(FrameRow(
+                source_path=str(root / "M 44_mosaic" / f"Stacked_panel_{i:02d}.fit")))
+            for i in range(11)
+        ]
+        assert set(proj.reject_seestar_output_frames("M 44_mosaic")) == set(panels)
+        for fid in panels:
+            assert proj.get_frame(fid).accept is False
+            assert proj.get_frame(fid).reject_reason == REJECT_REASON_SEESTAR_OUTPUT
+        for fid in subs:
+            assert proj.get_frame(fid).accept is True
+    finally:
+        proj.close()
+
+    # The single-field cap is untouched: 11 frames in a bare "<T>/" are real subs.
+    proj = Project.create(tmp_path / "proj_single", name="M 44")
+    try:
+        root = tmp_path / "incoming"
+        singles = [
+            proj.add_frame(FrameRow(source_path=str(root / "M 44" / f"Light_{i:03d}.fit")))
+            for i in range(11)
+        ]
+        assert proj.reject_seestar_output_frames("M 44") == []
+        for fid in singles:
+            assert proj.get_frame(fid).accept is True
+    finally:
+        proj.close()
+
+
+def test_reject_seestar_output_frames_still_spares_a_huge_mosaic_folder(tmp_path):
+    """The looser mosaic cap is a cap, not a licence: a ``<T>_mosaic/`` folder
+    holding far more images than any device makes panels is somebody's real subs
+    in a badly-named folder, and its frames must stay accepted."""
+    proj = Project.create(tmp_path / "proj", name="Veil (mosaic)")
+    try:
+        root = tmp_path / "incoming"
+        real = [
+            proj.add_frame(FrameRow(
+                source_path=str(root / "Veil_mosaic" / f"Light_{i:03d}.fit")))
+            for i in range(64)
+        ]
+        assert proj.reject_seestar_output_frames("Veil_mosaic") == []
+        for fid in real:
+            assert proj.get_frame(fid).accept is True
+    finally:
+        proj.close()
+
+
 def test_reject_seestar_output_frames_rejects_a_multi_frame_video_folder(tmp_path):
     """A ``*_video`` capture legitimately holds many frames and they are all junk
     (not stackable deep-sky subs), so the single-image size guard applies only to
@@ -627,6 +699,69 @@ def test_rescan_rejects_pre_v0_184_9_output_pollution_end_to_end(tmp_path):
             out = next(f for f in frames if f.source_path == str(output_file))
             assert out.accept is False
             assert out.reject_reason == REJECT_REASON_SEESTAR_OUTPUT
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_rescan_rejects_pre_convention_mosaic_panel_output_end_to_end(tmp_path):
+    """Upgrade path, mosaic flavour: a target that already holds the Seestar's
+    own ``<T>_mosaic/`` panel images alongside the real subs must have them
+    rejected on a re-scan, just as a single field's bare-``<T>/`` output is.
+
+    This is a real legacy shape. ``make_safe_name`` folds both ``"M 44_mosaic"``
+    (the name an old scan took from the output folder) and ``"M 44 (mosaic)"``
+    (the name the convention gives the subs) to ``M_44_mosaic``, and
+    ``_allocate_safe_name``'s disambiguation — which keeps two *different*
+    display names out of one project directory — shipped later, so a library
+    scanned before it has both sets of frames in one project. Its own docstring
+    is explicit that such a merge "can't be retro-split".
+
+    Before this fix nothing rejected them — the reject map skipped mosaics
+    outright, and the frame-count guard assumed an output folder holds one image
+    — so 11 low-resolution panel stacks were averaged into the mosaic and, being
+    smooth dither-medians, were preferentially picked as its stack reference."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 44_mosaic_sub").mkdir(parents=True)
+    for i in range(3):
+        write_seestar_fits(scan_root / "M 44_mosaic_sub" / f"Light_{i:03d}.fit",
+                           n_stars=5, seed=i)
+    # The Seestar's own on-device output: one stacked image per mosaic panel.
+    (scan_root / "M 44_mosaic").mkdir()
+    panel_files = [
+        write_seestar_fits(scan_root / "M 44_mosaic" / f"Stacked_panel_{i:02d}.fit",
+                           n_stars=5, seed=100 + i)
+        for i in range(11)
+    ]
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        # Seed the pre-fix polluted state: one project, under the safe name both
+        # display names fold to, already holding the on-device panel images.
+        entry, proj = lib.open_or_create_target("M 44 (mosaic)")
+        try:
+            for f in panel_files:
+                proj.add_frame(FrameRow(source_path=str(f)))
+        finally:
+            proj.close()
+        polluted_safe = entry.safe_name
+        assert polluted_safe == "M_44_mosaic"
+
+        result = scan_and_organize(lib, scan_root)
+        mosaic = next(t for t in result.targets if t.safe_name == polluted_safe)
+        assert mosaic.n_frames_added == 3               # the three raw subs
+        assert mosaic.n_output_frames_rejected == 11    # every panel output
+
+        proj = lib.open_target(polluted_safe)
+        try:
+            assert len(list(proj.iter_frames())) == 14  # nothing deleted
+            accepted = list(proj.iter_frames(accepted_only=True))
+            assert len(accepted) == 3                   # panels left the pool
+            assert all("M 44_mosaic_sub" in f.source_path for f in accepted)
+            for f in proj.iter_frames():
+                if "M 44_mosaic_sub" not in f.source_path:
+                    assert f.reject_reason == REJECT_REASON_SEESTAR_OUTPUT
         finally:
             proj.close()
     finally:

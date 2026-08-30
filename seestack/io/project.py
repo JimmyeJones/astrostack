@@ -257,12 +257,21 @@ _INSERT_COLS = [
 # the folder convention shipped). Additive + reversible — never a delete.
 REJECT_REASON_SEESTAR_OUTPUT = "auto:seestar_output"
 
-# The Seestar's on-device output folder holds a *single* stacked image (allow a
-# tiny margin for an occasional two-file output). A bare ``<T>/`` folder that
-# holds more than this is a user's real subs, not the on-device output, so its
-# frames must never be auto-rejected as output. Mirrors the scanner's
-# ``_MAX_JUNK_OUTPUT_FRAMES`` (kept local to avoid a scanner→project import cycle).
-_MAX_SEESTAR_OUTPUT_FRAMES = 2
+def _seestar_output_frame_cap(folder_name: str) -> int:
+    """How many frames a Seestar on-device *output* folder may hold and still be
+    treated as output rather than a user's real subs.
+
+    Deliberately **not** a local constant: this used to be a hard-coded ``2``
+    with a comment claiming it mirrored the scanner's ``_MAX_JUNK_OUTPUT_FRAMES``
+    — and it stopped mirroring it the moment that cap became mosaic-aware (a
+    mosaic's on-device output is one stacked image *per panel*, so a real
+    ``<T>_mosaic/`` output folder holds 7–11 images, not 1). Asking the scanner
+    for the number keeps the two guards from drifting apart again. The import is
+    deferred because the scanner imports *this* module.
+    """
+    from seestack.io.scanner import junk_output_frame_cap
+
+    return junk_output_frame_cap(folder_name)
 
 
 class Project:
@@ -766,20 +775,25 @@ class Project:
         ``accept=0`` with ``reject_reason=REJECT_REASON_SEESTAR_OUTPUT`` and the
         user can re-accept them.
 
-        ``output_folder`` is the bare target-folder basename (``"<T>"``); a frame
+        ``output_folder`` is the bare output-folder basename — ``"<T>"`` for a
+        single field, ``"<T>_mosaic"`` for a mosaic (whose raw subs live in
+        ``<T>_mosaic_sub/`` and whose target is ``<T> (mosaic)``); a frame
         is treated as output when its source's immediate parent folder matches it
         (case-insensitively) or is a ``*_video`` folder. A frame the user manually
         accepted (``user_override``) is left untouched, and a frame already
         rejected is not re-touched — so a re-scan is idempotent.
 
-        **Frame-count guard (per folder).** The Seestar's on-device output folder
-        holds a *single* stacked image, so a bare ``<T>/`` folder that holds more
-        than :data:`_MAX_SEESTAR_OUTPUT_FRAMES` frames is a user's real subs, not
-        the on-device output, and its frames are **never** rejected — otherwise a
-        mixed-source library with a genuine ``<T>/`` folder of raw subs sitting
+        **Frame-count guard (per folder).** A single field's on-device output
+        folder holds a *single* stacked image, so a bare ``<T>/`` folder that holds
+        more than :func:`_seestar_output_frame_cap` allows is a user's real subs,
+        not the on-device output, and its frames are **never** rejected — otherwise
+        a mixed-source library with a genuine ``<T>/`` folder of raw subs sitting
         beside a Seestar ``<T>_sub/`` (same basename) would silently lose whole
-        sessions from its stack. ``*_video`` captures legitimately hold many frames
-        and are all junk, so they are not size-guarded.
+        sessions from its stack. The cap comes from the *folder's* name, which is
+        the actual evidence: a mosaic's output folder (``<T>_mosaic/``) holds one
+        stacked image **per panel**, so it gets the scanner's looser mosaic cap.
+        ``*_video`` captures legitimately hold many frames and are all junk, so
+        they are not size-guarded.
 
         Returns the ids of the frames newly rejected by this call.
         """
@@ -803,8 +817,8 @@ class Project:
             elif parent_low.endswith("_video"):
                 video_ids.append(frame.id)
         to_reject: list[int] = list(video_ids)
-        for ids in output_by_folder.values():
-            if len(ids) <= _MAX_SEESTAR_OUTPUT_FRAMES:
+        for folder_path, ids in output_by_folder.items():
+            if len(ids) <= _seestar_output_frame_cap(Path(folder_path).name):
                 to_reject.extend(ids)
         if not to_reject:
             return []
