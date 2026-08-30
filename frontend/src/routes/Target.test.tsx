@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TargetView, countNewSubsSinceStack, countQcUncheckable, describeObject, mosaicGradingNote, rejectReasonLabel } from "./Target";
 import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
+import { formatCaptureNights } from "../format";
 import { sharePictureText } from "../share";
 
 function mkFrame(id: number, overrides: Partial<Frame> = {}): Frame {
@@ -1925,7 +1926,7 @@ describe("TargetView share text", () => {
       timestamp_utc: "2026-08-17T03:30:00Z",
       capture_night_start: "2024-11-15", capture_night_end: "2024-11-18",
     });
-    const expected = sharePictureText("M42", "15–18 Nov 2024");
+    const expected = sharePictureText("M42", formatCaptureNights("2024-11-15", "2024-11-18"));
     expect(data.text).toBe(expected.text);
     expect(data.title).toBe(expected.title);
     expect(data.text).toContain("captured 15–18 Nov 2024");
@@ -1939,7 +1940,7 @@ describe("TargetView share text", () => {
       timestamp_utc: "2026-08-17T03:30:00Z",
       capture_night_start: "2024-11-15", capture_night_end: "2024-11-15",
     });
-    expect(data.text).toBe(sharePictureText("M42", "15 Nov 2024").text);
+    expect(data.text).toBe(sharePictureText("M42", formatCaptureNights("2024-11-15", "2024-11-15")).text);
     expect(data.text).not.toContain("2026");
   });
 
