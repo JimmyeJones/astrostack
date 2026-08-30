@@ -762,7 +762,13 @@ async def download_full_res_png(
     as the run's editor recipe, so for such a run the plain STF render would serve
     the *un-edited* master. When the run's preview is a baked display-space edit and
     a saved recipe exists, render that recipe at native resolution instead, so the
-    download matches the preview the user clicked."""
+    download matches the preview the user clicked.
+
+    For the same reason the render also takes the North-up turn a past "Adjust →
+    North up → Save" baked into the stored preview, whether or not ``north_up``
+    was asked for: those bytes are what every other surface shows, and this render
+    starts from the canvas-grid FITS, so without it the download comes back
+    rotated away from the picture it claims to be."""
     from webapp.routers.editor import RECIPE_META_PREFIX
 
     lib, proj = deps.open_target_project(request, safe)
@@ -790,10 +796,25 @@ async def download_full_res_png(
             if isinstance(parsed, dict):
                 recipe_dict = parsed
 
+    # A run whose preview a past "Adjust → North up → Save" turned shows that
+    # turned picture *everywhere* — the thumbnail, the big view, the share JPEG,
+    # the wallpaper — because all of them serve the stored bytes. This render
+    # starts from the FITS instead, which is on the canvas grid, so without this
+    # it would hand back the same picture rotated back: a download that visibly
+    # disagrees with the picture the user clicked on, under a menu item that says
+    # it is that picture at full size. The turn is applied whenever the stored
+    # bytes carry one, whether or not this request asked for it — and asking for
+    # it as well is the same render, not a second rotation, because both mean
+    # "the run's own full North-up correction".
+    # In the threadpool because the recovered-angle path reads the preview's PNG
+    # header and the master's WCS, and this endpoint is async.
+    render_north_up = bool(north_up) or bool(
+        await run_in_threadpool(baked_north_up_deg, run))
+
     if recipe_dict is not None:
         png = await run_in_threadpool(
             pipeline.render_run_recipe_fullres_png, fits_path, recipe_dict,
-            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=bool(north_up),
+            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=render_north_up,
         )
     else:
         # A run the user tuned in History's "Adjust" has its stored preview baked
@@ -805,7 +826,7 @@ async def download_full_res_png(
         from seestack.render.thumbnail import render_preview_png_full_res
         png = await run_in_threadpool(
             render_preview_png_full_res, fits_path,
-            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=bool(north_up),
+            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=render_north_up,
             stretch=preview_stretch, black=preview_black,
         )
     filename = f"{basename}_fullres.png"
@@ -2791,16 +2812,98 @@ def stack_run_options(safe: str, run_id: int, request: Request) -> dict[str, Any
     return {"run_id": run_id, "options": options}
 
 
+#: Long-edge ceiling for the *shared* picture (the JPEG behind Share / Download
+#: JPEG / the keepsake / "with scale & compass"). Big enough that a post or a
+#: 6×4 print is sharp on any modern screen, small enough that a share stays a
+#: quick render and a messaging-app-friendly file — the stored 1024 px preview it
+#: replaces is neither.
+SHARE_JPEG_MAX_LONG_EDGE = 2560
+
+
+def _native_picture_source(run: Any, preview_png: bytes, baked_north_up: float,
+                           needed_long_edge: int) -> bytes | None:
+    """A **native-resolution** render of the same picture the stored preview shows,
+    up to ``needed_long_edge`` px — or ``None`` to use the stored preview bytes as
+    before.
+
+    The stored preview is capped at 1024 px
+    (:data:`~seestack.render.thumbnail.PREVIEW_MAX_WIDTH`), which is the resolution
+    of every picture this app hands over: the wallpaper cropped it (a ~470 px-wide
+    lock screen for a 1170 px phone) and the share JPEG re-encoded it. The
+    full-resolution pixels are right there in the run's FITS, and
+    :func:`~seestack.render.thumbnail.render_preview_png_full_res` is the renderer
+    that already reproduces the stored preview's own look at a chosen size (it is
+    what the "Full-res PNG" download serves), so each caller asks it for exactly
+    the pixels it needs — decimated *during* the FITS load, so the memory cost is
+    bounded by the request, not by the canvas.
+
+    Declines — leaving the caller bit-for-bit as it was — whenever the render
+    could show a *different* picture from the one on screen:
+
+    * a preview a past "Adjust → North up → Save" baked a rotation into (the FITS
+      grid is the un-rotated one, and matching a baked angle is the North-up
+      view's question, not this one);
+    * a "Process target" run, whose preview is a display-space auto-edit that only
+      the saved recipe can reproduce (the full-res render of *that* is a whole
+      editor pipeline at native size — worth it for an explicit "native size"
+      download, not yet for a one-tap share: see the backlog follow-on);
+    * a preview that shows only part of the canvas (an auto-crop border trim);
+    * a run with no readable FITS, or one whose canvas is no bigger than the
+      preview already is — where there is nothing to gain.
+    """
+    from seestack.previewcrop import parse_preview_crop
+    from seestack.render.thumbnail import render_preview_png_full_res
+    from seestack.wallpaper import png_size
+
+    if baked_north_up:
+        return None
+    if _preview_is_display_space(run.options_json):
+        return None
+    crop = parse_preview_crop(run.preview_crop_json)
+    if crop is not None:
+        return None                       # a trimmed preview isn't the whole canvas
+    fits_path = run.fits_path
+    if not fits_path or not Path(fits_path).exists():
+        return None
+    size = png_size(preview_png)
+    if size is None:
+        return None
+    preview_long = max(size)
+    # Cheap gate before any render: the canvas the preview came from is recorded on
+    # the run, so a stack that never had more pixels than its preview is skipped
+    # without touching the FITS.
+    canvas = [d for d in (run.canvas_w, run.canvas_h) if d]
+    if canvas and max(canvas) <= preview_long:
+        return None
+    needed = int(needed_long_edge)
+    if needed <= preview_long:
+        return None
+    try:
+        png = render_preview_png_full_res(
+            fits_path, max_long_edge=needed,
+            stretch=run.preview_stretch, black=run.preview_black)
+    except Exception:  # noqa: BLE001 — a broken FITS just falls back to the preview
+        return None
+    rendered = png_size(png)
+    if rendered is None or max(rendered) <= preview_long:
+        return None                       # no more pixels than we already had
+    return png
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/wallpaper")
 def download_wallpaper(safe: str, run_id: int, request: Request,
                        aspect: str = "phone", north_up: bool = False) -> Response:
     """Crop + size the finished stack preview into a ready-to-set wallpaper.
 
-    ``aspect`` is one of ``phone`` / ``desktop`` / ``square``. The preview is
+    ``aspect`` is one of ``phone`` / ``desktop`` / ``square``. The picture is
     cropped to that shape centred on the plate-solved target (falling back to the
     image centre when the run has no WCS or the target has no known position),
     downscaled to a sane device resolution without upsampling, and returned as a
-    share-friendly JPEG. ``north_up`` first rotates the picture so celestial North
+    share-friendly JPEG. Its source is a native-resolution re-render of the run's
+    own FITS where one can be made faithfully (see
+    :func:`_wallpaper_native_source`) — the stored preview is capped at 1024 px,
+    which is a third of a phone screen — and the stored preview bytes otherwise.
+    ``north_up`` first rotates the picture so celestial North
     points up (like every reference photo of the object), using the run's own WCS —
     a no-op when the run has no WCS or the correction is trivial, so the ordinary
     request is byte-for-byte unchanged. Read-only: nothing on disk changes.
@@ -2815,6 +2918,7 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
         png_size,
         render_wallpaper_jpeg,
         rotate_point_north_up,
+        wallpaper_source_long_edge,
     )
 
     preset = WALLPAPER_PRESETS.get(aspect)
@@ -2840,8 +2944,22 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
     # halves below map from the FITS grid, so neither may assume the stored
     # preview is still on it.
     baked_north_up = baked_north_up_deg(run)
+    # A wallpaper wants device-resolution pixels, and the stored preview is capped
+    # at 1024 px — so where the same picture can be re-rendered from the run's own
+    # FITS at the size the crop needs, that is the source instead. Declines to
+    # `None` (and everything below reads the stored bytes exactly as before)
+    # whenever the render could differ from the picture on screen.
+    prev_size = png_size(preview)
+    native = _native_picture_source(
+        run, preview, baked_north_up,
+        wallpaper_source_long_edge(prev_size[0], prev_size[1], preset),
+    ) if prev_size else None
+    if native is not None:
+        preview = native
     # Locate the target in the preview grid from the run's own WCS; None → centre.
     # Shared with the zoom clip, which has to frame on the identical point.
+    # Measured against whichever bytes won above — both are the same picture on the
+    # same grid, so only the scale differs.
     target_px = _target_pixel_in_preview(run, entry, preview)
 
     # North-up rotates the picture *and* moves the target pixel, so re-centre the
@@ -2901,6 +3019,16 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # angle. Everything below is measured against the FITS grid, so it has to
         # start from this rather than assume the preview is the un-rotated one.
         baked_north_up = baked_north_up_deg(run)
+        # This is the picture people actually *share* — posted, sent to family,
+        # printed 6×4 — and it was a re-encode of the 1024 px preview. Where the
+        # same picture can be re-rendered from the run's own master it is served at
+        # share resolution instead; `None` keeps the stored bytes, exactly as
+        # before. Everything baked on below (the marks, the caption, the matte) is
+        # sized as a *fraction* of the picture, so all of it scales with this.
+        native = _native_picture_source(run, preview, baked_north_up,
+                                        SHARE_JPEG_MAX_LONG_EDGE)
+        if native is not None:
+            preview = native
         # The width the scale bar is measured against: the bar's length is a
         # *fraction* of the picture's width, and a rotate-with-expand grows the
         # canvas without changing the pixel scale, so it must be the width of the
