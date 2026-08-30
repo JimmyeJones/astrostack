@@ -11,11 +11,13 @@ from PIL import Image
 
 from seestack.render.orient import rotate_image_north_up
 from seestack.wallpaper import (
+    WALLPAPER_MAX_SOURCE_LONG_EDGE,
     WALLPAPER_PRESETS,
     png_size,
     render_wallpaper_jpeg,
     rotate_point_north_up,
     wallpaper_crop_box,
+    wallpaper_source_long_edge,
     wallpaper_target_pixel,
 )
 
@@ -182,6 +184,38 @@ def test_render_wallpaper_downscales_to_preset_and_keeps_aspect():
     assert out.width <= WALLPAPER_PRESETS["phone"]["max_w"]
     assert out.height <= WALLPAPER_PRESETS["phone"]["max_h"]
     assert abs(out.width / out.height - 1170 / 2532) < 0.02
+
+
+def test_source_long_edge_asks_for_enough_to_fill_each_preset():
+    """The size the helper asks for is, by construction, enough: rendering a
+    square picture at it and cropping fills the preset exactly."""
+    for name, preset in WALLPAPER_PRESETS.items():
+        need = wallpaper_source_long_edge(1000, 1000, preset)
+        out = Image.open(BytesIO(render_wallpaper_jpeg(_png(need, need), preset)))
+        assert out.width == preset["max_w"], name
+        assert out.height == preset["max_h"], name
+
+
+def test_source_long_edge_follows_the_limiting_edge():
+    phone = WALLPAPER_PRESETS["phone"]           # tall crop → limited by height
+    desktop = WALLPAPER_PRESETS["desktop"]       # wide crop → limited by width
+    # A wide picture: the phone crop is full-height, so the *width* it implies is
+    # what has to be rendered (height 2532 × the picture's 2:1 shape).
+    assert wallpaper_source_long_edge(2000, 1000, phone) == 5064
+    # The same picture is still height-limited for a 16:9 desktop, but a much
+    # shallower crop needs far less of it.
+    assert wallpaper_source_long_edge(2000, 1000, desktop) == 2160
+    # A tall picture flips which edge limits the phone crop.
+    assert wallpaper_source_long_edge(1000, 4000, phone) == 4680
+
+
+def test_source_long_edge_is_capped_and_survives_a_degenerate_shape():
+    # A panorama would want an enormous source to fill a phone; the cap bounds it
+    # (a smaller — still correctly shaped — wallpaper, as a small picture always
+    # has), and a zero-size source asks for nothing.
+    huge = wallpaper_source_long_edge(20000, 1000, WALLPAPER_PRESETS["phone"])
+    assert huge == WALLPAPER_MAX_SOURCE_LONG_EDGE
+    assert wallpaper_source_long_edge(0, 0, WALLPAPER_PRESETS["phone"]) == 1
 
 
 def test_render_wallpaper_never_upsamples_small_preview():
