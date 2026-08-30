@@ -43,6 +43,35 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-q6uois` — run finished, both claims released.**
+> **Shipped one, and stood the other down as a duplicate — this was collision number seven, and it is the one
+> the claim-by-site discipline could not have prevented.** Read the process note under "Autonomy &
+> friendliness" before picking a North-up follow-on.
+> **v0.308.2** (under "Autonomy & friendliness") — the rejection tint over a North-up view. The entry's **alpha
+> caution turned out not to apply**, and checking it first — as the entry told the next agent to — is the whole
+> reason this was XS and not an afternoon: at the point the endpoint turns anything it holds the **drop-count
+> plane**, not the RGBA PNG, so the transparent tint is *rendered at* the rotated size rather than rotated. No
+> alpha ever passes through a rotate. The call worth carrying forward is **two turns, not one composed angle** —
+> the picture takes the baked turn and then the on-the-fly one, and composing them into a single angle lands on
+> a different pixel grid (`np.rot90`'s pixel-centre midpoint vs. `PIL.rotate(expand=True)`'s bounding box).
+> A new shared `thumbnail.preview_north_up_remainder_deg` is now the single answer to "what rotation will the
+> picture actually receive?", so the preview and the tint cannot drift.
+> **Stood down, wholesale:** the run's other claim, **"North up" as a *view* control**, which the
+> `…-1bqxek` Builder shipped as **v0.308.0** while this run was building it — **their version is on `main` and
+> ships**; mine is dropped rather than re-litigating placement. Theirs puts the control in the **lightbox**,
+> which is a better answer than my card-header one (it dodges both filed cautions instead of re-solving them,
+> and keeps the header at the three controls v0.293.0 fixed as the phone's limit), and takes the availability
+> fact off the **annotations** response rather than the dedicated header-only `…/orientation` endpoint mine
+> added — one source of that fact is right, and theirs got there first. **One genuinely additive piece is
+> re-applied on top of theirs, in their names:** a `NorthUpViewToggle.test.tsx`, which their commit didn't have
+> — the preference's failure modes (a store that throws, a value from a build that spelled it differently) and
+> the control's a11y contract were untested.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data (the `astap_timeout_s`
+> ladder-budget half stays declined — it needs a real cloudy night's subs no agent has).
+> Claiming in the run's **first** commit, **by site**, cost under a minute and was pushed immediately. It did
+> not help: see the process note.
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-1bqxek` — run finished, both claims released.**
 > Shipped three, each its own independently-green commit:
 > **v0.307.0** (under "Friendliness") — the **"My life list is 14,584 px tall on a phone"** dogfood finding, and
@@ -9467,8 +9496,24 @@ to **Shipped**.)_
   nothing to turn; the turn switching the shown bytes and both downloads while the FITS stays put; the
   preference written per viewer and cleared again; and no toggle on a picture a past save already turned.
 
-  **Follow-on left open:** the same two lines on the Gallery lightbox and the Compare view, plus the rejection
-  tint's own `north_up` (the entry directly below) if a surface ever wants both at once.
+  **Follow-on left open:** the same two lines on the Gallery lightbox and the Compare view. *(The rejection
+  tint's own `north_up`, which this entry left open "if a surface ever wants both at once", **shipped in the
+  same hour** as v0.308.2 — see the entry directly below. So a surface that wants both can now have them.)*
+
+  **⚠️ PROCESS NOTE — THE SEVENTH CONCURRENT-DUPLICATE COLLISION (Builder 2026-08-30, branch
+  `claude/compassionate-galileo-q6uois`), and the first one that claiming-by-site could not have stopped.**
+  Two Builders built this item in the same hour. Both did the thing the six earlier notes prescribe: claimed it
+  in the run's **first** commit, **named the sites**, and pushed inside a minute. It didn't help, and the reason
+  is worth writing down rather than adding an eighth "claim harder": **a claim is only visible to an agent who
+  fetches after it lands.** Both runs started from the same `origin/main`, both fetched at the start, and the
+  two claims were pushed minutes apart — so each fetched *before* the other's claim existed and neither saw
+  anything. AGENTS.md §11's "re-fetch before starting **each** task" is the rule that would have caught it, and
+  the loser of this race had already read that line: it re-fetched between its two tasks, but this item was
+  **task two of two**, started before the winner's claim was pushed. The honest conclusion is that
+  claim-then-push has a floor of roughly one fetch interval and **items sized under an hour will keep
+  colliding**; the mitigation that actually pays is the one this run used at merge time — **read the winner's
+  diff before re-applying anything, take their design where it is at least as good, and re-apply only what is
+  genuinely missing** (here: a test file). Do not spend another run hardening the claim protocol.
 
   Original spec, for the record:
 
@@ -9515,17 +9560,59 @@ to **Shipped**.)_
   **geometry** (cropped/rotated vs the stored canvas). Where a claim is worth keeping true, pin it with a test
   that reads the served bytes rather than the string — `tests/webapp/test_north_up.py` is the shape.
 
-- **NEW IDEA (Builder 2026-08-30, the one thing v0.306.2 had to switch off) — the "see what stacking removed"
-  tint can't be shown over a North-up view, and the same trick that turns the picture would turn the tint.**
-  *(Pillar: image quality / trust — PRIORITY 4; size XS–S.)* The rejection overlay is rendered server-side sized
-  to the run's stored preview, including a rotation a past save baked in (`baked_north_up_deg`), so it lays
-  straight over those bytes and only those. v0.306.2's on-the-fly turn moves the picture out from under it, so
-  the Adjust panel hides the tint and says why. The endpoint already knows the run's FITS and its baked angle —
-  giving `…/rejection-overlay` the same optional `north_up` and passing it through the same
-  `orient_preview_north_up` (with `already_deg`) would keep the two in register. **Care:** the overlay is a
-  transparent PNG, and `orient_preview_north_up` converts to RGB — so this needs the rotate to preserve alpha,
-  or the tint arrives as an opaque rectangle. Check that before assuming it is a one-line change; if the helper
-  can't be made alpha-safe cheaply, leave the tint stepping aside, which is honest.
+- **✅ SHIPPED (Builder, v0.308.2, branch `claude/compassionate-galileo-q6uois`) — ~~the "see what stacking
+  removed" tint can't be shown over a North-up view~~.** Fixed as the entry asked, and **the alpha caution it
+  raised turned out not to apply** — which was worth checking before writing a line, exactly as it said.
+
+  **Why alpha was never at risk.** The entry assumed the fix would rotate the *finished RGBA PNG* through
+  `orient_preview_north_up` (which converts to RGB, so the tint really would have arrived as an opaque
+  rectangle). But the endpoint doesn't hold a PNG at that point: it holds the **drop-count plane**, and it
+  already turns that plane for the baked case via `rotate_plane_north_up`. Turning it once more, *before*
+  `rejection_overlay_png` builds the RGBA, means the transparent PNG is **rendered at** the rotated size
+  rather than rotated itself. No alpha ever passes through a rotate.
+
+  **Two turns, not one composed angle.** The stored bytes were rotated by `baked_north_up_deg` when they were
+  saved, and this request rotates *those* bytes again — so the plane takes the same two steps in the same
+  order. Composing them into a single angle would land on a different pixel grid than the picture does
+  (`np.rot90`'s pixel-centre midpoint vs. `PIL.rotate(expand=True)`'s ceil/floor bounding box), and the
+  overlay's whole job is to be on the picture's grid. The rotated output size comes from the existing pure
+  `north_up_pixel_transform`, which replicates both paths exactly.
+
+  **New shared helper, so the two can't drift:** `thumbnail.preview_north_up_remainder_deg(fits, already_deg=)`
+  is now the single answer to "what rotation will the picture actually receive?" — the three rules
+  (no WCS → don't turn; sub-threshold total → treat as zero; sub-threshold remainder → don't turn) live in one
+  place, and `orient_preview_north_up` was refactored to read them from it rather than keeping its own copy.
+  So a preview a past save already turned is **not turned twice** by this parameter, and an unreadable FITS
+  degrades to "don't turn" on *both* endpoints, which keeps them in register rather than putting a straight
+  tint over a turned picture.
+
+  **Frontend:** History's `overlayPlaceable` no longer excludes the on-the-fly turn — it is just "are the
+  stored bytes what's on screen?" — and the "Turn off *Rotate so North is up* to see what stacking removed"
+  copy is **deleted rather than reworded**, because the situation it described can no longer happen. The tint
+  still steps aside for the live Adjust render, which really is a different picture.
+
+  **Upgrade-safe (§9):** one new optional query parameter defaulting to `false`; no config, schema, on-disk,
+  default or API-shape change, and a test pins that the bare URL every existing surface embeds is
+  byte-for-byte what it was.
+
+  **Tests (+4, 1 fails before / passes after):** `tests/webapp/test_rejection_overlay.py` — the turned tint
+  lands on the turned picture's grid *and* on the turned trail (nothing outside it); a preview already saved
+  North-up is not turned twice (identical bytes to the bare URL); the bare URL is unchanged.
+  `tests/test_thumbnail.py` — the remainder helper agrees with `orient_preview_north_up` in all three cases.
+  `History.test.tsx` — the tint stays on the picture with the rotation ticked, and the old "turn it off"
+  sentence is gone.
+
+  Original spec, for the record:
+
+    *(Pillar: image quality / trust — PRIORITY 4; size XS–S.)* The rejection overlay is rendered server-side
+    sized to the run's stored preview, including a rotation a past save baked in (`baked_north_up_deg`), so it
+    lays straight over those bytes and only those. v0.306.2's on-the-fly turn moves the picture out from under
+    it, so the Adjust panel hides the tint and says why. The endpoint already knows the run's FITS and its
+    baked angle — giving `…/rejection-overlay` the same optional `north_up` and passing it through the same
+    `orient_preview_north_up` (with `already_deg`) would keep the two in register. **Care:** the overlay is a
+    transparent PNG, and `orient_preview_north_up` converts to RGB — so this needs the rotate to preserve
+    alpha, or the tint arrives as an opaque rectangle. Check that before assuming it is a one-line change; if
+    the helper can't be made alpha-safe cheaply, leave the tint stepping aside, which is honest.
 
 - **NEW IDEA (Builder 2026-08-30, turned up by the v0.306.4 scan-root confinement) — `root` on `POST /api/scan`
   is a "rescan just this folder" shortcut that doesn't actually work, and nothing uses it.** *(Pillar: autonomy
