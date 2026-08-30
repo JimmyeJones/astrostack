@@ -115,6 +115,37 @@ def recovered_north_up_deg(run) -> float:  # noqa: ANN001
     return float(angle)
 
 
+def remaining_north_up_deg(run) -> float:  # noqa: ANN001
+    """How far a ``?north_up=true`` render would **still** turn this run's stored
+    preview — ``0.0`` when asking for North up would hand back what is already on
+    screen.
+
+    Not the same question as :func:`~seestack.render.thumbnail.applied_north_up_deg`,
+    which answers "how far is this run's *data* from North up?". Every renderer
+    that turns the stored bytes passes :func:`baked_north_up_deg` as
+    ``already_deg`` and applies only the remainder, so on a run whose preview a
+    past "Adjust → North up → Save" already turned, the honest answer is zero
+    however far its WCS is from North. A surface deciding whether to *offer* the
+    turn needs this one, or it puts up a control that visibly does nothing.
+
+    Mirrors :func:`~seestack.render.thumbnail.orient_preview_north_up`'s own
+    arithmetic rather than re-deriving it: the run's total correction, minus what
+    the bytes carry, thresholded — with no usable WCS (or no master FITS to read
+    one from) reading as "nothing to do", exactly as that renderer does.
+    """
+    if not run.fits_path:
+        return 0.0
+    from seestack.render.orient import NORTH_UP_MIN_DEG
+    from seestack.render.thumbnail import applied_north_up_deg
+
+    try:
+        total = applied_north_up_deg(run.fits_path)
+    except Exception:  # noqa: BLE001 — an unreadable master simply offers nothing
+        return 0.0
+    remaining = total - baked_north_up_deg(run)
+    return remaining if abs(remaining) >= NORTH_UP_MIN_DEG else 0.0
+
+
 def baked_north_up_deg(run) -> float:  # noqa: ANN001
     """The rotation a run's stored preview bytes carry, recorded or recovered.
 
