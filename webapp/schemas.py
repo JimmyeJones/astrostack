@@ -372,10 +372,12 @@ class TransparencyTrendOut(BaseModel):
     start_utc: str | None = None
     end_utc: str | None = None
     degraded_after_utc: str | None = None
-    # Mosaic panels levelled out of the series before trending (0 = a single
-    # field, i.e. the raw scores). A panel's star field is not the weather —
-    # see ``seestack.session_recap._level_panels``.
-    n_panels_levelled: int = 0
+    # How many mosaic panels this night's subs split into — 0 (and absent from an
+    # older backend) for the ordinary single-pointing target. Non-zero means the
+    # scores above were levelled panel by panel, because a mosaic's panels are
+    # different patches of sky and their star flux legitimately differs; the card
+    # says so rather than letting the reader assume one continuous sky.
+    n_pointings: int = 0
 
 
 class HealthNoteOut(BaseModel):

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from seestack.io.project import FrameRow, Project
 from seestack.session_recap import (
+    TRANSPARENCY_TREND_DROP_RATIO,
     bucket_reject_reason,
     focus_trend,
     last_session_frames,
@@ -15,7 +16,7 @@ from seestack.session_recap import (
 
 
 def _frame(ts: datetime | None, *, exposure=10.0, accept=True, reject_reason=None,
-           fwhm_px=None, transparency_score=None):
+           fwhm_px=None, transparency_score=None, ra=None, dec=None):
     return FrameRow(
         source_path=f"/x/{ts}-{accept}-{reject_reason}-{fwhm_px}-{transparency_score}-{id(ts)}.fit",
         timestamp_utc=ts.isoformat() if ts else None,
@@ -24,6 +25,8 @@ def _frame(ts: datetime | None, *, exposure=10.0, accept=True, reject_reason=Non
         reject_reason=reject_reason,
         fwhm_px=fwhm_px,
         transparency_score=transparency_score,
+        ra_center_deg=ra,
+        dec_center_deg=dec,
     )
 
 
@@ -914,5 +917,121 @@ def test_iter_frame_capture_rows_skips_undated_and_defaults_a_null_exposure(tmp_
         assert len(rows) == 3
         assert [r[1] for r in rows] == [10.0, 10.0, 0.0]
         assert [r[2] for r in rows] == [True, False, True]
+    finally:
+        proj.close()
+
+
+# --- ...and the same card on a MOSAIC, where the panels are different sky ----
+
+def _mosaic_night(proj, panels, *, base=None, step_min=3):
+    """One session that works through `panels` in sequence.
+
+    Each entry is ``(ra_deg, [scores…])`` — a panel's pointing and the
+    transparency scores of the subs shot there, in capture order. Panels are
+    ~1° apart (a real Seestar mosaic step), which is well clear of the 0.25°
+    dither floor `pointing_groups` separates on.
+    """
+    base = base or datetime(2026, 7, 10, 22, 0, 0)
+    i = 0
+    for ra, scores in panels:
+        for sc in scores:
+            proj.add_frame(_frame(base + timedelta(minutes=step_min * i),
+                                  transparency_score=sc, ra=ra, dec=41.0))
+            i += 1
+
+
+def test_a_mosaics_emptier_panel_is_not_called_clouds(tmp_path):
+    """The fourth site of the position-dependent-metric bug class (after QC
+    grading v0.270.2, photometric normalization v0.271.0 and quality weighting
+    v0.272.1): `transparency_score` is the median flux of a frame's *brightest
+    stars*, so a mosaic panel aimed at an emptier patch of sky records lower
+    scores for reasons that have nothing to do with the weather.
+
+    A Seestar working through its panels in sequence therefore ends the night on
+    a different patch of sky from the one it started on, and the raw first-third
+    vs last-third comparison reads the move as "clouds rolled in after 22:24" —
+    on a night that was, by construction here, perfectly steady within every
+    panel.
+    """
+    proj = Project.create(tmp_path / "t", "M31 mosaic")
+    try:
+        # Two panels, steady within themselves; the second is simply a 2.2×
+        # emptier star field. Nothing about the sky changed.
+        _mosaic_night(proj, [
+            (10.0, [1000, 1020, 980, 1010, 990]),
+            (11.0, [455, 445, 460, 450, 440]),
+        ])
+        tr = transparency_trend(proj)
+        assert tr is not None
+        # Levelled panel by panel, the night reads as what it is.
+        assert tr.verdict == "clear"
+        assert tr.degraded_after_utc is None
+        assert tr.n_pointings == 2
+        # ...and the sparkline the reader sees agrees with that verdict, rather
+        # than showing a cliff the caption denies.
+        assert max(tr.early_transparency, tr.late_transparency) < (
+            min(tr.early_transparency, tr.late_transparency)
+            * TRANSPARENCY_TREND_DROP_RATIO)
+    finally:
+        proj.close()
+
+
+def test_a_mosaic_night_that_really_did_cloud_over_is_still_caught(tmp_path):
+    """The other half: levelling the panels must not blind the card to weather.
+    Same two panels, but the sky genuinely collapses across the second half of
+    *each* panel — which is a real transparency drop, and still reads as one."""
+    proj = Project.create(tmp_path / "t", "M31 mosaic")
+    try:
+        _mosaic_night(proj, [
+            (10.0, [1000, 1020, 980, 400, 380, 360]),
+            (11.0, [455, 445, 460, 180, 170, 165]),
+        ])
+        tr = transparency_trend(proj)
+        assert tr is not None
+        assert tr.n_pointings == 2
+        assert tr.verdict == "degraded"
+        assert tr.degraded_after_utc is not None
+    finally:
+        proj.close()
+
+
+def test_a_single_pointing_night_is_untouched_by_the_panel_levelling(tmp_path):
+    """Fail-neutral: the ordinary target (one pointing, or unsolved subs) must
+    come out exactly as it did before the levelling existed — same verdict, same
+    numbers, and `n_pointings == 0` so the card says nothing extra."""
+    scores = [1000, 1020, 980, 990, 700, 520, 480, 450, 420]
+    for ra in (None, 10.0):  # unsolved, then one real pointing (plus a dither)
+        proj = Project.create(tmp_path / f"t{ra}", "M31")
+        try:
+            base = datetime(2026, 7, 10, 22, 0, 0)
+            for i, sc in enumerate(scores):
+                # ±0.02° of jitter is a dither, not a panel step.
+                jitter = None if ra is None else ra + (0.02 if i % 2 else -0.02)
+                proj.add_frame(_frame(base + timedelta(minutes=3 * i),
+                                      transparency_score=sc, ra=jitter,
+                                      dec=None if ra is None else 41.0))
+            tr = transparency_trend(proj)
+            assert tr is not None
+            assert tr.n_pointings == 0
+            assert tr.verdict == "degraded"
+            assert [p.transparency for p in tr.points] == [float(s) for s in scores]
+        finally:
+            proj.close()
+
+
+def test_one_measurable_panel_alone_levels_nothing(tmp_path):
+    """A split where only *one* panel carries enough measured subs to have its
+    own median: rescaling that panel against un-rescaled neighbours would move
+    the night for no honest reason, so nothing is levelled and the card stays
+    silent about panels."""
+    proj = Project.create(tmp_path / "t", "M31 mosaic")
+    try:
+        _mosaic_night(proj, [
+            (10.0, [1000, 1020, 980, 1010, 990, 1005]),
+            (11.0, [450, None]),  # too thin to measure
+        ])
+        tr = transparency_trend(proj)
+        assert tr is not None
+        assert tr.n_pointings == 0
     finally:
         proj.close()

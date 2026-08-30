@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   describeTransparencyTrend,
   formatClockUtc,
-  panelLevellingNote,
+  mosaicPanelsNote,
   sparklinePoints,
   transparencyVerdictBadge,
 } from "./transparencyTrend";
@@ -93,21 +93,19 @@ describe("sparklinePoints", () => {
   });
 });
 
-describe("panelLevellingNote", () => {
-  it("says nothing for a single-field night", () => {
-    expect(panelLevellingNote(trend())).toBeNull();
-    expect(panelLevellingNote(trend({ n_panels_levelled: 0 }))).toBeNull();
+describe("mosaicPanelsNote", () => {
+  it("says nothing on the ordinary single-pointing night", () => {
+    // Absent (an older backend), zero, and one pointing all mean "one patch of
+    // sky" — the note would only be noise.
+    expect(mosaicPanelsNote(trend())).toBe("");
+    expect(mosaicPanelsNote(trend({ n_pointings: 0 }))).toBe("");
+    expect(mosaicPanelsNote(trend({ n_pointings: 1 }))).toBe("");
   });
 
-  it("says nothing when an older backend omits the count", () => {
-    const t = trend();
-    delete (t as { n_panels_levelled?: number }).n_panels_levelled;
-    expect(panelLevellingNote(t)).toBeNull();
-  });
-
-  it("explains the levelling on a mosaic, naming the panel count", () => {
-    const s = panelLevellingNote(trend({ n_panels_levelled: 3 }));
-    expect(s).toContain("3 panels");
-    expect(s).toContain("hazier night");
+  it("explains the levelling when the night was a mosaic", () => {
+    const note = mosaicPanelsNote(trend({ n_pointings: 4 }));
+    expect(note).toContain("4 mosaic panels");
+    // The point the reader needs: a dimmer panel is geometry, not weather.
+    expect(note).toContain("emptier sky isn't haze");
   });
 });

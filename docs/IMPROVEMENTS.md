@@ -43,17 +43,45 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-> **Builder 2026-08-30, branch `claude/compassionate-galileo-ezix3s` — run in progress.** Working the standing
-> "sweep the engine for a POSITION-DEPENDENT metric compared across a whole target" QA lead. Shipped
-> **v0.304.1** (write-up at the top of "Bugs"): the fourth and fifth sites of that class, both reproduced
-> first — a clear mosaic getting a **"Hazy night"** badge (ratio 0.50) and a **"clouds rolled in"** verdict
-> (early 10025 vs late 4025) under a perfectly steady sky. Then **v0.304.2** (entry under "Image quality"):
-> the sixth site, the bulk "reject worst N%" cut sending all six of its rejections into the sparsest mosaic
-> panel. The rest of the lead's candidate list was then swept clean (see the note on it). Third task:
-> **v0.304.3**, the filed "first zoom clip is a silent wait" — a shared `DownloadMenuItem` that keeps the menu
-> open with a spinner while the server builds the file.
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-ezix3s` — run finished, all claims released.**
+> Worked the standing **"sweep the engine for a POSITION-DEPENDENT metric compared across a whole target"** QA
+> lead, and shipped three, each reproduced before fixing:
+> **v0.304.2** (top of "Bugs") — a perfectly clear three-panel mosaic scored **0.5008** on the per-run
+> `transparency_ratio` and got a **"Hazy night"** badge on History, Gallery and Compare, telling the owner to
+> reject their haziest subs on a night when nothing about the weather changed.
+> **v0.304.3** (under "Image quality") — the bulk **"reject worst N%"** cut ranked target-wide, so all six of
+> its rejections landed in the *sparsest panel*: "drop my haziest 10%" was really "delete a sixth of this
+> panel's coverage".
+> **v0.304.4** (under "Autonomy & friendliness") — the filed *"first zoom clip is a silent wait"*: a shared
+> `DownloadMenuItem` that holds the menu open with a spinner while the server builds the file, keeping the
+> plain-link fallback for a browser with no blob path.
+> **Stood down, wholesale:** this run also fixed `transparency_trend` (the "clouds rolled in" verdict on the
+> same mosaic), and so did the `…-xkjuvl` Builder, concurrently — **theirs landed on `main` first, so mine was
+> dropped entirely at merge time** and `main`'s implementation ships. The sixth such collision; the process
+> note on it (under "Image quality") has the one defence that would actually have helped, which is *naming the
+> site* in the claim, not just the lead.
+> **The lead is now closed:** the rest of its candidate list — `stackhealth`, `_fwhm_quality_drift`,
+> `best_frame` — was swept and came back clean, recorded on the entry so nobody re-treads it.
 
 _(nothing else claimed — claim an item here with your branch name)_
+
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-xkjuvl` — run finished, all claims released.**
+> **Shipped one, and stood two down as duplicates — read the process note below, this was collisions six AND
+> seven in one run.** The one that landed is the **position-dependent-metric sweep** (**v0.304.1**, under
+> "Image quality"), which found a real **fourth site** in the bug class behind v0.270.2 / v0.271.0 / v0.272.1:
+> the "Clouds & haze" card called a mosaic's move to an emptier panel *"clouds rolled in after 22:21 UTC"*
+> (measured 1000 → 450 before, 720 → 720 after). Everything else the QA lead named was swept and is recorded
+> as cleared, with the reasoning, in that entry — don't re-tread it.
+> **Stood down:** the **recipe-drift guard** and both **"Tonight, live" follow-ons**, both of which the
+> `…-fj2p70` Builder shipped concurrently (v0.302.1 / v0.304.0) while this run was building them. Their
+> versions are on `main` and this branch takes them wholesale rather than re-litigating naming — but **three
+> things this run built that theirs didn't** are re-applied on top of *their* code, in their names: the
+> **Adjust → Save** half of the drift (the reachable one — it needs no editor round-trip at all), the
+> **`reference-sub` gate** that had been answering where its own info endpoint said "hidden", and
+> `AUTO_EDIT_BAKED_LOOK_PREFIX` **registered in `run_meta.py`** so deleting a run takes its stamp with it
+> instead of leaving an orphan row. Write-ups are folded into their entries.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-fj2p70` — run finished, all three claims
 > released.** Shipped all three: the **recipe-drift stamp** (**v0.302.1**, write-up under "Autonomy &
@@ -165,51 +193,37 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **✅ SHIPPED (Builder, v0.304.1, branch `claude/compassionate-galileo-ezix3s`) — ~~a perfectly clear **mosaic**
-  night is told it was shot through cloud, twice: a "Hazy night" badge on every run, and "clouds rolled in" on
-  the Clouds & haze card.~~** Found by working the standing QA lead "sweep the rest of the engine for *compares a
-  POSITION-DEPENDENT metric across a whole target*" (filed under Image quality after three fixes of the same bug);
-  **reproduced before fixing**, so this is the fourth and fifth site of that class.
+- **✅ SHIPPED (Builder, v0.304.2, branch `claude/compassionate-galileo-ezix3s`) — ~~a perfectly clear
+  **mosaic** run is stamped "Hazy night", on every screen that shows it.~~** The **fifth** site of the
+  position-dependent-metric class (the QA lead under "Image quality"), reproduced before fixing. Sibling of the
+  `transparency_trend` fix another Builder landed as v0.304.1 in the same hour — same root cause, a *different*
+  consumer of the same metric, which that fix does not touch. (This run swept the same lead and fixed
+  `transparency_trend` too; that half was stood down wholesale at merge time in favour of `main`'s. See the
+  collision note under "Image quality".)
 
-  **Reproduced.** Three mosaic panels 1° apart, six subs each, one steady sky, `transparency_score` differing only
-  by the panels' star fields (10000 / 5000 / 4000 — well inside the 2.23× cross-panel gain error measured for
-  v0.271.0):
-  - `_compute_transparency_ratio` → **0.5008**. That is below the `HAZY_RATIO = 0.6` threshold, so History,
-    Gallery and Compare all stamp the run **"Hazy night"** with a tooltip claiming "median transparency ~50%
-    below this target's clearest nights" and advising the user to reject their haziest subs. The baseline is
-    `p90(all frames)`, which on a mosaic is set by whichever panel has the richest star field; every other panel
-    then reads as haze.
-  - `transparency_trend` → verdict **`degraded`**, early 10025 vs late 4025, with a fabricated
-    `degraded_after_utc`. A Seestar shoots a mosaic panel by panel, so the night's series is a staircase of star
-    fields; read as a time series, "we moved to a sparser panel" becomes "clouds rolled in".
+  **Reproduced.** Three mosaic panels 1° apart, six subs each, one steady sky, `transparency_score` differing
+  only by the panels' star fields (10000 / 5000 / 4000 — well inside the 2.23× cross-panel gain error measured
+  for the photometric pass): `_compute_transparency_ratio` → **0.5008**. That is below the frontend's
+  `HAZY_RATIO = 0.6`, so History, Gallery **and** Compare all stamp the run **"Hazy night"** with a tooltip
+  claiming "median transparency ~50% below this target's clearest nights" and advising the user to reject their
+  haziest subs — on a night where, by construction, nothing about the weather changed. The baseline is
+  `p90(all frames)`, which on a mosaic is set by whichever panel has the richest star field; every other panel
+  then reads as haze.
 
-  **Fix (both sites, through the shared `pointing_groups` gate so all five sites of this class now mean exactly
-  the same thing by "panel").**
-  - `stacker._panel_transparency_ratios` compares each panel's run median against **its own** p90 baseline and
-    combines the panels' ratios by median. It returns `[]` — "use the one target-wide baseline, exactly as
-    before" — unless the pointings split soundly *and* ≥2 panels each carry the same sample the function has
-    always demanded on both sides (5 baseline / 3 run frames).
-  - `session_recap._level_panels` rescales each substantial panel to the series' own overall median before
-    trending, so the between-panel step goes and the *within*-panel variation — the actual sky — stays. A sub in
-    no substantial panel keeps its raw score rather than being rescaled by a yardstick from another patch of sky.
-    New `n_panels_levelled` on the trend (0 = untouched) surfaces as one plain-language line on the card, so the
-    number a beginner sees is never silently not the raw one.
+  **Fix.** New `stacker._panel_transparency_ratios` compares each panel's run median against **its own** p90
+  baseline and combines the panels' ratios by median. It returns `[]` — "use the one target-wide baseline,
+  exactly as before" — unless the pointings split soundly through the shared `pointing_groups` gate *and* at
+  least two panels each carry the same sample this function has always demanded on both sides (5 baseline / 3
+  run frames). So a single-field target, an unsolved target and a too-tightly-packed mosaic are all bit-for-bit
+  unaffected.
 
-  **The one honest limitation, deliberately accepted:** on a strictly *sequential* single-pass mosaic, haze that
-  rolls in exactly at a panel boundary is now levelled away with the panel step — the two are genuinely
-  indistinguishable from within one session. It costs nothing on the common case because a Seestar **revisits**
-  its panels, so real haze shows up inside every panel and survives levelling (pinned by
-  `test_haze_rolling_in_across_a_mosaic_still_reads_degraded`). The disambiguator, if it ever matters, is each
-  panel's own *history* — filed as an idea under "Image quality".
+  **Upgrade-safe (§9):** pure read-only aggregation inside an existing best-effort diagnostic; no
+  config/schema/on-disk/API-shape change, and the value is still one `REAL` on the run row.
 
-  **Upgrade-safe (§9):** pure read-only aggregation, no config/schema/on-disk change; the API only *gains*
-  `n_panels_levelled` (defaulted, and optional in the TS type so an older backend reads 0); a single-field target,
-  an unsolved target and a too-tightly-packed mosaic are all bit-for-bit unchanged.
-
-  **Tests (+9 in `tests/test_transparency_mosaic.py`, 4 fail before / pass after; +3 vitest):** the clear mosaic
-  is not called hazy and not called degraded; a genuinely hazy mosaic run still reads hazy; one hazy panel of
-  three still drags the number below clear; haze rolling in across revisited panels still reads degraded; and the
-  three no-split fallbacks (single field, unsolved, raw points) are pinned unchanged.
+  **Tests (+6 in `tests/test_transparency_mosaic.py`, 1 fails before / passes after):** the clear mosaic is not
+  called hazy; a genuinely hazy mosaic run (every panel at 40% transparency against its own clear baseline)
+  still reads hazy; one hazy panel of three still drags the number below clear; and the single-field and
+  unsolved fallbacks are pinned to the old target-wide answer.
 
 - **✅ SHIPPED (Builder, v0.300.2, branch `claude/compassionate-galileo-4txqj1`) — ~~`Target.test.tsx`'s note-board
   test asserts the fold *synchronously* off the first note's arrival, so it races `NoticeBoard`'s
@@ -9325,6 +9339,38 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-30, found while shipping the v0.304.1 Adjust→Save half of the recipe-drift guard — the *behaviour*
+  behind the stale marker I fixed, which the fix deliberately did not change) — History → "Adjust" → Save
+  silently throws away a "Process target" run's finished picture.** *(Pillar: friendliness / trust —
+  PRIORITY 3; size S; copy + one guard, no engine work.)* `save_stack_preview` re-renders the preview from
+  the **linear** FITS at the chosen stretch/black. On an ordinary run that is exactly right and is the point
+  of the feature. On an **auto-edited** run it replaces the Auto-toned picture — the one on the Target hero,
+  in the Gallery, on the Library tile, and possibly pinned as the target's cover — with a plain stretch, and
+  says nothing at all about having done so. The recipe survives (re-opening the editor still finds it, and
+  as of v0.304.1 the run stops *claiming* to be a recipe preview), so the loss is recoverable — but only by
+  someone who knows to go to the editor and export, which is precisely not the beginner this app is for. The
+  reachable path is innocent: the History menu offers **Adjust** on any run with a FITS, and its own hint
+  ("Stretch / black point, from the full-range FITS") reads like a *view* control, not a destructive one —
+  and a user who opens it just to tick **North up** (the same panel) pays the same price. **Fix shape:** the
+  run listing already carries the marker (`preview_display_space`), so the panel can say so before the fact —
+  a one-line note on Adjust ("This picture was processed for you; saving here replaces it with a plain
+  stretch of the raw stack. Your edit is kept — re-open the editor to get it back.") and, better, a
+  **North-up-only** save on those runs that re-renders through the stored recipe instead of the sliders,
+  since rotation is the one thing a user genuinely wants from that panel on an already-finished picture.
+  Don't remove Adjust — it is legitimate; just stop it being a silent trapdoor.
+
+- **NEW IDEA (Builder 2026-08-30, read while fixing the mosaic half of the same card in v0.304.1) — the
+  "Clouds & haze" card promises something it can't check: *"those later subs … were automatically counted
+  less in your stack"*.** *(Pillar: trust — PRIORITY 3; size S; copy only, but it needs one datum plumbed.)*
+  That sentence is only true when the stack that used those subs had **quality weighting on**. The auto
+  chain does enable it, so on the walk-away path the claim usually holds — but an interactive stack with the
+  box unticked, and a target that has never been stacked at all, both get the same confident reassurance. The
+  card is a *capture-night* card and knows nothing about any run. **Fix shape:** either soften it to what is
+  actually known (*"hazy subs are counted less when quality weighting is on — it is on by default for
+  hands-off stacks"*), or plumb the newest genuine run's `quality_weighted` flag onto the response and only
+  make the promise when it was really used. The first is a five-minute honesty fix and probably the right
+  size; the second is better if the card ever grows.
+
 - **✅ SHIPPED (Builder, v0.302.1, branch `claude/compassionate-galileo-fj2p70`) — ~~a saved recipe on a
   "Process target" run can quietly drift from the picture that run's preview actually shows.~~** Shipped
   exactly as the fix shape below asked, and no wider.
@@ -9361,6 +9407,27 @@ to **Shipped**.)_
   gallery scan after a second-round edit, then clearing on export. The "one definition" runtime test's stub
   gained the same fourth argument the real function did, with its assertion untouched.
 
+  **➕ THREE ADDITIONS (Builder, v0.304.1, branch `claude/compassionate-galileo-xkjuvl`) — from the run that
+  built this same item concurrently and stood its own copy down.** The stamp above is kept verbatim; these are
+  the parts that run found and this one didn't, re-applied on top of it in its own names:
+  1. **The reachable half of the drift: History → "Adjust" → Save.** `save_stack_preview` re-renders the
+     preview from the **linear** FITS, so on an auto-edited run it replaces the tone-mapped picture with a
+     plain stretch — and left `preview_display_space` and the baked stamp behind, so the reveal would have put
+     its sub through an Auto recipe the picture beside it no longer carried. **This needs no editor
+     round-trip at all**, which makes it the likelier of the two paths, not the rarer. The marker and the
+     stamp are now cleared there, alongside the preview crop, on the same "always written, never left alone"
+     rule; the run falls back to the honest **stretch** match that the same endpoint records two lines above.
+  2. **`reference-sub` was answering where its own info endpoint said "hidden".** The card self-hides and
+     `before-after.jpg` 404s on a display-space run with no usable recipe, but the sub endpoint still served a
+     plain STF render into that gap. Nothing requests it while the card is hidden, so this is a trap for the
+     next surface rather than a live bug — same gate, same message, now.
+  3. **`AUTO_EDIT_BAKED_LOOK_PREFIX` registered in `run_meta.py`.** It is a per-run key, so without this a
+     deleted run leaves an orphan `editor_auto_baked_look:<id>` row nothing will ever read. (`test_run_purge.py`
+     is meant to catch exactly this and didn't — worth a look at *why* if anyone is in that file.)
+
+  **Tests (+2):** the reference-sub gate standing down with the card, and Adjust → Save flipping the run from
+  `matched_by: "recipe"` to `"stretch"` with the stamp gone rather than stale.
+
   Original spec, for the record:
 
   - **NEW IDEA (Builder 2026-08-30, found while building the v0.301.0 recipe-matched reveal — a real gap in an
@@ -9385,7 +9452,7 @@ to **Shipped**.)_
     which is a real but uncommon path; the reveal is the first surface where the disagreement becomes *visible*
     rather than merely latent, which is why it is worth closing now rather than when it bites.
 
-- **✅ SHIPPED (Builder, v0.304.3, branch `claude/compassionate-galileo-ezix3s`) — ~~the *first* zoom clip on a
+- **✅ SHIPPED (Builder, v0.304.4, branch `claude/compassionate-galileo-ezix3s`) — ~~the *first* zoom clip on a
   target is a silent wait.~~** Fixed as filed, but with the **fetch-to-blob** half rather than the
   `…/zoom-clip/info` half: `info` says whether a clip is *possible*, which the menu already knows from
   `has_preview` — it never warms the cache, so it would have added a request without shortening the wait. New
@@ -16389,38 +16456,117 @@ problems. Dogfood it every big-picture run and fix root causes.
   subs + unrelated container `<T>_sub` → the 2 root subs stay accepted. Only worth doing if the owner actually
   hits a mixed drop; the many-sub data-loss case (the real harm) is already fixed.
 
-- **IDEA / QA LEAD (Builder 2026-08-26, generalised from three fixes of the same bug) — sweep the rest of the
-  engine for "compares a POSITION-DEPENDENT metric across a whole target".** *(Pillar: image quality /
-  correctness — PRIORITY 4; size S to audit, unknown to fix; a good Scout run.)*
-  Three separate passes shipped the identical mistake and each one was found only after the previous fix made
-  it obvious: QC grading (v0.270.2), photometric normalization (v0.271.0) and quality weighting (v0.272.1)
-  all compared `star_count` / `sky_adu_median` / `transparency_score` against a **target-wide** median, which
-  on a mosaic reads "this panel points at emptier sky" as "this sub is bad". The shared gate now exists
-  (`pointing_groups`, `seestack/stack/pointings.py`), so a fourth site would be a one-line fix — the work is
-  *finding* it. **Method:** grep every `np.median(` / `np.percentile(` / `mean(` taken over a whole frame
-  list, and for each ask "is this metric a property of the night, or of where the scope pointed?" Night-wide
-  (FWHM, eccentricity, and anything derived from the *time* of capture) is correct target-wide; anything
-  flux-like or sky-brightness-like is not. Candidate sites worth checking first: the auto-grade reconsider /
-  reaccept path, `stackhealth`'s trend and drift verdicts, the session-quality drift and transparency-trend
-  endpoints, and any "best frame" / reference-frame picker that ranks on star count. **Note the asymmetry
-  that makes this quietly harmful:** several of these factors *clip at 1.0*, so a wrongly-compared panel can
-  only ever be penalised, never compensated — the loss is one-way and silent.
-  **(Builder 2026-08-30 — this lead paid out: two of the "candidate sites worth checking first" were real and
-  are fixed in v0.304.1, both reproduced before fixing — the per-run `transparency_ratio` behind the "Hazy
-  night" badge, and `session_recap.transparency_trend` behind the "Clouds & haze" card. See the entry at the
-  top of "Bugs". The lead stays open: the auto-grade reconsider/reaccept path, `stackhealth`'s trend and drift
-  verdicts, and the session-quality drift endpoint are still unswept. A **sixth** site — the bulk "reject worst
-  N%" cut — was found the same way and shipped in v0.304.2 (entry below). **The rest of the named candidate list
-  was then swept and came back clean — recorded so nobody re-treads it:** `stackhealth` compares only FWHM,
-  eccentricity, exposure and gain (all properties of the night or the setup, correctly target-wide);
-  `session_recap._fwhm_quality_drift` is FWHM-only, likewise; and `grading.best_frame` ranks on FWHM with
-  `star_count` as a *tie-break* only, which on a float metric essentially never decides the pick — traced, judged
-  not worth changing, and the cost of being wrong is one "first look" thumbnail. Method note that made them easy — grep
-  for `transparency_score` / `star_count` / `sky_adu_median` used outside a `pointing_groups` call, then ask
-  what claim the number is turned into: both of these turn a *pointing* difference into a **weather** claim,
-  which is the tell.)**
+- **✅ SWEPT, AND A FOURTH SITE FOUND AND FIXED (Builder, v0.304.1, branch
+  `claude/compassionate-galileo-xkjuvl`) — ~~IDEA / QA LEAD (Builder 2026-08-26) — sweep the rest of the engine
+  for "compares a POSITION-DEPENDENT metric across a whole target".~~** The sweep was run exactly as the
+  method below prescribes, and the fourth site was one of the candidates it named: **`transparency_trend`**
+  (`seestack/session_recap.py`), the "Clouds & haze through the night" card.
 
-- **NEW IDEA (Builder 2026-08-30, the one limitation deliberately accepted by the v0.304.1 panel-levelling fix)
+  **The bug, measured on a synthetic mosaic night.** `transparency_score` is the median flux of a frame's
+  *brightest stars*, so it is a property of where the scope pointed as much as of the sky. The card compared
+  the session's **first third** against its **last third** — and a Seestar works through its mosaic panels in
+  sequence, so it ends the night on a different patch of sky from the one it started on. Two panels, steady
+  within themselves, the second simply a 2.2× emptier star field (the same order as the **2.23× relative panel
+  gain error** measured for the photometric pass in v0.276.0): **before — verdict `degraded`, early/late
+  1000 → 450, "the sky got hazier after 22:21 UTC — clouds or haze rolling in"; after — verdict `clear`,
+  720 → 720, no marker.** On a night where, by construction, nothing about the weather changed. Worse, the
+  copy went on to tell the reader *"those later subs … were automatically counted less in your stack"* —
+  which, since the per-panel quality weighting shipped in v0.272.1, is **no longer true on a mosaic**. So the
+  card was confidently wrong twice about the same night.
+
+  **The fix, in the shape the other three used.** When the session's pointings split soundly
+  (`pointing_groups`, the shared gate, at the 3-frame floor the quality weighting uses), each panel's scores
+  are **rescaled onto the session's overall median** before anything is trended: the panel-to-panel offset
+  goes, the within-night change every panel actually saw stays, and the numbers stay in familiar units.
+  Fail-neutral at every edge — a single-pointing target, an unsolved one, and a mosaic too tightly packed to
+  separate get **no split and are byte-for-byte unchanged**; a sub in no substantial panel keeps its raw
+  score rather than borrowing another patch of sky's yardstick; and a split where only *one* panel can be
+  measured levels **nothing**, since moving that one against un-rescaled neighbours is worse than leaving the
+  night alone.
+
+  **Said out loud, not silently.** An additive `n_pointings` (0 on every ordinary target) reaches the card,
+  which adds one line — *"This night's subs came from 3 mosaic panels. Each panel points at a different patch
+  of sky, so they're compared against themselves — a panel aimed at emptier sky isn't haze."* — so the flat
+  sparkline and the verdict agree with each other and with what the reader knows the scope did.
+
+  **Also swept, and cleared (recorded so nobody re-treads them):**
+  * `stack/weighting.py`, `stack/photometric.py`, `qc/grading.py` — already per-pointing (v0.270.2 /
+    v0.271.0 / v0.272.1 / v0.276.0).
+  * `session_recap.focus_trend` and `session_quality_drift` — **FWHM**, a property of the *night* (seeing,
+    focus, tracking), correctly target-wide. Same for `frames.trailed_frame_ids` (eccentricity).
+  * `stack/reference.pick_reference_frame` — ranks on *distance to the median pointing*, which is
+    position-dependent **on purpose**; FWHM is only the tiebreak. Correct as written.
+  * `qc/grading.best_frame` — ranks FWHM first and only tie-breaks on star count; a float-FWHM tie is
+    vanishingly rare and the pick is a thumbnail, not data.
+  * `qc/sky_quality.sky_brightness` — compares a night's median **sky rate** against the target's own
+    multi-night baseline. Sky brightness *is* position-dependent, but across a mosaic's ~1° panel steps the
+    sky-dome difference is negligible next to the star-flux one, a night normally covers every panel, and
+    `SkySample` carries no RA/Dec at all. Left alone deliberately; if it is ever revisited, it needs the
+    pointing plumbed through first.
+
+  **Upgrade-safe (§9):** one additive response field an older frontend ignores, one optional frontend line, no
+  config/schema/on-disk/default change, and the single-pointing path (every non-mosaic target — i.e. almost
+  every install) is provably unchanged, pinned by its own test.
+
+  **Tests (+9, 2 fail before):** `tests/test_session_recap.py` (+4 — the emptier panel not called clouds; a
+  mosaic night that *really* clouded over still caught; the single-pointing/unsolved night byte-for-byte
+  unchanged including its exact point values; the one-measurable-panel no-op), `tests/webapp/…transparency_trend`
+  (+2 — `n_pointings` through the endpoint, both ways), `transparencyTrend.test.ts` (+2) and
+  `TransparencyTrendCard.test.tsx` (+2 — the line appears only on a mosaic).
+
+  Original spec, for the record:
+
+    *(Pillar: image quality /
+    correctness — PRIORITY 4; size S to audit, unknown to fix; a good Scout run.)*
+    Three separate passes shipped the identical mistake and each one was found only after the previous fix made
+    it obvious: QC grading (v0.270.2), photometric normalization (v0.271.0) and quality weighting (v0.272.1)
+    all compared `star_count` / `sky_adu_median` / `transparency_score` against a **target-wide** median, which
+    on a mosaic reads "this panel points at emptier sky" as "this sub is bad". The shared gate now exists
+    (`pointing_groups`, `seestack/stack/pointings.py`), so a fourth site would be a one-line fix — the work is
+    *finding* it. **Method:** grep every `np.median(` / `np.percentile(` / `mean(` taken over a whole frame
+    list, and for each ask "is this metric a property of the night, or of where the scope pointed?" Night-wide
+    (FWHM, eccentricity, and anything derived from the *time* of capture) is correct target-wide; anything
+    flux-like or sky-brightness-like is not. Candidate sites worth checking first: the auto-grade reconsider /
+    reaccept path, `stackhealth`'s trend and drift verdicts, the session-quality drift and transparency-trend
+    endpoints, and any "best frame" / reference-frame picker that ranks on star count. **Note the asymmetry
+    that makes this quietly harmful:** several of these factors *clip at 1.0*, so a wrongly-compared panel can
+    only ever be penalised, never compensated — the loss is one-way and silent.
+
+  **(Builder 2026-08-30, branch `claude/compassionate-galileo-ezix3s` — the lead is now fully worked; treat it
+  as CLOSED unless a new site appears.)** Swept independently in the same hour as the entry above (see the
+  collision note below). Beyond the `transparency_trend` site the other Builder fixed, the same sweep found and
+  shipped **two more**: the per-run `transparency_ratio` behind the **"Hazy night"** badge (v0.304.2 — a clear
+  three-panel mosaic scored **0.5008**, below the 0.6 hazy threshold, on a perfectly steady sky) and the bulk
+  **"reject worst N%"** cut (v0.304.3 — all six of its rejections landed in the sparsest panel). **The rest of
+  the candidate list was then swept and came back clean — recorded so nobody re-treads it:** `stackhealth`
+  compares only FWHM, eccentricity, exposure and gain (properties of the night or the setup, correctly
+  target-wide); `session_recap._fwhm_quality_drift` is FWHM-only, likewise; and `grading.best_frame` ranks on
+  FWHM with `star_count` as a *tie-break only*, which on a float metric essentially never decides the pick —
+  traced, judged not worth changing, and the cost of being wrong is one "first look" thumbnail. **What made
+  the two new sites easy to spot:** grep for `transparency_score` / `star_count` / `sky_adu_median` used
+  *outside* a `pointing_groups` call, then ask what claim the number is turned into. Both of these turned a
+  **pointing** difference into a **weather** claim — that is the tell, and it is a sharper filter than the
+  `np.median(` grep the method above starts from. The line itself now has one home in code:
+  `grading.PER_POINTING_METRICS`, derived from the existing `_MetricSpec.per_pointing` flags rather than a
+  second hand-written set, so a seventh site can be checked against it instead of against memory.
+
+- **⚠️ PROCESS NOTE — THE SIXTH CONCURRENT-DUPLICATE COLLISION (Builder 2026-08-30, branch
+  `claude/compassionate-galileo-ezix3s`) — two Builders swept this same QA lead in the same hour and both
+  fixed `transparency_trend`.** Their fix (v0.304.1, above) landed on `main` first, so **mine was stood down
+  wholesale at merge time** and `main`'s implementation is the one that ships — the two were functionally
+  equivalent (level each panel onto the session's overall median behind the `pointing_groups` gate; theirs
+  calls the field `n_pointings`, mine called it `n_panels_levelled`). **Nothing was salvaged from the
+  duplicate half and nothing needed to be.**
+  **What the collision did NOT cost, and why:** the same sweep, in the same run, also turned up **two sites
+  the other Builder did not touch** — the per-run `transparency_ratio` behind the "Hazy night" badge
+  (v0.304.2) and the bulk "reject worst N%" cut (v0.304.3), both below. Working the lead's *whole* candidate
+  list rather than stopping at the first hit is what made the run still worth its hour.
+  **The lesson, on top of the five notes above:** claiming early did not help here — both runs claimed within
+  minutes of each other, and a claim is only visible after it is *pushed and fetched*. For a **QA lead** that
+  names several candidate sites, the cheap defence is to say in the claim **which site** you are taking, and
+  to re-fetch `main` before writing the fix for a site whose name is already in another agent's claim.
+
+- **NEW IDEA (Builder 2026-08-30, the one limitation deliberately accepted by the v0.304.1 panel-levelling fix (main's))
   — tell "this panel is sparse" from "this panel was hazy" using the panel's own *history*.** *(Pillar: image
   quality / trust — PRIORITY 4; size M; do NOT start it without deciding the cross-night comparability question
   below.)* `session_recap._level_panels` levels a mosaic's panels against each other **within one session**,
@@ -16434,10 +16580,10 @@ problems. Dogfood it every big-picture run and fix root causes.
   settings change — so a historical baseline needs either a gain/exposure guard or a fallback to today's
   within-session levelling. Fail back to the current behaviour whenever it can't be established; never guess.
 
-- **✅ SHIPPED (Builder, v0.304.2, branch `claude/compassionate-galileo-ezix3s`) — ~~"reject the worst N% by
+- **✅ SHIPPED (Builder, v0.304.3, branch `claude/compassionate-galileo-ezix3s`) — ~~"reject the worst N% by
   transparency / star count / sky level" ranks a mosaic target-wide, so it sets aside the *sparsest panel*
   instead of the haziest subs.~~** The **sixth** site of the position-dependent-metric class, found while fixing
-  v0.304.1 and shipped as its own commit. Reproduced end-to-end first.
+  v0.304.2 and shipped as its own commit. Reproduced end-to-end first.
 
   **Reproduced** (`tests/webapp/test_api.py::test_bulk_reject_worst_on_a_mosaic_cuts_each_panel`, which fails on
   the old code): three panels of six subs, star fields 10000 / 5000 / 4000 under one steady sky, "reject the
@@ -18019,6 +18165,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   fix: group placed objects by `object_id` in the viewer, draw one node, and let the card list the targets
   behind it ("2 of your targets are this object"). **Don't** fix it by nudging one aside — a fake offset on a
   map whose whole promise is "placed where they really are" is exactly the wrong trade.
+
+- **⚠️ PROCESS NOTE (Builder 2026-08-30) — collisions SIX AND SEVEN, in one run, against one other Builder —
+  and claiming early did NOT prevent them, because the other run claimed early too.** Branch
+  `claude/compassionate-galileo-xkjuvl` claimed the recipe-drift guard and the engine QA-lead sweep in its
+  **first** commit and pushed inside a minute, exactly as notes one-to-five prescribe. `…-fj2p70` had claimed
+  the *same* drift item (plus the zoom clip) at roughly the same moment, on its own branch, and merged first;
+  it then also shipped the "Tonight, live" follow-ons that this run had picked up as its third task. Both runs
+  built two of the same three things, well, in parallel. **What that tells us:** the claim protocol is a
+  *publication*, not a lock — it only helps an agent that re-reads `main` **between** tasks, and neither did
+  (both fetched once at the start, per the checklist). **The cheap fix, and the one this note is really for:
+  `git fetch origin main` again immediately before *starting* each new task, not only before merging** — it
+  costs a second and would have caught both of these before a line was written. The §12 checklist's per-task
+  block should say so; it currently only fetches at start-of-run.
+  **How this run resolved it, for the pattern:** it took `main`'s implementation wholesale rather than
+  re-litigating naming, then re-applied on top of *their* code, in *their* names, only the parts its own
+  version had that theirs didn't (three, listed in that entry). That is much cheaper than a semantic merge and
+  leaves one implementation on `main`. **Don't** try to keep both, and **don't** discard your own work
+  unexamined — diff the two and port the delta.
 
 - **⚠️ PROCESS NOTE (Builder 2026-08-29) — the FIFTH concurrent-duplicate collision, hours after the fourth:
   two Builders built the Scout's "What's in my picture?" item at the same time. I stood mine down at merge
