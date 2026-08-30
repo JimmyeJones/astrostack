@@ -20595,7 +20595,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   it will promise fewer files than the zip holds; and the card currently hides below two *targets*, which
   would still hide the button from someone whose only pictures are Moon stills.
 
-- **✅ SHIPPED (Builder, v0.317.0, branch `claude/compassionate-galileo-cwqy3x`) — ~~say the print size on the
+- **✅ SHIPPED (Builder, v0.318.0, branch `claude/compassionate-galileo-cwqy3x`) — ~~say the print size on the
   **Stack form**, where the decision that sets it is actually made.~~** *(Pillar: enjoy + autonomy —
   PRIORITY 2–3.)* Both filed cautions honoured, and the second one turned out to have a *structural* answer
   rather than a conditional one.
@@ -20621,6 +20621,10 @@ problems. Dogfood it every big-picture run and fix root causes.
   arguing with itself. Rather than duplicate the threshold into the engine, the `bigger_*` half is withheld by
   the frontend at *the same constant* it warns at — one number, one voice. The "what it prints today" half
   always shows.
+
+  *(Its commit subject says v0.317.0 — the number was correct when it was written and `main` took it for the
+  per-run night count while this was in flight, so the version was re-picked from `main` at merge time per §11.
+  It ships as **v0.318.0**.)*
 
   **Upgrade-safe (§9):** one additive optional response field (`print_plan`) and one optional dataclass field on
   `StackEstimate`; no config, schema, on-disk, default or API-shape change. An older frontend ignores it; an
