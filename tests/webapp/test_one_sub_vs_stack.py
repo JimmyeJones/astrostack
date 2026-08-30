@@ -1013,3 +1013,76 @@ def test_an_auto_edit_from_before_the_stamp_is_unchanged(client, solved_library)
         f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack").json()
     assert body["available"] is True
     assert body["matched_by"] == "recipe"
+
+
+def test_the_reference_sub_stands_down_with_the_card(client, solved_library):
+    """The two halves must agree about when they can be shown. The card already
+    self-hides and the download already 404s on a display-space run we have no
+    recipe for — the sub endpoint was still serving a plain STF render into that
+    gap. Nothing requests it while the card is hidden, but an endpoint that
+    answers one way and its own info endpoint the other is a trap for the next
+    surface that reads it."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "unreadable.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+    _mark_auto_edited(solved_library, safe, run_id, "not a recipe at all")
+
+    base = f"/api/targets/{safe}/stack-runs/{run_id}"
+    assert client.get(f"{base}/one-sub-vs-stack").json()["available"] is False
+    assert client.get(f"{base}/reference-sub").status_code == 404
+    assert client.get(f"{base}/before-after.jpg").status_code == 404
+
+
+def test_saving_from_adjust_stops_the_run_claiming_a_recipe_preview(
+    client, solved_library,
+):
+    """The drift the stamp exists to catch, reached **without opening the editor
+    at all**: History → Adjust → Save re-renders the preview from the *linear*
+    FITS, so an auto-edit's tone-mapped picture is replaced by a plain stretch.
+    The recipe is untouched (it still reopens in the editor), but the bytes on
+    screen are no longer its result — so the run must stop being marked as a
+    recipe preview, or the reveal would match its sub to an edit the picture no
+    longer carries. It falls back to the honest stretch match instead, which the
+    same endpoint recorded two lines earlier."""
+    from webapp.pipeline import _auto_edit_process_run
+    from webapp.routers.editor import AUTO_EDIT_BAKED_LOOK_PREFIX
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "adjusted.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        assert _auto_edit_process_run(lib, safe, run_id)
+    finally:
+        lib.close()
+    base = f"/api/targets/{safe}/stack-runs/{run_id}"
+    assert client.get(f"{base}/one-sub-vs-stack").json()["matched_by"] == "recipe"
+
+    assert client.post(f"{base}/preview",
+                       json={"stretch": 0.5, "black": 0.02}).status_code == 200
+
+    body = client.get(f"{base}/one-sub-vs-stack").json()
+    assert body["available"] is True
+    assert body["matched_by"] == "stretch"
+    assert client.get(f"{base}/reference-sub").status_code == 200
+    # ...and the stamp that described the discarded picture is gone with it,
+    # rather than sitting there describing bytes that no longer exist.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            assert proj.get_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run_id}") is None
+        finally:
+            proj.close()
+    finally:
+        lib.close()

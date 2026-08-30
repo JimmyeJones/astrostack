@@ -657,6 +657,11 @@ Your job is just to keep the overlap harmless.
 
 **While working**
 - Read recent `git log` and open PRs/branches first; skip topics already in flight.
+- **Re-`git fetch origin main` before starting *each* task, not just at start of
+  run.** Claiming an item in `docs/IMPROVEMENTS.md` is a *publication*, not a
+  lock: it only helps agents who look again. Two Builders have independently
+  built the same item twice in one hour despite both claiming early — a fetch
+  between tasks costs a second and catches it before a line is written.
 - Keep branches small and single-topic so they rarely conflict.
 - `docs/IMPROVEMENTS.md` is the shared blackboard: claim an item by moving it to
   **In progress** with your branch name in the same commit that starts the work;
@@ -696,6 +701,8 @@ Start of run:
 [ ] env ready; baseline test suite green (if red, fixing it is task #1)
 
 Per task (repeat ~3–6×, or fewer if large):
+[ ] git fetch origin main FIRST — another agent may have shipped this task while
+    you worked on the last one (this has now happened seven times; §11)
 [ ] picked/invented ONE task (§3 decision rule or §4 ideation); marked In progress
 [ ] implemented across engine/webapp/frontend as needed
 [ ] upgrade-safe: config loads, DB migrates, layout/defaults/API unchanged (§9)

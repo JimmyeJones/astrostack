@@ -61,4 +61,20 @@ describe("TransparencyTrendCard", () => {
     await waitFor(() => expect(client.api.transparencyTrend).toHaveBeenCalled());
     expect(container.querySelector(".mantine-Paper-root")).toBeNull();
   });
+
+  it("adds the mosaic-panels line only when the night spanned panels", async () => {
+    vi.spyOn(client.api, "transparencyTrend").mockResolvedValue(
+      trend({ n_pointings: 3 }));
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByText(/3 mosaic panels/)).toBeInTheDocument());
+  });
+
+  it("says nothing about panels on an ordinary single-pointing night", async () => {
+    vi.spyOn(client.api, "transparencyTrend").mockResolvedValue(trend());
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByText("Clouds & haze")).toBeInTheDocument());
+    expect(screen.queryByText(/mosaic panels/)).toBeNull();
+  });
 });

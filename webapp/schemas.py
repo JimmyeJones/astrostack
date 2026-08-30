@@ -372,6 +372,12 @@ class TransparencyTrendOut(BaseModel):
     start_utc: str | None = None
     end_utc: str | None = None
     degraded_after_utc: str | None = None
+    # How many mosaic panels this night's subs split into — 0 (and absent from an
+    # older backend) for the ordinary single-pointing target. Non-zero means the
+    # scores above were levelled panel by panel, because a mosaic's panels are
+    # different patches of sky and their star flux legitimately differs; the card
+    # says so rather than letting the reader assume one continuous sky.
+    n_pointings: int = 0
 
 
 class HealthNoteOut(BaseModel):
