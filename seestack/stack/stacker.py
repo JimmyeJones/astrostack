@@ -965,6 +965,44 @@ def _integration_time_s(frames: list, n_used: int) -> float | None:
     return round(per_sub * n_used, 2)
 
 
+def _capture_window(frames: list) -> tuple[str | None, str | None]:
+    """When the subs going into this stack were *shot*: ``(earliest, latest)``
+    ``timestamp_utc`` among ``frames``, verbatim as they were recorded.
+
+    A stack's own ``timestamp_utc`` says when it *ran*, which is the wrong answer
+    to "when was this picture taken" the moment anyone re-stacks — a Seestar
+    owner arriving with a back catalogue gets a whole library whose every picture
+    claims to have been shot on install day. Recording the window here is the
+    only place that knows which subs actually went in.
+
+    Ordering is by *parsed instant*, never by string: the app writes UTC stamps
+    in more than one shape (a ``…Z`` suffix, a full ``+00:00`` offset, an
+    occasional naive stamp), so a lexicographic min/max would pick whichever
+    *spelling* sorts first. Undated frames are skipped; a set with nothing dated
+    yields ``(None, None)`` and every caller drops the clause rather than
+    guessing. Returns the recorded strings, not the parsed values, so nothing is
+    normalised away on the way into the row.
+
+    This is the *candidate* set — the same list :func:`_integration_time_s`
+    medians over. A sub that failed mid-stack is not subtracted, so the window
+    can be a little wider than the subs that truly contributed; it is a date
+    range for a caption, not an accounting of contributions.
+    """
+    from seestack.activity_calendar import parse_utc
+
+    dated = []  # (parsed instant, the string as recorded)
+    for f in frames:
+        raw = getattr(f, "timestamp_utc", None)
+        if not raw:
+            continue
+        parsed = parse_utc(str(raw))
+        if parsed is not None:
+            dated.append((parsed, str(raw)))
+    if not dated:
+        return None, None
+    return min(dated)[1], max(dated)[1]
+
+
 # A mosaic panel needs at least this many measured subs before it counts as a
 # separable pointing group (the same floor the photometric pass uses).
 _TRANSPARENCY_PANEL_MIN_FRAMES = 3
@@ -2425,6 +2463,7 @@ def run_stack(
         applied_cal = calibration.describe() if calibration is not None else None
         if applied_cal in (None, "", "none"):
             applied_cal = None
+        capture_start, capture_end = _capture_window(frames)
         run_id = project.add_stack_run(StackRunRow(
             id=None,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
@@ -2445,6 +2484,10 @@ def run_stack(
             options_json=_json.dumps(asdict(eff)),
             notes=color_cal_note or None,
             total_exposure_s=_integration_time_s(frames, n_used),
+            # When the subs were *shot*, as opposed to when this stack ran —
+            # the only honest source for anything that says "shot on …".
+            capture_start_utc=capture_start,
+            capture_end_utc=capture_end,
             transparency_ratio=_compute_transparency_ratio(project, frames),
             noise_sigma=noise_sigma,
             calstat=applied_cal,

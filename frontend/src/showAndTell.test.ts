@@ -52,9 +52,28 @@ describe("deepSkyMeta", () => {
 
   it("drops a clause an old run never recorded rather than printing a blank", () => {
     expect(deepSkyMeta(pic({ total_exposure_s: null, n_frames_used: 0 })))
-      .toBe(formatStampDate("2026-05-02T00:00:00Z"));
+      .toBe(`Stacked ${formatStampDate("2026-05-02T00:00:00Z")}`);
     expect(deepSkyMeta(pic({ timestamp_utc: "", total_exposure_s: null, n_frames_used: 1 })))
       .toBe("1 frame");
+  });
+
+  it("names the night the subs were shot when the run recorded one", () => {
+    // This line calls itself an acquisition line; the run's own stamp is when
+    // the *stack* ran, which on a re-stack of old data is a different year.
+    expect(deepSkyMeta(pic({
+      timestamp_utc: "2026-05-02T00:00:00Z", total_exposure_s: null,
+      n_frames_used: 0, capture_night_start: "2024-11-15",
+      capture_night_end: "2024-11-18",
+    }))).toBe("Shot 15–18 Nov 2024");
+  });
+
+  it("says which date it is, so a bare stamp can't be read as the capture night", () => {
+    expect(deepSkyMeta(pic({ total_exposure_s: null, n_frames_used: 0 })))
+      .toMatch(/^Stacked /);
+    expect(deepSkyMeta(pic({
+      total_exposure_s: null, n_frames_used: 0,
+      capture_night_start: "2024-11-15", capture_night_end: "2024-11-15",
+    }))).toMatch(/^Shot /);
   });
 });
 
@@ -80,8 +99,11 @@ describe("buildSlides", () => {
     expect(moon.fact).toMatch(/Moon/);
     expect(sun.fact).toMatch(/star/);
     expect(other.fact).toBe("");            // nothing true to say → say nothing
+    // A still carries only the date it was *made* — the app never learns when
+    // the clip was shot — so it says so rather than sitting bare beside the
+    // deep-sky slides' "Shot …".
     expect(moon.meta).toBe(
-      `${formatStampDate("2026-05-03T00:00:00Z")} · 400 frames stacked`);
+      `Stacked ${formatStampDate("2026-05-03T00:00:00Z")} · 400 frames stacked`);
   });
 
   it("skips a picture with no preview instead of showing a broken frame", () => {

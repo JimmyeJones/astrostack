@@ -93,9 +93,18 @@ function slugify(name: string): string {
 }
 
 /**
- * Build a friendly caption + filename for a shared picture from the target
- * name and (optionally) the capture/stack date, so the post arrives labelled.
+ * Build a friendly caption + filename for a shared picture from the target name
+ * and (optionally) the date it was **captured**, so the post arrives labelled.
  * A blank name falls back to a sensible generic so we never share `.jpg`.
+ *
+ * `captureLabel` is the date the *subs were shot* — `formatCaptureNights` over a
+ * run's capture window — and nothing else. It used to be filled with
+ * `formatStampDate(run.timestamp_utc)`, which is when the **stack ran**, so the
+ * share sheet announced a picture as "captured" on the day it was processed:
+ * the same day only if you stacked the night you shot, and years out on a
+ * re-stack of a back catalogue. A run with no recorded window passes nothing and
+ * the clause is simply dropped — the existing no-date branch — rather than
+ * reaching for the stamp that is to hand.
  *
  * `ext` is the shared file's extension. It defaults to `jpg` — every stack run
  * shares its share-JPEG — but a Moon/Sun still has only a PNG, and a PNG
@@ -105,11 +114,11 @@ function slugify(name: string): string {
  */
 export function sharePictureText(
   name: string | null | undefined,
-  dateLabel?: string | null,
+  captureLabel?: string | null,
   ext: string = "jpg",
 ): { title: string; text: string; filename: string } {
   const clean = (name ?? "").trim() || "My astrophoto";
-  const date = (dateLabel ?? "").trim();
+  const date = (captureLabel ?? "").trim();
   const title = date ? `${clean} · ${date}` : clean;
   const text = date ? `${clean} — captured ${date}` : clean;
   const filename = `${slugify(clean) || "astrophoto"}.${slugify(ext) || "jpg"}`;

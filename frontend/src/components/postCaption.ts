@@ -11,14 +11,20 @@
  *    full Moons wide."
  *
  * Every fact is pulled from existing signals (catalog identity, the run's frame
- * count / integration / date, the already-computed scale bar), so there's no
- * guessing and no wrong numbers. Pure and threshold-free, so it's trivially
- * unit-tested and degrades gracefully — any clause whose datum is missing is
- * simply dropped (no identity → "your target"; no WCS → no scale clause;
- * unknown date → no date clause).
+ * count / integration / **capture window**, the already-computed scale bar), so
+ * there's no guessing and no wrong numbers. Pure and threshold-free, so it's
+ * trivially unit-tested and degrades gracefully — any clause whose datum is
+ * missing is simply dropped (no identity → "your target"; no WCS → no scale
+ * clause; unknown capture window → no date clause).
+ *
+ * The date is the one fact this caption used to get *wrong*: it was built from
+ * the run's `timestamp_utc`, i.e. when the stack ran, and asserted it as when
+ * the picture was "shot". Those are the same day only if you stacked the night
+ * you shot; re-stack a back catalogue and the caption you post publicly is out
+ * by years. It now takes the run's capture window and nothing else.
  */
 
-import { formatIntegration } from "../format";
+import { captureNightsClause, formatIntegration } from "../format";
 
 export interface PostCaptionInput {
   /** Catalog common name ("Orion Nebula"), or "" / null when the catalog has none. */
@@ -31,33 +37,23 @@ export interface PostCaptionInput {
   nFrames?: number | null;
   /** Total integration in seconds (`run.total_exposure_s`), or null. */
   integrationS?: number | null;
-  /** A pre-formatted, timezone-safe date label ("20 Jul 2026"), or null. */
-  dateLabel?: string | null;
+  /** The run's capture window — the observing nights its subs were **shot** on
+   *  (`capture_night_start` / `capture_night_end`, ISO `YYYY-MM-DD`), or null.
+   *
+   *  Deliberately the raw window rather than a pre-formatted label: this used to
+   *  take a `dateLabel` and every caller filled it with `run.timestamp_utc`, the
+   *  moment the *stack* ran, so the caption a beginner pastes under their photo
+   *  said "shot on" the day they processed it — years out on a re-stack of a
+   *  back catalogue, which is exactly what a Seestar owner arriving with one
+   *  does. Taking the window itself means the wrong stamp no longer type-checks.
+   *  Both null (every run recorded before the app knew) simply drops the clause. */
+  captureNightStart?: string | null;
+  captureNightEnd?: string | null;
   /** The run's scale bar (from the annotations endpoint), or null. */
   scaleBar?: { moon_comparison?: string | null } | null;
   /** Fallback subject when the target isn't identified (the target's display
    *  name); a blank falls back to a sensible generic so we never post nothing. */
   fallbackName?: string | null;
-}
-
-const SHORT_MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
-/**
- * Format an ISO-8601 UTC timestamp as a friendly "20 Jul 2026" for the caption.
- * Reads the y/m/d straight off the string (never via `Date`) so the label can't
- * shift across a timezone boundary. Returns null for anything unparseable, so
- * the caller simply drops the date clause.
- */
-export function formatCaptionDate(iso: string | null | undefined): string | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec((iso ?? "").trim());
-  if (!m) return null;
-  const day = parseInt(m[3], 10);
-  const monthIdx = parseInt(m[2], 10) - 1;
-  if (monthIdx < 0 || monthIdx > 11 || day < 1 || day > 31) return null;
-  return `${day} ${SHORT_MONTHS[monthIdx]} ${m[1]}`;
 }
 
 /** "a"/"an" for a plain type word, from its first letter. */
@@ -107,9 +103,11 @@ export function postCaption(input: PostCaptionInput): string {
     }
   }
 
-  // Date + gear.
-  const dateLabel = (input.dateLabel ?? "").trim();
-  clauses.push(dateLabel ? `shot on ${dateLabel} with a Seestar` : "shot with a Seestar");
+  // Date + gear. The date is the *capture* window, never the stack stamp — and
+  // when the run predates the app recording one, the caption says "shot with a
+  // Seestar" and stops, rather than reaching for the date it has to hand.
+  const when = captureNightsClause(input.captureNightStart, input.captureNightEnd);
+  clauses.push(when ? `shot ${when} with a Seestar` : "shot with a Seestar");
 
   const first = `${subject} — ${clauses.join(", ")}.`;
 

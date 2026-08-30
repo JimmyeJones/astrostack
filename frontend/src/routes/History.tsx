@@ -10,8 +10,8 @@ import { IconAdjustments, IconCheck, IconChevronDown, IconClipboardText, IconCop
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded } from "../api/client";
-import { formatIntegration, formatStampDate } from "../format";
-import { postCaption, formatCaptionDate } from "../components/postCaption";
+import { formatCaptureNights, formatIntegration } from "../format";
+import { postCaption } from "../components/postCaption";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
@@ -924,7 +924,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         type: identity?.type,
         nFrames: run.n_frames_used,
         integrationS: run.total_exposure_s,
-        dateLabel: formatCaptionDate(run.timestamp_utc),
+        captureNightStart: run.capture_night_start,
+        captureNightEnd: run.capture_night_end,
         scaleBar,
         fallbackName: safe,
       });
@@ -955,7 +956,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     type: identity?.type,
     nFrames: run.n_frames_used,
     integrationS: run.total_exposure_s,
-    dateLabel: formatCaptionDate(run.timestamp_utc),
+    captureNightStart: run.capture_night_start,
+    captureNightEnd: run.capture_night_end,
     scaleBar: storedPreviewScaleBar(annotations.data, run),
     fallbackName: safe,
   });
@@ -1366,7 +1368,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                       url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
                       {...sharePictureText(
                         run.output_basename,
-                        formatStampDate(run.timestamp_utc),
+                        formatCaptureNights(
+                          run.capture_night_start, run.capture_night_end),
                       )}
                       text={shareCaption}
                     />
@@ -1545,7 +1548,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           ? (() => {
               const { title, filename } = sharePictureText(
                 run.output_basename,
-                formatStampDate(run.timestamp_utc),
+                formatCaptureNights(
+                  run.capture_night_start, run.capture_night_end),
               );
               return { shareFilename: filename, shareTitle: title, shareText: shareCaption };
             })()

@@ -18,6 +18,7 @@ from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from seestack.stackhealth import seam_verdict
 from webapp import deps, pipeline
+from webapp.capture_nights import capture_night_range
 from webapp.preview_orient import (
     baked_north_up_deg,
     recovered_north_up_deg,
@@ -30,6 +31,7 @@ from webapp.schemas import (
     stack_option_fields,
     validate_stack_options,
 )
+from webapp.site_location import resolve_site_lon
 
 router = APIRouter(tags=["stack"])
 
@@ -465,6 +467,12 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             )
             for r in runs
         }
+        # The observer's longitude, so each run's capture window can be named by
+        # the *observing night* it belongs to — the same noon-to-noon bucket the
+        # Nights card and the imaging calendar use. Resolved while the library is
+        # still open (and memoised on the app), so History and the Nights card
+        # can never name one session's subs two different dates.
+        lon = resolve_site_lon(request, lib, deps.get_settings(request).site_lon)
     finally:
         proj.close()
         lib.close()
@@ -474,6 +482,8 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
         # or geometry we can't reconcile at all. The pins/scale bar are measured
         # on the un-cropped FITS grid, so the UI needs both to draw on those bytes.
         crop = parse_preview_crop(r.preview_crop_json)
+        night_start, night_end = capture_night_range(
+            r.capture_start_utc, r.capture_end_utc, lon)
         out.append(StackRunOut(
             id=r.id,
             timestamp_utc=r.timestamp_utc,
@@ -498,6 +508,8 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             notes=r.notes,
             total_exposure_s=r.total_exposure_s,
             reusable=_run_is_reusable(r.options_json),
+            capture_night_start=night_start,
+            capture_night_end=night_end,
             transparency_ratio=r.transparency_ratio,
             noise_sigma=r.noise_sigma,
             stack_fwhm_px=r.stack_fwhm_px,

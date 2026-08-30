@@ -397,8 +397,33 @@ describe("Dashboard recent-stack date", () => {
     await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
 
     const expected = formatStampDate("2026-08-17T03:30:00Z");
-    expect(screen.getByText(expected)).toBeInTheDocument();
+    expect(screen.getByText(`Stacked ${expected}`)).toBeInTheDocument();
     expect(screen.queryByText("2026-08-17")).not.toBeInTheDocument();
+  });
+
+  it("names the night the subs were shot when the run recorded one", async () => {
+    // The tile's date used to be the run's own stamp, unlabelled — so a
+    // re-stack of a 2024 back catalogue was captioned with today's date, on the
+    // app's front page. Prefer the capture window; label whichever it is.
+    const stats = statsWithEveningStack();
+    stats.recent_stacks[0].capture_night_start = "2024-11-15";
+    stats.recent_stacks[0].capture_night_end = "2024-11-15";
+    vi.spyOn(client.api, "getStats").mockResolvedValue(stats);
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
+    expect(screen.getByText("Shot 15 Nov 2024")).toBeInTheDocument();
+    expect(screen.queryByText(/^Stacked /)).not.toBeInTheDocument();
+  });
+
+  it("says which date it is, so a bare stamp can't be read as a capture night", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(statsWithEveningStack());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
+    expect(screen.getByText(/^Stacked /)).toBeInTheDocument();
   });
 
   it("prints nothing rather than 'Invalid Date' for an unreadable stamp", async () => {

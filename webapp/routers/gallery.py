@@ -20,6 +20,8 @@ from pydantic import BaseModel
 
 from seestack.stackhealth import seam_verdict
 from webapp import deps
+from webapp.capture_nights import capture_night_range
+from webapp.site_location import resolve_site_lon
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +60,14 @@ class GalleryItem(BaseModel):
     # True when this run's settings can pre-fill the Stack form ("reuse settings").
     # False for editor-recipe / channel-combine runs, which carry no stack knobs.
     reusable: bool = False
+    # When this picture's subs were **shot**, as observing-night dates (ISO
+    # ``YYYY-MM-DD``, the same noon-to-noon bucket the Nights card uses); equal
+    # when the whole stack came from one night, and both None for a pre-schema-18
+    # run or one whose subs carry no capture time. ``timestamp_utc`` above is
+    # when the stack *ran* — the card's share sheet used to offer that as
+    # "captured", which is the same day only if you stacked the night you shot.
+    capture_night_start: str | None = None
+    capture_night_end: str | None = None
     # Median transparency of the stacked frames ÷ the target's clear-sky baseline
     # (< ~0.6 ⇒ hazy). None for pre-schema-5 runs; drives a "hazy night" badge.
     transparency_ratio: float | None = None
@@ -185,6 +195,11 @@ def get_gallery(request: Request) -> GalleryResponse:
         )
         from webapp.routers.stack import _unexported_edit
 
+        # The observer's longitude, so each run's capture window can be named by
+        # the observing night it belongs to — resolved once for the whole page,
+        # and by the same helper the Nights card and imaging calendar use.
+        lon = resolve_site_lon(request, lib, deps.get_settings(request).site_lon)
+
         for t in lib.list_targets():
             proj = None
             try:
@@ -204,7 +219,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                         items.append(_gallery_item(
                             t, run, proj, RECIPE_META_PREFIX,
                             EXPORTED_RECIPE_META_PREFIX, _unexported_edit,
-                            AUTO_EDIT_BAKED_LOOK_PREFIX,
+                            AUTO_EDIT_BAKED_LOOK_PREFIX, lon,
                         ))
                     except Exception:  # noqa: BLE001 — one bad run must not hide the rest
                         # Every required field is NOT NULL today, so nothing here
@@ -229,11 +244,14 @@ def get_gallery(request: Request) -> GalleryResponse:
 
 
 def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
-                  unexported_edit, baked_look_prefix: str = "") -> GalleryItem:  # noqa: ANN001
+                  unexported_edit, baked_look_prefix: str = "",
+                  lon_deg: float | None = None) -> GalleryItem:  # noqa: ANN001
     """One finished stack's gallery card. Split out so the loop above can skip a
     single unreadable run without losing every other target's pictures."""
     has_preview = bool(run.preview_path and Path(run.preview_path).exists())
     options = _parse_options(run.options_json)
+    night_start, night_end = capture_night_range(
+        run.capture_start_utc, run.capture_end_utc, lon_deg)
     return GalleryItem(
         safe=t.safe_name,
         target_name=t.name,
@@ -253,6 +271,8 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         ),
         options=options,
         reusable=_is_reusable(options),
+        capture_night_start=night_start,
+        capture_night_end=night_end,
         transparency_ratio=run.transparency_ratio,
         noise_sigma=run.noise_sigma,
         calstat=run.calstat,
@@ -357,6 +377,12 @@ class BestPicture(BaseModel):
     preview_url: str
     # Quality-blend score in [0, 1], relative to this Library's own collection.
     score: float
+    # When this picture's subs were **shot**, as observing-night dates (ISO
+    # ``YYYY-MM-DD``); both None for a pre-schema-18 run or one whose subs carry
+    # no capture time. Same distinction as on :class:`GalleryItem`:
+    # ``timestamp_utc`` is when the stack ran, which is not when it was shot.
+    capture_night_start: str | None = None
+    capture_night_end: str | None = None
     # True when this picture is the one the user pinned as its target's cover
     # ("Set as cover" in History). A pinned picture represents its target here
     # instead of the newest stack, and is floated above the ranked tail so the
@@ -444,6 +470,10 @@ def get_best_pictures(
 
     lib = deps.open_library(request)
     try:
+        # One resolution for the whole wall, shared with every other night
+        # surface, so a picture's capture nights read the same here as on its
+        # own History card.
+        lon = resolve_site_lon(request, lib, deps.get_settings(request).site_lon)
         for t in lib.list_targets():
             proj = None
             try:
@@ -463,6 +493,8 @@ def get_best_pictures(
                     continue
                 key = f"{t.safe_name}:{pick.id}"
                 info = identify_object(t.name, t.ra_deg, t.dec_deg, catalog=catalog)
+                night_start, night_end = capture_night_range(
+                    pick.capture_start_utc, pick.capture_end_utc, lon)
                 by_key[key] = BestPicture(
                     safe=t.safe_name,
                     target_name=t.name,
@@ -474,6 +506,8 @@ def get_best_pictures(
                     canvas_h=pick.canvas_h,
                     total_exposure_s=pick.total_exposure_s,
                     noise_sigma=pick.noise_sigma,
+                    capture_night_start=night_start,
+                    capture_night_end=night_end,
                     has_preview=True,
                     has_fits=bool(pick.fits_path and Path(pick.fits_path).exists()),
                     has_tiff=bool(pick.tiff_path and Path(pick.tiff_path).exists()),

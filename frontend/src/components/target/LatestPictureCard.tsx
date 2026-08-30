@@ -4,7 +4,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type FieldObject, type StackRun } from "../../api/client";
-import { formatIntegration, formatStampDate } from "../../format";
+import { formatCaptureNights, formatIntegration, formatStampDate } from "../../format";
 import { AnnotatedImage, croppedAnnotationView, objectLabel } from "../AnnotatedImage";
 import { ImageLightbox } from "../ImageLightbox";
 import { NorthUpViewToggle, loadNorthUpView, saveNorthUpView } from "../NorthUpViewToggle";
@@ -123,7 +123,10 @@ export function LatestPictureCard({
   });
   if (!run || !run.has_preview) return null;
   const previewSrc = api.stackArtifactUrl(safe, run.id, "preview");
-  const share = sharePictureText(name, formatStampDate(run.timestamp_utc));
+  // The date on a shared picture is when its subs were *shot*, never when the
+  // stack ran — a run with no recorded capture window shares without one.
+  const share = sharePictureText(
+    name, formatCaptureNights(run.capture_night_start, run.capture_night_end));
   // The pins are measured on the run's un-rotated, un-cropped FITS grid, and this
   // card always shows the *stored* preview bytes. A crop the one-click auto-edit
   // baked in composes exactly (shift the pixels into the trim); a baked-in

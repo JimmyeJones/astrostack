@@ -10,7 +10,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { fullResPngLabel } from "../fullres";
-import { formatDiskSize, formatIntegration, formatStampDate } from "../format";
+import { formatDiskSize, formatIntegration, pictureDateLabel } from "../format";
 import { loadDismissedSig, saveDismissedSig } from "../dismissal";
 import { settingsLink } from "../settingsSections";
 import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
@@ -349,13 +349,18 @@ export function Dashboard() {
               <Text fw={600} mt="xs" lineClamp={1}>{s.target_name}</Text>
               <Group justify="space-between" mt={4}>
                 <FrameCountBadge nFramesUsed={s.n_frames_used} color="violet" />
-                {/* The same "when was this picture made" caption the Gallery,
-                    History and the Target hero print — so the newest stack is
-                    dated identically wherever you meet it. A raw `slice(0, 10)`
-                    used to print the *UTC* calendar day, which for an evening
-                    stack west of UTC is tomorrow's date, disagreeing with every
-                    surface that converts to local time. */}
-                <Text size="xs" c="dimmed">{formatStampDate(s.timestamp_utc)}</Text>
+                {/* The picture's date, and *which* date it is. This used to be
+                    a bare stamp — and it was the run's own, i.e. when the stack
+                    ran, which anyone reads as the night they shot it. On a
+                    re-stack of a back catalogue that is out by years, on the
+                    app's front page. It now prefers the night the subs were
+                    taken, and says "Stacked" when that is all the run knows.
+                    (A raw `slice(0, 10)` before that printed the *UTC* calendar
+                    day, tomorrow's date for an evening stack west of UTC.) */}
+                <Text size="xs" c="dimmed">
+                  {pictureDateLabel(
+                    s.capture_night_start, s.capture_night_end, s.timestamp_utc)}
+                </Text>
               </Group>
             </Card>
           ))}
