@@ -312,6 +312,54 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.312.1, branch `claude/compassionate-galileo-6jgh4j`) — ~~"See what stacking
+  removed" paints a **cyan wash over the whole picture** on a many-sub stack, while the caption underneath
+  calls those marks satellite trails and cosmic rays.~~** Found by measuring the feature I had just put on two
+  more surfaces (v0.312.0), and **reproduced on real engine output before fixing**. *(Severity: wrong-picture +
+  a plain untruth in shipped copy, on the trust feature whose entire job is showing the user what the stack
+  removed — and it gets worse the more subs you have, i.e. exactly on the owner's own targets. Confidence:
+  reproduced, numbers below.)*
+
+  **Reproduced, on maps `run_stack` actually wrote.** A pixel is marked if it lost a sample in **any** frame,
+  so at a fixed per-sample clip rate the share of the canvas that is non-empty climbs with the sub count.
+  Measured over the planted-satellite-trail scene in `tests/test_rejection_map.py`, stacked for real:
+
+  | subs | REJFRAC | canvas non-empty | tinted above ¼ opacity (2× preview) | (4× preview) |
+  |---|---|---|---|---|
+  | 16 | 0.00073 | **1.9 %** | 3.6 % | 13.6 % |
+  | 32 | 0.00145 | **11.5 %** | 34.1 % | 79.5 % |
+  | 64 | 0.00201 | **31.2 %** | **72.9 %** | **94.2 %** |
+
+  At 64 subs and the 4× downsample an ordinary preview uses, **94 % of the frame is tinted** — and the
+  satellite trail's own alpha is *lower* than the sky beside it in places. The owner stacks 500–800.
+
+  **Root cause.** `rejection_overlay_png` normalised alpha by `p90` of the **non-empty** pixels. That is right
+  while the map is sparse (the hit set is then mostly real marks), and exactly wrong once it isn't: past
+  ~25 % coverage the hit set *is* the noise floor, so the floor normalises to opaque. The renderer's docstring
+  claimed the area-average "dilutes isolated speckle toward nothing" — true at 16 subs, false at 64, and the
+  claim had never been checked against a dense map.
+
+  **Fix.** The noise floor is *uniform* — every pixel runs the same risk of losing a sample to the tail — and
+  real marks are local excesses over it, so the map's own floor (`p75` of the density) is subtracted before
+  normalising, and the opaque level is then taken over the whole canvas rather than the residue. Two properties
+  make it safe rather than a restyle: `p75` is **exactly zero**, hence the subtraction is inert, on any map
+  whose canvas is three-quarters untouched (every map a modest stack writes); and it is **gated on the resize
+  having actually averaged**, because at 1:1 a trail pixel and a noise pixel are both "one sample lost here"
+  and a floor there would take the trail with the speckle (measured: it zeroed every count-1 trail pixel).
+  After: the 64-sub wash falls **94 % → 15 %** at 4× and **73 % → 19 %** at 2×, with the trail back at full
+  opacity over a sky whose median alpha is 0; a 300-sub map (83 % of the canvas non-empty) still reads as
+  "here is your satellite".
+
+  **Upgrade-safe (§9):** pure rendering, no config/schema/on-disk/API-shape or default change, and nothing
+  stored — the overlay is computed per request from the `_rejected.fits` the run already wrote.
+
+  **Tests (+4 in `tests/test_rejection_map.py`, 2 fail before / pass after):** a dense 64-sub map is not washed
+  at either preview scale and its trail is still the strongest thing on it; a near-saturated 300-sub map still
+  finds the trail; a sparse map is **byte-identical** to the un-floored arithmetic; and a 1:1 or scaled-up
+  render is byte-identical *however dense the map is*, so the fenced-off case stays fenced. The fixture is a
+  pure array calibrated to the 31.2 % figure measured on real 64-sub engine output, so the property costs
+  milliseconds instead of the minutes a real 64-sub stack takes.
+
 - **✅ SHIPPED (Builder, v0.311.3, branch `claude/compassionate-galileo-y2x4gk`) — ~~"First light" is the date
   you *installed AstroStack*, not the date you first captured — so it is wrong for the exact owner this app is
   built for, on a milestone stat and on the poster they share.~~** Found by **running the app**
@@ -19215,6 +19263,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   and the reason it was left out rather than guessed at. Compute it **once, at write time**, into a header card
   beside `REJMAP` (not per-request over a canvas-sized file), and surface it on the run-info the caption already
   reads. Measure the threshold against a real map before picking it.
+
+  **⚠️ MEASURED AND STOOD DOWN (Builder 2026-08-30, branch `claude/compassionate-galileo-6jgh4j`) — do NOT
+  build this from the summed map; the threshold this entry asks for does not exist.** I did exactly what it
+  demanded — measured against real `run_stack` output before picking anything — and the measurement closes the
+  idea rather than sizing it.
+
+  **What a blob count actually reads on real maps.** Connected components (8-connectivity) over the planted
+  satellite-trail scene at 16 subs: **1,296 blobs**, of which the trail is one (1,453 px). The *same scene with
+  no trail at all*: **1,323 blobs**. So counting blobs would tell a user with a perfectly clean night that
+  stacking removed 1,323 things. A minimum area does separate them at 16 subs — the largest pure-noise blob was
+  4 px against the trail's 1,453, and area ≥ 5 px gives **1 blob on the trail scene and 0 on the clean one**.
+
+  **And that separation dies with the sub count, which is the killer.** A pixel is marked if it lost a sample in
+  *any* frame, so the map densifies: non-empty share **1.9 % at 16 subs → 11.5 % at 32 → 31.2 % at 64**, and
+  blobs of ≥ 5 px go **1 → 532 → 2,013**, all noise, with the trail starting to percolate into the speckle
+  (largest blob 1,453 → 2,762 px). Extrapolated to the owner's 500–800-sub stacks the map is effectively
+  saturated and the honest count is a five-figure number. **No minimum area works across the sub counts this app
+  is for**, because the discriminator the entry assumes — a mark is dense, noise is sparse — is a property of the
+  *per-frame* rejection, and the summed map has thrown it away: a satellite crossing one sub contributes a drop
+  count of **1** along its path, pointwise indistinguishable from a noise-tail clip.
+
+  **If anyone ever wants this, the only honest shape is to count it where the information still exists** — at
+  combine time, per frame, before the counts are summed — which is a change inside the memory-bounded hot path,
+  not "a connected-component pass over the sibling". That is an L with real OOM risk, for a caption tweak. **The
+  percentage stays.**
+
+  **The measurement was not wasted:** applied to the *tint* rather than to a count it found a real bug — the
+  overlay washed the whole picture cyan on exactly these dense maps — fixed as **v0.312.1**, at the top of
+  "Bugs (fix these first)".
 
 - **NEW IDEA (Builder 2026-08-29, the follow-ups deliberately left out of "Your universe" v0.296.0) — "fly to
   it", and tell the reader what they're looking at.** *(Pillar: enjoy + understand — PRIORITY 3; size S each;

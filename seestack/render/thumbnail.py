@@ -721,6 +721,21 @@ _REJECTION_SCALE_PERCENTILE = 90.0
 #: Gamma applied to the normalised density, <1 so a trail that only appears in
 #: one sub of many is still plainly visible rather than a ghost.
 _REJECTION_ALPHA_GAMMA = 0.7
+#: Above this share of the density map being non-empty, the map is dominated by
+#: the *uniform* noise-tail clipping every pixel is subject to, not by marks —
+#: so the level at this percentile is subtracted as the map's own floor. Chosen
+#: as a percentile rather than a hit-fraction test so it is exactly zero, and
+#: therefore a strict no-op, on any map where three quarters of the canvas lost
+#: nothing (which is every map a modest stack produces). Real marks — trails,
+#: cosmic rays, hot columns — cover a small part of a canvas; nothing that
+#: covers three quarters of one is a mark.
+_REJECTION_FLOOR_PERCENTILE = 75.0
+#: The opaque level for a floor-subtracted map. Measured over the *whole* canvas
+#: rather than the non-empty pixels: after the subtraction almost everything is
+#: still faintly non-empty (the noise floor has spread, not a single value), so
+#: the hit-set percentile above would be set by that residue and re-open the
+#: wash the subtraction just closed.
+_REJECTION_DENSE_SCALE_PERCENTILE = 95.0
 
 
 def rejection_overlay_png(rejection_map: np.ndarray,
@@ -741,6 +756,22 @@ def rejection_overlay_png(rejection_map: np.ndarray,
     dense along a line, keeps its strength, while isolated speckle dilutes
     toward nothing. Scaling up (a small canvas, a big preview) degrades to
     nearest-neighbour, which is the right answer there too.
+
+    **Why the floor is subtracted.** That dilution alone stops working once the
+    map is *dense*, and the map gets denser with every sub: a pixel is marked if
+    it lost a sample in **any** frame, so at a fixed per-sample clip rate the
+    share of the canvas that is non-empty climbs with the sub count (measured on
+    real engine output: 1.9 % of the canvas at 16 subs, 11.5 % at 32, 31.2 % at
+    64 — and the Seestar owner this app is for stacks hundreds). Past that point
+    the *hit set* is mostly noise floor, so a percentile of it normalises the
+    floor itself to opaque and the tint becomes a cyan wash over the whole
+    picture — measured at 94 % of the frame above half opacity on a 64-sub stack
+    at a 4× downsample, with the satellite trail no more prominent than the sky
+    beside it. Since that floor is *uniform* — every pixel runs the same risk of
+    losing a sample to the noise tail — and real marks are local excesses over
+    it, subtracting the level at :data:`_REJECTION_FLOOR_PERCENTILE` removes it
+    and leaves the marks. The subtraction is exactly zero, hence byte-for-byte
+    inert, whenever three quarters of the canvas lost nothing.
     """
     import io
 
@@ -756,12 +787,28 @@ def rejection_overlay_png(rejection_map: np.ndarray,
     dens = np.asarray(
         Image.fromarray(m, mode="F").resize((w, h), Image.BOX),
         dtype=np.float32)
-    hit = dens > 0
-    if hit.any():
-        scale = float(np.percentile(dens[hit], _REJECTION_SCALE_PERCENTILE))
+    # Subtract the map's own uniform noise floor before normalising. Only where
+    # the resize actually *averaged*, because only then is `dens` a local
+    # density: at 1:1 (or scaling up) a trail pixel and a noise-tail pixel are
+    # both "one sample lost here" and nothing pointwise can separate them, so a
+    # floor there would take the trail with the speckle. Every real preview is a
+    # downsample of the canvas — the stored preview is capped at 1024 px on its
+    # long edge — so the 1:1 case needs a canvas no bigger than the preview,
+    # which for a Seestar stack means a tiny crop.
+    floor = 0.0
+    if w < m.shape[1] or h < m.shape[0]:
+        floor = float(np.percentile(dens, _REJECTION_FLOOR_PERCENTILE))
+    if floor > 0.0:
+        dens = np.clip(dens - floor, 0.0, None)
+        scale_pct, scale_over = _REJECTION_DENSE_SCALE_PERCENTILE, dens
+    else:
+        scale_pct, scale_over = _REJECTION_SCALE_PERCENTILE, dens[dens > 0]
+    if scale_over.size:
+        scale = float(np.percentile(scale_over, scale_pct))
         if scale <= 0:
             scale = float(dens.max())
-        alpha = np.clip(dens / scale, 0.0, 1.0) ** _REJECTION_ALPHA_GAMMA
+        alpha = (np.clip(dens / scale, 0.0, 1.0) ** _REJECTION_ALPHA_GAMMA
+                 if scale > 0 else np.zeros_like(dens))
     else:
         alpha = np.zeros_like(dens)
 
