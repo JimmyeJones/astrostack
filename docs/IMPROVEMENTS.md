@@ -445,6 +445,26 @@ _(nothing else claimed — claim an item here with your branch name)_
     owner supplied a full `tree` listing of `\\TRUENAS\astro` and the scanner's own
     `_apply_seestar_convention` was replayed over those exact 71 folder names.)*
 
+  **⚠️ Builder 2026-08-30, branch `claude/compassionate-galileo-ehnbid` — collision NINE: this was built twice,
+  in the same hour, and the version above is the one that ships.** Mine (v0.319.2 on my branch) was
+  indistinguishable in shape — same `_CAPTURE_SUFFIXES` tuple, same `"photo"` reason, same by-name bypass of
+  the frame-count gate. Theirs landed on `main` first, so mine is dropped rather than re-litigated. The
+  **one piece neither of us should lose is mine, and it is re-applied on top of theirs**: the *upgrade-heal*
+  half in `Project.reject_seestar_output_frames`, which neither their commit nor the entry's spec covers.
+  The scan-time skip stops new `*_photo` targets, and the cleanup nudge removes one that became its own
+  target — but a **legacy whole-card drop that lumped `Scenery_photo/` into a real target** is reached by
+  neither, and quietly averages finished snapshots into that target's own picture. Frames whose parent folder
+  is `*_photo` are now rejected there beside `*_video`, unguarded by the single-image size check (every
+  snapshot in such a folder is junk in a deep-sky stack), additively and re-acceptable by the user.
+  **Read alongside the open item two entries down** ("the same mosaic-cap asymmetry exists one layer down, on
+  the *frame* auto-reject"), which is about the same function and correctly declines to touch its **size
+  guard** without a repro. This is the *other* axis and needs no threshold moved: `_photo` joins `_video` in a
+  local `_CAPTURE_FOLDER_SUFFIXES` mirroring the scanner's `_CAPTURE_SUFFIXES` (kept local — scanner imports
+  project, so the reverse would be a cycle, the same reason `_MAX_SEESTAR_OUTPUT_FRAMES` is duplicated there).
+  Without it the two layers actively disagree about `_photo` from v0.319.2 onward: the scanner calls such a
+  folder a capture mode, the frame guard still calls it a possible target folder. Test in
+  `tests/test_scanner.py` beside the `*_video` one it mirrors; fails before.
+
   `seestack/io/scanner.py` defines exactly three convention suffixes — `_SUB_SUFFIX = "_sub"`,
   `_MOSAIC_SUB_SUFFIX = "_mosaic_sub"`, `_VIDEO_SUFFIX = "_video"` (lines ~63–65). **There is no `_photo`
   constant anywhere in the file.** The owner's device writes `Planetary_photo/` and `Scenery_photo/` alongside
@@ -452,7 +472,8 @@ _(nothing else claimed — claim an item here with your branch name)_
   `*_photo` folder falls through every rule, finds no `<name>_sub` sibling, and is ingested unchanged as a
   target. **Replaying the real convention logic over the owner's actual tree produces these junk targets:**
   `Planetary_photo`, `Scenery_photo`, `batch_stack_tmp`, and `MyWorks`.
-  - **`*_photo` is the real, generalisable bug** — the device writes single-shot stills there, not stackable
+  - **~~`*_photo` is the real, generalisable bug~~ — SHIPPED above, exactly as specified.** The device writes
+    single-shot stills there, not stackable
     deep-sky subs, exactly as it writes videos to `*_video`. **Fix:** add a `_PHOTO_SUFFIX = "_photo"` and skip
     it at scan time beside the existing `_video` skip, *and* teach `classify_seestar_junk_target` about it
     (mirroring the `video` verdict) so libraries that already ingested one get a cleanup nudge. Cheap, and it
@@ -596,6 +617,27 @@ _(nothing else claimed — claim an item here with your branch name)_
   while a bare `<T>/` of 11 frames beside `<T>_sub/` still does **not**. The shared helper already exists, so
   this is small — it is the *caution*, not the code, that made it a separate item.
 
+  **⚠️ Builder 2026-08-30, branch `claude/compassionate-galileo-ehnbid` — collision TEN, the same hour and the
+  same other Builder as collision nine. The version above ships; mine (v0.319.3–4 on my branch) is dropped in
+  full, with nothing left over to re-apply.** Both runs shipped all three filed parts *and* independently
+  found the same unfiled fourth one (a mosaic offered a merge with its own single field, against
+  `_apply_seestar_convention`'s stated "never co-stacked **or auto-merged**" invariant) *and* independently
+  decided to exclude junk targets too. Theirs is the better version and is the one to read: it puts the two
+  shared facts in a named module (`webapp/library_hygiene.py`) rather than a private helper inside the router,
+  splits duplicate detection into a free name-shape half and a paid confirmation half, and gives `_photo` its
+  own wording instead of reusing the video sentence. The **only** thing carried across is
+  `Project.source_paths()` — a one-column read instead of a `FrameRow` per row, now wired into
+  `confirm_duplicate_of_base` and `junk_verdict`, which walk the owner's ~5,477-frame targets on every poll.
+
+  **The process lesson, and it is a new one.** Both runs claimed by writing to this file in their first
+  commit, and both pushed that claim immediately — the discipline notes six through eight prescribe. It did
+  not help, because **the claim and the work started within minutes of each other**: `git fetch` at task start
+  showed a clean `main` for both. Claiming cannot serialise two agents who begin together; only *picking
+  differently* can. The cheapest real defence for the next Builder is **not** a better claim protocol but a
+  different opening move: when the bug queue has exactly one or two obvious front-runners — as it did here,
+  with two freshly-filed owner-reported entries at the very top — assume another Builder is already on the
+  top one, and take the second. Both of these runs took the top two *in the same order*.
+
   **The owner's live library (from the screenshot) — every near-identical pair is the same physical files
   counted twice:**
   | Card | Members (subs · integration) | Headline claim | Real unique |
@@ -629,7 +671,8 @@ _(nothing else claimed — claim an item here with your branch name)_
   + double compute)". **The two features disagree about the same pair of targets** — one says "delete the
   duplicate", the other says "combine these two separate nights" — and merge is the louder, more inviting one.
 
-  **Fix direction (all three parts; each is small, and part 1 is the one the owner sees):**
+  **Fix direction (all three parts; each is small, and part 1 is the one the owner sees) — ~~all three
+  shipped~~, see the write-up above:**
   1. **Exclude known-duplicate pairs from merge suggestions and route them to cleanup instead.** Before
      building a group, drop members that `duplicate_sub_target_base_name` flags *whose base target is also in
      the same group* (the base already owns those frames). If a group collapses to one real member, drop the
@@ -10092,6 +10135,39 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by the v0.319.3–4 merge/cleanup unification) — the
+  Library page now pays for the same library walk twice per refresh.** *(Pillar: performance — file, don't
+  pre-optimise. Size: S. Confidence: certain by construction; the cost is unmeasured on real data.)*
+  `merge_suggestions` and `cleanup_suggestions` both walk the library through `webapp/library_hygiene.py`,
+  and they are polled by the same page, so each refresh opens every confirmed duplicate pair's two projects
+  twice and reads their `source_paths` twice. On the owner's library that is the `M 3`/`M 3_SUB` pair at ~5,477 + ~5,455 rows, plus
+  the mosaic pair — call it ~22k single-column reads per refresh instead of ~11k. **This was the right trade**:
+  the alternative was the two endpoints keeping separate notions of "is this a duplicate?", which is exactly
+  the bug v0.319.3 fixed. `Project.source_paths()` already cut the per-row cost by not building a `FrameRow`,
+  which is most of what a naive fix would have bought.
+  **If it ever shows up:** `webapp/registry_cache.py` already exists for precisely this shape — a short-TTL
+  `app.state` cache keyed on the library's mtime would serve both endpoints from one walk. **Measure first**:
+  time `GET /api/targets/cleanup-suggestions` on a library with several thousand-frame duplicate pairs before
+  adding a cache, because a stale cleanup list after a scan is its own (worse) bug.
+
+- **LATENT HAZARD (Builder 2026-08-30, spotted while wiring mosaic duplicates to their base target for
+  v0.319.3 — traced, NOT reproduced, do not "fix" it blind) — a lowercase `<T>_mosaic/` folder would collide
+  with the `<T> (mosaic)` target's safe name.** *(Pillar: correctness / data integrity — PRIORITY 4. Size: M,
+  and most of that is deciding what is even safe to do. Confidence: the collision is arithmetic;
+  whether any device produces the input is unknown.)*
+  `make_safe_name` replaces every non-`[A-Za-z0-9._-]` run with `_`, so `"M 3 (mosaic)"` → `M_3_mosaic` — and a
+  target literally named `M 3_mosaic` maps to **the same safe name**. Two different targets, one project
+  directory. It does **not** bite the owner today only because `make_safe_name` deliberately preserves case and
+  their device writes the output folder as `M 3_MOSAIC` → `M_3_MOSAIC`. A firmware (or a hand-renamed folder)
+  that spelled it lowercase would land the on-device mosaic output and the real mosaic target on one another.
+  **Why not to fix it here:** changing `make_safe_name`'s output is a rename of on-disk directories, which §9
+  rules out outright, and the registry's own collision handling is the thing to read first
+  (`Library.create_target` raises `FileExistsError`; what an *ingest* does with that is the real question).
+  **The cheap, safe slice if this is ever taken:** detect the collision at scan time and *report* it (a
+  cleanup-style nudge naming both folders) rather than silently merging two objects into one project.
+  **Grep before starting:** `make_safe_name`, `open_or_create_target`, and the `(mosaic)` suffix in
+  `_apply_seestar_convention`.
+
 - **⭐ QA LEAD (Builder 2026-08-30, the ⭐ "normalises against its own subset" lead's *unswept* axis, now with a
   named candidate and a mechanism) — the Auto preset picker's four scene fractions are thresholded above a
   **noise-aware** floor, so they are a monotone function of how deep the stack is.** *(Pillar: image quality +
@@ -10194,7 +10270,33 @@ to **Shipped**.)_
   baseline built by sorting and taking `[0]`, an SQL `MIN()`/`ORDER BY … LIMIT 1`, or a "personal best" phrase
   in copy whose number comes from somewhere else. Those are the four shapes worth an hour.
 
-- **NEW IDEA (Builder 2026-08-30, the natural next tap on the v0.319.1 verdict fix) — let the Nights card's
+- **✅ SHIPPED (Builder, v0.319.5, branch `claude/compassionate-galileo-ehnbid`) — ~~let the Nights card's
+  "soft" badge say what it was compared against.~~** Built as filed, with the entry's own decision taken the
+  way it recommended: a **nullable `typical_fwhm_px` on `NightSummaryOut`**, additive and optional, so an older
+  frontend simply ignores it and a lone judgeable night sends `null` (there *is* no baseline, and the UI must
+  stay silent rather than invent one). The number is the same leave-one-out median `_typical_other_fwhm`
+  already computed for the verdict — it was thrown away a line later — so the badge and the verdict can never
+  quote different yardsticks.
+
+  **Kept to a tooltip, not a fourth column**, exactly as the entry's Care note demanded: a Mantine `Tooltip`
+  plus an `aria-label` carrying the same sentence, so it is reachable by keyboard and screen reader without
+  adding a pixel to the busiest page in the app. A test asserts the sentence is *not* rendered as row text.
+
+  **Copy, and one thing it must never say:** *"5.2 px stars — softer than this target's usual 3.4 px."* A test
+  asserts the sentence never says "best" or "sharpest" — the baseline is the median of the other nights, so
+  quoting it as anyone's best would be a number nobody achieved, which is exactly the untruth the v0.319.1 fix
+  removed from the sibling nudge one card up. A `sharp` night gets the same yardstick without the judgement;
+  `hazy` explains itself by its clouds (it is a cloud verdict, not a sharpness one) and quotes no pixels.
+
+  **Upgrade-safe (§9):** one additive nullable API field and one dataclass field; no config, schema, on-disk or
+  default change.
+
+  **Tests (+2 engine, +1 endpoint, +7 frontend):** the baseline reported on each row is the leave-one-out median and never
+  the night's own number (three nights, 5.0/3.4/3.0 → baselines 3.2/4.0/4.2); a lone night reports `None`;
+  the endpoint serialises both cases; the four tooltip shapes; and the card renders the label on the badge,
+  stays bare when an older backend sends no baseline, and never inlines the sentence.
+
+  *(Original spec.)* **NEW IDEA (Builder 2026-08-30, the natural next tap on the v0.319.1 verdict fix) — let the Nights card's
   "soft" badge say what it was compared against.** *(Pillar: friendliness + trust — PRIORITY 3; size XS;
   frontend-only, the number is already on the row.)* The badge is a bare word — `soft`, in yellow — sitting
   beside a button that offers to discard the night. The Last-session nudge one card up says the whole thing

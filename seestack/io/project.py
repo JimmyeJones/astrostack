@@ -264,6 +264,12 @@ REJECT_REASON_SEESTAR_OUTPUT = "auto:seestar_output"
 # ``_MAX_JUNK_OUTPUT_FRAMES`` (kept local to avoid a scanner→project import cycle).
 _MAX_SEESTAR_OUTPUT_FRAMES = 2
 
+# Seestar capture folders that hold finished pictures rather than raw subs — a
+# video clip or a single-shot still. Frames from either are junk in a deep-sky
+# stack whatever their count, so they are rejected without the size guard above.
+# Mirrors the scanner's ``_CAPTURE_SUFFIXES`` (kept local for the same reason).
+_CAPTURE_FOLDER_SUFFIXES = ("_video", "_photo")
+
 
 class Project:
     """Handle to a Seestack project directory and its SQLite database."""
@@ -753,7 +759,8 @@ class Project:
     def reject_seestar_output_frames(self, output_folder: str) -> list[int]:
         """Additively reject already-registered frames that live in the Seestar's
         own on-device *output* folder for this target (the bare ``<T>/`` beside
-        the authoritative ``<T>_sub/``), or in a ``*_video/`` capture folder.
+        the authoritative ``<T>_sub/``), or in a ``*_video/``/``*_photo/``
+        capture folder.
 
         This heals a library first scanned **before** the Seestar folder
         convention shipped (v0.184.9): back then the scanner ingested the
@@ -768,7 +775,8 @@ class Project:
 
         ``output_folder`` is the bare target-folder basename (``"<T>"``); a frame
         is treated as output when its source's immediate parent folder matches it
-        (case-insensitively) or is a ``*_video`` folder. A frame the user manually
+        (case-insensitively) or is a ``*_video``/``*_photo`` folder. A frame the
+        user manually
         accepted (``user_override``) is left untouched, and a frame already
         rejected is not re-touched — so a re-scan is idempotent.
 
@@ -778,8 +786,9 @@ class Project:
         the on-device output, and its frames are **never** rejected — otherwise a
         mixed-source library with a genuine ``<T>/`` folder of raw subs sitting
         beside a Seestar ``<T>_sub/`` (same basename) would silently lose whole
-        sessions from its stack. ``*_video`` captures legitimately hold many frames
-        and are all junk, so they are not size-guarded.
+        sessions from its stack. ``*_video`` captures and ``*_photo`` snapshot
+        folders legitimately hold many frames and are all junk, so they are not
+        size-guarded.
 
         Returns the ids of the frames newly rejected by this call.
         """
@@ -788,11 +797,12 @@ class Project:
         if not base_low:
             return []
         # Group bare-``<T>/`` candidates by their actual folder path so the
-        # single-image size check is applied per folder; ``*_video`` frames reject
-        # unconditionally. Matching the full parent *path* (not just the basename)
-        # also keeps a same-named folder elsewhere on disk from cross-triggering.
+        # single-image size check is applied per folder; ``*_video``/``*_photo``
+        # frames reject unconditionally. Matching the full parent *path* (not just
+        # the basename) also keeps a same-named folder elsewhere on disk from
+        # cross-triggering.
         output_by_folder: dict[str, list[int]] = {}
-        video_ids: list[int] = []
+        capture_ids: list[int] = []
         for frame in list(self.iter_frames()):
             if frame.id is None or frame.user_override or not frame.accept:
                 continue
@@ -800,9 +810,9 @@ class Project:
             parent_low = parent.name.lower()
             if parent_low == base_low:
                 output_by_folder.setdefault(str(parent), []).append(frame.id)
-            elif parent_low.endswith("_video"):
-                video_ids.append(frame.id)
-        to_reject: list[int] = list(video_ids)
+            elif parent_low.endswith(_CAPTURE_FOLDER_SUFFIXES):
+                capture_ids.append(frame.id)
+        to_reject: list[int] = list(capture_ids)
         for ids in output_by_folder.values():
             if len(ids) <= _MAX_SEESTAR_OUTPUT_FRAMES:
                 to_reject.extend(ids)
@@ -824,6 +834,21 @@ class Project:
         sql += " ORDER BY id"
         for row in self._conn.execute(sql):
             yield _row_to_frame(row)
+
+    def source_paths(self) -> list[str]:
+        """Every registered frame's ``source_path``, in id order.
+
+        A narrow, cheap alternative to ``iter_frames()`` for the folder-shape
+        questions the library-cleanup detectors ask ("do all these frames sit in
+        one ``*_sub/`` folder?", "does the base target already own every one of
+        them?"): one column, no ``FrameRow`` built per row — which matters on a
+        real target with thousands of subs, polled from the Library page.
+        """
+        assert self._conn is not None
+        return [
+            row[0] for row in self._conn.execute(
+                "SELECT source_path FROM frames ORDER BY id")
+        ]
 
     def count(self, accepted_only: bool = False) -> int:
         assert self._conn is not None

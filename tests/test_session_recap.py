@@ -503,6 +503,43 @@ def test_nights_breakdown_flags_a_soft_night_against_the_best(tmp_path):
         proj.close()
 
 
+def test_nights_breakdown_reports_the_baseline_each_verdict_was_judged_against(tmp_path):
+    """A night's verdict is a *comparison*, and the badge that shows it sits next
+    to a button offering to discard the night — so the number it was compared
+    against comes back on the row, and it is the same leave-one-out median the
+    verdict itself used (never the night's own median)."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for n, fwhm in enumerate((3.0, 3.4, 5.0)):
+            base = datetime(2026, 7, 1 + 7 * n, 22, 0, 0)
+            for i in range(5):
+                proj.add_frame(_frame(base + timedelta(seconds=30 * i), fwhm_px=fwhm))
+        nights = nights_breakdown(proj)  # newest first: 5.0, 3.4, 3.0
+        assert [n.median_fwhm_px for n in nights] == [5.0, 3.4, 3.0]
+        # Each night sees the median of the OTHER two, never its own number.
+        assert [n.typical_fwhm_px for n in nights] == [3.2, 4.0, 4.2]
+        assert nights[0].verdict == "soft"
+        # 5.0 vs a baseline of 3.2 is exactly what the badge must be able to say.
+        assert nights[0].median_fwhm_px > nights[0].typical_fwhm_px
+    finally:
+        proj.close()
+
+
+def test_nights_breakdown_has_no_baseline_for_a_lone_night(tmp_path):
+    """One judgeable night has nothing to be compared against, so there is no
+    baseline to report — and the UI must stay silent rather than invent one."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        base = datetime(2026, 7, 8, 22, 0, 0)
+        for i in range(5):
+            proj.add_frame(_frame(base + timedelta(seconds=30 * i), fwhm_px=3.0))
+        nights = nights_breakdown(proj)
+        assert len(nights) == 1
+        assert nights[0].typical_fwhm_px is None
+    finally:
+        proj.close()
+
+
 def test_nights_breakdown_flags_a_cloudy_night_hazy(tmp_path):
     """A night that lost ≥40% of its subs to cloud → 'hazy', which takes
     precedence over a sharpness judgement even if the survivors are sharp."""

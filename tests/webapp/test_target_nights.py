@@ -71,6 +71,57 @@ def test_nights_serialises_verdict_and_reject_buckets(client, solved_library, da
     assert nights[0]["n_kept"] == 1
 
 
+def _add_measured_night(
+    data_root: Path, safe: str, stamp_fmt: str, fwhm_px: float, n: int = 5,
+) -> None:
+    """Add ``n`` accepted, FWHM-measured subs one minute apart — enough for the
+    night to be judgeable (the verdict refuses to judge sharpness on thin data)."""
+    from seestack.io.project import FrameRow
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for i in range(n):
+                proj.add_frame(FrameRow(
+                    source_path=f"/dump/{safe}/{stamp_fmt % i}_{fwhm_px}.fit",
+                    timestamp_utc=stamp_fmt % i,
+                    fwhm_px=fwhm_px,
+                    exposure_s=10.0,
+                ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_nights_serialises_the_baseline_each_verdict_was_judged_against(
+    client, solved_library, data_root,
+):
+    """The badge the frontend draws from ``verdict`` sits beside a button that
+    discards the night, so the number behind the judgement has to come with it.
+    ``null`` on a lone night — there is nothing to compare against."""
+    # One night, no other night to be judged against.
+    _stamp(data_root, "M_42", {
+        0: {"fwhm_px": 3.0}, 1: {"fwhm_px": 3.0},
+        2: {"fwhm_px": 3.0},
+    })
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert len(nights) == 1
+    assert nights[0]["typical_fwhm_px"] is None
+
+    # Now give the target two judgeable nights: each sees the OTHER's median.
+    _add_measured_night(data_root, "M_42", "2026-07-01T22:%02d:00+00:00", 3.0)
+    _add_measured_night(data_root, "M_42", "2026-07-08T22:%02d:00+00:00", 5.0)
+    nights = client.get("/api/targets/M_42/nights").json()
+    judgeable = [n for n in nights if n["median_fwhm_px"] is not None]
+    assert len(judgeable) == 2
+    newest, oldest = judgeable
+    assert newest["median_fwhm_px"] == 5.0
+    assert newest["typical_fwhm_px"] == 3.0   # the other night, not its own 5.0
+    assert oldest["typical_fwhm_px"] == 5.0
+
+
 def _bounds(client, safe: str, ordinal: int = 0) -> dict:
     """The start/end bounds of the target's `ordinal`-th night (newest first)."""
     nights = client.get(f"/api/targets/{safe}/nights").json()

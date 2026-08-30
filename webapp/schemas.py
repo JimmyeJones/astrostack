@@ -332,6 +332,12 @@ class NightSummaryOut(BaseModel):
     kept_exposure_s: float
     median_fwhm_px: float | None = None
     verdict: str                         # "sharp" | "soft" | "hazy" | "" (too few measured)
+    # What the verdict was measured against: the median of the target's OTHER
+    # nights' median FWHMs. Additive and optional (``None`` when this is the only
+    # judgeable night, and an older frontend simply ignores it) — it lets the
+    # "soft" badge say *why* it is yellow, which matters because the button
+    # beside it offers to discard the night.
+    typical_fwhm_px: float | None = None
     is_best: bool = False
     reject_buckets: dict[str, int] = {}
 

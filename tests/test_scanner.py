@@ -588,6 +588,29 @@ def test_reject_seestar_output_frames_rejects_a_multi_frame_video_folder(tmp_pat
         proj.close()
 
 
+def test_reject_seestar_output_frames_rejects_a_multi_frame_photo_folder(tmp_path):
+    """Same family as the ``*_video`` case above, and the half the scan-time
+    ``_photo`` skip does not reach: a ``*_photo`` stills folder an old whole-card
+    drop already merged into a real target holds many finished snapshots, all junk
+    in a deep-sky stack. The single-image size guard must not spare them either —
+    otherwise that target keeps averaging finished pictures into its own."""
+    proj = Project.create(tmp_path / "proj", name="M 31")
+    try:
+        root = tmp_path / "incoming"
+        photos = [
+            proj.add_frame(FrameRow(
+                source_path=str(root / "Scenery_photo" / f"IMG_{i:03d}.fit")))
+            for i in range(6)
+        ]
+        keep = proj.add_frame(FrameRow(
+            source_path=str(root / "M 31_sub" / "Light_001.fit")))
+        rejected = proj.reject_seestar_output_frames("M 31")
+        assert set(rejected) == set(photos)      # every snapshot, none spared
+        assert keep not in rejected              # the real subs are untouched
+    finally:
+        proj.close()
+
+
 def test_rescan_rejects_pre_v0_184_9_output_pollution_end_to_end(tmp_path):
     """Upgrade path: a library first scanned before the Seestar convention
     shipped merged the on-device output into the ``<T>`` target. Re-scanning with
