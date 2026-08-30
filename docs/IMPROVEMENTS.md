@@ -360,6 +360,82 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🔴 OWNER-REPORTED WITH SCREENSHOT (2026-08-31) — "Same object in more than one folder?" offers to merge a
+  target with its OWN DUPLICATE, calls it "shot on separate nights", and DOUBLE-COUNTS the integration time in
+  the headline figure. The app already knows these are duplicates — a different feature detects them — but the
+  merge suggester never asks.** *(Severity: high broken-UX / actively misleading, **not** data corruption — see
+  the safety note below. Confidence: HIGH, traced end-to-end in code against the owner's real library data.
+  Owner's words: "it is still having issues with combining/distinguishing target folders.")*
+
+  **The owner's live library (from the screenshot) — every near-identical pair is the same physical files
+  counted twice:**
+  | Card | Members (subs · integration) | Headline claim | Real unique |
+  |---|---|---|---|
+  | M 3 | `M 3` 5477·30h, `M 3_SUB` 5455·30h, `M 3_MOSAIC_SUB` 253·1.4h, `M 3 (mosaic)` 253·1.4h, `M 3_MOSAIC` 1·20s | **"64 h total"** | **~31 h** |
+  | M 44 | `M 44_MOSAIC_SUB` 3588·20h, `M 44 (mosaic)` 3588·20h, `M 44_MOSAIC` 11·3min | "40 h total" | ~20 h |
+  | NGC 6960 | `NGC 6960_MOSAIC_SUB` 1779·9.9h, `NGC 6960 (mosaic)` 1779·9.9h, `NGC 6960_MOSAIC` 7·2min | "20 h total" | ~9.9 h |
+  | M 13 | `M 13` 3628·20h, `M 13_SUB` 3619·20h | "40 h total" | ~20 h |
+  | M 101 | `M 101` 2503·14h, `M 101_SUB` 2492·14h | "28 h total" | ~14 h |
+  | NGC 281W | `NGC 281W` 1788·9.9h, `NGC 281W_SUB` 1778·9.9h | "20 h total" | ~9.9 h |
+  The signature is unmistakable: the bare target holds the `_sub` target's frames **plus** a handful more
+  (5477−5455=22, 3628−3619=9, 2503−2492=11, 1788−1778=10 — the on-device output images). This is exactly the
+  documented pre-v0.184.9 legacy-duplicate shape: the convention now maps `<T>_sub/` → target `<T>`, so a
+  re-scan registers those subs under `<T>` while the old `<T>_sub`-named target lingers holding the *same*
+  frames. (`NGC 6888` 4815·27h vs `NGC 6888_SUB` 3110·17h is the one pair with genuinely different counts —
+  possibly a real two-folder case; the fix must not break that.)
+
+  **✅ SAFETY NOTE — VERIFIED, DO NOT PANIC-FIX: clicking "Combine" would NOT corrupt the picture.**
+  `merge_projects` (`seestack/io/merge.py:~60`) dedupes on the canonical realpath key precisely so "a change of
+  path spelling for one physical file … must not merge the same frame twice → double-weighted in the stack".
+  The duplicate frames are counted as `dup` and skipped. So the damage is **trust and confusion, not pixels**:
+  the owner clicks expecting a 64-hour-deep M 3 and gets back the ~31 h they already had, with nothing visibly
+  changed. That is why this reads to them as the app being broken.
+
+  **Root cause (traced):** `merge_suggestions` (`webapp/routers/targets.py:113`) calls
+  `find_same_object_target_groups` (`seestack/io/library.py`), which clusters **purely by plate-solved sky
+  position** (union-find over haversine separation) and has **zero awareness of duplicate relationships**.
+  Meanwhile `cleanup_suggestions`, *in the same router file* (`webapp/routers/targets.py:~160`), already
+  detects this exact case via `duplicate_sub_target_base_name` (`seestack/io/scanner.py`) and describes it
+  correctly: "`<T>_sub`-named **duplicates** holding the same raw subs the base target `<T>` now owns (clutter
+  + double compute)". **The two features disagree about the same pair of targets** — one says "delete the
+  duplicate", the other says "combine these two separate nights" — and merge is the louder, more inviting one.
+
+  **Fix direction (all three parts; each is small, and part 1 is the one the owner sees):**
+  1. **Exclude known-duplicate pairs from merge suggestions and route them to cleanup instead.** Before
+     building a group, drop members that `duplicate_sub_target_base_name` flags *whose base target is also in
+     the same group* (the base already owns those frames). If a group collapses to one real member, drop the
+     group entirely. The correct nudge for these is the existing "remove the duplicate" cleanup card, not a
+     merge. **Also fix the arithmetic**: the headline total must sum *unique* integration, never the raw sum
+     across duplicate members — and while you're there, the copy says "shot on separate nights", which is a
+     claim the clustering never actually established (it clusters on position alone); soften it to something
+     the data supports.
+  2. **`_mosaic_sub` duplicates currently have NO cleanup path at all** — `duplicate_sub_target_base_name`
+     explicitly bails on them (`if not low.endswith(_SUB_SUFFIX) or low.endswith(_MOSAIC_SUB_SUFFIX): return
+     None`, commented "deliberately left to its own bug"). The owner has **three** of them (`M 3_MOSAIC_SUB`,
+     `M 44_MOSAIC_SUB`, `NGC 6960_MOSAIC_SUB`), each duplicating its `<T> (mosaic)` sibling exactly. Extend the
+     detector to the mosaic case: base name for `<T>_mosaic_sub` is the mosaic target `<T> (mosaic)`, not `<T>`.
+  3. **The junk-output cleanup cap is too tight for a mosaic.** `classify_seestar_junk_target` only considers a
+     target with `n_frames <= _MAX_JUNK_OUTPUT_FRAMES` (**2**, `seestack/io/scanner.py:266`), which is right for
+     a single-field on-device output (one stacked image) but **wrong for a mosaic, whose on-device output is one
+     image per panel**. Owner's real data proves it: `M 44_MOSAIC` = **11 frames**, `NGC 6960_MOSAIC` = **7
+     frames** — both sail past the ≤2 gate and are never even examined, so they linger as junk targets forever.
+     (`M 3_MOSAIC` = 1 frame does qualify.) Raise/relax the cap for the `_mosaic` case specifically — keep it
+     conservative, keep the "sibling `_sub` folder actually exists on disk" positive-evidence requirement that
+     stops a real target being mistaken for junk.
+
+  **📌 THIS OWNER DATA UNBLOCKS AN ENTRY THAT HAS BEEN GATED FOR OVER A MONTH.** The open item "The
+  Seestar-aware scanner skips a bare `<T>/` on-device output folder only when a `<T>_sub` sibling is present,
+  never a `<T>_mosaic_sub` sibling" (filed 2026-07-24, further down this file) says it could not be shipped
+  because *"whether an S30/S50 actually names a mosaic's on-device stacked output as bare `<T>/` vs
+  `<T>_mosaic/` … is device-specific and could not be confirmed in-repo."* **The owner's S30 library answers
+  it: the device uses `<T>_mosaic/`** — `M 3_MOSAIC`, `M 44_MOSAIC` and `NGC 6960_MOSAIC` all exist as live
+  targets holding a handful of frames each. That entry also assumed `<T>_mosaic/` was already "collapsed and
+  skipped" by the suffix-strip; these targets existing proves that assumption needs re-checking. **Caveat, be
+  honest about it:** a screenshot cannot distinguish "the scanner still creates these today" from "these are
+  pre-v0.184.9 leftovers that cleanup simply can't reach" — so **confirm with a repro before changing scanner
+  behaviour**; parts 2 and 3 above are worth doing either way, because they heal a library that already has
+  them.
+
 - **✅ SHIPPED (Builder, v0.318.1, branch `claude/compassionate-galileo-cwqy3x`) — ~~the target classifier reads
   a thin stack's **grain as colour**, so a picture with no colour in it is suggested the nebula preset until you
   stack it deep enough.~~** The **second confirmed instance** of the ⭐ "normalises against its own subset" QA
