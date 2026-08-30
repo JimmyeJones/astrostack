@@ -501,12 +501,54 @@ _(nothing else claimed — claim an item here with your branch name)_
   cap for mosaics, whose on-device output is one image per panel — the owner's 11 and 7 frame counts being the
   proof). Lower risk than it looked; don't go rewriting the convention mapper.
 
-- **🔴 OWNER-REPORTED WITH SCREENSHOT (2026-08-31) — "Same object in more than one folder?" offers to merge a
-  target with its OWN DUPLICATE, calls it "shot on separate nights", and DOUBLE-COUNTS the integration time in
-  the headline figure. The app already knows these are duplicates — a different feature detects them — but the
-  merge suggester never asks.** *(Severity: high broken-UX / actively misleading, **not** data corruption — see
-  the safety note below. Confidence: HIGH, traced end-to-end in code against the owner's real library data.
-  Owner's words: "it is still having issues with combining/distinguishing target folders.")*
+- **✅ SHIPPED, ALL THREE PARTS (Builder, v0.319.3, branch `claude/compassionate-galileo-hyk4jn`) —
+  ~~"Same object in more than one folder?" offers to merge a target with its OWN DUPLICATE, calls it "shot on
+  separate nights", and DOUBLE-COUNTS the integration time in the headline figure.~~** The owner-reported bug,
+  fixed at the root the entry identified: **two features held the same fact and only one of them knew it.**
+
+  **The fix is a shared answer, not a second opinion.** `webapp/duplicate_targets.py` is now the single
+  definition of "is this target a duplicate of that one", and both the merge suggester and cleanup-suggestions
+  read it — so the pair the cleanup card calls a duplicate can no longer be the pair the merge card calls two
+  separate nights. It is deliberately in two halves so an ordinary library pays nothing: a pure name-shape test
+  (`duplicate_base_safe`, no I/O) rules the question out for all but a handful of targets, and only then does
+  `confirm_duplicate_of_base` open both projects to check the base owns **every** one of the other's frames.
+
+  **The entry's own "must not break this" case is what that confirmation is for**, and it has a test:
+  `NGC 6888` (4815 subs) beside `NGC 6888_SUB` (3110) holds *different* frames, so the base does not own them
+  all, and that pair is still offered as the real merge it may be. A name-only rule would have silently
+  suppressed it — which is why the cheap test only *gates* the expensive one and never decides alone.
+
+  **The arithmetic fixed itself, correctly.** Rather than special-casing the sum, the endpoint drops confirmed
+  duplicates and then **re-clusters the survivors through the same tested helper** — so the centre, the "all
+  within N′" figure and the headline total all describe the targets actually being offered. (Re-clustering
+  rather than patching the group also handles a single-linkage chain that legitimately splits in two once a
+  member leaves.) A group that collapses below two real members disappears entirely and lands in the cleanup
+  nudge, which is the correct offer for it.
+
+  **Copy:** "shot on separate nights" is gone. The clustering is on plate-solved position and knows nothing
+  about *when* anything was shot; it now says "in separate folders", with a test that the sentence never says
+  "night".
+
+  **Parts 2 and 3 shipped in the same commit, because part 1 needs part 2 to see the owner's mosaics:**
+  `duplicate_sub_target_base_name` now maps `<T>_mosaic_sub` → `<T> (mosaic)` (the base is the *mosaic*
+  target, not the single field — different footprint), taking the `(mosaic)` spelling from
+  `_apply_seestar_convention` itself with a test asserting the two agree by construction; and
+  `junk_output_frame_cap()` gives a mosaic's on-device output a looser cap (32) than a single field's (2),
+  because a mosaic's output is one image **per panel** — the owner's 11-frame `M 44_MOSAIC` and 7-frame
+  `NGC 6960_MOSAIC` never reached the classifier at all. The positive-evidence requirement is untouched (the
+  bare `<T>_mosaic/` folder's `<T>_mosaic_sub/` raw-subs sibling must actually be on disk), 32 is an order of
+  magnitude below any real target, and the detail copy no longer calls eleven images "its own single stacked
+  image". The webapp's duplicate `_MAX_CLEANUP_FRAMES = 2` is gone — the endpoint reads the engine's cap, so
+  the two can't drift.
+
+  **Upgrade-safe (§9):** read-only endpoints, no config/schema/on-disk change, no default flipped, no API
+  shape change (both endpoints return the same models — one returns *fewer*, more honest, rows).
+  **Tests: +4 merge endpoint (3 fail before; the fourth is the `NGC 6888` guard, which must pass both ways),
+  +2 cleanup endpoint (both fail before), +5 scanner, +1 frontend.**
+
+    *(Original spec kept below. Severity: high broken-UX / actively misleading, **not** data corruption — see
+    the safety note. Confidence: HIGH, traced end-to-end in code against the owner's real library data.
+    Owner's words: "it is still having issues with combining/distinguishing target folders.")*
 
   **The owner's live library (from the screenshot) — every near-identical pair is the same physical files
   counted twice:**

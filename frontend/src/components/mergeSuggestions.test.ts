@@ -55,6 +55,15 @@ describe("describeMergeSuggestion", () => {
     expect(text).toContain("50 min total");  // 3000 s
   });
 
+  it("does not claim the targets were shot on separate nights", () => {
+    // The backend clusters on plate-solved sky position alone and knows nothing
+    // about *when* anything was shot — the old wording asserted a fact the
+    // detection never established, on a nudge the owner was already mistrusting.
+    const text = describeMergeSuggestion(suggestion());
+    expect(text).not.toMatch(/night/i);
+    expect(text).toContain("in separate folders");
+  });
+
   it("drops the object clause when unnamed", () => {
     const text = describeMergeSuggestion(suggestion({ object_name: null }));
     expect(text).not.toContain("Andromeda");

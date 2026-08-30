@@ -119,21 +119,56 @@ def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
     offer a one-click "combine into one deep stack" nudge. Read-only: it only
     reads each target's plate-solved centre + integration figures and clusters by
     sky position; it never merges anything (the user confirms via ``POST
-    /merge``). Returns ``[]`` when nothing clusters."""
+    /merge``). Returns ``[]`` when nothing clusters.
+
+    **Known duplicates are dropped from a group before it is offered.** Position
+    clustering alone cannot tell "the same object shot on two nights" from "the
+    same *files* registered twice under two folder spellings" — the two sit at
+    identical coordinates, so a leftover ``<T>_sub``/``<T>_mosaic_sub`` duplicate
+    always clustered with its own base target. The nudge then invited the owner to
+    combine a target with itself and summed the same hours twice in the headline
+    figure ("64 h total" for ~31 h of real data). Cleanup-suggestions already
+    detects exactly this pair and calls it a duplicate; the two features
+    contradicting each other about the same two targets is what read as the app
+    being broken. Confirming a duplicate costs two project reads, so it is gated
+    on a pure name-shape test *and* on the base being in the same group — an
+    ordinary library pays nothing. A group that collapses below two real members
+    is dropped entirely, and lands in the cleanup nudge instead, which is the
+    correct offer for it."""
     from seestack.io.library import find_same_object_target_groups
     from seestack.objectinfo import identify_object
+    from webapp.duplicate_targets import (
+        confirm_duplicate_of_base,
+        duplicate_base_safe,
+    )
 
     lib = deps.open_library(request)
     try:
         groups = find_same_object_target_groups(lib.list_targets())
+        survivors = []
+        for g in groups:
+            in_group = {m.safe_name: m for m in g.members}
+            survivors.extend(
+                m for m in g.members
+                if confirm_duplicate_of_base(
+                    lib, m, in_group.get(duplicate_base_safe(m.name) or ""),
+                ) is None
+            )
+        # Re-cluster what survived rather than patching the old groups: the
+        # centre and the "all within N′" figure must describe the targets
+        # actually being offered, and dropping a member can legitimately split a
+        # single-linkage chain in two. Same tested helper, so the two passes
+        # cannot disagree; the second is over a handful of rows.
+        groups = find_same_object_target_groups(survivors)
     finally:
         lib.close()
 
     out: list[MergeSuggestionOut] = []
     for g in groups:
+        members = g.members
         # Name the cluster from its deepest member (offline catalog), best-effort —
         # a null name just drops the "(M 31)" clause in the nudge, never errors.
-        info = identify_object(g.members[0].name, g.center_ra_deg, g.center_dec_deg)
+        info = identify_object(members[0].name, g.center_ra_deg, g.center_dec_deg)
         object_name = (info.name or info.id) if info else None
         out.append(MergeSuggestionOut(
             object_name=object_name,
@@ -147,17 +182,10 @@ def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
                     n_frames_accepted=m.n_frames_accepted,
                     total_exposure_s=m.total_exposure_s,
                 )
-                for m in g.members
+                for m in members
             ],
         ))
     return out
-
-
-# A real light-frame stack has many subs; only a 1-frame on-device output (or a
-# ``_video`` target, handled by name regardless of count) is a cleanup candidate.
-# Skipping the big ones by frame count avoids opening their projects and scanning
-# thousands of source paths on every poll.
-_MAX_CLEANUP_FRAMES = 2
 
 
 @router.get("/cleanup-suggestions", response_model=list[CleanupSuggestionOut])
@@ -166,16 +194,26 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
     the Seestar folder convention, so the Library can offer a one-click "remove
     these" cleanup. Two kinds: (1) *junk* targets built from the Seestar's own
     output / ``_video`` / ``_photo`` folders (not raw subs, cannot be stacked); (2)
-    ``<T>_sub``-named *duplicates* holding the same raw subs the base target ``<T>``
-    now owns (clutter + double compute, not corrupt data). Read-only: it never
-    deletes anything (the user confirms via ``DELETE /api/targets/{safe}``), and
-    never touches the real ``_sub`` data or the base target. Returns ``[]`` when
-    the library is clean."""
-    from seestack.io.library import make_safe_name
+    ``<T>_sub`` / ``<T>_mosaic_sub``-named *duplicates* holding the same raw subs
+    the base target (``<T>`` / ``<T> (mosaic)``) now owns (clutter + double
+    compute, not corrupt data). Read-only: it never deletes anything (the user
+    confirms via ``DELETE /api/targets/{safe}``), and never touches the real
+    ``_sub`` data or the base target. Returns ``[]`` when the library is clean.
+
+    A real light-frame stack has many subs, so only a *tiny* target can be an
+    on-device output. Skipping the big ones by frame count avoids opening their
+    projects and scanning thousands of source paths on every poll; the cap is the
+    engine's own (``junk_output_frame_cap``, looser for a mosaic — whose on-device
+    output is one image *per panel*) so the two can't drift. A ``_video``/``_photo``
+    capture target is decided by name instead, at any frame count."""
     from seestack.io.scanner import (
         classify_seestar_junk_target,
-        duplicate_sub_target_base_name,
         is_capture_mode_target_name,
+        junk_output_frame_cap,
+    )
+    from webapp.duplicate_targets import (
+        confirm_duplicate_of_base,
+        duplicate_base_safe,
     )
 
     lib = deps.open_library(request)
@@ -211,7 +249,10 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
             # A ``_video``/``_photo`` name is decided by name alone, at any frame
             # count (the folder holds clips or stills, however many).
             is_capture_name = is_capture_mode_target_name(entry.name)
-            if is_capture_name or entry.n_frames <= _MAX_CLEANUP_FRAMES:
+            if (
+                is_capture_name
+                or entry.n_frames <= junk_output_frame_cap(entry.name)
+            ):
                 source_paths: list[str] = []
                 if not is_capture_name:
                     proj = lib.open_target(entry.safe_name)
@@ -232,48 +273,22 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
                     continue  # a junk target is never also a duplicate
 
             # --- (2) <T>_sub duplicate of a base target that now owns the subs -
-            # Cheap name-shape prefilter: only ``_sub``-named targets (rare) reach
-            # the project-opening confirmation below.
-            low = entry.name.strip().lower()
-            if not low.endswith("_sub") or low.endswith("_mosaic_sub"):
+            # Cheap name-shape prefilter (pure, no I/O): only ``*_sub``-named
+            # targets — including ``*_mosaic_sub``, whose base is the
+            # ``<T> (mosaic)`` target — reach the project-opening confirmation.
+            base_safe = duplicate_base_safe(entry.name)
+            if base_safe is None:
                 continue
-            proj = lib.open_target(entry.safe_name)
-            try:
-                dup_sources = [f.source_path for f in proj.iter_frames()]
-                # A genuine leftover duplicate holds nothing but re-registered raw
-                # subs. If this target *also* carries the user's own data — a
-                # stack-run history — then it is not disposable: the frontend's
-                # one-click cleanup deletes the registry target (keeping the files
-                # on disk), which would silently drop that history from the UI.
-                # Never offer such a target for removal (the base owns the subs,
-                # but the runs live only here). See the notes check below for the
-                # matching free-text-notes guard.
-                dup_has_runs = next(proj.iter_stack_runs(), None) is not None
-            finally:
-                proj.close()
-            base_name = duplicate_sub_target_base_name(entry.name, dup_sources)
-            if base_name is None:
+            dup = confirm_duplicate_of_base(lib, entry, by_safe.get(base_safe))
+            if dup is None:
                 continue
-            base = by_safe.get(make_safe_name(base_name))
-            if base is None or base.safe_name == entry.safe_name:
-                continue
-            base_proj = lib.open_target(base.safe_name)
-            try:
-                base_sources = {f.source_path for f in base_proj.iter_frames()}
-            finally:
-                base_proj.close()
-            # Offer removal only when the base already owns *every* one of these
-            # subs — so nothing real is lost, and the message is truthful — and
-            # only when this duplicate carries no user-owned data of its own
-            # (stack-run history or free-text notes), which a one-click removal
-            # would drop from the UI even though the files stay on disk.
+            # The base owns *every* one of these subs, so nothing real is lost and
+            # the message is truthful. Offer removal only when this duplicate also
+            # carries no user-owned data of its own (stack-run history or free-text
+            # notes), which a one-click removal would drop from the UI even though
+            # the files stay on disk.
             dup_has_notes = bool((entry.notes or "").strip())
-            if (
-                dup_sources
-                and all(s in base_sources for s in dup_sources)
-                and not dup_has_runs
-                and not dup_has_notes
-            ):
+            if not dup.has_own_runs and not dup_has_notes:
                 out.append(CleanupSuggestionOut(
                     safe=entry.safe_name,
                     name=entry.name,
@@ -281,9 +296,10 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
                     reason="duplicate_sub",
                     detail=(
                         "A leftover from an older scan — these are the same raw "
-                        f"subs, now already in your “{base.name}” target. Removing "
-                        "this duplicate tidies your library and saves re-stacking "
-                        "the same frames twice; your files on disk are untouched."
+                        f"subs, now already in your “{dup.base_name}” target. "
+                        "Removing this duplicate tidies your library and saves "
+                        "re-stacking the same frames twice; your files on disk are "
+                        "untouched."
                     ),
                 ))
     finally:
