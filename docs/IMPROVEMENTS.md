@@ -43,9 +43,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-> **Builder 2026-08-30, branch `claude/compassionate-galileo-7y6nlj` — CLAIMED, by site.** Taking the top open
-> item under "Autonomy & friendliness": **record how many *nights* went into a stack**, so a caption can say
-> "over 4 nights" instead of naming two dates. Sites I will touch: `seestack/stack/stacker.py`
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-7y6nlj` — claim released, shipped as v0.315.0.**
+> The top open item under "Autonomy & friendliness": **record how many *nights* went into a stack**, so a
+> caption can say "over 4 nights" instead of naming two dates. The entry offered two shapes and named the
+> read-time one honest; it is, with one refinement — **night dates cannot be what gets stored**, because a
+> night date is already the answer to "for which longitude?". *Hours* are the smallest thing that still
+> supports re-bucketing, and a 500-sub night is five of them. Full write-up on the entry under "Autonomy &
+> friendliness". Sites touched: `seestack/stack/stacker.py`
 > (`_capture_hours`, the `add_stack_run` call), `seestack/io/project.py` (schema **19**, additive
 > `capture_hours_json`), `webapp/capture_nights.py` (`capture_night_count`), the four run-shaped API payloads
 > (`webapp/schemas.py` `StackRunOut`, `webapp/routers/gallery.py` `GalleryItem`/`BestPicture`,
@@ -9624,23 +9628,65 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-30, the one thing the v0.313.0 capture window deliberately cannot say) — record
-  how many *nights* went into a stack, so the caption can say "over 4 nights" instead of naming two dates.**
-  *(Pillar: understand + share — PRIORITY 3; size S. Confidence: the limitation is pinned by a test —
-  `captureNightsClause` asserts it "never claims a night count it cannot know".)* A run now records its first
-  and last sub (`capture_start_utc` / `capture_end_utc`), which is enough for "shot between 15 and 18 Nov
-  2024" and **not** enough for the sentence a person actually says out loud: *"600 subs over 4 nights"*. The
-  two are not the same claim — a window of 15→18 Nov is equally consistent with two nights and with four —
-  and the difference is exactly the fact that makes a beginner's picture sound like the work it was.
-  **Shape:** one more additive column, `capture_nights` (an INTEGER), counted in `stacker._capture_window`'s
-  caller as the number of **distinct observing nights** among the frames it combined. **The catch worth
-  stating before anyone starts:** the engine cannot bucket a night without the observer's longitude, which is
-  a `webapp` concern (`resolve_site_lon`), and `seestack/` may not import `webapp` (§6). So either the count
-  is UTC noon-to-noon at stack time and mildly wrong for someone far from Greenwich, or the *set of night
-  dates* is what gets stored (a short JSON array, bucketed at read time like `capture_night_range` already
-  does) — the second is the honest one and barely bigger. Then `postCaption`, `nameplate` and the History
-  card can all say it. **Grep before building:** the per-target Nights card already counts nights *for a
-  target*; this is per **run**, which is a different set the moment anyone re-stacks a subset.
+- **✅ SHIPPED (Builder, v0.315.0, branch `claude/compassionate-galileo-7y6nlj`) — ~~a picture could name the
+  first and last night it was shot on, but never how many *nights* it took.~~ It can now say "over 4 nights".**
+
+  **What shipped.** Schema **19** adds one additive column, `capture_hours_json`, and
+  `stacker._capture_hours` fills it with the distinct **UTC hours** this run's subs arrived in. A new
+  `capture_night_count` buckets those into observing nights at *read* time, through the very same
+  `night_date_of` the date range already goes through — so the count and the dates beside it can never
+  contradict each other, and both follow the owner's longitude whenever they set one. `/api/targets/{safe}/stack-runs`,
+  `/api/stats`, `/api/gallery` and the best-pictures wall all report `capture_nights`; the ready-to-post caption
+  reads *"a stack of 600 subs (5h total), shot over 4 nights, between 15 and 18 Nov 2024 with a Seestar"*, and the
+  baked acquisition nameplate (share JPEG, editor share export, print export, keepsake) reads
+  *"15-18 Nov 2024 (4 nights)"*.
+
+  **The design call the entry asked for, decided.** The entry offered two shapes — a UTC-bucketed count frozen
+  at stack time, or the *set of nights* stored and bucketed at read time — and named the second the honest one.
+  It is, and this is that, with one refinement the entry did not have: night dates cannot be stored, because a
+  night date is *already* the answer to "for which longitude?" — storing one freezes exactly the guess the
+  entry wanted to avoid. **Hours are the smallest thing that still supports re-bucketing.** A 500-sub night is
+  five entries, not five hundred, and truncating to the hour can only misbucket a frame whose hour *contains*
+  local noon — broad daylight, which is not when subs are taken.
+
+  **Neither caption invents a count.** A count only appears when the run recorded one *and* it is 2 or more
+  *and* the caption is actually showing a span: one night is already named by the date, and "15 Nov 2024
+  (4 nights)" would contradict itself. Inferring the count from the span was never on the table — it would turn
+  every two-night stack into a four-night boast.
+
+  **Upgrade-safe (§9):** one additive column with a migration from any older version (tested by rolling a real
+  DB back to schema 18 and reopening), one optional dataclass field, one optional API field every consumer
+  treats as "say nothing". No config, on-disk-layout, API-shape or default change. A run recorded before the
+  column existed captions byte-for-byte as it did in v0.314.0. An editor export inherits its source run's hours,
+  since it is the same light.
+
+  **Tests (+30):** `tests/test_capture_hours.py` (hours distinct/sorted/on-the-hour, a 500-sub night collapsing
+  to five entries, all three UTC spellings landing in one bucket, undated frames skipped, the DB round trip and
+  the schema-18 → 19 migration keeping its rows); `tests/webapp/test_capture_nights.py` (two nights counted as
+  two, **one window with two truthful counts**, the count following the observer's longitude, and unrecorded /
+  malformed / junk input answering `None` rather than zero); `tests/webapp/test_capture_date_endpoints.py` (a
+  real stack recording its own night, the sparse-vs-dense pair on one identical window, the three surfaces
+  agreeing, and the longitude case); `tests/webapp/test_nameplate_date.py` and `tests/test_nameplate.py` (the
+  baked span with its count, the count kept out of a single-date caption, the keepsake subtitle carrying it, and
+  every span shape added to the glyph-coverage assertion); plus `format.test.ts` and `postCaption.test.ts`.
+
+  Original spec, for the record:
+
+    *(Pillar: understand + share — PRIORITY 3; size S. Confidence: the limitation is pinned by a test —
+    `captureNightsClause` asserts it "never claims a night count it cannot know".)* A run now records its first
+    and last sub (`capture_start_utc` / `capture_end_utc`), which is enough for "shot between 15 and 18 Nov
+    2024" and **not** enough for the sentence a person actually says out loud: *"600 subs over 4 nights"*. The
+    two are not the same claim — a window of 15→18 Nov is equally consistent with two nights and with four —
+    and the difference is exactly the fact that makes a beginner's picture sound like the work it was.
+    **Shape:** one more additive column, `capture_nights` (an INTEGER), counted in `stacker._capture_window`'s
+    caller as the number of **distinct observing nights** among the frames it combined. **The catch worth
+    stating before anyone starts:** the engine cannot bucket a night without the observer's longitude, which is
+    a `webapp` concern (`resolve_site_lon`), and `seestack/` may not import `webapp` (§6). So either the count
+    is UTC noon-to-noon at stack time and mildly wrong for someone far from Greenwich, or the *set of night
+    dates* is what gets stored (a short JSON array, bucketed at read time like `capture_night_range` already
+    does) — the second is the honest one and barely bigger. Then `postCaption`, `nameplate` and the History
+    card can all say it. **Grep before building:** the per-target Nights card already counts nights *for a
+    target*; this is per **run**, which is a different set the moment anyone re-stacks a subset.
 
 - **⚪ AUDIT NOTE (Builder 2026-08-30, first two candidates of the v0.312.1 "normalises against its own
   subset" QA lead — NON-findings, recorded so nobody re-treads them).** The lead directly above asks for a

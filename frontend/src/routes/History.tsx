@@ -914,6 +914,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         integrationS: run.total_exposure_s,
         captureNightStart: run.capture_night_start,
         captureNightEnd: run.capture_night_end,
+        captureNights: run.capture_nights,
         scaleBar,
         fallbackName: safe,
       });
@@ -946,6 +947,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     integrationS: run.total_exposure_s,
     captureNightStart: run.capture_night_start,
     captureNightEnd: run.capture_night_end,
+    captureNights: run.capture_nights,
     scaleBar: storedPreviewScaleBar(annotations.data, run),
     fallbackName: safe,
   });

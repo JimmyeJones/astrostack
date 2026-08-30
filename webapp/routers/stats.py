@@ -17,7 +17,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from webapp import deps, video
-from webapp.capture_nights import capture_night_range
+from webapp.capture_nights import capture_night_count, capture_night_range
 from webapp.goals import read_goal_s
 from webapp.registry_cache import cached_for_registry, registry_signature
 from webapp.site_location import resolve_site_lon
@@ -60,6 +60,12 @@ class RecentStack(BaseModel):
     # a strip captioned from it dates a re-stack of 2024 subs to today.
     capture_night_start: str | None = None
     capture_night_end: str | None = None
+    # How many observing **nights** those subs came from — the fact the window
+    # above cannot supply (15→18 Nov is equally consistent with two nights and
+    # with four), and the one a caption wants: "600 subs over 4 nights". None for
+    # a run recorded before the app tracked it, so a caller says nothing rather
+    # than claiming a count it does not have. Additive.
+    capture_nights: int | None = None
 
 
 class StatsResponse(BaseModel):
@@ -499,6 +505,8 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
                 has_fits = bool(run.fits_path and Path(run.fits_path).exists())
                 night_start, night_end = capture_night_range(
                     run.capture_start_utc, run.capture_end_utc, lon_deg)
+                nights = capture_night_count(
+                    getattr(run, "capture_hours_json", None), lon_deg)
                 recent.append(RecentStack(
                     safe=t.safe_name,
                     target_name=t.name,
@@ -513,6 +521,7 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
                     canvas_h=run.canvas_h or 0,
                     capture_night_start=night_start,
                     capture_night_end=night_end,
+                    capture_nights=nights,
                 ))
             n_stack_runs += target_runs
             if target_runs:

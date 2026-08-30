@@ -134,3 +134,100 @@ def test_the_observers_own_night_is_the_one_reported(client, solved_library):
                if r["output_basename"] == "master")
     assert run["capture_night_start"] == "2024-11-15"
     assert run["capture_night_end"] == "2024-11-15"
+
+
+# ---- how many nights ---------------------------------------------------
+
+
+def test_a_real_stack_records_the_nights_its_subs_came_from(
+        client, solved_library):
+    """The fixture subs are all one night, and the endpoint says so — a count of
+    1, not the silence a run with no recorded hours reports."""
+    r = client.post(
+        "/api/targets/M_42/stack",
+        json={"output_name": "capture_nights", "sigma_clip": False,
+              "background_flatten": False, "suppress_hot_pixels": False,
+              "max_workers": 2},
+    )
+    assert r.status_code == 200
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+    run = next(r for r in client.get("/api/targets/M_42/stack-runs").json()
+               if r["output_basename"] == "capture_nights")
+    assert run["capture_nights"] == 1
+
+
+def test_the_same_window_reports_the_nights_it_actually_holds(
+        client, solved_library):
+    """The point of the column: two runs with an identical 15→18 Nov window,
+    one built from two nights and one from four."""
+    _add_run(
+        solved_library, "M_42", output_basename="sparse",
+        capture_start_utc="2024-11-15T22:00:00Z",
+        capture_end_utc="2024-11-18T22:00:00Z",
+        capture_hours_json=json.dumps(
+            ["2024-11-15T22:00:00Z", "2024-11-18T22:00:00Z"]),
+    )
+    _add_run(
+        solved_library, "M_42", output_basename="dense",
+        capture_start_utc="2024-11-15T22:00:00Z",
+        capture_end_utc="2024-11-18T22:00:00Z",
+        capture_hours_json=json.dumps([
+            "2024-11-15T22:00:00Z", "2024-11-16T22:00:00Z",
+            "2024-11-17T22:00:00Z", "2024-11-18T22:00:00Z"]),
+    )
+    runs = {r["output_basename"]: r
+            for r in client.get("/api/targets/M_42/stack-runs").json()}
+    assert runs["sparse"]["capture_night_start"] == "2024-11-15"
+    assert runs["dense"]["capture_night_start"] == "2024-11-15"
+    assert runs["sparse"]["capture_nights"] == 2
+    assert runs["dense"]["capture_nights"] == 4
+
+
+def test_a_run_with_no_recorded_hours_reports_no_count(client, solved_library):
+    """Every run on the owner's install predates the column: it must say nothing
+    rather than claim a picture came from zero nights."""
+    _add_run(solved_library, "M_42",
+             capture_start_utc="2024-11-15T22:01:00Z",
+             capture_end_utc="2024-11-18T21:40:00Z")
+    run = next(r for r in client.get("/api/targets/M_42/stack-runs").json()
+               if r["output_basename"] == "master")
+    assert run["capture_nights"] is None
+
+
+def test_every_surface_counts_the_nights_the_same_way(client, solved_library):
+    """History, the Dashboard strip and the Gallery all show one picture; a
+    count that differed between them would be a visible contradiction."""
+    _add_run(
+        solved_library, "M_42",
+        capture_start_utc="2024-11-15T22:00:00Z",
+        capture_end_utc="2024-11-16T22:00:00Z",
+        capture_hours_json=json.dumps(
+            ["2024-11-15T22:00:00Z", "2024-11-16T22:00:00Z"]),
+    )
+    history = next(r for r in client.get("/api/targets/M_42/stack-runs").json()
+                   if r["output_basename"] == "master")
+    strip = next(s for s in client.get("/api/stats").json()["recent_stacks"]
+                 if s["output_basename"] == "master")
+    gallery = next(g for g in client.get("/api/gallery").json()["items"]
+                   if g["output_basename"] == "master")
+    for surface in (history, strip, gallery):
+        assert surface["capture_nights"] == 2
+
+
+def test_the_count_follows_the_observers_longitude(client, solved_library):
+    """Bucketed through the same helper as the dates, so the count can never
+    contradict the range beside it: one New Zealand evening straddling UTC noon
+    is one night, and both facts say so together."""
+    hours = json.dumps(["2024-11-15T10:00:00Z", "2024-11-15T18:00:00Z"])
+    _add_run(
+        solved_library, "M_42",
+        capture_start_utc="2024-11-15T10:00:00Z",
+        capture_end_utc="2024-11-15T18:00:00Z",
+        capture_hours_json=hours,
+    )
+    assert client.put("/api/settings", json={"site_lon": 150.0}).status_code == 200
+    run = next(r for r in client.get("/api/targets/M_42/stack-runs").json()
+               if r["output_basename"] == "master")
+    assert run["capture_night_start"] == run["capture_night_end"] == "2024-11-15"
+    assert run["capture_nights"] == 1

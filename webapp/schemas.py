@@ -556,6 +556,12 @@ class StackRunOut(BaseModel):
     # used to claim a picture was "shot on" the day it was processed.
     capture_night_start: str | None = None
     capture_night_end: str | None = None
+    # How many observing **nights** those subs came from — the fact the window
+    # above cannot supply (15→18 Nov is equally consistent with two nights and
+    # with four), and the one a caption wants: "600 subs over 4 nights". None for
+    # a run recorded before the app tracked it, so a caller says nothing rather
+    # than claiming a count it does not have. Additive.
+    capture_nights: int | None = None
     # Median transparency of the stacked frames ÷ the target's clear-sky
     # baseline (< ~0.6 ⇒ hazy). None for pre-schema-5 runs or when not
     # computable; lets the card show a "hazy night" badge at a glance.
