@@ -64,6 +64,20 @@ describe("describeFocusTrend", () => {
     expect(s).toContain("counted less");
   });
 
+  it("only promises the soft subs counted less when a stack really did it", () => {
+    const soft = (weighting?: string) => describeFocusTrend(trend({
+      verdict: "softened", soft_after_utc: "2026-07-10T01:30:00+00:00", weighting,
+    }));
+    expect(soft("applied"))
+      .toContain("Those softer subs were automatically counted less in your stack");
+    expect(soft("not_applied")).toContain("counted just as much as the rest");
+    expect(soft("unstacked")).toContain("haven't been stacked yet");
+    expect(soft(undefined)).toContain("when quality weighting is on");
+    for (const w of ["not_applied", "unstacked", undefined]) {
+      expect(soft(w)).not.toContain("were automatically counted less");
+    }
+  });
+
   it("falls back to 'later in the night' when no soft-after time is known", () => {
     const s = describeFocusTrend(trend({
       verdict: "softened",

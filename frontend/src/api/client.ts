@@ -586,6 +586,11 @@ export interface FocusTrend {
   start_utc: string | null;
   end_utc: string | null;
   soft_after_utc: string | null;
+  // Did the target's newest genuine stack actually count worse subs less?
+  // "applied" | "not_applied" | "unstacked" | "unknown" — absent from an older
+  // backend, which reads as "unknown" and gets the general wording. The card's
+  // "counted less in your stack" reassurance is only earned by "applied".
+  weighting?: string;
 }
 
 export interface TransparencyTrendPoint {
@@ -603,6 +608,9 @@ export interface TransparencyTrend {
   start_utc: string | null;
   end_utc: string | null;
   degraded_after_utc: string | null;
+  // The same "did the stack really down-weight them?" datum the focus card
+  // carries, for the identical promise this card makes about hazy subs.
+  weighting?: string;
   // How many mosaic panels this night's subs split into (0, or absent from an
   // older backend, for the ordinary single-pointing target). A mosaic's panels
   // are different patches of sky, so their star flux differs by pointing rather
