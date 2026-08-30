@@ -47,9 +47,12 @@ export function describeSkyCoverage(
   const moonPhrase = moons < 1.5
     ? "about a full moon's worth of sky"
     : `about ${Math.round(moons).toLocaleString()} full moons' worth of sky`;
-  const pictures = nPictures === 1 ? "1 picture" : `${nPictures} pictures`;
+  // Singular takes its own verb *and* drops the count: "Your 1 picture cover"
+  // was both ungrammatical and stilted, and it is the state a beginner is in on
+  // the day they meet this sentence — the one picture they just made.
+  const subject = nPictures === 1 ? "picture covers" : `${nPictures} pictures cover`;
   return (
-    `Your ${pictures} cover ${formatSkyArea(deg2)} square degrees — ` +
+    `Your ${subject} ${formatSkyArea(deg2)} square degrees — ` +
     `${moonPhrase}, and ${formatSkyFraction(fraction)} of the whole sky.`
   );
 }

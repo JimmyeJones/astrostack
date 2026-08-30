@@ -44,10 +44,20 @@ describe("describeSkyCoverage", () => {
     expect(s).toContain("0.045% of the whole sky");
   });
 
+  // This test's name was already right and its assertion was not: it pinned
+  // "Your 1 picture cover" — the subject and the verb disagreeing — which is
+  // what a beginner reads on the Dashboard the day they make their first
+  // picture, i.e. the single most-seen state of this sentence.
   it("reads naturally on a first picture", () => {
     const s = describeSkyCoverage(1.3, 1.3 / 41252.96, 1);
-    expect(s).toContain("Your 1 picture cover");
+    expect(s).toContain("Your picture covers 1.3 square degrees");
+    expect(s).not.toContain("picture cover ");
     expect(s).toContain("full moons");
+  });
+
+  it("keeps the count and the plural verb once there is more than one", () => {
+    const s = describeSkyCoverage(18.4, 18.4 / 41252.96, 12);
+    expect(s).toContain("Your 12 pictures cover 18.4 square degrees");
   });
 
   it("drops the plural when the whole library is about one moon", () => {

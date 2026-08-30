@@ -10,8 +10,9 @@ Registry-only by design: it reads only the fields the library keeps stamped on
 each target row, so it never opens a per-target ``project.sqlite``. That keeps
 the whole summary cheap to compute on every call. Kept pure (no ``webapp``
 imports, no filesystem I/O of its own) so it's unit-testable; the webapp layer
-supplies the "does this preview file still exist?" predicate and turns the hero
-rows into preview URLs.
+supplies the "does this preview file still exist?" predicate, the optional
+"when was this target's oldest sub captured?" lookup, and turns the hero rows
+into preview URLs.
 """
 
 from __future__ import annotations
@@ -67,10 +68,29 @@ def _to_summary_target(t: TargetEntry, has_preview: bool) -> SummaryTarget:
     )
 
 
+def _earliest_stamp(stamps: Sequence[str]) -> str | None:
+    """The chronologically earliest of a set of UTC stamps, or ``None``.
+
+    Compared by :func:`~seestack.activity_calendar.parse_utc` rather than
+    lexicographically, because the two kinds of stamp this now mixes are written
+    in different shapes — the registry's ``…Z`` creation stamp and a frame's
+    ``DATE-OBS`` as ingest recorded it — and string order only agrees with time
+    order when every stamp shares a shape. Anything unparseable is skipped; if
+    *nothing* parses we fall back to the plain string minimum, so a hand-edited
+    row still yields a date rather than none at all."""
+    from seestack.activity_calendar import parse_utc
+
+    parsed = [(dt, s) for s in stamps if (dt := parse_utc(s)) is not None]
+    if parsed:
+        return min(parsed, key=lambda p: p[0])[1]
+    return min(stamps) if stamps else None
+
+
 def summarize_library(
     targets: Sequence[TargetEntry],
     *,
     preview_exists: Callable[[str | None], bool] = bool,
+    first_capture: Callable[[str], str | None] | None = None,
     hero_limit: int = 60,
 ) -> LibrarySummary:
     """Aggregate the registry rows into a :class:`LibrarySummary`.
@@ -85,6 +105,12 @@ def summarize_library(
     default treats any non-empty path as present, which is all a unit test
     needs). ``hero_limit`` bounds the hero grid so a huge library returns a sane
     response.
+
+    ``first_capture(safe_name)`` answers "when was this target's oldest sub
+    actually captured?" — the frames' own ``DATE-OBS``, which lives in the
+    per-target project DB this module deliberately never opens, so the webapp
+    supplies it. It drives ``first_light_utc``; omit it (the default) and first
+    light falls back to the target-*creation* stamps alone, exactly as before.
     """
     imaged = [
         t for t in targets
@@ -94,11 +120,21 @@ def summarize_library(
     n_subs_kept = sum(int(t.n_frames_accepted or 0) for t in imaged)
     total_integration_s = sum(float(t.total_exposure_s or 0.0) for t in imaged)
 
-    # First light = the earliest target-creation stamp among imaged targets.
-    # ``created_utc`` is an ISO-8601 UTC string, so a lexicographic min is a
-    # chronological min. Guard against a blank/None stamp on a hand-edited row.
-    created_stamps = [t.created_utc for t in imaged if t.created_utc]
-    first_light_utc = min(created_stamps) if created_stamps else None
+    # First light = when the oldest sub in the library was *captured* — not when
+    # its target row happened to be created here. Those coincide only for someone
+    # who installed AstroStack before they started imaging; for the owner this app
+    # is built for — a Seestar user dropping in a back catalogue of subs — every
+    # target is created on install day, so the creation stamp says "you started
+    # astrophotography this week" about someone who has been at it for years, on
+    # a milestone stat *and* on the poster they share. Per target we take its own
+    # oldest capture and fall back to its creation stamp when nothing is dated, so
+    # a target whose subs carry no DATE-OBS still contributes what it always did.
+    stamps = [
+        stamp for t in imaged
+        if (stamp := ((first_capture(t.safe_name) if first_capture else None)
+                      or t.created_utc))
+    ]
+    first_light_utc = _earliest_stamp(stamps)
 
     longest = max(
         imaged, key=lambda t: float(t.total_exposure_s or 0.0), default=None,

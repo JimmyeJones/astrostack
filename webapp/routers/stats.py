@@ -255,14 +255,38 @@ def _summary_target_out(t) -> SummaryTargetOut:  # noqa: ANN001 — SummaryTarge
     )
 
 
-@router.get("/api/library/summary", response_model=LibrarySummaryResponse)
-def get_library_summary(request: Request) -> LibrarySummaryResponse:
-    """The "Your sky, so far" whole-library progress summary — total kept
-    integration, subs kept, targets imaged, first-light date, the standout
-    targets, and a hero grid of finished pictures. Registry-only, read-only
-    aggregation over data already on disk; cached on the app between scans.
-    Returns zeroed tallies (and ``null`` standouts) until some light is
-    collected."""
+def _first_capture_lookup(lib):  # noqa: ANN001, ANN202 — Library
+    """``safe_name -> the target's oldest sub's capture stamp``, or ``None``.
+
+    The one thing the "Your sky, so far" roll-up can't answer from the registry:
+    ``DATE-OBS`` lives in the per-target project DB. One indexed ``MIN`` per
+    imaged target, and only on a summary-cache miss (a minute's TTL, plus a
+    signature over the registry), so a page render pays for it at most once a
+    minute. A target whose DB can't be opened or read answers ``None`` and simply
+    falls back to its creation stamp — a broken project must not sink the whole
+    summary."""
+    def lookup(safe: str) -> str | None:
+        try:
+            proj = lib.open_target(safe)
+        except Exception:  # noqa: BLE001 — an unreadable project has no answer
+            return None
+        try:
+            return proj.earliest_frame_utc()
+        except Exception:  # noqa: BLE001
+            return None
+        finally:
+            proj.close()
+    return lookup
+
+
+def _cached_library_summary(request: Request):  # noqa: ANN202 — LibrarySummary
+    """The "Your sky, so far" roll-up, behind the app-level summary cache.
+
+    Shared by the summary endpoint and the recap poster so the two can never
+    quote different totals — and so the project-DB reads behind ``first light``
+    are paid for once per cache window rather than once per caller (the recap's
+    own docstring already claimed it read "through their existing caches"; now it
+    does)."""
     from seestack.library_summary import summarize_library
 
     lib = deps.open_library(request)
@@ -276,15 +300,26 @@ def get_library_summary(request: Request) -> LibrarySummaryResponse:
         cache = getattr(request.app.state, "summary_cache", None)
         now = time.monotonic()
         if cache and cache["sig"] == sig and (now - cache["at"]) < _SUMMARY_CACHE_TTL_S:
-            summary = cache["data"]
-        else:
-            summary = summarize_library(
-                targets,
-                preview_exists=lambda p: bool(p) and Path(p).exists(),
-            )
-            request.app.state.summary_cache = {"sig": sig, "at": now, "data": summary}
+            return cache["data"]
+        summary = summarize_library(
+            targets,
+            preview_exists=lambda p: bool(p) and Path(p).exists(),
+            first_capture=_first_capture_lookup(lib),
+        )
+        request.app.state.summary_cache = {"sig": sig, "at": now, "data": summary}
+        return summary
     finally:
         lib.close()
+
+
+@router.get("/api/library/summary", response_model=LibrarySummaryResponse)
+def get_library_summary(request: Request) -> LibrarySummaryResponse:
+    """The "Your sky, so far" whole-library progress summary — total kept
+    integration, subs kept, targets imaged, first-light date, the standout
+    targets, and a hero grid of finished pictures. Read-only aggregation over
+    data already on disk; cached on the app between scans. Returns zeroed
+    tallies (and ``null`` standouts) until some light is collected."""
+    summary = _cached_library_summary(request)
 
     return LibrarySummaryResponse(
         n_targets_imaged=summary.n_targets_imaged,
@@ -822,21 +857,14 @@ class RecapOut(BaseModel):
 def _recap_facts(request: Request, months: int):
     """Collect the recap facts from the roll-ups the app already serves.
 
-    Registry-only for the totals/standouts (:func:`summarize_library`), plus the
-    activity calendar's night count — both read through their existing caches, so
-    a recap costs nothing the Dashboard hasn't already paid for.
+    The totals/standouts come from the same roll-up the summary endpoint serves
+    (:func:`_cached_library_summary`), plus the activity calendar's night count —
+    both read through their existing caches, so a recap costs nothing the
+    Dashboard hasn't already paid for.
     """
-    from seestack.library_summary import summarize_library
     from seestack.recap import RecapFacts
 
-    lib = deps.open_library(request)
-    try:
-        summary = summarize_library(
-            lib.list_targets(),
-            preview_exists=lambda p: bool(p) and Path(p).exists(),
-        )
-    finally:
-        lib.close()
+    summary = _cached_library_summary(request)
     cal = _cached_activity_calendar(request, months)
     top = summary.longest_target
     # The rest of what you pointed at, ranked by integration — every imaged
