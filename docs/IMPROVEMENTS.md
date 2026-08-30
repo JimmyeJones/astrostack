@@ -360,6 +360,58 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🟠 VERIFIED AGAINST THE OWNER'S REAL S30 FOLDER TREE (2026-08-31) — the scanner does not recognise the
+  Seestar's `*_photo` folders, so they are ingested as ordinary deep-sky targets. Same family as the
+  already-fixed `*_video` bug, and it is a one-line-shaped gap.** *(Severity: broken-UX / junk targets — not
+  corruption of real data. Confidence: HIGH — the owner supplied a full `tree` listing of
+  `\\TRUENAS\astro` and the scanner's own `_apply_seestar_convention` was replayed over those exact 71 folder
+  names.)*
+
+  `seestack/io/scanner.py` defines exactly three convention suffixes — `_SUB_SUFFIX = "_sub"`,
+  `_MOSAIC_SUB_SUFFIX = "_mosaic_sub"`, `_VIDEO_SUFFIX = "_video"` (lines ~63–65). **There is no `_photo`
+  constant anywhere in the file.** The owner's device writes `Planetary_photo/` and `Scenery_photo/` alongside
+  the `Solar_video/`, `Lunar_video/`, `Planetary_video/` and `Scenery_video/` folders that *are* handled — so a
+  `*_photo` folder falls through every rule, finds no `<name>_sub` sibling, and is ingested unchanged as a
+  target. **Replaying the real convention logic over the owner's actual tree produces these junk targets:**
+  `Planetary_photo`, `Scenery_photo`, `batch_stack_tmp`, and `MyWorks`.
+  - **`*_photo` is the real, generalisable bug** — the device writes single-shot stills there, not stackable
+    deep-sky subs, exactly as it writes videos to `*_video`. **Fix:** add a `_PHOTO_SUFFIX = "_photo"` and skip
+    it at scan time beside the existing `_video` skip, *and* teach `classify_seestar_junk_target` about it
+    (mirroring the `video` verdict) so libraries that already ingested one get a cleanup nudge. Cheap, and it
+    closes the family properly rather than one suffix at a time.
+  - **`batch_stack_tmp`** is **not** created by this app — grepped the whole repo, no match — so it is
+    something else's temp folder living in the share. It has no `_sub` sibling, so it ingests as a target
+    named `batch_stack_tmp` if it holds any FITS. Worth a cleanup nudge at minimum; a generic "obvious temp
+    folder" scan-time skip is a judgement call, so **file, don't blind-add** a name-pattern blocklist.
+  - **`MyWorks` — do NOT act on this one from the evidence below.** It is the Seestar's own *container*
+    folder, and the real scanner runs `_looks_like_seestar_container` / container expansion, which the replay
+    **did not model** (it replayed the flat convention step only). `MyWorks` almost certainly expands
+    correctly. Listed for completeness, explicitly not a finding.
+
+- **✅ CLOSES A GATED ENTRY — the owner's real folder tree answers the device-naming question that blocked the
+  2026-07-24 "mosaic bare-output skip" item, and the answer is: THERE IS NOTHING TO FIX in the scanner.**
+  *(No code change wanted. This is a scope reduction — read it before touching mosaic ingest.)* That entry
+  (further down this file) says it could not ship because *"whether an S30/S50 actually names a mosaic's
+  on-device stacked output as bare `<T>/` … is device-specific and could not be confirmed in-repo."*
+  **Confirmed from the owner's live S30 share: the device uses `<T>_mosaic/`, and the problematic bare-`<T>`
+  shape never occurs.** Every mosaic in their tree appears as the pair `<T>_mosaic/` + `<T>_mosaic_sub/`
+  (`M 3`, `M 31`, `M 44`, `NGC 6960`, `NGC 7000`, `IC 5070`, `IC 1318`, `HIP 4205`, `73 Leonis`, `Alphecca`,
+  `QU Serpentis`, `V772 Herculis`), and every bare `<T>/` in the tree has a `<T>_sub/` sibling.
+
+  **Replaying `_apply_seestar_convention` over all 71 real folder names: 36 folders correctly skipped, 36
+  units produced, and every single `_mosaic` output folder was skipped** — because the existing bare-output
+  test appends `_sub` to the folder name, and `"M 44_mosaic" + "_sub"` is exactly `"M 44_mosaic_sub"`, which is
+  present. The 33 real sub folders mapped to exactly the right targets (`M 3_sub` → `M 3`, `M 3_mosaic_sub` →
+  `M 3 (mosaic)`, etc.). **The scanner is correct on this owner's real data.**
+
+  **What this means for the merge/duplicate entry directly below:** it settles that entry's own stated caveat.
+  The `M 3_MOSAIC` (1 frame), `M 44_MOSAIC` (11 frames) and `NGC 6960_MOSAIC` (7 frames) targets sitting in
+  the owner's library are **pre-v0.184.9 leftovers that cleanup cannot reach — NOT targets the scanner creates
+  today.** So **no scanner behaviour change is needed**, and the remaining work is purely *cleanup reach*
+  (parts 2 and 3 of that entry: extend duplicate detection to `_mosaic_sub`, and raise the junk-output frame
+  cap for mosaics, whose on-device output is one image per panel — the owner's 11 and 7 frame counts being the
+  proof). Lower risk than it looked; don't go rewriting the convention mapper.
+
 - **🔴 OWNER-REPORTED WITH SCREENSHOT (2026-08-31) — "Same object in more than one folder?" offers to merge a
   target with its OWN DUPLICATE, calls it "shot on separate nights", and DOUBLE-COUNTS the integration time in
   the headline figure. The app already knows these are duplicates — a different feature detects them — but the
