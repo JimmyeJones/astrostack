@@ -418,12 +418,32 @@ _(nothing else claimed — claim an item here with your branch name)_
   makes ten ordinary ones nag, and no longer badges nine of them "soft" while still earning its own "best" nod;
   a genuinely soft night is still caught and still badged on a long project; and the leave-one-out helper
   directly, including the identical-twins case.
-- **🟠 VERIFIED AGAINST THE OWNER'S REAL S30 FOLDER TREE (2026-08-31) — the scanner does not recognise the
-  Seestar's `*_photo` folders, so they are ingested as ordinary deep-sky targets. Same family as the
-  already-fixed `*_video` bug, and it is a one-line-shaped gap.** *(Severity: broken-UX / junk targets — not
-  corruption of real data. Confidence: HIGH — the owner supplied a full `tree` listing of
-  `\\TRUENAS\astro` and the scanner's own `_apply_seestar_convention` was replayed over those exact 71 folder
-  names.)*
+- **✅ SHIPPED (Builder, v0.319.2, branch `claude/compassionate-galileo-hyk4jn`) — ~~the scanner does not
+  recognise the Seestar's `*_photo` folders, so they are ingested as ordinary deep-sky targets.~~** Fixed as
+  the *family*, not the suffix: `_VIDEO_SUFFIX` and a new `_PHOTO_SUFFIX` now live in one `_CAPTURE_SUFFIXES`
+  tuple that the scan-time skip, the legacy-base helper's ingest test, and the cleanup classifier all read, so
+  no future run can teach one of them a capture mode and miss the others. Measured before/after on the
+  entry's own replay: `_apply_seestar_convention` over `[M 31_sub, M 31, Planetary_photo, Scenery_photo,
+  Planetary_video, Scenery_video]` gave `["M 31", "Planetary_photo", "Scenery_photo"]` and now gives
+  `["M 31"]`.
+
+  **The healing half matters more than the skip**, because the owner's library already holds these: a
+  `*_photo` target now earns a cleanup nudge with a new `"photo"` reason and its *own* wording ("the single
+  snapshots it takes in scenery/planetary photo mode"), not the video sentence — a folder of 40 scenery
+  stills told it can't be stacked "because it's a video" reads as the app being confused. Like `_video` the
+  verdict is decided by **name alone at any frame count**, via a new shared
+  `is_capture_mode_target_name()`; the endpoint's `_MAX_CLEANUP_FRAMES ≤ 2` gate would otherwise never look
+  at a 40-still folder. Upgrade-safe (§9): a new enum *value* on an existing field, no config/schema/on-disk
+  change; an older frontend simply doesn't render the new group. **Tests: +5 (`tests/test_scanner.py`),
+  +1 webapp (`tests/webapp/test_cleanup_suggestions.py`), +1 frontend — all fail before.**
+
+  Deliberately **not** done, and still open below: the entry's other two names. `batch_stack_tmp` is
+  something else's temp folder (a name-pattern blocklist is a judgement call — filed, not blind-added), and
+  `MyWorks` was explicitly listed as a non-finding.
+
+    *(Original spec: severity broken-UX / junk targets — not corruption of real data. Confidence: HIGH — the
+    owner supplied a full `tree` listing of `\\TRUENAS\astro` and the scanner's own
+    `_apply_seestar_convention` was replayed over those exact 71 folder names.)*
 
   `seestack/io/scanner.py` defines exactly three convention suffixes — `_SUB_SUFFIX = "_sub"`,
   `_MOSAIC_SUB_SUFFIX = "_mosaic_sub"`, `_VIDEO_SUFFIX = "_video"` (lines ~63–65). **There is no `_photo`
@@ -445,6 +465,17 @@ _(nothing else claimed — claim an item here with your branch name)_
     folder, and the real scanner runs `_looks_like_seestar_container` / container expansion, which the replay
     **did not model** (it replayed the flat convention step only). `MyWorks` almost certainly expands
     correctly. Listed for completeness, explicitly not a finding.
+
+- **🟡 OPEN, SPLIT OUT OF THE `*_photo` ENTRY ABOVE WHEN THAT SHIPPED (v0.319.2) — `batch_stack_tmp` in the
+  owner's share ingests as a target.** Not created by this app (grepped: no match), so it is some other
+  tool's temp folder living in `\\TRUENAS\astro`. It has no `_sub` sibling, so it ingests unchanged if it
+  holds any FITS. *(Severity: low — one junk tile. Confidence: HIGH, from the owner's real `tree`.)*
+  **Deliberately left for a decision rather than blind-added with the `_photo` fix:** a scan-time
+  name-pattern blocklist for "obvious temp folders" is a judgement call an agent should not make on the
+  on-by-default ingest hot path, because the guess that costs nothing here ("anything called `*_tmp`") would
+  silently drop a real folder someone named badly. **The safe half is the cleanup nudge**, which is
+  after-the-fact and user-confirmed: a verdict alongside `photo`/`video` for a target whose frames all sit in
+  a folder matching a small, explicit temp-name list. Size XS. Do the nudge; leave the scan-time skip filed.
 
 - **✅ CLOSES A GATED ENTRY — the owner's real folder tree answers the device-naming question that blocked the
   2026-07-24 "mosaic bare-output skip" item, and the answer is: THERE IS NOTHING TO FIX in the scanner.**
@@ -470,12 +501,100 @@ _(nothing else claimed — claim an item here with your branch name)_
   cap for mosaics, whose on-device output is one image per panel — the owner's 11 and 7 frame counts being the
   proof). Lower risk than it looked; don't go rewriting the convention mapper.
 
-- **🔴 OWNER-REPORTED WITH SCREENSHOT (2026-08-31) — "Same object in more than one folder?" offers to merge a
-  target with its OWN DUPLICATE, calls it "shot on separate nights", and DOUBLE-COUNTS the integration time in
-  the headline figure. The app already knows these are duplicates — a different feature detects them — but the
-  merge suggester never asks.** *(Severity: high broken-UX / actively misleading, **not** data corruption — see
-  the safety note below. Confidence: HIGH, traced end-to-end in code against the owner's real library data.
-  Owner's words: "it is still having issues with combining/distinguishing target folders.")*
+- **✅ SHIPPED, ALL THREE PARTS (Builder, v0.319.3, branch `claude/compassionate-galileo-hyk4jn`) —
+  ~~"Same object in more than one folder?" offers to merge a target with its OWN DUPLICATE, calls it "shot on
+  separate nights", and DOUBLE-COUNTS the integration time in the headline figure.~~** The owner-reported bug,
+  fixed at the root the entry identified: **two features held the same fact and only one of them knew it.**
+
+  **The fix is a shared answer, not a second opinion.** `webapp/duplicate_targets.py` is now the single
+  definition of "is this target a duplicate of that one", and both the merge suggester and cleanup-suggestions
+  read it — so the pair the cleanup card calls a duplicate can no longer be the pair the merge card calls two
+  separate nights. It is deliberately in two halves so an ordinary library pays nothing: a pure name-shape test
+  (`duplicate_base_safe`, no I/O) rules the question out for all but a handful of targets, and only then does
+  `confirm_duplicate_of_base` open both projects to check the base owns **every** one of the other's frames.
+
+  **The entry's own "must not break this" case is what that confirmation is for**, and it has a test:
+  `NGC 6888` (4815 subs) beside `NGC 6888_SUB` (3110) holds *different* frames, so the base does not own them
+  all, and that pair is still offered as the real merge it may be. A name-only rule would have silently
+  suppressed it — which is why the cheap test only *gates* the expensive one and never decides alone.
+
+  **The arithmetic fixed itself, correctly.** Rather than special-casing the sum, the endpoint drops confirmed
+  duplicates and then **re-clusters the survivors through the same tested helper** — so the centre, the "all
+  within N′" figure and the headline total all describe the targets actually being offered. (Re-clustering
+  rather than patching the group also handles a single-linkage chain that legitimately splits in two once a
+  member leaves.) A group that collapses below two real members disappears entirely and lands in the cleanup
+  nudge, which is the correct offer for it.
+
+  **Copy:** "shot on separate nights" is gone. The clustering is on plate-solved position and knows nothing
+  about *when* anything was shot; it now says "in separate folders", with a test that the sentence never says
+  "night".
+
+  **Parts 2 and 3 shipped in the same commit, because part 1 needs part 2 to see the owner's mosaics:**
+  `duplicate_sub_target_base_name` now maps `<T>_mosaic_sub` → `<T> (mosaic)` (the base is the *mosaic*
+  target, not the single field — different footprint), taking the `(mosaic)` spelling from
+  `_apply_seestar_convention` itself with a test asserting the two agree by construction; and
+  `junk_output_frame_cap()` gives a mosaic's on-device output a looser cap (32) than a single field's (2),
+  because a mosaic's output is one image **per panel** — the owner's 11-frame `M 44_MOSAIC` and 7-frame
+  `NGC 6960_MOSAIC` never reached the classifier at all. The positive-evidence requirement is untouched (the
+  bare `<T>_mosaic/` folder's `<T>_mosaic_sub/` raw-subs sibling must actually be on disk), 32 is an order of
+  magnitude below any real target, and the detail copy no longer calls eleven images "its own single stacked
+  image". The webapp's duplicate `_MAX_CLEANUP_FRAMES = 2` is gone — the endpoint reads the engine's cap, so
+  the two can't drift.
+
+  **Upgrade-safe (§9):** read-only endpoints, no config/schema/on-disk change, no default flipped, no API
+  shape change (both endpoints return the same models — one returns *fewer*, more honest, rows).
+  **Tests: +4 merge endpoint (3 fail before; the fourth is the `NGC 6888` guard, which must pass both ways),
+  +2 cleanup endpoint (both fail before), +5 scanner, +1 frontend.**
+
+  **↳ FOLLOW-ON SHIPPED IN THE SAME RUN (v0.319.4) — the *other two* wrong offers on the owner's own
+  screenshot, found by asking "what does the M 3 card show *after* the fix?"** The answer was: still three
+  members, `M 3` + `M 3 (mosaic)` + `M 3_MOSAIC`. Both remaining offers are the same class — *the merge
+  suggester proposing something the app itself already refuses* — so they are fixed the same way, by giving it
+  the facts the rest of the app holds rather than another special case.
+  1. **A mosaic is never grouped with the single field of the same object.** `_apply_seestar_convention`'s own
+     docstring states the invariant outright: `<T> (mosaic)` is kept a separate target from `<T>` "so their
+     differing footprints are never co-stacked **or auto-merged**". Position clustering cannot see a canvas —
+     the two point at the same place — so it fused them and the nudge offered exactly the merge ingest
+     refused. The two populations are now clustered **separately** (two mosaics of one object are still a real
+     merge; so are two single fields; the pair across the line is not), and the `" (mosaic)"` spelling has one
+     definition, `mosaic_target_name()`, asserted against what the convention actually builds.
+  2. **A junk target is never offered as a merge partner.** The Seestar's on-device output sits at the
+     coordinates of the subs it was stacked from, so it clustered with them — and the app offered to
+     *combine* a target the cleanup card was, on the same screen, offering to *delete*.
+  `webapp/duplicate_targets.py` became **`webapp/library_hygiene.py`**, since it now holds both facts the
+  Library shares, and `cleanup_suggestions` reads its `junk_verdict()` too — so the junk gate, like the
+  duplicate one, has exactly one implementation. The gate stays cheap: capture targets are decided by name,
+  and nothing else is opened unless it is already small enough to *be* an output.
+  **The end-to-end test is the owner's screenshot**: their five-target M 3 card now produces **no merge
+  suggestion at all** — the honest answer — and three cleanup nudges instead. **Tests: +4 merge endpoint
+  (3 fail before; "two mosaics of one object still merge" is the don't-overshoot guard), +1 scanner.**
+
+    *(Original spec kept below. Severity: high broken-UX / actively misleading, **not** data corruption — see
+    the safety note. Confidence: HIGH, traced end-to-end in code against the owner's real library data.
+    Owner's words: "it is still having issues with combining/distinguishing target folders.")*
+
+- **🟡 THE SAME MOSAIC-CAP ASYMMETRY EXISTS ONE LAYER DOWN, ON THE *FRAME* AUTO-REJECT — traced while
+  shipping v0.319.3, deliberately NOT changed in the same run because it is the ingest hot path.**
+  *(Severity: low-moderate — a handful of low-resolution on-device panel images silently join a real mosaic's
+  stack. Confidence: traced in code; NOT reproduced against owner data. Size S.)*
+
+  `seestack/io/project.py:265` defines `_MAX_SEESTAR_OUTPUT_FRAMES = 2` with the comment *"Mirrors the
+  scanner's `_MAX_JUNK_OUTPUT_FRAMES`"* — and as of v0.319.3 it no longer does, because the scanner's cap is
+  now mosaic-aware (`junk_output_frame_cap()`: 2 for a single field, 32 for a `*_mosaic` output whose output
+  is one image *per panel*). That function is the **frame-level** guard: when a target holds frames from a
+  bare `<T>/` output folder it rejects them (`REJECT_REASON_SEESTAR_OUTPUT`, additive and reversible), but
+  only when that folder holds ≤2 frames, so a mosaic's 7- or 11-image output folder sails past it exactly as
+  the target-level cap used to.
+
+  **Why it was left:** the two guards are not the same decision. The target-level one only *suggests* a
+  cleanup the user confirms; this one **auto-rejects frames on ingest**, on by default, on the path the
+  owner's real data flows through nightly. Raising a cap there without a repro is the "blind-flip a threshold
+  on the on-by-default hot path" AGENTS.md §1 warns against — a bare folder of 11 *real* subs that happens to
+  sit beside a `_sub` sibling would start losing whole sessions. **What to do:** mirror the scanner's helper
+  (`junk_output_frame_cap(folder.name)`) rather than inventing a second number, keep the positive-evidence
+  sibling requirement, and add a test that a bare `<T>_mosaic/` of 11 frames beside `<T>_mosaic_sub/` rejects
+  while a bare `<T>/` of 11 frames beside `<T>_sub/` still does **not**. The shared helper already exists, so
+  this is small — it is the *caution*, not the code, that made it a separate item.
 
   **The owner's live library (from the screenshot) — every near-identical pair is the same physical files
   counted twice:**
