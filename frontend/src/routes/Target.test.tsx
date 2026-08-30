@@ -957,11 +957,20 @@ describe("TargetView note board", () => {
     expect(
       screen.getByText("1 frame couldn't be quality-checked"),
     ).toBeVisible();
+
+    // Wait for the disclosure before asserting the fold. `NoticeBoard` counts
+    // the notes that actually rendered by *measuring the DOM* (a
+    // MutationObserver, because a self-hiding note decides for itself and does
+    // not re-render the parent), so the demote lands one render after a note's
+    // text appears — the board deliberately shows everything inline until it has
+    // measured. The button is that measurement's own signal, exactly as
+    // `NoticeBoard.test.tsx` waits for it; asserting straight off `findByText`
+    // races that commit and went red on CI (run 1228) while passing locally.
+    const more = await screen.findByRole("button", { name: /1 more note$/ });
     const offer = screen.getByText("Ready to process?");
     expect(offer).not.toBeVisible();
 
     // Nothing is lost: the rest are one click away, and go back when done.
-    const more = screen.getByRole("button", { name: /1 more note$/ });
     fireEvent.click(more);
     expect(screen.getByText("Ready to process?")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /Hide 1 note/ }));
