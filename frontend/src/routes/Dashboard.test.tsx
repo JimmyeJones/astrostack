@@ -7,6 +7,7 @@ import { Dashboard } from "./Dashboard";
 import * as client from "../api/client";
 import type { DashboardStats, SystemInfo } from "../api/client";
 import { formatStampDate } from "../format";
+import { describeSkyCoverage } from "../components/skyCoverage";
 
 function mkStats(): DashboardStats {
   return {
@@ -411,5 +412,39 @@ describe("Dashboard recent-stack date", () => {
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
     // The raw slice used to print the garbage straight onto the card.
     expect(screen.queryByText("not-a-date")).not.toBeInTheDocument();
+  });
+});
+
+describe("Dashboard sky-coverage line", () => {
+  it("says how much of the sky the pictures cover, in My map's own words", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "skyCoverage").mockResolvedValue({
+      deg2: 18.4, sky_fraction: 18.4 / 41252.96, n_pictures: 12,
+      whole_sky_deg2: 41252.96,
+    });
+
+    renderDashboard();
+    // Asserted against the shared helper itself, not a copy of its wording, so
+    // the Dashboard and My map cannot drift into two different sentences.
+    const expected = describeSkyCoverage(18.4, 18.4 / 41252.96, 12);
+    await waitFor(() => expect(
+      screen.getByTestId("sky-coverage-line").textContent).toContain(expected));
+    // …and it lands on the map it's describing, not the real-sky atlas.
+    expect(screen.getByRole("link", { name: /See it on My map/ }))
+      .toHaveAttribute("href", "/sky?view=mine");
+  });
+
+  it("stays quiet until a finished picture actually carries a position", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "skyCoverage").mockResolvedValue({
+      deg2: 0, sky_fraction: 0, n_pictures: 0, whole_sky_deg2: 41252.96,
+    });
+
+    renderDashboard();
+    await waitFor(() => expect(client.api.skyCoverage).toHaveBeenCalled());
+    expect(screen.queryByTestId("sky-coverage-line")).toBeNull();
+    expect(screen.queryByText(/See it on My map/)).toBeNull();
   });
 });
