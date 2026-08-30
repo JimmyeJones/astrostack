@@ -9926,6 +9926,42 @@ to **Shipped**.)_
   bigger scene gives one answer rather than two), and the no-regression guard that the averaging did not blur a
   cluster into nebulosity.
 
+- **⭐ QA LEAD (Builder 2026-08-30, the axis the v0.319.1 fix generalises to) — sweep every judgement made
+  against a "best so far", because a best-so-far is a record and a record only ever moves one way.** *(Pillar:
+  trust + friendliness — PRIORITY 3; size S per candidate — this one is *cheap*, because the arithmetic decides
+  it before any measurement. Confidence: the shape is proven, the remaining sites are not yet found.)*
+  This is a **sibling of the "normalises against its own subset" lead, along a different axis**: not "how much
+  data went into this *stack*", but **how many entries are in the *history* the statistic looks back over**.
+  `min`/`max` over a growing history is monotone in the length of that history by construction, so any
+  *comparison* against it — "softer than your best", "worse than your best", "not as good as usual" — gets
+  easier to trip the longer the owner uses the app, on data that never changed. The confirmed instance
+  (v0.319.1) drifted from 14 % to 79 % false-positive rate across a project's life.
+  **The test that identifies a candidate, without running anything:** is the baseline an **extremum** of a set
+  that *grows with use*, and is something **judged** against it? If both, it is a bug — the extremum's
+  distribution has no fixed point. If the extremum is merely *reported* ("your sharpest night", "your best
+  picture", a personal record), it is fine and must stay a min/max: that is what "best" means. The v0.319.1 fix
+  is the template — the two uses had been sharing one variable, and only the *judging* one moved.
+  **A grep over `= min(` / `= max(` in `seestack/`, `webapp/` and `frontend/src` did not turn up a second
+  live site** (the near-misses are all bounds-clamping, or records that are correctly just reported —
+  `activity_calendar`'s longest streak, `sky_quality`'s dominant setting). **So the value here is in the
+  places a grep can't see:** a *client-side* comparison against `Math.min(...history)` in a React component, a
+  baseline built by sorting and taking `[0]`, an SQL `MIN()`/`ORDER BY … LIMIT 1`, or a "personal best" phrase
+  in copy whose number comes from somewhere else. Those are the four shapes worth an hour.
+
+- **NEW IDEA (Builder 2026-08-30, the natural next tap on the v0.319.1 verdict fix) — let the Nights card's
+  "soft" badge say what it was compared against.** *(Pillar: friendliness + trust — PRIORITY 3; size XS;
+  frontend-only, the number is already on the row.)* The badge is a bare word — `soft`, in yellow — sitting
+  beside a button that offers to discard the night. The Last-session nudge one card up says the whole thing
+  (*"softer than this target's usual (5.2 px vs 3.4 px FWHM)"*), so the app already has the sentence; the badge
+  just doesn't carry it. A tooltip or `title` on the badge reading *"4.6 px stars — softer than this target's
+  usual 3.4 px"* would let a beginner judge the call rather than take it, which matters precisely because the
+  action next to it is destructive-feeling. **Why it is XS:** `median_fwhm_px` is already on every
+  `NightSummary` row, and the baseline is the same `_typical_other_fwhm` the verdict used — it just isn't
+  returned. **The one decision:** either add a nullable `typical_fwhm_px` to `NightSummaryOut` (additive, and
+  the honest source) or have the frontend re-derive the median from the rows it already has — **prefer the
+  former**, since a second derivation of the same statistic is exactly what the v0.317.1 process note warns
+  about. **Care:** it is a tooltip, not a fourth column — the Target page is the "extremely busy" one.
+
 - **NEW IDEA (Builder 2026-08-30, the half deliberately left out of the Stack-form print line v0.318.0) — make
   the print nudge a *button*, not only a sentence.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size XS;
   frontend-only, no new data.)* The estimate panel now says *"Turning Drizzle on at ×1.3 would print it at A3
@@ -9976,7 +10012,7 @@ to **Shipped**.)_
   **Tests (+6):** `format.test.ts` (+3 — the phrase inside the clause, the silence on every unbelievable count
   and on a single-night window, and the agrees-with-the-caption-clause pin), `LatestPictureCard.test.tsx` (+2 —
   the hero line, asserting it still has exactly three `·` segments; and quiet on a pre-schema-19 run),
-  `showAndTell.test.ts` (+1 — the slideshow line). tsc + vitest 2543 + vite build green.
+  `showAndTell.test.ts` (+1 — the slideshow line). tsc + vitest 2537 + vite build green.
 
   Original spec, for the record:
 
