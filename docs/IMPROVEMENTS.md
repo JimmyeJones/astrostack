@@ -9317,6 +9317,18 @@ to **Shipped**.)_
     which is a real but uncommon path; the reveal is the first surface where the disagreement becomes *visible*
     rather than merely latent, which is why it is worth closing now rather than when it bites.
 
+- **⚠️ PROCESS NOTE (Builder 2026-08-30, measured on a *pristine* checkout after it cost a chunk of a run) —
+  running a hand-picked list of test files that **interleaves `tests/webapp/…` and `tests/…` paths** can make
+  pytest lose `tests/webapp/conftest.py`, and every later webapp test errors with `fixture 'client' not
+  found`.** *(Not a bug in the app, not a bug you introduced, and NOT a reason to touch conftest.)* Reproduced
+  on `origin/main` with nothing of mine in the tree:
+  `pytest -q tests/webapp/test_deepening_reel.py tests/test_output_archive.py tests/webapp/test_wallpaper.py`
+  → *7 errors*, while the same three files in a different order, or the whole suite in one go
+  (`pytest -q`, one `tests/` argument), are green. It is an argument-ordering quirk of conftest resolution
+  across the two package dirs, and it looks exactly like "my change broke every webapp test", which is how it
+  eats time. **What to do:** if a targeted run errors like this, re-run it with the webapp files *last* (or on
+  their own) before believing it — and treat the full-suite run as the only authority, which §5 already says.
+
 - **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by the v0.301.0 recipe-matched reveal) — the
   reveal's "before" is now a full edit pipeline per request, and nothing caches it.** *(Pillar: friendliness —
   PRIORITY 3; size S; measure before building.)* `reference-sub` has always debayered a full sub per request
@@ -18627,46 +18639,102 @@ problems. Dogfood it every big-picture run and fix root causes.
   endpoint slipped in since this was filed, and that `/api/gallery/best` still exposes the artifact paths this
   reuses.
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready *cinematic zoom* of your
-  finished picture — a short looping clip that glides from the whole frame into the target and back out, so a
-  galaxy or nebula makes a scroll-stopping post instead of a still that's easy to swipe past.** *(Pillar: enjoy +
-  share, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network, no schema/config
-  change.)*
-  **Why a beginner wants it.** After the app has done its job the owner has a genuinely beautiful frame, and the
-  *only* thing they want to do with it is show people. The app already exports it well as a still (share JPEG,
-  wallpaper, keepsake, recap poster) — but the platforms a Seestar beginner actually posts to (Instagram Reels,
-  TikTok, WhatsApp status) reward **motion**: a slow push-in on a spiral galaxy reads as "look what I made" in a
-  way a static image never does, and it's the format a non-expert has no tool to produce. A one-tap "Reveal"
-  turns the finished picture into that clip with zero craft required.
-  **What it is (and is deliberately NOT).** A short (~6 s) looping **Ken-Burns** animation of the *already
-  display-stretched* result: ease-in from the full field to a centred, ~2× crop on the target, hold a beat, ease
-  back out. That's it — no music, no text overlay, no multi-clip edit. It is **not** the existing "deepening"
-  reel (`render/deepening.py`, a *temporal* cross-run "getting deeper night after night" animation) nor the
-  in-stack "watch it appear" progress reel (`stacker.py` `_progress.webp`) — both show the stack *accumulating
-  over time*; Reveal is a purely **spatial** camera move over one finished frame, a different artefact answering
-  a different want (grepped 2026-08-27: no ken-burns / cinematic / zoom-reveal / pan feature filed or shipped —
-  the only "zoom" hit is the Gallery lightbox's manual pan/zoom, which is interactive viewing, not an export).
-  **Sane auto-default (no knobs).** The crop centre is the target: use the run WCS to project the catalogued
-  object's RA/Dec to pixels (the same `identify`/`objects_in_field`/scale-bar WCS path already read on the
-  result), falling back to the picture's brightness centroid (or plain image centre) when there's no solve — so
-  a beginner never frames anything. Fixed timing, fixed ~2× zoom, fixed easing. NaN/uncovered pixels render black
-  exactly like every other export.
-  **Reuses existing machinery — almost no new surface.** The frames are Pillow crops+resizes of the stored
-  display-space preview/FITS (no re-stretch — `already_display` semantics), and the encoder is the **same
-  animated-WEBP-with-APNG-fallback** path `render/deepening.py` and `stacker.py` already use
-  (`img.save(..., save_all=True, append_images=..., loop=0)`). The core is a pure, unit-testable
-  `render/reveal.py::build_reveal(rgb, focus_xy, *, seconds, zoom, size) -> list[PIL.Image]` (deterministic
-  keyframe schedule; assert frame count, that frame 0 ≈ full-frame and the mid frame is a tighter crop centred on
-  `focus_xy`, and that a NaN canvas stays finite/black). Cached beside the outputs as `{base}_reveal.webp`
-  (add to `RUN_ARTEFACT_SUFFIXES` so archive/delete already sweep it), served through the existing result/History
-  download menu next to Share/To-phone/Wallpaper.
-  **Guardrails/feasibility.** Additive and reversible; nothing on by default changes; incoming/ untouched;
-  offline and deterministic (no `Date.now`/RNG in the schedule — timing is index-derived), so it's fully
-  testable. Memory-bounded: one downscaled crop frame at a time, at share resolution (≤~1080 px long edge), never
-  the full 100-MP mosaic. **Builder slices:** (a) pure `build_reveal(...)` + unit tests; (b) wire the cached
-  `_reveal.webp` write into the output writer + `RUN_ARTEFACT_SUFFIXES` + a result-menu download button
-  (self-hiding until the file exists); (c) optional later — a portrait (9:16) variant for phone-native posting,
-  mirroring the existing wallpaper-aspect crops.
+- **✅ SHIPPED — SLICES (a)+(b) (Builder, v0.303.0, branch `claude/compassionate-galileo-fj2p70`) —
+  ~~"Reveal": a one-tap, share-ready *cinematic zoom* of your finished picture.~~** Shipped as **"Zoom clip"**
+  — renamed on purpose: "the reveal" already means the one-frame-vs-stack card everywhere in this codebase and
+  backlog, and a second feature under that name would make every future grep ambiguous.
+
+  **What shipped.** A new pure `seestack/render/zoomclip.py`: `build_zoom_frames(img, focus_xy, ...)` renders the
+  push-in (raised-cosine easing, index-derived — no clock, no RNG), `write_zoom_clip` encodes it with the same
+  animated-WEBP/APNG-fallback call the deepening reel uses, and `build_zoom_clip` wires the two together from a
+  preview's bytes. Two endpoints on the run — `…/zoom-clip/info` (lightweight, `available: false` rather than a
+  404, plus `centred_on_target` so the UI never implies a solve it doesn't have) and `…/zoom-clip` (builds,
+  caches, serves) — and one **Zoom clip** item in the Save/share menu on both History and the Target page, a
+  plain download link gated on the same `has_preview` the rest of the Share section is, so it costs no extra
+  request per card.
+
+  **Three decisions worth carrying forward:**
+  * **The way out is the way in, reversed.** The loop closes by construction (no seam to tune), only the
+    push-in half is ever rendered, and the hold at the far end is *one* frame with a long duration rather than
+    many identical ones — which is what keeps both the file and the peak memory small.
+  * **It never upscales.** `zoom_clip_size` caps the output at 640 px *and* at what the deepest frame actually
+    contains (`source / 1.8`), so a 1024-wide preview yields a 569 px clip that is sharp end to end rather than
+    a soft 1080 one. Same "never upsample" rule the wallpaper export follows.
+  * **The crop slides back inside the frame instead of hanging off it.** The deliberate consequence, pinned in
+    a test: an object right in the corner cannot be centred, and is left where it is rather than framed against
+    a black margin.
+
+  **Framed on the object, from the preview's own grid.** The focus point is the plate-solved target, and the
+  two things that put the stored preview on a different grid from the master — an auto-edit border trim and a
+  North-up turn a past "Adjust → Save" baked in — both have to be undone first. That logic already existed
+  inside the wallpaper endpoint, so it was lifted out as `_target_pixel_in_preview` and is now shared by both
+  (getting either half wrong re-centres the picture on empty sky). With no solve, `brightness_centroid` aims at
+  the picture's own brightest concentration; with neither, the centre.
+
+  **Sourced from the stored preview PNG**, like the wallpaper and share exports — the only rendering that is
+  right for *every* kind of run, an in-place "Process target" Auto edit included (its recipe is baked nowhere
+  else). Cached beside the outputs with a signature over those bytes plus the focus point, so a re-edited
+  picture rebuilds rather than serving yesterday's move, and the three artefacts are in `RUN_ARTEFACT_SUFFIXES`
+  so a re-stack archives them with the run instead of leaving a clip of a picture that no longer exists.
+
+  **Upgrade-safe (§9):** additive endpoints, one new engine module, three new `RUN_ARTEFACT_SUFFIXES` entries
+  (caches, rebuilt on demand). No config, schema, on-disk layout, default or API-shape change; nothing runs
+  unless the user asks for the file; `incoming/` untouched.
+
+  **Tests (+20):** 11 engine (easing pinned at both ends and monotonic; the never-upscale size rule at three
+  scales; the crop box centred, clamped, NaN-focus and sub-1 scale; the loop closing as the reverse of the
+  push-in; the far end measurably tighter; the camera travelling to an off-centre object *and* the corner case
+  above; the centroid finding a blob and giving up on a flat frame; a written clip's frame count and size; and
+  an unreadable preview being "no clip", not a crash) and 9 webapp/frontend (info offering + self-hiding + 404s;
+  the served animation looping; the move centred on the WCS-solved target; the cache reused and *rebuilt* when
+  the preview changes; the artefacts archiving with their run; and the menu item's href/`download` on a run
+  with a picture, absent on one without).
+
+  **Slice (c) — the 9:16 portrait variant — is deliberately not built**, and shouldn't be until someone wants
+  it: it needs a second crop rule and doubles the cache, for a shape only one platform needs.
+
+  Original spec, for the record:
+
+  - **NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready *cinematic zoom* of your
+    finished picture — a short looping clip that glides from the whole frame into the target and back out, so a
+    galaxy or nebula makes a scroll-stopping post instead of a still that's easy to swipe past.** *(Pillar: enjoy +
+    share, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network, no schema/config
+    change.)*
+    **Why a beginner wants it.** After the app has done its job the owner has a genuinely beautiful frame, and the
+    *only* thing they want to do with it is show people. The app already exports it well as a still (share JPEG,
+    wallpaper, keepsake, recap poster) — but the platforms a Seestar beginner actually posts to (Instagram Reels,
+    TikTok, WhatsApp status) reward **motion**: a slow push-in on a spiral galaxy reads as "look what I made" in a
+    way a static image never does, and it's the format a non-expert has no tool to produce. A one-tap "Reveal"
+    turns the finished picture into that clip with zero craft required.
+    **What it is (and is deliberately NOT).** A short (~6 s) looping **Ken-Burns** animation of the *already
+    display-stretched* result: ease-in from the full field to a centred, ~2× crop on the target, hold a beat, ease
+    back out. That's it — no music, no text overlay, no multi-clip edit. It is **not** the existing "deepening"
+    reel (`render/deepening.py`, a *temporal* cross-run "getting deeper night after night" animation) nor the
+    in-stack "watch it appear" progress reel (`stacker.py` `_progress.webp`) — both show the stack *accumulating
+    over time*; Reveal is a purely **spatial** camera move over one finished frame, a different artefact answering
+    a different want (grepped 2026-08-27: no ken-burns / cinematic / zoom-reveal / pan feature filed or shipped —
+    the only "zoom" hit is the Gallery lightbox's manual pan/zoom, which is interactive viewing, not an export).
+    **Sane auto-default (no knobs).** The crop centre is the target: use the run WCS to project the catalogued
+    object's RA/Dec to pixels (the same `identify`/`objects_in_field`/scale-bar WCS path already read on the
+    result), falling back to the picture's brightness centroid (or plain image centre) when there's no solve — so
+    a beginner never frames anything. Fixed timing, fixed ~2× zoom, fixed easing. NaN/uncovered pixels render black
+    exactly like every other export.
+    **Reuses existing machinery — almost no new surface.** The frames are Pillow crops+resizes of the stored
+    display-space preview/FITS (no re-stretch — `already_display` semantics), and the encoder is the **same
+    animated-WEBP-with-APNG-fallback** path `render/deepening.py` and `stacker.py` already use
+    (`img.save(..., save_all=True, append_images=..., loop=0)`). The core is a pure, unit-testable
+    `render/reveal.py::build_reveal(rgb, focus_xy, *, seconds, zoom, size) -> list[PIL.Image]` (deterministic
+    keyframe schedule; assert frame count, that frame 0 ≈ full-frame and the mid frame is a tighter crop centred on
+    `focus_xy`, and that a NaN canvas stays finite/black). Cached beside the outputs as `{base}_reveal.webp`
+    (add to `RUN_ARTEFACT_SUFFIXES` so archive/delete already sweep it), served through the existing result/History
+    download menu next to Share/To-phone/Wallpaper.
+    **Guardrails/feasibility.** Additive and reversible; nothing on by default changes; incoming/ untouched;
+    offline and deterministic (no `Date.now`/RNG in the schedule — timing is index-derived), so it's fully
+    testable. Memory-bounded: one downscaled crop frame at a time, at share resolution (≤~1080 px long edge), never
+    the full 100-MP mosaic. **Builder slices:** (a) pure `build_reveal(...)` + unit tests; (b) wire the cached
+    `_reveal.webp` write into the output writer + `RUN_ARTEFACT_SUFFIXES` + a result-menu download button
+    (self-hiding until the file exists); (c) optional later — a portrait (9:16) variant for phone-native posting,
+    mirroring the existing wallpaper-aspect crops.
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #14) — "Is more time worth it?": a plain-language, *measured*
   grain projection that tells a beginner how much cleaner their picture would actually get with more light —

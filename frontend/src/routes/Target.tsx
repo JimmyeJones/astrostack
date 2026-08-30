@@ -7,7 +7,7 @@ import {
   IconAlertTriangle, IconArrowBackUp, IconCheck, IconChevronDown, IconClock,
   IconDeviceFloppy, IconDeviceMobile, IconDownload, IconHistory,
   IconNotes, IconPhoto, IconPhotoDown, IconSparkles, IconStack2, IconTelescope,
-  IconTargetArrow, IconWand, IconX,
+  IconTargetArrow, IconVideo, IconWand, IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
@@ -1332,6 +1332,18 @@ export function TargetView() {
                   onClick={() => setToPhone(true)}>
                   To phone
                   <span style={MENU_HINT}>Scan a QR to open it on your phone</span>
+                </Menu.Item>
+                {/* Motion, for the places a still gets swiped past. Built and
+                    cached server-side from this run's own preview, so it needs no
+                    extra request to decide whether to offer it: every run with a
+                    picture has one. */}
+                <Menu.Item leftSection={<IconVideo size={16} />}
+                  component="a" href={api.stackZoomClipUrl(safe, latestRun.id)}
+                  download>
+                  Zoom clip
+                  <span style={MENU_HINT}>
+                    A few seconds gliding into your target — for posting
+                  </span>
                 </Menu.Item>
                 <Menu.Divider />
                 <WallpaperMenuItems safe={safe} runId={latestRun.id}

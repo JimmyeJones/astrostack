@@ -620,6 +620,24 @@ describe("HistoryView", () => {
       .toBe(client.api.stackWallpaperUrl("M_42", 1, "phone"));
     expect(await menuItem("Desktop")).toBeInTheDocument();
     expect(await menuItem("Square")).toBeInTheDocument();
+    // …and the zoom clip sits with the other share actions, as a plain download
+    // link (the server builds and caches it) rather than a second fetch.
+    const clip = await menuItem("Zoom clip");
+    expect(clip.getAttribute("href")).toBe(client.api.stackZoomClipUrl("M_42", 1));
+    expect(clip.hasAttribute("download")).toBe(true);
+  });
+
+  it("offers no zoom clip for a run with no picture", async () => {
+    // The whole Share section is gated on the run having a preview — there is
+    // nothing for a camera to move over otherwise, and the endpoint would 404.
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ has_preview: false, has_fits: true })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+
+    openSaveShare();
+    expect(await menuItem("FITS")).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^Zoom clip/ })).toBeNull();
   });
 
   it("caps the save/share menu's height instead of letting it clip", async () => {

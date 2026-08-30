@@ -6,7 +6,7 @@ import {
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconCheck, IconChevronDown, IconClipboardText, IconCopy, IconDeviceFloppy, IconDeviceMobile, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
+import { IconAdjustments, IconCheck, IconChevronDown, IconClipboardText, IconCopy, IconDeviceFloppy, IconDeviceMobile, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconVideo, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded } from "../api/client";
@@ -1299,6 +1299,19 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                     >
                       Copy caption
                       <span style={MENU_HINT}>A ready-to-post sentence about this picture</span>
+                    </Menu.Item>
+                    {/* Motion, for the places a still gets swiped past. Built and
+                        cached server-side from this run's own preview, so it costs
+                        no extra request to offer: every run with a picture has one. */}
+                    <Menu.Item
+                      leftSection={<IconVideo size={16} />}
+                      component="a" href={api.stackZoomClipUrl(safe, run.id)}
+                      download
+                    >
+                      Zoom clip
+                      <span style={MENU_HINT}>
+                        A few seconds gliding into your target — for posting
+                      </span>
                     </Menu.Item>
                     <Menu.Divider />
                     <WallpaperMenuItems safe={safe} runId={run.id} />

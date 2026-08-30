@@ -1355,6 +1355,187 @@ async def deepening_reel(safe: str, request: Request) -> FileResponse:
     return FileResponse(reel, media_type=media, filename=reel.name)
 
 
+# --- Share-ready "zoom clip" -------------------------------------------------
+# A short looping push-in on ONE finished picture, for posting. Unlike the two
+# animations above (the progress reel and the deepening reel, both of which show a
+# stack accumulating *over time*) this is a purely spatial camera move over the
+# finished frame — see seestack.render.zoomclip. Rendered on demand from the run's
+# stored preview PNG (the same bytes the wallpaper/share exports use, so it matches
+# the picture on screen for every kind of run) and cached beside the outputs with a
+# content signature, so a repeat download is a plain file read.
+
+_ZOOM_CLIP_SUFFIXES = ("_zoom.webp", "_zoom.png")
+
+
+def _target_pixel_in_preview(run: Any, entry: Any,
+                             preview_png: bytes) -> tuple[float, float] | None:
+    """Where the catalogued target sits in a run's **stored preview bytes**, or
+    ``None`` to centre on the image instead.
+
+    Two things can put those bytes on a different grid from the master, and both
+    have to be undone before the WCS answer means anything: an auto-edit border
+    trim (``preview_crop``), and a North-up turn a past "Adjust → Save" baked in
+    (``preview_north_up_deg``) — so the mapping is done on the un-rotated grid and
+    the answer turned by the same angle. One definition, two callers (the wallpaper
+    crop and the zoom clip), because getting either half wrong re-centres the
+    picture on empty sky.
+    """
+    from seestack.wallpaper import (
+        png_size,
+        rotate_point_north_up,
+        wallpaper_target_pixel,
+    )
+
+    ra = entry.ra_deg if entry is not None else None
+    dec = entry.dec_deg if entry is not None else None
+    if ra is None or dec is None or not run.fits_path:
+        return None
+    baked = baked_north_up_deg(run)
+    flat_size = png_size(preview_png)
+    if baked:
+        flat_size = _unrotated_preview_size(run.fits_path) or flat_size
+    if flat_size is None:
+        return None
+    target_px = wallpaper_target_pixel(
+        run.fits_path, ra, dec, flat_size[0], flat_size[1],
+        parse_preview_crop(run.preview_crop_json))
+    if target_px is not None and baked:
+        target_px = rotate_point_north_up(
+            target_px[0], target_px[1], flat_size[0], flat_size[1], baked)
+    return target_px
+
+
+def _zoom_clip_signature(preview_path: Path,
+                         focus_xy: tuple[float, float] | None) -> str:
+    """Content signature of a run's clip — the preview bytes it was made from plus
+    the point it zooms onto, so a re-edited preview (or a target that has since
+    been plate-solved) rebuilds rather than serving yesterday's move."""
+    import hashlib
+
+    # Version tag: bump when the *render output* changes for an unchanged preview,
+    # so cached clips are rebuilt in place instead of serving the old schedule.
+    parts = ["v1"]
+    try:
+        st = os.stat(preview_path)
+        parts.append(f"{st.st_mtime_ns}:{st.st_size}")
+    except OSError:
+        parts.append("0:0")
+    parts.append("centre" if focus_xy is None
+                 else f"{focus_xy[0]:.1f},{focus_xy[1]:.1f}")
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()
+
+
+def _build_or_get_zoom_clip(preview_path: Path, basename: str,
+                            focus_xy: tuple[float, float] | None) -> Path | None:
+    """Return the cached zoom clip for this run's preview, rebuilding it when the
+    signature has changed. Blocking (decodes + encodes an animation), so callers
+    dispatch it to a threadpool."""
+    out_dir = preview_path.parent
+    sig = _zoom_clip_signature(preview_path, focus_xy)
+    sig_file = out_dir / f"{basename}_zoom.sig"
+    for suffix in _ZOOM_CLIP_SUFFIXES:
+        cand = out_dir / f"{basename}{suffix}"
+        if cand.exists() and sig_file.exists():
+            with contextlib.suppress(OSError):
+                if sig_file.read_text().strip() == sig:
+                    return cand
+    # (Re)build: clear any stale clip of either format first, so a format change
+    # (WEBP↔APNG) can't leave two files the resolver disagrees on.
+    for suffix in _ZOOM_CLIP_SUFFIXES:
+        with contextlib.suppress(OSError):
+            (out_dir / f"{basename}{suffix}").unlink()
+    from seestack.render.zoomclip import build_zoom_clip
+
+    try:
+        data = preview_path.read_bytes()
+    except OSError:
+        return None
+    path = build_zoom_clip(data, out_dir, basename, focus_xy=focus_xy)
+    if path is None:
+        return None
+    with contextlib.suppress(OSError):
+        sig_file.write_text(sig)
+    return path
+
+
+def _zoom_clip_inputs(request: Request, safe: str,
+                      run_id: int) -> tuple[Any, Path | None, tuple[float, float] | None]:
+    """``(run, preview_path, focus_xy)`` for a run's zoom clip — the one DB read
+    both endpoints below need. ``preview_path`` is ``None`` when the run has no
+    stored picture to move the camera over, which is what makes the card self-hide
+    rather than 404 at the user."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        entry = lib.find_target(safe)
+    finally:
+        proj.close()
+        lib.close()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    if not run.preview_path or not Path(run.preview_path).exists():
+        return (run, None, None)
+    preview_path = Path(run.preview_path)
+    focus_xy = None
+    with contextlib.suppress(OSError):
+        focus_xy = _target_pixel_in_preview(run, entry, preview_path.read_bytes())
+    return (run, preview_path, focus_xy)
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/zoom-clip/info")
+def zoom_clip_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
+    """Whether a share-ready zoom clip can be made of this run, and how it will be
+    framed. Lightweight (no render): ``available`` is false — not a 404 — when the
+    run has no stored preview, so the button simply doesn't appear.
+
+    ``centred_on_target`` says whether the move aims at the plate-solved object or
+    at the picture's own brightest part, so the UI can be honest about it in one
+    short line rather than implying a solve it doesn't have."""
+    _run, preview_path, focus_xy = _zoom_clip_inputs(request, safe, run_id)
+    if preview_path is None:
+        return {"available": False}
+    from PIL import features
+
+    from seestack.render.zoomclip import (
+        CLIP_HOLD_SECONDS,
+        CLIP_IN_SECONDS,
+        CLIP_ZOOM,
+        zoom_clip_size,
+    )
+    from seestack.wallpaper import png_size
+
+    size = None
+    with contextlib.suppress(OSError):
+        size = png_size(preview_path.read_bytes())
+    out = zoom_clip_size(*size) if size else None
+    return {
+        "available": True,
+        "format": "webp" if features.check("webp") else "png",
+        "centred_on_target": focus_xy is not None,
+        "zoom": CLIP_ZOOM,
+        # The whole loop: in, hold, and back out again.
+        "seconds": round(2 * CLIP_IN_SECONDS + CLIP_HOLD_SECONDS, 1),
+        "width": out[0] if out else None,
+        "height": out[1] if out else None,
+    }
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/zoom-clip")
+async def zoom_clip(safe: str, run_id: int, request: Request) -> FileResponse:
+    """Serve this run's looping zoom clip (WEBP, or APNG where Pillow has no WEBP),
+    building and caching it on demand. 404 when the run has no stored preview."""
+    run, preview_path, focus_xy = _zoom_clip_inputs(request, safe, run_id)
+    if preview_path is None:
+        raise HTTPException(status_code=404, detail="No preview for this run")
+    basename = run.output_basename or "master"
+    clip = await run_in_threadpool(_build_or_get_zoom_clip, preview_path,
+                                   basename, focus_xy)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Could not build a zoom clip")
+    media = _PROGRESS_MEDIA.get(clip.suffix, "application/octet-stream")
+    return FileResponse(clip, media_type=media, filename=clip.name)
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/render-suggestion")
 async def render_stretch_suggestion(
     safe: str, run_id: int, request: Request,
@@ -2392,7 +2573,6 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
         png_size,
         render_wallpaper_jpeg,
         rotate_point_north_up,
-        wallpaper_target_pixel,
     )
 
     preset = WALLPAPER_PRESETS.get(aspect)
@@ -2419,26 +2599,8 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
     # preview is still on it.
     baked_north_up = baked_north_up_deg(run)
     # Locate the target in the preview grid from the run's own WCS; None → centre.
-    # `wallpaper_target_pixel` maps onto a *uniform downscale* of the master, so
-    # on a preview a past save rotated it has to be given that un-rotated grid and
-    # the answer turned by the same angle — otherwise the crop re-centres on the
-    # wrong spot even when North-up isn't asked for.
-    target_px = None
-    ra = entry.ra_deg if entry is not None else None
-    dec = entry.dec_deg if entry is not None else None
-    flat_size = png_size(preview)
-    if baked_north_up and run.fits_path:
-        flat_size = _unrotated_preview_size(run.fits_path) or flat_size
-    if ra is not None and dec is not None and run.fits_path and flat_size is not None:
-        # ...and the other way the stored bytes can leave the canvas grid: an
-        # auto-edit border trim, which shifts and shrinks the mapping.
-        target_px = wallpaper_target_pixel(
-            run.fits_path, ra, dec, flat_size[0], flat_size[1],
-            parse_preview_crop(run.preview_crop_json))
-        if target_px is not None and baked_north_up:
-            target_px = rotate_point_north_up(
-                target_px[0], target_px[1], flat_size[0], flat_size[1],
-                baked_north_up)
+    # Shared with the zoom clip, which has to frame on the identical point.
+    target_px = _target_pixel_in_preview(run, entry, preview)
 
     # North-up rotates the picture *and* moves the target pixel, so re-centre the
     # crop on the rotated position. Only the rotation still *missing* from the
