@@ -1274,6 +1274,18 @@ def _build_output_header_meta(
         total = _integration_time_s(frames, n_used)
         if total is not None:
             meta["EXPTOTAL"] = (total, "integration time (s)")
+    # When the light in this master was actually collected. The master carried no
+    # capture time at all until now — so a file opened in Siril/PixInsight, and
+    # the app's own acquisition nameplate (which reads this card), had no date to
+    # show, while this module's docstring claimed otherwise. DATE-OBS is the
+    # first sub's start and DATE-END the last sub's, which is the FITS
+    # convention for a combined frame; both are omitted when no sub carries a
+    # capture time, exactly as every other card here degrades.
+    capture_start, capture_end = _capture_window(frames)
+    if capture_start:
+        meta["DATE-OBS"] = (capture_start, "start of the first sub combined")
+    if capture_end and capture_end != capture_start:
+        meta["DATE-END"] = (capture_end, "start of the last sub combined")
     # Label the method the dispatcher actually ran, applying the *same* frame-count
     # gates it uses (`min_max_reject and n >= 3`, `sigma_clip and n >= 4`): below
     # those counts the dispatcher silently falls through to plain mean (no rejection

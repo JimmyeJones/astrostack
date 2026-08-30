@@ -74,6 +74,17 @@ def test_every_caption_character_has_a_glyph_in_the_font_we_draw_with():
         nameplate_line(NameplateFields(
             integration_s=1.5, n_frames=3, sub_exposure_s=2.5,
             date_iso="2026-01-05")),
+        # …and every shape of the multi-night span, which is where a tidy-up
+        # would reach for an en dash the bundled font cannot draw.
+        nameplate_line(NameplateFields(
+            target="M 31", n_frames=505,
+            date_iso="2024-11-15", date_end_iso="2024-11-18")),
+        nameplate_line(NameplateFields(
+            target="M 31", n_frames=505,
+            date_iso="2024-10-28", date_end_iso="2024-11-03")),
+        nameplate_line(NameplateFields(
+            target="M 31", n_frames=505,
+            date_iso="2024-12-28", date_end_iso="2025-01-03")),
     ]
     for caption in captions:
         assert caption, "a caption with real data must not be empty"
@@ -155,3 +166,51 @@ def test_draw_nameplate_fits_a_long_caption_without_crashing_on_a_tiny_image():
     )
     out = draw_nameplate(img, fields)
     assert out.size == (64, 48)                    # shrank to fit, no crash
+
+
+# --- the acquisition date, and the span a multi-night stack covers ------------
+#
+# A nameplate had *no date at all* until the stacker started stamping a capture
+# time: it read a `DATE-OBS` card the master never carried, so the one field an
+# acquisition caption is really for was silently missing from every shared
+# picture. These pin what it says now.
+
+def test_a_span_writes_its_shared_parts_once():
+    from seestack.nameplate import format_acq_range
+
+    assert format_acq_range("2024-11-15", "2024-11-18") == "15-18 Nov 2024"
+    assert format_acq_range("2024-10-28", "2024-11-03") == "28 Oct-3 Nov 2024"
+    assert format_acq_range("2024-12-28", "2025-01-03") == (
+        "28 Dec 2024-3 Jan 2025")
+
+
+def test_one_night_captions_exactly_as_it_always_did():
+    from seestack.nameplate import format_acq_date, format_acq_range
+
+    for iso in ("2026-07-19T21:03:00", "2026-01-05"):
+        assert format_acq_range(iso, iso) == format_acq_date(iso)
+        assert format_acq_range(iso, None) == format_acq_date(iso)
+        assert format_acq_range(iso) == format_acq_date(iso)
+
+
+def test_a_span_reads_forwards_however_it_arrives():
+    from seestack.nameplate import format_acq_range
+
+    assert format_acq_range("2024-11-18", "2024-11-15") == "15-18 Nov 2024"
+
+
+def test_an_unusable_end_degrades_to_the_single_date():
+    from seestack.nameplate import format_acq_range
+
+    assert format_acq_range("2024-11-15", "not-a-date") == "15 Nov 2024"
+    assert format_acq_range("2024-11-15", "") == "15 Nov 2024"
+    assert format_acq_range(None, "2024-11-15") == "15 Nov 2024"
+    assert format_acq_range(None, None) == ""
+
+
+def test_the_caption_carries_the_span():
+    assert nameplate_line(NameplateFields(
+        target="M 31", integration_s=15150, n_frames=505, sub_exposure_s=30,
+        date_iso="2024-11-15", date_end_iso="2024-11-18",
+        camera="ZWO Seestar S50",
+    )) == "M 31 · 4h 12m (505x30s) · 15-18 Nov 2024 · ZWO Seestar S50"
