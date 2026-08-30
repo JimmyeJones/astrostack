@@ -1,15 +1,16 @@
 import {
-  Alert, Badge, Card, Center, Group, Image, Loader, Progress, Select, Stack, Text,
-  Title,
+  Alert, Anchor, Badge, Card, Center, Group, Image, Loader, Progress, Select,
+  Stack, Text, Title,
 } from "@mantine/core";
 import { IconAntenna, IconMoonStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, type LiveSession } from "../api/client";
+import { api, type LiveSession, type Target } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { useKeepAwake } from "../components/useKeepAwake";
 import {
-  conditionsCause, conditionsLine, freshnessLine, goalLine, mostRecentlyActive,
-  sharpnessLine, tonightHeadline,
+  alsoActiveTonight, conditionsCause, conditionsLine, freshnessLine, goalLine,
+  mostRecentlyActive, sharpnessLine, tonightHeadline,
 } from "../live/liveSession";
 
 // How often to re-ask while the page is open. A capture night moves in minutes,
@@ -60,6 +61,14 @@ export function LiveView() {
     enabled: !!safe,
     refetchInterval: POLL_MS,
   });
+
+  // This is the other page in the app meant to be *left open* — outdoors, on a
+  // phone, for hours — and the one where the screen sleeping actually costs
+  // something: you walk over to check and it's black. Held only while the
+  // session still reads `active`, so a finished night releases it and the phone
+  // goes back to its own battery rules. Same fail-soft helper the slideshow
+  // uses: a browser without the Wake Lock API simply doesn't get one.
+  useKeepAwake(live.data?.active === true);
 
   if (targets.isError) {
     return <QueryError error={targets.error} onRetry={() => targets.refetch()} />;
@@ -113,7 +122,11 @@ export function LiveView() {
           </Text>
         </Alert>
       ) : (
-        <LiveCard safe={safe} name={target?.name ?? safe} live={live.data} />
+        <>
+          <LiveCard safe={safe} name={target?.name ?? safe} live={live.data} />
+          <AlsoTonight targets={targets.data} safe={safe}
+            onPick={(v) => setParams({ target: v })} />
+        </>
       )}
     </Stack>
   );
@@ -186,5 +199,40 @@ function LiveCard({ safe, name, live }: {
         ) : null}
       </Stack>
     </Card>
+  );
+}
+
+/**
+ * One line naming the *other* targets that also got subs tonight, each a link
+ * that switches the page to it.
+ *
+ * The page deliberately follows one target — that's what makes it answerable at
+ * a glance — but a Seestar that re-points mid-night leaves the earlier target
+ * invisible unless the reader already knows the picker exists. This closes that
+ * without turning the page into a dashboard: names and a link, nothing measured,
+ * no extra request (it reads the target list the page already has).
+ *
+ * Renders nothing when the night was one target, which is the common case.
+ */
+function AlsoTonight({ targets, safe, onPick }: {
+  targets: Target[] | undefined;
+  safe: string;
+  onPick: (safe: string) => void;
+}) {
+  const others = alsoActiveTonight(targets, safe);
+  if (others.length === 0) return null;
+  return (
+    <Text size="xs" c="dimmed">
+      Also got subs tonight:{" "}
+      {others.map((t, i) => (
+        <span key={t.safe_name}>
+          {i > 0 ? ", " : ""}
+          <Anchor component="button" type="button" size="xs"
+            onClick={() => onPick(t.safe_name)}>
+            {t.name}
+          </Anchor>
+        </span>
+      ))}
+    </Text>
   );
 }

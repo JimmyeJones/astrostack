@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LiveView } from "./Live";
@@ -143,6 +143,61 @@ describe("LiveView", () => {
       expect(screen.getByText("No session to show yet")).toBeInTheDocument());
     expect(screen.getByText(/M 42 has no subs with a capture time yet/))
       .toBeInTheDocument();
+  });
+
+  it("names the other target the same night shot, as a link to it", async () => {
+    // A Seestar that re-points mid-night would otherwise leave the earlier
+    // target invisible unless the reader knew the picker existed.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([
+      target(),
+      target({ safe_name: "NGC_7000", name: "NGC 7000",
+               last_activity_utc: "2026-07-08T21:40:00+00:00" }),
+      target({ safe_name: "M_81", name: "M 81",       // a different night
+               last_activity_utc: "2026-07-01T23:00:00+00:00" }),
+    ]);
+    const spy = vi.spyOn(client.api, "liveSession").mockResolvedValue(live());
+    renderLive();
+    const link = await screen.findByRole("button", { name: "NGC 7000" });
+    // Last week's target is in the picker, but not on this line: only a button
+    // (the line's links) would mean it was named as part of tonight.
+    expect(screen.queryByRole("button", { name: "M 81" })).not.toBeInTheDocument();
+    fireEvent.click(link);
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("NGC_7000"));
+  });
+
+  it("says nothing about other targets when the night was just this one", async () => {
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([target()]);
+    vi.spyOn(client.api, "liveSession").mockResolvedValue(live());
+    renderLive();
+    await waitFor(() => expect(screen.getByText("Capturing")).toBeInTheDocument());
+    expect(screen.queryByText(/Also got subs tonight/)).not.toBeInTheDocument();
+  });
+
+  it("holds the screen awake while capturing, and lets it go when finished", async () => {
+    // The page is propped on a phone outdoors for hours; a black screen is the
+    // one failure that makes it feel broken.
+    const release = vi.fn().mockResolvedValue(undefined);
+    const request = vi.fn().mockResolvedValue({ release });
+    Object.defineProperty(navigator, "wakeLock", {
+      value: { request }, configurable: true, writable: true,
+    });
+    try {
+      vi.spyOn(client.api, "listTargets").mockResolvedValue([target()]);
+      vi.spyOn(client.api, "liveSession").mockResolvedValue(live());
+      const { unmount } = renderLive();
+      await waitFor(() => expect(request).toHaveBeenCalledWith("screen"));
+      unmount();
+      await waitFor(() => expect(release).toHaveBeenCalled());
+
+      // A session that has already finished never asks for one.
+      request.mockClear();
+      vi.spyOn(client.api, "liveSession").mockResolvedValue(live({ active: false }));
+      renderLive();
+      await waitFor(() => expect(screen.getByText("Finished")).toBeInTheDocument());
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(navigator as object, "wakeLock");
+    }
   });
 
   it("offers no picker when there is only one target to watch", async () => {
