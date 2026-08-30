@@ -209,8 +209,33 @@ describe("captureNightsClause", () => {
   });
 
   it("never claims a night count it cannot know", () => {
-    // A run records its first and last night, not how many it shot in between.
+    // A window alone says first and last, not how many nights are in between —
+    // so with no recorded count the clause must not invent one.
     expect(captureNightsClause("2024-11-15", "2024-11-18")).not.toContain("nights");
+    expect(captureNightsClause("2024-11-15", "2024-11-18", null))
+      .toBe("between 15 and 18 Nov 2024");
+  });
+
+  it("says how many nights when the run recorded them", () => {
+    expect(captureNightsClause("2024-11-15", "2024-11-18", 4))
+      .toBe("over 4 nights, between 15 and 18 Nov 2024");
+    // The same window built from only two of those nights says two — the whole
+    // reason the count is recorded rather than inferred from the span.
+    expect(captureNightsClause("2024-11-15", "2024-11-18", 2))
+      .toBe("over 2 nights, between 15 and 18 Nov 2024");
+  });
+
+  it("stays quiet about a count that would say nothing or contradict", () => {
+    // One night is already named by the date, and a fractional/zero/negative
+    // count is a backend we don't understand — say the span and stop.
+    expect(captureNightsClause("2024-11-15", "2024-11-18", 1))
+      .toBe("between 15 and 18 Nov 2024");
+    for (const odd of [0, -3, 2.5, NaN]) {
+      expect(captureNightsClause("2024-11-15", "2024-11-18", odd))
+        .toBe("between 15 and 18 Nov 2024");
+    }
+    // …and a count never appears beside a single date, which it would contradict.
+    expect(captureNightsClause("2024-11-15", "2024-11-15", 4)).toBe("on 15 Nov 2024");
   });
 
   it("is empty when there is no window", () => {

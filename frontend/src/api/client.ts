@@ -770,6 +770,11 @@ export interface DashboardStats {
      *  Absent on an older backend or a run with no recorded window. */
     capture_night_start?: string | null;
     capture_night_end?: string | null;
+    /** How many observing **nights** those subs came from. The window above
+     *  cannot say — 15→18 Nov is equally consistent with two nights and with
+     *  four — and the count is what makes a picture sound like the work it was.
+     *  Absent for a run recorded before the app tracked it; say nothing then. */
+    capture_nights?: number | null;
   }[];
   disk: {
     total_gb?: number; used_gb?: number; free_gb?: number;
@@ -937,6 +942,11 @@ export interface StackRun {
   // never falling back to `timestamp_utc`, which is when the stack *ran*.
   capture_night_start?: string | null;
   capture_night_end?: string | null;
+  /** How many observing **nights** those subs came from. The window above
+   *  cannot say — 15→18 Nov is equally consistent with two nights and with
+   *  four — and the count is what makes a picture sound like the work it was.
+   *  Absent for a run recorded before the app tracked it; say nothing then. */
+  capture_nights?: number | null;
   transparency_ratio?: number | null;
   noise_sigma?: number | null;
   // This stack's own measured median star size (FWHM) in native-frame pixels,
@@ -1351,6 +1361,11 @@ export interface GalleryItem {
   // date rather than passing off a processing stamp as a capture date.
   capture_night_start?: string | null;
   capture_night_end?: string | null;
+  /** How many observing **nights** those subs came from. The window above
+   *  cannot say — 15→18 Nov is equally consistent with two nights and with
+   *  four — and the count is what makes a picture sound like the work it was.
+   *  Absent for a run recorded before the app tracked it; say nothing then. */
+  capture_nights?: number | null;
   transparency_ratio?: number | null;
   noise_sigma?: number | null;
   calstat?: string | null;
@@ -1496,6 +1511,11 @@ export interface BestPicture {
   // date rather than passing off a processing stamp as a capture date.
   capture_night_start?: string | null;
   capture_night_end?: string | null;
+  /** How many observing **nights** those subs came from. The window above
+   *  cannot say — 15→18 Nov is equally consistent with two nights and with
+   *  four — and the count is what makes a picture sound like the work it was.
+   *  Absent for a run recorded before the app tracked it; say nothing then. */
+  capture_nights?: number | null;
 
   // True when this is the picture the user pinned as its target's cover ("Set as
   // cover" in History): it represents that target here instead of the newest

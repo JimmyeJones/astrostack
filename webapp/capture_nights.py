@@ -16,12 +16,23 @@ use. Going through that one helper is the point: a caption that named a night by
 its raw UTC date would disagree with the Nights card for anybody shooting west
 of Greenwich, where an evening's subs land on the *next* UTC day.
 
+It also answers the question the window *cannot*: **how many nights** a stack is
+made of. A window of 15→18 Nov is equally consistent with two nights and with
+four, and "600 subs over 4 nights" is what a person actually says about their
+picture — so a run also records the hours its subs arrived in
+(``capture_hours_json``, schema 19+) and :func:`capture_night_count` buckets
+*those* through the very same helper. Counting here rather than at stack time is
+deliberate: the count then follows the owner's longitude whenever they set one,
+instead of freezing a UTC-bucketed guess into the row.
+
 Pure and offline: give it the window and the observer's longitude and it returns
 ``YYYY-MM-DD`` strings (or ``None``), so it is trivially unit-tested and a
 missing/unparseable stamp simply drops the clause rather than guessing.
 """
 
 from __future__ import annotations
+
+import json
 
 from seestack.activity_calendar import night_date_of
 
@@ -53,6 +64,50 @@ def capture_night_range(
     # A window recorded (or hand-edited) end-first still describes a real range;
     # name it in the order a reader expects rather than refusing it.
     return (first, last) if first <= last else (last, first)
+
+
+def capture_night_dates(
+    capture_hours_json: str | None,
+    lon_deg: float | None = None,
+) -> list[str]:
+    """The distinct observing nights a run's subs fall into, as sorted ISO dates.
+
+    ``capture_hours_json`` is the run row's ``capture_hours_json`` (schema 19+):
+    a JSON array of on-the-hour UTC instants, one per hour in which a sub was
+    taken (see :func:`seestack.stack.stacker._capture_hours`). Bucketing happens
+    *here*, at read time, through the same :func:`night_date_of` the range above
+    uses — so the count follows the observer's longitude and can never disagree
+    with the dates the caption names.
+
+    Returns ``[]`` for a run recorded before the column existed, for malformed
+    JSON, and for anything that isn't a list of parseable stamps: a caller then
+    says nothing about nights rather than guessing a number.
+    """
+    if not capture_hours_json:
+        return []
+    try:
+        raw = json.loads(capture_hours_json)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    nights = {night for h in raw if (night := _night(
+        h if isinstance(h, str) else None, lon_deg)) is not None}
+    return sorted(nights)
+
+
+def capture_night_count(
+    capture_hours_json: str | None,
+    lon_deg: float | None = None,
+) -> int | None:
+    """How many observing nights went into a stack, or ``None`` when unknown.
+
+    ``None`` — not ``0`` — is the "we don't know" answer, so a run from before
+    the app recorded it reads as *silence* rather than as a picture shot on no
+    nights at all.
+    """
+    nights = capture_night_dates(capture_hours_json, lon_deg)
+    return len(nights) or None
 
 
 def _night(stamp: str | None, lon_deg: float | None) -> str | None:

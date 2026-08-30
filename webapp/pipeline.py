@@ -1185,7 +1185,7 @@ def _nameplate_fields(fits_path: str, entry: Any, run: Any,
     noon-to-noon, exactly as the rest of the app does.
     """
     from seestack.nameplate import NameplateFields
-    from webapp.capture_nights import capture_night_range
+    from webapp.capture_nights import capture_night_count, capture_night_range
 
     prov = _carry_provenance(fits_path)  # key -> (value, comment)
 
@@ -1214,6 +1214,10 @@ def _nameplate_fields(fits_path: str, entry: Any, run: Any,
         getattr(run, "capture_end_utc", None),
         lon_deg,
     )
+    # How many nights the span covers, bucketed for the same longitude, so the
+    # baked caption and the app's own night surfaces cannot disagree. Absent for
+    # every run predating schema 19, which simply captions the span alone.
+    nights = capture_night_count(getattr(run, "capture_hours_json", None), lon_deg)
     if date_iso is None:
         for key in ("DATE-OBS", "DATE-END"):
             card = prov.get(key)
@@ -1231,6 +1235,7 @@ def _nameplate_fields(fits_path: str, entry: Any, run: Any,
         sub_exposure_s=_num("EXPOSURE"),
         date_iso=date_iso,
         date_end_iso=date_end_iso,
+        nights=nights,
         camera=_SEESTAR_CAMERA,
     )
 
@@ -1442,6 +1447,7 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int,
             # quoting.
             capture_start_utc=run.capture_start_utc,
             capture_end_utc=run.capture_end_utc,
+            capture_hours_json=getattr(run, "capture_hours_json", None),
         ))
         # Remember, on the *source* run, which edit this export rendered. Its
         # saved recipe is deliberately left alone — it is the user's document —

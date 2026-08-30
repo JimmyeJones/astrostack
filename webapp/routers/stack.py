@@ -18,7 +18,7 @@ from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from seestack.stackhealth import seam_verdict
 from webapp import deps, pipeline
-from webapp.capture_nights import capture_night_range
+from webapp.capture_nights import capture_night_count, capture_night_range
 from webapp.preview_orient import (
     baked_north_up_deg,
     recovered_north_up_deg,
@@ -484,6 +484,8 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
         crop = parse_preview_crop(r.preview_crop_json)
         night_start, night_end = capture_night_range(
             r.capture_start_utc, r.capture_end_utc, lon)
+        nights = capture_night_count(
+            getattr(r, "capture_hours_json", None), lon)
         out.append(StackRunOut(
             id=r.id,
             timestamp_utc=r.timestamp_utc,
@@ -510,6 +512,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             reusable=_run_is_reusable(r.options_json),
             capture_night_start=night_start,
             capture_night_end=night_end,
+            capture_nights=nights,
             transparency_ratio=r.transparency_ratio,
             noise_sigma=r.noise_sigma,
             stack_fwhm_px=r.stack_fwhm_px,

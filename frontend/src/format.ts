@@ -92,16 +92,20 @@ export function formatCaptureNights(
 
 /**
  * The same window as a caption clause: `"on 15 Nov 2024"` for one night,
- * `"between 15 and 18 Nov 2024"` for a run built from several. `""` when
- * unknown, so the caption drops the clause.
+ * `"between 15 and 18 Nov 2024"` for a run built from several — and
+ * `"over 4 nights, between 15 and 18 Nov 2024"` when the run also recorded how
+ * many nights it is made of. `""` when unknown, so the caption drops the clause.
  *
- * Two nights are all a run records — the first and the last — so this never
- * claims a *count* ("over 4 nights") it cannot know; "between … and …" is the
- * strongest thing that is certainly true.
+ * The count is the part a person actually says out loud about their picture, and
+ * a window cannot supply it: 15→18 Nov is equally consistent with two nights and
+ * with four. So it is quoted only when the run *recorded* it (`capture_nights`,
+ * schema 19+) — never inferred from the span, which would turn a two-night stack
+ * into a four-night boast.
  */
 export function captureNightsClause(
   start: string | null | undefined,
   end: string | null | undefined,
+  nights?: number | null,
 ): string {
   const a = parseNightDate(start) ?? parseNightDate(end);
   const b = parseNightDate(end) ?? parseNightDate(start);
@@ -114,7 +118,13 @@ export function captureNightsClause(
     : first.month !== last.month
       ? `${first.day} ${MONTHS_ABBR[first.month - 1]}`
       : `${first.day}`;
-  return `between ${firstLabel} and ${lastLabel}`;
+  const span = `between ${firstLabel} and ${lastLabel}`;
+  // A count of 1 beside a multi-night span would contradict it, and a count is
+  // only ever a whole number of nights — anything else is a backend the app
+  // doesn't understand, so it says nothing rather than something odd.
+  const n = typeof nights === "number" && Number.isInteger(nights) && nights > 1
+    ? nights : null;
+  return n ? `over ${n} nights, ${span}` : span;
 }
 
 /**

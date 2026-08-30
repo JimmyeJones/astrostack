@@ -30,7 +30,7 @@ from typing import Any, Iterable, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     preview_north_up_deg REAL,
     preview_crop_json TEXT,
     capture_start_utc TEXT,
-    capture_end_utc TEXT
+    capture_end_utc TEXT,
+    capture_hours_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -607,6 +608,18 @@ class Project:
                         f"ALTER TABLE stack_runs ADD COLUMN {col} TEXT")
                 except sqlite3.OperationalError:
                     pass  # already present
+        if from_version < 19:
+            # The *hours* this run's subs arrived in, so the read side can count
+            # the observing **nights** they fall into for the owner's own
+            # longitude. The window above cannot: 15→18 Nov is equally consistent
+            # with two nights and with four, and "over 4 nights" is the sentence
+            # a person actually says about their picture. Additive; runs recorded
+            # before this column existed stay NULL and simply say nothing.
+            try:
+                self._conn.execute(
+                    "ALTER TABLE stack_runs ADD COLUMN capture_hours_json TEXT")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -998,9 +1011,10 @@ class Project:
             "  options_json, notes, total_exposure_s, transparency_ratio,"
             "  noise_sigma, calstat, is_mosaic, engine_version,"
             "  rejection_fraction, rejection_mode, n_roughly_aligned, stack_fwhm_px,"
-            "  seam_residual, capture_start_utc, capture_end_utc"
+            "  seam_residual, capture_start_utc, capture_end_utc,"
+            "  capture_hours_json"
             ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            "         ?, ?, ?)",
+            "         ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -1012,6 +1026,7 @@ class Project:
                 None if run.n_roughly_aligned is None else int(run.n_roughly_aligned),
                 run.stack_fwhm_px, run.seam_residual,
                 run.capture_start_utc, run.capture_end_utc,
+                run.capture_hours_json,
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -1102,6 +1117,10 @@ class Project:
                 capture_end_utc=(
                     row["capture_end_utc"]
                     if "capture_end_utc" in row.keys() else None
+                ),
+                capture_hours_json=(
+                    row["capture_hours_json"]
+                    if "capture_hours_json" in row.keys() else None
                 ),
             )
 
@@ -1313,6 +1332,14 @@ class StackRunRow:
     # "shot on …" must use these.
     capture_start_utc: str | None = None
     capture_end_utc: str | None = None
+    # The distinct UTC hours this run's subs were shot in, as a JSON array of
+    # on-the-hour instants (``["2024-11-15T21:00:00Z", …]``) — see
+    # :func:`seestack.stack.stacker._capture_hours`. It exists so the read side
+    # can count the observing **nights** a stack spans for the observer's own
+    # longitude, which the window above cannot answer. NULL for runs from before
+    # this column existed (schema < 19) and for runs whose frames carry no
+    # capture time; every caller then drops the clause rather than guessing.
+    capture_hours_json: str | None = None
     # How many contributing subs sub-pixel refine had to leave *only roughly
     # aligned* (its measured shift exceeded the cap, so the frame stacked
     # unshifted → possibly soft/doubled stars). None when refine was off, not
