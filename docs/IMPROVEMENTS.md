@@ -43,14 +43,32 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-> **Builder 2026-08-30, branch `claude/compassionate-galileo-1bqxek` — CLAIMED, in flight. Two items, named by
-> site so a concurrent Builder can see exactly what would collide (the six duplicate-collision process notes all
-> say the lead alone isn't enough):**
-> 1. **The "My life list is 14,584 px tall on a phone" dogfood finding** (under "Friendliness (PRIORITY 3)") —
->    `frontend/src/routes/LifeList.tsx`, the `Section` component's single eager `SimpleGrid`.
-> 2. **"Let North up be a way to *look* at a picture, not only a way to overwrite it"** (under "Autonomy &
->    friendliness") — `webapp/routers/stack.py::stack_annotations` (one additive field) plus
->    `frontend/src/components/target/LatestPictureCard.tsx`'s lightbox (`toolbarExtra`).
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-1bqxek` — run finished, both claims released.**
+> Shipped three, each its own independently-green commit:
+> **v0.307.0** (under "Friendliness") — the **"My life list is 14,584 px tall on a phone"** dogfood finding, and
+> the entry's own cheap diagnosis was right: the whole bundled catalog was drawn eagerly into one grid. Grouping
+> the captured objects ahead of the rest and putting the to-shoot tail behind one count took it to **3,008 px**
+> (**−79 %**; desktop 5,236 → 1,453 px), **re-measured with the same probe** as the entry demanded. It was the
+> tallest page in the app by nearly 3× and is now level with the Target page. Nothing removed: picking "Still to
+> shoot" — the filter that already existed — still lists every one of them, unshortened, and a test pins that.
+> **v0.308.0** (under "Autonomy & friendliness") — **North up as a *view*.** The design call worth knowing is
+> *where*: putting the toggle in the **lightbox** rather than on the card answers both of the entry's cautions
+> outright instead of re-solving them — a plain `<img>` has no pins, scale bar, compass or rejection tint to fall
+> out of register — and it keeps the Target card's header row at three controls, which v0.293.0 already
+> established is the phone's limit. The endpoint field is taken from `applied_north_up_deg` rather than
+> re-derived, and it reports **null** where the turn would do nothing, so the control never appears where it
+> would visibly do nothing.
+> **v0.308.1** (under "Features that serve real workflows") — a **plain untruth in shipped copy**, found while
+> sizing the full-size-zip idea: the card said "Download all" gives you "the full-size pictures themselves", and
+> the archive holds each target's **1024 px preview**. Copy fixed and pointed at the per-picture Full-res PNG.
+> **Stood down, with the reasoning recorded on its entry:** the *feature* half of that idea. Its filed "prefer
+> the TIFF" is a trap — a stack's TIFF is written **linear**, so it opens looking black, and only an editor
+> export writes a display-space one. The real full-size picture is the full-res PNG, which has **no file on
+> disk**. The honest shape is a job with staged output (an **L**), not `?full=true` on a streaming endpoint.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
+> Claiming in the run's **first** commit, **by site**, and pushing it immediately cost under a minute; `main` had
+> not moved by merge time and there was no collision.
 
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-aj7ysy` — run finished, all three claims
 > released.** Shipped three, each its own independently-green commit:
@@ -9468,6 +9486,34 @@ to **Shipped**.)_
     FITS grid, so a turned view must hide them (`cantPlaceMarks`); and the rejection tint is sized to the stored
     bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
     make it the default: the saved orientation is what the owner chose.
+
+- **NEW IDEA (Builder 2026-08-30, the follow-on v0.308.0 deliberately left open) — put the North-up *view* on the
+  other two surfaces that show a picture big.** *(Pillar: enjoy + trust — PRIORITY 3; size XS — two lines each;
+  read-only, off by default.)* v0.308.0 built the whole mechanism: the `north_up_deg` field on `…/annotations`,
+  the shared `components/NorthUpViewToggle.tsx` (toggle + the two `localStorage` accessors), and the pattern of
+  passing it into `ImageLightbox` through `toolbarExtra` while swapping `src`/`downloadHref`/`jpegHref`/
+  `fullResHref` for their `north_up` forms. The **Gallery lightbox** and the **Compare** view use the same
+  lightbox and are the same two lines each. **The one thing to check per surface before wiring it:** does that
+  lightbox draw anything *measured against the stored bytes* over the picture (pins, a scale bar, the rejection
+  tint)? The Target hero's does not, which is why it was first. If one does, it must step aside for a turned view
+  exactly as History's already does, or the marks land in the wrong place. **Don't** make it the default
+  anywhere: the saved orientation is what the owner chose, and the preference is shared across surfaces already
+  (one `localStorage` key), so turning it on in the Gallery will correctly turn it on the Target page too.
+
+- **QA LEAD (Builder 2026-08-30, generalised from the v0.308.1 copy fix) — sweep every download control's *copy*
+  against what its endpoint actually serves.** *(Pillar: trust — PRIORITY 3; size S per surface, and the sweep
+  itself is one run.)* "Download all my pictures" promised **"the full-size pictures themselves"** and handed over
+  1024 px previews; nothing failed, no test caught it, and it would have been discovered by a user at the moment
+  it cost them most (trying to print from their backup). That is a **bug class**, not one slip: a download's copy
+  is written once, next to the button, and then the endpoint underneath it evolves — the picture it serves gets
+  capped, re-rendered, cropped, tone-mapped or renamed — with nothing tying the two together. **The sweep:** for
+  every control that hands over a file (the pictures zip, the montage, the wall, the keepsake, the print export,
+  the wallpaper, the zoom clip, the share JPEG, the full-res PNG, the imaging log, each artifact kind on
+  History's menu), read the sentence beside it and then read what the handler actually writes, and reconcile the
+  two — **fixing the copy where the file is right, and the file where the copy is right.** The properties that
+  keep drifting are **size** (capped preview vs native), **colour space** (linear TIFF vs display-space), and
+  **geometry** (cropped/rotated vs the stored canvas). Where a claim is worth keeping true, pin it with a test
+  that reads the served bytes rather than the string — `tests/webapp/test_north_up.py` is the shape.
 
 - **NEW IDEA (Builder 2026-08-30, the one thing v0.306.2 had to switch off) — the "see what stacking removed"
   tint can't be shown over a North-up view, and the same trick that turns the picture would turn the tint.**
