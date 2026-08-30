@@ -9487,19 +9487,76 @@ to **Shipped**.)_
     bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
     make it the default: the saved orientation is what the owner chose.
 
-- **🚧 IN PROGRESS (Builder 2026-08-30, branch `claude/compassionate-galileo-x2nj2o`) — NEW IDEA (Builder
-  2026-08-30, the follow-on v0.308.0 deliberately left open) — put the North-up *view* on the
-  other two surfaces that show a picture big.** *(Pillar: enjoy + trust — PRIORITY 3; size XS — two lines each;
-  read-only, off by default.)* v0.308.0 built the whole mechanism: the `north_up_deg` field on `…/annotations`,
-  the shared `components/NorthUpViewToggle.tsx` (toggle + the two `localStorage` accessors), and the pattern of
-  passing it into `ImageLightbox` through `toolbarExtra` while swapping `src`/`downloadHref`/`jpegHref`/
-  `fullResHref` for their `north_up` forms. The **Gallery lightbox** and the **Compare** view use the same
-  lightbox and are the same two lines each. **The one thing to check per surface before wiring it:** does that
-  lightbox draw anything *measured against the stored bytes* over the picture (pins, a scale bar, the rejection
-  tint)? The Target hero's does not, which is why it was first. If one does, it must step aside for a turned view
-  exactly as History's already does, or the marks land in the wrong place. **Don't** make it the default
-  anywhere: the saved orientation is what the owner chose, and the preference is shared across surfaces already
-  (one `localStorage` key), so turning it on in the Gallery will correctly turn it on the Target page too.
+- **✅ SHIPPED — GALLERY (Builder, v0.309.0, branch `claude/compassionate-galileo-x2nj2o`) — ~~put the North-up
+  *view* on the other two surfaces that show a picture big.~~** The Gallery lightbox has it; **Compare
+  deliberately does not, and the entry's premise about it was wrong** (see below). *(Pillar: enjoy + trust —
+  PRIORITY 3.)*
+
+  **It was not two lines, because the field it keys off was answering the wrong question.**
+  `…/annotations`'s `north_up_deg` reported `applied_north_up_deg(fits)` — *"how far is this run's **data** from
+  North up?"* — while its own comment claimed it was *"exactly when `…/preview?north_up=true` would hand back
+  the stored bytes untouched"*. Those differ on a run whose preview a past **Adjust → North up → Save** already
+  turned: every renderer passes `baked_north_up_deg` as `already_deg` and applies **only the remainder**, so on
+  such a run asking for North up is a no-op while the FITS is still just as far from North as ever. The Target
+  hero never showed the resulting dead toggle only because it *also* guards on `run.preview_north_up_deg` — a
+  second fact the Gallery's item doesn't carry. Rather than copy that guard (and add a field to
+  `GalleryItem`), the endpoint now answers the question it always claimed to: new
+  `webapp.preview_orient.remaining_north_up_deg` mirrors `orient_preview_north_up`'s own arithmetic — total
+  minus baked, thresholded — so no caller can put up a control that visibly does nothing. The Target card's
+  extra guard stays, now belt-and-braces.
+
+  **Gallery.** The toggle joins the slideshow and wallpaper controls in the lightbox's `toolbarExtra`; the
+  shown picture, the PNG download, the JPEG behind Share and the full-res PNG all follow it, and the **FITS
+  deliberately does not** — raw data stays WCS-aligned whichever way you are looking at it. The annotations
+  fetch is `enabled` only once a picture is open, so drawing a grid of any size still costs no extra request.
+  Same `localStorage` key as the Target hero, so the preference is one preference.
+
+  **Compare was checked and left alone, on purpose.** The entry says it "uses the same lightbox"; it does not —
+  `routes/Compare.tsx` draws bare `<img>` elements inside a drag-to-reveal slider, and the two runs it puts
+  under one wipe line can carry different corrections. Turning them independently would slide two differently-
+  oriented pictures against each other, which is worse than not offering it. Filed below as its own item with
+  that finding, rather than shipped blind.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, default or API-*shape* change. The one behaviour change is
+  an existing response field becoming honest on a case where it was wrong; an older frontend reads `null` there
+  as "no toggle", which is exactly right.
+
+  **Tests (+6; the Python one fails before):** `tests/webapp/test_stack_annotations.py` — a run reports the turn,
+  then reports `null` once *those very degrees* are recorded as baked into its preview, with the objects and rose
+  pinned unchanged across the two (this is a question about the stored preview, not about the field).
+  `Gallery.test.tsx` — nothing fetched and no toggle until a picture is opened; no toggle where the turn would
+  not move the picture; the turn switching the shown bytes and all three downloads while the FITS stays put; the
+  preference written to the shared key and cleared again; and a preview-only run (no FITS) asking nothing and
+  offering nothing.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy + trust — PRIORITY 3; size XS — two lines each;
+    read-only, off by default.)* v0.308.0 built the whole mechanism: the `north_up_deg` field on `…/annotations`,
+    the shared `components/NorthUpViewToggle.tsx` (toggle + the two `localStorage` accessors), and the pattern of
+    passing it into `ImageLightbox` through `toolbarExtra` while swapping `src`/`downloadHref`/`jpegHref`/
+    `fullResHref` for their `north_up` forms. The **Gallery lightbox** and the **Compare** view use the same
+    lightbox and are the same two lines each. **The one thing to check per surface before wiring it:** does that
+    lightbox draw anything *measured against the stored bytes* over the picture (pins, a scale bar, the rejection
+    tint)? The Target hero's does not, which is why it was first. If one does, it must step aside for a turned view
+    exactly as History's already does, or the marks land in the wrong place. **Don't** make it the default
+    anywhere: the saved orientation is what the owner chose, and the preference is shared across surfaces already
+    (one `localStorage` key), so turning it on in the Gallery will correctly turn it on the Target page too.
+
+- **NEW IDEA (Builder 2026-08-30, the half v0.309.0 checked and deliberately did NOT ship) — the Compare view
+  is not a lightbox, and North-up there needs a decision, not a copy-paste.** *(Pillar: enjoy + trust —
+  PRIORITY 3; size S; read-only.)* The v0.308.0 follow-on assumed Compare "uses the same lightbox"; it does
+  not. `routes/Compare.tsx` draws bare `<img>` elements inside a drag-to-reveal wipe (and a side-by-side grid),
+  so there is no `toolbarExtra` to hang a toggle from and no single picture to turn. **The real question is
+  what a turned comparison should mean:** two runs of one target can carry *different* corrections (a mosaic
+  re-framed between sessions is the realistic case), so turning each by its own angle slides two
+  differently-oriented pictures against each other under one wipe line — which is worse than not offering it.
+  **The honest shapes, pick one:** (a) offer the turn only when both runs report the *same* `north_up_deg`
+  (within the renderer's own threshold), which is the overwhelmingly common case and is checkable from the two
+  `…/annotations` responses; or (b) turn both by the *A* run's angle and say so, which keeps the wipe line
+  meaningful but mis-orients B. Do **not** ship (c) "turn each by its own angle" — that is the one that looks
+  fine in a screenshot and is wrong in use. The server half is already built (`?north_up=true` on the preview),
+  so this is a frontend decision plus two fetches.
 
 - **🚧 IN PROGRESS (Builder 2026-08-30, branch `claude/compassionate-galileo-x2nj2o`) — QA LEAD (Builder
   2026-08-30, generalised from the v0.308.1 copy fix) — sweep every download control's *copy*

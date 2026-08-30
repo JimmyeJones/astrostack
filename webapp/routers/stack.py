@@ -18,7 +18,11 @@ from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from seestack.stackhealth import seam_verdict
 from webapp import deps, pipeline
-from webapp.preview_orient import baked_north_up_deg, recovered_north_up_deg
+from webapp.preview_orient import (
+    baked_north_up_deg,
+    recovered_north_up_deg,
+    remaining_north_up_deg,
+)
 from webapp.schemas import (
     STACK_DEFAULTS_META_KEY,
     StackOptionField,
@@ -41,8 +45,9 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
-def _run_fits_path(request: Request, safe: str, run_id: int) -> tuple[str, str | None]:
-    """Return (basename, fits_path) for a run, or raise 404."""
+def _run_row(request: Request, safe: str, run_id: int):  # noqa: ANN201
+    """The run's own DB row, or raise 404. The row is a plain dataclass, so it
+    stays readable after the project is closed."""
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
@@ -51,6 +56,12 @@ def _run_fits_path(request: Request, safe: str, run_id: int) -> tuple[str, str |
         lib.close()
     if run is None:
         raise HTTPException(status_code=404, detail="No such run")
+    return run
+
+
+def _run_fits_path(request: Request, safe: str, run_id: int) -> tuple[str, str | None]:
+    """Return (basename, fits_path) for a run, or raise 404."""
+    run = _run_row(request, safe, run_id)
     return run.output_basename, run.fits_path
 
 
@@ -1121,29 +1132,32 @@ async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dic
 
     Runs the header read + projection in a threadpool so it never blocks the job
     worker."""
-    _, fits_path = _run_fits_path(request, safe, run_id)  # raises 404 for an unknown run
+    run = _run_row(request, safe, run_id)  # raises 404 for an unknown run
+    fits_path = run.fits_path
 
     def work() -> dict[str, Any]:
         from seestack.annotate import objects_in_field
         from seestack.io.wcs_io import celestial_wcs_from_fits
-        from seestack.render.thumbnail import applied_north_up_deg
         from seestack.skymarks import sky_directions
 
         wcs, width, height = celestial_wcs_from_fits(fits_path) if fits_path else (None, 0, 0)
         objs = objects_in_field(wcs, width, height)
         directions = sky_directions(wcs, width, height)
-        # "How far would we have to turn this to put North up?" — 0.0 when the run
-        # has no usable WCS or the correction is below the renderer's threshold,
-        # i.e. exactly when `…/preview?north_up=true` would hand back the stored
-        # bytes untouched. Reported as null in that case so a surface can decide
-        # whether offering the turn is worth a control at all, and taken from
-        # `applied_north_up_deg` — the one helper that already owns the
-        # threshold-and-snap rules — so this can never disagree with what a
-        # rotated render actually does. That helper re-reads the header rather
+        # "How far would `…/preview?north_up=true` actually turn this picture?" —
+        # 0.0 when it would hand back the stored bytes untouched, reported as null
+        # so a surface can decide whether offering the turn is worth a control at
+        # all. That is deliberately **not** `applied_north_up_deg(fits)`, which
+        # answers the different question "how far is this run's *data* from North
+        # up?": on a run whose preview a past "Adjust → North up → Save" already
+        # turned, the renderer passes the baked angle as `already_deg` and applies
+        # only the remainder — i.e. nothing — while the data is still just as far
+        # from North as it ever was. `remaining_north_up_deg` mirrors that
+        # renderer's own arithmetic rather than re-deriving it, so this can never
+        # disagree with what a rotated render does. It re-reads the header rather
         # than taking the `wcs` above; a second header read is cheap, and
         # re-deriving the threshold here to save it is exactly the drift the
-        # helper exists to prevent.
-        north_up_deg = applied_north_up_deg(fits_path) if fits_path else 0.0
+        # shared helpers exist to prevent.
+        north_up_deg = remaining_north_up_deg(run)
         return {
             "width": width,
             "height": height,
