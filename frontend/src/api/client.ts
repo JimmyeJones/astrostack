@@ -1314,6 +1314,20 @@ export interface StackEstimate {
     peak_bytes: number;
     peak_gb: number;
   } | null;
+  // What this stack would *print* at, in the unit a human wants, while the knob
+  // that sets it is still on screen. `bigger_*` are null whenever there is
+  // nothing honest to offer (the canvas already fills the largest paper, the gap
+  // needs more super-resolution than pays off, or the bigger canvas would bust
+  // the memory budget — that verdict is the one above's to give, not this one's).
+  // Optional so an older backend simply says nothing.
+  print_plan?: {
+    name: string | null;
+    dpi: number | null;
+    text: string;
+    bigger_name: string | null;
+    bigger_drizzle_scale: number | null;
+    bigger_text: string | null;
+  } | null;
   // What "Auto outlier removal" resolves to for this many frames — the engine
   // overrides the sigma-clip / min-max toggles when it's on, so the form reads
   // the truth from here rather than re-deriving the rule. null means those

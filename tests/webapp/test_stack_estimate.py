@@ -187,3 +187,56 @@ def test_estimate_reports_what_auto_outlier_removal_resolves_to(
     assert client.get(url, params={"auto_reject": "true",
                                    "drizzle": "true"}).json()[
         "auto_reject_resolved"] is None
+
+
+def test_estimate_carries_the_print_plan(client, solved_library):
+    """The canvas said in the unit a human wants, before the run fixes it. The
+    fixture's 480×320 reference canvas is below even the smallest paper, so this
+    also pins the honest too-small answer — the one place a beginner most needs
+    to be told that the lever is pixels, not more subs."""
+    from seestack.printexport import print_options
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    data = client.get(f"/api/targets/{safe}/stack-estimate").json()
+    plan = data["print_plan"]
+    assert plan is not None
+    assert print_options(data["output_w"], data["output_h"]) == []
+    assert plan["name"] is None and plan["dpi"] is None
+    assert "not more subs" in plan["text"]
+    # …and the reachable half: super-resolution really does bring this canvas up
+    # to the smallest paper, so the nudge names it and the scale that gets there.
+    assert plan["bigger_name"] == "6×4 in"
+    s = plan["bigger_drizzle_scale"]
+    assert s is not None and 1.0 < s <= 2.0
+    reached = client.get(
+        f"/api/targets/{safe}/stack-estimate",
+        params={"drizzle": "true", "drizzle_scale": s},
+    ).json()
+    assert reached["print_plan"]["name"] == "6×4 in"
+    assert "Drizzle" in plan["bigger_text"] and "6×4 in" in plan["bigger_text"]
+
+
+def test_print_plan_follows_the_drizzle_scale_on_the_form(client, solved_library):
+    """The plan describes the canvas the *current* settings would produce, so
+    turning the knob on the form changes the sentence."""
+    from seestack.printexport import print_options
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    driz = client.get(
+        f"/api/targets/{safe}/stack-estimate",
+        params={"drizzle": "true", "drizzle_scale": 4.0},
+    ).json()
+    plan = driz["print_plan"]
+    best = print_options(driz["output_w"], driz["output_h"])
+    assert plan["name"] == (best[0].name if best else None)
+
+
+def test_print_plan_withholds_the_nudge_when_over_budget(
+    client, solved_library, monkeypatch):
+    """The over-budget alert replaces the sizing line entirely, so the nudge must
+    not be quietly recommending an even bigger canvas beside it."""
+    monkeypatch.setenv("ASTROSTACK_MAX_STACK_GB", str(1e-3))
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    data = client.get(f"/api/targets/{safe}/stack-estimate").json()
+    assert data["would_exceed"] is True
+    assert data["print_plan"]["bigger_name"] is None
