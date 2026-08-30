@@ -17578,7 +17578,11 @@ problems. Dogfood it every big-picture run and fix root causes.
 
   **Upgrade-safe (§9):** no schema, config, on-disk or default change — one additive response field, and a
   path that reads meta the auto-edit already wrote. Old installs light up on runs they already have.
-  **Tests (+6 webapp, +2 vitest; 3 fail before):** available/`matched_by` on an auto-edited run, the
+  **Verified on the real path, not just a fabricated marker:** the last regression test runs
+  `webapp.pipeline._auto_edit_process_run` — the function "Process target" itself calls — over a real linear
+  master and then asks the app the same two questions the dogfood pass asked. Before this change both answered
+  "no" (`{"available": false}`, and a 404 reading *"This run's picture is an edited export…"*).
+  **Tests (+7 webapp, +2 vitest; 4 fail before):** available/`matched_by` on an auto-edited run, the
   `reference-sub` render differing from the plain STF render of the same sub (proof the recipe actually ran),
   the before/after download working there, a plain run still reporting `"stretch"`, an export staying hidden
   *even with a recipe on it*, and three unreadable-recipe shapes staying hidden.
