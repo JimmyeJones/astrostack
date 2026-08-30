@@ -43,7 +43,16 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-_(none — claim an item here with your branch name)_
+- **CLAIMED (Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow`) — the DOGFOOD FINDING under
+  "Features that serve real workflows": "One frame vs your stack" (and the new before/after share) is invisible
+  on every one-click **"Process target"** run.** Taking the *honest full fix* the entry describes, not the
+  interim copy slice: render the reference sub through the run's **own stored recipe**, so the two halves differ
+  only in noise/detail (identical processing, one frame vs many) rather than in tone curve. Scoped to the
+  in-place auto-edited run (linear FITS + a stored recipe); a genuine display-space **export** stays hidden.
+
+- **CLAIMED (Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow`) — idea (b) of "fly to it, and
+  tell the reader what they're looking at": carry `CatalogObject.blurb` onto `UniverseObjectOut`** so the
+  universe map's read-out is a sentence about the object, not just a distance.
 
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-4txqj1` — run finished, both claims released.**
 > Shipped two: **"Share your glow-up"** (**v0.300.0**, write-up under "Features that serve real workflows") —
