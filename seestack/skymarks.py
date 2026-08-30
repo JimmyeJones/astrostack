@@ -227,6 +227,47 @@ def _text(draw, xy, text: str, font, anchor: str) -> None:  # noqa: ANN001
               stroke_width=2, stroke_fill=HALO_RGB)
 
 
+def mark_zones(width: int, height: int, marks: SkyMarks):  # noqa: ANN201
+    """The pixel boxes :func:`draw_sky_marks` will ink on a ``width`` × ``height``
+    picture, as ``(x0, y0, x1, y1)`` rectangles.
+
+    So another overlay drawn on the same picture can keep out of them. The marks
+    go on **last** (a caption or matte is added after, never over them), which
+    means a collision doesn't mislead — it just buries whatever was underneath —
+    but a name half-hidden by the compass rose is still a name the beginner
+    can't read, and this is the cheap way to avoid it.
+
+    Derived from the same constants the drawing uses rather than re-measured, so
+    the two can't drift; a mark that isn't drawn contributes no box, and a
+    :class:`SkyMarks` with nothing to draw returns ``()``.
+    """
+    if not marks or width <= 0 or height <= 0:
+        return ()
+    short = max(1, min(width, height))
+    margin = max(_MIN_MARGIN_PX, round(short * _MARGIN_FRACTION))
+    line_w = max(_MIN_LINE_PX, round(short * _LINE_FRACTION))
+    label_px = max(_MIN_LABEL_PX, round(short * _LABEL_FRACTION))
+    zones: list[tuple[float, float, float, float]] = []
+    if marks.has_scale:
+        bar = min(float(marks.bar_px), max(1.0, width - 2.0 * margin))
+        serif = max(line_w * 2, round(short * 0.010))
+        # The bar sits at (margin, margin); its serifs stand off it vertically
+        # and its label is set below them, ~1.4 line-heights tall with the halo.
+        zones.append((margin - serif, margin - serif - line_w,
+                      margin + bar + serif,
+                      margin + serif + line_w + label_px * 1.4))
+    if marks.directions is not None:
+        rose = max(_MIN_ROSE_PX, round(short * _ROSE_FRACTION))
+        gap = max(6, round(short * 0.018))
+        pad = rose + gap + margin
+        cx, cy = float(width - pad), float(pad)
+        # The arms point wherever the sky says, so the rose's box is the full
+        # circle its longest reach (arm + gap + letter) sweeps out.
+        reach = rose + gap + label_px
+        zones.append((cx - reach, cy - reach, cx + reach, cy + reach))
+    return tuple(zones)
+
+
 def draw_sky_marks(img, marks: SkyMarks):  # noqa: ANN001, ANN201
     """Return a new RGB ``PIL.Image``: ``img`` with the scale bar drawn at the
     top-left and the North/East rose at the top-right.

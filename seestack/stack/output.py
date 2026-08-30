@@ -528,7 +528,15 @@ def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
             img = src.convert("RGB")
         if object_labels is not None:
             from seestack.objectlabels import draw_object_labels
-            img = draw_object_labels(img, object_labels)
+            # The names go on first so the marks (drawn next) sit over them
+            # rather than under — but a name buried under the compass rose is a
+            # name nobody can read, so hand the placement the boxes those marks
+            # are about to occupy and let it route around them.
+            avoid = ()
+            if sky_marks is not None:
+                from seestack.skymarks import mark_zones
+                avoid = mark_zones(img.width, img.height, sky_marks)
+            img = draw_object_labels(img, object_labels, avoid=avoid)
         if sky_marks is not None:
             from seestack.skymarks import draw_sky_marks
             img = draw_sky_marks(img, sky_marks)
