@@ -304,6 +304,38 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.311.1, branch `claude/compassionate-galileo-e1p1x8`) — ~~"Full-res PNG (native
+  size)" hands back a picture **rotated away from the one you clicked** on any run whose preview was saved
+  North up.~~** Found by walking the **geometry** axis of the download-copy sweep (the one axis v0.309.1
+  explicitly recorded as unswept), and **reproduced before fixing**. *(Severity: wrong-picture on the
+  print-and-keep download — the one the app now points people at for printing (v0.308.1). Bounded: it only
+  fires on a run someone used History's "Adjust → North up → Save" on, which until v0.308.0 was the **only**
+  way to see a picture North up. Confidence: reproduced, numbers below.)*
+
+  **Reproduced.** A 1600 × 1200 master with a 30° field rotation, saved North up: the picture on screen —
+  thumbnail, Gallery, Target hero, share JPEG, wallpaper, zoom clip, all of which serve the **stored preview
+  bytes** — is **1024 × 948** (aspect 1.08, the expand-rotate's grid). The full-res PNG came back
+  **1600 × 1200** (aspect 1.33): the canvas grid, i.e. the same picture turned back 30°. Every other consumer
+  is right, because they start from the bytes; this one is the only one that starts from the **FITS**, which
+  is deliberately WCS-aligned.
+
+  **Fix.** `download_full_res_png` renders with `north_up = asked or baked_north_up_deg(run)` — the same
+  recorded-or-recovered angle every other reader of those bytes already goes through, so the render lands on
+  the grid the preview is on. Both branches (the plain STF/asinh render and the saved-recipe render) take it,
+  because v0.305.0's `keep_processed` save can bake a turn into a **processed** run too. Asking for
+  `?north_up=true` on such a run is now the *same* render rather than a second rotation: both mean "the run's
+  own full North-up correction". Read in the threadpool, since the recovered-angle path reads a PNG header and
+  the master's WCS and the endpoint is `async`.
+
+  **Upgrade-safe (§9):** no config/schema/on-disk/API-shape or default change; one render argument, on runs
+  that carry a recorded (or arithmetically recovered) turn. A run nothing ever turned is byte-for-byte
+  unchanged, and a test pins exactly that.
+
+  **Tests (+3 in `tests/webapp/test_full_res_png.py`, 2 fail before / pass after):** the download's aspect now
+  matches the *served preview's* aspect and not the canvas's, and is grown by the rotation; `?north_up=true`
+  and the bare URL return identical bytes on such a run; and an unturned run's download still equals
+  `render_preview_png_full_res(fits)` exactly.
+
 - **✅ SHIPPED (Builder, v0.304.2, branch `claude/compassionate-galileo-ezix3s`) — ~~a perfectly clear
   **mosaic** run is stamped "Hazy night", on every screen that shows it.~~** The **fifth** site of the
   position-dependent-metric class (the QA lead under "Image quality"), reproduced before fixing. Sibling of the
@@ -9532,6 +9564,25 @@ to **Shipped**.)_
     bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
     make it the default: the saved orientation is what the owner chose.
 
+> **⚠️ PROCESS NOTE — COLLISION NUMBER EIGHT (Builder 2026-08-30, branch
+> `claude/compassionate-galileo-e1p1x8`).** I built this same Gallery item concurrently with the
+> `…-x2nj2o` Builder and **stood mine down wholesale at merge time; theirs is what ships**, and it is the
+> better answer for a reason worth keeping: I hit the identical "GalleryItem doesn't carry
+> `preview_north_up_deg`" wall and solved it by **adding that field to the item**; they solved it by making
+> `…/annotations`'s `north_up_deg` *honest* (`remaining_north_up_deg`), which fixes the same wrongness for
+> every future caller instead of teaching one more surface to work around it. Nothing of mine was re-applied
+> — their five `Gallery.test.tsx` tests cover everything my four did, and `NorthUpViewToggle.test.tsx`
+> (v0.308.2) already pins the preference read my one non-duplicate test exercised through the page.
+> **What the claim discipline cannot fix, stated plainly for the next run:** both of us claimed in our
+> first commit, by site, and pushed immediately — the same as collisions six and seven — and it did not help,
+> because we were *both already working* when the other's claim landed. The only thing that would have caught
+> it is **re-fetching `origin/main` immediately before starting each task** (AGENTS.md §11 says so; I fetched
+> before task 1 and before task 3, and their work landed in between), *and* reading the log rather than only
+> the backlog: their claim commit `c8fb278` was on `origin/main` 12 minutes before I started this task. The
+> cheap habit that would actually have worked: **`git log --oneline origin/main -10` as part of picking each
+> task**, not just `git fetch`. This item was an XS follow-on filed the same morning — exactly the shape two
+> Builders pick simultaneously.
+
 - **✅ SHIPPED — GALLERY (Builder, v0.309.0, branch `claude/compassionate-galileo-x2nj2o`) — ~~put the North-up
   *view* on the other two surfaces that show a picture big.~~** The Gallery lightbox has it; **Compare
   deliberately does not, and the entry's premise about it was wrong** (see below). *(Pillar: enjoy + trust —
@@ -9650,6 +9701,23 @@ to **Shipped**.)_
   **Still open, filed as its own item below:** the **colour-space** axis — the TIFF download carries *no*
   description at all, and a plain stack's TIFF is written **linear**, so it opens looking black. The
   **geometry** axis (cropped/rotated vs the stored canvas) was not swept.
+  **▶ The geometry axis was then swept by the `…-e1p1x8` Builder and turned up a real one straight away:**
+  "Full-res PNG (native size)" served a picture **rotated away from the one on screen** on any run saved North
+  up — fixed as **v0.311.1**, entry at the top of "Bugs (fix these first)". The *crop* half of that axis (a
+  preview that shows only part of the canvas) is still unswept.
+
+  **▶ Swept independently in the same hour, on the SAME axis, by the `…-e1p1x8` Builder — and the two halves
+  are complementary, not duplicates: that run fixed the FILE where this one fixed the COPY.** The wallpaper
+  and the share JPEG were both *made out of* the 1024 px preview, so no wording could have made them honest —
+  the presets name real device resolutions (1170 × 2532 …) and the endpoint fed the crop a third of that.
+  Fixed as **v0.310.0** (wallpaper) and **v0.311.0** (share JPEG, keepsake and scale-&-compass), both entries
+  filed below. So on the **size** axis the sweep now stands at: full-res PNG copy corrected (v0.309.1),
+  pictures zip corrected (v0.308.1), wallpaper and share JPEG *re-sourced* (v0.310.0 / v0.311.0). Also swept
+  and cleared by that run: the share JPEG's own "served at the same resolution" docstring, which was true and
+  is now obsolete rather than wrong. **Still open on size:** the **zoom clip** (built from the same preview,
+  and the cap sets its resolution directly — 569 px where 640 was available), and the wallpaper/share on a
+  **"Process target"** run, which both deliberately decline. Untouched on any axis: the montage, the wall, the
+  print export and the imaging log.
 
   Original spec, for the record:
 
@@ -17004,6 +17072,62 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **✅ SHIPPED (Builder, v0.310.0, branch `claude/compassionate-galileo-e1p1x8`) — ~~"Make it your wallpaper"
+  built your lock screen out of a **1024 px thumbnail**, so a 1170 × 2532 phone got a ~470 px-wide picture
+  blown up 2.5×.~~** The first finding of the **"sweep every download control's copy against what its endpoint
+  actually serves"** QA lead filed above (under "Autonomy & friendliness") — and it is the *file* half of that
+  bug class, not the copy half: `WALLPAPER_PRESETS` names real device resolutions (1170 × 2532 / 1920 × 1080 /
+  1440²), the module promises the picture "sized for the device", and the endpoint then handed
+  `render_wallpaper_jpeg` the run's **stored preview**, which is capped at
+  `thumbnail.PREVIEW_MAX_WIDTH = 1024`. Since the renderer (correctly) never upsamples, a phone crop of that
+  preview is 473 × 1024 — 44 % of the pixels along each edge of the screen it is for — and the phone stretches
+  the rest. *(Severity: image quality on the single most-shared artifact the app makes. Confidence:
+  arithmetic, then reproduced as a failing test.)*
+
+  **Fix.** `stack._wallpaper_native_source` re-renders the *same picture* from the run's own master at the size
+  the crop actually needs, and the endpoint uses those bytes when it can. Nothing downstream changed: the
+  target-pixel mapping, the North-up turn and the crop all read whichever bytes won, and they are the same
+  picture on the same grid at a different scale. The renderer is
+  `render_preview_png_full_res` — the one the "Full-res PNG" download already uses to reproduce the stored
+  preview's own look (STF for a linear stack, the run's saved `preview_stretch`/`black` for one tuned in
+  History's "Adjust") — asked for a bounded size via the new pure
+  `wallpaper.wallpaper_source_long_edge`, which solves "which edge limits this crop?" and clamps to
+  `WALLPAPER_MAX_SOURCE_LONG_EDGE = 6000`. That matters for memory: `load_stack_rgb` decimates **during** the
+  FITS load, so the cost is set by the request (≤ 2532 px for a phone), not by a 100 MP mosaic canvas.
+
+  **What it deliberately declines** — each falls back to the exact old bytes, so the endpoint is
+  bit-for-bit unchanged there: a preview with a **baked North-up** turn (the FITS grid is the un-rotated one);
+  a **"Process target" run** (its preview is a display-space auto-edit only the saved recipe reproduces — see
+  the follow-on below); a preview showing only **part of the canvas** (auto-crop trim); a **missing FITS**; and
+  a canvas **no bigger than the preview** (checked from the run's recorded `canvas_w/h` *before* any render, so
+  the common no-gain case costs nothing).
+
+  **Upgrade-safe (§9):** read-only render on an explicit user-initiated download; no config/schema/on-disk/API
+  or default change, and no new setting. Nothing is written — the stored preview is untouched.
+
+  **Tests (+5 in `tests/webapp/test_wallpaper.py`, 2 fail before / pass after; +3 pure in
+  `tests/test_wallpaper.py`):** a 1200 × 900 master with a 400 px preview yields a **900 px-tall** phone
+  wallpaper; the native wallpaper is pinned to be *the same picture* as the preview-sourced one (both resampled
+  to 32² and compared, max |Δ| < 12 of 255) rather than merely bigger; the processed-run and missing-FITS
+  fallbacks land back on the preview's size; North-up still turns it, at native size; and the sizing helper is
+  pinned by construction (render at what it asks for → the crop fills the preset exactly), by limiting edge,
+  and at the cap.
+
+- **NEW IDEA (Builder 2026-08-30, the two halves deliberately left out of the v0.310.0 wallpaper fix) — the
+  other two exports that are still made out of the 1024 px preview.** *(Pillar: image quality — PRIORITY 4;
+  size S each; the second one has a cost gate, read it.)*
+  **(a) The keepsake / "with scale & compass" JPEG** (`download_stack_run`, `kind="jpeg"`) is the one the
+  Target page's own comment calls "the one that matters on Instagram **or a printed 6×4**" — at 1024 px that
+  print is ~170 dpi. The blocker is not the source: it is that `png_bytes_to_jpeg`'s nameplate, keepsake matte
+  and sky marks are laid out against the picture's pixel width (`_unrotated_preview_width` feeds
+  `_sky_marks_for_run`), so simply handing it bigger bytes rescales the furniture. Do it *with* a pass over
+  those layout constants, or not at all.
+  **(b) The wallpaper on a "Process target" run**, which v0.310.0 declines. `render_run_recipe_fullres_png`
+  would reproduce it exactly (crop included, which is why the framing would match), but unlike
+  `render_preview_png_full_res` it renders the **whole editor pipeline at full canvas size** and decimates
+  afterwards — fine behind a menu item that says "native size", not obviously fine for a one-tap wallpaper on
+  a RAM-capped NAS with a 100 MP mosaic. If picked up, gate it on canvas size and measure the peak RSS.
+
 - **✅ SHIPPED (Builder, v0.294.1, branch `claude/compassionate-galileo-i9ybki`) — ~~report the *true*
   contributing-frame count in a κ-σ run's History / integration time, not the conservative
   `min(pass1, pass2)`.~~** `stacker.py` now records `n_used = n_used_p2`, with the reasoning in the code:
@@ -19262,31 +19386,85 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Builder: grep first** — reuse `api.stackFraming` / `useStackFraming` and `seestack.framing.recentre_nudge`
   rather than a second definition of "which way".
 
-- **NEW IDEA (Builder 2026-08-27, traced while fixing the full-res-PNG stretch bug) — the picture a beginner
-  actually *shares* is 1024 px wide, because every share export is built from the stored preview PNG rather
-  than the master.** *(Pillar: enjoy + share + trust, PRIORITY 3; size S–M; additive, no new deps. Confidence:
-  traced against the code.)* `_write_preview_png` caps the stored preview at **1024 px** wide
-  (`seestack/stack/output.py:366`), and the share JPEG (`stack.py`, `kind == "jpeg"`), the wallpaper
-  (`stack.py:1988`) and the sub-reveal all start from `run.preview_path` bytes. So the file a beginner posts,
-  sets as a phone background, or sends to family is 1024 px — soft on any modern phone, let alone a 1440p
-  screen — even though the master holds the full canvas and the "Download full-res PNG" button beside it
-  serves it. *(Note for whoever picks this up: an old Builder investigation elsewhere in this file describes
-  the share JPEG as having a "2048px cap". That is stale — it is the 1024 px preview, re-encoded.)*
-  **Builder 2026-08-30 — one more consumer, and the first that *measurably* pays for the cap.** The **Zoom
-  clip** (v0.303.0) is built from the same stored preview, and because it must not upscale, the cap sets its
-  resolution directly: `zoom_clip_size` yields **569 px** from a 1024-wide preview (1024 ÷ the 1.8× zoom)
-  where the same clip off a native-res source would be the full 640. So fixing this makes the shared *clip*
-  visibly sharper too, not just the shared still — worth weighing against the **L** sizing below. Nothing
-  about the clip needs changing when it lands: it takes whatever pixels it is handed.
-  **Why it is newly cheap:** the parity problem that made this awkward is gone. As of v0.287.4
-  `render_preview_png_full_res` takes the run's saved `stretch`/`black`, so a share render can reproduce the
-  *exact* look of the stored preview at any size — the share and the thumbnail can't drift.
-  **Shape:** render the share/wallpaper source at a share-sized cap (~2048–2560 px, and the actual screen size
-  for a wallpaper) through that same call, keeping every existing mark (nameplate, scale bar, North rose) —
-  they are all fractions of the picture width, so they scale with it. **Cautions:** this turns a byte-copy
-  into a real render on a RAM-capped NAS, so cap it, do it in the threadpool as the full-res download already
-  does, and leave the *gallery/History thumbnail* on the cheap stored preview — only the export grows. Keep
-  the un-rotated/no-marks path byte-identical where it can be, or state plainly that it changed.
+- **✅ MOSTLY SHIPPED (Builder, v0.310.0 + v0.311.0, branch `claude/compassionate-galileo-e1p1x8`) — ~~the
+  picture a beginner actually *shares* is 1024 px wide, because every share export is built from the stored
+  preview PNG rather than the master.~~ The wallpaper and the share JPEG (with its keepsake and
+  scale-&-compass variants) now come off the master; the zoom clip is the one consumer still left on the
+  preview.** *(The original spec is kept below, indented — it is what the two commits were built from.)*
+
+    **What shipped.** One shared `stack._native_picture_source(run, preview, baked_north_up, needed_long_edge)`
+    re-renders the same picture from the run's own FITS at the size each caller needs, and returns `None` —
+    "use the stored bytes, exactly as before" — wherever the render could show a *different* picture: a baked
+    North-up preview, a "Process target" display-space run, an auto-crop-trimmed preview, a missing FITS, or a
+    canvas no bigger than the preview (read from `canvas_w/h` *before* any render). **v0.310.0** used it for the
+    wallpaper (see the entry under "Image quality"); **v0.311.0** used it for `kind="jpeg"` at a
+    `SHARE_JPEG_MAX_LONG_EDGE = 2560` cap.
+
+    **The entry's claim that the marks scale was checked, not assumed, and it is right — with one wrinkle that
+    would have been a bug if the swap had gone in one line later.** The nameplate's font, the keepsake's matte
+    and the rose are all fractions of the picture's own size, so they scale for free. The **scale bar is not**:
+    `SkyMarks.bar_px` is `bar.fraction × preview_width`, a length in pixels *of the image it will be drawn on*,
+    computed by the caller. So the source swap has to happen **before** `preview_width` is measured — a bar
+    measured against the 400 px preview and drawn on a 1600 px picture would claim a length four times what it
+    marks. A test spies on `_sky_marks_for_run`'s width argument rather than eyeballing the picture, because
+    this is exactly the kind of thing that reads fine and is silently wrong.
+
+    **The 2026-08-29 stand-down note below sized this as an **L** and was right about every part of it — what
+    made it shippable is that the hard parts are *declined* rather than solved.** Its point 1 (the plain path
+    is easy) is exactly what shipped. Its point 2 (the recipe path needs a render cache, and that cache is the
+    bulk of the work) stands untouched: `_native_picture_source` returns `None` for a display-space run, so
+    nothing renders and nothing needs caching — the cost is that the owner's `auto_edit_on_autostack` runs keep
+    the 1024 px share, and that half is still open. Its point 3 (test blast radius) did not materialise, for
+    the same reason: the **canvas ≤ preview** gate means the old fixtures — `test_wallpaper.py`'s zero-valued
+    FITS beside a solid-colour preview, and `test_share_north_up_double_rotation.py`'s three byte-identity
+    assertions — all take the stored-preview path exactly as before. Not one assertion was rewritten or
+    loosened. **The lesson worth carrying: a source swap that can decline cheaply is a different size from one
+    that must always succeed.**
+
+    **Not done: the zoom clip.** It reads `run.preview_path` bytes directly and caches the result under a
+    signature *of those bytes* (`_zoom_clip_signature`), so feeding it a bigger source means re-keying the cache
+    as well as swapping the bytes — a separate, self-contained slice. The gain the entry measured still stands
+    (569 px → 640).
+
+    **Upgrade-safe (§9):** no config/schema/on-disk/API-shape change; the endpoints, their query parameters and
+    their media types are untouched. Stated plainly rather than hidden: the *bytes* of a plain share JPEG do
+    change on a run whose master is bigger than its preview — that is the fix, not a side effect. Nothing is
+    written to disk, and the gallery/History **thumbnail** deliberately stays on the cheap stored preview, as
+    the spec's caution asked.
+
+    **Tests (+8 in `tests/webapp/test_share_native_resolution.py`, 6 fail before / pass after):** the share
+    JPEG off a 1600 px master with a 400 px preview; the cap (monkeypatched small, so no 100 MP fixture); the
+    "same picture, only bigger" comparison against the display-space twin; the scale-bar width spy above; the
+    keepsake matting the big picture; North-up on the bigger source; and the processed-run / missing-FITS
+    fallbacks.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-08-27, traced while fixing the full-res-PNG stretch bug) — the picture a beginner
+    actually *shares* is 1024 px wide, because every share export is built from the stored preview PNG rather
+    than the master.** *(Pillar: enjoy + share + trust, PRIORITY 3; size S–M; additive, no new deps. Confidence:
+    traced against the code.)* `_write_preview_png` caps the stored preview at **1024 px** wide
+    (`seestack/stack/output.py:366`), and the share JPEG (`stack.py`, `kind == "jpeg"`), the wallpaper
+    (`stack.py:1988`) and the sub-reveal all start from `run.preview_path` bytes. So the file a beginner posts,
+    sets as a phone background, or sends to family is 1024 px — soft on any modern phone, let alone a 1440p
+    screen — even though the master holds the full canvas and the "Download full-res PNG" button beside it
+    serves it. *(Note for whoever picks this up: an old Builder investigation elsewhere in this file describes
+    the share JPEG as having a "2048px cap". That is stale — it is the 1024 px preview, re-encoded.)*
+    **Builder 2026-08-30 — one more consumer, and the first that *measurably* pays for the cap.** The **Zoom
+    clip** (v0.303.0) is built from the same stored preview, and because it must not upscale, the cap sets its
+    resolution directly: `zoom_clip_size` yields **569 px** from a 1024-wide preview (1024 ÷ the 1.8× zoom)
+    where the same clip off a native-res source would be the full 640. So fixing this makes the shared *clip*
+    visibly sharper too, not just the shared still — worth weighing against the **L** sizing below. Nothing
+    about the clip needs changing when it lands: it takes whatever pixels it is handed.
+    **Why it is newly cheap:** the parity problem that made this awkward is gone. As of v0.287.4
+    `render_preview_png_full_res` takes the run's saved `stretch`/`black`, so a share render can reproduce the
+    *exact* look of the stored preview at any size — the share and the thumbnail can't drift.
+    **Shape:** render the share/wallpaper source at a share-sized cap (~2048–2560 px, and the actual screen size
+    for a wallpaper) through that same call, keeping every existing mark (nameplate, scale bar, North rose) —
+    they are all fractions of the picture width, so they scale with it. **Cautions:** this turns a byte-copy
+    into a real render on a RAM-capped NAS, so cap it, do it in the threadpool as the full-res download already
+    does, and leave the *gallery/History thumbnail* on the cheap stored preview — only the export grows. Keep
+    the un-rotated/no-marks path byte-identical where it can be, or state plainly that it changed.
 
   **⚠️ Builder note (2026-08-29, branch `claude/compassionate-galileo-eypoyg`) — I claimed this, sized it
   against the real code, and STOOD DOWN before writing any of it. It is not S–M; read this before picking it
@@ -26257,6 +26435,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **NEW IDEA (Builder 2026-08-30, the shape the v0.311.1 bug had, and the reason it existed) — there are now
+  **two** answers to "render this run's picture at size N, exactly as it is shown", and the bug was the gap
+  between them.** *(Pillar: correctness by construction / maintainability — PRIORITY 3; size S; pure
+  consolidation, no behaviour change intended.)* `stack._native_picture_source` (v0.310.0) knows the full list
+  of ways a stored preview can differ from a fresh FITS render — a baked North-up turn, a display-space
+  "Process target" edit, an auto-crop trim, a missing master — and **declines** when it can't reproduce the
+  picture faithfully. `download_full_res_png` answers the same question independently: it handles the recipe
+  and the saved `stretch`/`black`, silently didn't handle the baked turn (that was v0.311.1), and does not
+  consider the crop at all. Two implementations of one question is exactly how the rotation went missing from
+  one of them. **Shape:** one function — `run_picture_png(run, recipe_json, *, max_long_edge)` — that returns
+  the render *and* what it could not reproduce, with `_native_picture_source` becoming "call it, and decline
+  when it reports anything unreproduced" and the full-res endpoint becoming "call it, and serve what comes
+  back". **Do it as a pure refactor with the existing tests as the gate** (`test_full_res_png.py`,
+  `test_share_native_resolution.py`, `test_wallpaper.py` between them pin every branch), and check the **crop**
+  case explicitly while there: a plain run should never carry a `preview_crop_json` (only the auto-edit writes
+  one, and it sets `preview_display_space` too), but nothing asserts that, and if it can happen the full-res
+  download is showing a differently-*framed* picture the same way it was showing a differently-rotated one.
+
+- **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by v0.310.0 / v0.311.0) — the wallpaper and the
+  share JPEG are now real renders, and nothing caches them.** *(Size S if it ever bites; **do not build it on
+  spec** — AGENTS.md §6 says optimise a *measured* hot spot.)* Both were a file read plus a re-encode; each is
+  now a decimated FITS load and stretch (≤ 2560 px for a share, ≤ the device size for a wallpaper) on every
+  request, and the browser has no way to revalidate — the responses carry no `ETag` or `Last-Modified`. A
+  beginner tapping Share three times pays for three renders. The cheap fix if it is ever felt is a validator
+  keyed on the master's `(mtime_ns, size)` plus the request's own parameters, exactly as
+  `_zoom_clip_signature` already keys its cache; the expensive one is a stored derivative, which is what the
+  "Process target" half of the same feature would need anyway. **Measure first:** on the owner's box the
+  interesting number is a share tap on their largest mosaic, not a synthetic frame.
 
 - **⚪ PRE-EXISTING TEST-HARNESS QUIRK (Builder 2026-08-29, tripped over while spot-checking a merge; recorded
   so nobody spends a run thinking their change broke it) — naming an engine test file and a `tests/webapp/` one
