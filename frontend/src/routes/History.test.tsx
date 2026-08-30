@@ -620,8 +620,12 @@ describe("HistoryView", () => {
       .toBe(client.api.stackWallpaperUrl("M_42", 1, "phone"));
     expect(await menuItem("Desktop")).toBeInTheDocument();
     expect(await menuItem("Square")).toBeInTheDocument();
-    // …and the zoom clip sits with the other share actions, as a plain download
-    // link (the server builds and caches it) rather than a second fetch.
+    // …and the zoom clip sits with the other share actions. jsdom has no
+    // `URL.createObjectURL`, so what renders here is `DownloadMenuItem`'s
+    // old-browser fallback — the plain `<a download>` this item has always been,
+    // pinned so the progressive enhancement can never take the download away.
+    // The spinner path a real browser takes is covered in
+    // `components/DownloadMenuItem.test.tsx`.
     const clip = await menuItem("Zoom clip");
     expect(clip.getAttribute("href")).toBe(client.api.stackZoomClipUrl("M_42", 1));
     expect(clip.hasAttribute("download")).toBe(true);

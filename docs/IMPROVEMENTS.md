@@ -49,7 +49,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > first — a clear mosaic getting a **"Hazy night"** badge (ratio 0.50) and a **"clouds rolled in"** verdict
 > (early 10025 vs late 4025) under a perfectly steady sky. Then **v0.304.2** (entry under "Image quality"):
 > the sixth site, the bulk "reject worst N%" cut sending all six of its rejections into the sparsest mosaic
-> panel.
+> panel. The rest of the lead's candidate list was then swept clean (see the note on it). Third task:
+> **v0.304.3**, the filed "first zoom clip is a silent wait" — a shared `DownloadMenuItem` that keeps the menu
+> open with a spinner while the server builds the file.
 
 _(nothing else claimed — claim an item here with your branch name)_
 
@@ -9383,8 +9385,30 @@ to **Shipped**.)_
     which is a real but uncommon path; the reveal is the first surface where the disagreement becomes *visible*
     rather than merely latent, which is why it is worth closing now rather than when it bites.
 
-- **NEW IDEA (Builder 2026-08-30, the one rough edge left by the v0.303.0 zoom clip, and the honest cost of
-  building it lazily behind a plain link) — the *first* zoom clip on a target is a silent wait.** *(Pillar:
+- **✅ SHIPPED (Builder, v0.304.3, branch `claude/compassionate-galileo-ezix3s`) — ~~the *first* zoom clip on a
+  target is a silent wait.~~** Fixed as filed, but with the **fetch-to-blob** half rather than the
+  `…/zoom-clip/info` half: `info` says whether a clip is *possible*, which the menu already knows from
+  `has_preview` — it never warms the cache, so it would have added a request without shortening the wait. New
+  shared `frontend/src/components/DownloadMenuItem.tsx` fetches the file itself, holds the menu open
+  (`closeMenuOnClick={false}` — otherwise the spinner unmounts with the menu on the very click that starts it)
+  with a `Loader` and a "Building your clip — a few seconds the first time" line, then hands the blob to the
+  browser. Both call sites (History card menu, Target page menu) use it.
+
+  **Two things the blob path would have quietly broken, and how they're handled.** (1) A plain `<a download>`
+  lets the server's `Content-Disposition` name the file, and the clip is a **WEBP *or* an APNG** depending on
+  what Pillow can encode — so a hardcoded extension would mislabel half the downloads. `filenameFromDisposition`
+  (pure, unit-tested, RFC 5987 aware) reads the server's name and falls back to the caller's only when there
+  isn't one. (2) A browser with no `fetch`/`createObjectURL` renders **exactly today's plain link** — the
+  enhancement can only add feedback, never take the download away. That fallback is what jsdom exercises, so
+  `History.test.tsx`'s existing href/download assertion still passes and now says which path it is pinning.
+
+  **Tests (+9 in `frontend/src/components/DownloadMenuItem.test.tsx`):** the old-browser fallback, the building
+  line appearing *with the menu still open*, the server-named and fallback filenames, and a failed build
+  explaining itself instead of leaving the spinner spinning.
+
+  Original spec, for the record:
+
+  *(Pillar:
   friendliness — PRIORITY 3; size S; frontend-only in its cheapest form.)* The **Zoom clip** menu item is an
   `<a download>` straight at `…/zoom-clip`, which is what makes it free to offer (no info request per card,
   no state) — but the first tap for a run builds ~24 LANCZOS crops and encodes an animated WEBP before a byte
@@ -16386,7 +16410,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   night" badge, and `session_recap.transparency_trend` behind the "Clouds & haze" card. See the entry at the
   top of "Bugs". The lead stays open: the auto-grade reconsider/reaccept path, `stackhealth`'s trend and drift
   verdicts, and the session-quality drift endpoint are still unswept. A **sixth** site — the bulk "reject worst
-  N%" cut — was found the same way and shipped in v0.304.2 (entry below). Method note that made them easy — grep
+  N%" cut — was found the same way and shipped in v0.304.2 (entry below). **The rest of the named candidate list
+  was then swept and came back clean — recorded so nobody re-treads it:** `stackhealth` compares only FWHM,
+  eccentricity, exposure and gain (all properties of the night or the setup, correctly target-wide);
+  `session_recap._fwhm_quality_drift` is FWHM-only, likewise; and `grading.best_frame` ranks on FWHM with
+  `star_count` as a *tie-break* only, which on a float metric essentially never decides the pick — traced, judged
+  not worth changing, and the cost of being wrong is one "first look" thumbnail. Method note that made them easy — grep
   for `transparency_score` / `star_count` / `sky_adu_median` used outside a `pointing_groups` call, then ask
   what claim the number is turned into: both of these turn a *pointing* difference into a **weather** claim,
   which is the tell.)**
