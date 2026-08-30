@@ -9524,6 +9524,32 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-30, the generalisation of the v0.311.3 "First light" bug) — sweep every date the
+  app shows a beginner and ask whether it means *when you shot this* or *when the app did something*.**
+  *(Pillar: understand / trust — PRIORITY 3; size S per surface, M for the sweep. Confidence: the class is
+  confirmed — one instance was reproduced in a running app and fixed this run.)* "First light" quoted the
+  target-row **creation** stamp and so told a Seestar owner with a back catalogue that they took up the hobby
+  the week they installed AstroStack. The bug is fixed; **the class is not swept.** The owner's mental model of
+  a date on a picture is *the night I shot it*, and several surfaces show a **processing** date in a place that
+  reads like a capture date — the clearest is the Dashboard's **Recent stacks** strip, whose tile reads
+  `Sample: Orion Nebula (M42) · 6 FRAMES · Aug 30, 2026` where the 30 Aug is when the *stack ran*, while the
+  subs under it are dated 2024-11-15. On a re-stack of old data that is off by years, on the app's front page.
+  **Shape:** enumerate the surfaces (Dashboard recent strip, Gallery cards, History rows, the Library tile, the
+  keepsake/poster) and for each decide which date the *reader* means, rather than which one is cheapest to
+  reach — a stack run's own timestamp is right for "which run is newest", and wrong as the caption on a
+  picture. `Project.earliest_frame_utc()` (new this run) and the existing per-night rollups already answer the
+  capture side, so most of this is a decision plus a label, not new data. **Care:** don't flip a *sort* to
+  capture time — "newest run" is the right ordering for History — and where both dates matter, say both
+  ("shot 15 Nov 2024 · stacked 30 Aug 2026") rather than silently swapping one for the other.
+
+- **NEW IDEA (Builder 2026-08-30, noted while fixing the sky-coverage line v0.311.4) — the app writes "full
+  moons" in one sentence and "full Moon" in three others.** *(Pillar: friendliness — PRIORITY 3; size XS.)*
+  `components/skyCoverage.ts` says *"about 6 full moons' worth of sky"*; `scalebar._moon_comparison`,
+  `angularsize` and the framing hint all say *"full Moon"*. Same noun, same product, two spellings, and on the
+  Dashboard the two can appear within a screen of each other. One line of copy plus its three test assertions.
+  Deliberately **not** folded into v0.311.4, which was a grammar fix — this is cosmetic churn and should be
+  picked up on its own (or alongside anything else touching that file), not smuggled in.
+
 - **✅ SHIPPED (Builder, v0.308.0, branch `claude/compassionate-galileo-1bqxek`) — ~~let "North up" be a way to
   *look* at a picture, not only a way to overwrite it.~~** First surface built: the Target page's picture, in
   the viewer you get by clicking it. *(Pillar: enjoy + trust — PRIORITY 3.)*
