@@ -16,8 +16,10 @@ leans on that, and on the Seestar's **folder-naming convention** (see
     a ``<Target>_sub/`` sibling exists we skip this output folder so we never
     build a bogus 1-frame "stack" from it. A bare folder with no ``_sub``
     sibling still ingests as a target (older / non-Seestar layouts).
-  * ``*_video/`` folders are video captures, not stackable deep-sky subs, and
-    are skipped entirely.
+  * ``*_video/`` folders are video captures and ``*_photo/`` folders are the
+    single-shot stills the device takes in scenery/planetary photo mode
+    (``Planetary_photo/``, ``Scenery_photo/``). Neither holds stackable
+    deep-sky subs, so both are skipped entirely.
   * Loose FITS files sitting directly in the root (exports, one-offs, files
     that escaped a folder) are collected into a single ``Unsorted`` target
     you can sort out by hand later.
@@ -58,11 +60,44 @@ ShouldStopFn = Callable[[], bool]
 # Seestar folder-naming convention (see the module docstring). The Seestar
 # writes raw subs into "<Target>_sub/" ("<Target>_mosaic_sub/" for a mosaic)
 # and its own on-device stacked OUTPUT into the bare "<Target>/". "*_video/"
-# folders are video captures. Suffixes are matched case-insensitively because
-# the folder casing is not guaranteed across firmware/app versions.
+# folders are video captures and "*_photo/" folders are single-shot stills
+# (the device writes "Planetary_photo/", "Scenery_photo/" beside the matching
+# "*_video/" ones) — neither holds stackable deep-sky subs. Suffixes are matched
+# case-insensitively because the folder casing is not guaranteed across
+# firmware/app versions.
 _SUB_SUFFIX = "_sub"
 _MOSAIC_SUB_SUFFIX = "_mosaic_sub"
 _VIDEO_SUFFIX = "_video"
+_PHOTO_SUFFIX = "_photo"
+
+# How a mosaic's target is *named* once ingested: "<T> (mosaic)", deliberately
+# distinct from the single-field "<T>" so their differing footprints are never
+# co-stacked or auto-merged. One definition, because three things now depend on
+# the exact spelling — the convention that builds it, the duplicate detector
+# that names a "<T>_mosaic_sub" leftover's base, and the merge suggester that
+# must not offer to combine a mosaic with its single field.
+_MOSAIC_TARGET_SUFFIX = " (mosaic)"
+
+
+def mosaic_target_name(base: str) -> str:
+    """The target name a mosaic's raw-subs folder ``<base>_mosaic_sub/`` becomes."""
+    return f"{base}{_MOSAIC_TARGET_SUFFIX}"
+
+
+def is_mosaic_target_name(target_name: str) -> bool:
+    """True when a target is a **mosaic**, by the name the convention gave it.
+
+    A mosaic and the single field of the same object sit at the same plate-solved
+    centre, so nothing about position can tell them apart — but their canvases
+    differ, which is the whole reason the convention keeps them as two targets.
+    Anything that groups targets by *where they point* needs this to avoid
+    proposing a combination the ingest side deliberately refused to make."""
+    return target_name.strip().lower().endswith(_MOSAIC_TARGET_SUFFIX)
+
+# The capture-mode folders that never hold stackable deep-sky sub-frames, so the
+# scanner skips them and the cleanup nudge offers to remove any a pre-convention
+# scan already ingested. One tuple so the two can never disagree about the family.
+_CAPTURE_SUFFIXES = (_VIDEO_SUFFIX, _PHOTO_SUFFIX)
 
 
 def _apply_seestar_convention(
@@ -76,7 +111,8 @@ def _apply_seestar_convention(
 
     Rules, applied per folder:
 
-    * ``*_video`` → skipped (video capture, not stackable subs).
+    * ``*_video`` / ``*_photo`` → skipped (a video capture or a single-shot
+      still, not stackable subs).
     * ``<T>_mosaic_sub`` → target ``"<T> (mosaic)"`` (a mosaic's raw subs, kept
       distinct from the single-field target so their differing footprints are
       never co-stacked or auto-merged).
@@ -110,11 +146,11 @@ def _apply_seestar_convention(
     units: list[tuple[str, list[Path]]] = []
     for (name, files), parent in zip(subdirs_with_fits, parents, strict=True):
         low = name.lower()
-        if low.endswith(_VIDEO_SUFFIX):
+        if low.endswith(_CAPTURE_SUFFIXES):
             continue
         if low.endswith(_MOSAIC_SUB_SUFFIX):
             base = name[: -len(_MOSAIC_SUB_SUFFIX)].rstrip()
-            units.append((f"{base} (mosaic)" if base else name, files))
+            units.append((mosaic_target_name(base) if base else name, files))
             continue
         if low.endswith(_SUB_SUFFIX):
             base = name[: -len(_SUB_SUFFIX)].rstrip()
@@ -244,7 +280,7 @@ def _seestar_output_bases(
     ingested_bare = {
         name.lower()
         for (name, _), parent in zip(subdirs_with_fits, parents, strict=True)
-        if not name.lower().endswith((_VIDEO_SUFFIX, _SUB_SUFFIX))
+        if not name.lower().endswith((*_CAPTURE_SUFFIXES, _SUB_SUFFIX))
         and (parent, name.lower() + _SUB_SUFFIX) not in sibling_names
     }
     bases: dict[str, str] = {}
@@ -265,13 +301,70 @@ def _seestar_output_bases(
 # while never flagging a real light-frame stack (dozens–thousands of subs).
 _MAX_JUNK_OUTPUT_FRAMES = 2
 
+# ...except for a MOSAIC, whose on-device output is one stacked image **per
+# panel**, not one image. The owner's real S30 library proves the single-image
+# cap is wrong there: "M 44_mosaic" holds 11 frames and "NGC 6960_mosaic" 7,
+# so both sail past the ≤2 gate and linger as junk targets forever. This cap is
+# still an order of magnitude below any real light-frame target (hundreds to
+# thousands of subs), and the positive-evidence requirement is unchanged — the
+# folder must be a bare "<T>_mosaic/" whose "<T>_mosaic_sub/" raw-subs sibling
+# is actually present on disk — so a real target is still never mistaken for junk.
+_MAX_JUNK_MOSAIC_OUTPUT_FRAMES = 32
+
+# The bare on-device output folder of a mosaic ("<T>_mosaic/", beside its raw
+# subs in "<T>_mosaic_sub/"). Confirmed as this device's real naming from the
+# owner's live S30 share — the bare "<T>/" shape never occurs for a mosaic.
+_MOSAIC_SUFFIX = "_mosaic"
+
+
+def junk_output_frame_cap(target_name: str) -> int:
+    """The largest frame count worth *examining* as a possible on-device output
+    target, given only its name. Two values, because a single field's on-device
+    output is one stacked image while a mosaic's is one image per panel (see
+    :data:`_MAX_JUNK_MOSAIC_OUTPUT_FRAMES`).
+
+    Exists so a caller can skip opening a big target's project without keeping —
+    and drifting from — its own copy of the engine's limits. It only decides
+    *whether to look*; :func:`classify_seestar_junk_target` still requires the
+    positive on-disk evidence before anything is flagged."""
+    if target_name.strip().lower().endswith(_MOSAIC_SUFFIX):
+        return _MAX_JUNK_MOSAIC_OUTPUT_FRAMES
+    return _MAX_JUNK_OUTPUT_FRAMES
+
 
 @dataclass(frozen=True)
 class JunkTargetVerdict:
-    """Why a target looks like Seestar output/video junk, not raw subs."""
+    """Why a target looks like Seestar output/capture junk, not raw subs."""
 
-    reason: str   # "video" | "on_device_output"
+    reason: str   # "video" | "photo" | "on_device_output"
     detail: str   # plain-language, beginner-facing explanation
+
+
+def is_capture_mode_target_name(target_name: str) -> bool:
+    """True when a target's *name* alone marks it as one of the Seestar's
+    capture-mode folders (``*_video`` / ``*_photo``) — neither of which holds
+    stackable subs, at any frame count. Lets a caller decide by name before
+    paying to open the target's project."""
+    return target_name.strip().lower().endswith(_CAPTURE_SUFFIXES)
+
+
+def _capture_folder_verdict(suffix: str) -> JunkTargetVerdict:
+    """The verdict for one of the Seestar's capture-mode folders
+    (:data:`_CAPTURE_SUFFIXES`) — a video clip or a single-shot still. Both are
+    "there are no subs in here", but the wording has to name the right thing or
+    the nudge reads as nonsense beside a folder full of scenery snapshots."""
+    if suffix == _PHOTO_SUFFIX:
+        return JunkTargetVerdict(
+            "photo",
+            "Built from a Seestar “_photo” folder — the single snapshots it "
+            "takes in scenery/planetary photo mode, not raw sub-frames, so "
+            "there is nothing here to stack into a deep image.",
+        )
+    return JunkTargetVerdict(
+        "video",
+        "Built from a Seestar “_video” capture folder, not raw sub-frames — "
+        "it can't be stacked into a deep image.",
+    )
 
 
 def classify_seestar_junk_target(
@@ -280,8 +373,8 @@ def classify_seestar_junk_target(
     n_frames: int,
 ) -> JunkTargetVerdict | None:
     """
-    Decide whether a library target was built from a Seestar *output* or *video*
-    folder rather than raw sub-frames — the leftover "junk" targets an old,
+    Decide whether a library target was built from a Seestar *output*, *video* or
+    *photo* folder rather than raw sub-frames — the leftover "junk" targets an old,
     pre-``_apply_seestar_convention`` scan produced before the scanner learned the
     Seestar folder convention (v0.184.9).
 
@@ -292,47 +385,66 @@ def classify_seestar_junk_target(
 
     * ``video`` — the target name (or every frame's source folder) ends with
       ``_video``: a video capture, not stackable deep-sky subs.
+    * ``photo`` — the same, for ``_photo``: the single stills the device takes in
+      scenery/planetary photo mode. Same family, same "nothing to stack here"
+      verdict, different wording.
     * ``on_device_output`` — a small (≤ ``_MAX_JUNK_OUTPUT_FRAMES``) target whose
       frames all sit in a single **bare** ``<T>/`` folder that has a raw-subs
       ``<T>_sub/`` sibling on disk: the Seestar's own single stacked output, which
       "stacks" to one lower-resolution frame (colour speckle).
 
     Conservative by design — it only flags a target with positive evidence
-    (a ``_video`` name/folder, or a bare output folder whose ``_sub`` sibling is
-    actually present), so a real target is never mistaken for junk.
+    (a ``_video``/``_photo`` name/folder, or a bare output folder whose ``_sub``
+    sibling is actually present), so a real target is never mistaken for junk.
     """
-    _VIDEO_DETAIL = (
-        "Built from a Seestar “_video” capture folder, not raw sub-frames — "
-        "it can't be stacked into a deep image."
-    )
-    if target_name.strip().lower().endswith(_VIDEO_SUFFIX):
-        return JunkTargetVerdict("video", _VIDEO_DETAIL)
+    low_name = target_name.strip().lower()
+    if is_capture_mode_target_name(target_name):
+        for suffix in _CAPTURE_SUFFIXES:
+            if low_name.endswith(suffix):
+                return _capture_folder_verdict(suffix)
 
     folders = {Path(p).parent for p in source_paths}
     if not folders:
         return None
     folder_names = {f.name.lower() for f in folders}
-    if all(n.endswith(_VIDEO_SUFFIX) for n in folder_names):
-        return JunkTargetVerdict("video", _VIDEO_DETAIL)
+    for suffix in _CAPTURE_SUFFIXES:
+        if all(n.endswith(suffix) for n in folder_names):
+            return _capture_folder_verdict(suffix)
 
-    if n_frames <= _MAX_JUNK_OUTPUT_FRAMES and len(folders) == 1:
+    if len(folders) == 1:
         folder = next(iter(folders))
         low = folder.name.lower()
         # A raw-subs folder ("_sub"/"_mosaic_sub") is never junk — only a *bare*
         # output folder is. "_mosaic_sub" ends with "_sub", so one test covers both.
-        if not (low.endswith(_SUB_SUFFIX) or low.endswith(_VIDEO_SUFFIX)):
+        # The cap comes from the FOLDER's name, which is the actual evidence: a
+        # mosaic's output holds one image per panel, a single field's holds one.
+        if (
+            not low.endswith((_SUB_SUFFIX, *_CAPTURE_SUFFIXES))
+            and n_frames <= junk_output_frame_cap(folder.name)
+        ):
             sibling = folder.parent / f"{folder.name}{_SUB_SUFFIX}"
             try:
                 is_output = sibling.is_dir()
             except OSError:
                 is_output = False
             if is_output:
+                is_mosaic = low.endswith(_MOSAIC_SUFFIX)
+                what = (
+                    "its own stacked image of each mosaic panel"
+                    if is_mosaic
+                    else "the Seestar's own single stacked image"
+                )
+                consequence = (
+                    "stacking them just reproduces those few lower-resolution "
+                    "panel images."
+                    if is_mosaic
+                    else "stacking it just reproduces that one lower-resolution "
+                    "frame."
+                )
                 return JunkTargetVerdict(
                     "on_device_output",
-                    "Looks like the Seestar's own single stacked image (its "
-                    f"“{folder.name}_sub” raw-subs folder is right beside it), not "
-                    "raw subs — stacking it just reproduces that one "
-                    "lower-resolution frame.",
+                    f"Looks like {what} (its “{folder.name}_sub” raw-subs folder "
+                    f"is right beside it), not raw subs — {consequence}",
                 )
     return None
 
@@ -353,19 +465,22 @@ def duplicate_sub_target_base_name(
     correct raw subs, so this is **not** the ``on_device_output`` junk case; it is
     a de-duplication hint.
 
+    **A mosaic is the same story with a different base name.** A leftover
+    ``<T>_mosaic_sub``-named target duplicates the ``<T> (mosaic)`` target the
+    convention now builds from that folder — *not* the single-field ``<T>``, whose
+    footprint is different. (The owner's live library has three of these:
+    ``M 3_MOSAIC_SUB``, ``M 44_MOSAIC_SUB``, ``NGC 6960_MOSAIC_SUB``.) The
+    ``(mosaic)`` suffix is taken from :func:`_apply_seestar_convention` so the two
+    can never disagree about what the duplicate's base is called.
+
     Pure and side-effect-free: it only recognises the *shape* (name ends ``_sub``
     and every frame sits under a single ``*_sub/`` folder). The caller must confirm
-    the base target ``<T>`` actually exists and already owns these subs before
-    offering removal, so a legitimately-named standalone ``…_sub`` target (or one
-    whose subs the base doesn't yet own) is never flagged. Single-field only —
-    ``_mosaic_sub`` naming is device-specific and deliberately left to its own bug.
+    the base target actually exists and already owns these subs before offering
+    removal, so a legitimately-named standalone ``…_sub`` target (or one whose subs
+    the base doesn't yet own) is never flagged.
     """
-    name = target_name.strip()
-    low = name.lower()
-    if not low.endswith(_SUB_SUFFIX) or low.endswith(_MOSAIC_SUB_SUFFIX):
-        return None
-    base = name[: -len(_SUB_SUFFIX)].rstrip()
-    if not base:
+    base = duplicate_sub_base_name_from_name(target_name)
+    if base is None:
         return None
     folders = {Path(p).parent for p in source_paths}
     if len(folders) != 1:
@@ -374,6 +489,27 @@ def duplicate_sub_target_base_name(
     if not folder.name.lower().endswith(_SUB_SUFFIX):
         return None
     return base
+
+
+def duplicate_sub_base_name_from_name(target_name: str) -> str | None:
+    """The *name-shape* half of :func:`duplicate_sub_target_base_name`: given only
+    a target's name, the name of the target the convention would fold its folder
+    into (``<T>_sub`` → ``<T>``, ``<T>_mosaic_sub`` → ``<T> (mosaic)``), or
+    ``None`` if the name isn't that shape.
+
+    Split out because a caller that has a *set* of target names — the merge
+    suggester, deciding whether two members of one sky-position cluster are the
+    same physical files under two spellings — can rule the question out by name
+    alone, and only pay to open both projects for the pairs that could be it."""
+    name = target_name.strip()
+    low = name.lower()
+    if not low.endswith(_SUB_SUFFIX):
+        return None
+    if low.endswith(_MOSAIC_SUB_SUFFIX):
+        base = name[: -len(_MOSAIC_SUB_SUFFIX)].rstrip()
+        return mosaic_target_name(base) if base else None
+    base = name[: -len(_SUB_SUFFIX)].rstrip()
+    return base if base else None
 
 
 @dataclass
