@@ -628,6 +628,85 @@ class StackResult:
 
 
 @dataclass
+class PrintPlan:
+    """What the stack these settings describe would **print** at, said before it
+    is run.
+
+    ``printexport`` can already tell a *finished* picture the largest paper it
+    fills sharply and what it would take to reach the next size up — but by then
+    the canvas is fixed and the one lever that sets it (Drizzle) is a knob on a
+    form the user has already left. This is the same answer in the tense that can
+    still change the outcome: megapixels turned into a paper size, plus the
+    concrete drizzle scale that would reach one size bigger.
+
+    ``bigger_*`` are all None whenever there is nothing honest to offer: the
+    output already fills the largest paper, the gap needs more super-resolution
+    than :data:`~seestack.printexport.DRIZZLE_MAX_USEFUL_SCALE`, or the bigger
+    canvas would not fit the memory budget (the estimate's own over-budget
+    verdict owns that case — this must never talk past it)."""
+
+    # The largest paper the output would print sharply at, None when the canvas
+    # is too small for even the smallest size offered.
+    name: str | None
+    dpi: int | None
+    text: str                          # the finished plain-language sentence
+    bigger_name: str | None = None     # the next paper size up…
+    bigger_drizzle_scale: float | None = None   # …and the scale that reaches it
+    bigger_text: str | None = None
+
+
+def _print_plan(out_w: int, out_h: int, dst_shape: tuple[int, int], *,
+                drizzle: bool, drizzle_scale: float, drizzle_reject: bool,
+                rejection_map: bool, budget: int) -> PrintPlan:
+    """Turn a pre-run output canvas into :class:`PrintPlan` (see there).
+
+    The drizzle scale offered is *verified*, not derived and hoped for: the
+    candidate is stepped up the same 0.1 grid the form uses until the canvas it
+    really produces qualifies for the paper, so the sentence can't promise a size
+    the run would just miss. It is dropped entirely when the canvas at that scale
+    would exceed ``budget``, so the nudge never argues with the memory guard."""
+    from seestack.printexport import DRIZZLE_MAX_USEFUL_SCALE, bigger_print, print_options
+
+    options = print_options(out_w, out_h)
+    best = options[0] if options else None
+    if best is not None:
+        text = f"This stack would print sharply up to {best.name}."
+    else:
+        text = ("This stack won't have enough pixels for a sharp print — that "
+                "takes more resolution (Drizzle, or shooting a mosaic), not "
+                "more subs.")
+    plan = PrintPlan(name=(best.name if best else None),
+                     dpi=(best.dpi if best else None), text=text)
+
+    nxt = bigger_print(out_w, out_h)
+    if nxt is None:
+        return plan
+    # Output = canvas × scale, so reaching ``nxt.scale`` times more detail per
+    # side means multiplying whatever scale is set now (×1.0 when drizzle is off).
+    current = float(drizzle_scale) if drizzle else 1.0
+    step = 0.1
+    candidate = math.ceil(current * nxt.scale / step) * step
+    while round(candidate, 2) <= DRIZZLE_MAX_USEFUL_SCALE + 1e-9:
+        candidate = round(candidate, 2)
+        peak, (cand_h, cand_w) = _estimate_peak_bytes(
+            dst_shape, drizzle=True, drizzle_scale=candidate,
+            drizzle_reject=drizzle_reject, rejection_map=rejection_map)
+        if any(o.name == nxt.name
+               for o in print_options(cand_w, cand_h)):
+            if int(peak) > budget:
+                return plan     # the memory verdict owns this case, not us
+            verb = (f"Raising Drizzle to ×{candidate:g}" if drizzle
+                    else f"Turning Drizzle on at ×{candidate:g}")
+            return replace(
+                plan, bigger_name=nxt.name, bigger_drizzle_scale=candidate,
+                bigger_text=(f"{verb} would print it at {nxt.name} instead — "
+                             "super-resolution needs plenty of well-dithered "
+                             "subs to pay off."))
+        candidate += step
+    return plan
+
+
+@dataclass
 class StackEstimate:
     """A dry-run sizing of a stack: the output canvas it would produce and the
     peak working memory it would need — computed without stacking anything, so
@@ -661,6 +740,11 @@ class StackEstimate:
     # coarse fields above miss (dropping extra min/max outlier passes on a
     # non-drizzle stack). None when the run fits or no single lever obviously does.
     memory_fix: MemoryFix | None = None
+    # What this canvas would *print* at, and the drizzle scale that would reach
+    # one size bigger — the megapixel count in the unit a human actually wants,
+    # said at the one moment the lever is still on screen. Never contradicts the
+    # memory verdict (see :class:`PrintPlan`).
+    print_plan: PrintPlan | None = None
 
 
 def kappa_min_frames(kappa: float) -> int:
@@ -938,6 +1022,11 @@ def estimate_stack(project: Project, options: StackOptions,
         suggested_drizzle_scale=suggested_scale,
         suggested_reference_canvas=suggest_ref_canvas,
         memory_fix=memory_fix,
+        print_plan=_print_plan(
+            out_w, out_h, dst_shape,
+            drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
+            drizzle_reject=options.drizzle_reject,
+            rejection_map=_records_rejection_map(options, n), budget=budget),
     )
 
 

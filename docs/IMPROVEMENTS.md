@@ -20324,9 +20324,49 @@ problems. Dogfood it every big-picture run and fix root causes.
   it will promise fewer files than the zip holds; and the card currently hides below two *targets*, which
   would still hide the button from someone whose only pictures are Moon stills.
 
-- **NEW IDEA (Builder 2026-08-29, the obvious next tap on "what would print bigger?" v0.295.0) — say the print
-  size on the **Stack form**, where the decision that sets it is actually made.** *(Pillar: enjoy + autonomy —
-  PRIORITY 2–3; size S; read-only, additive, no new deps — every ingredient exists.)* v0.295.0 tells a finished
+- **✅ SHIPPED (Builder, v0.317.0, branch `claude/compassionate-galileo-cwqy3x`) — ~~say the print size on the
+  **Stack form**, where the decision that sets it is actually made.~~** *(Pillar: enjoy + autonomy —
+  PRIORITY 2–3.)* Both filed cautions honoured, and the second one turned out to have a *structural* answer
+  rather than a conditional one.
+
+  **The deferral is structural, not a guard.** The entry's hard caution — never offer a bigger print on a canvas
+  the memory guard is refusing — is enforced twice, in the two places it can break. In the browser the print
+  line lives **inside the `estimateOverBudget` else-branch**: the over-budget alert *replaces* the sizing line,
+  so a print sentence cannot render beside a refusal at all, whatever the payload says. And in the engine the
+  nudge itself re-costs the canvas it would produce and returns nothing when that exceeds the same `budget` the
+  guard refuses on — so a payload that *could* argue with the guard is never built either.
+
+  **The offered scale is verified, not extrapolated.** `PrintPlan.bigger_drizzle_scale` is a scale the run can
+  be set to, so it must genuinely land the paper it names. `bigger_print` gives the gap in detail-per-side;
+  multiplying by whatever scale is already set (×1.0 when drizzle is off) only *proposes* a candidate, and
+  rounding, the `int(round(dim·s))` canvas formula and the papers' differing aspects can all leave it a pixel
+  short. So `_print_plan` steps the candidate up the same 0.1 grid the form uses and re-asks `print_options`
+  about the canvas `_estimate_peak_bytes` says the run would really write, taking the first that qualifies —
+  and gives up at `DRIZZLE_MAX_USEFUL_SCALE` (×2.0), because past that the honest lever is a mosaic and a
+  beginner told to type ×3.4 learns nothing they can act on.
+
+  **The frame-count gate is in the browser on purpose.** The form already warns that drizzle needs 200+ dithered
+  subs (`DRIZZLE_TOO_FEW_FRAMES = 100`), so recommending drizzle a line above that warning would be the panel
+  arguing with itself. Rather than duplicate the threshold into the engine, the `bigger_*` half is withheld by
+  the frontend at *the same constant* it warns at — one number, one voice. The "what it prints today" half
+  always shows.
+
+  **Upgrade-safe (§9):** one additive optional response field (`print_plan`) and one optional dataclass field on
+  `StackEstimate`; no config, schema, on-disk, default or API-shape change. An older frontend ignores it; an
+  older backend omitting it renders nothing, which a test pins.
+
+  **Tests (+16):** 9 in `tests/test_stack_print_plan.py` — the paper named agrees with what `print_options`
+  gives the same canvas (no second voice); the too-small line says pixels, never subs; the offered scale really
+  qualifies for the paper it names *and* points upward; the scale multiplies the one already set; silence at
+  `DRIZZLE_MAX_USEFUL_SCALE`, at the largest paper, and one byte over budget (with the plain half still told);
+  and the plan riding on `estimate_stack` describing that estimate's own canvas. 3 in
+  `tests/webapp/test_stack_estimate.py` (the payload, the plan following the drizzle knob, and the nudge
+  withheld over budget) and 4 in `Stack.test.tsx` (both lines rendered; the nudge withheld at 12 frames; nothing
+  at all over budget; and a null `print_plan` degrading quietly).
+
+  Original spec, for the record:
+
+  *(Size: S; read-only, additive, no new deps — every ingredient exists.)* v0.295.0 tells a finished
   picture *"about 1.3× more detail would print this at A3 — the lever is re-stacking with Drizzle on."* That is
   the right sentence in the wrong tense: by the time it is read, the stack that fixed the canvas size is
   already made, and the user has to remember it until the next time they open the Stack form. **The Stack form

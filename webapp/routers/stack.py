@@ -398,6 +398,23 @@ def stack_estimate(
             if est.memory_fix is not None
             else None
         ),
+        # What this stack would print at, and the drizzle scale that reaches one
+        # size bigger — the canvas said in the unit a human wants, while the knob
+        # that sets it is still on screen. ``bigger_*`` are null whenever there is
+        # nothing honest to offer (already the largest paper, past useful
+        # super-resolution, or the bigger canvas busts the memory budget).
+        "print_plan": (
+            {
+                "name": est.print_plan.name,
+                "dpi": est.print_plan.dpi,
+                "text": est.print_plan.text,
+                "bigger_name": est.print_plan.bigger_name,
+                "bigger_drizzle_scale": est.print_plan.bigger_drizzle_scale,
+                "bigger_text": est.print_plan.bigger_text,
+            }
+            if est.print_plan is not None
+            else None
+        ),
         # What "Auto outlier removal" actually resolves to for this many frames.
         # With it on, the engine *overrides* the sigma-clip / min-max toggles, so
         # a form that still shows them as live tells the beginner the opposite of
