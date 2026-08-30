@@ -113,48 +113,6 @@ export function freshnessLine(live: LiveSession): string {
  * screen loads, so this needs no extra request and opens no project database.
  * Returns null for an empty library, or when nothing carries an activity stamp,
  * so the page shows its empty state rather than picking arbitrarily. */
-/** How close another target's last activity has to be to the watched one's before
- * it counts as "the same night".
- *
- * Six hours is the same gap the backend's session split uses
- * (`DEFAULT_SESSION_GAP_HOURS`), so "tonight" means the same thing on this page
- * as it does in the recap and the Nights card — a Seestar that re-points at
- * midnight is one night, and yesterday's target is not. */
-export const SAME_NIGHT_HOURS = 6;
-
-/**
- * The *other* targets that also got subs inside the same night as the one being
- * watched, most recent first — empty when there are none.
- *
- * The page opens on whichever target's frames arrived most recently, which is
- * right: on a capture night that's the one filling up. But a Seestar that
- * re-points mid-night (or a mosaic split across panels) leaves the earlier
- * target invisible unless the reader already knows to use the picker. This is
- * the data behind one line naming them, built from the target list the page has
- * already fetched — no extra request, and deliberately not a second dashboard.
- *
- * Anchored on the watched target's own last activity rather than on the clock,
- * so reading the page the next morning still shows what shared that night.
- */
-export function alsoActiveTonight(
-  targets: Target[] | null | undefined,
-  safe: string | null,
-): Target[] {
-  const all = targets ?? [];
-  const watched = all.find((t) => t.safe_name === safe);
-  const anchor = watched?.last_activity_utc
-    ? new Date(watched.last_activity_utc).getTime()
-    : NaN;
-  if (!Number.isFinite(anchor)) return [];
-  const window = SAME_NIGHT_HOURS * 3600 * 1000;
-  return all
-    .filter((t) => t.safe_name !== safe && !!t.last_activity_utc)
-    .map((t) => ({ t, ms: new Date(t.last_activity_utc as string).getTime() }))
-    .filter(({ ms }) => Number.isFinite(ms) && Math.abs(ms - anchor) <= window)
-    .sort((a, b) => b.ms - a.ms)
-    .map(({ t }) => t);
-}
-
 export function mostRecentlyActive(targets: Target[] | null | undefined): Target | null {
   let best: Target | null = null;
   let bestT = -Infinity;
@@ -168,4 +126,42 @@ export function mostRecentlyActive(targets: Target[] | null | undefined): Target
     }
   }
   return best;
+}
+
+/** How far apart two targets' newest frames can be and still count as "the same
+ * night". Long enough to span a winter night end to end, short enough that last
+ * week's session never shows up as company. */
+export const SAME_NIGHT_HOURS = 14;
+
+/** The *other* targets that also got subs around the same time as the one on
+ * screen, newest first.
+ *
+ * A Seestar that re-points mid-night (or a mosaic split across panels) leaves
+ * the earlier target invisible on this page, because it opens on whichever
+ * target's frames arrived most recently and says nothing about the rest. This is
+ * the one line that fixes that, and it stays a zero-extra-request change:
+ * `last_activity_utc` is already on the target list the page loads.
+ *
+ * Deliberately *not* a multi-target dashboard — the page's value is that it
+ * answers two questions about **one** night at a glance — so the result is
+ * capped at `limit` and is only ever rendered as links.
+ */
+export function alsoActiveTonight(
+  targets: Target[] | null | undefined,
+  currentSafe: string | null,
+  limit = 3,
+): Target[] {
+  const current = (targets ?? []).find((t) => t.safe_name === currentSafe);
+  const refMs = current?.last_activity_utc
+    ? new Date(current.last_activity_utc).getTime()
+    : NaN;
+  if (!Number.isFinite(refMs)) return [];
+  const windowMs = SAME_NIGHT_HOURS * 3600_000;
+  return (targets ?? [])
+    .filter((t) => t.safe_name !== currentSafe && !!t.last_activity_utc)
+    .map((t) => ({ t, ms: new Date(t.last_activity_utc!).getTime() }))
+    .filter(({ ms }) => Number.isFinite(ms) && Math.abs(ms - refMs) <= windowMs)
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, limit)
+    .map(({ t }) => t);
 }

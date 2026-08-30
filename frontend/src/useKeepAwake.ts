@@ -1,21 +1,20 @@
 import { useEffect } from "react";
 
 /**
- * Hold the screen awake while `active` is true.
+ * Hold the screen awake while ``active`` is true.
  *
- * Two pages in this app are designed to be *left open*: the "Show and tell"
- * slideshow (point a screen at it in a room full of people) and "Tonight, live"
- * (propped on a phone, outdoors, for hours). On both, the screen going black is
- * the one failure that makes the feature feel broken — you walk over to check
- * and there's nothing there. This is the single implementation both use; it
- * lived inside `ShowAndTell` first.
+ * Two pages in this app are designed to be *left open* — the "Show and tell"
+ * slideshow (pointed at a screen across the room) and "Tonight, live" (propped on
+ * a phone outdoors while the Seestar works) — and on both, the screen going dark
+ * is the one failure that makes the page feel broken: you walk over to look and
+ * it's black.
  *
- * Every call is guarded. The Screen Wake Lock API is absent on some browsers
- * (and in the test DOM), and it *rejects* when the page isn't visible — a
- * slideshow that throws on the way to the TV is worse than one that lets the
- * screen dim. Browsers also drop the lock whenever the tab is hidden, so it is
- * re-requested on `visibilitychange`. Nothing is persisted and nothing is
- * configurable; passing `false` releases it.
+ * Every call is guarded, because this API is the definition of best-effort: the
+ * Screen Wake Lock API is absent on some browsers (and in the test DOM), and it
+ * *rejects* when the page isn't visible — a page that throws on the way to the TV
+ * is worse than one that lets the screen dim. Browsers also drop the lock whenever
+ * the tab is hidden, so it is re-requested on `visibilitychange`. Nothing is
+ * persisted and nothing is configurable; pass `false` and the lock is released.
  */
 export function useKeepAwake(active: boolean) {
   useEffect(() => {

@@ -179,7 +179,7 @@ def get_gallery(request: Request) -> GalleryResponse:
     try:
         from seestack.io.project import Project
         from webapp.routers.editor import (
-            AUTO_EDIT_BAKED_PREFIX,
+            AUTO_EDIT_BAKED_LOOK_PREFIX,
             EXPORTED_RECIPE_META_PREFIX,
             RECIPE_META_PREFIX,
         )
@@ -204,7 +204,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                         items.append(_gallery_item(
                             t, run, proj, RECIPE_META_PREFIX,
                             EXPORTED_RECIPE_META_PREFIX, _unexported_edit,
-                            AUTO_EDIT_BAKED_PREFIX,
+                            AUTO_EDIT_BAKED_LOOK_PREFIX,
                         ))
                     except Exception:  # noqa: BLE001 — one bad run must not hide the rest
                         # Every required field is NOT NULL today, so nothing here
@@ -229,8 +229,7 @@ def get_gallery(request: Request) -> GalleryResponse:
 
 
 def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
-                  unexported_edit,
-                  baked_prefix: str | None = None) -> GalleryItem:  # noqa: ANN001
+                  unexported_edit, baked_look_prefix: str = "") -> GalleryItem:  # noqa: ANN001
     """One finished stack's gallery card. Split out so the loop above can skip a
     single unreadable run without losing every other target's pictures."""
     has_preview = bool(run.preview_path and Path(run.preview_path).exists())
@@ -258,14 +257,15 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         noise_sigma=run.noise_sigma,
         calstat=run.calstat,
         seam_verdict=seam_verdict(run.seam_residual),
-        # A few extra keyed reads on the project DB the caller already has open —
+        # Three extra keyed reads on the project DB the caller already has open —
         # the same near-free lookups the run listing does, which is what made
         # this affordable library-wide.
         unexported_edit=unexported_edit(
             run.options_json,
             proj.get_meta(f"{recipe_prefix}{run.id}"),
             proj.get_meta(f"{exported_prefix}{run.id}"),
-            proj.get_meta(f"{baked_prefix}{run.id}") if baked_prefix else None,
+            (proj.get_meta(f"{baked_look_prefix}{run.id}")
+             if baked_look_prefix else None),
         ),
     )
 
@@ -543,7 +543,8 @@ def _scan_unexported_edits(lib) -> list[UnexportedEditItem]:
     the ``project_meta`` rows whose key starts with the editor-recipe prefix
     (:meth:`Project.iter_meta_prefix`) and stops there when there are none — which
     is every target that has never been edited. Only when a target *does* carry
-    recipes does it take a second prefix scan for the already-exported markers and
+    recipes does it take the two further prefix scans (the already-exported markers
+    and the auto-edit's baked-look stamps) and
     look up those specific runs' two columns (:meth:`Project.stack_run_options`);
     no run listing, no file stats, no preview checks. A broken project DB is
     skipped exactly as the other cross-target reads skip it, so one corrupt target
@@ -551,7 +552,7 @@ def _scan_unexported_edits(lib) -> list[UnexportedEditItem]:
     """
     from seestack.io.project import Project
     from webapp.routers.editor import (
-        AUTO_EDIT_BAKED_PREFIX,
+        AUTO_EDIT_BAKED_LOOK_PREFIX,
         EXPORTED_RECIPE_META_PREFIX,
         RECIPE_META_PREFIX,
     )
@@ -579,8 +580,10 @@ def _scan_unexported_edits(lib) -> list[UnexportedEditItem]:
             exported = (
                 _by_run_id(proj, EXPORTED_RECIPE_META_PREFIX) if recipes else {}
             )
+            # Same shape and same condition: one more prefix scan, and only for a
+            # target that has actually been edited.
             baked = (
-                _by_run_id(proj, AUTO_EDIT_BAKED_PREFIX) if recipes else {}
+                _by_run_id(proj, AUTO_EDIT_BAKED_LOOK_PREFIX) if recipes else {}
             )
             summaries = (
                 proj.stack_run_options(recipes) if recipes else {}

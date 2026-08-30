@@ -7,11 +7,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type LiveSession, type Target } from "../api/client";
 import { QueryError } from "../components/QueryError";
-import { useKeepAwake } from "../components/useKeepAwake";
 import {
   alsoActiveTonight, conditionsCause, conditionsLine, freshnessLine, goalLine,
   mostRecentlyActive, sharpnessLine, tonightHeadline,
 } from "../live/liveSession";
+import { useKeepAwake } from "../useKeepAwake";
 
 // How often to re-ask while the page is open. A capture night moves in minutes,
 // not seconds, and the endpoint is a read-only aggregation over the frames table
@@ -62,13 +62,11 @@ export function LiveView() {
     refetchInterval: POLL_MS,
   });
 
-  // This is the other page in the app meant to be *left open* — outdoors, on a
-  // phone, for hours — and the one where the screen sleeping actually costs
-  // something: you walk over to check and it's black. Held only while the
-  // session still reads `active`, so a finished night releases it and the phone
-  // goes back to its own battery rules. Same fail-soft helper the slideshow
-  // uses: a browser without the Wake Lock API simply doesn't get one.
-  useKeepAwake(live.data?.active === true);
+  // This page is meant to be propped up outdoors for hours, and a phone dimming
+  // three minutes in is the whole reason you'd walk back over to it. Held only
+  // while the session is still running, so a finished night lets the screen
+  // sleep; the same best-effort helper the slideshow uses (see useKeepAwake).
+  useKeepAwake(!!live.data?.active);
 
   if (targets.isError) {
     return <QueryError error={targets.error} onRetry={() => targets.refetch()} />;
@@ -124,11 +122,44 @@ export function LiveView() {
       ) : (
         <>
           <LiveCard safe={safe} name={target?.name ?? safe} live={live.data} />
-          <AlsoTonight targets={targets.data} safe={safe}
-            onPick={(v) => setParams({ target: v })} />
+          <AlsoTonight targets={targets.data} currentSafe={safe}
+            onPick={(s) => setParams({ target: s })} />
         </>
       )}
     </Stack>
+  );
+}
+
+/**
+ * "You also shot these around the same time" — one line, only when it's true.
+ *
+ * The page opens on whichever target's frames arrived most recently, which is
+ * right, but a Seestar that re-points mid-night (or a mosaic split across panels)
+ * would otherwise leave the earlier target invisible unless the reader knows to
+ * use the picker above. Costs no extra request: it reads the same target list the
+ * page already loaded. Renders nothing when the night only had one target, which
+ * is the common case.
+ */
+function AlsoTonight({ targets, currentSafe, onPick }: {
+  targets: Target[] | undefined;
+  currentSafe: string;
+  onPick: (safe: string) => void;
+}) {
+  const others = alsoActiveTonight(targets, currentSafe);
+  if (!others.length) return null;
+  return (
+    <Text size="sm" c="dimmed">
+      Also shot around the same time:{" "}
+      {others.map((t, i) => (
+        <span key={t.safe_name}>
+          {i ? ", " : ""}
+          <Anchor component="button" type="button" inherit
+            onClick={() => onPick(t.safe_name)}>
+            {t.name}
+          </Anchor>
+        </span>
+      ))}
+    </Text>
   );
 }
 
@@ -199,40 +230,5 @@ function LiveCard({ safe, name, live }: {
         ) : null}
       </Stack>
     </Card>
-  );
-}
-
-/**
- * One line naming the *other* targets that also got subs tonight, each a link
- * that switches the page to it.
- *
- * The page deliberately follows one target — that's what makes it answerable at
- * a glance — but a Seestar that re-points mid-night leaves the earlier target
- * invisible unless the reader already knows the picker exists. This closes that
- * without turning the page into a dashboard: names and a link, nothing measured,
- * no extra request (it reads the target list the page already has).
- *
- * Renders nothing when the night was one target, which is the common case.
- */
-function AlsoTonight({ targets, safe, onPick }: {
-  targets: Target[] | undefined;
-  safe: string;
-  onPick: (safe: string) => void;
-}) {
-  const others = alsoActiveTonight(targets, safe);
-  if (others.length === 0) return null;
-  return (
-    <Text size="xs" c="dimmed">
-      Also got subs tonight:{" "}
-      {others.map((t, i) => (
-        <span key={t.safe_name}>
-          {i > 0 ? ", " : ""}
-          <Anchor component="button" type="button" size="xs"
-            onClick={() => onPick(t.safe_name)}>
-            {t.name}
-          </Anchor>
-        </span>
-      ))}
-    </Text>
   );
 }
