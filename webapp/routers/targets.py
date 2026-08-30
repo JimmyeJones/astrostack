@@ -165,7 +165,7 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
     """Detect leftover targets a pre-v0.184.9 scan built before the scanner learned
     the Seestar folder convention, so the Library can offer a one-click "remove
     these" cleanup. Two kinds: (1) *junk* targets built from the Seestar's own
-    output / ``_video`` folders (not raw subs, cannot be stacked); (2)
+    output / ``_video`` / ``_photo`` folders (not raw subs, cannot be stacked); (2)
     ``<T>_sub``-named *duplicates* holding the same raw subs the base target ``<T>``
     now owns (clutter + double compute, not corrupt data). Read-only: it never
     deletes anything (the user confirms via ``DELETE /api/targets/{safe}``), and
@@ -206,11 +206,13 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
                     ),
                 ))
                 continue
-            # --- (1) output/video junk (cheap: only small targets opened) -----
-            is_video_name = entry.name.strip().lower().endswith("_video")
-            if is_video_name or entry.n_frames <= _MAX_CLEANUP_FRAMES:
+            # --- (1) output/video/photo junk (cheap: only small targets opened) -
+            # A "_video"/"_photo" capture folder is junk by name whatever its
+            # frame count, so those bypass the count gate (and need no sources).
+            is_capture_name = entry.name.strip().lower().endswith(("_video", "_photo"))
+            if is_capture_name or entry.n_frames <= _MAX_CLEANUP_FRAMES:
                 source_paths: list[str] = []
-                if not is_video_name:
+                if not is_capture_name:
                     proj = lib.open_target(entry.safe_name)
                     try:
                         source_paths = [f.source_path for f in proj.iter_frames()]

@@ -44,7 +44,7 @@ describe("CleanupSuggestionsCard", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/look like Seestar outputs or videos/i),
+        screen.getByText(/look like Seestar outputs, videos or snapshots/i),
       ).toBeInTheDocument(),
     );
     expect(screen.getByText(/M 31 · on-device output/)).toBeInTheDocument();
@@ -87,7 +87,7 @@ describe("CleanupSuggestionsCard", () => {
     await waitFor(() =>
       expect(screen.getByText(/are duplicates left by an older scan/i)).toBeInTheDocument(),
     );
-    expect(screen.getByText(/look like Seestar outputs or videos/i)).toBeInTheDocument();
+    expect(screen.getByText(/look like Seestar outputs, videos or snapshots/i)).toBeInTheDocument();
     expect(screen.getByText(/M 31_sub · duplicate/)).toBeInTheDocument();
   });
 
@@ -124,7 +124,7 @@ describe("CleanupSuggestionsCard", () => {
     // Dismiss only the junk group via its "Keep them" button (first one).
     fireEvent.click(screen.getAllByText("Keep them")[0]);
     await waitFor(() =>
-      expect(screen.queryByText(/look like Seestar outputs or videos/i)).not.toBeInTheDocument(),
+      expect(screen.queryByText(/look like Seestar outputs, videos or snapshots/i)).not.toBeInTheDocument(),
     );
     // The duplicate group is still shown.
     expect(screen.getByText(/are duplicates left by an older scan/i)).toBeInTheDocument();
@@ -152,7 +152,7 @@ describe("CleanupSuggestionsCard", () => {
     expect(screen.getByText(/MyWorks · mixed drop/)).toBeInTheDocument();
     // It is not lumped in with the outputs/videos group.
     expect(
-      screen.queryByText(/look like Seestar outputs or videos/i),
+      screen.queryByText(/look like Seestar outputs, videos or snapshots/i),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Remove this target"));

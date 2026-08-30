@@ -418,9 +418,45 @@ _(nothing else claimed — claim an item here with your branch name)_
   makes ten ordinary ones nag, and no longer badges nine of them "soft" while still earning its own "best" nod;
   a genuinely soft night is still caught and still badged on a long project; and the leave-one-out helper
   directly, including the identical-twins case.
-- **🟠 VERIFIED AGAINST THE OWNER'S REAL S30 FOLDER TREE (2026-08-31) — the scanner does not recognise the
-  Seestar's `*_photo` folders, so they are ingested as ordinary deep-sky targets. Same family as the
-  already-fixed `*_video` bug, and it is a one-line-shaped gap.** *(Severity: broken-UX / junk targets — not
+- **✅ SHIPPED (Builder, v0.319.2, branch `claude/compassionate-galileo-ehnbid`) — ~~the scanner does not
+  recognise the Seestar's `*_photo` folders, so they are ingested as ordinary deep-sky targets.~~** The
+  `*_video` family is now closed across all three places that knew about it, and the entry's diagnosis was
+  exactly right — there was no `_photo` constant anywhere in `scanner.py`.
+
+  **What shipped, in the three places that had to agree:**
+  1. **Scan time** — `_PHOTO_SUFFIX` plus a shared `_CAPTURE_SUFFIXES = (_VIDEO_SUFFIX, _PHOTO_SUFFIX)` tuple,
+     so `_apply_seestar_convention` skips a `*_photo/` folder beside a `*_video/` one, and
+     `_seestar_output_bases`' `ingested_bare` set makes the *same* test (the two halves are documented as
+     unable to disagree, and now cannot).
+  2. **Cleanup nudge** — `classify_seestar_junk_target` gained a `"photo"` verdict mirroring `"video"`, by
+     target name *or* by every frame's source folder, so a library that already ingested one gets the
+     one-click removal. `cleanup_suggestions` bypasses its frame-count gate for a `_photo` name the same way
+     it does for `_video` — **this mattered**: a stills folder holds many snapshots, so the `≤2` gate would
+     never have examined the owner's.
+  3. **Upgrade heal** — `Project.reject_seestar_output_frames` additively rejects `*_photo` frames alongside
+     `*_video` ones (no size guard: every snapshot in such a folder is junk in a deep-sky stack). Without
+     this, a legacy whole-card drop that lumped `Scenery_photo/` into a real target would keep averaging
+     finished snapshots into that target's picture.
+
+  **Frontend:** the `photo` reason renders in the existing junk group (it would otherwise have been filtered
+  out of *both* groups and shown nowhere), badges as "snapshot" rather than falling through to "on-device
+  output", and the group's copy now says "outputs, videos or snapshots".
+
+  **Upgrade-safe (§9):** purely additive — a new reason *value* on an existing response field, no config,
+  schema, on-disk or default change; an old library is only ever *offered* a cleanup it can decline.
+
+  **Tests (+8, all fail before):** the convention skips `*_photo` (case-insensitively); a replay of the
+  owner's real S30 folder shapes yields exactly `M 3`, `M 3 (mosaic)`, `M 44 (mosaic)` with both `_photo`
+  folders and all four `_video` folders gone; the junk verdict by name and by source folder; a tiny `_photo`
+  target reports `photo` rather than falling into the bare-output branch; the endpoint flags a 30-frame
+  `Scenery_photo` target while leaving a 30-frame real one alone; a multi-frame `*_photo` folder is rejected
+  wholesale while the real `_sub` frames beside it are untouched; and the end-to-end scan grows a
+  `Scenery_photo/` folder that produces no target.
+
+  **The other two names in this entry are unchanged and still open** (`batch_stack_tmp`, and `MyWorks` which
+  is explicitly not a finding) — see the original spec below.
+
+  *(Original spec.)* *(Severity: broken-UX / junk targets — not
   corruption of real data. Confidence: HIGH — the owner supplied a full `tree` listing of
   `\\TRUENAS\astro` and the scanner's own `_apply_seestar_convention` was replayed over those exact 71 folder
   names.)*
@@ -432,7 +468,8 @@ _(nothing else claimed — claim an item here with your branch name)_
   `*_photo` folder falls through every rule, finds no `<name>_sub` sibling, and is ingested unchanged as a
   target. **Replaying the real convention logic over the owner's actual tree produces these junk targets:**
   `Planetary_photo`, `Scenery_photo`, `batch_stack_tmp`, and `MyWorks`.
-  - **`*_photo` is the real, generalisable bug** — the device writes single-shot stills there, not stackable
+  - **~~`*_photo` is the real, generalisable bug~~ — SHIPPED above, exactly as specified.** The device writes
+    single-shot stills there, not stackable
     deep-sky subs, exactly as it writes videos to `*_video`. **Fix:** add a `_PHOTO_SUFFIX = "_photo"` and skip
     it at scan time beside the existing `_video` skip, *and* teach `classify_seestar_junk_target` about it
     (mirroring the `video` verdict) so libraries that already ingested one get a cleanup nudge. Cheap, and it
