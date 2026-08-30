@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
-  Badge, Card, Center, Group, Image, Loader, Progress, SegmentedControl, SimpleGrid,
-  Stack, Text, Title, Tooltip,
+  Anchor, Badge, Card, Center, Group, Image, Loader, Progress, SegmentedControl,
+  SimpleGrid, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
 import { IconChecklist, IconCircleCheck } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -21,6 +21,15 @@ import { QueryError } from "../components/QueryError";
 // the match is done server-side against plate-solved target centres.
 
 type Filter = "all" | "captured" | "todo";
+
+// How many not-yet-shot tiles the "All" view draws before the rest go behind a
+// count. The whole catalog rendered eagerly made this the tallest page in the
+// app by nearly 3× — 14,584 px on a 420 px phone, about 17 screens of scrolling
+// to reach anything — and every one of those screens was objects the owner
+// hasn't got yet, scrolled past to find the ones they have. Nothing is removed
+// (the owner's standing rule): the remainder is one tap away, and asking for
+// "Still to shoot" explicitly still lists every one of them.
+const TODO_PREVIEW = 12;
 
 /** "Galaxy in Andromeda" — the tile's one-line identity, in plain words. */
 function describe(item: LifeListItem): string {
@@ -78,11 +87,30 @@ function ObjectTile({ item }: { item: LifeListItem }) {
     : body;
 }
 
+function Grid({ items }: { items: LifeListItem[] }) {
+  return (
+    <SimpleGrid cols={{ base: 2, xs: 3, sm: 4, md: 5, lg: 6 }} spacing="sm">
+      {items.map((i) => <ObjectTile key={i.catalog_id} item={i} />)}
+    </SimpleGrid>
+  );
+}
+
 function Section({ title, note, items, filter }: {
   title: string; note: string; items: LifeListItem[]; filter: Filter;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const shown = items.filter((i) =>
     filter === "all" || (filter === "captured" ? i.captured : !i.captured));
+  // Catalog order is kept inside each half — this only groups them, so the ones
+  // the owner actually has come first instead of being scattered through a
+  // hundred greyed-out tiles.
+  const got = shown.filter((i) => i.captured);
+  const todo = shown.filter((i) => !i.captured);
+  // "Still to shoot" is the list the user just asked for, so it is never
+  // shortened there; only the mixed "All" view collapses its tail.
+  const collapsible = filter === "all" && !expanded && todo.length > TODO_PREVIEW;
+  const todoShown = collapsible ? todo.slice(0, TODO_PREVIEW) : todo;
+  const bothHalves = got.length > 0 && todo.length > 0;
   return (
     <Stack gap="xs">
       <div>
@@ -96,9 +124,36 @@ function Section({ title, note, items, filter }: {
             : "You've got every one of these. Nothing left on this list!"}
         </Text>
       ) : (
-        <SimpleGrid cols={{ base: 2, xs: 3, sm: 4, md: 5, lg: 6 }} spacing="sm">
-          {shown.map((i) => <ObjectTile key={i.catalog_id} item={i} />)}
-        </SimpleGrid>
+        <>
+          {got.length > 0 ? (
+            <>
+              {bothHalves ? (
+                <Text size="xs" c="dimmed" fw={600}>Got it · {got.length}</Text>
+              ) : null}
+              <Grid items={got} />
+            </>
+          ) : null}
+          {todo.length > 0 ? (
+            <>
+              {bothHalves ? (
+                <Text size="xs" c="dimmed" fw={600}>Still to shoot · {todo.length}</Text>
+              ) : null}
+              <Grid items={todoShown} />
+              {collapsible ? (
+                <Anchor component="button" type="button" size="sm"
+                        onClick={() => setExpanded(true)}>
+                  Show all {todo.length} still to shoot
+                </Anchor>
+              ) : null}
+              {filter === "all" && expanded && todo.length > TODO_PREVIEW ? (
+                <Anchor component="button" type="button" size="sm"
+                        onClick={() => setExpanded(false)}>
+                  Show fewer
+                </Anchor>
+              ) : null}
+            </>
+          ) : null}
+        </>
       )}
     </Stack>
   );

@@ -14598,22 +14598,56 @@ problems. Dogfood it every big-picture run and fix root causes.
     same field labels sensibly on a 180 px History card, a 260 px Target card and a full-screen lightbox; and
     never move a *dot* — only its chip — or the label stops pointing at its object.
 
-- **DOGFOOD FINDING (Builder 2026-08-29, measured by `scripts/agent-dogfood.sh`, not read off the code) — "My
-  life list" is 14,584 px tall on a phone, nearly 3× the next-worst page and 2.8× its own desktop height.**
-  *(Pillar: friendliness — PRIORITY 3, the standing "the pages are extremely busy" item. Size: M.
-  Confidence: measured — the probe's own page-height table, this run.)*
-  The probe's ranking is unambiguous: `[phone] /life-list: 14584px`, then `[desktop] /life-list: 5236px`, then
-  the Target page at 3035 px. Nothing overflows and there are no console errors — the page is *correct*, it is
-  simply enormous, and on the device the owner actually reads it on that is ~17 screens of scrolling. Every
-  other page the probe visits fits in a third of that.
-  **Why it is worth a slice.** The owner's complaint is explicitly about scrolling to reach the actual
-  information, and this is the app's clearest instance of it. The fix is the same regrouping the IA slices have
-  used elsewhere — nothing removed: a phone-first shape for the list (collapse the not-yet-shot bulk behind a
-  count, or paginate/section by catalog), with the shot ones — the part that is *about the owner* — above the
-  fold. **Measure it the same way afterwards** (`scripts/agent-dogfood.sh`, the page-height table) and state
-  the before/after in the commit, exactly as the IA slices do with block counts.
-  **Grep first:** confirm whether the height is the catalog's full length rendered eagerly; if so, the cheap
-  half may be a windowed / "show more" list rather than an IA rethink.
+- **✅ SHIPPED (Builder, v0.307.0, branch `claude/compassionate-galileo-1bqxek`) — ~~"My life list" is 14,584 px
+  tall on a phone, nearly 3× the next-worst page and 2.8× its own desktop height.~~** Fixed as the entry's own
+  "cheap half" predicted, and **re-measured with the same probe**. *(Pillar: friendliness — PRIORITY 3, the
+  standing "the pages are extremely busy" item.)*
+
+  **Measured before → after, `scripts/agent-dogfood.sh` page-height table, same catalog:**
+  `[phone] /life-list: 14584 px → 3008 px` (−79 %) and `[desktop] /life-list: 5236 px → 1453 px` (−72 %). It
+  was the tallest page in the app by nearly 3×; it is now level with the Target page (2884 px phone) and below
+  it on desktop. ~17 screens of phone scrolling became ~3.5.
+
+  **The grep the entry asked for, answered: yes, it was the whole catalog rendered eagerly.** `Section` drew one
+  `SimpleGrid` over every item it was given — 110 Messier plus 47 others, at `cols={{base: 2}}` on a phone, so
+  ~79 rows of ~176 px tiles. Nothing needed an IA rethink; the shape was already right, there was just too much
+  of it on screen at once.
+
+  **What shipped — two changes, both of them pure arrangement.** (1) Each section now renders the objects
+  you've **got** first and the ones still ahead of you second (catalog order preserved *inside* each half, so
+  M31 still sits where a checklist reader expects it), labelled `Got it · N` / `Still to shoot · N` when both
+  halves exist. The part that is *about the owner* is above the fold, which is what the entry asked for. (2) In
+  the mixed **All** view the still-to-shoot tail draws its first `TODO_PREVIEW = 12` tiles and puts the rest
+  behind one `Show all N still to shoot` link (and `Show fewer` to put them back).
+
+  **Nothing is removed — the owner's hard constraint.** Every object is still on the page, one tap away, and
+  picking **Still to shoot** from the filter that already existed lists every single one of them with no
+  shortening at all: that is the list the user just asked for, so it is never abbreviated. A test pins exactly
+  that.
+
+  **Upgrade-safe (§9):** frontend only — no API, schema, config, on-disk or default change, and no new request.
+
+  **Tests (+3 in `LifeList.test.tsx`, 2 fail before / pass after):** a 30-object to-shoot list draws 12 and
+  then all 30 on request and 12 again on "Show fewer"; a mixed section orders the captured ones ahead of the
+  rest and labels both halves (asserted on DOM order, not on a count); and the "Still to shoot" filter shows
+  all 30 with no disclosure at all. The 10 pre-existing assertions pass unchanged.
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness — PRIORITY 3, the standing "the pages are extremely busy" item. Size: M.
+    Confidence: measured — the probe's own page-height table, this run.)*
+    The probe's ranking is unambiguous: `[phone] /life-list: 14584px`, then `[desktop] /life-list: 5236px`, then
+    the Target page at 3035 px. Nothing overflows and there are no console errors — the page is *correct*, it is
+    simply enormous, and on the device the owner actually reads it on that is ~17 screens of scrolling. Every
+    other page the probe visits fits in a third of that.
+    **Why it is worth a slice.** The owner's complaint is explicitly about scrolling to reach the actual
+    information, and this is the app's clearest instance of it. The fix is the same regrouping the IA slices have
+    used elsewhere — nothing removed: a phone-first shape for the list (collapse the not-yet-shot bulk behind a
+    count, or paginate/section by catalog), with the shot ones — the part that is *about the owner* — above the
+    fold. **Measure it the same way afterwards** (`scripts/agent-dogfood.sh`, the page-height table) and state
+    the before/after in the commit, exactly as the IA slices do with block counts.
+    **Grep first:** confirm whether the height is the catalog's full length rendered eagerly; if so, the cheap
+    half may be a windowed / "show more" list rather than an IA rethink.
 
 - **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the owner *save* their
   universe map, and put it where they'd think to look for it.** *(Pillar: enjoy + share — PRIORITY 3.
