@@ -339,6 +339,55 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.313.1, branch `claude/compassionate-galileo-p5irbc`) — ~~a mosaic with **no panel
+  step in it at all** grows one as you shoot it deeper: `seam_residual` climbed 0.27 → 1.56 grain-widths
+  between 4 and 128 subs a panel, past the bar where "How's my stack?" tells the owner *"the panels of this
+  mosaic didn't fully even out … faint seams may show"*.~~** The **first confirmed instance of the ⭐ QA LEAD
+  under "Autonomy & friendliness"** (sweep every statistic that normalises against its own non-empty/selected
+  subset), worked with the lead's own method — measure the statistic at several sub counts on one scene and
+  look for monotonicity — and reproduced before fixing. *(Severity: trust / wrong-verdict on the owner's exact
+  data shape — deep mosaics — surfaced on the History chip, the Gallery `seam_verdict`, and the "How's my
+  stack?" note. Not wrong-picture: the leveling pass itself is untouched. Confidence: measured, monotone
+  across 7 sub counts.)*
+
+  **The mechanism, and why the fixtures could never have shown it.** `measure_seam_residual` reported
+  `spread_adu` as a plain `max − min` over the per-level **sky modes**, i.e. it charged every level's own
+  *estimation noise* to the seam. Every fixture in `tests/test_coverage_leveling.py` builds four fat coverage
+  bands of ~120,000 px each, so each level's sky is pinned to a thousandth of the grain and that noise is
+  invisible. A real deep mosaic is the opposite shape: **the Seestar dithers**, so the frame-count map ramps
+  from 1 frame at the fringe to hundreds in a panel body, and the canvas carries *dozens* of thin, low-coverage
+  levels whose sky is simultaneously the **noisiest** (σ ∝ 1/√coverage — 40 ADU at coverage 1 against 2.5 at
+  coverage 256) and the **least sampled**. Their scatter alone sets `max − min`. And it does not shrink with
+  the yardstick: the divisor is the *median* level's grain, which falls as 1/√N, while the number of ramp
+  levels grows — so the ratio rises like √N on a canvas that is, by construction, one flat sky.
+  Measured on a two-panel scene with identical panels: **0.271 (4 subs/panel) → 0.471 (8) → 0.533 (16) →
+  0.759 (32) → 1.379 (64) → 1.564 (128)**. The `seam_verdict` reading walks "flat" → silent → **"check"**
+  purely as a function of how long the owner stayed out.
+
+  **The fix, in the same shape as the v0.312.1 tint fix: subtract the estimator's own noise floor.** Each
+  measured level now carries the sky-pixel count its mode rests on, so its standard error is known
+  (`_MODE_SE_FACTOR = 2.15`; `_sky_mode` is the SExtractor `2.5·med − 1.5·mean`, whose variance is
+  `4.57·σ²/n` analytically — 2.14·σ/√n — and a direct measurement of the function on Gaussian samples agrees,
+  2.07–2.22 across n = 200…10,000). The spread is now the largest gap between the levels' ±`_SEAM_SE_Z`·SE
+  intervals rather than between the point estimates, which reports only what the noise cannot explain.
+  `_SEAM_SE_Z = 2.0` covers the growth of `E[max − min]` with the level count (≈3.1·SE at K = 10, ≈3.9·SE at
+  K = 80) well past what a real mosaic reaches.
+  **Inert where it should be:** a level measured from thousands of sky pixels has an SE far below the grain,
+  so all 27 pre-existing tests — including *"panel offsets left in place read > 5.0"* and *"one stranded level
+  is caught (> 1.5)"* — pass **unchanged**. Flat scene after the fix: 0.000 / 0.051 / 0.054 / 0.016 / 0.338 /
+  0.434 / 0.074 across the same seven depths. A genuine 3×-grain stranded panel body still reads 3.0–3.4
+  ("check") at every one of them.
+
+  **Upgrade-safe (§9):** pure engine change inside one read-only diagnostic. No config, schema, on-disk, API or
+  default change; `SeamResidual`'s fields and units are the same, and old runs keep the `seam_residual` they
+  were stamped with (which is what their picture was actually measured at). `level_by_coverage` — the pass
+  that touches pixels — is **not** modified.
+
+  **Tests (+2 in `tests/test_coverage_leveling.py`, both on a new `_deep_dither_scene` helper; the first fails
+  before at `ratio=1.564`/"check"):** a flat mosaic reads "flat" at 8 *and* 128 subs a panel and the deep read
+  isn't a multiple of the shallow one; and the other half — a 3×-grain stranded panel body still reads "check"
+  at both depths, so the slack hasn't blunted a real seam.
+
 - **✅ SHIPPED (Builder, v0.312.1, branch `claude/compassionate-galileo-6jgh4j`) — ~~"See what stacking
   removed" paints a **cyan wash over the whole picture** on a many-sub stack, while the caption underneath
   calls those marks satellite trails and cosmic rays.~~** Found by measuring the feature I had just put on two
@@ -9873,6 +9922,34 @@ to **Shipped**.)_
   stays small, while the map's coverage does not — the two are routinely conflated).
   **Method that worked:** stack the same scene at several sub counts, print the statistic, and look for
   monotonicity. It took one afternoon and found a wrong-picture bug on the first candidate.
+
+  **🔎 SWEPT ONCE (Builder 2026-08-30, branch `claude/compassionate-galileo-p5irbc`) — one bug found and
+  fixed, four candidates cleared. Read this before running the sweep again; it says what is already done.**
+  Method as filed: real `run_stack` runs of one dithered synthetic field at **8 / 32 / 128** subs, printing
+  each candidate statistic, plus a pure-array two-panel mosaic at **4 … 256 subs a panel** where the sweep
+  needed depths a real stack would take an hour to reach.
+  **Found and fixed → `seam_residual`** (v0.313.1, entry at the top of "Bugs"): a `max − min` over per-level
+  sky modes charges the estimates' own noise to the seam, and a dithered deep mosaic's coverage ramp supplies
+  dozens of thin, low-coverage levels whose noise *grows* relative to the shrinking yardstick. 0.27 → 1.56
+  between 4 and 128 subs a panel, on a canvas with identical panels. **This is the same axis the lead
+  predicted, and it was on the second candidate.**
+  **Cleared — measured, not read, and monotone in nothing that matters:**
+  `analyze_proxy`'s `sky_sigma` and the `_noise_fraction` crossfade behind one-click Auto (0.0022 → 0.0009 →
+  0.00046 across 8/32/128 — it falls as 1/√N exactly as it should, and Auto stays on the clean/sharpen end at
+  every depth); `classify_target`'s cues, which are the "fraction of affected pixels" pickers the lead named
+  (`sig_frac` 0.0142/0.0142/0.0148, `ext_frac` 0.0106/0.0104/0.0104, `star_share` 0.255/0.270/0.299 — flat, and
+  the verdict stays `None` throughout); the **star-mask coverage fraction** (0.00304/0.00304/0.00305 — the
+  99.9th-percentile normalisation is scale-free in the sub count); and **`REJFRAC`** (0.0039 → 0.0065), which
+  rises slightly with depth because κ-σ's noise-tail clip rate is *per sample* and more samples land per pixel
+  — bounded, honest, and well inside the 0.05 %–8 % band `stackhealth` speaks in.
+  **One thing found and NOT fixed, filed on its own below** (it is advisory copy, not a wrong picture): the
+  `coverage_min / coverage_max` ratio behind `stackhealth`'s ragged-border note. See the entry under
+  "Friendliness".
+  **Left for the next sweep** (candidates from the lead that this run did not reach): the auto-*edit* strength
+  pickers downstream of `suggest_denoise_strength` on a genuinely noisy deep stack (this scene's Auto never
+  left the clean end, so the denoise branch was never exercised at depth), and `_fwhm_quality_drift` /
+  `best_frame` along this axis (they were swept along the *position* axis and cleared, which says nothing
+  here).
 
 - **NEW IDEA (Builder 2026-08-30, the one case the v0.312.1 tint fix deliberately fenced off rather than
   solved) — a many-sub stack whose canvas is no bigger than its preview still gets the cyan wash.**

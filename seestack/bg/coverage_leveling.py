@@ -60,6 +60,7 @@ the stacked canvas.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -83,6 +84,29 @@ _MIN_STRIDED_PIXELS = 12
 # itself inflated by the between-level offsets on a mosaic, so 3× is a generous
 # bound that still rejects structured regions by orders of magnitude.
 _RESCUE_MAX_SIGMA_RATIO = 3.0
+
+
+# How much noisier a level's *sky-mode estimate* is than the plain standard
+# error of its pixels. ``_sky_mode`` returns the SExtractor approximation
+# ``2.5·median − 1.5·mean``, whose variance works out at ``4.57·σ²/n`` for
+# Gaussian noise — i.e. ``2.14·σ/√n`` — and a direct measurement of
+# :func:`_sky_mode` on Gaussian samples agrees (2.07–2.22 across n = 200…10000).
+# Used to say how precisely a level's sky was actually pinned down, so
+# :func:`measure_seam_residual` can tell a real step from the scatter of its own
+# estimates.
+_MODE_SE_FACTOR = 2.15
+
+# How many standard errors of slack each level's sky estimate gets before a
+# level-to-level difference counts as a *step*. The seam spread is a max−min
+# over every measured level, and the max−min of K noisy estimates grows with K
+# (≈ 3.1·SE at K = 10, ≈ 3.9·SE at K = 80) even when the true sky is identical
+# everywhere — so without this the measurement reports its own estimator noise
+# as a seam. Two SE per level covers that growth to well past the level count a
+# real mosaic reaches, while costing a genuinely stepped level almost nothing:
+# a level measured from thousands of sky pixels has an SE far below the grain,
+# so the deduction is invisible on every scene this measurement was calibrated
+# on.
+_SEAM_SE_Z = 2.0
 
 
 # Sigma-clipped statistics used only to *locate* a level (its rough sky, its
@@ -411,6 +435,14 @@ class SeamResidual:
     It is unit-free by construction, so it means the same thing whatever the
     stack's exposure, gain or normalisation: rescaling the picture moves the
     step and the grain together and leaves the number exactly where it was.
+
+    ``spread_adu`` is the step the levels are *confidently* apart by: each
+    level's sky estimate carries its own standard error, and only the part of
+    the max−min that survives that slack is reported (see ``_SEAM_SE_Z``). On a
+    deep, heavily-dithered mosaic the coverage map ramps through dozens of thin,
+    low-coverage levels whose sky is both the noisiest and the least sampled, so
+    without the deduction their scatter alone reads as a seam that grows with
+    the sub count.
     """
 
     n_levels: int        # coverage levels the measurement could actually read
@@ -455,6 +487,7 @@ def measure_seam_residual(
 
     per_level: dict[int, list[float]] = {}
     per_level_sigma: dict[int, list[float]] = {}
+    per_level_n: dict[int, int] = {}
     for level in ctx.big_levels:
         found = _level_sky_mask(ctx, level, object_sigma, dilate_object_mask_px)
         if found is None:
@@ -466,6 +499,10 @@ def measure_seam_residual(
         per_level[level] = [float(s) for s in skies]  # type: ignore[arg-type]
         per_level_sigma[level] = [
             _robust_stats(img[..., c][region_sky_mask])[1] for c in range(3)]
+        # How many sky pixels that estimate rests on — the other half of its
+        # standard error, and the reason a thin dither-ramp level must not be
+        # allowed to set the spread on its own.
+        per_level_n[level] = int(region_sky_mask.sum())
 
     # Two readable levels is the minimum for a *difference* to exist at all.
     if len(per_level) < 2:
@@ -473,8 +510,31 @@ def measure_seam_residual(
 
     worst: tuple[float, float, float] | None = None
     for c in range(3):
-        vals = [per_level[lvl][c] for lvl in per_level]
-        spread = float(max(vals) - min(vals))
+        # The step the levels are *confidently* apart by. A plain max−min over
+        # the per-level sky modes charges every level's own estimation noise to
+        # the seam, and that noise is neither small nor even: a deep mosaic's
+        # coverage map ramps from 1 frame at the fringe to hundreds in a panel
+        # body, so the thin low-coverage levels carry ~√N times the grain of the
+        # deep ones on a fraction of the pixels. Their scatter alone then reads
+        # as a step — one that *grows* with the sub count while the yardstick
+        # (the median level's grain) shrinks, which is how a perfectly flat
+        # mosaic came to measure 0.27 grain-widths at 4 subs a panel and 1.56 at
+        # 128 (past the "faint seams may show" bar). Giving each level's
+        # estimate its own ± slack and taking the largest gap between those
+        # intervals reports only what the noise can't explain. On a level
+        # measured from thousands of sky pixels the slack is a small fraction of
+        # the grain, so a real seam is untouched.
+        his: list[float] = []
+        los: list[float] = []
+        for lvl, vals_c in per_level.items():
+            v = float(vals_c[c])
+            sig_l = per_level_sigma[lvl][c]
+            n_l = per_level_n[lvl]
+            se = (_MODE_SE_FACTOR * float(sig_l) / math.sqrt(n_l)
+                  if np.isfinite(sig_l) and sig_l > 0 and n_l > 0 else 0.0)
+            his.append(v - _SEAM_SE_Z * se)
+            los.append(v + _SEAM_SE_Z * se)
+        spread = max(0.0, float(max(his) - min(los)))
         # The yardstick is the grain *within* a level, taken as the median of the
         # per-level spreads — not the canvas-wide σ. A canvas-wide σ is itself
         # inflated by the very level-to-level offsets being measured, so on the
