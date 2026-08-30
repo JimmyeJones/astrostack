@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type React from "react";
 import { ActionIcon, Button, Menu, Tooltip } from "@mantine/core";
 import type { ButtonProps, MantineSize } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -44,7 +45,10 @@ export function SharePictureButton({
   /** Render as a `Menu.Item` — for a card that already collapses its actions into
    * one menu. Must be rendered inside a `Menu.Dropdown`. */
   asMenuItem?: boolean;
-  label?: string;
+  /** Menu/button copy. A node rather than a string so a menu item can carry the
+   * same one-line hint its neighbours do; `ariaLabel` still names it for
+   * assistive tech, so a richer label costs nothing there. */
+  label?: React.ReactNode;
   /** Tooltip copy — override for non-picture shares (e.g. a clip). */
   tooltip?: string;
   /** Accessible label — override for non-picture shares. */

@@ -1327,13 +1327,28 @@ export function TargetView() {
                     travel with the file, so the plain share above arrives as an
                     unlabelled rectangle while this one carries its own story.
                     Same caption, but `filename` overrides the spread's so the
-                    two shares can't land on top of each other in downloads. */}
+                    two shares can't land on top of each other in downloads.
+
+                    It carries the *marks* too — the scale bar, the North/East
+                    rose and the names of the catalog objects in the field. This
+                    is the share meant for other people, and those three are what
+                    make a picture read as a real astrophoto to someone who
+                    wasn't there; the plain share above stays naked for anyone
+                    who wants the bare picture. Every one of them is a clean
+                    no-op server-side on a run that can't supply it (no solve, a
+                    rotated or reshaped preview, an empty field), so this never
+                    becomes a share that fails — it just carries less. */}
                 <SharePictureButton
                   asMenuItem
-                  label="Share the keepsake"
+                  label={<>
+                    Share the keepsake
+                    <span style={MENU_HINT}>
+                      Framed, with its scale, which way is North, and what’s in it
+                    </span>
+                  </>}
                   ariaLabel="Share the framed keepsake"
                   url={api.stackArtifactUrl(
-                    safe, latestRun.id, "jpeg", false, false, true)}
+                    safe, latestRun.id, "jpeg", false, false, true, true, true)}
                   {...sharePictureText(target.data?.name, captureLabel)}
                   filename={keepsakeFilename(
                     sharePictureText(target.data?.name).filename)}

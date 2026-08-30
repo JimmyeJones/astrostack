@@ -237,6 +237,40 @@ describe("LatestPictureCard — object labels", () => {
     expect(readout).not.toHaveTextContent("Running Man");
   });
 
+  it("offers to save the picture with the names baked in, once they're shown", async () => {
+    // The names are drawn in the browser, so they vanish the moment the picture
+    // leaves the app. The offer appears where the labels are — not as another
+    // item in the page's already-long Save/share menu.
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations());
+    renderCard(mkRun());
+    expect(screen.queryByTestId("save-labelled")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    const link = await screen.findByTestId("save-labelled");
+    expect(link).toHaveAttribute(
+      "href", "/api/targets/M_42/stack-runs/7/jpeg?label_objects=true");
+  });
+
+  it("doesn't offer the labelled save where the server would refuse it", async () => {
+    // A picture a past save rotated North-up can't carry the pins at all — the
+    // server hands back the plain file — so offering the save would be a link
+    // that quietly does nothing.
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations());
+    renderCard(mkRun({ preview_north_up_deg: 12.5 }));
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await screen.findByTestId("identify-readout");
+    expect(screen.queryByTestId("save-labelled")).not.toBeInTheDocument();
+  });
+
+  it("doesn't offer the labelled save when nothing landed in the frame", async () => {
+    vi.spyOn(client.api, "stackAnnotations")
+      .mockResolvedValue(annotations({ objects: [] }));
+    renderCard(mkRun());
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    await waitFor(() => expect(screen.getByTestId("identify-readout"))
+      .toHaveTextContent(/No catalog objects landed/));
+    expect(screen.queryByTestId("save-labelled")).not.toBeInTheDocument();
+  });
+
   it("says it couldn't work it out rather than showing an empty line", async () => {
     vi.spyOn(client.api, "stackAnnotations").mockRejectedValue(new Error("nope"));
     renderCard(mkRun());

@@ -15,6 +15,7 @@ import pytest
 pytest.importorskip("astropy")
 
 from seestack.bg.coverage_leveling import level_by_coverage
+from seestack.stackhealth import seam_verdict
 
 
 def _mosaic_image_with_panel_steps(h=200, w=300, levels=(2, 5, 9)):
@@ -743,3 +744,86 @@ def test_the_fill_falls_back_to_a_straight_line_when_no_curve_was_fitted():
     # the straight line, which is exactly the 125.6 that sits 0.8 ADU off the
     # true 124.8 when a curve *was* fitted.
     assert shifted == pytest.approx(125.6, abs=0.5), shifted
+
+
+# --- the seam residual has to mean the same thing at 8 subs and at 800 --------
+#
+# Every fixture above builds four fat coverage bands of 120,000 pixels each, so
+# each level's sky is pinned down to a thousandth of the grain and the estimate's
+# own noise is invisible. A real deep mosaic looks nothing like that: the Seestar
+# dithers, so the coverage map ramps from one frame at the fringe to hundreds in
+# a panel body, and the measurement ends up comparing dozens of thin, low-coverage
+# levels whose sky is both the noisiest (σ ∝ 1/√coverage) and the least sampled.
+
+def _deep_dither_scene(n_per_panel, *, frame_sigma=40.0, dither=6, seed=0,
+                       h=400, w=700):
+    """A two-panel mosaic with **no** panel offset at all, built from
+    ``n_per_panel`` dithered subs per panel.
+
+    Every pixel's sky is exactly the same number; only the noise differs, and it
+    falls as 1/√coverage exactly as stacking makes it. So a seam measurement on
+    this canvas has nothing to find at any depth — the only thing that changes
+    with ``n_per_panel`` is how many coverage levels the dither ramp splits into
+    and how unequal their precision is.
+    """
+    rng = np.random.default_rng(seed)
+    cov = np.zeros((h, w), dtype=np.float64)
+    for x0, x1 in ((40, 400), (340, 660)):
+        for _ in range(n_per_panel):
+            dx = int(rng.integers(-dither, dither + 1))
+            dy = int(rng.integers(-dither, dither + 1))
+            cov[max(0, 40 + dy):min(h, 360 + dy),
+                max(0, x0 + dx):min(w, x1 + dx)] += 1
+    covered = cov > 0
+    sig = frame_sigma / np.sqrt(np.maximum(cov, 1.0))
+    rgb = np.full((h, w, 3), np.nan, dtype=np.float32)
+    for c in range(3):
+        noise = rng.normal(0.0, 1.0, size=(h, w)) * sig
+        rgb[..., c] = np.where(covered, 100.0 + noise, np.nan)
+    return rgb, cov.astype(np.float32)
+
+
+def test_a_flat_mosaic_does_not_grow_a_seam_as_the_sub_count_rises():
+    """Regression: the residual used to be a monotone function of the sub count
+    on a canvas with no seam in it.
+
+    ``spread_adu`` was a plain max−min over the per-level sky modes, so every
+    level's own estimation noise was charged to the seam. That noise does not
+    shrink with the yardstick: the thin low-coverage ramp levels carry ~√N times
+    the grain of a panel body on a fraction of the pixels, and there are more of
+    them the deeper the stack goes, while the yardstick (the median level's
+    grain) falls as 1/√N. Measured on this scene the ratio climbed 0.27 (4 subs
+    a panel) → 0.76 (32) → 1.38 (64) → **1.56 (128)**, i.e. straight past the
+    1.5 bar at which "How's my stack?" tells the owner *"the panels of this
+    mosaic didn't fully even out … faint seams may show"* — about a mosaic whose
+    panels are, by construction, identical.
+    """
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    shallow = measure_seam_residual(*_deep_dither_scene(8))
+    deep = measure_seam_residual(*_deep_dither_scene(128))
+    assert shallow is not None and deep is not None
+    # Both canvases are flat, so both must read flat — the health check's own bar.
+    assert seam_verdict(round(shallow.ratio, 4)) == "flat", shallow
+    assert seam_verdict(round(deep.ratio, 4)) == "flat", deep
+    # And the depth must not be what decides it: the deep read may not be a
+    # multiple of the shallow one just because there is more data behind it.
+    assert deep.ratio < max(0.5, 2.0 * shallow.ratio), (shallow, deep)
+
+
+def test_a_real_step_on_a_deep_dithered_mosaic_is_still_caught():
+    """The other half: the slack each level's estimate now gets must not blunt a
+    genuine seam. A panel body stranded by 3× the picture's own grain — the same
+    size of step ``test_one_stranded_coverage_level_is_caught`` uses — still
+    reads well past the "check" bar at every depth, because a level measured
+    from thousands of sky pixels has a standard error far below the grain."""
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    for n in (8, 128):
+        rgb, cov = _deep_dither_scene(n)
+        grain = 40.0 / np.sqrt(n)                    # the stacked picture's noise
+        rgb = rgb.copy()
+        rgb[np.rint(cov).astype(int) >= int(0.8 * n)] += np.float32(3.0 * grain)
+        seamed = measure_seam_residual(rgb, cov)
+        assert seamed is not None
+        assert seam_verdict(round(seamed.ratio, 4)) == "check", (n, seamed)

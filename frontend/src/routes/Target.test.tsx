@@ -260,6 +260,41 @@ describe("TargetView latest-picture download", () => {
       "Its name, date and exposure printed on the picture")).toBeInTheDocument();
   });
 
+  it("sends the marks and the object names with the shared keepsake", async () => {
+    // The keepsake share is the one meant for other people. A scale bar, a
+    // compass and the names of what's in the field are what make a picture read
+    // as a real astrophoto to someone who wasn't there — and all three are
+    // drawn in the browser, so without baking them in the shared file loses
+    // every one. The plain share above stays naked on purpose.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    // The share control renders nothing in a browser that can't share files,
+    // which is jsdom's default — so say it can.
+    const nav = navigator as unknown as { share?: unknown; canShare?: unknown };
+    nav.share = async () => {};
+    nav.canShare = () => true;
+    const url = vi.spyOn(client.api, "stackArtifactUrl");
+    try {
+      renderTarget();
+
+      await openSaveShare();
+      const share = await screen.findByLabelText("Share the framed keepsake");
+      expect(share).toHaveTextContent("Share the keepsake");
+      expect(share).toHaveTextContent(/what.s in it/);
+      // keepsake + scale + label_objects, in that order.
+      expect(url).toHaveBeenCalledWith(
+        "M_42", 9, "jpeg", false, false, true, true, true);
+      // …and the plain "Framed keepsake" download is untouched: whoever wants
+      // the bare frame still has it.
+      expect((await screen.findByText("Framed keepsake")).closest("a"))
+        .toHaveAttribute("href", "/api/targets/M_42/stack-runs/9/jpeg?keepsake=true");
+    } finally {
+      delete nav.share;
+      delete nav.canShare;
+    }
+  });
+
   it("offers the scale-and-compass picture beside the plain downloads", async () => {
     // The app draws both marks on screen, but a browser overlay doesn't travel
     // with the file — so the downloaded picture loses the two things that make
