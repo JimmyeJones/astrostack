@@ -257,6 +257,9 @@ class UniverseObjectOut(BaseModel):
     distance_text: str
     years_text: str
     depth: float
+    # Additive: the catalog's one-line "what am I looking at?". "" when the
+    # catalog has none, so the viewer simply shows nothing.
+    blurb: str = ""
 
 
 class UniverseShellOut(BaseModel):

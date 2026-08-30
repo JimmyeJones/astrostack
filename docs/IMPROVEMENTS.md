@@ -45,6 +45,16 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 _(none — claim an item here with your branch name)_
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow` — run finished, all claims released.**
+> Shipped two: the ~~invisible reveal on "Process target"~~ dogfood finding (**v0.301.0**, write-up under
+> "Features that serve real workflows"), taking the *honest full fix* rather than the interim copy slice — the
+> reference sub goes through the run's own stored recipe, so both halves carry identical processing; and both
+> cheap taps on **"Your universe"** (**v0.302.0**) — the catalog blurb on the read-out, and **fly to it**.
+> The bug queue was checked first and is still genuinely dry: every entry under "Bugs (fix these first)" is
+> ✅ shipped, a ⚪ audit non-finding, or explicitly stood down pending owner data.
+> Claiming in the run's **first** commit and pushing immediately (per the five duplicate-collision process
+> notes) again cost under a minute; no collision.
+
 > **Builder 2026-08-29, branch `claude/compassionate-galileo-4txqj1` — run finished, both claims released.**
 > Shipped two: **"Share your glow-up"** (**v0.300.0**, write-up under "Features that serve real workflows") —
 > all three filed slices, a new pure `seestack/beforeafter.py`, the `before-after.jpg` endpoint and the
@@ -9239,6 +9249,41 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-30, found while building the v0.301.0 recipe-matched reveal — a real gap in an
+  assumption the app already relies on in several places) — a saved recipe on a "Process target" run can
+  quietly drift from the picture that run's preview actually shows.** *(Pillar: trust — PRIORITY 3; size S–M;
+  additive, no behaviour change until something disagrees.)* `_auto_edit_process_run` bakes the Auto recipe
+  into the run's preview PNG and stores the recipe at `editor_recipe:<run_id>` **in one step**, so at that
+  moment the two agree — and `_unexported_edit` says so out loud: it deliberately does *not* flag a
+  `preview_display_space` run, "whose recipe *is* what its preview shows". But a user can re-open that run in
+  the editor, change a parameter, press **Save**, and the stored preview is **not** re-rendered. From then on
+  the assumption is false, and nothing notices: the run isn't flagged as an unfinished edit (it is excluded by
+  design), and as of v0.301.0 the reveal's "before" is rendered through the *stored* recipe while the "after"
+  is still the *old* baked preview — so the two halves would differ by an edit as well as by frame count,
+  which is exactly what that feature must never show. **Fix shape (small, additive, no migration):** stamp the
+  recipe *look* that was baked — `_recipe_look()` already exists in `routers/stack.py` and is exactly the
+  "does this describe the same picture?" comparison, uid- and timestamp-blind — into a meta key beside the
+  recipe at auto-edit time, and have the surfaces that rely on the assumption compare against it: the reveal
+  (stand down to hidden on a mismatch, as it does for a missing recipe today) and `_unexported_edit` (flag the
+  run again, since a second-round edit on an auto-edited run really *is* unfinished). Runs from before the
+  stamp exists have no stamp, so they behave exactly as they do now — the guard only ever fires where it can
+  actually tell. **Reachability, honestly:** it needs a Save on an already-processed run without an export,
+  which is a real but uncommon path; the reveal is the first surface where the disagreement becomes *visible*
+  rather than merely latent, which is why it is worth closing now rather than when it bites.
+
+- **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by the v0.301.0 recipe-matched reveal) — the
+  reveal's "before" is now a full edit pipeline per request, and nothing caches it.** *(Pillar: friendliness —
+  PRIORITY 3; size S; measure before building.)* `reference-sub` has always debayered a full sub per request
+  and answered `Cache-Control: no-store`; on an auto-edited run it now *also* runs the whole Auto recipe
+  (gradient fit → colour calibrate → STF stretch → SCNR → saturation → auto curve, plus denoise/sharpen when
+  the recipe carries them) over that sub, at the 1024-wide proxy scale. That is comparable to one live-preview
+  render, in a threadpool, and only when the card is revealed — so it is very unlikely to matter, and it was
+  shipped without a cache deliberately rather than guessing at one. **But measure it on the owner's box before
+  assuming:** if a reveal on a big target is visibly slow, the pattern to copy is already in the same file —
+  the noise-ratio endpoint's fingerprinted meta stamp (`NOISE_RATIO_META_PREFIX`, keyed on the master and the
+  representative sub), which would key here on the sub *and* the recipe look, so a re-edit invalidates it.
+  Don't add a cache on speculation; a stale "before" is worse than a slow one.
+
 - **NEW IDEA (Builder 2026-08-29, the two follow-ons "Tonight, live" v0.298.0 deliberately left out) — keep the
   screen awake on the live page, and cover a night that shot more than one target.** *(Pillar: understand +
   enjoy — PRIORITY 3; size S each; both frontend-only, no new data.)*
@@ -17570,34 +17615,76 @@ problems. Dogfood it every big-picture run and fix root causes.
     where they really are compared to each other," and flying through your own captured slice of the universe is
     a strong, shareable "wow" moment, same spirit as the light-travel-time feature it reuses data from.
 
-- **DOGFOOD FINDING (Builder 2026-08-29, found by running the app — `scripts/agent-dogfood.sh` — while
-  verifying the new before/after share, not by reading code) — "One frame vs your stack" (and therefore the
-  new "Share this before/after") is invisible on every one-click **"Process target"** run, which is the
-  flagship path a beginner actually uses.** *(Pillar: enjoy + trust — PRIORITY 2–3; size M; **not** a bug —
-  the gate is deliberate and correct as written, so this is a feature to build, not a check to loosen.)*
-  **Measured, not inferred.** On a freshly-booted app with the bundled sample loaded and processed by the
-  one-click button, `GET .../stack-runs/1/one-sub-vs-stack` answers `{"available": false, "n_frames": 6, …}`
-  and the before/after download 404s with *"This run's picture is an edited export…"*. Submitting a plain
-  stack of the same frames (run 2) makes both work immediately. The cause is exactly the gate:
-  `_auto_edit_process_run` rewrites the run's preview to the Auto recipe's tone-mapped result and stamps
-  `preview_display_space`, and a raw STF sub render can't be honestly matched to a recipe-toned picture — so
-  the reveal self-hides, correctly.
-  **Why it matters more than its "one path" sounds.** `auto_edit_on_autostack` defaults to **off**, so the
-  walk-away auto-stack still produces a linear preview and keeps the reveal — but "Process target" *always*
-  auto-edits, and it is the button the app points a beginner at. So the app's single most convincing moment,
-  and the shareable artefact just built on top of it, are absent from the one journey most likely to be taken.
-  **Shape (the honest fix, and why it isn't small).** The run's recipe is already stored per run
-  (`RECIPE_META_PREFIX{run_id}`), so the matched "before" exists in principle: debayer the reference sub to
-  linear RGB and render it through the **same recipe**, which is a *more* honest comparison than STF-matching
-  (identical processing, one frame vs many). But that means driving `seestack.edit` over a single sub —
-  op-by-op behaviour on one noisy frame (background extraction, star handling, any crop), the memory/time cost
-  on the request path, and a cache story — which is why it is filed rather than bolted onto the v0.300.0
-  endpoint. **Cheaper interim slice, if the full one isn't wanted:** say *why* instead of showing nothing —
-  the card currently renders `null`, so a beginner who processed their target sees no reveal and no reason.
-  One calm line ("your picture has been auto-edited, so there's nothing fair to compare a raw frame against —
-  a plain stack of the same subs will show it") turns an invisible surface into an explained one. **Care:**
-  do NOT make the gate looser to get the reveal back — pairing an STF sub against a recipe-toned stack sells
-  a tone difference as what stacking bought you, which is the one thing this feature must never do.
+- **✅ SHIPPED (Builder, v0.301.0, branch `claude/compassionate-galileo-lcagow`) — ~~"One frame vs your stack"
+  (and the before/after share built on it) is invisible on every one-click "Process target" run.~~** Fixed with
+  the **honest full fix** the entry describes, not the interim copy slice: the reveal's "before" is now the
+  reference sub put through the run's **own stored recipe**, so both halves carry *identical* processing and
+  differ only in how many frames went in. The app's most convincing moment — and the shareable artefact on top
+  of it — is now present on the flagship beginner journey.
+
+  **What shipped.** A new engine helper `seestack.render.thumbnail.load_sub_linear_rgb()` (factored out of
+  `render_sub_preview`, which now calls it) returns one debayered sub as **linear** RGB plus the
+  `proxy_scale` an `EditContext` needs, so a recipe can be rendered over it at the right spatial scale;
+  `webapp.routers.editor.render_sub_display_array()` is the recipe render itself, the single-sub sibling of
+  `render_run_display_array`. In `routers/stack.py`, `_auto_edit_recipe_json()` decides — narrowly — when
+  that path is honest, and `_display_space_without_recipe()` is the one gate all three surfaces
+  (`one-sub-vs-stack`, `reference-sub`, `before-after.jpg`) now share, so the card, the render and the
+  download can never disagree about a run.
+
+  **The gate, stated precisely, because the whole feature turns on it.** The recipe path opens **only** for an
+  in-place "Process target" Auto edit: `preview_display_space` marked on the run, a FITS that is still
+  **linear** (`fits_is_display_space` false), and a readable recipe stored at `editor_recipe:<run_id>`. A
+  genuine editor **export** stays hidden exactly as before — its FITS is itself tone-mapped, so there is no
+  linear picture behind it and a recipe on it describes a *second-round* edit. So is an auto-edited run whose
+  recipe is missing or unreadable: without it we would be guessing what its preview shows, and the entry's
+  own caution stands — the gate was never loosened, it was given the one thing that makes it unnecessary.
+
+  **Said out loud, not just shown.** The info endpoint gained an additive `matched_by` field
+  (`"recipe"`/`"stretch"`), and `oneFrameCaption` uses it to add *"Both sides went through the same edit, so
+  the only difference is the extra frames."* — a beginner looking at an edited picture beside a grainy frame
+  has to be told the editing isn't the difference. A plain linear run's wording is byte-identical to before.
+
+  **Upgrade-safe (§9):** no schema, config, on-disk or default change — one additive response field, and a
+  path that reads meta the auto-edit already wrote. Old installs light up on runs they already have.
+  **Verified on the real path, not just a fabricated marker:** the last regression test runs
+  `webapp.pipeline._auto_edit_process_run` — the function "Process target" itself calls — over a real linear
+  master and then asks the app the same two questions the dogfood pass asked. Before this change both answered
+  "no" (`{"available": false}`, and a 404 reading *"This run's picture is an edited export…"*).
+  **Tests (+7 webapp, +2 vitest; 4 fail before):** available/`matched_by` on an auto-edited run, the
+  `reference-sub` render differing from the plain STF render of the same sub (proof the recipe actually ran),
+  the before/after download working there, a plain run still reporting `"stretch"`, an export staying hidden
+  *even with a recipe on it*, and three unreadable-recipe shapes staying hidden.
+
+  Original spec, for the record:
+
+  - **DOGFOOD FINDING (Builder 2026-08-29, found by running the app — `scripts/agent-dogfood.sh` — while
+    verifying the new before/after share, not by reading code) — "One frame vs your stack" (and therefore the
+    new "Share this before/after") is invisible on every one-click **"Process target"** run, which is the
+    flagship path a beginner actually uses.** *(Pillar: enjoy + trust — PRIORITY 2–3; size M; **not** a bug —
+    the gate is deliberate and correct as written, so this is a feature to build, not a check to loosen.)*
+    **Measured, not inferred.** On a freshly-booted app with the bundled sample loaded and processed by the
+    one-click button, `GET .../stack-runs/1/one-sub-vs-stack` answers `{"available": false, "n_frames": 6, …}`
+    and the before/after download 404s with *"This run's picture is an edited export…"*. Submitting a plain
+    stack of the same frames (run 2) makes both work immediately. The cause is exactly the gate:
+    `_auto_edit_process_run` rewrites the run's preview to the Auto recipe's tone-mapped result and stamps
+    `preview_display_space`, and a raw STF sub render can't be honestly matched to a recipe-toned picture — so
+    the reveal self-hides, correctly.
+    **Why it matters more than its "one path" sounds.** `auto_edit_on_autostack` defaults to **off**, so the
+    walk-away auto-stack still produces a linear preview and keeps the reveal — but "Process target" *always*
+    auto-edits, and it is the button the app points a beginner at. So the app's single most convincing moment,
+    and the shareable artefact just built on top of it, are absent from the one journey most likely to be taken.
+    **Shape (the honest fix, and why it isn't small).** The run's recipe is already stored per run
+    (`RECIPE_META_PREFIX{run_id}`), so the matched "before" exists in principle: debayer the reference sub to
+    linear RGB and render it through the **same recipe**, which is a *more* honest comparison than STF-matching
+    (identical processing, one frame vs many). But that means driving `seestack.edit` over a single sub —
+    op-by-op behaviour on one noisy frame (background extraction, star handling, any crop), the memory/time cost
+    on the request path, and a cache story — which is why it is filed rather than bolted onto the v0.300.0
+    endpoint. **Cheaper interim slice, if the full one isn't wanted:** say *why* instead of showing nothing —
+    the card currently renders `null`, so a beginner who processed their target sees no reveal and no reason.
+    One calm line ("your picture has been auto-edited, so there's nothing fair to compare a raw frame against —
+    a plain stack of the same subs will show it") turns an invisible surface into an explained one. **Care:**
+    do NOT make the gate looser to get the reveal back — pairing an STF sub against a recipe-toned stack sells
+    a tone difference as what stacking bought you, which is the one thing this feature must never do.
 
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
@@ -17622,16 +17709,35 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **NEW IDEA (Builder 2026-08-29, the follow-ups deliberately left out of "Your universe" v0.296.0) — "fly to
   it", and tell the reader what they're looking at.** *(Pillar: enjoy + understand — PRIORITY 3; size S each;
   frontend-only, no new data.)* Three cheap taps on the shipped page, in value order:
-  (a) **Fly to this object.** Clicking a picture selects it and stops the drift, but the camera stays where it
-  was — on a five-decade scale the nearest objects are a long way in from the outer ring, so the reader has to
-  orbit and dolly to actually *look* at the thing they clicked. An eased camera tween to a point just outside
-  the object (the classic "fly through your universe" move the owner's SpaceEngine reference is built on) is
-  the single biggest felt improvement left. Keep OrbitControls' target at the origin or the orbit becomes
-  confusing; tween the camera position only.
-  (b) **The blurb is already there.** `CatalogObject.blurb` — the plain-language "what am I looking at?"
-  one-liner the object card on the Target page already shows — is loaded by `identify_object` and simply not
-  carried onto `UniverseObjectOut`. One additive field and one `<Text>`: the read-out goes from a distance to
-  an actual sentence about the object. **Grep first**, don't re-derive the lookup.
+  (a) ~~**Fly to this object.**~~ — **✅ SHIPPED v0.302.0** (Builder 2026-08-30, branch
+  `claude/compassionate-galileo-lcagow`), with the filed caution honoured exactly: OrbitControls' target stays
+  at the origin and only the camera position moves. The trick that makes those two compatible is that the
+  destination sits on the object's **own radial line**, just outside it (`flyToCameraPosition` in
+  `sky/universe.ts`) — with the object *between* camera and origin, looking at the origin frames it dead
+  centre anyway. A `<FlyTo>` component eases the camera there (a fixed fraction of the remaining gap per
+  second, `delta` clamped so a backgrounded tab doesn't teleport on its first frame back) and stands down the
+  instant someone grabs the controls. The controls' own `update()` runs at frame priority **-1**, i.e. before
+  this write, so they follow the camera rather than fight it; the destination is clamped to their own
+  `min`/`maxDistance` so the arrival can't visibly snap.
+  **Tests (5, in `sky/universe.test.ts`):** the destination is on the object's line and outside it; the
+  camera-past-object property on an off-axis object (a unit-dot check, not just an axis case); every placed
+  depth **and** both extremes land inside the orbit limits; a degenerate/non-finite position declines with
+  `null` rather than flying to NaN; and a further object really does end up further out. The `<FlyTo>`
+  component itself is untested, like the rest of the WebGL scene — the maths it runs on is not.
+  (b) ~~**The blurb is already there.**~~ — **✅ SHIPPED v0.302.0** (Builder 2026-08-30, branch
+  `claude/compassionate-galileo-lcagow`), exactly as filed and at the filed size. `UniverseObject` gained a
+  `blurb: str = ""` carried straight off `identify_object`'s `ObjectInfo.blurb` (grepped first — the lookup
+  already loads it), `UniverseObjectOut` an additive field defaulting to `""`, and the object card one
+  `<Text>` rendered only when the sentence is non-empty. So the read-out is now *about the object* rather
+  than two numbers about something the reader may not recognise. **Tests:** three in
+  `tests/test_universemap.py` (the blurb travels; a catalog entry without one yields `""`, never `None`, so
+  no read site needs a guard; and — the measurement, not an assumption — the **real bundled catalog** does
+  carry blurbs for the popular targets), one in `tests/webapp/test_sky_universe.py` pinning the field on the
+  response, and two in `Universe.test.tsx` (shown when present; nothing at all for `""` *and* for a missing
+  field, so an older backend degrades cleanly).
+    *(Original spec: `CatalogObject.blurb` — the plain-language "what am I looking at?" one-liner the object
+    card on the Target page already shows — is loaded by `identify_object` and simply not carried onto
+    `UniverseObjectOut`. One additive field and one `<Text>`. **Grep first**, don't re-derive the lookup.)*
   (c) **Constellation lines at the backdrop radius.** The star backdrop is a bare point cloud at r=420; the
   offline Sky viewer's recognisable-star labelling is the precedent. Only worth it if a constellation-line
   dataset is already bundled — check before scoping, and do **not** add one as a dependency for this.

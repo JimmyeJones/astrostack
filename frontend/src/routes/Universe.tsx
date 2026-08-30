@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Billboard, Html, Line, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useQuery } from "@tanstack/react-query";
@@ -12,7 +12,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { raDecToVector, type SkyImage, type SkyStar } from "../sky/projection";
 import {
-  radiusForDepth, scaleCaption, spanSummary, withPictures,
+  FLY_MAX_DISTANCE, FLY_MIN_DISTANCE, flyToCameraPosition, radiusForDepth,
+  scaleCaption, spanSummary, withPictures,
   type PlacedPicture, type UniverseData, type UniverseObject,
 } from "../sky/universe";
 
@@ -178,6 +179,42 @@ function ObjectNode({ placed, selected, onSelect }: {
   );
 }
 
+/** Fraction of the distance to the destination still left after one second —
+ *  the easing constant. Small enough to arrive in about a second, large enough
+ *  that the move reads as travel rather than a cut. */
+const FLY_REMAINING_PER_SECOND = 0.004;
+
+/**
+ * Eases the camera to `to` — the "fly to it" move after a click.
+ *
+ * Position only: OrbitControls keeps its target at the origin, and
+ * {@link flyToCameraPosition} picks a point on the object's own radial line, so
+ * looking at the origin still centres the object. Exponential easing (a fixed
+ * fraction of the remaining gap per second) so it starts fast and settles, with
+ * `delta` clamped so a stalled tab doesn't teleport on its first frame back.
+ *
+ * The controls run their own `update()` at frame priority -1, i.e. *before*
+ * this, so each write lands as the starting position they derive from next
+ * frame — they follow the camera rather than fight it. Handing `to = null`
+ * (which the viewer does the moment someone grabs the controls) stops the move
+ * immediately.
+ */
+function FlyTo({ to }: { to: THREE.Vector3 | null }) {
+  const camera = useThree((s) => s.camera);
+  const arrived = useRef(false);
+  useEffect(() => { arrived.current = false; }, [to]);
+  useFrame((_state, delta) => {
+    if (!to || arrived.current) return;
+    const t = 1 - Math.pow(FLY_REMAINING_PER_SECOND, Math.min(delta, 0.1));
+    camera.position.lerp(to, t);
+    if (camera.position.distanceTo(to) < 0.05) {
+      camera.position.copy(to);
+      arrived.current = true;
+    }
+  });
+  return null;
+}
+
 function Scene({ data, images, stars, selected, onSelect }: {
   data: UniverseData;
   images: SkyImage[];
@@ -192,6 +229,17 @@ function Scene({ data, images, stars, selected, onSelect }: {
   // ourselves, which would fight the controls' own per-frame update; and it
   // stops for good the instant the viewer takes hold, so it never wrestles them.
   const [userMoved, setUserMoved] = useState(false);
+  // Where a click should take the camera. Recomputed only when the selection
+  // changes; cleared when the viewer takes the controls, so the tween never
+  // wrestles a hand already on the mouse.
+  const [flyTo, setFlyTo] = useState<THREE.Vector3 | null>(null);
+  useEffect(() => {
+    if (!selected) { setFlyTo(null); return; }
+    const at = raDecToVector(
+      selected.ra_deg, selected.dec_deg, radiusForDepth(selected.depth));
+    const dest = flyToCameraPosition(at);
+    setFlyTo(dest ? new THREE.Vector3(dest.x, dest.y, dest.z) : null);
+  }, [selected]);
   return (
     <>
       <color attach="background" args={["#04050a"]} />
@@ -209,10 +257,12 @@ function Scene({ data, images, stars, selected, onSelect }: {
           onSelect={onSelect}
         />
       ))}
+      <FlyTo to={flyTo} />
       <OrbitControls
-        makeDefault enablePan={false} minDistance={20} maxDistance={360}
+        makeDefault enablePan={false}
+        minDistance={FLY_MIN_DISTANCE} maxDistance={FLY_MAX_DISTANCE}
         autoRotate={!userMoved && selected === null} autoRotateSpeed={0.35}
-        onStart={() => setUserMoved(true)}
+        onStart={() => { setUserMoved(true); setFlyTo(null); }}
       />
     </>
   );
@@ -288,9 +338,15 @@ export function UniverseObjectCard({ object, onOpen, onClose }: {
       </Group>
       {subtitle ? <Text size="xs" c="dimmed" mb={4}>{subtitle}</Text> : null}
       <Text size="sm" mb={2}>{object.distance_text} away</Text>
-      <Text size="xs" c="dimmed" mb={8}>
+      <Text size="xs" c="dimmed" mb={object.blurb ? 4 : 8}>
         The light in your picture left about {object.years_text} ago.
       </Text>
+      {/* What the thing actually *is* — the same one-liner the Target page's
+          object card shows. Without it the read-out is two numbers about
+          something the reader may not recognise. */}
+      {object.blurb ? (
+        <Text size="xs" c="dimmed" mb={8}>{object.blurb}</Text>
+      ) : null}
       <Group gap={8}>
         <Button size="xs" onClick={() => onOpen(object.safe)}>Open target</Button>
         <Button size="xs" variant="subtle" onClick={onClose}>Close</Button>

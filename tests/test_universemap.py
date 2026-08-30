@@ -209,3 +209,41 @@ def test_the_real_bundled_catalog_places_the_owners_targets():
     # against Andromeda (2.5 Mly) — the separation this feature exists to show.
     assert by_id["M42"].depth < by_id["M57"].depth < by_id["M31"].depth
     assert by_id["M31"].distance_ly > 1_000_000
+
+
+# ------------------------------------------------------------------- blurb --
+#
+# The map's read-out was two numbers (a distance and a light-travel time) about
+# an object the reader may not recognise. The catalog already carries the
+# plain-language "what am I looking at?" one-liner the Target page's object card
+# shows, so carrying it here costs one field and turns the read-out into a
+# sentence about the thing.
+
+
+def test_the_catalog_blurb_travels_onto_the_placed_object():
+    cat = (CatalogObject(id="M31", name="Andromeda Galaxy", ra_deg=10.68,
+                         dec_deg=41.27, type="galaxy", con="And",
+                         distance_ly=2_500_000,
+                         blurb="The nearest big galaxy to our own."),)
+    m = build_universe_map([_target("M31")], catalog=cat)
+    assert [o.blurb for o in m.objects] == ["The nearest big galaxy to our own."]
+
+
+def test_an_object_with_no_blurb_carries_an_empty_string_not_none():
+    # The viewer renders "" as nothing at all; a None would have to be guarded
+    # at every read site (and would break the response model's str field).
+    m = build_universe_map([_target("M31")], catalog=CAT)
+    assert [o.blurb for o in m.objects] == [""]
+
+
+def test_the_real_bundled_catalog_actually_has_blurbs_to_carry():
+    # The field is only worth having if the shipped data fills it — this is the
+    # measurement, not an assumption: the popular targets a beginner shoots are
+    # exactly the curated ones.
+    m = build_universe_map([
+        CapturedTarget(safe="M_31", name="M 31"),
+        CapturedTarget(safe="M_42", name="M 42"),
+    ])
+    blurbs = [o.blurb for o in m.objects]
+    assert all(isinstance(b, str) for b in blurbs)
+    assert any(b.strip() for b in blurbs)

@@ -22,6 +22,9 @@ export interface UniverseObject {
   distance_text: string;
   years_text: string;
   depth: number;
+  /** The catalog's plain-language "what am I looking at?" one-liner. Optional so
+   *  an older backend that doesn't send it simply shows no sentence. */
+  blurb?: string;
 }
 
 export interface UniverseShell {
@@ -110,4 +113,47 @@ export function spanSummary(objects: UniverseObject[]): string {
   }
   return `From ${near.name} at ${near.distance_text} out to ${far.name} `
     + `at ${far.distance_text}.`;
+}
+
+/** How far *outside* an object the camera stops when it flies to it. The
+ *  pictures are {@link PICTURE_SIZE}-sized in world units, so this is roughly
+ *  "close enough to fill the view, far enough to still see the ring behind it".
+ */
+export const FLY_MARGIN = 14;
+/** The camera's own orbit limits (mirrored from OrbitControls' min/maxDistance),
+ *  so a fly-to can never park the camera somewhere the controls would then snap
+ *  it out of on the next frame. */
+export const FLY_MIN_DISTANCE = 20;
+export const FLY_MAX_DISTANCE = 360;
+
+/**
+ * Where the camera should end up to *look at* an object — "fly to it".
+ *
+ * Clicking a picture selects it, but on a five-decade scale the nearest objects
+ * are a long way in from the outer ring, so without this the reader has to orbit
+ * and dolly to actually look at the thing they clicked.
+ *
+ * The camera stays on the object's **own radial line**, just outside it. That is
+ * what lets OrbitControls keep its target at the origin (moving the target makes
+ * the orbit confusing, and the origin is "you are here" — the point every
+ * distance on this map is measured from): with the object *between* the camera
+ * and the origin, looking at the origin puts it dead centre anyway.
+ *
+ * Returns `null` for a degenerate position (an object on top of the origin,
+ * which the inner radius makes impossible, or a non-finite coordinate) — the
+ * caller then simply doesn't move, rather than flying the camera into NaN.
+ */
+export function flyToCameraPosition(
+  target: { x: number; y: number; z: number },
+  opts: { margin?: number; min?: number; max?: number } = {},
+): { x: number; y: number; z: number } | null {
+  const { x, y, z } = target;
+  if (![x, y, z].every((v) => Number.isFinite(v))) return null;
+  const len = Math.hypot(x, y, z);
+  if (!(len > 1e-6)) return null;
+  const margin = opts.margin ?? FLY_MARGIN;
+  const min = opts.min ?? FLY_MIN_DISTANCE;
+  const max = opts.max ?? FLY_MAX_DISTANCE;
+  const dist = Math.min(max, Math.max(min, len + margin));
+  return { x: (x / len) * dist, y: (y / len) * dist, z: (z / len) * dist };
 }
