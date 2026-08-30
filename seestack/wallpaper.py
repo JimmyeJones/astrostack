@@ -38,6 +38,49 @@ WALLPAPER_PRESETS: dict[str, dict] = {
 }
 
 
+#: Ceiling on the source long edge a caller is asked to render for a wallpaper.
+#: A crop only ever takes *part* of the picture, so filling a phone screen from a
+#: very wide mosaic would want an enormous source; this bounds the render on a
+#: RAM-capped host. Hitting it simply yields a smaller — still correctly shaped —
+#: wallpaper, exactly as a small picture always has.
+WALLPAPER_MAX_SOURCE_LONG_EDGE = 6000
+
+
+def wallpaper_source_long_edge(
+    src_w: int, src_h: int, preset: dict,
+    *, cap: int = WALLPAPER_MAX_SOURCE_LONG_EDGE,
+) -> int:
+    """How many pixels along its long edge a source of shape ``src_w × src_h``
+    needs before :func:`render_wallpaper_jpeg` can fill ``preset`` at its device
+    size.
+
+    The crop takes the largest ``preset``-shaped rectangle that fits, so only one
+    of the two edges limits it: a picture wider than the target shape is limited
+    by its height, a narrower one by its width. This scales the shape up until the
+    limiting edge reaches the preset's own ``max_w``/``max_h``, and reports the
+    long edge of that size — what a caller should ask a renderer for. Clamped to
+    ``cap``; a degenerate shape asks for nothing beyond the cap's floor of 1.
+
+    Only the *shape* of the source matters, so the stored preview's dimensions
+    answer it for the full-resolution picture too (a preview is a uniform
+    downscale of the same canvas).
+    """
+    if src_w <= 0 or src_h <= 0:
+        return 1
+    max_w = max(1, int(preset["max_w"]))
+    max_h = max(1, int(preset["max_h"]))
+    target_ratio = int(preset["aspect_w"]) / int(preset["aspect_h"])
+    src_ratio = src_w / src_h
+    if src_ratio > target_ratio:
+        # Wider than the crop shape → the crop is limited by the source's height.
+        need_h = float(max_h)
+        need_w = need_h * src_ratio
+    else:
+        need_w = float(max_w)
+        need_h = need_w / src_ratio
+    return max(1, min(int(cap), math.ceil(max(need_w, need_h))))
+
+
 def wallpaper_crop_box(
     img_w: int, img_h: int, aspect_w: int, aspect_h: int,
     target_px: tuple[float, float] | None = None,

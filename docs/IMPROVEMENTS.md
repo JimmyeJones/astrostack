@@ -9559,6 +9559,15 @@ to **Shipped**.)_
   keep drifting are **size** (capped preview vs native), **colour space** (linear TIFF vs display-space), and
   **geometry** (cropped/rotated vs the stored canvas). Where a claim is worth keeping true, pin it with a test
   that reads the served bytes rather than the string — `tests/webapp/test_north_up.py` is the shape.
+  **▶ Started (Builder 2026-08-30, branch `claude/compassionate-galileo-e1p1x8`) — the **size** axis, and the
+  lead was right that this is a class rather than a slip.** The first control swept was the **wallpaper**, and
+  it was the *file* that was wrong, not the copy: the presets name real device resolutions and the endpoint fed
+  the crop a 1024 px preview. Fixed in **v0.309.0** (entry under "Image quality"). Swept and **cleared** in the
+  same pass: the **share JPEG** ("served at the same resolution" — the docstring says so and it is true), the
+  **full-res PNG** (native, and it follows a saved recipe/Adjust stretch so it matches the thumbnail), and the
+  **pictures zip** (fixed as v0.308.1). Still **open on the size axis**: the **keepsake / scale-&-compass**
+  JPEG — filed with its blocker under "Image quality". Untouched so far: the montage, the wall, the print
+  export, the zoom clip and the imaging log.
 
 - **NEW IDEA (Builder 2026-08-30, spotted at merge time while reconciling the two concurrent North-up
   implementations — NOT a bug today, filed so it doesn't become one) — there are now *two* ways to ask "is
@@ -16819,6 +16828,62 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **✅ SHIPPED (Builder, v0.309.0, branch `claude/compassionate-galileo-e1p1x8`) — ~~"Make it your wallpaper"
+  built your lock screen out of a **1024 px thumbnail**, so a 1170 × 2532 phone got a ~470 px-wide picture
+  blown up 2.5×.~~** The first finding of the **"sweep every download control's copy against what its endpoint
+  actually serves"** QA lead filed above (under "Autonomy & friendliness") — and it is the *file* half of that
+  bug class, not the copy half: `WALLPAPER_PRESETS` names real device resolutions (1170 × 2532 / 1920 × 1080 /
+  1440²), the module promises the picture "sized for the device", and the endpoint then handed
+  `render_wallpaper_jpeg` the run's **stored preview**, which is capped at
+  `thumbnail.PREVIEW_MAX_WIDTH = 1024`. Since the renderer (correctly) never upsamples, a phone crop of that
+  preview is 473 × 1024 — 44 % of the pixels along each edge of the screen it is for — and the phone stretches
+  the rest. *(Severity: image quality on the single most-shared artifact the app makes. Confidence:
+  arithmetic, then reproduced as a failing test.)*
+
+  **Fix.** `stack._wallpaper_native_source` re-renders the *same picture* from the run's own master at the size
+  the crop actually needs, and the endpoint uses those bytes when it can. Nothing downstream changed: the
+  target-pixel mapping, the North-up turn and the crop all read whichever bytes won, and they are the same
+  picture on the same grid at a different scale. The renderer is
+  `render_preview_png_full_res` — the one the "Full-res PNG" download already uses to reproduce the stored
+  preview's own look (STF for a linear stack, the run's saved `preview_stretch`/`black` for one tuned in
+  History's "Adjust") — asked for a bounded size via the new pure
+  `wallpaper.wallpaper_source_long_edge`, which solves "which edge limits this crop?" and clamps to
+  `WALLPAPER_MAX_SOURCE_LONG_EDGE = 6000`. That matters for memory: `load_stack_rgb` decimates **during** the
+  FITS load, so the cost is set by the request (≤ 2532 px for a phone), not by a 100 MP mosaic canvas.
+
+  **What it deliberately declines** — each falls back to the exact old bytes, so the endpoint is
+  bit-for-bit unchanged there: a preview with a **baked North-up** turn (the FITS grid is the un-rotated one);
+  a **"Process target" run** (its preview is a display-space auto-edit only the saved recipe reproduces — see
+  the follow-on below); a preview showing only **part of the canvas** (auto-crop trim); a **missing FITS**; and
+  a canvas **no bigger than the preview** (checked from the run's recorded `canvas_w/h` *before* any render, so
+  the common no-gain case costs nothing).
+
+  **Upgrade-safe (§9):** read-only render on an explicit user-initiated download; no config/schema/on-disk/API
+  or default change, and no new setting. Nothing is written — the stored preview is untouched.
+
+  **Tests (+5 in `tests/webapp/test_wallpaper.py`, 2 fail before / pass after; +3 pure in
+  `tests/test_wallpaper.py`):** a 1200 × 900 master with a 400 px preview yields a **900 px-tall** phone
+  wallpaper; the native wallpaper is pinned to be *the same picture* as the preview-sourced one (both resampled
+  to 32² and compared, max |Δ| < 12 of 255) rather than merely bigger; the processed-run and missing-FITS
+  fallbacks land back on the preview's size; North-up still turns it, at native size; and the sizing helper is
+  pinned by construction (render at what it asks for → the crop fills the preset exactly), by limiting edge,
+  and at the cap.
+
+- **NEW IDEA (Builder 2026-08-30, the two halves deliberately left out of the v0.309.0 wallpaper fix) — the
+  other two exports that are still made out of the 1024 px preview.** *(Pillar: image quality — PRIORITY 4;
+  size S each; the second one has a cost gate, read it.)*
+  **(a) The keepsake / "with scale & compass" JPEG** (`download_stack_run`, `kind="jpeg"`) is the one the
+  Target page's own comment calls "the one that matters on Instagram **or a printed 6×4**" — at 1024 px that
+  print is ~170 dpi. The blocker is not the source: it is that `png_bytes_to_jpeg`'s nameplate, keepsake matte
+  and sky marks are laid out against the picture's pixel width (`_unrotated_preview_width` feeds
+  `_sky_marks_for_run`), so simply handing it bigger bytes rescales the furniture. Do it *with* a pass over
+  those layout constants, or not at all.
+  **(b) The wallpaper on a "Process target" run**, which v0.309.0 declines. `render_run_recipe_fullres_png`
+  would reproduce it exactly (crop included, which is why the framing would match), but unlike
+  `render_preview_png_full_res` it renders the **whole editor pipeline at full canvas size** and decimates
+  afterwards — fine behind a menu item that says "native size", not obviously fine for a one-tap wallpaper on
+  a RAM-capped NAS with a 100 MP mosaic. If picked up, gate it on canvas size and measure the peak RSS.
 
 - **✅ SHIPPED (Builder, v0.294.1, branch `claude/compassionate-galileo-i9ybki`) — ~~report the *true*
   contributing-frame count in a κ-σ run's History / integration time, not the conservative
