@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TargetView, countNewSubsSinceStack, countQcUncheckable, describeObject, mosaicGradingNote, rejectReasonLabel } from "./Target";
 import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
-import { formatStampDate } from "../format";
 import { sharePictureText } from "../share";
 
 function mkFrame(id: number, overrides: Partial<Frame> = {}): Frame {
@@ -1892,11 +1891,10 @@ describe("TargetView share text", () => {
     return () => { delete nav.canShare; delete nav.share; };
   }
 
-  it("names the picture's month in the text it hands the OS share sheet", async () => {
-    const stamp = "2026-08-17T03:30:00Z";
+  /** Open the menu, press one of its share items, and return what the OS got. */
+  async function shareFrom(item: string, run: Partial<client.StackRun>) {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget({ name: "M42" }));
-    vi.spyOn(client.api, "listStackRuns")
-      .mockResolvedValue([mkRun({ id: 9, timestamp_utc: stamp })]);
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9, ...run })]);
     vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
 
     const share = vi.fn(async (_d?: ShareData) => {});
@@ -1910,19 +1908,49 @@ describe("TargetView share text", () => {
     // The header's own Share control — now an item inside the "Save / share"
     // menu the hero row collapses its picture actions into.
     await openSaveShare();
-    const btn = await screen.findByRole("menuitem", { name: "Share picture" });
-    fireEvent.click(btn);
-
+    fireEvent.click(await screen.findByRole("menuitem", { name: item }));
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
     const data = share.mock.calls[0][0] as ShareData;
-    const expected = sharePictureText("M42", formatStampDate(stamp));
-    expect(data.text).toBe(expected.text);
-    expect(data.title).toBe(expected.title);
-    // …and specifically not the ambiguous numeric form it used to send.
-    expect(data.text).not.toMatch(/\d+\/\d+\/\d{4}/);
-
     restore();
     vi.unstubAllGlobals();
+    return data;
+  }
+
+  it("tells the OS share sheet the night the subs were shot, not the stack day", async () => {
+    // Regression: this menu went on filling the share caption with
+    // `timestamp_utc` after every other share surface was fixed, so the app's
+    // most prominent picture announced itself as "captured" on the day it was
+    // processed — years out on a re-stack of a back catalogue.
+    const data = await shareFrom("Share picture", {
+      timestamp_utc: "2026-08-17T03:30:00Z",
+      capture_night_start: "2024-11-15", capture_night_end: "2024-11-18",
+    });
+    const expected = sharePictureText("M42", "15–18 Nov 2024");
+    expect(data.text).toBe(expected.text);
+    expect(data.title).toBe(expected.title);
+    expect(data.text).toContain("captured 15–18 Nov 2024");
+    expect(data.text).not.toContain("2026");
+    // …and specifically not the ambiguous numeric form it used to send.
+    expect(data.text).not.toMatch(/\d+\/\d+\/\d{4}/);
+  });
+
+  it("shares the keepsake with the same date as the plain picture", async () => {
+    const data = await shareFrom("Share the framed keepsake", {
+      timestamp_utc: "2026-08-17T03:30:00Z",
+      capture_night_start: "2024-11-15", capture_night_end: "2024-11-15",
+    });
+    expect(data.text).toBe(sharePictureText("M42", "15 Nov 2024").text);
+    expect(data.text).not.toContain("2026");
+  });
+
+  it("shares with no date at all when the run recorded no capture window", async () => {
+    // Every run on an install that predates the window. Saying nothing is the
+    // honest outcome; reaching for the stack stamp is the bug.
+    const data = await shareFrom("Share picture", {
+      timestamp_utc: "2026-08-17T03:30:00Z",
+    });
+    expect(data.text).toBe("M42");
+    expect(data.text).not.toContain("captured");
   });
 });
 

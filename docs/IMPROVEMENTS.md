@@ -360,6 +360,41 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.315.1, branch `claude/compassionate-galileo-7y6nlj`) — ~~the Target page's own
+  **Share** menu still told the OS share sheet a picture was "captured" the day the **stack ran**~~, on both
+  its plain and its keepsake share — the two sites the v0.313.0 sweep missed.** *(Severity: wrong fact on
+  **shared output** — the words a beginner's phone puts under their photo in public. Same class and same
+  severity as the bug v0.313.0 fixed; this is two call sites of it that were left behind. Confidence:
+  reproduced — a run whose subs were shot 2024-11-15 shared as "captured 17 Aug 2026", and the three new tests
+  fail before the fix and pass after.)* **Found by dogfooding** (`scripts/agent-dogfood.sh`): the sample's hero
+  caption read *"Stacked Aug 30, 2026"* directly above a frames table of `2024-11-15 22:10` subs, and pulling
+  that thread found the share menu beneath it.
+
+  **Root cause.** `share.ts::sharePictureText`'s second argument is documented as *"the date the subs were
+  shot — `formatCaptureNights` over a run's capture window — and nothing else"*, and `routes/Target.tsx` passed
+  `formatStampDate(latestRun.timestamp_utc)` to it, twice. Its own comment claimed it was *"the same date
+  `LatestPictureCard`'s share text uses for the same picture"* — which had stopped being true when that card
+  was fixed. One page, one picture, two different dates. **Worth recording as a pattern:** the comment naming
+  the sibling it agreed with is what made the drift invisible; a shared `captureLabel` computed once on the
+  page now makes the two shares agree by construction, and the frozen test that pinned the *old* stamp is why
+  it survived the sweep at all.
+
+  **…and the caption under the picture, which is the same fact.** `latestPictureCaption` printed the stack
+  stamp unconditionally on the app's most prominent picture. It now goes through the existing
+  `pictureDateLabel` — *"Shot 15–18 Nov 2024"* when the run recorded a window, *"Stacked 30 Aug 2026"* when it
+  didn't — so it never asserts a capture date it doesn't have, and never leaves a bare one to be misread. This
+  is the `Target.tsx` half of the date sweep filed under "Autonomy & friendliness"; the Gallery/History
+  *provenance* lines are deliberately still the run stamp, which is right there.
+
+  **Upgrade-safe (§9):** frontend-only. No API, schema, config, on-disk or default change; a run with no
+  recorded window shares with no date clause at all, exactly as every other share surface already did.
+
+  **Tests (+5, 3 fail before):** `Target.test.tsx` (the share sheet naming the shot night and not the stack
+  year, the keepsake share agreeing with the plain one, and a windowless run sharing with no date — the old
+  test that asserted the *stack stamp* is replaced by these, since it pinned the bug) and
+  `LatestPictureCard.test.tsx` (the caption saying "Shot …" once a window exists, and still labelling
+  "Stacked …" when there is none).
+
 - **✅ SHIPPED (Builder, v0.312.1, branch `claude/compassionate-galileo-6jgh4j`) — ~~"See what stacking
   removed" paints a **cyan wash over the whole picture** on a many-sub stack, while the caption underneath
   calls those marks satellite trails and cosmic rays.~~** Found by measuring the feature I had just put on two
@@ -9801,9 +9836,11 @@ to **Shipped**.)_
   and `showAndTell.test.ts`.
 
   **What is left of this sweep** (the rest of the entry below still stands): Gallery cards and History rows
-  still print the run stamp in their *provenance* lines, which is arguably right there; the keepsake/poster
-  and the Sky footprint line were not touched; and `Target.tsx`'s hero caption already says "Stacked …",
-  honestly, but could now say both dates.
+  still print the run stamp in their *provenance* lines, which is arguably right there; and the Sky footprint
+  line was not touched. **Two of the listed leftovers are now closed:** the keepsake/poster caption picked up
+  the capture date with the nameplate in **v0.314.0** (they share `acquisition_parts`), and `Target.tsx`'s
+  hero caption now prefers the capture window through `pictureDateLabel` (**v0.315.1**) — which is where
+  dogfooding found the share-menu bug filed at the top of "Bugs".
 
 - **NEW IDEA (Builder 2026-08-30, the generalisation of the v0.311.3 "First light" bug) — sweep every date the
   app shows a beginner and ask whether it means *when you shot this* or *when the app did something*.**
