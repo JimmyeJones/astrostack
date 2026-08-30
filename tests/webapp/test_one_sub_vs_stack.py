@@ -695,3 +695,175 @@ def test_deleting_a_run_takes_its_noise_stamp_with_it(client, solved_library):
         assert proj.get_meta(f"{NOISE_RATIO_META_PREFIX}{run_id}") is None
     finally:
         proj.close()
+
+
+# --- The one-click "Process target" path -------------------------------------
+#
+# `_auto_edit_process_run` rewrites the run's preview to the Auto recipe's
+# tone-mapped result and stamps `preview_display_space` — which used to hide the
+# reveal (and the before/after share built on it) from the *flagship* beginner
+# journey, since a raw STF sub can't honestly be matched to a recipe-toned stack.
+# It doesn't have to be hidden: that run keeps a linear FITS and stores the very
+# recipe its preview shows, so the sub can be put through the same ops. These pin
+# that the recipe path opens exactly those runs and nothing else.
+
+
+def _mark_auto_edited(data_root, safe: str, run_id: int,
+                      recipe_json: str | None) -> None:
+    """Make a run look like an in-place "Process target" Auto edit: the
+    `preview_display_space` marker plus (optionally) the recipe its preview shows."""
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            assert proj.set_run_preview_display_space(run_id) is True
+            if recipe_json is not None:
+                proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe_json)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def _auto_recipe_json() -> str:
+    """A realistic Auto recipe — built by the same `presets.auto_recipe` the
+    one-click path uses, so the tests exercise the real op list (gradient →
+    colour calibrate → STF stretch → SCNR → saturation → curves), not a toy."""
+    import numpy as np
+
+    from seestack.edit.presets import auto_recipe
+
+    rng = np.random.default_rng(7)
+    rgb = np.clip(rng.normal(0.05, 0.01, size=(64, 96, 3)), 0.0, 1.0).astype(np.float32)
+    return auto_recipe(rgb, median_fwhm=3.0).to_json()
+
+
+def test_auto_edited_run_offers_the_reveal_through_its_own_recipe(
+    client, solved_library,
+):
+    # Fail-before: an in-place Auto edit reported available=False, so the app's
+    # most convincing moment was missing from the one button a beginner is
+    # pointed at ("Process target").
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "autoedit_ok.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+    _mark_auto_edited(solved_library, safe, run_id, _auto_recipe_json())
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack").json()
+    assert body["available"] is True
+    # ...and it says *how* the halves were matched, so the caption can be honest
+    # about both sides carrying the same edit.
+    assert body["matched_by"] == "recipe"
+
+
+def test_a_plain_linear_run_still_reports_the_stretch_match(client, solved_library):
+    # The additive field must not re-label the common case: a plain stack is
+    # still matched by a shared tone curve, not by a recipe.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(solved_library, safe, with_preview=True)
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack").json()
+    assert body["available"] is True
+    assert body["matched_by"] == "stretch"
+
+
+def test_auto_edited_reference_sub_is_rendered_through_the_recipe(
+    client, solved_library,
+):
+    # The whole point of opening the gate: the "before" must carry the *same*
+    # processing as the shown picture. Proven by the render differing from the
+    # plain STF render of the same sub — if the recipe were ignored the two would
+    # be byte-identical.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "autoedit_sub.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+
+    plain = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/reference-sub")
+    assert plain.status_code == 200
+
+    _mark_auto_edited(solved_library, safe, run_id, _auto_recipe_json())
+    through = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/reference-sub")
+    assert through.status_code == 200
+    assert through.headers["content-type"] == "image/png"
+    im = Image.open(BytesIO(through.content))
+    assert im.mode == "RGB" and im.width > 1 and im.height > 1
+    assert through.content != plain.content
+
+
+def test_auto_edited_run_downloads_the_before_after(client, solved_library):
+    # The share button is gated on the same endpoint, so it must light up here
+    # too — this is the run a beginner actually has to share.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "autoedit_ba.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+    _mark_auto_edited(solved_library, safe, run_id, _auto_recipe_json())
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+
+
+def test_a_display_space_export_stays_hidden_even_with_a_recipe(
+    client, solved_library,
+):
+    # The gate is opened by the *in-place* marker on a linear FITS, never by a
+    # recipe alone. A genuine export's FITS is itself tone-mapped, so there is no
+    # linear picture behind it and a recipe on it describes a second-round edit —
+    # rendering a raw sub through that would be exactly the unfair pairing this
+    # feature must never show.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "export_recipe.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=True)
+    _mark_auto_edited(solved_library, safe, run_id, _auto_recipe_json())
+
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack",
+    ).json()["available"] is False
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg").status_code == 404
+
+
+def test_auto_edited_run_with_an_unreadable_recipe_stays_hidden(
+    client, solved_library,
+):
+    # Without a recipe we can't know what the stored preview shows, so guessing
+    # (an STF sub beside a recipe-toned stack) is worse than hiding. Garbage and
+    # a recipe with no `ops` list are both "no recipe".
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        target_dir = Path(lib.target_dir(lib.find_target(safe)))
+    finally:
+        lib.close()
+    for i, bad in enumerate(["not json at all", '{"version": 3}', "[]"]):
+        run_id = _register_run_with_master_and_preview(
+            solved_library, safe, target_dir / f"autoedit_bad{i}.fits",
+            display_space=False)
+        _mark_auto_edited(solved_library, safe, run_id, bad)
+        assert client.get(
+            f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack",
+        ).json()["available"] is False, bad

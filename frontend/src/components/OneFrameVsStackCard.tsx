@@ -49,7 +49,8 @@ export function OneFrameVsStackCard({
 
   const subSrc = api.stackReferenceSubUrl(safe, runId);
   const stackSrc = api.stackArtifactUrl(safe, runId, "preview");
-  const caption = oneFrameCaption(info.data.sub_exposure_s, info.data.n_frames);
+  const caption = oneFrameCaption(
+    info.data.sub_exposure_s, info.data.n_frames, info.data.matched_by);
   const noiseBadge = noiseReductionBadge(noise.data?.ratio, info.data.n_frames);
 
   const moveTo = (clientX: number) => {

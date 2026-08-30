@@ -43,13 +43,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-- **CLAIMED (Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow`) — the DOGFOOD FINDING under
-  "Features that serve real workflows": "One frame vs your stack" (and the new before/after share) is invisible
-  on every one-click **"Process target"** run.** Taking the *honest full fix* the entry describes, not the
-  interim copy slice: render the reference sub through the run's **own stored recipe**, so the two halves differ
-  only in noise/detail (identical processing, one frame vs many) rather than in tone curve. Scoped to the
-  in-place auto-edited run (linear FITS + a stored recipe); a genuine display-space **export** stays hidden.
-
 - **CLAIMED (Builder 2026-08-30, branch `claude/compassionate-galileo-lcagow`) — idea (b) of "fly to it, and
   tell the reader what they're looking at": carry `CatalogObject.blurb` onto `UniverseObjectOut`** so the
   universe map's read-out is a sentence about the object, not just a distance.
@@ -17546,34 +17539,72 @@ problems. Dogfood it every big-picture run and fix root causes.
     where they really are compared to each other," and flying through your own captured slice of the universe is
     a strong, shareable "wow" moment, same spirit as the light-travel-time feature it reuses data from.
 
-- **DOGFOOD FINDING (Builder 2026-08-29, found by running the app — `scripts/agent-dogfood.sh` — while
-  verifying the new before/after share, not by reading code) — "One frame vs your stack" (and therefore the
-  new "Share this before/after") is invisible on every one-click **"Process target"** run, which is the
-  flagship path a beginner actually uses.** *(Pillar: enjoy + trust — PRIORITY 2–3; size M; **not** a bug —
-  the gate is deliberate and correct as written, so this is a feature to build, not a check to loosen.)*
-  **Measured, not inferred.** On a freshly-booted app with the bundled sample loaded and processed by the
-  one-click button, `GET .../stack-runs/1/one-sub-vs-stack` answers `{"available": false, "n_frames": 6, …}`
-  and the before/after download 404s with *"This run's picture is an edited export…"*. Submitting a plain
-  stack of the same frames (run 2) makes both work immediately. The cause is exactly the gate:
-  `_auto_edit_process_run` rewrites the run's preview to the Auto recipe's tone-mapped result and stamps
-  `preview_display_space`, and a raw STF sub render can't be honestly matched to a recipe-toned picture — so
-  the reveal self-hides, correctly.
-  **Why it matters more than its "one path" sounds.** `auto_edit_on_autostack` defaults to **off**, so the
-  walk-away auto-stack still produces a linear preview and keeps the reveal — but "Process target" *always*
-  auto-edits, and it is the button the app points a beginner at. So the app's single most convincing moment,
-  and the shareable artefact just built on top of it, are absent from the one journey most likely to be taken.
-  **Shape (the honest fix, and why it isn't small).** The run's recipe is already stored per run
-  (`RECIPE_META_PREFIX{run_id}`), so the matched "before" exists in principle: debayer the reference sub to
-  linear RGB and render it through the **same recipe**, which is a *more* honest comparison than STF-matching
-  (identical processing, one frame vs many). But that means driving `seestack.edit` over a single sub —
-  op-by-op behaviour on one noisy frame (background extraction, star handling, any crop), the memory/time cost
-  on the request path, and a cache story — which is why it is filed rather than bolted onto the v0.300.0
-  endpoint. **Cheaper interim slice, if the full one isn't wanted:** say *why* instead of showing nothing —
-  the card currently renders `null`, so a beginner who processed their target sees no reveal and no reason.
-  One calm line ("your picture has been auto-edited, so there's nothing fair to compare a raw frame against —
-  a plain stack of the same subs will show it") turns an invisible surface into an explained one. **Care:**
-  do NOT make the gate looser to get the reveal back — pairing an STF sub against a recipe-toned stack sells
-  a tone difference as what stacking bought you, which is the one thing this feature must never do.
+- **✅ SHIPPED (Builder, v0.301.0, branch `claude/compassionate-galileo-lcagow`) — ~~"One frame vs your stack"
+  (and the before/after share built on it) is invisible on every one-click "Process target" run.~~** Fixed with
+  the **honest full fix** the entry describes, not the interim copy slice: the reveal's "before" is now the
+  reference sub put through the run's **own stored recipe**, so both halves carry *identical* processing and
+  differ only in how many frames went in. The app's most convincing moment — and the shareable artefact on top
+  of it — is now present on the flagship beginner journey.
+
+  **What shipped.** A new engine helper `seestack.render.thumbnail.load_sub_linear_rgb()` (factored out of
+  `render_sub_preview`, which now calls it) returns one debayered sub as **linear** RGB plus the
+  `proxy_scale` an `EditContext` needs, so a recipe can be rendered over it at the right spatial scale;
+  `webapp.routers.editor.render_sub_display_array()` is the recipe render itself, the single-sub sibling of
+  `render_run_display_array`. In `routers/stack.py`, `_auto_edit_recipe_json()` decides — narrowly — when
+  that path is honest, and `_display_space_without_recipe()` is the one gate all three surfaces
+  (`one-sub-vs-stack`, `reference-sub`, `before-after.jpg`) now share, so the card, the render and the
+  download can never disagree about a run.
+
+  **The gate, stated precisely, because the whole feature turns on it.** The recipe path opens **only** for an
+  in-place "Process target" Auto edit: `preview_display_space` marked on the run, a FITS that is still
+  **linear** (`fits_is_display_space` false), and a readable recipe stored at `editor_recipe:<run_id>`. A
+  genuine editor **export** stays hidden exactly as before — its FITS is itself tone-mapped, so there is no
+  linear picture behind it and a recipe on it describes a *second-round* edit. So is an auto-edited run whose
+  recipe is missing or unreadable: without it we would be guessing what its preview shows, and the entry's
+  own caution stands — the gate was never loosened, it was given the one thing that makes it unnecessary.
+
+  **Said out loud, not just shown.** The info endpoint gained an additive `matched_by` field
+  (`"recipe"`/`"stretch"`), and `oneFrameCaption` uses it to add *"Both sides went through the same edit, so
+  the only difference is the extra frames."* — a beginner looking at an edited picture beside a grainy frame
+  has to be told the editing isn't the difference. A plain linear run's wording is byte-identical to before.
+
+  **Upgrade-safe (§9):** no schema, config, on-disk or default change — one additive response field, and a
+  path that reads meta the auto-edit already wrote. Old installs light up on runs they already have.
+  **Tests (+6 webapp, +2 vitest; 3 fail before):** available/`matched_by` on an auto-edited run, the
+  `reference-sub` render differing from the plain STF render of the same sub (proof the recipe actually ran),
+  the before/after download working there, a plain run still reporting `"stretch"`, an export staying hidden
+  *even with a recipe on it*, and three unreadable-recipe shapes staying hidden.
+
+  Original spec, for the record:
+
+  - **DOGFOOD FINDING (Builder 2026-08-29, found by running the app — `scripts/agent-dogfood.sh` — while
+    verifying the new before/after share, not by reading code) — "One frame vs your stack" (and therefore the
+    new "Share this before/after") is invisible on every one-click **"Process target"** run, which is the
+    flagship path a beginner actually uses.** *(Pillar: enjoy + trust — PRIORITY 2–3; size M; **not** a bug —
+    the gate is deliberate and correct as written, so this is a feature to build, not a check to loosen.)*
+    **Measured, not inferred.** On a freshly-booted app with the bundled sample loaded and processed by the
+    one-click button, `GET .../stack-runs/1/one-sub-vs-stack` answers `{"available": false, "n_frames": 6, …}`
+    and the before/after download 404s with *"This run's picture is an edited export…"*. Submitting a plain
+    stack of the same frames (run 2) makes both work immediately. The cause is exactly the gate:
+    `_auto_edit_process_run` rewrites the run's preview to the Auto recipe's tone-mapped result and stamps
+    `preview_display_space`, and a raw STF sub render can't be honestly matched to a recipe-toned picture — so
+    the reveal self-hides, correctly.
+    **Why it matters more than its "one path" sounds.** `auto_edit_on_autostack` defaults to **off**, so the
+    walk-away auto-stack still produces a linear preview and keeps the reveal — but "Process target" *always*
+    auto-edits, and it is the button the app points a beginner at. So the app's single most convincing moment,
+    and the shareable artefact just built on top of it, are absent from the one journey most likely to be taken.
+    **Shape (the honest fix, and why it isn't small).** The run's recipe is already stored per run
+    (`RECIPE_META_PREFIX{run_id}`), so the matched "before" exists in principle: debayer the reference sub to
+    linear RGB and render it through the **same recipe**, which is a *more* honest comparison than STF-matching
+    (identical processing, one frame vs many). But that means driving `seestack.edit` over a single sub —
+    op-by-op behaviour on one noisy frame (background extraction, star handling, any crop), the memory/time cost
+    on the request path, and a cache story — which is why it is filed rather than bolted onto the v0.300.0
+    endpoint. **Cheaper interim slice, if the full one isn't wanted:** say *why* instead of showing nothing —
+    the card currently renders `null`, so a beginner who processed their target sees no reveal and no reason.
+    One calm line ("your picture has been auto-edited, so there's nothing fair to compare a raw frame against —
+    a plain stack of the same subs will show it") turns an invisible surface into an explained one. **Care:**
+    do NOT make the gate looser to get the reveal back — pairing an STF sub against a recipe-toned stack sells
+    a tone difference as what stacking bought you, which is the one thing this feature must never do.
 
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**

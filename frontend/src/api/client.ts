@@ -2265,6 +2265,11 @@ export const api = {
       n_frames: number | null;
       sub_exposure_s: number | null;
       integration_s: number | null;
+      // How the two halves were made comparable: "stretch" (a plain linear run,
+      // both rendered through the same tone curve) or "recipe" (a "Process
+      // target" Auto edit, both put through that run's own edit). Optional so an
+      // older backend that doesn't send it still reads as the plain case.
+      matched_by?: string | null;
     }>(`/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack`),
   // The concrete "stacking cut your noise ~N×" number (lazy, best-effort — null
   // for an edited/older run or an unmeasurable image).

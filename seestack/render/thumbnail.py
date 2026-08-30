@@ -139,6 +139,41 @@ def generate_thumbnail(
     return out_path
 
 
+def load_sub_linear_rgb(
+    fits_path: str | Path,
+    *,
+    bayer_pattern: str | None = None,
+    max_width: int = 1024,
+) -> tuple[np.ndarray, float]:
+    """Debayer one raw Seestar sub to **linear** RGB, decimated to ``max_width``.
+
+    Returns ``(rgb, proxy_scale)`` where ``proxy_scale`` is ``full_width /
+    rendered_width`` (``>= 1.0``) — the same meaning
+    :class:`seestack.edit.registry.EditContext` gives it, so a caller can render
+    an editor recipe over the result at the right spatial scale.
+
+    Factored out of :func:`render_sub_preview` (which stretches the same array to
+    PNG) so the "one frame vs your stack" reveal can put the sub through the
+    run's *own* editor recipe instead of a stretch, without re-implementing the
+    load/debayer/decimate half. Pure inputs/outputs, so it can run in a worker
+    thread.
+    """
+    from seestack.io.fits_loader import bilinear_debayer, load_seestar_raw
+
+    rgb, info = load_seestar_raw(fits_path, debayer=False, out_dtype=np.float32)
+    pattern = bayer_pattern or info.bayer_pattern or "RGGB"
+    rgb = bilinear_debayer(rgb, pattern=pattern)
+
+    h, w = rgb.shape[:2]
+    scale = 1.0
+    if w > max_width:
+        target_w = max_width
+        target_h = max(1, int(round(h * (max_width / w))))
+        rgb = _downsample_rgb(rgb, target_h, target_w)
+        scale = float(w) / float(target_w)
+    return rgb, scale
+
+
 def render_sub_preview(
     fits_path: str | Path,
     *,
@@ -174,18 +209,10 @@ def render_sub_preview(
 
     from PIL import Image
 
-    from seestack.io.fits_loader import bilinear_debayer, load_seestar_raw
     from seestack.stack.output import _autostretch_for_export
 
-    rgb, info = load_seestar_raw(fits_path, debayer=False, out_dtype=np.float32)
-    pattern = bayer_pattern or info.bayer_pattern or "RGGB"
-    rgb = bilinear_debayer(rgb, pattern=pattern)
-
-    h, w = rgb.shape[:2]
-    if w > max_width:
-        target_w = max_width
-        target_h = max(1, int(round(h * (max_width / w))))
-        rgb = _downsample_rgb(rgb, target_h, target_w)
+    rgb, _scale = load_sub_linear_rgb(
+        fits_path, bayer_pattern=bayer_pattern, max_width=max_width)
 
     if stretch is not None and black is not None:
         stretched = asinh_stretch(rgb, stretch=float(stretch), black=float(black))
