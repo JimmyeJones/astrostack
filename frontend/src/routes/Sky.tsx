@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Badge, Button, Group, Loader, Paper, SegmentedControl, Text } from "@mantine/core";
 import { IconDownload, IconStars } from "@tabler/icons-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { api } from "../api/client";
 import { describeSkyCoverage } from "../components/skyCoverage";
@@ -316,12 +316,34 @@ export function myMapFilename(now: Date = new Date()): string {
 
 type SkyMode = "online" | "offline" | "mine";
 const MODE_KEY = "astrostack.skyMode";
+const SKY_MODES: readonly SkyMode[] = ["online", "offline", "mine"];
+
+/**
+ * Which map this page opens on: an explicit `?view=` wins, then the mode the
+ * viewer last chose, then the real-sky atlas.
+ *
+ * The query parameter exists so something elsewhere can link *to* a particular
+ * map — the Dashboard's sky-coverage line points at "My map", which is
+ * otherwise a nav click plus a mode switch away. It is read once, as the
+ * *initial* mode only, and deliberately doesn't write `MODE_KEY`: following a
+ * link should show you that map without quietly rewriting the default you come
+ * back to. An unknown or absent value falls through, so an old bookmark and a
+ * hand-typed URL both behave.
+ */
+export function initialSkyMode(
+  asked: string | null, stored: string | null,
+): SkyMode {
+  if (asked && SKY_MODES.includes(asked as SkyMode)) return asked as SkyMode;
+  if (stored && SKY_MODES.includes(stored as SkyMode)) return stored as SkyMode;
+  return "online";
+}
 
 export function SkyView() {
   const navigate = useNavigate();
   const [selected, setSelected] = useState<SkyImage | null>(null);
+  const [params] = useSearchParams();
   const [mode, setMode] = useState<SkyMode>(
-    () => (localStorage.getItem(MODE_KEY) as SkyMode) || "online",
+    () => initialSkyMode(params.get("view"), localStorage.getItem(MODE_KEY)),
   );
   const sky = useQuery({ queryKey: ["sky"], queryFn: api.getSky });
 

@@ -2920,6 +2920,31 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         raise HTTPException(status_code=404, detail=f"No {kind} for this run")
     filename = f"{run.output_basename}{Path(path).suffix}"
     download = kind in ("fits", "tiff", "preview")
+    if kind == "preview" and north_up:
+        # Preview the North-up turn on the *stored* bytes, without a live render.
+        # History's Adjust panel needs this on a "Process target" run: there the
+        # picture on disk is a processed one, so swapping it for a render of the
+        # linear master just to show which way up it would be shows a picture
+        # neither Save button writes. Nothing on disk changes — the rotation is
+        # applied to a copy on the way out — so the bare URL every other surface
+        # embeds is byte-for-byte unchanged, and FITS/TIFF still never rotate.
+        from seestack.render.thumbnail import orient_preview_north_up
+
+        data = Path(path).read_bytes()
+        fits_path = run.fits_path
+        if fits_path and Path(fits_path).exists():
+            # A broken FITS just serves the stored bytes, un-turned — the same
+            # degrade the JPEG path takes for the same reason.
+            with contextlib.suppress(Exception):
+                data = orient_preview_north_up(
+                    data, fits_path, already_deg=baked_north_up_deg(run))
+        return Response(
+            content=data, media_type=media,
+            headers={
+                "Cache-Control": "no-cache",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
     # The preview PNG is regenerated *in place* (same path) by "Save as preview"
     # and the Process-target auto-edit, but every gallery/dashboard/compare
     # surface embeds it at the bare, unversioned URL. Without an explicit

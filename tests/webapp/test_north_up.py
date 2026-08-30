@@ -124,3 +124,82 @@ def test_render_north_up_noop_without_wcs(client, solved_library, tmp_path):
     rotated = client.get(
         f"/api/targets/{safe}/stack-runs/{run_id}/render?size=128&north_up=true")
     assert _png_size(plain.content) == _png_size(rotated.content)
+
+
+def _preview_path(data_root, safe: str, run_id: int) -> Path:
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    return Path(run.preview_path)
+
+
+def test_stored_preview_serves_north_up_without_rewriting_the_file(
+        client, solved_library):
+    """The stored preview PNG can be *served* North-up, on the fly.
+
+    History's Adjust panel needs this on a "Process target" run: the picture on
+    disk there is a processed one, so swapping it for a live render of the linear
+    master just to show which way up it would be shows a picture neither Save
+    button writes. Rotating the saved bytes on the way out lets the panel preview
+    the turn on the picture itself — and nothing on disk may move.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_wcs_run(solved_library, safe, rot_deg=30.0)
+    on_disk = _preview_path(solved_library, safe, run_id).read_bytes()
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/preview"
+    plain = client.get(url)
+    rotated = client.get(f"{url}?north_up=true")
+    assert plain.status_code == 200 and rotated.status_code == 200
+    assert rotated.headers["content-type"].startswith("image/png")
+    # The bare URL every other surface embeds is byte-for-byte what it always was.
+    assert plain.content == on_disk
+    # A 30° expand-rotate grows the canvas, so the turned preview is larger…
+    pw, ph = _png_size(plain.content)
+    rw, rh = _png_size(rotated.content)
+    assert rw > pw and rh > ph
+    # …and the file itself never moved.
+    assert _preview_path(solved_library, safe, run_id).read_bytes() == on_disk
+
+
+def test_stored_preview_north_up_is_a_noop_without_wcs(client, solved_library):
+    """No usable WCS → the saved bytes are served untouched, never an error."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        tdir = Path(lib.target_dir(lib.find_target(safe)))
+        cube = np.ones((3, 40, 40), np.float32)
+        fp = tdir / "nowcs_preview_turn.fits"
+        fits.PrimaryHDU(data=cube).writeto(fp, overwrite=True)
+        prev = tdir / "nowcs_preview_turn.png"
+        Image.new("RGB", (40, 30), (5, 5, 5)).save(prev)
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-03T00:00:00Z",
+                output_basename="nowcsturn", fits_path=str(fp), tiff_path=None,
+                preview_path=str(prev), n_frames_used=5,
+                canvas_h=30, canvas_w=40, coverage_min=1, coverage_max=5,
+                options_json="{}"))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/preview"
+    assert client.get(f"{url}?north_up=true").content == client.get(url).content
+
+
+def test_stored_fits_never_takes_the_north_up_turn(client, solved_library):
+    """Only the *picture* orients — the science artifacts stay WCS-aligned."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_wcs_run(solved_library, safe, rot_deg=30.0)
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/fits"
+    assert client.get(f"{url}?north_up=true").content == client.get(url).content
