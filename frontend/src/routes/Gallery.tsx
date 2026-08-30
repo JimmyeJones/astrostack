@@ -35,6 +35,9 @@ import {
 } from "../components/videoFraming";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { runSlideKey, showFromHref, videoSlideKey } from "../showAndTell";
+import {
+  NorthUpViewToggle, loadNorthUpView, saveNorthUpView,
+} from "../components/NorthUpViewToggle";
 
 export type GallerySort = "newest" | "cleanest";
 export type CalFilter = "all" | "calibrated" | "uncalibrated";
@@ -457,6 +460,28 @@ export function GalleryView() {
   const presets = useQuery({ queryKey: ["presets"], queryFn: api.listPresets });
   const [viewing, setViewing] = useState<GalleryItem | null>(null);
   const [viewingStill, setViewingStill] = useState<VideoStill | null>(null);
+  // "Show it the way every reference photo of this object is" — a *view*, not a
+  // save (see `NorthUpViewToggle`). One remembered preference across every
+  // surface that offers it, so turning it on here turns it on the Target page
+  // too; deliberately off by default.
+  const [northUp, setNorthUp] = useState(loadNorthUpView);
+  // The same annotations read the Target hero uses, and for the same reason: its
+  // `north_up_deg` is the one honest answer to "would turning this actually
+  // change anything?". Fetched only once a picture is open (and only when the
+  // run still has the FITS whose WCS the answer comes off), so browsing the
+  // gallery costs nothing extra — and it shares History's cache key.
+  const viewingAnnotations = useQuery({
+    queryKey: ["annotations", viewing?.safe, viewing?.run_id],
+    queryFn: () => api.stackAnnotations(viewing!.safe, viewing!.run_id),
+    enabled: !!viewing?.has_fits,
+    staleTime: 5 * 60_000,
+  });
+  // Offer the turn only where it would visibly do something: a real correction
+  // exists, and the stored bytes aren't already turned (a picture a past
+  // "Adjust → North up → Save" baked is North-up on disk).
+  const canNorthUp = typeof viewingAnnotations.data?.north_up_deg === "number"
+    && !viewing?.preview_north_up_deg;
+  const turned = northUp && canNorthUp;
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<GallerySort>("newest");
   const [calFilter, setCalFilter] = useState<CalFilter>("all");
@@ -684,20 +709,36 @@ export function GalleryView() {
         </SimpleGrid>
       )}
 
+      {/* Everything the viewer shows and hands over follows the turn — the
+          picture, the plain PNG, the JPEG behind Share and the full-res PNG — so
+          a picture you downloaded because you liked how it looked arrives that
+          way. The FITS deliberately does not: the raw data stays WCS-aligned,
+          exactly as the Target page's viewer has it. */}
       <ImageLightbox
-        src={viewing ? viewing.preview_url : null}
+        src={viewing
+          ? (turned ? api.stackPreviewNorthUpUrl(viewing.safe, viewing.run_id)
+                    : viewing.preview_url)
+          : null}
         title={viewing ? `${viewing.target_name} · ${viewing.output_basename}` : undefined}
         downloadHref={viewing?.has_preview
-          ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "preview") : undefined}
+          ? (turned ? api.stackPreviewNorthUpUrl(viewing.safe, viewing.run_id)
+                    : api.stackArtifactUrl(viewing.safe, viewing.run_id, "preview"))
+          : undefined}
         jpegHref={viewing?.has_preview
-          ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "jpeg") : undefined}
+          ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "jpeg", turned) : undefined}
         fullResHref={viewing?.has_fits
-          ? api.stackFullResPngUrl(viewing.safe, viewing.run_id) : undefined}
+          ? api.stackFullResPngUrl(viewing.safe, viewing.run_id, turned) : undefined}
         rawHref={viewing?.has_fits
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
         toolbarExtra={viewing?.has_preview
           ? (
             <Group gap={4} wrap="nowrap">
+              {canNorthUp ? (
+                <NorthUpViewToggle
+                  on={northUp}
+                  onChange={(on) => { setNorthUp(on); saveNorthUpView(on); }}
+                />
+              ) : null}
               {/* Same "show me this one" entry point as My best pictures, so the
                   slideshow can start on whatever you're looking at. */}
               <Tooltip label="Start the slideshow on this picture">
@@ -708,7 +749,8 @@ export function GalleryView() {
                   <IconPlayerPlay size={18} />
                 </ActionIcon>
               </Tooltip>
-              <WallpaperMenu safe={viewing.safe} runId={viewing.run_id} variant="subtle" />
+              <WallpaperMenu safe={viewing.safe} runId={viewing.run_id}
+                variant="subtle" canNorthUp={canNorthUp} />
             </Group>
           ) : undefined}
         {...(viewing?.has_preview

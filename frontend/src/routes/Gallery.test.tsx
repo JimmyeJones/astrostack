@@ -850,3 +850,75 @@ describe("Gallery card layout", () => {
     expect(name).toHaveAttribute("title", "Sample: Orion Nebula (M42)");
   });
 });
+
+describe("Gallery North-up view", () => {
+  function mockGallery(extra: Partial<GalleryItem> = {}) {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), has_preview: true, preview_url: "/p/1.png", ...extra }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+  }
+  function mockAnnotations(north_up_deg: number | null) {
+    return vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      objects: [], width: 100, height: 80, north_up_deg,
+    } as never);
+  }
+  async function openViewer() {
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+  }
+
+  afterEach(() => window.localStorage.clear());
+
+  it("turns the picture and everything it hands over, but never the raw FITS", async () => {
+    mockGallery();
+    mockAnnotations(31.5);
+    await openViewer();
+
+    fireEvent.click(await screen.findByTestId("north-up-view"));
+
+    const turned = "/api/targets/M_42/stack-runs/1/preview?north_up=true";
+    await waitFor(() =>
+      expect(screen.getByAltText("M_42 · m1")).toHaveAttribute("src", turned));
+    fireEvent.click(screen.getByLabelText("Download picture"));
+    expect((await screen.findByText("Full-res PNG (native size)")).closest("a"))
+      .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/full-res-png?north_up=true");
+    expect(screen.getByText("JPEG (smaller — best for sharing)").closest("a"))
+      .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/jpeg?north_up=true");
+    // The raw data stays WCS-aligned — turning it would misdescribe the file.
+    expect(screen.getByLabelText("Download raw data"))
+      .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/fits");
+  });
+
+  it("does not offer the turn where it would visibly do nothing", async () => {
+    // No usable correction: the annotations report `north_up_deg: null`.
+    mockGallery();
+    mockAnnotations(null);
+    await openViewer();
+    await screen.findByLabelText("Download picture");        // viewer is open
+    expect(screen.queryByTestId("north-up-view")).toBeNull();
+  });
+
+  it("does not offer the turn on a picture already saved North up", async () => {
+    // The stored bytes are turned already, so asking the server to turn them
+    // again is the no-op it correctly refuses.
+    mockGallery({ preview_north_up_deg: 90 });
+    mockAnnotations(90);
+    await openViewer();
+    await screen.findByLabelText("Download picture");
+    expect(screen.queryByTestId("north-up-view")).toBeNull();
+  });
+
+  it("starts from the viewer's remembered preference, shared with the Target page", async () => {
+    window.localStorage.setItem("astrostack.northUpView", "1");
+    mockGallery();
+    mockAnnotations(31.5);
+    await openViewer();
+
+    await waitFor(() => expect(screen.getByAltText("M_42 · m1"))
+      .toHaveAttribute("src", "/api/targets/M_42/stack-runs/1/preview?north_up=true"));
+    expect(screen.getByTestId("north-up-view")).toHaveAttribute("aria-pressed", "true");
+  });
+});
