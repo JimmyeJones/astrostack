@@ -2271,19 +2271,23 @@ export const api = {
   stackArtifactUrl: (
     safe: string, id: number, kind: "preview" | "jpeg" | "fits" | "tiff",
     northUp = false, nameplate = false, keepsake = false, scale = false,
+    labelObjects = false,
   ) => {
     const base = `/api/targets/${safe}/stack-runs/${id}/${kind}`;
     if (kind !== "jpeg") return base;
     // Only the share-friendly JPEG honours north_up (rotate so North is up),
     // nameplate (bake the acquisition-data caption over the picture), keepsake
     // (mat the picture on a dark card with its name and acquisition data set
-    // beneath it, for printing or posting) and scale (draw the angular scale bar
-    // and the North/East compass onto the picture, from the run's own solve).
+    // beneath it, for printing or posting), scale (draw the angular scale bar
+    // and the North/East compass onto the picture, from the run's own solve) and
+    // label_objects (draw the named catalog objects in the field — the same pins
+    // the "What's in it?" overlay shows, baked in so they travel with the file).
     const params: string[] = [];
     if (northUp) params.push("north_up=true");
     if (nameplate) params.push("nameplate=true");
     if (keepsake) params.push("keepsake=true");
     if (scale) params.push("scale=true");
+    if (labelObjects) params.push("label_objects=true");
     return params.length ? `${base}?${params.join("&")}` : base;
   },
   // The run's *stored* preview PNG, turned so celestial North is up — the saved
