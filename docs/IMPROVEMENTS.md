@@ -9741,6 +9741,69 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **⭐ QA LEAD (Builder 2026-08-30, the ⭐ "normalises against its own subset" lead's *unswept* axis, now with a
+  named candidate and a mechanism) — the Auto preset picker's four scene fractions are thresholded above a
+  **noise-aware** floor, so they are a monotone function of how deep the stack is.** *(Pillar: image quality +
+  trust — PRIORITY 2–4; size M — one measurement session, then a fix only if it moves. Confidence: mechanism
+  read, **not** measured. Filed as a lead, not a bug.)* The lead's own list named "the auto-grade / auto-edit
+  strength pickers that read a fraction of *affected* pixels" as the half a `np.percentile` grep cannot see.
+  This is that half, and the site is `seestack/edit/presets.py::classify_scene`.
+
+  **The mechanism.** It normalises the frame to its own 0.5/99.5 percentiles, measures the sky and the sky's
+  MAD, and calls anything above `thr = sky + max(0.06, 6·sky_sigma)` "signal". Every downstream cue —
+  `sig_frac`, `ext_frac`, `pt_frac`, `star_share` — is a *count of pixels above that threshold*, and
+  `sky_sigma` falls as 1/√N. So on a shallow stack `thr` is set by the noise term and only bright structure
+  clears it; on the owner's 500-sub stack the 0.06 floor takes over and faint nebulosity that was under the
+  noise now counts as extended signal. `ext_frac` therefore **grows with depth on the same sky**, and it is
+  compared against hard constants (`≤ 0.012` → cluster, `≥ 0.06` → nebula, `0.004…0.05` → galaxy). A galaxy
+  that classifies as a galaxy at 16 subs can cross into "nebula" at 300 — and the class picks the **preset the
+  one-click Auto edit applies**, so this is a picture-changing decision, not a chip.
+
+  **Do it the lead's way, and measure before touching anything.** Stack one synthetic scene at 16 / 64 / 300
+  subs, print `cues` at each depth, and look for monotonicity — exactly the method that found the tint bug and
+  (independently, on `main`) the seam-residual bug, which is now **two confirmed instances of this class in two
+  days**. **Care, and why this is filed rather than fixed:** the thresholds are on the on-by-default hot path,
+  and AGENTS.md §1 forbids a blind flip. If it does move, the honest fix is the same shape both confirmed
+  instances took — make the *threshold* depth-invariant (the 0.06 floor already is; it is the `6·sky_sigma`
+  term and the percentile normalisation that are not) rather than re-tuning the constants against one scene.
+
+- **NEW IDEA (Builder 2026-08-30, the obvious next tap on the per-run night count v0.317.0) — say "over 4
+  nights" where a person is *looking at* the picture, not only where they copy a caption.** *(Pillar:
+  understand + enjoy — PRIORITY 3; size XS–S; purely additive on machinery that now exists.)* `capture_nights`
+  is on `/api/targets/{safe}/stack-runs`, `/api/stats` and `/api/gallery` already, and today only the
+  ready-to-post caption and the baked nameplate read it. The obvious surfaces are History's run card and the
+  Target hero caption, both of which currently show a date range and stop. **Do not just append it** — the
+  owner's standing "extremely busy" priority means this should *replace* something in those lines rather than
+  become one more fact, e.g. "Shot over 4 nights, 15–18 Nov 2024" as one clause. **Grep before building:** the
+  per-target Nights card counts nights *for a target*; this is per **run**, and the two legitimately differ the
+  moment anyone re-stacks a subset — a surface showing both at once needs to say which is which.
+
+- **⚠️ PROCESS NOTE (Builder 2026-08-30, the reason the v0.317.1 bug survived a whole sweep of its own class)
+  — a comment that asserts agreement with a *sibling* is a drift hazard, and a test that freezes the current
+  behaviour turns it into a permanent one.** The two Target-page share calls carried the comment *"the same
+  date `LatestPictureCard`'s share text uses for the same picture"*. It was true when written. When that card
+  was fixed the comment stayed, and now read as a reassurance that the site had already been handled — so a
+  sweep that greps for the *bug* finds a site that documents itself as correct. Compounding it,
+  `Target.test.tsx` asserted the caption equalled `sharePictureText("M42", formatStampDate(stamp))`, i.e. it
+  pinned the wrong stamp precisely. **The lesson worth generalising:** where two call sites must agree, make
+  them agree *by construction* — one shared value (the page now computes `captureLabel` once) or a type
+  (v0.317.2) — never by a comment naming the other one. And when a sweep of a class leaves a site untouched,
+  check whether a *test* is asserting the old behaviour there; that is what makes a missed site invisible
+  rather than merely unfixed.
+
+- **⚪ DOGFOOD BASELINE (Builder 2026-08-30, `scripts/agent-dogfood.sh`, recorded so the next IA slice has
+  numbers rather than an impression) — nothing overflows and nothing errors; the tallest page is now the
+  Target page.** Full-page scroll heights on a booted app with the bundled sample loaded and processed:
+  **phone** `/targets/<t>` 3035 px · `/life-list` 3008 px · `/targets/<t>/edit/1` 2775 px · `/` 1813 px ·
+  `/targets/<t>/stack` 1712 px; **desktop** `/targets/<t>` 2010 px · `/targets/<t>/edit/1` 1767 px ·
+  `/life-list` 1453 px. The probe reports **no horizontal overflow on any page and no console errors**. For
+  scale: the life list was **14,584 px** on a phone before v0.307.0 and Settings was 5,827 px before v0.266.0,
+  so the five named IA slices plus those two have taken the app's worst page from ~24 phone screens to ~5.
+  **What this says about "don't start Library/Editor speculatively":** it still holds — neither is the wall.
+  The Target page is the tallest thing left, and it is tall because it is genuinely the page with the most on
+  it, not because anything is stacked badly. One real friction *was* found on it this run and is fixed
+  (v0.317.1); nothing else in the screenshots reads as a layout problem.
+
 - **✅ SHIPPED (Builder, v0.317.0, branch `claude/compassionate-galileo-7y6nlj`) — ~~a picture could name the
   first and last night it was shot on, but never how many *nights* it took.~~ It can now say "over 4 nights".**
 
