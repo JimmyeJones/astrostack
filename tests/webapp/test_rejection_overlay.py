@@ -301,3 +301,26 @@ def test_the_bare_overlay_url_is_unchanged_by_the_new_parameter(client, solved_l
     run_id, _f, _p = _make_run(solved_library, safe)
     base = f"/api/targets/{safe}/stack-runs/{run_id}/rejection-overlay"
     assert client.get(base).content == client.get(f"{base}?north_up=false").content
+
+
+def test_the_gallery_listing_says_which_runs_have_a_map(client, solved_library):
+    """The full-screen viewer the Gallery opens decides whether to offer the tint
+    from the listing row it already drew the card from — the same one stat() the
+    run listing does, so the two surfaces can't disagree about one run, and
+    opening a picture costs no extra request."""
+    safe = _safe(client)
+    with_id, _f, _p = _make_run(solved_library, safe)
+    rows = {it["run_id"]: it for it in client.get("/api/gallery").json()["items"]}
+    assert rows[with_id]["has_rejection_map"] is True
+
+    # …and it agrees with the answer the History card reads, on the same run.
+    runs = {r["id"]: r for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
+    assert runs[with_id]["has_rejection_map"] is True
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        (lib.target_dir(lib.find_target(safe)) / "rej_rejected.fits").unlink()
+    finally:
+        lib.close()
+    rows = {it["run_id"]: it for it in client.get("/api/gallery").json()["items"]}
+    assert rows[with_id]["has_rejection_map"] is False
