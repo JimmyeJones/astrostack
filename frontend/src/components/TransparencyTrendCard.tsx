@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import {
   describeTransparencyTrend,
-  panelLevellingNote,
+  mosaicPanelsNote,
   sparklinePoints,
   transparencyVerdictBadge,
 } from "./transparencyTrend";
@@ -35,7 +35,8 @@ export function TransparencyTrendCard({ safe }: { safe: string }) {
   const scores = t.points.map((p) => p.transparency);
   const poly = sparklinePoints(scores, SPARK_W, SPARK_H);
   const badge = transparencyVerdictBadge(t.verdict);
-  const panelNote = panelLevellingNote(t);
+  // Empty (and so not rendered at all) on the ordinary single-pointing target.
+  const panels = mosaicPanelsNote(t);
 
   return (
     <Paper withBorder p="sm" radius="md" mt="xs">
@@ -75,7 +76,7 @@ export function TransparencyTrendCard({ safe }: { safe: string }) {
             </Group>
           </Box>
           <Text size="xs" c="dimmed">{describeTransparencyTrend(t)}</Text>
-          {panelNote && <Text size="xs" c="dimmed">{panelNote}</Text>}
+          {panels ? <Text size="xs" c="dimmed">{panels}</Text> : null}
         </Stack>
       </Group>
     </Paper>

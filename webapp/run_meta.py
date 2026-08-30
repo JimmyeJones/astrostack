@@ -31,6 +31,7 @@ def per_run_meta_prefixes() -> tuple[str, ...]:
         CALIBRATION_WARNINGS_META_PREFIX,
     )
     from webapp.routers.editor import (
+        AUTO_EDIT_BAKED_LOOK_PREFIX,
         AUTO_EDIT_COLORCAL_PREFIX,
         AUTO_EDIT_NOTE_PREFIX,
         AUTO_EDIT_SKYCAST_PREFIX,
@@ -45,6 +46,7 @@ def per_run_meta_prefixes() -> tuple[str, ...]:
         AUTO_EDIT_NOTE_PREFIX,
         AUTO_EDIT_SKYCAST_PREFIX,
         AUTO_EDIT_COLORCAL_PREFIX,
+        AUTO_EDIT_BAKED_LOOK_PREFIX,
         CALIBRATION_SKIPPED_META_PREFIX,
         CALIBRATION_WARNINGS_META_PREFIX,
         NOISE_RATIO_META_PREFIX,

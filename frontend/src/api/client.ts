@@ -603,10 +603,12 @@ export interface TransparencyTrend {
   start_utc: string | null;
   end_utc: string | null;
   degraded_after_utc: string | null;
-  // Mosaic panels levelled out of the line before trending (0 = a single field,
-  // i.e. the raw scores). A panel's star field is not the weather. Optional so
-  // an older backend simply reads as 0.
-  n_panels_levelled?: number;
+  // How many mosaic panels this night's subs split into (0, or absent from an
+  // older backend, for the ordinary single-pointing target). A mosaic's panels
+  // are different patches of sky, so their star flux differs by pointing rather
+  // than by weather — non-zero means the scores above were levelled panel by
+  // panel before the verdict was taken.
+  n_pointings?: number;
 }
 
 export interface LibrarySessionRecap {

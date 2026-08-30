@@ -797,7 +797,7 @@ def target_transparency_trend(safe: str, request: Request) -> TransparencyTrendO
         start_utc=trend.start_utc,
         end_utc=trend.end_utc,
         degraded_after_utc=trend.degraded_after_utc,
-        n_panels_levelled=trend.n_panels_levelled,
+        n_pointings=trend.n_pointings,
     )
 
 

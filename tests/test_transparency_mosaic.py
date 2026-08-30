@@ -1,20 +1,19 @@
 """A mosaic's panels are different star fields, not different skies.
 
 ``transparency_score`` is the median flux of a frame's *brightest stars*, so it
-is a property of where the scope pointed as much as of the sky. Two places read
-it across a whole target and so turned "we moved to a sparser panel" into a
-weather claim on a perfectly clear night:
+is a property of where the scope pointed as much as of the sky. The per-run
+``transparency_ratio`` behind the **"Hazy night"** badge compared it against a
+target-wide ``p90`` baseline — which on a mosaic is set by whichever panel has
+the richest star field, so every other panel read as haze and a perfectly clear
+mosaic was stamped "Hazy night" on History, Gallery and Compare.
 
-  * the per-run ``transparency_ratio`` behind the **"Hazy night"** badge, and
-  * the **"Clouds & haze"** card's session trend.
-
-Both now split by mosaic panel through the shared ``pointing_groups`` gate, and
-both fall back to exactly their old target-wide behaviour when the pointings
-don't split soundly.
+It now splits by mosaic panel through the shared ``pointing_groups`` gate, and
+falls back to exactly the old target-wide behaviour when the pointings don't
+split soundly. (The sibling site on the same metric — the "Clouds & haze" card's
+session trend — is fixed and covered in ``tests/test_session_recap.py``.)
 """
 
 from seestack.io.project import FrameRow, Project
-from seestack.session_recap import transparency_trend
 from seestack.stack.stacker import _compute_transparency_ratio
 
 # Three mosaic panels, 1° apart — well beyond the 0.25° panel link distance, and
@@ -25,46 +24,26 @@ PANELS = [(10.0, 20.0), (11.0, 20.0), (12.0, 20.0)]
 FIELD = [10000.0, 5000.0, 4000.0]
 
 
-def _add(proj, name, *, ra, dec, transp, t_utc=None, accept=True):
+def _add(proj, name, *, ra, dec, transp, accept=True):
     fid = proj.add_frame(FrameRow(
-        id=None, source_path=name, accept=accept, timestamp_utc=t_utc,
+        id=None, source_path=name, accept=accept,
         ra_center_deg=ra, dec_center_deg=dec, transparency_score=transp,
     ))
     return proj.get_frame(fid)
 
 
-def _clock(start_hour=20):
-    """Successive capture times, five minutes apart."""
-    minute = 0
-    hour = start_hour
-    while True:
-        yield f"2026-07-10T{hour:02d}:{minute:02d}:00+00:00"
-        minute += 5
-        if minute >= 60:
-            minute -= 60
-            hour += 1
+def _mosaic_night(proj, *, dim=1.0, tag="a", per_panel=6):
+    """One mosaic night: ``per_panel`` subs on each of the three panels.
 
-
-def _mosaic_night(proj, *, dim=1.0, tag="a", per_panel=6, times=None, interleave=False):
-    """One clear mosaic night: ``per_panel`` subs on each of the three panels.
-
-    ``dim`` multiplies every score (a night shot through haze dims all panels
-    equally). ``interleave`` cycles the panels the way a Seestar revisits them,
-    rather than shooting each to completion.
+    ``dim`` multiplies every score — a night shot through haze dims all panels
+    equally, which is what a *real* hazy run looks like.
     """
-    order = (
-        [(k, p) for k in range(per_panel) for p in range(len(PANELS))]
-        if interleave else
-        [(k, p) for p in range(len(PANELS)) for k in range(per_panel)]
-    )
-    out = []
-    for k, p in order:
-        ra, dec = PANELS[p]
-        out.append(_add(
-            proj, f"{tag}_p{p}_{k}.fit", ra=ra, dec=dec,
-            transp=FIELD[p] * dim + k, t_utc=next(times) if times else None,
-        ))
-    return out
+    return [
+        _add(proj, f"{tag}_p{p}_{k}.fit", ra=PANELS[p][0], dec=PANELS[p][1],
+             transp=FIELD[p] * dim + k)
+        for p in range(len(PANELS))
+        for k in range(per_panel)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -141,68 +120,5 @@ def test_an_unsolved_target_keeps_the_target_wide_baseline(tmp_path):
         ratio = _compute_transparency_ratio(proj, run)
         assert ratio is not None
         assert 0.95 <= ratio <= 1.05
-    finally:
-        proj.close()
-
-
-# ---------------------------------------------------------------------------
-# The "Clouds & haze" card (session transparency trend)
-# ---------------------------------------------------------------------------
-
-def test_a_clear_mosaic_night_is_not_clouds_rolling_in(tmp_path):
-    """Before the fix a panel-by-panel mosaic read "degraded" (early 10025 vs
-    late 4025) under a perfectly steady sky."""
-    proj = Project.create(tmp_path / "p", name="t")
-    try:
-        _mosaic_night(proj, times=_clock())
-        trend = transparency_trend(proj)
-        assert trend is not None
-        assert trend.verdict == "clear", (
-            f"{trend.verdict}: early {trend.early_transparency} "
-            f"late {trend.late_transparency}"
-        )
-        assert trend.n_panels_levelled == 3
-        assert trend.degraded_after_utc is None
-    finally:
-        proj.close()
-
-
-def test_haze_rolling_in_across_a_mosaic_still_reads_degraded(tmp_path):
-    """Levelling the panels must not blind the card to the real thing. A Seestar
-    revisits its panels through the night, so a sky that closes in shows up
-    *inside* every panel — which survives levelling."""
-    proj = Project.create(tmp_path / "p", name="t")
-    try:
-        times = _clock()
-        # Six passes over three panels; the sky fades steadily from 1.0 to 0.4.
-        for k in range(6):
-            dim = 1.0 - 0.12 * k
-            for p, (ra, dec) in enumerate(PANELS):
-                _add(proj, f"m{k}_{p}.fit", ra=ra, dec=dec,
-                     transp=FIELD[p] * dim, t_utc=next(times))
-        trend = transparency_trend(proj)
-        assert trend is not None
-        assert trend.n_panels_levelled == 3
-        assert trend.verdict == "degraded"
-        assert trend.degraded_after_utc is not None
-    finally:
-        proj.close()
-
-
-def test_a_single_field_night_is_untouched(tmp_path):
-    """No sound panel split → the plotted points are the raw scores, as before."""
-    proj = Project.create(tmp_path / "p", name="t")
-    try:
-        times = _clock()
-        ra, dec = PANELS[0]
-        raw = [10000, 9800, 9600, 5000, 4800, 4600]
-        for i, s in enumerate(raw):
-            _add(proj, f"s{i}.fit", ra=ra, dec=dec, transp=float(s),
-                 t_utc=next(times))
-        trend = transparency_trend(proj)
-        assert trend is not None
-        assert trend.n_panels_levelled == 0
-        assert [p.transparency for p in trend.points] == [float(s) for s in raw]
-        assert trend.verdict == "degraded"
     finally:
         proj.close()
