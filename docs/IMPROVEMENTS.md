@@ -9883,16 +9883,53 @@ to **Shipped**.)_
   two-key set re-queries the estimate once or twice before wiring it, or the panel will flicker between two
   verdicts.
 
-- **NEW IDEA (Builder 2026-08-30, the obvious next tap on the per-run night count v0.317.0) — say "over 4
-  nights" where a person is *looking at* the picture, not only where they copy a caption.** *(Pillar:
-  understand + enjoy — PRIORITY 3; size XS–S; purely additive on machinery that now exists.)* `capture_nights`
-  is on `/api/targets/{safe}/stack-runs`, `/api/stats` and `/api/gallery` already, and today only the
-  ready-to-post caption and the baked nameplate read it. The obvious surfaces are History's run card and the
-  Target hero caption, both of which currently show a date range and stop. **Do not just append it** — the
-  owner's standing "extremely busy" priority means this should *replace* something in those lines rather than
-  become one more fact, e.g. "Shot over 4 nights, 15–18 Nov 2024" as one clause. **Grep before building:** the
-  per-target Nights card counts nights *for a target*; this is per **run**, and the two legitimately differ the
-  moment anyone re-stacks a subset — a surface showing both at once needs to say which is which.
+- ~~**NEW IDEA (Builder 2026-08-30, the obvious next tap on the per-run night count v0.317.0) — say "over 4
+  nights" where a person is *looking at* the picture, not only where they copy a caption.**~~ —
+  **SHIPPED v0.319.0** (Builder 2026-08-30, branch `claude/compassionate-galileo-go263h`). *(Pillar:
+  understand + enjoy — PRIORITY 3.)*
+
+  **One helper, three surfaces, no new line anywhere.** The entry's "do not just append it" is the whole design:
+  the count is folded *inside* the date clause every one of these lines already carried, so each grows by three
+  words rather than gaining a fourth `·` segment. `pictureDateLabel` — the app's single "one-line date under a
+  picture" formatter — takes an optional `captureNights` and renders **"Shot over 4 nights, 15–18 Nov 2024"**.
+  That one change lit up all three places a person is *looking at* a picture rather than copying a caption: the
+  **Target hero** (`latestPictureCaption`), the **Dashboard's** newest-pictures grid, and the **Show & Tell
+  slideshow's** acquisition line — which is arguably the best of the three, since it is the surface someone
+  actually shows to another person.
+
+  **The rule about when a count may be spoken is now one function, not two copies.** `nightCountPhrase` holds
+  all four conditions (recorded, integral, >1, and a window that really spans more than one night) and *both*
+  `captureNightsClause` and `pictureDateLabel` call it — so the caption and the picture line agree **by
+  construction**. That is deliberately the shape the ⚠️ process note directly below this entry asks for: the
+  v0.317.1 bug survived a sweep precisely because two sites that had to match were kept in step by a *comment*
+  naming the other one. A test asserts the two surfaces quote the count on exactly the same inputs.
+
+  **What it deliberately does not touch:** `formatCaptureNights`, which produces the `CaptureLabel` branded type
+  behind share filenames and titles — a filename is not a place for "over 4 nights". The count therefore appears
+  only on lines a person reads, never in a name.
+
+  **Grepped as the entry demanded:** the per-target **Nights** card counts nights *for a target* and this is per
+  **run**; no surface changed here shows both, so nothing has to disambiguate them.
+
+  **Upgrade-safe (§9):** frontend-only, one optional trailing parameter, no engine/API/schema/config/default
+  change. A run from before schema 19 carries no `capture_nights` and reads exactly as it did.
+
+  **Tests (+6):** `format.test.ts` (+3 — the phrase inside the clause, the silence on every unbelievable count
+  and on a single-night window, and the agrees-with-the-caption-clause pin), `LatestPictureCard.test.tsx` (+2 —
+  the hero line, asserting it still has exactly three `·` segments; and quiet on a pre-schema-19 run),
+  `showAndTell.test.ts` (+1 — the slideshow line). tsc + vitest 2543 + vite build green.
+
+  Original spec, for the record:
+
+    *(Pillar: understand + enjoy — PRIORITY 3; size XS–S; purely additive on
+    machinery that now exists.)* `capture_nights` is on
+    `/api/targets/{safe}/stack-runs`, `/api/stats` and `/api/gallery` already, and today only the
+    ready-to-post caption and the baked nameplate read it. The obvious surfaces are History's run card and the
+    Target hero caption, both of which currently show a date range and stop. **Do not just append it** — the
+    owner's standing "extremely busy" priority means this should *replace* something in those lines rather than
+    become one more fact, e.g. "Shot over 4 nights, 15–18 Nov 2024" as one clause. **Grep before building:** the
+    per-target Nights card counts nights *for a target*; this is per **run**, and the two legitimately differ the
+    moment anyone re-stacks a subset — a surface showing both at once needs to say which is which.
 
 - **⚠️ PROCESS NOTE (Builder 2026-08-30, the reason the v0.317.1 bug survived a whole sweep of its own class)
   — a comment that asserts agreement with a *sibling* is a drift hazard, and a test that freezes the current
