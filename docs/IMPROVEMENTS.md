@@ -9622,21 +9622,57 @@ to **Shipped**.)_
     **geometry** (cropped/rotated vs the stored canvas). Where a claim is worth keeping true, pin it with a test
     that reads the served bytes rather than the string — `tests/webapp/test_north_up.py` is the shape.
 
-- **NEW IDEA (Builder 2026-08-30, the colour-space half the v0.309.1 sweep found and left) — the TIFF
-  download says nothing at all, and a plain stack's TIFF opens looking black.** *(Pillar: trust /
-  friendliness — PRIORITY 3; size S.)* Every other item on History's artifact menu carries a dimmed hint
-  saying what the file is; **TIFF is the one with none**, and it is the one that most needs it.
-  `_write_tiff` writes `mode="linear"` for an ordinary stack (`StackOptions.tiff_mode` defaults to
-  `"linear"`), so a beginner who picks the biggest-sounding file gets 16 bits of *linear* data that opens
-  near-black in any ordinary viewer and reads as a broken download. **But the honest sentence is not one
-  sentence:** the same menu item serves an *editor export*, whose TIFF is written `already_display=True`,
-  i.e. the finished display-space picture, which opens correctly. So the copy has to know which. **Do not
-  guess it in the frontend** — the server already owns this decision as `_run_display_space(run)`
-  (`webapp/routers/editor.py`), reading the FITS's `DISPLAY_SPACE_CARD`. The clean shape is one additive
-  boolean on the run listing (`display_space`) driving two hints: "16-bit, full depth — the finished picture"
-  vs "16-bit raw levels — opens dark until you stretch it; for another app, not for viewing". **Check first**
-  whether the card is reliable on an in-place-upgraded install's older runs; if it can't be answered, say the
-  weaker true thing rather than the wrong specific one.
+- **✅ SHIPPED (Builder, v0.309.2, branch `claude/compassionate-galileo-x2nj2o`) — ~~the TIFF download says
+  nothing at all, and a plain stack's TIFF opens looking black.~~** The colour-space axis of the sweep above,
+  closed in the same run that found it. *(Pillar: trust / friendliness — PRIORITY 3.)*
+
+  **What shipped.** The TIFF item on History's artifact menu was the only download there with no hint, and the
+  one most likely to look broken: it now says **"16-bit raw levels — opens dark until you stretch it in another
+  app"** on an ordinary stack, and **"16-bit — the finished picture, at full depth"** on an editor export.
+
+  **No new API field was needed, and no guess was made.** The filed direction was an additive `display_space`
+  boolean on the run listing; it turns out the run already carries the fact — `options_json`'s
+  `display_space: true` is written by the editor export in the *same* `write_stack_outputs` call that passes
+  `already_display=True`, so the flag and the file cannot disagree, and it is the very key the server's own
+  `_run_display_space` reads. `StackRun.options` is already on the wire (the Gallery's `combineMethodKey`
+  reads it the same way), so `frontend/src/tiffDownload.ts` is a pure function over facts already present.
+  It also covers the stacker's *other* non-dark mode, `tiff_mode: "autostretch"`, which the filed shape would
+  have missed.
+
+  **The filed caution — "check whether it's reliable on an older run" — was answered by grep, not assumed:**
+  exactly one site writes a display-space TIFF (`webapp/pipeline.py`'s editor export), and it is the same site
+  that writes the flag, so there is no run that has one without the other. A run with missing or unparseable
+  options falls through to the warning, which is the safe default: warning about a picture that turns out fine
+  costs nothing, staying silent about a linear one costs the whole download.
+
+  **Upgrade-safe (§9):** frontend-only, reading a field already served. No config, schema, on-disk, default or
+  API change.
+
+  **Tests (+7), and the claim is pinned to the bytes, not the string.** `tests/test_tiff_opens_dark.py` writes
+  real stack outputs and measures how bright the TIFF actually opens: a linear stack lands under 2 % of full
+  scale, an `already_display=True` export above 35 %, and `autostretch` more than 3× its linear sibling. Its
+  fixture is deliberately a *star field* rather than one lone star — the linear packer maps the robust
+  0.5–99.9 percentile range onto 0–65535, so with a single star the 99.9th percentile sits down in the
+  nebulosity and the file comes out mid-grey, which no real stack ever does; that near-miss is written into the
+  fixture's docstring so nobody simplifies it back. Plus `tiffDownload.test.ts` (5, including the falsy and
+  non-boolean flags) and two on History that the warning appears for a plain stack and does not for an export.
+
+  Original spec, for the record:
+
+    *(Pillar: trust /
+    friendliness — PRIORITY 3; size S.)* Every other item on History's artifact menu carries a dimmed hint
+    saying what the file is; **TIFF is the one with none**, and it is the one that most needs it.
+    `_write_tiff` writes `mode="linear"` for an ordinary stack (`StackOptions.tiff_mode` defaults to
+    `"linear"`), so a beginner who picks the biggest-sounding file gets 16 bits of *linear* data that opens
+    near-black in any ordinary viewer and reads as a broken download. **But the honest sentence is not one
+    sentence:** the same menu item serves an *editor export*, whose TIFF is written `already_display=True`,
+    i.e. the finished display-space picture, which opens correctly. So the copy has to know which. **Do not
+    guess it in the frontend** — the server already owns this decision as `_run_display_space(run)`
+    (`webapp/routers/editor.py`), reading the FITS's `DISPLAY_SPACE_CARD`. The clean shape is one additive
+    boolean on the run listing (`display_space`) driving two hints: "16-bit, full depth — the finished picture"
+    vs "16-bit raw levels — opens dark until you stretch it; for another app, not for viewing". **Check first**
+    whether the card is reliable on an in-place-upgraded install's older runs; if it can't be answered, say the
+    weaker true thing rather than the wrong specific one.
 
 - **NEW IDEA (Builder 2026-08-30, the one thing v0.306.2 had to switch off) — the "see what stacking removed"
   tint can't be shown over a North-up view, and the same trick that turns the picture would turn the tint.**

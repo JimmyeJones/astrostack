@@ -37,6 +37,7 @@ import { SampleTourNote } from "../components/SampleTourNote";
 import { WallpaperMenuItems } from "../components/WallpaperMenu";
 import { sharePictureText } from "../share";
 import { fullResPngHint } from "../fullres";
+import { tiffDownloadHint } from "../tiffDownload";
 import { Sparkline } from "../components/Sparkline";
 import { DownloadMenuItem } from "../components/DownloadMenuItem";
 
@@ -1343,6 +1344,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                     component="a" href={api.stackArtifactUrl(safe, run.id, "tiff")}
                   >
                     TIFF
+                    <span style={MENU_HINT}>{tiffDownloadHint(run.options)}</span>
                   </Menu.Item>
                 )}
                 {run.has_preview && (

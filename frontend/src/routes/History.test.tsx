@@ -602,6 +602,35 @@ describe("HistoryView", () => {
     expect(screen.getByText("Same look, full size (1080×1920 px)")).toBeInTheDocument();
   });
 
+  it("warns that a plain stack's TIFF opens dark, and doesn't on an editor export", async () => {
+    // The one download on this menu with nothing said about it, and the one most
+    // likely to look broken: an ordinary stack's TIFF is linear.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, has_tiff: true, options: {} }),
+    ]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    await menuItem("TIFF");
+    expect(screen.getByText(/opens dark until you stretch it/)).toBeInTheDocument();
+  });
+
+  it("calls an editor export's TIFF the finished picture, because it is", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({
+        has_preview: true, has_tiff: true,
+        options: { editor_recipe: { ops: [] }, display_space: true },
+      }),
+    ]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    await menuItem("TIFF");
+    expect(screen.getByText("16-bit — the finished picture, at full depth"))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/opens dark/)).not.toBeInTheDocument();
+  });
+
   it("does not offer a picture download when the run has no preview", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: false })]);
     renderHistory();
