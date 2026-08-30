@@ -269,3 +269,117 @@ def test_full_res_png_of_an_unadjusted_run_is_unchanged(client, solved_library):
     r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
     assert r.status_code == 200
     assert r.content == render_preview_png_full_res(fits_path)
+
+
+def _add_north_up_saved_run(data_root, safe: str, *, w: int, h: int,
+                            rot_deg: float = 30.0) -> int:
+    """A run as History's "Adjust → North up → Save" leaves one: a canvas-grid
+    master, a stored preview rendered *turned*, and the angle recorded on the row.
+    """
+    from astropy.wcs import WCS
+
+    from seestack.render.thumbnail import (
+        applied_north_up_deg,
+        render_preview_png_full_res,
+    )
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        tdir = lib.target_dir(lib.find_target(safe))
+        rng = np.random.default_rng(3)
+        cube = (rng.random((3, h, w), dtype=np.float32) * 200.0)
+        wcs = WCS(naxis=2)
+        wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+        wcs.wcs.crpix = [w / 2 + 0.5, h / 2 + 0.5]
+        wcs.wcs.crval = [150.0, 20.0]
+        th = np.radians(rot_deg)
+        ct, st = float(np.cos(th)), float(np.sin(th))
+        s = 0.001
+        wcs.wcs.cd = [[-s * ct, s * st], [s * st, s * ct]]
+        fits_path = tdir / f"turned_{w}x{h}.fits"
+        fits.PrimaryHDU(data=cube, header=wcs.to_header()).writeto(
+            fits_path, overwrite=True)
+        preview_path = tdir / f"turned_{w}x{h}_preview.png"
+        preview_path.write_bytes(render_preview_png_full_res(
+            fits_path, max_long_edge=1024, north_up=True))
+
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="turned", fits_path=str(fits_path), tiff_path=None,
+                preview_path=str(preview_path), n_frames_used=5,
+                canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=5,
+                options_json="{}",
+            ))
+            # What the save records: the turn it just baked into those bytes.
+            proj.set_stack_preview_north_up(run_id, applied_north_up_deg(fits_path))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        return run_id
+    finally:
+        lib.close()
+
+
+def test_full_res_png_follows_a_preview_that_was_saved_north_up(
+        client, solved_library):
+    """The regression: this render starts from the *canvas-grid* FITS, while every
+    other surface shows the stored preview — so on a run whose preview a past
+    "Adjust → North up → Save" turned, the "Full-res PNG (native size)" download
+    came back rotated away from the picture it claims to be (measured: a 1600×1200
+    master saved North-up shows as 1024×948 on screen and downloaded as 1600×1200,
+    i.e. a 30° different picture)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_north_up_saved_run(solved_library, safe, w=1600, h=1200)
+
+    shown = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/preview")
+    assert shown.status_code == 200
+    with Image.open(io.BytesIO(shown.content)) as im:
+        shown_aspect = im.width / im.height
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    assert r.status_code == 200
+    with Image.open(io.BytesIO(r.content)) as im:
+        got_w, got_h = im.size
+    # Same picture, just bigger: the expand-rotate's aspect, not the canvas's.
+    assert abs(got_w / got_h - shown_aspect) < 0.01
+    assert abs(got_w / got_h - 1600 / 1200) > 0.1     # and *not* the canvas grid
+    assert max(got_w, got_h) > 1600                   # grown by the rotation
+
+
+def test_asking_for_north_up_on_an_already_turned_run_is_the_same_picture(
+        client, solved_library):
+    """`?north_up=true` and the bare URL both mean "the run's own full North-up
+    correction" on such a run — one turn, not two."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_north_up_saved_run(solved_library, safe, w=1600, h=1200)
+
+    plain = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    asked = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png?north_up=true")
+    assert plain.status_code == 200 and asked.status_code == 200
+    assert plain.content == asked.content
+
+
+def test_full_res_png_of_an_unturned_run_is_untouched(client, solved_library):
+    """The no-regression half: a run nothing ever turned still renders on the
+    canvas grid, byte-for-byte as before."""
+    from seestack.render.thumbnail import render_preview_png_full_res
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 300, 220
+    run_id = _add_run(solved_library, safe, w=w, h=h)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            fits_path = next(
+                r for r in proj.iter_stack_runs() if r.id == run_id).fits_path
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    assert r.content == render_preview_png_full_res(fits_path)
