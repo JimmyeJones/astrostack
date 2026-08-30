@@ -514,6 +514,32 @@ def _apply_north_up(disp: np.ndarray, fits_path: str | Path) -> np.ndarray:
     return np.clip(rotate_image_north_up(disp, angle), 0.0, 1.0)
 
 
+def preview_north_up_remainder_deg(
+    fits_path: str | Path, *, already_deg: float = 0.0,
+) -> float:
+    """The rotation :func:`orient_preview_north_up` will **actually apply** to a
+    stored preview — ``0.0`` when it would return the bytes untouched.
+
+    Anything that has to lay something *over* that turned picture — the "see what
+    stacking removed" tint, which is a separate PNG sized to the preview — needs
+    the same answer the picture got, and it must come from here rather than each
+    caller re-deriving the "no WCS → don't turn", "sub-threshold total → treat as
+    zero", "sub-threshold remainder → don't turn" rules. The returned angle is
+    deliberately **un-snapped**: both :func:`~seestack.render.orient.
+    rotate_image_north_up` and its plane/mask siblings apply the 90°-snap
+    themselves, so passing the raw remainder to any of them keeps them in step.
+    """
+    from seestack.render.orient import NORTH_UP_MIN_DEG
+
+    total = stack_north_up_deg(fits_path)
+    if total is None:
+        return 0.0
+    if abs(total) < NORTH_UP_MIN_DEG:
+        total = 0.0
+    angle = total - float(already_deg)
+    return 0.0 if abs(angle) < NORTH_UP_MIN_DEG else angle
+
+
 def orient_preview_north_up(
     preview_png: bytes, fits_path: str | Path, *, already_deg: float = 0.0,
 ) -> bytes:
@@ -546,15 +572,10 @@ def orient_preview_north_up(
 
     from PIL import Image
 
-    from seestack.render.orient import NORTH_UP_MIN_DEG, rotate_image_north_up
+    from seestack.render.orient import rotate_image_north_up
 
-    total = stack_north_up_deg(fits_path)
-    if total is None:
-        return preview_png
-    if abs(total) < NORTH_UP_MIN_DEG:
-        total = 0.0
-    angle = total - float(already_deg)
-    if abs(angle) < NORTH_UP_MIN_DEG:
+    angle = preview_north_up_remainder_deg(fits_path, already_deg=already_deg)
+    if not angle:
         return preview_png
     with Image.open(io.BytesIO(preview_png)) as src:
         rgb = np.asarray(src.convert("RGB"), dtype=np.float32) / 255.0

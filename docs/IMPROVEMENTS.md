@@ -9429,17 +9429,59 @@ to **Shipped**.)_
   bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
   make it the default: the saved orientation is what the owner chose.
 
-- **NEW IDEA (Builder 2026-08-30, the one thing v0.306.2 had to switch off) — the "see what stacking removed"
-  tint can't be shown over a North-up view, and the same trick that turns the picture would turn the tint.**
-  *(Pillar: image quality / trust — PRIORITY 4; size XS–S.)* The rejection overlay is rendered server-side sized
-  to the run's stored preview, including a rotation a past save baked in (`baked_north_up_deg`), so it lays
-  straight over those bytes and only those. v0.306.2's on-the-fly turn moves the picture out from under it, so
-  the Adjust panel hides the tint and says why. The endpoint already knows the run's FITS and its baked angle —
-  giving `…/rejection-overlay` the same optional `north_up` and passing it through the same
-  `orient_preview_north_up` (with `already_deg`) would keep the two in register. **Care:** the overlay is a
-  transparent PNG, and `orient_preview_north_up` converts to RGB — so this needs the rotate to preserve alpha,
-  or the tint arrives as an opaque rectangle. Check that before assuming it is a one-line change; if the helper
-  can't be made alpha-safe cheaply, leave the tint stepping aside, which is honest.
+- **✅ SHIPPED (Builder, v0.306.5, branch `claude/compassionate-galileo-q6uois`) — ~~the "see what stacking
+  removed" tint can't be shown over a North-up view~~.** Fixed as the entry asked, and **the alpha caution it
+  raised turned out not to apply** — which was worth checking before writing a line, exactly as it said.
+
+  **Why alpha was never at risk.** The entry assumed the fix would rotate the *finished RGBA PNG* through
+  `orient_preview_north_up` (which converts to RGB, so the tint really would have arrived as an opaque
+  rectangle). But the endpoint doesn't hold a PNG at that point: it holds the **drop-count plane**, and it
+  already turns that plane for the baked case via `rotate_plane_north_up`. Turning it once more, *before*
+  `rejection_overlay_png` builds the RGBA, means the transparent PNG is **rendered at** the rotated size
+  rather than rotated itself. No alpha ever passes through a rotate.
+
+  **Two turns, not one composed angle.** The stored bytes were rotated by `baked_north_up_deg` when they were
+  saved, and this request rotates *those* bytes again — so the plane takes the same two steps in the same
+  order. Composing them into a single angle would land on a different pixel grid than the picture does
+  (`np.rot90`'s pixel-centre midpoint vs. `PIL.rotate(expand=True)`'s ceil/floor bounding box), and the
+  overlay's whole job is to be on the picture's grid. The rotated output size comes from the existing pure
+  `north_up_pixel_transform`, which replicates both paths exactly.
+
+  **New shared helper, so the two can't drift:** `thumbnail.preview_north_up_remainder_deg(fits, already_deg=)`
+  is now the single answer to "what rotation will the picture actually receive?" — the three rules
+  (no WCS → don't turn; sub-threshold total → treat as zero; sub-threshold remainder → don't turn) live in one
+  place, and `orient_preview_north_up` was refactored to read them from it rather than keeping its own copy.
+  So a preview a past save already turned is **not turned twice** by this parameter, and an unreadable FITS
+  degrades to "don't turn" on *both* endpoints, which keeps them in register rather than putting a straight
+  tint over a turned picture.
+
+  **Frontend:** History's `overlayPlaceable` no longer excludes the on-the-fly turn — it is just "are the
+  stored bytes what's on screen?" — and the "Turn off *Rotate so North is up* to see what stacking removed"
+  copy is **deleted rather than reworded**, because the situation it described can no longer happen. The tint
+  still steps aside for the live Adjust render, which really is a different picture.
+
+  **Upgrade-safe (§9):** one new optional query parameter defaulting to `false`; no config, schema, on-disk,
+  default or API-shape change, and a test pins that the bare URL every existing surface embeds is
+  byte-for-byte what it was.
+
+  **Tests (+4, 1 fails before / passes after):** `tests/webapp/test_rejection_overlay.py` — the turned tint
+  lands on the turned picture's grid *and* on the turned trail (nothing outside it); a preview already saved
+  North-up is not turned twice (identical bytes to the bare URL); the bare URL is unchanged.
+  `tests/test_thumbnail.py` — the remainder helper agrees with `orient_preview_north_up` in all three cases.
+  `History.test.tsx` — the tint stays on the picture with the rotation ticked, and the old "turn it off"
+  sentence is gone.
+
+  Original spec, for the record:
+
+    *(Pillar: image quality / trust — PRIORITY 4; size XS–S.)* The rejection overlay is rendered server-side
+    sized to the run's stored preview, including a rotation a past save baked in (`baked_north_up_deg`), so it
+    lays straight over those bytes and only those. v0.306.2's on-the-fly turn moves the picture out from under
+    it, so the Adjust panel hides the tint and says why. The endpoint already knows the run's FITS and its
+    baked angle — giving `…/rejection-overlay` the same optional `north_up` and passing it through the same
+    `orient_preview_north_up` (with `already_deg`) would keep the two in register. **Care:** the overlay is a
+    transparent PNG, and `orient_preview_north_up` converts to RGB — so this needs the rotate to preserve
+    alpha, or the tint arrives as an opaque rectangle. Check that before assuming it is a one-line change; if
+    the helper can't be made alpha-safe cheaply, leave the tint stepping aside, which is honest.
 
 - **NEW IDEA (Builder 2026-08-30, turned up by the v0.306.4 scan-root confinement) — `root` on `POST /api/scan`
   is a "rescan just this folder" shortcut that doesn't actually work, and nothing uses it.** *(Pillar: autonomy

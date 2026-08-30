@@ -2239,16 +2239,20 @@ export const api = {
   // The run's *stored* preview PNG, turned so celestial North is up — the saved
   // bytes rotated on the way out, not a re-render. Deliberately its own helper
   // rather than a flag on `stackArtifactUrl`: the bare artifact URLs stay
-  // WCS-aligned for every surface that embeds them, and only the one caller that
-  // wants to *preview a turn* on a picture it must not replace (History's Adjust
-  // panel on a processed run) asks for this.
+  // WCS-aligned for every surface that embeds them, and only a caller that wants
+  // to *look at* a turn on a picture it must not replace asks for this.
   stackPreviewNorthUpUrl: (safe: string, id: number) =>
     `/api/targets/${safe}/stack-runs/${id}/preview?north_up=true`,
   // "See what stacking removed" — a transparent PNG tinting where outlier
   // rejection dropped samples, sized to the run's stored preview so it lays
   // straight over it. Only runs whose `rejection.has_map` is true have one.
-  stackRejectionOverlayUrl: (safe: string, id: number) =>
-    `/api/targets/${safe}/stack-runs/${id}/rejection-overlay`,
+  // `northUp` composes the same on-the-fly turn `stackPreviewNorthUpUrl` applies
+  // to the picture underneath, so the tint stays in register with a North-up
+  // *view* instead of having to step aside; off by default, so the bare URL is
+  // unchanged for every surface that already embeds it.
+  stackRejectionOverlayUrl: (safe: string, id: number, northUp = false) =>
+    `/api/targets/${safe}/stack-runs/${id}/rejection-overlay` +
+    (northUp ? "?north_up=true" : ""),
   // "Make it your wallpaper" — the finished preview cropped to a device aspect
   // (phone/desktop/square), auto-centred on the target, downloaded as a JPEG.
   stackWallpaperUrl: (
