@@ -37,6 +37,7 @@ import { SampleTourNote } from "../components/SampleTourNote";
 import { WallpaperMenuItems } from "../components/WallpaperMenu";
 import { sharePictureText } from "../share";
 import { fullResPngHint } from "../fullres";
+import { removedOverlayCaption } from "../removed";
 import { tiffDownloadHint } from "../tiffDownload";
 import { Sparkline } from "../components/Sparkline";
 import { DownloadMenuItem } from "../components/DownloadMenuItem";
@@ -244,25 +245,12 @@ export function rejectionSummaryText(
   return `Rejection ${verb} ~${pctText} ${noun} (${note})`;
 }
 
-// The caption under a picture whose "what was removed" tint is showing. The
-// overlay alone is a mystery — a beginner sees cyan speckle on their nebula and
-// has no idea whether something went wrong. This names it, and deliberately
-// frames it as protection delivered rather than data thrown away: those samples
-// were in the subs and are *not* in the picture, which is the whole point of
-// stacking many frames. Reuses the run's own measured fraction so it can never
-// disagree with the trust line a few pixels above it.
-export function removedOverlayCaption(
-  rejection: StackRejectionSummary | null | undefined,
-): string {
-  const lead =
-    "The cyan marks are what stacking removed — satellite trails, plane trails " +
-    "and cosmic rays that were in your subs but aren’t in your picture.";
-  const frac = rejection?.fraction;
-  if (typeof frac !== "number" || !Number.isFinite(frac) || frac <= 0) return lead;
-  const pct = frac * 100;
-  const pctText = pct < 0.1 ? "under 0.1%" : pct < 10 ? `about ${pct.toFixed(1)}%` : `about ${Math.round(pct)}%`;
-  return `${lead} That was ${pctText} of your samples; the rest is untouched.`;
-}
+// The "what was removed" caption now lives in `removed.ts`, because the tint is
+// no longer only on this card — the full-screen viewer on the Gallery and the
+// Target page show it too, and one picture must not be described two ways.
+// Re-exported here so the surfaces (and tests) that have always read it from
+// History keep working.
+export { removedOverlayCaption };
 
 // Plain-language trust note for quality weighting. The stacker already computes
 // which subs it down-weighted (soft/hazy/elongated frames pulled below full

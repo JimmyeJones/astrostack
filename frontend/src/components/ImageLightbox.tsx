@@ -53,10 +53,22 @@ export function computePinch(
  */
 export function ImageLightbox({
   src, title, downloadHref, jpegHref, fullResHref, fullResCanvas, rawHref, rawLabel,
-  shareFilename, shareTitle, shareText, toolbarExtra, onClose,
+  shareFilename, shareTitle, shareText, toolbarExtra, overlaySrc, overlayNote,
+  onClose,
 }: {
   src: string | null;
   title?: string;
+  /** Optional transparent PNG laid exactly over `src` — today the "what
+   * stacking removed" tint. It is served at the same pixel size as `src`, so it
+   * takes the identical fit and the identical zoom/pan transform and cannot
+   * drift out of register. Purely decorative: `pointer-events: none`, so it
+   * never eats a drag, and `aria-hidden`, because `overlayNote` is what a
+   * screen reader should hear. A surface must only pass this while `src` is the
+   * picture the overlay was measured against. */
+  overlaySrc?: string | null;
+  /** The plain-language caption for `overlaySrc`, shown above the zoom hint —
+   * a coloured speckle with no explanation reads as damage, not as protection. */
+  overlayNote?: string;
   /** Optional extra control(s) rendered in the toolbar (e.g. a "Wallpaper" menu),
    * so a surface can offer its own actions without this component knowing them. */
   toolbarExtra?: React.ReactNode;
@@ -238,6 +250,17 @@ export function ImageLightbox({
   const zoomed = t.scale > MIN_SCALE;
   const center = () => [window.innerWidth / 2, window.innerHeight / 2] as const;
 
+  // Shared by the picture and any overlay laid on it, so the two can never be
+  // fitted or moved differently — the overlay is served at the picture's own
+  // pixel size, so identical constraints put it exactly on top.
+  const imgFit: React.CSSProperties = {
+    maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
+    transformOrigin: "center center",
+    willChange: "transform", userSelect: "none",
+  };
+  const transform = `translate(${t.tx}px, ${t.ty}px) scale(${t.scale})`;
+  const transition = dragging ? "none" : "transform 80ms ease-out";
+
   return (
     <Modal
       opened={src != null}
@@ -335,6 +358,7 @@ export function ImageLightbox({
           onPointerCancel={onPointerUp}
           onDoubleClick={onDoubleClick}
           style={{
+            position: "relative",
             width: "100%", height: "100%", display: "flex",
             alignItems: "center", justifyContent: "center",
             cursor: zoomed ? (dragging ? "grabbing" : "grab") : "zoom-in",
@@ -346,12 +370,28 @@ export function ImageLightbox({
               src={src}
               alt={title ?? "stacked image"}
               draggable={false}
+              style={{ ...imgFit, transform, transition }}
+            />
+          ) : null}
+          {/* The overlay is a SIBLING rather than a child wrapper on purpose.
+              Wrapping both images would make the picture's `max-height: 100%`
+              resolve against an auto-height box — indefinite, i.e. no cap — and
+              a tall picture would overflow the viewer. Absolutely positioned
+              with `inset: 0` + `margin: auto` centres a replaced element on
+              exactly the box `align-items/justify-content: center` puts the
+              picture in, and the same fit and transform then land it pixel for
+              pixel, at every zoom level. */}
+          {src && overlaySrc ? (
+            <img
+              src={overlaySrc}
+              alt=""
+              aria-hidden
+              draggable={false}
+              data-testid="lightbox-overlay"
               style={{
-                maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
-                transform: `translate(${t.tx}px, ${t.ty}px) scale(${t.scale})`,
-                transformOrigin: "center center",
-                transition: dragging ? "none" : "transform 80ms ease-out",
-                willChange: "transform", userSelect: "none",
+                ...imgFit, transform, transition,
+                position: "absolute", inset: 0, margin: "auto",
+                pointerEvents: "none",
               }}
             />
           ) : null}
@@ -361,6 +401,11 @@ export function ImageLightbox({
           size="xs" c="dimmed"
           style={{ position: "absolute", bottom: 10, left: 0, right: 0, textAlign: "center" }}
         >
+          {src && overlaySrc && overlayNote ? (
+            <Text component="span" size="xs" c="cyan.4" display="block" mb={4} px="sm">
+              {overlayNote}
+            </Text>
+          ) : null}
           Scroll or pinch to zoom · drag to pan · double-tap to reset · Esc to close
         </Text>
       </div>

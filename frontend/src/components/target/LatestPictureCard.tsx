@@ -8,6 +8,8 @@ import { formatIntegration, formatStampDate } from "../../format";
 import { AnnotatedImage, croppedAnnotationView, objectLabel } from "../AnnotatedImage";
 import { ImageLightbox } from "../ImageLightbox";
 import { NorthUpViewToggle, loadNorthUpView, saveNorthUpView } from "../NorthUpViewToggle";
+import { ShowRemovedToggle } from "../ShowRemovedToggle";
+import { removedOverlayCaption } from "../../removed";
 import { isJobPollAbort, pollJobUntilDone } from "../editor/pollJob";
 import { sharePictureText } from "../../share";
 
@@ -79,6 +81,11 @@ export function LatestPictureCard({
   // save. Remembered per viewer, off by default: the saved orientation is the
   // one the owner chose (see `NorthUpViewToggle`).
   const [northUp, setNorthUp] = useState(loadNorthUpView);
+  // "Show what stacking removed" — the History card's tint, offered where the
+  // picture is actually big enough to read it. Off by default, and only on runs
+  // that recorded a map at all (`record_rejection_map`, off by default), so the
+  // control is absent rather than inert on every ordinary stack.
+  const [showRemoved, setShowRemoved] = useState(false);
   const qc = useQueryClient();
   // Hooks must run unconditionally, so this is declared before the early return.
   // `run` is captured lazily inside the mutation, which only fires from a button
@@ -121,6 +128,16 @@ export function LatestPictureCard({
     enabled: (identify || light) && !!run?.has_fits,
     staleTime: Infinity,
   });
+  // The caption's measured fraction, on the same endpoint and cache key the
+  // History card's copy of this tint uses — fetched only once the tint is
+  // actually switched on, so an ordinary page load (and an ordinary lightbox
+  // open) asks for nothing.
+  const removedInfo = useQuery({
+    queryKey: ["stack-info", safe, run?.id],
+    queryFn: () => api.stackRunInfo(safe, run!.id),
+    enabled: showRemoved && !!run?.has_rejection_map,
+    staleTime: Infinity,
+  });
   if (!run || !run.has_preview) return null;
   const previewSrc = api.stackArtifactUrl(safe, run.id, "preview");
   const share = sharePictureText(name, formatStampDate(run.timestamp_utc));
@@ -157,6 +174,11 @@ export function LatestPictureCard({
   // deliberately does not: the raw data stays WCS-aligned.
   const lightboxSrc = turned
     ? api.stackPreviewNorthUpUrl(safe, run.id) : previewSrc;
+  // The tint is measured against the *stored* preview bytes, which is exactly
+  // what this lightbox shows — so unlike the pins and the scale bar it needs no
+  // stand-down for a baked-in crop or rotation, and it composes with the
+  // North-up *view* by taking the same turn the picture underneath takes.
+  const hasRejectionMap = !!run.has_rejection_map;
   return (
     <Paper withBorder p="sm" radius="md" data-testid="latest-picture">
       <Group justify="space-between" gap="xs" mb={6} wrap="nowrap">
@@ -250,11 +272,21 @@ export function LatestPictureCard({
           ? api.stackFullResPngUrl(safe, run.id, turned) : undefined}
         fullResCanvas={{ w: run.canvas_w, h: run.canvas_h }}
         rawHref={run.has_fits ? api.stackArtifactUrl(safe, run.id, "fits") : undefined}
-        toolbarExtra={canNorthUp ? (
-          <NorthUpViewToggle
-            on={northUp}
-            onChange={(on) => { setNorthUp(on); saveNorthUpView(on); }}
-          />
+        overlaySrc={showRemoved && hasRejectionMap
+          ? api.stackRejectionOverlayUrl(safe, run.id, turned) : null}
+        overlayNote={removedOverlayCaption(removedInfo.data?.rejection)}
+        toolbarExtra={canNorthUp || hasRejectionMap ? (
+          <>
+            {canNorthUp ? (
+              <NorthUpViewToggle
+                on={northUp}
+                onChange={(on) => { setNorthUp(on); saveNorthUpView(on); }}
+              />
+            ) : null}
+            {hasRejectionMap ? (
+              <ShowRemovedToggle on={showRemoved} onChange={setShowRemoved} />
+            ) : null}
+          </>
         ) : undefined}
         shareFilename={share.filename}
         shareTitle={share.title}
