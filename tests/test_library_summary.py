@@ -128,3 +128,73 @@ def test_imaged_ranked_respects_the_same_cap_as_the_hero_grid():
 
 def test_imaged_ranked_is_empty_on_an_untouched_library():
     assert summarize_library([]).imaged_ranked == []
+
+
+# "First light" is a milestone stat *and* the poster's "Since <date>" line, and
+# it used to be the earliest target-*creation* stamp — when the row was made in
+# AstroStack. For the owner this app is built for (a Seestar user dropping in a
+# back catalogue of subs) every target is created on install day, so it claimed
+# they started astrophotography the week they installed the app.
+def test_first_light_is_when_the_oldest_sub_was_captured():
+    targets = [
+        _entry("M31", created="2026-08-30T09:00:00Z", accepted=50, exposure=3000.0),
+        _entry("M42", created="2026-08-30T09:01:00Z", accepted=120, exposure=1800.0),
+    ]
+    captures = {"M31": "2024-11-15T22:12:00Z", "M42": "2023-02-03T20:00:00Z"}
+    s = summarize_library(targets, first_capture=captures.get)
+    assert s.first_light_utc == "2023-02-03T20:00:00Z"
+
+
+def test_first_light_falls_back_to_creation_for_an_undated_target():
+    # A target whose subs carry no DATE-OBS contributes exactly what it always
+    # did, so nothing regresses on a library the lookup can't answer for.
+    targets = [
+        _entry("M31", created="2026-01-05T00:00:00Z", accepted=50, exposure=3000.0),
+        _entry("M42", created="2026-01-02T00:00:00Z", accepted=120, exposure=1800.0),
+    ]
+    s = summarize_library(targets, first_capture=lambda _s: None)
+    assert s.first_light_utc == "2026-01-02T00:00:00Z"
+    # …and one dated target still wins over the other's creation stamp.
+    s2 = summarize_library(
+        targets, first_capture={"M31": "2025-06-01T00:00:00Z"}.get)
+    assert s2.first_light_utc == "2025-06-01T00:00:00Z"
+
+
+def test_first_light_ignores_a_target_with_no_light_yet():
+    # The gate that already applied to creation stamps applies to captures too:
+    # an empty target is not one of "your pictures", however old its subs claim
+    # to be.
+    targets = [
+        _entry("M31", created="2026-01-05T00:00:00Z", accepted=50, exposure=3000.0),
+        _entry("Empty", created="2025-12-01T00:00:00Z", accepted=0, exposure=0.0),
+    ]
+    s = summarize_library(
+        targets,
+        first_capture={"Empty": "2019-01-01T00:00:00Z",
+                       "M31": "2025-11-02T00:00:00Z"}.get,
+    )
+    assert s.first_light_utc == "2025-11-02T00:00:00Z"
+
+
+def test_first_light_compares_stamps_by_time_not_by_string():
+    # The two kinds of stamp now mixed are written in different shapes — the
+    # registry's `…Z` and a frame's DATE-OBS as ingest recorded it — so a
+    # lexicographic minimum would pick whichever *spelling* sorts first.
+    # "2024-03-01T00:00:00+00:00" < "2024-03-01T01:00:00Z" as text and as time;
+    # the pair below disagree, which is the case that matters.
+    targets = [
+        _entry("A", created="2026-01-01T00:00:00Z", accepted=1, exposure=1.0),
+        _entry("B", created="2026-01-01T00:00:00Z", accepted=1, exposure=1.0),
+    ]
+    s = summarize_library(
+        targets,
+        first_capture={"A": "2024-03-01T05:00:00+02:00",   # 03:00 UTC — earlier
+                       "B": "2024-03-01T04:00:00Z"}.get,   # 04:00 UTC — sorts first
+    )
+    assert s.first_light_utc == "2024-03-01T05:00:00+02:00"
+
+
+def test_first_light_survives_an_unparseable_stamp():
+    targets = [_entry("M31", created="not-a-date", accepted=1, exposure=1.0)]
+    s = summarize_library(targets, first_capture=lambda _s: None)
+    assert s.first_light_utc == "not-a-date"   # something beats nothing
