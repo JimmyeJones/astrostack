@@ -57,6 +57,11 @@ class NameplateFields:
     n_frames: int | None = None
     sub_exposure_s: float | None = None
     date_iso: str | None = None
+    #: The *last* night of a stack built from several, when it differs from
+    #: ``date_iso`` — the caption then reads ``"11-14 Sep 2024"`` instead of
+    #: naming only the night it started. Optional and ignored when equal,
+    #: absent, or unparseable, so a single-night run captions exactly as before.
+    date_end_iso: str | None = None
     camera: str | None = None
 
 
@@ -85,6 +90,40 @@ def format_acq_date(date_iso: str | None) -> str:
     if not (1 <= month <= 12) or not (1 <= day <= 31) or year <= 0:
         return ""
     return f"{day} {_MONTHS[month - 1]} {year}"
+
+
+def format_acq_range(start_iso: str | None, end_iso: str | None = None) -> str:
+    """The acquisition date, or the span a multi-night stack covers.
+
+    ``("2024-09-11", "2024-09-14")`` → ``"11-14 Sep 2024"``; the shared parts are
+    written once, exactly as the app's on-screen capture labels do it. One night
+    (or an end that is missing, unparseable or equal) degrades to
+    :func:`format_acq_date`, so a single-night run captions as it always has.
+
+    **ASCII only, deliberately.** The bundled font has no en dash — see this
+    module's header — so the span uses a plain ``-``; ``test_nameplate.py`` pins
+    that every character a caption can produce has a real glyph.
+    """
+    start = format_acq_date(start_iso)
+    end = format_acq_date(end_iso)
+    if not end or end == start:
+        return start
+    if not start:
+        return end
+    s_day, s_mon, s_year = start.split(" ")
+    e_day, e_mon, e_year = end.split(" ")
+    # Order the two ends by date, so a window recorded (or hand-edited) the wrong
+    # way round still reads forwards.
+    if (int(s_year), _MONTHS.index(s_mon), int(s_day)) > (
+            int(e_year), _MONTHS.index(e_mon), int(e_day)):
+        start, end = end, start
+        s_day, s_mon, s_year = start.split(" ")
+        e_day, e_mon, e_year = end.split(" ")
+    if s_year != e_year:
+        return f"{start}-{end}"
+    if s_mon != e_mon:
+        return f"{s_day} {s_mon}-{end}"
+    return f"{s_day}-{end}"
 
 
 def acquisition_parts(fields: NameplateFields, *,
@@ -119,7 +158,7 @@ def acquisition_parts(fields: NameplateFields, *,
     elif detail:
         parts.append(detail)
 
-    date = format_acq_date(fields.date_iso)
+    date = format_acq_range(fields.date_iso, fields.date_end_iso)
     if date:
         parts.append(date)
 
