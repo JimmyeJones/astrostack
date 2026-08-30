@@ -19,8 +19,11 @@ from seestack.io.scanner import (
     _seestar_output_bases,
     classify_seestar_junk_target,
     container_target_children,
+    duplicate_sub_base_name_from_name,
     duplicate_sub_target_base_name,
-    junk_scan_frame_cap,
+    is_capture_mode_target_name,
+    is_mosaic_target_name,
+    junk_output_frame_cap,
     run_qc_and_solve,
     scan_and_organize,
 )
@@ -146,68 +149,6 @@ def test_apply_seestar_convention_sibling_skip_fires_for_true_sibling():
     assert [n for n, _ in units] == ["M31"]
 
 
-def test_apply_seestar_convention_skips_photo_folders():
-    """The Seestar writes single-shot stills into ``*_photo/`` folders
-    (``Scenery_photo``, ``Planetary_photo``) exactly as it writes clips to
-    ``*_video/``. Neither holds stackable deep-sky subs, so both are skipped —
-    without this a ``*_photo`` folder falls through every rule and is ingested
-    as an ordinary deep-sky target."""
-    units = _apply_seestar_convention(_fake(
-        "M 31_sub", "M 31",                        # real subs + on-device output
-        "Scenery_photo", "Planetary_photo",        # single-shot stills
-        "Lunar_video",                             # a clip, for contrast
-    ))
-    assert [n for n, _ in units] == ["M 31"]
-    # Case-insensitive on the suffix, like every other convention test.
-    assert _apply_seestar_convention(_fake("Scenery_PHOTO")) == []
-
-
-def test_apply_seestar_convention_over_the_owners_real_folder_names():
-    """Replay of the owner's live S30 share (the shapes that mattered): the two
-    ``*_photo`` folders and the four ``*_video`` folders are skipped, every
-    ``_sub``/``_mosaic_sub`` maps to its target, and each on-device output is
-    dropped in favour of its raw-subs sibling."""
-    units = _apply_seestar_convention(_fake(
-        "M 3_sub", "M 3",
-        "M 3_mosaic_sub", "M 3_mosaic",
-        "M 44_mosaic_sub", "M 44_mosaic",
-        "Solar_video", "Lunar_video", "Planetary_video", "Scenery_video",
-        "Planetary_photo", "Scenery_photo",
-    ))
-    assert [n for n, _ in units] == ["M 3", "M 3 (mosaic)", "M 44 (mosaic)"]
-
-
-def test_classify_junk_photo_by_target_name():
-    """A target an older scan built from a ``*_photo`` stills folder is junk by
-    name, whatever its frame count — a stills folder holds many snapshots."""
-    v = classify_seestar_junk_target("Scenery_photo", [], n_frames=42)
-    assert v is not None and v.reason == "photo"
-    assert "snapshot" in v.detail.lower()
-    # Case-insensitive on the suffix.
-    assert classify_seestar_junk_target("Planetary_PHOTO", [], 3) is not None
-
-
-def test_classify_junk_photo_by_source_folder(tmp_path):
-    """Even without a ``_photo`` target name, frames sourced entirely from a
-    ``*_photo`` folder are the Seestar's own stills."""
-    photos = tmp_path / "Scenery_photo"
-    photos.mkdir()
-    paths = [str(photos / "IMG_001.fit"), str(photos / "IMG_002.fit")]
-    v = classify_seestar_junk_target("Scenery", paths, n_frames=2)
-    assert v is not None and v.reason == "photo"
-
-
-def test_classify_junk_photo_folder_is_never_the_on_device_output_case(tmp_path):
-    """A tiny ``*_photo`` target must be reported as ``photo``, not silently fall
-    into the bare-output branch (which would need a ``_sub`` sibling that a stills
-    folder never has, and would then report nothing at all)."""
-    photos = tmp_path / "Scenery_photo"
-    photos.mkdir()
-    (tmp_path / "Scenery_photo_sub").mkdir()  # nonsense sibling, must not matter
-    v = classify_seestar_junk_target("Scenery", [str(photos / "one.fit")], n_frames=1)
-    assert v is not None and v.reason == "photo"
-
-
 def test_classify_junk_video_by_target_name():
     """A target named '<T>_video' is a Seestar video capture — flagged as junk
     regardless of what its frames' source folders look like (no disk needed)."""
@@ -225,6 +166,50 @@ def test_classify_junk_video_by_source_folder(tmp_path):
     paths = [str(vid / "f001.fit"), str(vid / "f002.fit")]
     v = classify_seestar_junk_target("Solar", paths, n_frames=2)
     assert v is not None and v.reason == "video"
+
+
+def test_apply_seestar_convention_skips_photo_folders():
+    """The Seestar writes single-shot stills into '*_photo/' folders
+    ('Planetary_photo/', 'Scenery_photo/') beside the '*_video/' ones. They hold
+    no stackable deep-sky subs, so they must be skipped exactly like videos —
+    before this they fell through every rule and ingested as junk targets."""
+    units = _apply_seestar_convention(_fake(
+        "M 31_sub", "M 31",                          # real target + its output
+        "Planetary_photo", "Scenery_photo",          # single-shot stills
+        "Planetary_video", "Scenery_video",          # video captures
+    ))
+    assert [n for n, _ in units] == ["M 31"]
+    # Case-insensitive, like every other suffix test.
+    assert _apply_seestar_convention(_fake("Scenery_PHOTO")) == []
+
+
+def test_classify_junk_photo_by_target_name():
+    """A library that already ingested a '*_photo' folder (any older build, or
+    an older scan) gets a cleanup nudge, with wording that names stills rather
+    than claiming it is a video."""
+    v = classify_seestar_junk_target("Scenery_photo", [], n_frames=40)
+    assert v is not None and v.reason == "photo"
+    assert "photo" in v.detail and "video" not in v.detail
+    assert classify_seestar_junk_target("Planetary_PHOTO", [], 5) is not None
+
+
+def test_classify_junk_photo_by_source_folder(tmp_path):
+    """Even under a different target name, frames sourced entirely from a
+    '*_photo' folder are single stills, not subs."""
+    photos = tmp_path / "Planetary_photo"
+    photos.mkdir()
+    paths = [str(photos / "IMG_001.fit"), str(photos / "IMG_002.fit")]
+    v = classify_seestar_junk_target("Jupiter", paths, n_frames=2)
+    assert v is not None and v.reason == "photo"
+
+
+def test_is_capture_mode_target_name_covers_both_and_nothing_else():
+    """The shared name test the cleanup endpoint uses to decide by name alone,
+    before paying to open a target's project."""
+    assert is_capture_mode_target_name("Lunar_video")
+    assert is_capture_mode_target_name("  Scenery_PHOTO  ")
+    assert not is_capture_mode_target_name("M 31")
+    assert not is_capture_mode_target_name("M 31_sub")
 
 
 def test_classify_junk_on_device_output_when_sub_sibling_present(tmp_path):
@@ -250,45 +235,38 @@ def test_classify_junk_mosaic_output_when_mosaic_sub_sibling_present(tmp_path):
     assert v is not None and v.reason == "on_device_output"
 
 
-def test_classify_junk_mosaic_output_allows_one_image_per_panel(tmp_path):
-    """A mosaic's on-device output is one finished image **per panel**, so the
-    single-image cap that is right for a plain field wrongly spares it. The
-    owner's real library proves the shape: ``M 44_MOSAIC`` = 11 frames,
-    ``NGC 6960_MOSAIC`` = 7 — both sailed past the ≤2 gate and lingered forever."""
-    (tmp_path / "M 44_mosaic_sub").mkdir()
+def test_classify_junk_multi_panel_mosaic_output(tmp_path):
+    """A mosaic's on-device output is one stacked image **per panel**, not one
+    image, so the single-field ≤2-frame cap never even looked at it. The owner's
+    real library proves it: ``M 44_MOSAIC`` holds 11 frames and
+    ``NGC 6960_MOSAIC`` 7, and both lingered as junk targets forever."""
+    (tmp_path / "M 44_mosaic_sub").mkdir()          # the raw-subs sibling
     output = tmp_path / "M 44_mosaic"
     output.mkdir()
-    paths = [str(output / f"panel_{i:02d}.fit") for i in range(11)]
-    v = classify_seestar_junk_target("M 44_mosaic", paths, n_frames=11)
+    panels = [str(output / f"Stacked_{i:02d}.fit") for i in range(11)]
+    v = classify_seestar_junk_target("M 44_mosaic", panels, n_frames=11)
     assert v is not None and v.reason == "on_device_output"
-    assert "mosaic" in v.detail.lower()
-    # The *single-field* cap is untouched: the same 11 frames in a bare "<T>/"
-    # folder are a real session, never junk.
-    (tmp_path / "M 13_sub").mkdir()
-    plain = tmp_path / "M 13"
-    plain.mkdir()
-    plain_paths = [str(plain / f"Light_{i:03d}.fit") for i in range(11)]
-    assert classify_seestar_junk_target("M 13", plain_paths, n_frames=11) is None
+    # The wording must not claim it is one image when there are eleven.
+    assert "panel" in v.detail and "single stacked image" not in v.detail
 
 
-def test_classify_not_junk_for_a_mosaic_folder_with_a_real_stacks_worth_of_frames(tmp_path):
-    """The widened mosaic cap must still never reach a real light-frame stack —
-    hundreds of frames in a ``*_mosaic/`` folder are somebody's actual subs."""
+def test_classify_not_junk_for_a_real_mosaic_stack(tmp_path):
+    """The looser mosaic cap must stay far below any real target: a mosaic's raw
+    subs number in the hundreds/thousands, so a big one is never flagged."""
     (tmp_path / "M 44_mosaic_sub").mkdir()
     output = tmp_path / "M 44_mosaic"
     output.mkdir()
-    paths = [str(output / f"Light_{i:03d}.fit") for i in range(200)]
-    assert classify_seestar_junk_target("M 44_mosaic", paths, n_frames=200) is None
+    paths = [str(output / f"Light_{i:04d}.fit") for i in range(400)]
+    assert classify_seestar_junk_target("M 44_mosaic", paths, n_frames=400) is None
 
 
-def test_junk_scan_frame_cap_widens_only_for_a_mosaic_name():
-    """The public prefilter a library walk uses must agree with the classifier's
-    own caps — gating a mosaic output at the single-image cap is exactly why the
-    owner's 11-frame ``M 44_MOSAIC`` was never even examined."""
-    assert junk_scan_frame_cap("M 31") == 2
-    assert junk_scan_frame_cap("M 31_sub") == 2
-    assert junk_scan_frame_cap("M 44_mosaic") > 11
-    assert junk_scan_frame_cap("M 44_MOSAIC") == junk_scan_frame_cap("M 44_mosaic")
+def test_junk_output_frame_cap_is_looser_only_for_a_mosaic():
+    """The shared cap the cleanup endpoint prefilters on, so it can skip opening
+    a big target's project without keeping its own copy of the limit."""
+    assert junk_output_frame_cap("M 31") == 2
+    assert junk_output_frame_cap("M 44_mosaic") > 2
+    # A mosaic's *raw subs* folder is not an output folder — no loosening there.
+    assert junk_output_frame_cap("M 44_mosaic_sub") == 2
 
 
 def test_classify_not_junk_without_a_sub_sibling(tmp_path):
@@ -355,23 +333,41 @@ def test_duplicate_sub_base_name_is_none_for_mixed_source_folders():
 
 
 def test_duplicate_sub_base_name_maps_mosaic_sub_to_the_mosaic_target():
-    """The owner's real S30 share settles the mosaic naming the original
-    single-field-only rule was waiting on: the device writes ``<T>_mosaic_sub/``
-    and the convention maps it to ``<T> (mosaic)``, so a leftover target literally
-    named ``<T>_mosaic_sub`` duplicates *that* target — not the single field."""
+    """A ``<T>_mosaic_sub``-named leftover duplicates the ``<T> (mosaic)`` target
+    the convention builds from that folder — NOT the single-field ``<T>``, whose
+    footprint is different. (This used to return ``None``: the mosaic case was
+    deferred as "device-specific", and the owner's library has three of them —
+    ``M 3_MOSAIC_SUB``, ``M 44_MOSAIC_SUB``, ``NGC 6960_MOSAIC_SUB`` — with no
+    cleanup path at all.)"""
     subs = [Path("/dump/M 3_mosaic_sub/a.fit"), Path("/dump/M 3_mosaic_sub/b.fit")]
     assert duplicate_sub_target_base_name("M 3_mosaic_sub", subs) == "M 3 (mosaic)"
-    # Exactly the name ``_apply_seestar_convention`` produces for the same folder.
-    assert _apply_seestar_convention(_fake("M 3_mosaic_sub"))[0][0] == "M 3 (mosaic)"
-    # Case-insensitive on the suffix, and the stem keeps its own casing.
-    assert duplicate_sub_target_base_name(
-        "NGC 6960_MOSAIC_SUB", [Path("/d/NGC 6960_MOSAIC_SUB/a.fit")],
-    ) == "NGC 6960 (mosaic)"
 
 
-def test_duplicate_sub_base_name_is_none_for_a_bare_mosaic_sub_name():
-    """No stem before ``_mosaic_sub`` → nothing to name the base target after."""
-    assert duplicate_sub_target_base_name("_mosaic_sub", [Path("/d/_mosaic_sub/a.fit")]) is None
+def test_duplicate_sub_base_name_from_name_matches_the_convention():
+    """The pure name-shape half, and the property that matters: the base it names
+    is exactly the target ``_apply_seestar_convention`` builds from that folder,
+    so the duplicate detector and the scanner can never disagree."""
+    assert duplicate_sub_base_name_from_name("M 31_sub") == "M 31"
+    assert duplicate_sub_base_name_from_name("M 3_mosaic_sub") == "M 3 (mosaic)"
+    assert duplicate_sub_base_name_from_name("M 31") is None
+    assert duplicate_sub_base_name_from_name("_sub") is None
+    for folder in ("M 31_sub", "M 3_mosaic_sub"):
+        [(built, _)] = _apply_seestar_convention(_fake(folder))
+        assert duplicate_sub_base_name_from_name(folder) == built
+
+
+def test_is_mosaic_target_name_recognises_what_the_convention_builds():
+    """Anything that groups targets by *where they point* needs this: a mosaic
+    and the single field of the same object share a centre but not a canvas, and
+    the convention keeps them apart on purpose. Asserted against the name the
+    convention actually builds, so the spelling has one definition."""
+    [(built, _)] = _apply_seestar_convention(_fake("M 44_mosaic_sub"))
+    assert is_mosaic_target_name(built)
+    assert is_mosaic_target_name("M 44 night 2 (MOSAIC)")
+    assert not is_mosaic_target_name("M 44")
+    # The device's own output folder is not the mosaic *target* — different name,
+    # and it is junk rather than a target to keep clustered with the mosaic.
+    assert not is_mosaic_target_name("M 44_mosaic")
 
 
 def test_duplicate_sub_base_name_is_none_with_no_frames():
@@ -400,9 +396,6 @@ def test_scan_is_seestar_aware_end_to_end(tmp_path):
     # A video capture (must be ignored).
     (scan_root / "Lunar_video").mkdir()
     write_seestar_fits(scan_root / "Lunar_video" / "clip_001.fit", n_stars=5, seed=6)
-    # A single-shot stills folder (must be ignored, same as the video).
-    (scan_root / "Scenery_photo").mkdir()
-    write_seestar_fits(scan_root / "Scenery_photo" / "IMG_001.fit", n_stars=5, seed=7)
 
     lib = Library.create(tmp_path / "lib")
     try:
@@ -596,10 +589,11 @@ def test_reject_seestar_output_frames_rejects_a_multi_frame_video_folder(tmp_pat
 
 
 def test_reject_seestar_output_frames_rejects_a_multi_frame_photo_folder(tmp_path):
-    """Same family as the ``*_video`` case above: a ``*_photo`` stills folder an
-    old whole-card drop merged into a real target holds many finished snapshots,
-    all junk in a deep-sky stack, so the single-image size guard must not spare
-    them either."""
+    """Same family as the ``*_video`` case above, and the half the scan-time
+    ``_photo`` skip does not reach: a ``*_photo`` stills folder an old whole-card
+    drop already merged into a real target holds many finished snapshots, all junk
+    in a deep-sky stack. The single-image size guard must not spare them either —
+    otherwise that target keeps averaging finished pictures into its own."""
     proj = Project.create(tmp_path / "proj", name="M 31")
     try:
         root = tmp_path / "incoming"

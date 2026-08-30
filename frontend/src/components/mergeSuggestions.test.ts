@@ -55,12 +55,13 @@ describe("describeMergeSuggestion", () => {
     expect(text).toContain("50 min total");  // 3000 s
   });
 
-  it("says separate folders, not a claim about nights it cannot make", () => {
-    // The backend clusters on plate-solved position alone — it knows nothing
-    // about *when* anything was shot, so the nudge must not assert it.
+  it("does not claim the targets were shot on separate nights", () => {
+    // The backend clusters on plate-solved sky position alone and knows nothing
+    // about *when* anything was shot — the old wording asserted a fact the
+    // detection never established, on a nudge the owner was already mistrusting.
     const text = describeMergeSuggestion(suggestion());
-    expect(text).toContain("in separate folders");
     expect(text).not.toMatch(/night/i);
+    expect(text).toContain("in separate folders");
   });
 
   it("drops the object clause when unnamed", () => {

@@ -695,8 +695,8 @@ class CleanupSuggestionOut(BaseModel):
     a one-click "remove these" and the user confirms; nothing is deleted until then
     (``DELETE /api/targets/{safe}``). ``reason`` is one of ``"video"`` /
     ``"photo"`` / ``"on_device_output"`` (built from a Seestar output, ``_video``
-    or ``_photo`` folder rather
-    than raw sub-frames — cannot be stacked) or ``"duplicate_sub"`` (a
+    or ``_photo`` folder rather than raw sub-frames — cannot be stacked) or
+    ``"duplicate_sub"`` (a
     ``<T>_sub``-named duplicate holding the *same* raw subs the base target ``<T>``
     now owns — a harmless clutter/wasted-compute leftover, not corrupt data) or
     ``"legacy_mixed_drop"`` (a legacy giant target an old scan built from a

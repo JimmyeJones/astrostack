@@ -37,6 +37,12 @@ describe("CleanupSuggestionsCard", () => {
     vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([
       suggestion(),
       suggestion({ safe: "lunar_video", name: "Lunar_video", reason: "video" }),
+      suggestion({
+        safe: "scenery_photo",
+        name: "Scenery_photo",
+        n_frames: 40,
+        reason: "photo",
+      }),
     ]);
     const del = vi.spyOn(client.api, "deleteTarget").mockResolvedValue({} as never);
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -44,17 +50,21 @@ describe("CleanupSuggestionsCard", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/look like Seestar outputs, videos or snapshots/i),
+        screen.getByText(/look like Seestar outputs, videos or photos/i),
       ).toBeInTheDocument(),
     );
     expect(screen.getByText(/M 31 · on-device output/)).toBeInTheDocument();
     expect(screen.getByText(/Lunar_video · video/)).toBeInTheDocument();
+    // A "_photo" capture folder belongs in the same group, labelled as itself
+    // rather than borrowing the "video" wording.
+    expect(screen.getByText(/Scenery_photo · photo/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Remove these 2 targets"));
+    fireEvent.click(screen.getByText("Remove these 3 targets"));
     expect(confirm).toHaveBeenCalled();
-    await waitFor(() => expect(del).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(del).toHaveBeenCalledTimes(3));
     expect(del).toHaveBeenCalledWith("m_31", false);
     expect(del).toHaveBeenCalledWith("lunar_video", false);
+    expect(del).toHaveBeenCalledWith("scenery_photo", false);
   });
 
   it("does not delete anything when the confirmation is declined", async () => {
@@ -87,7 +97,7 @@ describe("CleanupSuggestionsCard", () => {
     await waitFor(() =>
       expect(screen.getByText(/are duplicates left by an older scan/i)).toBeInTheDocument(),
     );
-    expect(screen.getByText(/look like Seestar outputs, videos or snapshots/i)).toBeInTheDocument();
+    expect(screen.getByText(/look like Seestar outputs, videos or photos/i)).toBeInTheDocument();
     expect(screen.getByText(/M 31_sub · duplicate/)).toBeInTheDocument();
   });
 
@@ -124,7 +134,7 @@ describe("CleanupSuggestionsCard", () => {
     // Dismiss only the junk group via its "Keep them" button (first one).
     fireEvent.click(screen.getAllByText("Keep them")[0]);
     await waitFor(() =>
-      expect(screen.queryByText(/look like Seestar outputs, videos or snapshots/i)).not.toBeInTheDocument(),
+      expect(screen.queryByText(/look like Seestar outputs or videos/i)).not.toBeInTheDocument(),
     );
     // The duplicate group is still shown.
     expect(screen.getByText(/are duplicates left by an older scan/i)).toBeInTheDocument();
@@ -152,7 +162,7 @@ describe("CleanupSuggestionsCard", () => {
     expect(screen.getByText(/MyWorks · mixed drop/)).toBeInTheDocument();
     // It is not lumped in with the outputs/videos group.
     expect(
-      screen.queryByText(/look like Seestar outputs, videos or snapshots/i),
+      screen.queryByText(/look like Seestar outputs or videos/i),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Remove this target"));

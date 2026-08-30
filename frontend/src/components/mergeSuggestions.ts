@@ -24,9 +24,9 @@ export function mergeSuggestionTotalExposureS(s: MergeSuggestion): number {
 //   "These 3 targets look like the same object (Andromeda Galaxy), in separate
 //    folders. Combine them into one deeper picture (3.8 h total)."
 //
-// It used to say "shot on separate nights", which the backend never established:
-// it clusters on plate-solved *position* alone and knows nothing about when
-// anything was shot. Separate folders is the fact the detection actually has.
+// It used to say "shot on separate nights", which the detection never
+// establishes: the backend clusters on plate-solved sky position alone and
+// knows nothing about *when* anything was shot. Say what the data supports.
 export function describeMergeSuggestion(s: MergeSuggestion): string {
   const n = s.targets.length;
   const obj = s.object_name ? ` (${s.object_name})` : "";

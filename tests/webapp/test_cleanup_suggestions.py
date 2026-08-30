@@ -62,33 +62,30 @@ def test_flags_output_and_video_junk_but_not_real_targets(client, data_root: Pat
     assert by_safe["M_31"]["detail"] and by_safe["Lunar_video"]["detail"]
 
 
-def test_flags_a_photo_stills_target_whatever_its_frame_count(client, data_root: Path):
-    """The Seestar writes single-shot stills to ``*_photo/`` (``Scenery_photo``,
-    ``Planetary_photo``). An older scan ingested those as an ordinary deep-sky
-    target, and a stills folder holds *many* snapshots — so, exactly like a
-    ``_video`` capture, it must be flagged by name and bypass the frame-count gate
-    the cheap output detector uses."""
+def test_flags_a_photo_capture_target_at_any_frame_count(client, data_root: Path):
+    """A ``*_photo`` target — the single stills the Seestar takes in
+    scenery/planetary photo mode — is junk exactly like a ``*_video`` one, and
+    like videos it is decided by *name* at any frame count (the frame-count gate
+    would otherwise never even look at a folder of 40 snapshots)."""
     incoming = data_root / "dump"
     photos = incoming / "Scenery_photo"
     photos.mkdir(parents=True)
-    photo_frames = [photos / f"IMG_{i:03d}.fit" for i in range(30)]
+    photo_frames = [photos / f"IMG_{i:03d}.fit" for i in range(40)]
     real = incoming / "M 42"
     real.mkdir()
-    real_frames = [real / f"Light_{i:03d}.fit" for i in range(30)]
 
     lib = Library.open_or_create(data_root / "library")
     try:
         _add_target(lib, "Scenery_photo", photo_frames)
-        _add_target(lib, "M 42", real_frames)
+        _add_target(lib, "M 42", [real / f"Light_{i:03d}.fit" for i in range(20)])
     finally:
         lib.close()
 
-    r = client.get("/api/targets/cleanup-suggestions")
-    assert r.status_code == 200
-    by_safe = {s["safe"]: s for s in r.json()}
+    body = client.get("/api/targets/cleanup-suggestions").json()
+    by_safe = {s["safe"]: s for s in body}
     assert set(by_safe) == {"Scenery_photo"}
     assert by_safe["Scenery_photo"]["reason"] == "photo"
-    assert by_safe["Scenery_photo"]["detail"]
+    assert "photo" in by_safe["Scenery_photo"]["detail"]
 
 
 def test_flags_a_legacy_mixed_drop_target_regardless_of_size(client, data_root: Path):
@@ -280,3 +277,64 @@ def test_flagged_target_can_then_be_deleted(client, data_root: Path):
     assert client.delete("/api/targets/Comet").status_code == 200
     # Gone from the library, and no longer suggested.
     assert client.get("/api/targets/cleanup-suggestions").json() == []
+
+
+# --- mosaics: the two places cleanup could not reach the owner's library -----
+# From the owner's real S30 share (2026-08-31). Both were verified against live
+# data: three "<T>_MOSAIC_SUB" duplicates with no cleanup path at all, and
+# "<T>_MOSAIC" on-device outputs (11 and 7 frames) that sailed past a cap
+# written for a single field's ONE stacked image.
+
+
+def test_flags_a_mosaic_sub_duplicate_the_mosaic_target_now_owns(
+    client, data_root: Path,
+):
+    """``M 44_mosaic_sub`` duplicates the ``M 44 (mosaic)`` target the convention
+    builds from that folder — not the single-field ``M 44``, whose footprint is
+    different. The detector used to bail on ``_mosaic_sub`` entirely, so these
+    three targets in the owner's library had no cleanup path at all."""
+    incoming = data_root / "dump"
+    (incoming / "M 44_mosaic_sub").mkdir(parents=True)
+    subs = [incoming / "M 44_mosaic_sub" / f"Light_{i:03d}.fit" for i in range(6)]
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "M 44 (mosaic)", subs)     # the convention's target
+        _add_target(lib, "M 44_mosaic_sub", subs)   # leftover duplicate
+        # The single-field target of the same object is a DIFFERENT footprint and
+        # must never be treated as the mosaic duplicate's base.
+        _add_target(lib, "M 44", [incoming / "M 44_sub" / "Light_001.fit"])
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/cleanup-suggestions").json()
+    by_safe = {s["safe"]: s for s in body}
+    assert set(by_safe) == {"M_44_mosaic_sub"}
+    assert by_safe["M_44_mosaic_sub"]["reason"] == "duplicate_sub"
+    assert "M 44 (mosaic)" in by_safe["M_44_mosaic_sub"]["detail"]
+
+
+def test_flags_a_multi_panel_mosaic_on_device_output(client, data_root: Path):
+    """A mosaic's on-device output holds one stacked image per panel, so the
+    owner's 11-frame ``M 44_MOSAIC`` and 7-frame ``NGC 6960_MOSAIC`` never even
+    reached the classifier behind the ≤2-frame gate. A real mosaic target of
+    hundreds of subs is still left alone."""
+    incoming = data_root / "dump"
+    (incoming / "M 44_mosaic_sub").mkdir(parents=True)
+    output = incoming / "M 44_mosaic"
+    output.mkdir()
+    real = incoming / "NGC 7000_mosaic_sub"
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "M 44_mosaic",
+                    [output / f"Stacked_{i:02d}.fit" for i in range(11)])
+        _add_target(lib, "NGC 7000 (mosaic)",
+                    [real / f"Light_{i:04d}.fit" for i in range(300)])
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/cleanup-suggestions").json()
+    by_safe = {s["safe"]: s for s in body}
+    assert set(by_safe) == {"M_44_mosaic"}
+    assert by_safe["M_44_mosaic"]["reason"] == "on_device_output"

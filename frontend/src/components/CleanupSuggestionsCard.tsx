@@ -31,7 +31,7 @@ function saveDismissed(key: string): void {
 
 function reasonLabel(reason: CleanupSuggestion["reason"]): string {
   if (reason === "video") return "video";
-  if (reason === "photo") return "snapshot";
+  if (reason === "photo") return "photo";
   if (reason === "duplicate_sub") return "duplicate";
   if (reason === "legacy_mixed_drop") return "mixed drop";
   return "on-device output";
@@ -168,13 +168,13 @@ export function CleanupSuggestionsCard() {
         items={junk}
         lsKey={JUNK_LS_KEY}
         icon={<IconTrash size={18} />}
-        title="Some targets look like Seestar outputs, videos or snapshots, not raw subs"
+        title="Some targets look like Seestar outputs, videos or photos, not raw subs"
         intro={
           <>
             An earlier scan picked up the Seestar's own finished images, video
-            clips and single snapshots as if they were raw sub-frames. These can't
-            be stacked into a good picture — remove them to tidy your library. Your
-            raw sub folders on disk are never touched.
+            clips and single snapshots as if they were raw sub-frames. These
+            can't be stacked into a good picture — remove them to tidy your
+            library. Your raw sub folders on disk are never touched.
           </>
         }
         onRemove={onRemove}
