@@ -148,6 +148,93 @@ def test_annotations_empty_when_run_has_no_wcs(client, solved_library):
     assert body["north_up_deg"] is None
 
 
+def _set_crop(data_root, safe: str, run_id: int, crop) -> None:
+    """Record on the run what the one-click "Process target" auto-edit would have:
+    its stored preview shows only ``crop`` of the stack canvas."""
+    from seestack.previewcrop import preview_crop_json
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.set_stack_preview_crop(run_id, preview_crop_json(crop))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_annotations_offer_no_preview_bar_on_an_uncropped_run(client, solved_library):
+    """The second bar exists only for the pictures that need it: an ordinary run's
+    stored preview *is* the canvas, so `scale_bar` already describes it and the
+    payload gains nothing."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=1000, h=800,
+                      arcsec_per_px=3.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    assert body["scale_bar"] is not None
+    assert body["preview_scale_bar"] is None
+
+
+def test_annotations_size_a_cropped_preview_against_what_it_shows(
+    client, solved_library,
+):
+    """A picture the auto-edit trimmed is *narrower* than the canvas, and the one
+    sentence a beginner reads and shares off it — "the whole frame is about N full
+    Moons wide" — is a claim about that picture. Sized on the canvas it overstates
+    the field by the reciprocal of the crop (here 1/0.7 ≈ 1.43×).
+
+    The drawn bar was already re-based client-side; the sentence was not, so the
+    endpoint now hands back a second bar measured on the visible rectangle.
+    """
+    from seestack.io.wcs_io import arcsec_per_px, celestial_wcs_from_fits
+    from seestack.previewcrop import PreviewCrop
+    from seestack.scalebar import scale_bar_for
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 1000, 800
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=w, h=h,
+                      arcsec_per_px=3.0)
+    # A 70 %-wide border trim, the shape `auto_crop_border` produces on a mosaic.
+    _set_crop(solved_library, safe, run_id, PreviewCrop(0.15, 0.15, 0.85, 0.85))
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    canvas = body["scale_bar"]
+    shown = body["preview_scale_bar"]
+    assert shown is not None
+    # Ground truth: the *same* pure helper, on the same visible pixel box the
+    # shared JPEG's baked marks use — parity, not a re-derivation.
+    wcs, gw, gh = celestial_wcs_from_fits(_run_fits(solved_library, safe, run_id))
+    expected = scale_bar_for(arcsec_per_px(wcs), round(0.7 * gw), round(0.7 * gh))
+    assert expected is not None
+    assert shown == expected.to_dict()
+    # The claim really did shrink to the picture: ~70 % of the canvas's field, and
+    # a strictly smaller Moon count than the canvas would have quoted.
+    assert abs(shown["frame_arcmin"] - 0.7 * canvas["frame_arcmin"]) < 0.05
+    assert shown["moon_comparison"] != canvas["moon_comparison"]
+    # …and `fraction` is already a fraction of *this* picture's width, so nothing
+    # downstream has to rescale it.
+    assert abs(shown["fraction"] * shown["frame_arcmin"] * 60.0 - shown["arcsec"]) < 1.0
+
+
+def test_annotations_offer_no_preview_bar_without_a_wcs_to_measure_it(
+    client, solved_library,
+):
+    """A cropped run with no celestial solution has nothing to measure either
+    bar from — the overlay omits both rather than inventing a field width."""
+    from seestack.previewcrop import PreviewCrop
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=512, h=512,
+                      arcsec_per_px=3.0, with_wcs=False)
+    _set_crop(solved_library, safe, run_id, PreviewCrop(0.1, 0.1, 0.9, 0.9))
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    assert body["scale_bar"] is None
+    assert body["preview_scale_bar"] is None
+
+
 def test_annotations_say_how_far_north_up_would_turn_this_picture(
     client, solved_library,
 ):
