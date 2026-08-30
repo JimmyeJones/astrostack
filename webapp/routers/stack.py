@@ -428,7 +428,11 @@ def channel_combine(safe: str, body: dict[str, Any], request: Request) -> dict[s
 
 @router.get("/api/targets/{safe}/stack-runs", response_model=list[StackRunOut])
 def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
-    from webapp.routers.editor import EXPORTED_RECIPE_META_PREFIX, RECIPE_META_PREFIX
+    from webapp.routers.editor import (
+        AUTO_EDIT_BAKED_PREFIX,
+        EXPORTED_RECIPE_META_PREFIX,
+        RECIPE_META_PREFIX,
+    )
 
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -436,15 +440,17 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
         # The pinned "cover" run (library-level), so the History card can mark it.
         entry = lib.find_target(safe)
         cover_id = entry.cover_stack_run_id if entry is not None else None
-        # Two small meta reads per run, so every surface that shows a run's
+        # Three small meta reads per run, so every surface that shows a run's
         # picture can tell an un-exported saved edit from a finished one (see
-        # ``_unexported_edit``): the saved recipe, and the one an export of this
-        # run already rendered. Both live in the same already-open DB.
+        # ``_unexported_edit``): the saved recipe, the one an export of this run
+        # already rendered, and the look an unattended auto-edit baked into the
+        # preview. All live in the same already-open DB.
         unexported = {
             r.id: _unexported_edit(
                 r.options_json,
                 proj.get_meta(f"{RECIPE_META_PREFIX}{r.id}"),
                 proj.get_meta(f"{EXPORTED_RECIPE_META_PREFIX}{r.id}"),
+                proj.get_meta(f"{AUTO_EDIT_BAKED_PREFIX}{r.id}"),
             )
             for r in runs
         }
@@ -567,14 +573,49 @@ def _recipe_look(recipe_json: str | None) -> list | None:
             continue
         params = op.get("params")
         # Sorted by key so two recipes that differ only in JSON key order match.
-        # Keys are unique, so no value is ever compared during the sort.
-        items = sorted(params.items()) if isinstance(params, dict) else []
+        # Keys are unique, so no value is ever compared during the sort. Built out
+        # of lists rather than tuples so a look survives a JSON round-trip
+        # unchanged — ``AUTO_EDIT_BAKED_PREFIX`` stores one and compares it back.
+        items = ([[k, v] for k, v in sorted(params.items())]
+                 if isinstance(params, dict) else [])
         look.append([op.get("id"), items])
     return look
 
 
+def _recipe_drifted(recipe_json: str | None, baked_look_json: str | None) -> bool:
+    """True when a run's **saved recipe no longer describes its stored preview**.
+
+    ``baked_look_json`` is the ``_recipe_look`` an unattended auto-edit stamped
+    beside the recipe it had just baked into the preview PNG
+    (``editor.AUTO_EDIT_BAKED_PREFIX``, written by ``pipeline._auto_edit_process_run``).
+    Re-opening such a run in the editor, changing a parameter and pressing **Save**
+    rewrites the recipe but *not* the preview, and this is the only thing on disk
+    that can tell afterwards.
+
+    ``False`` whenever it cannot honestly say otherwise — no stamp (every run
+    auto-edited before the stamp existed, and every run that was never auto-edited),
+    an unreadable stamp, or no readable recipe to compare it against. So this never
+    fires on an upgrading install's existing runs; the guard only ever speaks where
+    it can actually tell. Compared by *look*, so re-saving an unchanged edit — which
+    re-stamps ``updated_utc`` and re-rolls no op uid — stays quiet.
+    """
+    if not baked_look_json:
+        return False
+    try:
+        baked = json.loads(baked_look_json)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    if not isinstance(baked, list):
+        return False
+    look = _recipe_look(recipe_json)
+    if look is None:
+        return False
+    return look != baked
+
+
 def _unexported_edit(options_json: str | None, recipe_json: str | None,
-                     exported_recipe_json: str | None = None) -> bool:
+                     exported_recipe_json: str | None = None,
+                     baked_look_json: str | None = None) -> bool:
     """True when this run carries a **saved editor recipe that its stored preview
     does not show** — the user edited the picture, pressed Save, and never
     exported.
@@ -591,7 +632,12 @@ def _unexported_edit(options_json: str | None, recipe_json: str | None,
     False when there is no recipe, when the recipe is unparseable, when every op
     in it is disabled — a recipe that changes nothing is not an unfinished edit —
     and for an in-place "Process target" Auto edit, whose recipe *is* what its
-    preview shows.
+    preview shows *while the two still agree*. ``baked_look_json`` is what makes
+    that last clause checkable rather than assumed: pass the stamp the auto-edit
+    left (``editor.AUTO_EDIT_BAKED_PREFIX``) and a run whose recipe has since been
+    re-saved with a different look is flagged again, because that second-round edit
+    is exactly as invisible as a first-round one. Without the stamp — every run
+    auto-edited before it existed — the answer is exactly what it always was.
 
     Note which display-space marker is checked and which is not, because the two
     are written by different paths and only one of them bakes the stored recipe:
@@ -615,11 +661,21 @@ def _unexported_edit(options_json: str | None, recipe_json: str | None,
     ``updated_utc``) stays quiet, while changing a parameter and saving speaks up
     again — that second-round edit is as invisible as the first one was."""
     look = _recipe_look(recipe_json)
-    if not look:
-        # No recipe, unreadable, or every op disabled — nothing unfinished.
-        return False
     opts = _parse_options(options_json)
     if opts.get("preview_display_space"):
+        # An in-place Auto edit: its recipe *is* what its preview shows — unless
+        # the two have since drifted apart, which only the baked stamp can tell
+        # (see :func:`_recipe_drifted`). Where they still agree, nothing is
+        # unfinished, exactly as before. Where they don't, this run falls through
+        # to the same already-exported test as any other, so finishing the export
+        # still stops the app asking. The drift test deliberately replaces the
+        # "recipe changes nothing" one below rather than following it: on these
+        # runs a recipe that changes nothing still disagrees with a preview that
+        # plainly does.
+        if not _recipe_drifted(recipe_json, baked_look_json):
+            return False
+    elif not look:
+        # No recipe, unreadable, or every op disabled — nothing unfinished.
         return False
     # Already exported *this* look ⇒ finished. Anything else ⇒ still unfinished.
     return not (exported_recipe_json and _recipe_look(exported_recipe_json) == look)
@@ -1444,6 +1500,19 @@ async def save_stack_preview(
         # written rather than left alone. A stale crop would have every surface
         # that lines up with the preview correcting for a trim that is gone.
         proj.set_stack_preview_crop(run_id, None)
+        # ...and for the same reason, these bytes are no longer a recipe result.
+        # Saving from Adjust replaces a "Process target" auto-edit's tone-mapped
+        # preview with a plain stretch of the linear FITS (the recipe itself is
+        # untouched and still reopens in the editor), so leaving the marker and the
+        # baked-look stamp behind would have the reveal put its single sub through
+        # an Auto recipe the picture beside it no longer shows. Cleared together
+        # with the crop, on the same "always written, never left alone" rule — a
+        # linear run is unaffected either way, and the stretch just recorded above
+        # is what the reveal should match against now.
+        if _preview_is_display_space(run.options_json) and not is_display:
+            from webapp.routers.editor import AUTO_EDIT_BAKED_PREFIX
+            proj.set_run_preview_display_space(run_id, False)
+            proj.delete_meta(f"{AUTO_EDIT_BAKED_PREFIX}{run_id}")
     finally:
         proj.close()
         lib.close()
@@ -1493,11 +1562,19 @@ def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
       the recipe on it, if any, describes a *second-round* edit of the export;
     * an ordinary linear run, which already has the honest STF/asinh match; and
     * an auto-edited run whose recipe is missing or unreadable, where we'd be
-      guessing at what its preview shows.
+      guessing at what its preview shows; and
+    * an auto-edited run whose recipe has **drifted** from the one its preview was
+      baked from — the user re-opened it, changed something and pressed Save, which
+      rewrites the recipe and leaves the preview alone. Rendering the sub through
+      the *new* recipe would make the two halves of the reveal differ by an edit as
+      well as by frame count, which is the one thing that comparison must never
+      show, so it stands down to hidden exactly as a missing recipe does.
 
     Like every other surface that reads this marker (see ``_unexported_edit``), it
     takes the stored recipe to *be* what the stored preview shows — which is what
-    ``_auto_edit_process_run`` writes, in one step, for these runs.
+    ``_auto_edit_process_run`` writes, in one step, for these runs. The drift check
+    is what keeps that true afterwards, and it only speaks where it can tell: a run
+    auto-edited before the stamp existed has none, and behaves exactly as before.
     """
     from seestack.stack.output import fits_is_display_space
 
@@ -1505,7 +1582,7 @@ def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
         return None
     if run.fits_path and Path(run.fits_path).exists() and fits_is_display_space(run.fits_path):
         return None
-    from webapp.routers.editor import RECIPE_META_PREFIX
+    from webapp.routers.editor import AUTO_EDIT_BAKED_PREFIX, RECIPE_META_PREFIX
 
     raw = proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}")
     if not raw:
@@ -1515,6 +1592,8 @@ def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
     except (json.JSONDecodeError, TypeError, ValueError):
         return None
     if not isinstance(parsed, dict) or not isinstance(parsed.get("ops"), list):
+        return None
+    if _recipe_drifted(raw, proj.get_meta(f"{AUTO_EDIT_BAKED_PREFIX}{run.id}")):
         return None
     return raw
 
@@ -1640,6 +1719,17 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
             pattern = "RGGB"
         src_path = str(src)
         recipe_json = _auto_edit_recipe_json(proj, run)
+        if _display_space_without_recipe(run, recipe_json):
+            # The stack half is tone-mapped and we have no way to put a sub
+            # through the same processing (a display-space export, or an
+            # auto-edited run whose recipe is missing, unreadable, or has drifted
+            # from the one its preview shows). The card already self-hides on
+            # exactly these runs, and the download beside it already 404s — say
+            # the same thing here rather than serving a half that doesn't match.
+            raise HTTPException(
+                status_code=404,
+                detail="This run's picture is an edited export, so a raw frame "
+                       "can't be matched to it honestly.")
         # If the run's preview was re-saved with a custom asinh stretch (History
         # "Adjust"), render the sub through that same curve so the reveal's two
         # halves differ only in noise/detail — not a tone offset. Both columns are
