@@ -113,6 +113,48 @@ export function freshnessLine(live: LiveSession): string {
  * screen loads, so this needs no extra request and opens no project database.
  * Returns null for an empty library, or when nothing carries an activity stamp,
  * so the page shows its empty state rather than picking arbitrarily. */
+/** How close another target's last activity has to be to the watched one's before
+ * it counts as "the same night".
+ *
+ * Six hours is the same gap the backend's session split uses
+ * (`DEFAULT_SESSION_GAP_HOURS`), so "tonight" means the same thing on this page
+ * as it does in the recap and the Nights card — a Seestar that re-points at
+ * midnight is one night, and yesterday's target is not. */
+export const SAME_NIGHT_HOURS = 6;
+
+/**
+ * The *other* targets that also got subs inside the same night as the one being
+ * watched, most recent first — empty when there are none.
+ *
+ * The page opens on whichever target's frames arrived most recently, which is
+ * right: on a capture night that's the one filling up. But a Seestar that
+ * re-points mid-night (or a mosaic split across panels) leaves the earlier
+ * target invisible unless the reader already knows to use the picker. This is
+ * the data behind one line naming them, built from the target list the page has
+ * already fetched — no extra request, and deliberately not a second dashboard.
+ *
+ * Anchored on the watched target's own last activity rather than on the clock,
+ * so reading the page the next morning still shows what shared that night.
+ */
+export function alsoActiveTonight(
+  targets: Target[] | null | undefined,
+  safe: string | null,
+): Target[] {
+  const all = targets ?? [];
+  const watched = all.find((t) => t.safe_name === safe);
+  const anchor = watched?.last_activity_utc
+    ? new Date(watched.last_activity_utc).getTime()
+    : NaN;
+  if (!Number.isFinite(anchor)) return [];
+  const window = SAME_NIGHT_HOURS * 3600 * 1000;
+  return all
+    .filter((t) => t.safe_name !== safe && !!t.last_activity_utc)
+    .map((t) => ({ t, ms: new Date(t.last_activity_utc as string).getTime() }))
+    .filter(({ ms }) => Number.isFinite(ms) && Math.abs(ms - anchor) <= window)
+    .sort((a, b) => b.ms - a.ms)
+    .map(({ t }) => t);
+}
+
 export function mostRecentlyActive(targets: Target[] | null | undefined): Target | null {
   let best: Target | null = null;
   let bestT = -Infinity;

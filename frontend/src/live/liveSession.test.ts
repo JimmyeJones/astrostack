@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  conditionsCause, conditionsLine, freshnessLine, goalLine, mostRecentlyActive,
+  alsoActiveTonight, conditionsCause, conditionsLine, freshnessLine, goalLine,
+  mostRecentlyActive,
   sharpnessLine, tonightHeadline,
 } from "./liveSession";
 import type { LiveSession, Target } from "../api/client";
@@ -198,5 +199,41 @@ describe("mostRecentlyActive", () => {
     expect(mostRecentlyActive(null)).toBeNull();
     expect(mostRecentlyActive(undefined)).toBeNull();
     expect(mostRecentlyActive([target({ last_activity_utc: null })])).toBeNull();
+  });
+});
+
+describe("alsoActiveTonight", () => {
+  const t = (safe: string, last: string | null) =>
+    ({ safe_name: safe, name: safe.replace("_", " "), last_activity_utc: last } as never);
+
+  it("names the other targets that got subs inside the same night", () => {
+    // The Seestar re-pointed at 23:30 after two hours on NGC 7000; both belong
+    // to the same night, so the earlier one must not vanish.
+    const got = alsoActiveTonight([
+      t("M_42", "2026-07-09T01:10:00+00:00"),
+      t("NGC_7000", "2026-07-08T23:20:00+00:00"),
+      t("M_31", "2026-07-08T22:05:00+00:00"),
+    ], "M_42");
+    expect(got.map((x) => x.safe_name)).toEqual(["NGC_7000", "M_31"]);
+  });
+
+  it("leaves out last week's target, and the one being watched", () => {
+    const got = alsoActiveTonight([
+      t("M_42", "2026-07-09T01:10:00+00:00"),
+      t("M_81", "2026-07-02T23:20:00+00:00"),  // a different night entirely
+      t("M_51", null),                          // never captured
+    ], "M_42");
+    expect(got).toEqual([]);
+  });
+
+  it("says nothing when there is no anchor to measure against", () => {
+    // No watched target, an unknown one, or one that has never captured: there
+    // is no "tonight" to compare to, so the line stays away rather than guessing.
+    expect(alsoActiveTonight([t("M_42", "2026-07-09T01:10:00+00:00")], null)).toEqual([]);
+    expect(alsoActiveTonight([t("M_42", "2026-07-09T01:10:00+00:00")], "NOPE")).toEqual([]);
+    expect(alsoActiveTonight([
+      t("M_42", null), t("M_31", "2026-07-09T01:10:00+00:00"),
+    ], "M_42")).toEqual([]);
+    expect(alsoActiveTonight(undefined, "M_42")).toEqual([]);
   });
 });
