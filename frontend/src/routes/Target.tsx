@@ -60,6 +60,7 @@ import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadg
 import { nextBestMove } from "../components/target/nextBestMove";
 import { softerThanUsual } from "../components/target/softStars";
 import { detectMixedPointings } from "../components/target/mixedPointings";
+import { DownloadMenuItem } from "../components/DownloadMenuItem";
 
 // Re-exported for existing tests that import it from this route module.
 export { describeObject };
@@ -1342,14 +1343,16 @@ export function TargetView() {
                     cached server-side from this run's own preview, so it needs no
                     extra request to decide whether to offer it: every run with a
                     picture has one. */}
-                <Menu.Item leftSection={<IconVideo size={16} />}
-                  component="a" href={api.stackZoomClipUrl(safe, latestRun.id)}
-                  download>
-                  Zoom clip
-                  <span style={MENU_HINT}>
-                    A few seconds gliding into your target — for posting
-                  </span>
-                </Menu.Item>
+                <DownloadMenuItem
+                  icon={<IconVideo size={16} />}
+                  url={api.stackZoomClipUrl(safe, latestRun.id)}
+                  filename={`${latestRun.output_basename || "stack"}_zoom.webp`}
+                  label="Zoom clip"
+                  hint="A few seconds gliding into your target — for posting"
+                  busyHint="Building your clip — a few seconds the first time"
+                  errorMessage="Couldn't build a zoom clip for this run."
+                  hintStyle={MENU_HINT}
+                />
                 <Menu.Divider />
                 <WallpaperMenuItems safe={safe} runId={latestRun.id}
                   canNorthUp={wallpaperCanNorthUp} />
