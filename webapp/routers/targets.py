@@ -729,6 +729,52 @@ def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
     ]
 
 
+def latest_stack_weighting(proj) -> str:
+    """Did this target's newest *real* stack actually count its worse subs less?
+
+    Both trend cards ("Focus & sharpness", "Clouds & haze") reassure the reader
+    that the night's soft / hazy subs "were automatically counted less in your
+    stack". That is only true when the stack that used them had **quality
+    weighting** on and the combine actually honoured it — the walk-away chains do
+    enable it, so on the hands-off path the claim usually holds, but an
+    interactive stack with the box unticked and a target that has never been
+    stacked at all were getting the same confident promise. These cards are
+    *capture-night* cards and knew nothing about any run; this is the one datum
+    that lets them tell the truth.
+
+    Four answers, in the order they're worth saying:
+
+    * ``"applied"`` — the newest genuine stack stamped ``WGTMODE``: weights were
+      computed **and** used, so the promise is earned.
+    * ``"not_applied"`` — there is a stack, but it didn't weight (the box was off,
+      or ``WGTSKIP``: weighting was requested and the order-statistic min/max
+      combine ignored it, which is the same outcome for the reader).
+    * ``"unstacked"`` — no genuine stack run yet, so nothing has counted anything.
+    * ``"unknown"`` — a run whose master we can't read. Say nothing rather than
+      guess; the card falls back to the general wording, exactly as it does for an
+      older backend that doesn't send this field at all.
+
+    Costs one FITS *header* read of a single run — the same cheap read the History
+    Info panel does — and only for a target that has a trend card to draw.
+    """
+    from webapp.pipeline import _newest_genuine_stack_run
+
+    # The same "which run made the current image" answer the reprocess/stale
+    # logic uses, so the card can't disagree with the rest of the app.
+    run = _newest_genuine_stack_run(proj)
+    if run is None:
+        return "unstacked"
+    if not run.fits_path or not Path(run.fits_path).exists():
+        return "unknown"
+    from astropy.io import fits as _fits
+
+    try:
+        header = _fits.getheader(run.fits_path)
+    except Exception:  # noqa: BLE001 — an unreadable header just means "can't tell"
+        return "unknown"
+    return "applied" if "WGTMODE" in header else "not_applied"
+
+
 @router.get("/{safe}/focus-trend", response_model=FocusTrendOut | None)
 def target_focus_trend(safe: str, request: Request) -> FocusTrendOut | None:
     """Star-sharpness (FWHM) through the target's most recent capture night — the
@@ -744,12 +790,16 @@ def target_focus_trend(safe: str, request: Request) -> FocusTrendOut | None:
     lib, proj = deps.open_target_project(request, safe)
     try:
         trend = focus_trend(proj)
+        # Only when there's a card to draw — a target with too few measured subs
+        # pays nothing for the extra read.
+        weighting = latest_stack_weighting(proj) if trend is not None else "unknown"
     finally:
         proj.close()
         lib.close()
     if trend is None:
         return None
     return FocusTrendOut(
+        weighting=weighting,
         verdict=trend.verdict,
         points=[
             FocusTrendPointOut(t_utc=p.t_utc, fwhm_px=p.fwhm_px) for p in trend.points
@@ -779,12 +829,14 @@ def target_transparency_trend(safe: str, request: Request) -> TransparencyTrendO
     lib, proj = deps.open_target_project(request, safe)
     try:
         trend = transparency_trend(proj)
+        weighting = latest_stack_weighting(proj) if trend is not None else "unknown"
     finally:
         proj.close()
         lib.close()
     if trend is None:
         return None
     return TransparencyTrendOut(
+        weighting=weighting,
         verdict=trend.verdict,
         points=[
             TransparencyTrendPointOut(t_utc=p.t_utc, transparency=p.transparency)

@@ -5,7 +5,7 @@
  * Direction differs from focus — for transparency *higher* = a clearer sky.
  */
 import type { TransparencyTrend } from "../api/client";
-import { formatClockUtc } from "./focusTrend";
+import { formatClockUtc, weightingClause } from "./focusTrend";
 
 export { formatClockUtc };
 
@@ -30,8 +30,8 @@ export function describeTransparencyTrend(t: TransparencyTrend): string {
       return (
         `The sky got hazier${whenClause} — clouds or haze rolling in ` +
         `(or your target sinking into thicker air). Those later subs came through ` +
-        `a murkier sky and were automatically counted less in your stack; ` +
-        `a clearer night will add more real signal.`
+        `a murkier sky. ` + weightingClause(t.weighting, "They") +
+        ` A clearer night will add more real signal.`
       );
     }
     case "cleared":

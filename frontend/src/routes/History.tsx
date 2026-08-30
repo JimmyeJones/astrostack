@@ -818,6 +818,12 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const northUpDeg = suggestion.data?.north_up_deg;
   const canNorthUp = typeof northUpDeg === "number";
   const applyNorthUp = northUp && canNorthUp;
+  // Is the picture on screen a *processed* one (the one-click "Process target"
+  // Auto edit)? If so, the plain Save re-renders a flat stretch of the raw stack
+  // over it — everywhere it's used, including a pinned cover — and says nothing.
+  // Say it, and (when the recipe is still there) offer the save that keeps it.
+  const processedPreview = !!suggestion.data?.processed_preview;
+  const canKeepProcessed = !!suggestion.data?.can_keep_processed;
   const defStretch = typeof sugStretch === "number" ? sugStretch : DEFAULT_STRETCH;
   const defBlack = typeof sugBlack === "number" ? sugBlack : DEFAULT_BLACK;
   // Apply the suggestion the first time it arrives, but only while the user
@@ -831,14 +837,22 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   }, [sugStretch, sugBlack]);
 
   const save = useMutation({
-    mutationFn: () => api.saveStackPreview(safe, run.id, dStretch, dBlack, applyNorthUp),
-    onSuccess: () => {
+    mutationFn: (keepProcessed: boolean) =>
+      api.saveStackPreview(safe, run.id, dStretch, dBlack, applyNorthUp, keepProcessed),
+    onSuccess: (_data, keepProcessed) => {
       setCacheBust(Date.now());
       // The save records the North-up rotation it baked in on the run itself, so
       // the card's own row is stale the moment it lands.
       qc.invalidateQueries({ queryKey: ["runs", safe] });
       qc.invalidateQueries({ queryKey: ["sky"] });
       qc.invalidateQueries({ queryKey: ["gallery"] });
+      if (keepProcessed) {
+        // The saved bytes are the processed picture, which the live slider
+        // render on screen is not — so step out of the way and show it.
+        setAdjust(false);
+        notifications.show({ message: "Kept your processed picture", color: "teal" });
+        return;
+      }
       notifications.show({ message: "Preview updated", color: "teal" });
     },
     onError: () => notifications.show({ message: "Could not save preview", color: "red" }),
@@ -1116,10 +1130,36 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             label="Add a caption to the JPEG"
             description="Bake the acquisition data (target, integration, date, gear) into the JPEG you download or share."
           />
+          {processedPreview ? (
+            // Said *before* the save, next to the button that does it: this
+            // panel is the one reachable path that quietly costs a beginner
+            // their finished picture, and its own hint ("from the full-range
+            // FITS") reads like a view control.
+            <Text size="xs" c="yellow.4" mt={4}>
+              This picture was processed for you.{" "}
+              {canKeepProcessed
+                ? "“Save as preview” replaces it with a plain view of the raw stack — use “Keep the processed picture” below to change how it’s turned without losing it."
+                : "“Save as preview” replaces it with a plain view of the raw stack. Your edit is kept — re-open it in the editor to get the processed look back."}
+            </Text>
+          ) : null}
           <Group gap="xs" mt={4}>
+            {processedPreview && canKeepProcessed ? (
+              // The one thing you actually want from this panel on a finished
+              // picture is the rotation, so that save is the primary action
+              // here — it re-bakes the run's own edit instead of the sliders.
+              <Button
+                size="xs" color="grape" leftSection={<IconSparkles size={14} />}
+                loading={save.isPending && save.variables === true}
+                onClick={() => save.mutate(true)}
+              >
+                Keep the processed picture
+              </Button>
+            ) : null}
             <Button
               size="xs" leftSection={<IconDeviceFloppy size={14} />}
-              loading={save.isPending} onClick={() => save.mutate()}
+              variant={processedPreview && canKeepProcessed ? "light" : "filled"}
+              loading={save.isPending && save.variables === false}
+              onClick={() => save.mutate(false)}
             >
               Save as preview
             </Button>

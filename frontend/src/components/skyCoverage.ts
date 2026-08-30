@@ -1,0 +1,55 @@
+/** Pure phrasing for "how much of the sky have you actually photographed?".
+ *
+ * The number itself is measured server-side off each run's own WCS
+ * (`seestack/skyarea.py`) — never by counting pixels on the map, which is an
+ * Aitoff projection (not equal-area) that also draws every picture several times
+ * life size. All this file does is say it in words a beginner reads once and
+ * understands. No React, no I/O, so it's unit-testable on its own.
+ */
+
+/** Square degrees in one full Moon (~31 arcmin across) — the only unit of sky
+ *  area a beginner already has a feel for. */
+export const FULL_MOON_DEG2 = 0.2018;
+
+/** A tiny fraction as a readable percentage. Astro coverage is genuinely small,
+ *  so the usual `toFixed(1)` would render almost every real library as "0.0%". */
+export function formatSkyFraction(fraction: number): string {
+  const pct = fraction * 100;
+  if (!Number.isFinite(pct) || pct <= 0) return "0%";
+  if (pct < 0.001) return "less than 0.001%";
+  if (pct < 0.1) return `${pct.toFixed(3)}%`;
+  if (pct < 1) return `${pct.toFixed(2)}%`;
+  if (pct < 10) return `${pct.toFixed(1)}%`;
+  return `${Math.round(pct)}%`;
+}
+
+/** Square degrees, at a precision that suits the magnitude. */
+export function formatSkyArea(deg2: number): string {
+  if (!Number.isFinite(deg2) || deg2 <= 0) return "0";
+  if (deg2 < 1) return deg2.toFixed(2);
+  if (deg2 < 100) return deg2.toFixed(1);
+  return String(Math.round(deg2));
+}
+
+/**
+ * The one-line read-out under "My map", or `""` when there's nothing to say yet
+ * (no finished picture carries a position, so any number would be invented).
+ *
+ * Leads with the honest measurement, then anchors it in full moons — the only
+ * patch of sky a beginner can already picture — and closes with the fraction,
+ * which is the number that makes people grin.
+ */
+export function describeSkyCoverage(
+  deg2: number, fraction: number, nPictures: number,
+): string {
+  if (!Number.isFinite(deg2) || deg2 <= 0 || nPictures <= 0) return "";
+  const moons = deg2 / FULL_MOON_DEG2;
+  const moonPhrase = moons < 1.5
+    ? "about a full moon's worth of sky"
+    : `about ${Math.round(moons).toLocaleString()} full moons' worth of sky`;
+  const pictures = nPictures === 1 ? "1 picture" : `${nPictures} pictures`;
+  return (
+    `Your ${pictures} cover ${formatSkyArea(deg2)} square degrees — ` +
+    `${moonPhrase}, and ${formatSkyFraction(fraction)} of the whole sky.`
+  );
+}
