@@ -56,6 +56,50 @@ def test_full_res_png_serves_native_resolution(client, solved_library):
         assert im.size == (w, h)  # native output resolution, not the 1024 cap
 
 
+def test_full_res_png_of_an_enormous_mosaic_is_capped_not_native(
+    client, solved_library,
+):
+    """The download menus used to call this file "native size" — and History
+    printed the canvas dimensions beside it — on every picture, including ones
+    the render caps.
+
+    This reads the **served bytes** at the production ceiling (not an injected
+    one), so the claim the copy makes is pinned to what the endpoint actually
+    hands over rather than to a string. A canvas past the cap comes back
+    decimated; the FITS and TIFF beside it are what hold its native pixels, and
+    `frontend/src/fullres.ts` now says so.
+    """
+    from webapp.routers.stack import _FULL_RES_PNG_MAX_LONG_EDGE as CAP
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # Deliberately a *long thin* canvas: past the cap on its long edge (so the
+    # decimation really fires) while staying cheap to render.
+    w, h = CAP + 400, 100
+    run_id = _add_run(solved_library, safe, w=w, h=h)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    assert r.status_code == 200
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size != (w, h)          # NOT native, whatever the menu says
+        assert max(im.size) == CAP        # …capped exactly at the ceiling
+
+
+def test_full_res_png_at_the_cap_exactly_is_still_native(client, solved_library):
+    """The boundary the copy switches on: a canvas *at* the ceiling is served
+    native, so the honest wording stays "native size" for it rather than warning
+    about a cap that didn't bite."""
+    from webapp.routers.stack import _FULL_RES_PNG_MAX_LONG_EDGE as CAP
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = CAP, 60
+    run_id = _add_run(solved_library, safe, w=w, h=h)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    assert r.status_code == 200
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size == (w, h)
+
+
 def test_full_res_png_404_when_run_has_no_fits(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     run_id = _add_run(solved_library, safe, w=100, h=80, with_fits=False)

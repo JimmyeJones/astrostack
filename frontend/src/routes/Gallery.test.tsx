@@ -850,3 +850,109 @@ describe("Gallery card layout", () => {
     expect(name).toHaveAttribute("title", "Sample: Orion Nebula (M42)");
   });
 });
+
+// "North up" as a way to *look* at a picture, not a way to overwrite it. The
+// mechanism shipped on the Target hero in v0.308.0; this is the same control on
+// the surface a beginner actually browses their pictures from. Nothing is
+// written — the server turns the stored bytes on the way out — and it is only
+// offered where turning the picture would actually change it.
+describe("Gallery — North up as a view", () => {
+  function galleryWith(over: Partial<GalleryItem> = {}) {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), has_preview: true, preview_url: "/p/1.png", ...over }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+  }
+  const annotations = (north_up_deg: number | null) => ({
+    width: 1920, height: 1080, objects: [], scale_bar: null, north_up_deg,
+  });
+
+  afterEach(() => window.localStorage.clear());
+
+  it("asks nothing extra until a picture is actually opened", async () => {
+    galleryWith();
+    const ann = vi.spyOn(client.api, "stackAnnotations")
+      .mockResolvedValue(annotations(118.5));
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    // Drawing the grid must not cost a request per card, however many there are.
+    expect(ann).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
+  });
+
+  it("offers no turn on a picture that turning would not move", async () => {
+    galleryWith();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations(null));
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+
+    await waitFor(() => expect(client.api.stackAnnotations).toHaveBeenCalled());
+    expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
+  });
+
+  it("turns the picture on request and hands over what is on screen", async () => {
+    galleryWith();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations(118.5));
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+
+    const toggle = await screen.findByTestId("north-up-view");
+    const shown = () => screen.getByRole("dialog").querySelector("img")!;
+    // Off by default: the saved orientation is the one the owner chose.
+    expect(shown()).toHaveAttribute("src", "/p/1.png");
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(shown())
+      .toHaveAttribute("src", "/api/targets/M_42/stack-runs/1/preview?north_up=true"));
+    // Every download follows the view, so a picture someone saved *because* they
+    // liked how it looked arrives that way…
+    fireEvent.click(screen.getByLabelText("Download picture"));
+    expect((await screen.findByText("Full-res PNG (native size)")).closest("a"))
+      .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/full-res-png?north_up=true");
+    expect(screen.getByText("Quick preview PNG (up to 1024px)").closest("a"))
+      .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview?north_up=true");
+    expect(screen.getByText("JPEG (smaller — best for sharing)").closest("a"))
+      .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/jpeg?north_up=true");
+    // …except the raw data, which stays WCS-aligned whichever way you look at it.
+    expect(screen.getByLabelText("Download raw data"))
+      .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/fits");
+  });
+
+  it("remembers the choice in the one key the Target page's copy reads", async () => {
+    galleryWith();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations(118.5));
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+    fireEvent.click(await screen.findByTestId("north-up-view"));
+
+    await waitFor(() => expect(window.localStorage.getItem("astrostack.northUpView"))
+      .toBe("1"));
+    fireEvent.click(screen.getByTestId("north-up-view"));
+    await waitFor(() => expect(window.localStorage.getItem("astrostack.northUpView"))
+      .toBe("0"));
+  });
+
+  it("offers nothing on a preview-only run, which has no WCS to turn by", async () => {
+    galleryWith({ has_fits: false });
+    const ann = vi.spyOn(client.api, "stackAnnotations")
+      .mockResolvedValue(annotations(118.5));
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+
+    await screen.findByRole("dialog");
+    expect(ann).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
+  });
+});
