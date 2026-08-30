@@ -765,6 +765,11 @@ export interface DashboardStats {
      *  backend omits them and the copy falls back to the common wording. */
     canvas_w?: number;
     canvas_h?: number;
+    /** When this picture's subs were **shot** (observing nights, ISO
+     *  `YYYY-MM-DD`) — as opposed to `timestamp_utc`, when the stack ran.
+     *  Absent on an older backend or a run with no recorded window. */
+    capture_night_start?: string | null;
+    capture_night_end?: string | null;
   }[];
   disk: {
     total_gb?: number; used_gb?: number; free_gb?: number;
@@ -924,6 +929,14 @@ export interface StackRun {
   notes: string | null;
   total_exposure_s?: number | null;
   reusable?: boolean;
+  // When this picture's subs were **shot** — the observing nights (ISO
+  // `YYYY-MM-DD`) of its first and last sub, bucketed server-side with the same
+  // noon-to-noon rule the Nights card uses. Equal when the whole stack came from
+  // one night. Null/absent for a run recorded before the app knew (schema < 18)
+  // or whose subs carry no capture time, and callers then drop the clause —
+  // never falling back to `timestamp_utc`, which is when the stack *ran*.
+  capture_night_start?: string | null;
+  capture_night_end?: string | null;
   transparency_ratio?: number | null;
   noise_sigma?: number | null;
   // This stack's own measured median star size (FWHM) in native-frame pixels,
@@ -1332,6 +1345,12 @@ export interface GalleryItem {
   preview_url: string;
   options: Record<string, unknown>;
   reusable?: boolean;
+  // When this picture's subs were **shot** (observing nights, ISO `YYYY-MM-DD`,
+  // bucketed server-side) — as opposed to `timestamp_utc`, when the stack ran.
+  // Null/absent for a run recorded before the app knew; a caller then drops the
+  // date rather than passing off a processing stamp as a capture date.
+  capture_night_start?: string | null;
+  capture_night_end?: string | null;
   transparency_ratio?: number | null;
   noise_sigma?: number | null;
   calstat?: string | null;
@@ -1471,6 +1490,13 @@ export interface BestPicture {
   preview_url: string;
   // Quality-blend score in [0, 1], relative to this Library's own collection.
   score: number;
+  // When this picture's subs were **shot** (observing nights, ISO `YYYY-MM-DD`,
+  // bucketed server-side) — as opposed to `timestamp_utc`, when the stack ran.
+  // Null/absent for a run recorded before the app knew; a caller then drops the
+  // date rather than passing off a processing stamp as a capture date.
+  capture_night_start?: string | null;
+  capture_night_end?: string | null;
+
   // True when this is the picture the user pinned as its target's cover ("Set as
   // cover" in History): it represents that target here instead of the newest
   // stack, and is floated above the ranked tail so the automatic ranking can't

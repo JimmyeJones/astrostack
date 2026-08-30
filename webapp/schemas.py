@@ -546,6 +546,16 @@ class StackRunOut(BaseModel):
     # True when this run's options can pre-fill the Stack form ("reuse settings").
     # False for editor-recipe / channel-combine runs, which carry no stack knobs.
     reusable: bool = False
+    # When the subs in this picture were **shot**, as observing-night dates
+    # (ISO ``YYYY-MM-DD``, local noon-to-noon — the same bucketing the Nights
+    # card and the imaging calendar use). Equal when the whole stack came from
+    # one night. None for pre-schema-18 runs and for a run whose subs carry no
+    # capture time; every caller then drops the clause rather than falling back
+    # to ``timestamp_utc``, which is when the stack *ran* — a difference of years
+    # on a re-stack of a back catalogue, and the reason the shareable caption
+    # used to claim a picture was "shot on" the day it was processed.
+    capture_night_start: str | None = None
+    capture_night_end: str | None = None
     # Median transparency of the stacked frames ÷ the target's clear-sky
     # baseline (< ~0.6 ⇒ hazy). None for pre-schema-5 runs or when not
     # computable; lets the card show a "hazy night" badge at a glance.

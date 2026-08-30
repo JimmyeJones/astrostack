@@ -1407,6 +1407,14 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int,
                                       "display_space": True}),
             notes="edited",
             engine_version=APP_VERSION,
+            # An export is the *same light* as the run it was edited from, so it
+            # carries that run's capture window forward. Without this an edited
+            # picture would lose the one date that says when it was shot and fall
+            # back to no date at all — the export's own stamp is when the editor
+            # ran, which is exactly the thing this window exists to stop us
+            # quoting.
+            capture_start_utc=run.capture_start_utc,
+            capture_end_utc=run.capture_end_utc,
         ))
         # Remember, on the *source* run, which edit this export rendered. Its
         # saved recipe is deliberately left alone — it is the user's document —

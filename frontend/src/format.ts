@@ -56,6 +56,96 @@ export function formatNightDate(iso: string | null | undefined): string {
 }
 
 /**
+ * When a picture's subs were **shot**, from a run's capture window
+ * (`capture_night_start` / `capture_night_end` — observing-night dates the
+ * server bucketed with the same noon-to-noon rule the Nights card uses).
+ *
+ * A stack's own `timestamp_utc` is when it *ran*, which is a different fact: on
+ * a re-stack of a back catalogue the two are years apart, so nothing may say
+ * "shot" or "captured" from that stamp. Returns `""` — not "—" — when the window
+ * is missing or unparseable (every run from before the app recorded it), because
+ * every caller here drops the clause rather than printing a placeholder.
+ *
+ * Compact by design, for a caption or a tile: the shared parts of a range are
+ * written once ("15–18 Nov 2024", "28 Oct – 3 Nov 2024", "28 Dec 2024 – 3 Jan
+ * 2025"). The en dash is spaced only when the two sides are multi-word, which is
+ * the typographic convention and keeps "15–18" from looking like a subtraction.
+ */
+export function formatCaptureNights(
+  start: string | null | undefined,
+  end: string | null | undefined,
+): string {
+  const a = parseNightDate(start) ?? parseNightDate(end);
+  const b = parseNightDate(end) ?? parseNightDate(start);
+  if (!a || !b) return "";
+  const [first, last] = nightKey(a) <= nightKey(b) ? [a, b] : [b, a];
+  const lastLabel = `${last.day} ${MONTHS_ABBR[last.month - 1]} ${last.year}`;
+  if (nightKey(first) === nightKey(last)) return lastLabel;
+  if (first.year !== last.year) {
+    return `${first.day} ${MONTHS_ABBR[first.month - 1]} ${first.year} – ${lastLabel}`;
+  }
+  if (first.month !== last.month) {
+    return `${first.day} ${MONTHS_ABBR[first.month - 1]} – ${lastLabel}`;
+  }
+  return `${first.day}–${lastLabel}`;
+}
+
+/**
+ * The same window as a caption clause: `"on 15 Nov 2024"` for one night,
+ * `"between 15 and 18 Nov 2024"` for a run built from several. `""` when
+ * unknown, so the caption drops the clause.
+ *
+ * Two nights are all a run records — the first and the last — so this never
+ * claims a *count* ("over 4 nights") it cannot know; "between … and …" is the
+ * strongest thing that is certainly true.
+ */
+export function captureNightsClause(
+  start: string | null | undefined,
+  end: string | null | undefined,
+): string {
+  const a = parseNightDate(start) ?? parseNightDate(end);
+  const b = parseNightDate(end) ?? parseNightDate(start);
+  if (!a || !b) return "";
+  const [first, last] = nightKey(a) <= nightKey(b) ? [a, b] : [b, a];
+  const lastLabel = `${last.day} ${MONTHS_ABBR[last.month - 1]} ${last.year}`;
+  if (nightKey(first) === nightKey(last)) return `on ${lastLabel}`;
+  const firstLabel = first.year !== last.year
+    ? `${first.day} ${MONTHS_ABBR[first.month - 1]} ${first.year}`
+    : first.month !== last.month
+      ? `${first.day} ${MONTHS_ABBR[first.month - 1]}`
+      : `${first.day}`;
+  return `between ${firstLabel} and ${lastLabel}`;
+}
+
+/**
+ * The one-line date under a picture, **labelled** — `"Shot 15 Nov 2024"` when
+ * the run recorded when its subs were taken, `"Stacked 30 Aug 2026"` when it
+ * didn't, and `""` when neither date is usable.
+ *
+ * The label is the point. A *bare* date beside a picture is read as "the night
+ * I took this", and on every strip and slideshow in the app that date was the
+ * run's `timestamp_utc` — so a re-stack of a 2024 back catalogue was captioned
+ * with today. Naming which date it is costs one word and makes the wrong
+ * reading impossible; preferring the capture window means the common case says
+ * the thing the reader actually wanted.
+ */
+export function pictureDateLabel(
+  captureNightStart: string | null | undefined,
+  captureNightEnd: string | null | undefined,
+  stackedUtc: string | null | undefined,
+): string {
+  const shot = formatCaptureNights(captureNightStart, captureNightEnd);
+  if (shot) return `Shot ${shot}`;
+  const stacked = formatStampDate(stackedUtc);
+  return stacked ? `Stacked ${stacked}` : "";
+}
+
+/** Sortable `YYYYMMDD` for a parsed night, so two nights compare as dates. */
+function nightKey(p: { year: number; month: number; day: number }): number {
+  return p.year * 10000 + p.month * 100 + p.day;
+}
+
+/**
  * A byte count as a friendly disk figure: "21 GB" / "4.2 GB" / "830 MB".
  *
  * Binary (1024³), because that is what every other size this app prints uses —

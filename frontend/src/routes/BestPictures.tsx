@@ -7,7 +7,7 @@ import { IconPlayerPlay, IconSparkles, IconStarFilled } from "@tabler/icons-reac
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type BestPicture } from "../api/client";
-import { formatStampDate } from "../format";
+import { formatCaptureNights } from "../format";
 import { sharePictureText } from "../share";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
@@ -163,7 +163,8 @@ export function BestPicturesView() {
           ? (() => {
               const { title, text, filename } = sharePictureText(
                 viewing.target_name,
-                formatStampDate(viewing.timestamp_utc),
+                formatCaptureNights(
+                  viewing.capture_night_start, viewing.capture_night_end),
               );
               return { shareFilename: filename, shareTitle: title, shareText: text };
             })()
