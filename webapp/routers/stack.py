@@ -2777,23 +2777,32 @@ def stack_run_options(safe: str, run_id: int, request: Request) -> dict[str, Any
     return {"run_id": run_id, "options": options}
 
 
-def _wallpaper_native_source(run: Any, preview_png: bytes, preset: dict,
-                             baked_north_up: float) -> bytes | None:
+#: Long-edge ceiling for the *shared* picture (the JPEG behind Share / Download
+#: JPEG / the keepsake / "with scale & compass"). Big enough that a post or a
+#: 6×4 print is sharp on any modern screen, small enough that a share stays a
+#: quick render and a messaging-app-friendly file — the stored 1024 px preview it
+#: replaces is neither.
+SHARE_JPEG_MAX_LONG_EDGE = 2560
+
+
+def _native_picture_source(run: Any, preview_png: bytes, baked_north_up: float,
+                           needed_long_edge: int) -> bytes | None:
     """A **native-resolution** render of the same picture the stored preview shows,
-    sized for ``preset`` — or ``None`` to use the stored preview bytes as before.
+    up to ``needed_long_edge`` px — or ``None`` to use the stored preview bytes as
+    before.
 
     The stored preview is capped at 1024 px
-    (:data:`~seestack.render.thumbnail.PREVIEW_MAX_WIDTH`), and the wallpaper never
-    upsamples, so cropping it to a phone shape yielded a ~470 px-wide lock screen
-    for a 1170 px phone — the picture the presets promise at device size, delivered
-    at a third of it. The full-resolution pixels are right there in the run's FITS,
-    and :func:`~seestack.render.thumbnail.render_preview_png_full_res` is the
-    renderer that already reproduces the stored preview's own look at a chosen size
-    (it is what the "Full-res PNG" download serves), so the wallpaper asks it for
-    exactly the pixels the crop needs — decimated *during* the FITS load, so the
-    memory cost is bounded by the request, not by the canvas.
+    (:data:`~seestack.render.thumbnail.PREVIEW_MAX_WIDTH`), which is the resolution
+    of every picture this app hands over: the wallpaper cropped it (a ~470 px-wide
+    lock screen for a 1170 px phone) and the share JPEG re-encoded it. The
+    full-resolution pixels are right there in the run's FITS, and
+    :func:`~seestack.render.thumbnail.render_preview_png_full_res` is the renderer
+    that already reproduces the stored preview's own look at a chosen size (it is
+    what the "Full-res PNG" download serves), so each caller asks it for exactly
+    the pixels it needs — decimated *during* the FITS load, so the memory cost is
+    bounded by the request, not by the canvas.
 
-    Declines — leaving the endpoint bit-for-bit as it was — whenever the render
+    Declines — leaving the caller bit-for-bit as it was — whenever the render
     could show a *different* picture from the one on screen:
 
     * a preview a past "Adjust → North up → Save" baked a rotation into (the FITS
@@ -2802,14 +2811,14 @@ def _wallpaper_native_source(run: Any, preview_png: bytes, preset: dict,
     * a "Process target" run, whose preview is a display-space auto-edit that only
       the saved recipe can reproduce (the full-res render of *that* is a whole
       editor pipeline at native size — worth it for an explicit "native size"
-      download, not yet for a one-tap wallpaper: see the backlog follow-on);
+      download, not yet for a one-tap share: see the backlog follow-on);
     * a preview that shows only part of the canvas (an auto-crop border trim);
     * a run with no readable FITS, or one whose canvas is no bigger than the
       preview already is — where there is nothing to gain.
     """
     from seestack.previewcrop import parse_preview_crop
     from seestack.render.thumbnail import render_preview_png_full_res
-    from seestack.wallpaper import png_size, wallpaper_source_long_edge
+    from seestack.wallpaper import png_size
 
     if baked_north_up:
         return None
@@ -2831,7 +2840,7 @@ def _wallpaper_native_source(run: Any, preview_png: bytes, preset: dict,
     canvas = [d for d in (run.canvas_w, run.canvas_h) if d]
     if canvas and max(canvas) <= preview_long:
         return None
-    needed = wallpaper_source_long_edge(size[0], size[1], preset)
+    needed = int(needed_long_edge)
     if needed <= preview_long:
         return None
     try:
@@ -2874,6 +2883,7 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
         png_size,
         render_wallpaper_jpeg,
         rotate_point_north_up,
+        wallpaper_source_long_edge,
     )
 
     preset = WALLPAPER_PRESETS.get(aspect)
@@ -2904,7 +2914,11 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
     # FITS at the size the crop needs, that is the source instead. Declines to
     # `None` (and everything below reads the stored bytes exactly as before)
     # whenever the render could differ from the picture on screen.
-    native = _wallpaper_native_source(run, preview, preset, baked_north_up)
+    prev_size = png_size(preview)
+    native = _native_picture_source(
+        run, preview, baked_north_up,
+        wallpaper_source_long_edge(prev_size[0], prev_size[1], preset),
+    ) if prev_size else None
     if native is not None:
         preview = native
     # Locate the target in the preview grid from the run's own WCS; None → centre.
@@ -2970,6 +2984,16 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # angle. Everything below is measured against the FITS grid, so it has to
         # start from this rather than assume the preview is the un-rotated one.
         baked_north_up = baked_north_up_deg(run)
+        # This is the picture people actually *share* — posted, sent to family,
+        # printed 6×4 — and it was a re-encode of the 1024 px preview. Where the
+        # same picture can be re-rendered from the run's own master it is served at
+        # share resolution instead; `None` keeps the stored bytes, exactly as
+        # before. Everything baked on below (the marks, the caption, the matte) is
+        # sized as a *fraction* of the picture, so all of it scales with this.
+        native = _native_picture_source(run, preview, baked_north_up,
+                                        SHARE_JPEG_MAX_LONG_EDGE)
+        if native is not None:
+            preview = native
         # The width the scale bar is measured against: the bar's length is a
         # *fraction* of the picture's width, and a rotate-with-expand grows the
         # canvas without changing the pixel scale, so it must be the width of the

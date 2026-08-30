@@ -19143,31 +19143,85 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Builder: grep first** — reuse `api.stackFraming` / `useStackFraming` and `seestack.framing.recentre_nudge`
   rather than a second definition of "which way".
 
-- **NEW IDEA (Builder 2026-08-27, traced while fixing the full-res-PNG stretch bug) — the picture a beginner
-  actually *shares* is 1024 px wide, because every share export is built from the stored preview PNG rather
-  than the master.** *(Pillar: enjoy + share + trust, PRIORITY 3; size S–M; additive, no new deps. Confidence:
-  traced against the code.)* `_write_preview_png` caps the stored preview at **1024 px** wide
-  (`seestack/stack/output.py:366`), and the share JPEG (`stack.py`, `kind == "jpeg"`), the wallpaper
-  (`stack.py:1988`) and the sub-reveal all start from `run.preview_path` bytes. So the file a beginner posts,
-  sets as a phone background, or sends to family is 1024 px — soft on any modern phone, let alone a 1440p
-  screen — even though the master holds the full canvas and the "Download full-res PNG" button beside it
-  serves it. *(Note for whoever picks this up: an old Builder investigation elsewhere in this file describes
-  the share JPEG as having a "2048px cap". That is stale — it is the 1024 px preview, re-encoded.)*
-  **Builder 2026-08-30 — one more consumer, and the first that *measurably* pays for the cap.** The **Zoom
-  clip** (v0.303.0) is built from the same stored preview, and because it must not upscale, the cap sets its
-  resolution directly: `zoom_clip_size` yields **569 px** from a 1024-wide preview (1024 ÷ the 1.8× zoom)
-  where the same clip off a native-res source would be the full 640. So fixing this makes the shared *clip*
-  visibly sharper too, not just the shared still — worth weighing against the **L** sizing below. Nothing
-  about the clip needs changing when it lands: it takes whatever pixels it is handed.
-  **Why it is newly cheap:** the parity problem that made this awkward is gone. As of v0.287.4
-  `render_preview_png_full_res` takes the run's saved `stretch`/`black`, so a share render can reproduce the
-  *exact* look of the stored preview at any size — the share and the thumbnail can't drift.
-  **Shape:** render the share/wallpaper source at a share-sized cap (~2048–2560 px, and the actual screen size
-  for a wallpaper) through that same call, keeping every existing mark (nameplate, scale bar, North rose) —
-  they are all fractions of the picture width, so they scale with it. **Cautions:** this turns a byte-copy
-  into a real render on a RAM-capped NAS, so cap it, do it in the threadpool as the full-res download already
-  does, and leave the *gallery/History thumbnail* on the cheap stored preview — only the export grows. Keep
-  the un-rotated/no-marks path byte-identical where it can be, or state plainly that it changed.
+- **✅ MOSTLY SHIPPED (Builder, v0.309.0 + v0.310.0, branch `claude/compassionate-galileo-e1p1x8`) — ~~the
+  picture a beginner actually *shares* is 1024 px wide, because every share export is built from the stored
+  preview PNG rather than the master.~~ The wallpaper and the share JPEG (with its keepsake and
+  scale-&-compass variants) now come off the master; the zoom clip is the one consumer still left on the
+  preview.** *(The original spec is kept below, indented — it is what the two commits were built from.)*
+
+    **What shipped.** One shared `stack._native_picture_source(run, preview, baked_north_up, needed_long_edge)`
+    re-renders the same picture from the run's own FITS at the size each caller needs, and returns `None` —
+    "use the stored bytes, exactly as before" — wherever the render could show a *different* picture: a baked
+    North-up preview, a "Process target" display-space run, an auto-crop-trimmed preview, a missing FITS, or a
+    canvas no bigger than the preview (read from `canvas_w/h` *before* any render). **v0.309.0** used it for the
+    wallpaper (see the entry under "Image quality"); **v0.310.0** used it for `kind="jpeg"` at a
+    `SHARE_JPEG_MAX_LONG_EDGE = 2560` cap.
+
+    **The entry's claim that the marks scale was checked, not assumed, and it is right — with one wrinkle that
+    would have been a bug if the swap had gone in one line later.** The nameplate's font, the keepsake's matte
+    and the rose are all fractions of the picture's own size, so they scale for free. The **scale bar is not**:
+    `SkyMarks.bar_px` is `bar.fraction × preview_width`, a length in pixels *of the image it will be drawn on*,
+    computed by the caller. So the source swap has to happen **before** `preview_width` is measured — a bar
+    measured against the 400 px preview and drawn on a 1600 px picture would claim a length four times what it
+    marks. A test spies on `_sky_marks_for_run`'s width argument rather than eyeballing the picture, because
+    this is exactly the kind of thing that reads fine and is silently wrong.
+
+    **The 2026-08-29 stand-down note below sized this as an **L** and was right about every part of it — what
+    made it shippable is that the hard parts are *declined* rather than solved.** Its point 1 (the plain path
+    is easy) is exactly what shipped. Its point 2 (the recipe path needs a render cache, and that cache is the
+    bulk of the work) stands untouched: `_native_picture_source` returns `None` for a display-space run, so
+    nothing renders and nothing needs caching — the cost is that the owner's `auto_edit_on_autostack` runs keep
+    the 1024 px share, and that half is still open. Its point 3 (test blast radius) did not materialise, for
+    the same reason: the **canvas ≤ preview** gate means the old fixtures — `test_wallpaper.py`'s zero-valued
+    FITS beside a solid-colour preview, and `test_share_north_up_double_rotation.py`'s three byte-identity
+    assertions — all take the stored-preview path exactly as before. Not one assertion was rewritten or
+    loosened. **The lesson worth carrying: a source swap that can decline cheaply is a different size from one
+    that must always succeed.**
+
+    **Not done: the zoom clip.** It reads `run.preview_path` bytes directly and caches the result under a
+    signature *of those bytes* (`_zoom_clip_signature`), so feeding it a bigger source means re-keying the cache
+    as well as swapping the bytes — a separate, self-contained slice. The gain the entry measured still stands
+    (569 px → 640).
+
+    **Upgrade-safe (§9):** no config/schema/on-disk/API-shape change; the endpoints, their query parameters and
+    their media types are untouched. Stated plainly rather than hidden: the *bytes* of a plain share JPEG do
+    change on a run whose master is bigger than its preview — that is the fix, not a side effect. Nothing is
+    written to disk, and the gallery/History **thumbnail** deliberately stays on the cheap stored preview, as
+    the spec's caution asked.
+
+    **Tests (+8 in `tests/webapp/test_share_native_resolution.py`, 6 fail before / pass after):** the share
+    JPEG off a 1600 px master with a 400 px preview; the cap (monkeypatched small, so no 100 MP fixture); the
+    "same picture, only bigger" comparison against the display-space twin; the scale-bar width spy above; the
+    keepsake matting the big picture; North-up on the bigger source; and the processed-run / missing-FITS
+    fallbacks.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-08-27, traced while fixing the full-res-PNG stretch bug) — the picture a beginner
+    actually *shares* is 1024 px wide, because every share export is built from the stored preview PNG rather
+    than the master.** *(Pillar: enjoy + share + trust, PRIORITY 3; size S–M; additive, no new deps. Confidence:
+    traced against the code.)* `_write_preview_png` caps the stored preview at **1024 px** wide
+    (`seestack/stack/output.py:366`), and the share JPEG (`stack.py`, `kind == "jpeg"`), the wallpaper
+    (`stack.py:1988`) and the sub-reveal all start from `run.preview_path` bytes. So the file a beginner posts,
+    sets as a phone background, or sends to family is 1024 px — soft on any modern phone, let alone a 1440p
+    screen — even though the master holds the full canvas and the "Download full-res PNG" button beside it
+    serves it. *(Note for whoever picks this up: an old Builder investigation elsewhere in this file describes
+    the share JPEG as having a "2048px cap". That is stale — it is the 1024 px preview, re-encoded.)*
+    **Builder 2026-08-30 — one more consumer, and the first that *measurably* pays for the cap.** The **Zoom
+    clip** (v0.303.0) is built from the same stored preview, and because it must not upscale, the cap sets its
+    resolution directly: `zoom_clip_size` yields **569 px** from a 1024-wide preview (1024 ÷ the 1.8× zoom)
+    where the same clip off a native-res source would be the full 640. So fixing this makes the shared *clip*
+    visibly sharper too, not just the shared still — worth weighing against the **L** sizing below. Nothing
+    about the clip needs changing when it lands: it takes whatever pixels it is handed.
+    **Why it is newly cheap:** the parity problem that made this awkward is gone. As of v0.287.4
+    `render_preview_png_full_res` takes the run's saved `stretch`/`black`, so a share render can reproduce the
+    *exact* look of the stored preview at any size — the share and the thumbnail can't drift.
+    **Shape:** render the share/wallpaper source at a share-sized cap (~2048–2560 px, and the actual screen size
+    for a wallpaper) through that same call, keeping every existing mark (nameplate, scale bar, North rose) —
+    they are all fractions of the picture width, so they scale with it. **Cautions:** this turns a byte-copy
+    into a real render on a RAM-capped NAS, so cap it, do it in the threadpool as the full-res download already
+    does, and leave the *gallery/History thumbnail* on the cheap stored preview — only the export grows. Keep
+    the un-rotated/no-marks path byte-identical where it can be, or state plainly that it changed.
 
   **⚠️ Builder note (2026-08-29, branch `claude/compassionate-galileo-eypoyg`) — I claimed this, sized it
   against the real code, and STOOD DOWN before writing any of it. It is not S–M; read this before picking it
