@@ -67,6 +67,22 @@ describe("deepSkyMeta", () => {
     }))).toBe("Shot 15–18 Nov 2024");
   });
 
+  it("says how many nights it took, when the run recorded that too", () => {
+    // The slideshow is where someone *shows* the picture to another person, so
+    // "over 4 nights" is the fact most worth having there — and the date range
+    // beside it cannot supply it.
+    expect(deepSkyMeta(pic({
+      total_exposure_s: null, n_frames_used: 0,
+      capture_night_start: "2024-11-15", capture_night_end: "2024-11-18",
+      capture_nights: 4,
+    }))).toBe("Shot over 4 nights, 15–18 Nov 2024");
+    // …and stays quiet on a run made before the count existed.
+    expect(deepSkyMeta(pic({
+      total_exposure_s: null, n_frames_used: 0,
+      capture_night_start: "2024-11-15", capture_night_end: "2024-11-18",
+    }))).not.toContain("nights");
+  });
+
   it("says which date it is, so a bare stamp can't be read as the capture night", () => {
     expect(deepSkyMeta(pic({ total_exposure_s: null, n_frames_used: 0 })))
       .toMatch(/^Stacked /);

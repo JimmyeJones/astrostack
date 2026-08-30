@@ -359,7 +359,8 @@ export function Dashboard() {
                     day, tomorrow's date for an evening stack west of UTC.) */}
                 <Text size="xs" c="dimmed">
                   {pictureDateLabel(
-                    s.capture_night_start, s.capture_night_end, s.timestamp_utc)}
+                    s.capture_night_start, s.capture_night_end, s.timestamp_utc,
+                    s.capture_nights)}
                 </Text>
               </Group>
             </Card>

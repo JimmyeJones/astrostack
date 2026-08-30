@@ -30,7 +30,8 @@ import { sharePictureText } from "../../share";
 export function latestPictureCaption(run: StackRun): string {
   const parts: string[] = [];
   const when = pictureDateLabel(
-    run.capture_night_start, run.capture_night_end, run.timestamp_utc);
+    run.capture_night_start, run.capture_night_end, run.timestamp_utc,
+    run.capture_nights);
   if (when) parts.push(when);
   parts.push(`${run.n_frames_used} frame${run.n_frames_used === 1 ? "" : "s"}`);
   if (run.total_exposure_s) parts.push(`${formatIntegration(run.total_exposure_s)} of light`);

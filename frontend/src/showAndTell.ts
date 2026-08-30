@@ -68,7 +68,8 @@ const VIDEO_FACTS: Record<string, string> = {
 export function deepSkyMeta(pic: BestPicture): string {
   const parts: string[] = [];
   const date = pictureDateLabel(
-    pic.capture_night_start, pic.capture_night_end, pic.timestamp_utc);
+    pic.capture_night_start, pic.capture_night_end, pic.timestamp_utc,
+    pic.capture_nights);
   if (date) parts.push(date);
   if (
     pic.total_exposure_s != null &&
