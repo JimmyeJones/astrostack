@@ -62,6 +62,32 @@ def test_flags_output_and_video_junk_but_not_real_targets(client, data_root: Pat
     assert by_safe["M_31"]["detail"] and by_safe["Lunar_video"]["detail"]
 
 
+def test_flags_a_photo_capture_target_at_any_frame_count(client, data_root: Path):
+    """A ``*_photo`` target — the single stills the Seestar takes in
+    scenery/planetary photo mode — is junk exactly like a ``*_video`` one, and
+    like videos it is decided by *name* at any frame count (the frame-count gate
+    would otherwise never even look at a folder of 40 snapshots)."""
+    incoming = data_root / "dump"
+    photos = incoming / "Scenery_photo"
+    photos.mkdir(parents=True)
+    photo_frames = [photos / f"IMG_{i:03d}.fit" for i in range(40)]
+    real = incoming / "M 42"
+    real.mkdir()
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "Scenery_photo", photo_frames)
+        _add_target(lib, "M 42", [real / f"Light_{i:03d}.fit" for i in range(20)])
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/cleanup-suggestions").json()
+    by_safe = {s["safe"]: s for s in body}
+    assert set(by_safe) == {"Scenery_photo"}
+    assert by_safe["Scenery_photo"]["reason"] == "photo"
+    assert "photo" in by_safe["Scenery_photo"]["detail"]
+
+
 def test_flags_a_legacy_mixed_drop_target_regardless_of_size(client, data_root: Path):
     """A target flagged at scan time as a legacy whole-device / mixed-folder drop
     must be surfaced for one-click cleanup even though it is *large* — the cheap

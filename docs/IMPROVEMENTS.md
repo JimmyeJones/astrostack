@@ -418,12 +418,32 @@ _(nothing else claimed — claim an item here with your branch name)_
   makes ten ordinary ones nag, and no longer badges nine of them "soft" while still earning its own "best" nod;
   a genuinely soft night is still caught and still badged on a long project; and the leave-one-out helper
   directly, including the identical-twins case.
-- **🟠 VERIFIED AGAINST THE OWNER'S REAL S30 FOLDER TREE (2026-08-31) — the scanner does not recognise the
-  Seestar's `*_photo` folders, so they are ingested as ordinary deep-sky targets. Same family as the
-  already-fixed `*_video` bug, and it is a one-line-shaped gap.** *(Severity: broken-UX / junk targets — not
-  corruption of real data. Confidence: HIGH — the owner supplied a full `tree` listing of
-  `\\TRUENAS\astro` and the scanner's own `_apply_seestar_convention` was replayed over those exact 71 folder
-  names.)*
+- **✅ SHIPPED (Builder, v0.319.2, branch `claude/compassionate-galileo-hyk4jn`) — ~~the scanner does not
+  recognise the Seestar's `*_photo` folders, so they are ingested as ordinary deep-sky targets.~~** Fixed as
+  the *family*, not the suffix: `_VIDEO_SUFFIX` and a new `_PHOTO_SUFFIX` now live in one `_CAPTURE_SUFFIXES`
+  tuple that the scan-time skip, the legacy-base helper's ingest test, and the cleanup classifier all read, so
+  no future run can teach one of them a capture mode and miss the others. Measured before/after on the
+  entry's own replay: `_apply_seestar_convention` over `[M 31_sub, M 31, Planetary_photo, Scenery_photo,
+  Planetary_video, Scenery_video]` gave `["M 31", "Planetary_photo", "Scenery_photo"]` and now gives
+  `["M 31"]`.
+
+  **The healing half matters more than the skip**, because the owner's library already holds these: a
+  `*_photo` target now earns a cleanup nudge with a new `"photo"` reason and its *own* wording ("the single
+  snapshots it takes in scenery/planetary photo mode"), not the video sentence — a folder of 40 scenery
+  stills told it can't be stacked "because it's a video" reads as the app being confused. Like `_video` the
+  verdict is decided by **name alone at any frame count**, via a new shared
+  `is_capture_mode_target_name()`; the endpoint's `_MAX_CLEANUP_FRAMES ≤ 2` gate would otherwise never look
+  at a 40-still folder. Upgrade-safe (§9): a new enum *value* on an existing field, no config/schema/on-disk
+  change; an older frontend simply doesn't render the new group. **Tests: +5 (`tests/test_scanner.py`),
+  +1 webapp (`tests/webapp/test_cleanup_suggestions.py`), +1 frontend — all fail before.**
+
+  Deliberately **not** done, and still open below: the entry's other two names. `batch_stack_tmp` is
+  something else's temp folder (a name-pattern blocklist is a judgement call — filed, not blind-added), and
+  `MyWorks` was explicitly listed as a non-finding.
+
+    *(Original spec: severity broken-UX / junk targets — not corruption of real data. Confidence: HIGH — the
+    owner supplied a full `tree` listing of `\\TRUENAS\astro` and the scanner's own
+    `_apply_seestar_convention` was replayed over those exact 71 folder names.)*
 
   `seestack/io/scanner.py` defines exactly three convention suffixes — `_SUB_SUFFIX = "_sub"`,
   `_MOSAIC_SUB_SUFFIX = "_mosaic_sub"`, `_VIDEO_SUFFIX = "_video"` (lines ~63–65). **There is no `_photo`
@@ -445,6 +465,17 @@ _(nothing else claimed — claim an item here with your branch name)_
     folder, and the real scanner runs `_looks_like_seestar_container` / container expansion, which the replay
     **did not model** (it replayed the flat convention step only). `MyWorks` almost certainly expands
     correctly. Listed for completeness, explicitly not a finding.
+
+- **🟡 OPEN, SPLIT OUT OF THE `*_photo` ENTRY ABOVE WHEN THAT SHIPPED (v0.319.2) — `batch_stack_tmp` in the
+  owner's share ingests as a target.** Not created by this app (grepped: no match), so it is some other
+  tool's temp folder living in `\\TRUENAS\astro`. It has no `_sub` sibling, so it ingests unchanged if it
+  holds any FITS. *(Severity: low — one junk tile. Confidence: HIGH, from the owner's real `tree`.)*
+  **Deliberately left for a decision rather than blind-added with the `_photo` fix:** a scan-time
+  name-pattern blocklist for "obvious temp folders" is a judgement call an agent should not make on the
+  on-by-default ingest hot path, because the guess that costs nothing here ("anything called `*_tmp`") would
+  silently drop a real folder someone named badly. **The safe half is the cleanup nudge**, which is
+  after-the-fact and user-confirmed: a verdict alongside `photo`/`video` for a target whose frames all sit in
+  a folder matching a small, explicit temp-name list. Size XS. Do the nudge; leave the scan-time skip filed.
 
 - **✅ CLOSES A GATED ENTRY — the owner's real folder tree answers the device-naming question that blocked the
   2026-07-24 "mosaic bare-output skip" item, and the answer is: THERE IS NOTHING TO FIX in the scanner.**

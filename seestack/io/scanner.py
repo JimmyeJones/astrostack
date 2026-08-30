@@ -16,8 +16,10 @@ leans on that, and on the Seestar's **folder-naming convention** (see
     a ``<Target>_sub/`` sibling exists we skip this output folder so we never
     build a bogus 1-frame "stack" from it. A bare folder with no ``_sub``
     sibling still ingests as a target (older / non-Seestar layouts).
-  * ``*_video/`` folders are video captures, not stackable deep-sky subs, and
-    are skipped entirely.
+  * ``*_video/`` folders are video captures and ``*_photo/`` folders are the
+    single-shot stills the device takes in scenery/planetary photo mode
+    (``Planetary_photo/``, ``Scenery_photo/``). Neither holds stackable
+    deep-sky subs, so both are skipped entirely.
   * Loose FITS files sitting directly in the root (exports, one-offs, files
     that escaped a folder) are collected into a single ``Unsorted`` target
     you can sort out by hand later.
@@ -58,11 +60,20 @@ ShouldStopFn = Callable[[], bool]
 # Seestar folder-naming convention (see the module docstring). The Seestar
 # writes raw subs into "<Target>_sub/" ("<Target>_mosaic_sub/" for a mosaic)
 # and its own on-device stacked OUTPUT into the bare "<Target>/". "*_video/"
-# folders are video captures. Suffixes are matched case-insensitively because
-# the folder casing is not guaranteed across firmware/app versions.
+# folders are video captures and "*_photo/" folders are single-shot stills
+# (the device writes "Planetary_photo/", "Scenery_photo/" beside the matching
+# "*_video/" ones) — neither holds stackable deep-sky subs. Suffixes are matched
+# case-insensitively because the folder casing is not guaranteed across
+# firmware/app versions.
 _SUB_SUFFIX = "_sub"
 _MOSAIC_SUB_SUFFIX = "_mosaic_sub"
 _VIDEO_SUFFIX = "_video"
+_PHOTO_SUFFIX = "_photo"
+
+# The capture-mode folders that never hold stackable deep-sky sub-frames, so the
+# scanner skips them and the cleanup nudge offers to remove any a pre-convention
+# scan already ingested. One tuple so the two can never disagree about the family.
+_CAPTURE_SUFFIXES = (_VIDEO_SUFFIX, _PHOTO_SUFFIX)
 
 
 def _apply_seestar_convention(
@@ -76,7 +87,8 @@ def _apply_seestar_convention(
 
     Rules, applied per folder:
 
-    * ``*_video`` → skipped (video capture, not stackable subs).
+    * ``*_video`` / ``*_photo`` → skipped (a video capture or a single-shot
+      still, not stackable subs).
     * ``<T>_mosaic_sub`` → target ``"<T> (mosaic)"`` (a mosaic's raw subs, kept
       distinct from the single-field target so their differing footprints are
       never co-stacked or auto-merged).
@@ -110,7 +122,7 @@ def _apply_seestar_convention(
     units: list[tuple[str, list[Path]]] = []
     for (name, files), parent in zip(subdirs_with_fits, parents, strict=True):
         low = name.lower()
-        if low.endswith(_VIDEO_SUFFIX):
+        if low.endswith(_CAPTURE_SUFFIXES):
             continue
         if low.endswith(_MOSAIC_SUB_SUFFIX):
             base = name[: -len(_MOSAIC_SUB_SUFFIX)].rstrip()
@@ -244,7 +256,7 @@ def _seestar_output_bases(
     ingested_bare = {
         name.lower()
         for (name, _), parent in zip(subdirs_with_fits, parents, strict=True)
-        if not name.lower().endswith((_VIDEO_SUFFIX, _SUB_SUFFIX))
+        if not name.lower().endswith((*_CAPTURE_SUFFIXES, _SUB_SUFFIX))
         and (parent, name.lower() + _SUB_SUFFIX) not in sibling_names
     }
     bases: dict[str, str] = {}
@@ -268,10 +280,37 @@ _MAX_JUNK_OUTPUT_FRAMES = 2
 
 @dataclass(frozen=True)
 class JunkTargetVerdict:
-    """Why a target looks like Seestar output/video junk, not raw subs."""
+    """Why a target looks like Seestar output/capture junk, not raw subs."""
 
-    reason: str   # "video" | "on_device_output"
+    reason: str   # "video" | "photo" | "on_device_output"
     detail: str   # plain-language, beginner-facing explanation
+
+
+def is_capture_mode_target_name(target_name: str) -> bool:
+    """True when a target's *name* alone marks it as one of the Seestar's
+    capture-mode folders (``*_video`` / ``*_photo``) — neither of which holds
+    stackable subs, at any frame count. Lets a caller decide by name before
+    paying to open the target's project."""
+    return target_name.strip().lower().endswith(_CAPTURE_SUFFIXES)
+
+
+def _capture_folder_verdict(suffix: str) -> JunkTargetVerdict:
+    """The verdict for one of the Seestar's capture-mode folders
+    (:data:`_CAPTURE_SUFFIXES`) — a video clip or a single-shot still. Both are
+    "there are no subs in here", but the wording has to name the right thing or
+    the nudge reads as nonsense beside a folder full of scenery snapshots."""
+    if suffix == _PHOTO_SUFFIX:
+        return JunkTargetVerdict(
+            "photo",
+            "Built from a Seestar “_photo” folder — the single snapshots it "
+            "takes in scenery/planetary photo mode, not raw sub-frames, so "
+            "there is nothing here to stack into a deep image.",
+        )
+    return JunkTargetVerdict(
+        "video",
+        "Built from a Seestar “_video” capture folder, not raw sub-frames — "
+        "it can't be stacked into a deep image.",
+    )
 
 
 def classify_seestar_junk_target(
@@ -280,8 +319,8 @@ def classify_seestar_junk_target(
     n_frames: int,
 ) -> JunkTargetVerdict | None:
     """
-    Decide whether a library target was built from a Seestar *output* or *video*
-    folder rather than raw sub-frames — the leftover "junk" targets an old,
+    Decide whether a library target was built from a Seestar *output*, *video* or
+    *photo* folder rather than raw sub-frames — the leftover "junk" targets an old,
     pre-``_apply_seestar_convention`` scan produced before the scanner learned the
     Seestar folder convention (v0.184.9).
 
@@ -292,35 +331,38 @@ def classify_seestar_junk_target(
 
     * ``video`` — the target name (or every frame's source folder) ends with
       ``_video``: a video capture, not stackable deep-sky subs.
+    * ``photo`` — the same, for ``_photo``: the single stills the device takes in
+      scenery/planetary photo mode. Same family, same "nothing to stack here"
+      verdict, different wording.
     * ``on_device_output`` — a small (≤ ``_MAX_JUNK_OUTPUT_FRAMES``) target whose
       frames all sit in a single **bare** ``<T>/`` folder that has a raw-subs
       ``<T>_sub/`` sibling on disk: the Seestar's own single stacked output, which
       "stacks" to one lower-resolution frame (colour speckle).
 
     Conservative by design — it only flags a target with positive evidence
-    (a ``_video`` name/folder, or a bare output folder whose ``_sub`` sibling is
-    actually present), so a real target is never mistaken for junk.
+    (a ``_video``/``_photo`` name/folder, or a bare output folder whose ``_sub``
+    sibling is actually present), so a real target is never mistaken for junk.
     """
-    _VIDEO_DETAIL = (
-        "Built from a Seestar “_video” capture folder, not raw sub-frames — "
-        "it can't be stacked into a deep image."
-    )
-    if target_name.strip().lower().endswith(_VIDEO_SUFFIX):
-        return JunkTargetVerdict("video", _VIDEO_DETAIL)
+    low_name = target_name.strip().lower()
+    if is_capture_mode_target_name(target_name):
+        for suffix in _CAPTURE_SUFFIXES:
+            if low_name.endswith(suffix):
+                return _capture_folder_verdict(suffix)
 
     folders = {Path(p).parent for p in source_paths}
     if not folders:
         return None
     folder_names = {f.name.lower() for f in folders}
-    if all(n.endswith(_VIDEO_SUFFIX) for n in folder_names):
-        return JunkTargetVerdict("video", _VIDEO_DETAIL)
+    for suffix in _CAPTURE_SUFFIXES:
+        if all(n.endswith(suffix) for n in folder_names):
+            return _capture_folder_verdict(suffix)
 
     if n_frames <= _MAX_JUNK_OUTPUT_FRAMES and len(folders) == 1:
         folder = next(iter(folders))
         low = folder.name.lower()
         # A raw-subs folder ("_sub"/"_mosaic_sub") is never junk — only a *bare*
         # output folder is. "_mosaic_sub" ends with "_sub", so one test covers both.
-        if not (low.endswith(_SUB_SUFFIX) or low.endswith(_VIDEO_SUFFIX)):
+        if not low.endswith((_SUB_SUFFIX, *_CAPTURE_SUFFIXES)):
             sibling = folder.parent / f"{folder.name}{_SUB_SUFFIX}"
             try:
                 is_output = sibling.is_dir()

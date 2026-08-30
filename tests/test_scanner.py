@@ -20,6 +20,7 @@ from seestack.io.scanner import (
     classify_seestar_junk_target,
     container_target_children,
     duplicate_sub_target_base_name,
+    is_capture_mode_target_name,
     run_qc_and_solve,
     scan_and_organize,
 )
@@ -162,6 +163,50 @@ def test_classify_junk_video_by_source_folder(tmp_path):
     paths = [str(vid / "f001.fit"), str(vid / "f002.fit")]
     v = classify_seestar_junk_target("Solar", paths, n_frames=2)
     assert v is not None and v.reason == "video"
+
+
+def test_apply_seestar_convention_skips_photo_folders():
+    """The Seestar writes single-shot stills into '*_photo/' folders
+    ('Planetary_photo/', 'Scenery_photo/') beside the '*_video/' ones. They hold
+    no stackable deep-sky subs, so they must be skipped exactly like videos —
+    before this they fell through every rule and ingested as junk targets."""
+    units = _apply_seestar_convention(_fake(
+        "M 31_sub", "M 31",                          # real target + its output
+        "Planetary_photo", "Scenery_photo",          # single-shot stills
+        "Planetary_video", "Scenery_video",          # video captures
+    ))
+    assert [n for n, _ in units] == ["M 31"]
+    # Case-insensitive, like every other suffix test.
+    assert _apply_seestar_convention(_fake("Scenery_PHOTO")) == []
+
+
+def test_classify_junk_photo_by_target_name():
+    """A library that already ingested a '*_photo' folder (any older build, or
+    an older scan) gets a cleanup nudge, with wording that names stills rather
+    than claiming it is a video."""
+    v = classify_seestar_junk_target("Scenery_photo", [], n_frames=40)
+    assert v is not None and v.reason == "photo"
+    assert "photo" in v.detail and "video" not in v.detail
+    assert classify_seestar_junk_target("Planetary_PHOTO", [], 5) is not None
+
+
+def test_classify_junk_photo_by_source_folder(tmp_path):
+    """Even under a different target name, frames sourced entirely from a
+    '*_photo' folder are single stills, not subs."""
+    photos = tmp_path / "Planetary_photo"
+    photos.mkdir()
+    paths = [str(photos / "IMG_001.fit"), str(photos / "IMG_002.fit")]
+    v = classify_seestar_junk_target("Jupiter", paths, n_frames=2)
+    assert v is not None and v.reason == "photo"
+
+
+def test_is_capture_mode_target_name_covers_both_and_nothing_else():
+    """The shared name test the cleanup endpoint uses to decide by name alone,
+    before paying to open a target's project."""
+    assert is_capture_mode_target_name("Lunar_video")
+    assert is_capture_mode_target_name("  Scenery_PHOTO  ")
+    assert not is_capture_mode_target_name("M 31")
+    assert not is_capture_mode_target_name("M 31_sub")
 
 
 def test_classify_junk_on_device_output_when_sub_sibling_present(tmp_path):
