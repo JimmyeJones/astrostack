@@ -56,6 +56,20 @@ export function formatNightDate(iso: string | null | undefined): string {
 }
 
 /**
+ * A date label that is a **capture** date — when the light was collected — and
+ * not when the app did something. Only {@link formatCaptureNights} can make one.
+ *
+ * It is a plain string at runtime (a branded type, erased by the compiler), so
+ * it renders and concatenates like any other. The point is the *input* side:
+ * `sharePictureText` takes one of these, so handing it
+ * `formatStampDate(run.timestamp_utc)` — the moment the stack ran — no longer
+ * type-checks. That mistake was made twice on the Target page and survived a
+ * whole sweep of this class, because a processing stamp reads perfectly
+ * plausibly in the slot a capture date belongs in.
+ */
+export type CaptureLabel = string & { readonly __captureLabel: unique symbol };
+
+/**
  * When a picture's subs were **shot**, from a run's capture window
  * (`capture_night_start` / `capture_night_end` — observing-night dates the
  * server bucketed with the same noon-to-noon rule the Nights card uses).
@@ -74,20 +88,20 @@ export function formatNightDate(iso: string | null | undefined): string {
 export function formatCaptureNights(
   start: string | null | undefined,
   end: string | null | undefined,
-): string {
+): CaptureLabel {
   const a = parseNightDate(start) ?? parseNightDate(end);
   const b = parseNightDate(end) ?? parseNightDate(start);
-  if (!a || !b) return "";
+  if (!a || !b) return "" as CaptureLabel;
   const [first, last] = nightKey(a) <= nightKey(b) ? [a, b] : [b, a];
   const lastLabel = `${last.day} ${MONTHS_ABBR[last.month - 1]} ${last.year}`;
-  if (nightKey(first) === nightKey(last)) return lastLabel;
+  if (nightKey(first) === nightKey(last)) return lastLabel as CaptureLabel;
   if (first.year !== last.year) {
-    return `${first.day} ${MONTHS_ABBR[first.month - 1]} ${first.year} – ${lastLabel}`;
+    return `${first.day} ${MONTHS_ABBR[first.month - 1]} ${first.year} – ${lastLabel}` as CaptureLabel;
   }
   if (first.month !== last.month) {
-    return `${first.day} ${MONTHS_ABBR[first.month - 1]} – ${lastLabel}`;
+    return `${first.day} ${MONTHS_ABBR[first.month - 1]} – ${lastLabel}` as CaptureLabel;
   }
-  return `${first.day}–${lastLabel}`;
+  return `${first.day}–${lastLabel}` as CaptureLabel;
 }
 
 /**

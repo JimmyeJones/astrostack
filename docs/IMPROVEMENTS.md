@@ -395,6 +395,35 @@ _(nothing else claimed — claim an item here with your branch name)_
   `LatestPictureCard.test.tsx` (the caption saying "Shot …" once a window exists, and still labelling
   "Stacked …" when there is none).
 
+- **✅ SHIPPED (Builder, v0.315.2, branch `claude/compassionate-galileo-7y6nlj`) — the recurrence guard for
+  the bug directly above: a share caption's date argument is now a **type**, so a processing stamp cannot
+  reach it.** *(Pillar: trust — PRIORITY 3; frontend-only, no behaviour change on the picture path. Filed and
+  shipped together because the fix above is the *second* time this exact substitution shipped, and a comment
+  saying "use the capture window here" had already failed to stop it once.)*
+
+  **What shipped.** `formatCaptureNights` now returns a branded `CaptureLabel` (a compile-time-only brand — it
+  is a plain string at runtime, so every display use is byte-for-byte unchanged), and `sharePictureText` takes
+  one. Passing `formatStampDate(run.timestamp_utc)` into the capture slot is now a **type error**, which is
+  the same discipline v0.313.0 applied to `postCaption` when it stopped taking a `dateLabel` — the mistake
+  fails to compile rather than reading plausibly. Turning it on found the two remaining call sites
+  immediately, which is the evidence that the guard was worth its weight.
+
+  **…and those two sites were the same wrong claim, on a different picture.** The Gallery lightbox's and the
+  Moon & Sun page's shares of a **video still** passed `created_utc` — set by
+  `webapp/video.py` to `datetime.now(UTC)` when the app stacks the clip — into a slot that renders
+  *"captured …"*. The app never learns when a clip was shot. Rather than dropping the date (which loses a fact
+  the owner may want) or asserting it (which is the bug), a still now goes through a sibling
+  `shareStillText`, which keeps the date and **labels** it: *"Moon · Stacked 30 Aug 2026"* /
+  *"Moon — stacked 30 Aug 2026"*. A separate function rather than an argument, so the two kinds of picture
+  cannot be swapped back by accident.
+
+  **Upgrade-safe (§9):** frontend-only, no API/schema/config/on-disk/default change; the branded type is
+  erased at build time, so the shipped bundle's picture-share captions are identical.
+
+  **Tests (+3):** `share.test.ts` covers `shareStillText`'s labelled date, its no-date fall-through and its
+  PNG-by-default filename; the existing `sharePictureText` cases mint a `CaptureLabel` explicitly, and
+  `Target.test.tsx` now builds its expectation from the real `formatCaptureNights` rather than a literal.
+
 - **✅ SHIPPED (Builder, v0.312.1, branch `claude/compassionate-galileo-6jgh4j`) — ~~"See what stacking
   removed" paints a **cyan wash over the whole picture** on a many-sub stack, while the caption underneath
   calls those marks satellite trails and cosmic rays.~~** Found by measuring the feature I had just put on two

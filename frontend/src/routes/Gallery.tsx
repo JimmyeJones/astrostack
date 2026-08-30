@@ -14,7 +14,7 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   api, type GalleryItem, type StackOptionField, type VideoStill,
 } from "../api/client";
-import { sharePictureText } from "../share";
+import { sharePictureText, shareStillText } from "../share";
 import { formatCaptureNights, formatIntegration, formatStampDate } from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
@@ -827,13 +827,14 @@ export function GalleryView() {
         ) : undefined}
         {...(viewingStill
           ? (() => {
-              // The still's PNG *is* its picture, so the share sheet gets that —
-              // named `.png`, since a PNG arriving called `.jpg` confuses the
-              // app it lands in.
-              const { title, text, filename } = sharePictureText(
+              // A still goes through `shareStillText`, not the picture one: the
+              // app never learns when the *clip* was shot, only when it stacked
+              // the capture — so the date keeps its "Stacked" label instead of
+              // being passed off as a capture date. (Its PNG *is* its picture,
+              // hence the extension the helper already defaults to.)
+              const { title, text, filename } = shareStillText(
                 viewingStill.label,
                 formatStampDate(viewingStill.created_utc),
-                "png",
               );
               return { shareFilename: filename, shareTitle: title, shareText: text };
             })()
