@@ -15380,6 +15380,29 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-30, MEASURED — the one other finding of the sub-count sweep that shipped
+  v0.313.1, filed rather than fixed because it is advisory copy, not a wrong picture) — "How's my stack?"
+  tells every deep stack its edges are ragged, and can never praise one for even coverage.** *(Pillar:
+  friendliness + trust — PRIORITY 3; size S–M; **needs a small schema decision, read it before starting**.)*
+  `stackhealth.stack_health`'s coverage note fires when
+  `coverage_max >= 4 and coverage_min <= 0.25 * coverage_max`, and the "even coverage" strength in the positive
+  summary is its exact complement. But `coverage_min` is the **extreme minimum over the covered canvas** — on
+  any dithered stack that is 1, because *some* pixel at the very fringe was touched by exactly one frame. So
+  the ratio is 1/N and falls monotonically with the sub count: measured on real `run_stack` output of one
+  dithered field, **0.125 at 8 subs → 0.031 at 32 → 0.0078 at 128**. Two consequences, both on the owner's own
+  data: the *"the edges have far fewer frames than the centre … Trim border gives a clean, even rectangle"*
+  note fires on **every** Seestar stack however trivial the ramp (a ±6 px dither on a 480 px frame is 2.5 % of
+  the width) and reads with the same weight as a genuinely ragged mosaic border; and **"even coverage" can
+  never appear** in the "solid stack" praise for anybody, because no dithered stack can clear it.
+  **The honest shape** is to gate on *how much* of the canvas is thinly covered rather than on the extreme
+  minimum — e.g. the fraction of covered pixels below 25 % of the peak, silent below a few percent.
+  **The catch to decide first:** that fraction is not stored. Adding it is an additive `stack_runs` column
+  (`SCHEMA_VERSION` + `ALTER TABLE`, the established pattern), but old runs would read NULL — so the entry has
+  to choose between *falling back to today's behaviour on an old run* (they keep nagging until re-stacked) and
+  *staying silent on an old run* (a real ragged border goes unmentioned on the runs the owner already has).
+  Neither is obviously right; pick one and say why on the shipped entry. **Do not** just raise the 0.25
+  threshold — that changes which mosaics are caught without fixing the mechanism, and the mechanism is the bug.
+
 - **✅ SHIPPED (Builder, v0.311.4, branch `claude/compassionate-galileo-y2x4gk`) — ~~"Your 1 picture cover
   0.29 square degrees" — the sky-coverage line on the Dashboard doesn't agree with itself, in the one state
   every beginner passes through.~~** Second finding from the same `scripts/agent-dogfood.sh` pass as the
@@ -21003,8 +21026,60 @@ problems. Dogfood it every big-picture run and fix root causes.
   the in-app reveal (this is the *portable* artefact), the montage wall (many targets, one grid) and the recap
   poster (a night's stats): this is the *one target's before→after*, the thing people actually post.
 
-- **NEW IDEA (Builder 2026-08-29, the follow-on v0.293.0 deliberately left out) — let the object labels travel
-  into the shared picture: a "label what's in it" variant of the share JPEG.** *(Pillar: understand + share,
+- ~~**NEW IDEA (Builder 2026-08-29, the follow-on v0.293.0 deliberately left out) — let the object labels travel
+  into the shared picture: a "label what's in it" variant of the share JPEG.**~~ — **SHIPPED v0.314.0**
+  (Builder 2026-08-30, branch `claude/compassionate-galileo-p5irbc`), built to the filed shape, with all three
+  cautions honoured. *(Pillar: understand + share — PRIORITY 3. The run's new beginner capability.)*
+
+  **What shipped.** A new pure engine module `seestack/objectlabels.py` — `place_labels` (which objects, where,
+  in what order) and `draw_object_labels` (the pixel work) — layered into `png_bytes_to_jpeg` beside the sky
+  marks and the nameplate, behind a `label_objects` flag on the JPEG artifact endpoint. Same source as the
+  on-screen overlay (`objects_in_field` through the run's own solved WCS), so the file a beginner posts says
+  exactly what the card they shared it from said.
+
+  **Two design calls worth knowing.**
+  **(1) The anchors are *fractions*, not pixels.** The share JPEG is re-rendered at share resolution
+  (`_native_picture_source`), so its grid is not the FITS grid the pins were measured on — the same reasoning
+  that makes `SkyMarks.bar_px` a scaled fraction. **(2) The deconfliction is at *draw* time, not in the pure
+  half.** How many chips fit, and whether two collide, depends on the rendered size; the same field has to stay
+  readable baked onto a 900 px share and a 2048 px one. So the pure half only decides *which* objects and in
+  what order (most notable — closest to the picture's centre — first, the same sort the on-screen read-out
+  uses), and the drawing hands out its budget in that order, tries each chip below/above/right/left of its dot,
+  and **drops** the ones a crowded field has no room for. The dot never moves: nudging it makes the name point
+  at empty sky. Measured on a 12-object pile at the same spot, the drawing inks *less* of the picture (1240 px)
+  than four well-spread names do (2559 px) — i.e. it really does give up rather than overdraw.
+
+  **The three filed cautions, answered rather than dodged.** A **turned** picture (`?north_up=true`, or a past
+  "Adjust → North up → Save" baked into the stored bytes) refuses outright — a rotate-with-expand moves every
+  pixel *and* grows the canvas, and unlike the browser overlay there is no toggle to fall back to, so an
+  unlabelled share beats a mis-plotted one. `preview_geometry_unknown` refuses too, exactly as the scale bar
+  does. A **crop** is the one geometry that is reconcilable, so it composes: each pin is re-based onto the kept
+  rectangle and an object the trim cut away drops out. And a label is never drawn half off the edge — every
+  chip must fit inside the picture's own margin or it isn't drawn.
+
+  **Placement (the IA call).** *Not* a seventh item in the Target page's Save/share menu — the owner's standing
+  complaint is that these pages are too busy, and the sibling entry two above this one flags the same menu as
+  already carrying two shares. Instead the offer appears **inside the "What's in it?" read-out**, the one moment
+  the option is obviously wanted, and only when there is actually something to label and the geometry allows it
+  (so the link can never be one that quietly hands back the plain file).
+
+  **Upgrade-safe (§9):** new optional query flag defaulting to false, new optional `png_bytes_to_jpeg` kwarg,
+  new engine module, one new positional default on `stackArtifactUrl`. The bare URL every existing surface
+  embeds returns byte-identical bytes (pinned by a test). No schema, config, on-disk or default change. The
+  labelled file gets its own `_labelled` filename so it can't overwrite a sibling variant in downloads.
+
+  **Tests (+25):** `tests/test_object_labels.py` (13 — fractions not pixels, notability order, off-canvas and
+  trimmed-away drops, crop re-basing, the empty no-op, marks landing on the object, every mark inside the
+  frame, the crowded-pile drop, the budget band, canvas size unchanged); `tests/webapp/test_share_object_labels.py`
+  (9 — on a synthetic wide Orion field: the field really does contain catalog objects, labelled ≠ plain, the
+  plain download byte-for-byte unchanged, its own filename, composition with the keepsake matte, the turned
+  refusal, the UNKNOWN refusal, no-FITS, and the crop re-basing end to end);
+  `LatestPictureCard.test.tsx` (+3 — the offer appears with the labels and carries the right URL, and is absent
+  both on a rotated run and on an empty field).
+
+  *(Original spec kept below for provenance.)*
+
+  *(Pillar: understand + share,
   PRIORITY 3; size S–M; additive, opt-in, no new deps.)* v0.293.0 puts the named-object pins on the Target
   page's picture, which answers "what *is* that smudge?" for the owner — but the moment they share the picture,
   the answer is gone, and "here's the Running Man Nebula next to Orion" is a far better post than an unlabelled
@@ -21021,6 +21096,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   half off the edge. **Tests:** the labelled JPEG differs from the plain one only where labels land; a
   North-up-saved run returns the plain picture unchanged (never a mis-plot); a cropped run's labels land inside
   the trim.
+
+- **NEW IDEA (Builder 2026-08-30, the two halves deliberately left out of the labelled share v0.314.0) — the
+  names reach the *download*, not yet the **share sheet**; and a North-up picture still refuses them.**
+  *(Pillar: understand + share — PRIORITY 3.)* Two independent slices, in value order.
+  **(a) Put the names on the picture the share sheet sends (S).** v0.314.0's offer is a `download` link, and
+  sharing is where the names matter most — a post is read by people who have no idea what a smudge is, while
+  a download is usually for the owner's own archive. The server half is done and *composes*: the labels are
+  drawn on the picture before any caption or matte, so `keepsake=true&label_objects=true` already works and is
+  pinned by a test. So this is `SharePictureButton` with one more flag plus a `filename` override, exactly the
+  shape `keepsakeFilename` already has. **The real question is which share gets them**, not how — the sibling
+  entry under "Friendliness" (*"the marked picture is a download only"*) raises the identical question for the
+  scale bar and reaches the same answer: most likely the **keepsake** share — the one meant for other people —
+  gains them, rather than adding a fourth share item to a menu the owner already calls busy. Decide the two
+  together; shipping them separately will produce two different answers to one question.
+  **(b) Label a North-up share (S–M).** v0.314.0 refuses on a turned picture because the pins are on the
+  un-rotated FITS grid — an honest stand-down, but it means the two most-wanted marks on a shared file
+  (North-up framing and object names) are mutually exclusive. It is buildable: the turn is a known angle with
+  `expand=True`, and the app **already** maps points through exactly that transform —
+  `seestack.render.orient.north_up_pixel_transform`, which `wallpaper_target_pixel` uses to follow the target
+  through the same rotation. So the pin coordinates can be carried through the turn rather than abandoned.
+  **Check first, in this order:** that the transform's angle convention matches `applied_north_up_deg`'s (the
+  wallpaper path composes them, so there is a worked example to copy rather than re-derive); and that a label
+  pushed into the expanded canvas's new corners still clears the picture's own margin — the rotate adds
+  triangular black wedges, and a name drawn in one points at nothing. Ship it as *"labels also survive the
+  turn"*, not as a new control.
 
 - **✅ ALREADY SHIPPED — DUPLICATE ENTRY, DO NOT RE-PICK (pruned by the Builder, 2026-08-29).** This is a
   second, unstruck copy of the "My life list" idea that shipped in full: `seestack/lifelist.py`,
