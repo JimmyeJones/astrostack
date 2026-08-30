@@ -1694,6 +1694,83 @@ describe("HistoryView adjustable render", () => {
     expect(screen.queryByLabelText("Rotate so North is up")).not.toBeInTheDocument();
   });
 
+  it("warns before Save throws away a processed picture, and offers to keep it", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true }),
+    ]);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: null, black: null, north_up_deg: 33.0,
+      processed_preview: true, can_keep_processed: true,
+    });
+    const save = vi.spyOn(client.api, "saveStackPreview")
+      .mockResolvedValue({ ok: true });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
+
+    expect(await screen.findByText(/This picture was processed for you/))
+      .toBeInTheDocument();
+    // Rotate, then keep — the whole point: the turn shouldn't cost the picture.
+    fireEvent.click(await screen.findByText("Rotate so North is up"));
+    fireEvent.click(await screen.findByText("Keep the processed picture"));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(
+      "M_42", 1, expect.any(Number), expect.any(Number), true, true));
+  });
+
+  it("still saves a plain stretch when the user asks for one", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true }),
+    ]);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: null, black: null, processed_preview: true, can_keep_processed: true,
+    });
+    const save = vi.spyOn(client.api, "saveStackPreview")
+      .mockResolvedValue({ ok: true });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
+    fireEvent.click(await screen.findByText("Save as preview"));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(
+      "M_42", 1, expect.any(Number), expect.any(Number), false, false));
+  });
+
+  it("warns without offering a rescue when the run's recipe is gone", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true }),
+    ]);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: null, black: null, processed_preview: true, can_keep_processed: false,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
+    expect(await screen.findByText(/re-open it in the editor/)).toBeInTheDocument();
+    expect(screen.queryByText("Keep the processed picture")).toBeNull();
+  });
+
+  it("says nothing about processing on an ordinary linear run", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_fits: true, has_preview: true }),
+    ]);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: 0.5, black: 0.35,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Adjust"));
+    await waitFor(() => expect(screen.getByText("0.50")).toBeInTheDocument());
+    expect(screen.queryByText(/This picture was processed for you/)).toBeNull();
+    expect(screen.queryByText("Keep the processed picture")).toBeNull();
+  });
+
   it("ends the sample tour here — where a beginner's finished pictures live", async () => {
     localStorage.clear();
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);

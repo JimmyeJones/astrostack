@@ -471,3 +471,113 @@ async def my_map_png(request: Request) -> Response:
     data = await run_in_threadpool(work)
     return Response(content=data, media_type="image/png",
                     headers={"Cache-Control": "no-cache"})
+
+
+#: The answer, beside the map it belongs to, keyed by what went into it.
+_MY_MAP_AREA = "my_map_area.json"
+
+
+def _sky_coverage_inputs(lib) -> tuple[list[str], str]:  # noqa: ANN001, ANN202
+    """Every target's newest master FITS, plus a fingerprint of exactly that set.
+
+    A cheap walk — one `stat` per target, no pixels read — so a cached answer can
+    be validated without paying for the coverage maps that produced it.
+    """
+    from seestack.io.project import Project
+
+    fingerprint: dict[str, list] = {"v": 1, "runs": []}
+    paths: list[str] = []
+    for t in lib.list_targets():
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(t))
+        except Exception:  # noqa: BLE001 — one broken project must not lose the stat
+            if proj is not None:
+                proj.close()
+            continue
+        try:
+            run = next(
+                (r for r in proj.iter_stack_runs()
+                 if r.fits_path and Path(r.fits_path).exists()),
+                None,
+            )
+        finally:
+            proj.close()
+        if run is None:
+            continue
+        try:
+            stat = Path(run.fits_path).stat()
+        except OSError:
+            continue
+        fingerprint["runs"].append(
+            [t.safe_name, run.id, int(stat.st_size), int(stat.st_mtime)])
+        paths.append(run.fits_path)
+    return paths, json.dumps(fingerprint, sort_keys=True)
+
+
+def _measure_sky_coverage(paths: list[str]) -> dict:
+    """Total sky area (deg²) across those masters, as the endpoint's payload.
+
+    Each is measured by :func:`seestack.skyarea.stack_sky_area_deg2`, so what
+    counts as "photographed" is the same well-covered definition the map masks
+    with, and nothing about how the map is *drawn* can move the number. A run
+    with no usable WCS contributes nothing rather than a guessed field.
+
+    Targets are simply summed. Two different targets overlapping on the sky would
+    be double-counted, but that needs two library targets aimed at the same patch
+    — which the library already models as one target with more frames.
+    """
+    from seestack.skyarea import WHOLE_SKY_DEG2, sky_fraction, stack_sky_area_deg2
+
+    total = 0.0
+    n_pictures = 0
+    for fits_path in paths:
+        area = stack_sky_area_deg2(fits_path)
+        if area is None:
+            continue
+        total += area
+        n_pictures += 1
+    return {"deg2": total, "sky_fraction": sky_fraction(total),
+            "n_pictures": n_pictures, "whole_sky_deg2": WHOLE_SKY_DEG2}
+
+
+@router.get("/api/sky/coverage")
+async def sky_coverage(request: Request) -> dict:
+    """How much of the sky the owner's own pictures actually cover.
+
+    The number beside "My map": *"you have photographed 18.4 deg² — about 0.04 %
+    of the whole sky"*. Measured from each run's **own WCS**, never by counting
+    pixels on the map (Aitoff isn't equal-area, and the map draws every picture
+    several times life size), so the stat can't quietly disagree with the picture
+    it sits under. Read-only, and cached in the app's own state dir against the
+    same "has any target's newest picture changed?" fingerprint the map uses, so
+    the coverage-map reads happen once per change rather than once per page view.
+    """
+    settings = deps.get_settings(request)
+    cache_path = settings.state_dir / _MY_MAP_AREA
+
+    def work() -> dict:
+        lib = deps.open_library(request)
+        try:
+            # The fingerprint is a cheap walk (one stat per target); the
+            # per-run coverage reads are what's worth caching, so validate
+            # first and let a hit skip them entirely.
+            paths, want = _sky_coverage_inputs(lib)
+        finally:
+            lib.close()
+        try:
+            cached = json.loads(cache_path.read_text())
+            if cached.get("fingerprint") == want:
+                return cached["value"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        payload = _measure_sky_coverage(paths)
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(
+                json.dumps({"fingerprint": want, "value": payload}))
+        except OSError:  # a read-only state dir just means no cache
+            pass
+        return payload
+
+    return await run_in_threadpool(work)

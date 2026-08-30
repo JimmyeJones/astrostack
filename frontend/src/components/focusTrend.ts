@@ -27,6 +27,43 @@ export function focusVerdictBadge(verdict: string): { color: string; label: stri
   }
 }
 
+/**
+ * What can honestly be said about the night's worse subs being "counted less".
+ *
+ * Both trend cards used to promise it flat out, which is only true when the
+ * stack that used those subs had **quality weighting** on and the combine
+ * honoured it. The hands-off chains do enable it, so on the walk-away path the
+ * promise usually held — but an interactive stack with the box unticked, and a
+ * target that has never been stacked at all, got the same confident sentence.
+ * The backend now says which it is (`weighting`); this turns that into one
+ * beginner-readable clause. An older backend sends nothing, which lands on the
+ * general wording — true in every case, promising nothing about a particular
+ * run. `subject` is the card's own capitalised noun phrase ("Those softer subs").
+ * Pure/testable.
+ */
+export function weightingClause(weighting: string | undefined, subject: string): string {
+  switch (weighting) {
+    case "applied":
+      return `${subject} were automatically counted less in your stack.`;
+    case "not_applied":
+      return (
+        `${subject} counted just as much as the rest, though: your latest stack ` +
+        `of this target didn't weight subs by quality. AstroStack turns that on ` +
+        `when it stacks for you.`
+      );
+    case "unstacked":
+      return (
+        `${subject} haven't been stacked yet — when AstroStack stacks for you, ` +
+        `it weights subs like these down automatically.`
+      );
+    default:
+      return (
+        `${subject} are counted less automatically when quality weighting is ` +
+        `on, which it is whenever AstroStack stacks for you.`
+      );
+  }
+}
+
 /** Plain-language, beginner-facing sentence for the card. Pure/testable. */
 export function describeFocusTrend(t: FocusTrend): string {
   switch (t.verdict) {
@@ -36,8 +73,8 @@ export function describeFocusTrend(t: FocusTrend): string {
       return (
         `Your stars softened${whenClause} ` +
         `(${px(t.early_fwhm_px)} → ${px(t.late_fwhm_px)}) — likely dew or a ` +
-        `temperature/focus drift. A dew heater or a quick refocus next time helps; ` +
-        `those softer subs were automatically counted less in your stack.`
+        `temperature/focus drift. A dew heater or a quick refocus next time helps. ` +
+        weightingClause(t.weighting, "Those softer subs")
       );
     }
     case "improved":

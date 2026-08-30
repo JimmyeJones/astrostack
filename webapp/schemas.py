@@ -350,6 +350,14 @@ class FocusTrendOut(BaseModel):
     start_utc: str | None = None
     end_utc: str | None = None
     soft_after_utc: str | None = None
+    # Did the target's newest genuine stack actually count worse subs less?
+    # "applied" | "not_applied" | "unstacked" | "unknown" (see
+    # ``routers.targets.latest_stack_weighting``). The card's reassurance that the
+    # night's soft subs "were counted less in your stack" is only true for
+    # "applied"; the others get honest wording instead. Defaults to "unknown",
+    # which is also what an older client reads when the field is absent, so the
+    # general phrasing is the fallback everywhere.
+    weighting: str = "unknown"
 
 
 class TransparencyTrendPointOut(BaseModel):
@@ -372,6 +380,9 @@ class TransparencyTrendOut(BaseModel):
     start_utc: str | None = None
     end_utc: str | None = None
     degraded_after_utc: str | None = None
+    # The same "did the stack really down-weight them?" datum the focus card
+    # carries, for the identical promise this card makes about hazy subs.
+    weighting: str = "unknown"
     # How many mosaic panels this night's subs split into — 0 (and absent from an
     # older backend) for the ordinary single-pointing target. Non-zero means the
     # scores above were levelled panel by panel, because a mosaic's panels are

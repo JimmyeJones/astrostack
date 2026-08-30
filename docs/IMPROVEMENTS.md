@@ -43,6 +43,31 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-30, branch `claude/compassionate-galileo-1m28nv` — run finished, all claims released.**
+> Shipped three, each its own independently-green commit:
+> **v0.305.0** (under "Autonomy & friendliness") — the **History → "Adjust" → Save trapdoor**: on a
+> "Process target" run, saving replaced the processed picture with a plain stretch of the linear master,
+> silently, and a user who opened the panel only to tick **North up** paid the same price. Both filed halves:
+> the warning, and a `keep_processed` save that re-bakes the run's own recipe (rotated, if asked) so the one
+> control anybody wants there stops flattening the picture. It also *mends* a drifted run rather than
+> declining on it. The plain slider save is untouched, and a test pins that beside the new one.
+> **v0.305.1** (same section) — the **"counted less in your stack"** promise. Took the *plumbed* option and
+> found the identical sentence on the sibling **focus** card, so both were fixed together. The key call:
+> `latest_stack_weighting` reads the newest genuine stack's **FITS provenance** (`WGTMODE`), not
+> `options_json` — a run can ask for weighting and have an order-statistic min/max combine ignore it
+> (`WGTSKIP`), which for the reader is the same as never asking. A test pins exactly that case.
+> **v0.306.0** (under "Features that serve real workflows") — the run's new beginner feature, **"how much of
+> the sky have you actually seen?"** under My map. The entry warned it needed an equal-area projection pass;
+> it doesn't — `|det(pixel_scale_matrix)|` is the solid angle of one pixel, so the area is exact *before*
+> anything is projected, and nothing about how the map is drawn can move it (a test renders the map between
+> two reads and asserts it didn't budge).
+> **Confirmed pre-existing, not mine:** the pytest quirk the `…-fj2p70` Builder filed reproduced again — a
+> hand-picked file list interleaving `tests/webapp/…` and `tests/…` paths lost `tests/webapp/conftest.py`
+> and errored every webapp test with `fixture 'client' not found`. Re-running the same files without the
+> interleave passed. It still looks exactly like "my change broke everything"; the note is worth keeping.
+> Claiming in the run's **first** commit, **by site** (file + function, not just the lead), cost under a
+> minute; `main` had not moved by merge time and there was no collision.
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-ezix3s` — run finished, all claims released.**
 > Worked the standing **"sweep the engine for a POSITION-DEPENDENT metric compared across a whole target"** QA
 > lead, and shipped three, each reproduced before fixing:
@@ -9339,37 +9364,140 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-30, found while shipping the v0.304.1 Adjust→Save half of the recipe-drift guard — the *behaviour*
-  behind the stale marker I fixed, which the fix deliberately did not change) — History → "Adjust" → Save
-  silently throws away a "Process target" run's finished picture.** *(Pillar: friendliness / trust —
-  PRIORITY 3; size S; copy + one guard, no engine work.)* `save_stack_preview` re-renders the preview from
-  the **linear** FITS at the chosen stretch/black. On an ordinary run that is exactly right and is the point
-  of the feature. On an **auto-edited** run it replaces the Auto-toned picture — the one on the Target hero,
-  in the Gallery, on the Library tile, and possibly pinned as the target's cover — with a plain stretch, and
-  says nothing at all about having done so. The recipe survives (re-opening the editor still finds it, and
-  as of v0.304.1 the run stops *claiming* to be a recipe preview), so the loss is recoverable — but only by
-  someone who knows to go to the editor and export, which is precisely not the beginner this app is for. The
-  reachable path is innocent: the History menu offers **Adjust** on any run with a FITS, and its own hint
-  ("Stretch / black point, from the full-range FITS") reads like a *view* control, not a destructive one —
-  and a user who opens it just to tick **North up** (the same panel) pays the same price. **Fix shape:** the
-  run listing already carries the marker (`preview_display_space`), so the panel can say so before the fact —
-  a one-line note on Adjust ("This picture was processed for you; saving here replaces it with a plain
-  stretch of the raw stack. Your edit is kept — re-open the editor to get it back.") and, better, a
-  **North-up-only** save on those runs that re-renders through the stored recipe instead of the sliders,
-  since rotation is the one thing a user genuinely wants from that panel on an already-finished picture.
-  Don't remove Adjust — it is legitimate; just stop it being a silent trapdoor.
+- **NEW IDEA (Builder 2026-08-30, spotted while shipping the v0.305.0 Adjust trapdoor fix — the one thing that
+  fix deliberately left alone) — on a *processed* run, the Adjust panel shows you a picture that is not the
+  one either button will save.** *(Pillar: editor/trust — PRIORITY 1–3; size S; frontend only.)* Opening
+  Adjust swaps the card's `<img>` from the stored preview to the live `…/render` of the **linear** FITS at
+  the sliders. On an ordinary run that is exactly the point: what you see is what "Save as preview" writes.
+  On a "Process target" run it is now misleading in a new way — the panel offers **"Keep the processed
+  picture"**, whose result is the *recipe* render, i.e. the picture that was on screen a moment before you
+  opened the panel and is not on screen now. v0.305.0 papers over the worst of it by closing the panel on a
+  successful keep-save (so you immediately see what you kept), and the warning text says which is which, but
+  the honest fix is for the *preview* to follow the button: keep showing the stored bytes on a processed run
+  until the user actually touches a slider (`touched.current`, which the panel already tracks for the
+  suggestion), and only then switch to the live render. **Cautions:** don't break the North-up preview — the
+  live render is currently the only way to *see* the rotation before saving it, so if the stored bytes are
+  shown, the rotation preview needs the same `north_up` treatment the share path uses
+  (`orient_preview_north_up` on the stored PNG, which is exactly what that helper is for). Grep first: the
+  card already has three "which picture is on screen?" predicates (`showingStored`, `imageIsNorthUp`,
+  `geometryUnplaceable`) — this belongs with them, not beside them.
 
-- **NEW IDEA (Builder 2026-08-30, read while fixing the mosaic half of the same card in v0.304.1) — the
-  "Clouds & haze" card promises something it can't check: *"those later subs … were automatically counted
-  less in your stack"*.** *(Pillar: trust — PRIORITY 3; size S; copy only, but it needs one datum plumbed.)*
-  That sentence is only true when the stack that used those subs had **quality weighting on**. The auto
-  chain does enable it, so on the walk-away path the claim usually holds — but an interactive stack with the
-  box unticked, and a target that has never been stacked at all, both get the same confident reassurance. The
-  card is a *capture-night* card and knows nothing about any run. **Fix shape:** either soften it to what is
-  actually known (*"hazy subs are counted less when quality weighting is on — it is on by default for
-  hands-off stacks"*), or plumb the newest genuine run's `quality_weighted` flag onto the response and only
-  make the promise when it was really used. The first is a five-minute honesty fix and probably the right
-  size; the second is better if the card ever grows.
+
+- **✅ SHIPPED (Builder, v0.305.0, branch `claude/compassionate-galileo-1m28nv`) — ~~History → "Adjust" → Save
+  silently throws away a "Process target" run's finished picture.~~** Both halves of the filed shape, and no
+  wider.
+
+  **What shipped.** The trapdoor is now signposted *and* has a way round it.
+  * **The suggestion endpoint says what a save would cost.** `render-suggestion` (already fetched the moment
+    Adjust opens, so this costs no request) gained `processed_preview` — true when the stored picture is an
+    in-place "Process target" Auto edit whose FITS is still linear — and `can_keep_processed`, true when that
+    run's recipe is still on disk. Both default false, which is every ordinary run and every older client.
+  * **The panel warns before the fact**, in the beginner's words, next to the button that does it: *"This
+    picture was processed for you. 'Save as preview' replaces it with a plain view of the raw stack…"*, with
+    the tail differing on whether the rescue is available (use the other button) or not (re-open the editor).
+  * **`keep_processed` — the save that keeps the picture.** A second path through the same endpoint re-bakes
+    the run's own stored **recipe** into the preview instead of the sliders, optionally rotated North-up. So
+    the one control anybody genuinely wants from this panel on a finished picture — the rotation — now turns
+    *that* picture rather than flattening it. It writes exactly what `_auto_edit_process_run` writes (the
+    recipe render, its crop measured on the un-rotated render, the baked-look stamp, the display-space
+    marker) plus the angle this save applied, so the bytes, the marker and the stamp cannot disagree
+    afterwards; the stretch columns are cleared, because these bytes are not an asinh render and nothing
+    should match against one. The rotation goes through `orient_preview_north_up` and the angle through
+    `applied_north_up_deg` — the same pair the share/download path uses — so the recorded angle can't drift
+    from the pixels.
+  * **It also ends drift, rather than declining on it.** `_saved_recipe_json` is deliberately *drift-blind*
+    (unlike `_auto_edit_recipe_json`): re-baking makes the render and the stamp come from one recipe again,
+    which is exactly what the stamp means, so the surfaces that stood down (the reveal) reopen.
+
+  **The plain slider save is untouched** — the fix is "give them the other option", not "redefine Save", and a
+  test pins the old behaviour (bytes replaced, marker and stamp cleared) beside the new one.
+
+  **Upgrade-safe (§9):** one optional request field defaulting to the old path, two additive response fields;
+  no config, schema, on-disk, default or API-shape change. An old client never sends `keep_processed` and
+  reads the old shape.
+
+  **Tests (+13; 7 of the 9 Python ones fail before):** `tests/webapp/test_adjust_keeps_processed.py` — the
+  two flags on a linear run, after an auto-edit, and with the recipe removed; the plain save still replacing
+  the picture; the keep-save reproducing the baked bytes *byte for byte* and leaving marker/stamp/stretch
+  columns right; the North-up keep-save on a 30°-rotated WCS (canvas grows, level stays processed-bright, the
+  angle is recorded); the border trim re-recorded on a deliberately trimmable mosaic fixture; the 400 when
+  there is no recipe (and the bytes left alone); and the drifted run re-baked back into agreement. Four
+  `History.test.tsx` cases cover the warning, the two buttons' arguments, the no-rescue wording and the
+  silence on an ordinary run.
+
+  Original spec:
+
+  - **NEW IDEA (Builder 2026-08-30, found while shipping the v0.304.1 Adjust→Save half of the recipe-drift guard — the *behaviour*
+    behind the stale marker I fixed, which the fix deliberately did not change) — History → "Adjust" → Save
+    silently throws away a "Process target" run's finished picture.** *(Pillar: friendliness / trust —
+    PRIORITY 3; size S; copy + one guard, no engine work.)* `save_stack_preview` re-renders the preview from
+    the **linear** FITS at the chosen stretch/black. On an ordinary run that is exactly right and is the point
+    of the feature. On an **auto-edited** run it replaces the Auto-toned picture — the one on the Target hero,
+    in the Gallery, on the Library tile, and possibly pinned as the target's cover — with a plain stretch, and
+    says nothing at all about having done so. The recipe survives (re-opening the editor still finds it, and
+    as of v0.304.1 the run stops *claiming* to be a recipe preview), so the loss is recoverable — but only by
+    someone who knows to go to the editor and export, which is precisely not the beginner this app is for. The
+    reachable path is innocent: the History menu offers **Adjust** on any run with a FITS, and its own hint
+    ("Stretch / black point, from the full-range FITS") reads like a *view* control, not a destructive one —
+    and a user who opens it just to tick **North up** (the same panel) pays the same price. **Fix shape:** the
+    run listing already carries the marker (`preview_display_space`), so the panel can say so before the fact —
+    a one-line note on Adjust ("This picture was processed for you; saving here replaces it with a plain
+    stretch of the raw stack. Your edit is kept — re-open the editor to get it back.") and, better, a
+    **North-up-only** save on those runs that re-renders through the stored recipe instead of the sliders,
+    since rotation is the one thing a user genuinely wants from that panel on an already-finished picture.
+    Don't remove Adjust — it is legitimate; just stop it being a silent trapdoor.
+
+- **✅ SHIPPED (Builder, v0.305.1, branch `claude/compassionate-galileo-1m28nv`) — ~~the "Clouds & haze" card
+  promises something it can't check: *"those later subs … were automatically counted less in your stack"*.~~**
+  Took the **plumbed** option, not the copy-softening one — and found the *same sentence* on the sibling
+  card, so both were fixed together.
+
+  **What shipped.** `routers.targets.latest_stack_weighting(proj)` answers the one question the promise
+  rests on, and both trend endpoints carry it as `weighting`:
+  * **`"applied"`** — the target's newest *genuine* stack (via the existing `_newest_genuine_stack_run`, so
+    the card can't disagree with what reprocess calls "the current image's stack") stamped **`WGTMODE`** on
+    its master: weights were computed **and** honoured. This is the only state that earns the sentence.
+  * **`"not_applied"`** — there is a stack and it didn't weight. Deliberately read from the FITS provenance
+    rather than `options_json`, because the options flag is *not* the claim: a run can ask for weighting and
+    have the order-statistic min/max combine ignore it entirely (`WGTSKIP`), which for the reader is the same
+    outcome as never asking. A test pins exactly that case.
+  * **`"unstacked"`** — no genuine run yet, so nothing has counted anything. This was the worst case the old
+    copy papered over.
+  * **`"unknown"`** — a run whose master can't be read; say nothing rather than guess.
+
+  **The copy follows it** through one shared pure helper, `weightingClause(weighting, subject)` in
+  `focusTrend.ts` (which `transparencyTrend.ts` already imports from): "were automatically counted less in
+  your stack" only on `applied`; "counted just as much as the rest, though: your latest stack of this target
+  didn't weight subs by quality" on `not_applied`; "haven't been stacked yet — when AstroStack stacks for
+  you, it weights subs like these down automatically" on `unstacked`; and the general, always-true "are
+  counted less automatically when quality weighting is on, which it is whenever AstroStack stacks for you"
+  otherwise — which is also what an **older backend** produces, since the field is then absent.
+
+  **Cost:** one FITS *header* read (the same cheap read the History Info panel does), taken only when the
+  card is actually going to be drawn — a target with too few measured subs to trend pays nothing.
+
+  **Upgrade-safe (§9):** one additive response field on each of two endpoints, defaulting to `"unknown"`; no
+  config, schema, on-disk, default or API-shape change.
+
+  **Tests (+9):** `tests/webapp/test_trend_weighting_promise.py` walks both endpoints through all four states
+  — never stacked, really weighted, not weighted, *asked for but ignored* (options say `quality_weighted`,
+  header says otherwise), an editor-export row that must be looked past, an unreadable master, and a
+  weighted run superseded by an unweighted one — plus a copy assertion per card that only `applied` produces
+  "were automatically counted less".
+
+  Original spec:
+
+  - **NEW IDEA (Builder 2026-08-30, read while fixing the mosaic half of the same card in v0.304.1) — the
+    "Clouds & haze" card promises something it can't check: *"those later subs … were automatically counted
+    less in your stack"*.** *(Pillar: trust — PRIORITY 3; size S; copy only, but it needs one datum plumbed.)*
+    That sentence is only true when the stack that used those subs had **quality weighting on**. The auto
+    chain does enable it, so on the walk-away path the claim usually holds — but an interactive stack with the
+    box unticked, and a target that has never been stacked at all, both get the same confident reassurance. The
+    card is a *capture-night* card and knows nothing about any run. **Fix shape:** either soften it to what is
+    actually known (*"hazy subs are counted less when quality weighting is on — it is on by default for
+    hands-off stacks"*), or plumb the newest genuine run's `quality_weighted` flag onto the response and only
+    make the promise when it was really used. The first is a five-minute honesty fix and probably the right
+    size; the second is better if the card ever grows.
 
 - **✅ SHIPPED (Builder, v0.302.1, branch `claude/compassionate-galileo-fj2p70`) — ~~a saved recipe on a
   "Process target" run can quietly drift from the picture that run's preview actually shows.~~** Shipped
@@ -17900,6 +18028,24 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW IDEA (Builder 2026-08-30, the two obvious next taps on the v0.306.0 sky-coverage stat) — put "how much
+  of the sky have you seen" where the owner already looks, and stop it double-counting neighbours.**
+  *(Pillar: enjoy + trust — PRIORITY 3; size S each; both read-only.)*
+  1. **Say it on the Dashboard.** The number is a pride stat, and today it lives one nav click and one mode
+     switch away, under a map most people visit occasionally. `GET /api/sky/coverage` is already cached
+     server-side against the "did a picture change?" fingerprint, so a Dashboard line costs one cheap request
+     and no new machinery. Same sentence, same helper (`describeSkyCoverage`) — do **not** re-word it, or the
+     two surfaces will drift.
+  2. **Overlapping targets are summed twice.** `_measure_sky_coverage` adds each target's area independently.
+     Two library targets aimed at the same patch of sky would be counted twice — the library normally models
+     that as *one* target with more frames, which is why this was shipped as-is, but a deliberately
+     re-framed second target (a wider mosaic over an earlier single field is the realistic case) really does
+     double-count. **Honest fix:** rasterise each run's covered footprint onto one coarse equal-area sky grid
+     (HEALPix-style, or a simple sin(dec) band grid — no new dependency needed at ~0.1° resolution) and count
+     *set* cells. Only worth it if the owner ever has adjacent targets; check before building, and note that
+     the fix makes the number go *down*, which needs a word of explanation if it visibly moves.
+
+
 - **✅ SHIPPED — FIRST SLICE (Builder, v0.296.0, branch `claude/compassionate-galileo-u3wi1n`) —
   ~~⭐ OWNER CLARIFICATION (2026-08-29): the *actual* universe map — the owner's captured objects placed in
   TRUE 3D by real distance, not on one fixed-radius dome.~~** Shipped as **"Your universe"**, its own page at
@@ -18245,16 +18391,58 @@ problems. Dogfood it every big-picture run and fix root causes.
     with:** the map's own subtitle already names the owner's totals, so a saved map explains itself with no
     extra work. **Grep first:** the map's URL builder already exists in `api`; don't write a second one.
 
-- **NEW IDEA (Builder 2026-08-29) — "how much of the sky have you actually seen?" — cheap, but only on an
-  equal-area projection.** *(Pillar: enjoy + understand — PRIORITY 3; size S; read-only.)* Painted-pixels ÷
-  in-projection-pixels is a genuinely honest "you have photographed 0.04 % of the sky" — one
-  `np.count_nonzero`, no new geometry — **but only if the projection is equal-area.** The shipped map is
-  **Aitoff, which is not**, so counting pixels off it over-weights the centre and under-weights the rim; a
-  Hammer (or Mollweide) pass, or an area-weighted count, is the honest version. **The second trap:** the map
-  exaggerates small pictures so they stay visible, which inflates any pixel count several-fold — so measure
-  on an *unexaggerated* pass, never off the picture the owner is looking at. A stat that silently disagrees
-  with the map beside it is worse than no stat at all. Deep-sky imagers love this number and a beginner
-  understands it immediately, so it is worth doing properly rather than approximately.
+- **✅ SHIPPED (Builder, v0.306.0, branch `claude/compassionate-galileo-1m28nv`) — ~~"how much of the sky have
+  you actually seen?"~~** Shipped as the line under **My map** — and it sidesteps *both* traps the entry
+  names by never touching the projection at all.
+
+  **The insight that made it S rather than M.** The entry's shape was "count painted pixels ÷ in-projection
+  pixels, but you'll need an equal-area pass". You don't: the area is exactly known *before* anything is
+  projected. The determinant of a run's WCS `pixel_scale_matrix` **is** the solid angle one pixel subtends,
+  so covered area is "how many pixels did enough frames reach" × that. No Hammer pass, no un-exaggerated
+  re-render, and — the point — **nothing about how the map is drawn can move the number**, which is what the
+  entry was really protecting. A test renders the map between two reads of the stat and asserts it didn't
+  budge.
+
+  **What shipped.**
+  * `seestack/skyarea.py` (new, pure): `stack_sky_area_deg2(fits)` — well-covered pixel count ×
+    `|det(pixel_scale_matrix)|` — plus `WHOLE_SKY_DEG2` and `sky_fraction`. "Well-covered" is the existing
+    `stack_detail_mask`, i.e. *the same definition that masks a mosaic's ragged fringe off the map*, so the
+    stat and the picture agree about what counts as photographed. A run with no celestial WCS contributes
+    **nothing** rather than a nominal field: guessing would claim sky the owner never pointed at.
+  * `GET /api/sky/coverage` → `{deg2, sky_fraction, n_pictures, whole_sky_deg2}`, summing each target's
+    newest master. Cached in the app's own `state/my_map_area.json` against the same "has any target's newest
+    picture changed?" fingerprint the map uses — and the fingerprint walk (one `stat` per target) is
+    deliberately separated from the measurement, so a cache hit skips every coverage-map read.
+  * `frontend/src/components/skyCoverage.ts` (pure) + one line under the map: *"Your 12 pictures cover 18.4
+    square degrees — about 91 full moons' worth of sky, and 0.045% of the whole sky."* The **full moon** is
+    the only patch of sky a beginner already has a feel for, so it carries the number; the percentage is the
+    part that makes people grin. `formatSkyFraction` exists because `toFixed(1)` renders every real library
+    as "0.0%".
+
+  **Beginner bar:** understood on sight, no setting, nothing to configure, and it is about enjoying your own
+  data — not a pro measurement.
+
+  **Upgrade-safe (§9):** one new read-only endpoint, one new cache file inside the app's own state dir
+  (overwritten in place, never grows); no config, schema, on-disk-layout, default or API-shape change.
+
+  **Tests (+15):** `tests/webapp/test_sky_coverage.py` (7) pins the area against hand-computed square degrees,
+  that NaN *and* thinly-covered fringe pixels don't count, that a WCS-less run contributes nothing, a fresh
+  install answering zero rather than erroring, the cache both hitting and invalidating, two targets summing,
+  and the render-can't-move-it property above. `skyCoverage.test.ts` (8) covers the phrasing, including the
+  singular/plural moon and staying silent with nothing to measure; two `Sky.test.tsx` cases render the line.
+
+  Original spec:
+
+  - **NEW IDEA (Builder 2026-08-29) — "how much of the sky have you actually seen?" — cheap, but only on an
+    equal-area projection.** *(Pillar: enjoy + understand — PRIORITY 3; size S; read-only.)* Painted-pixels ÷
+    in-projection-pixels is a genuinely honest "you have photographed 0.04 % of the sky" — one
+    `np.count_nonzero`, no new geometry — **but only if the projection is equal-area.** The shipped map is
+    **Aitoff, which is not**, so counting pixels off it over-weights the centre and under-weights the rim; a
+    Hammer (or Mollweide) pass, or an area-weighted count, is the honest version. **The second trap:** the map
+    exaggerates small pictures so they stay visible, which inflates any pixel count several-fold — so measure
+    on an *unexaggerated* pass, never off the picture the owner is looking at. A stat that silently disagrees
+    with the map beside it is worse than no stat at all. Deep-sky imagers love this number and a beginner
+    understands it immediately, so it is worth doing properly rather than approximately.
 
 - **✅ SHIPPED — FIRST SLICE (Builder, v0.292.0, branch `claude/compassionate-galileo-4drm6t`) —
   ~~⭐ OWNER-REQUESTED (2026-08-28) — "Universe map": an all-sky view built ONLY from the owner's own captured

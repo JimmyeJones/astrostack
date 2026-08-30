@@ -58,6 +58,29 @@ describe("describeTransparencyTrend", () => {
     expect(s.toLowerCase()).toContain("clearer night");
   });
 
+  it("only promises the hazy subs counted less when a stack really did it", () => {
+    const hazy = (weighting?: string) => describeTransparencyTrend(trend({
+      verdict: "degraded",
+      degraded_after_utc: "2026-07-10T01:10:00+00:00",
+      weighting,
+    }));
+    // Earned: the newest genuine stack stamped its per-frame weighting.
+    expect(hazy("applied")).toContain("were automatically counted less in your stack");
+    // Not earned — and the card says so rather than reassuring wrongly.
+    const off = hazy("not_applied");
+    expect(off).toContain("counted just as much as the rest");
+    expect(off).not.toContain("were automatically counted less");
+    // Nothing has counted anything yet.
+    const never = hazy("unstacked");
+    expect(never).toContain("haven't been stacked yet");
+    expect(never).not.toContain("were automatically counted less");
+    // An older backend sends no verdict: say what's generally true, promise
+    // nothing about this target's runs.
+    const general = hazy(undefined);
+    expect(general).toContain("when quality weighting is on");
+    expect(general).not.toContain("were automatically counted less");
+  });
+
   it("falls back to 'later in the night' when no degraded-after time is known", () => {
     const s = describeTransparencyTrend(trend({
       verdict: "degraded",

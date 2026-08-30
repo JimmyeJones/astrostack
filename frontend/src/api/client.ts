@@ -586,6 +586,11 @@ export interface FocusTrend {
   start_utc: string | null;
   end_utc: string | null;
   soft_after_utc: string | null;
+  // Did the target's newest genuine stack actually count worse subs less?
+  // "applied" | "not_applied" | "unstacked" | "unknown" — absent from an older
+  // backend, which reads as "unknown" and gets the general wording. The card's
+  // "counted less in your stack" reassurance is only earned by "applied".
+  weighting?: string;
 }
 
 export interface TransparencyTrendPoint {
@@ -603,6 +608,9 @@ export interface TransparencyTrend {
   start_utc: string | null;
   end_utc: string | null;
   degraded_after_utc: string | null;
+  // The same "did the stack really down-weight them?" datum the focus card
+  // carries, for the identical promise this card makes about hazy subs.
+  weighting?: string;
   // How many mosaic panels this night's subs split into (0, or absent from an
   // older backend, for the ordinary single-pointing target). A mosaic's panels
   // are different patches of sky, so their star flux differs by pointing rather
@@ -2267,6 +2275,13 @@ export const api = {
       // The rotation (deg) that puts celestial North up, or null when the run has
       // no usable WCS / the correction is trivial (so no "North up" toggle).
       north_up_deg?: number | null;
+      // True when the picture on screen is a *processed* one (the one-click
+      // "Process target" Auto edit), so a plain slider save would replace it
+      // with a flat stretch of the raw stack — the panel warns before the fact.
+      processed_preview?: boolean;
+      // …and true when that run's recipe is still on disk, so the save can
+      // re-bake the processed picture instead (rotation and all).
+      can_keep_processed?: boolean;
     }>(`/api/targets/${safe}/stack-runs/${id}/render-suggestion`),
   // "One frame vs your stack" reveal — a single raw sub next to the finished
   // stack, so a beginner sees what stacking bought them.
@@ -2314,11 +2329,17 @@ export const api = {
   deepeningReelUrl: (safe: string) => `/api/targets/${safe}/deepening-reel`,
   saveStackPreview: (
     safe: string, id: number, stretch: number, black: number, northUp = false,
+    keepProcessed = false,
   ) =>
     req<{ ok: boolean }>(`/api/targets/${safe}/stack-runs/${id}/preview`, {
       // north_up saves the image rotated so North is up, matching what the user
       // sees on screen when they save with the History "North up" toggle on.
-      method: "POST", body: JSON.stringify({ stretch, black, north_up: northUp }),
+      // keep_processed re-bakes a processed run's own saved edit instead of the
+      // sliders, so rotating a finished picture doesn't flatten it (default
+      // false — the plain stretch save, unchanged).
+      method: "POST",
+      body: JSON.stringify({ stretch, black, north_up: northUp,
+                             ...(keepProcessed ? { keep_processed: true } : {}) }),
     }),
 
   // pipeline
@@ -2422,6 +2443,16 @@ export const api = {
   getSky: () => req<SkyData>("/api/sky"),
   /** The all-sky "My map" PNG, built server-side from the owner's own pictures. */
   myMapUrl: () => "/api/sky/my-map.png",
+  /**
+   * How much sky those pictures actually cover, measured from each run's own
+   * WCS — never by counting pixels on the map, which is a non-equal-area
+   * projection that also draws every picture larger than life.
+   */
+  skyCoverage: () =>
+    req<{
+      deg2: number; sky_fraction: number; n_pictures: number;
+      whole_sky_deg2: number;
+    }>("/api/sky/coverage"),
   /** "Your universe" — the captured objects placed in depth by catalog distance. */
   getUniverse: () => req<UniverseData>("/api/sky/universe"),
 
