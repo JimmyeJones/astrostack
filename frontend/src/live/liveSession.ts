@@ -127,3 +127,41 @@ export function mostRecentlyActive(targets: Target[] | null | undefined): Target
   }
   return best;
 }
+
+/** How far apart two targets' newest frames can be and still count as "the same
+ * night". Long enough to span a winter night end to end, short enough that last
+ * week's session never shows up as company. */
+export const SAME_NIGHT_HOURS = 14;
+
+/** The *other* targets that also got subs around the same time as the one on
+ * screen, newest first.
+ *
+ * A Seestar that re-points mid-night (or a mosaic split across panels) leaves
+ * the earlier target invisible on this page, because it opens on whichever
+ * target's frames arrived most recently and says nothing about the rest. This is
+ * the one line that fixes that, and it stays a zero-extra-request change:
+ * `last_activity_utc` is already on the target list the page loads.
+ *
+ * Deliberately *not* a multi-target dashboard — the page's value is that it
+ * answers two questions about **one** night at a glance — so the result is
+ * capped at `limit` and is only ever rendered as links.
+ */
+export function alsoActiveTonight(
+  targets: Target[] | null | undefined,
+  currentSafe: string | null,
+  limit = 3,
+): Target[] {
+  const current = (targets ?? []).find((t) => t.safe_name === currentSafe);
+  const refMs = current?.last_activity_utc
+    ? new Date(current.last_activity_utc).getTime()
+    : NaN;
+  if (!Number.isFinite(refMs)) return [];
+  const windowMs = SAME_NIGHT_HOURS * 3600_000;
+  return (targets ?? [])
+    .filter((t) => t.safe_name !== currentSafe && !!t.last_activity_utc)
+    .map((t) => ({ t, ms: new Date(t.last_activity_utc!).getTime() }))
+    .filter(({ ms }) => Number.isFinite(ms) && Math.abs(ms - refMs) <= windowMs)
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, limit)
+    .map(({ t }) => t);
+}

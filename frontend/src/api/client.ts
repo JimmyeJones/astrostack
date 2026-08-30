@@ -2234,6 +2234,11 @@ export const api = {
     northUp = false,
   ) => `/api/targets/${safe}/stack-runs/${id}/wallpaper?aspect=${aspect}` +
     (northUp ? "&north_up=true" : ""),
+  // "Zoom clip" — a short looping push-in on the finished picture and back out,
+  // for posting somewhere that rewards motion. Built and cached server-side from
+  // the run's own preview; a run with no preview simply has none.
+  stackZoomClipUrl: (safe: string, id: number) =>
+    `/api/targets/${safe}/stack-runs/${id}/zoom-clip`,
   // "What's in this picture?" — catalog objects that fall inside a run's field.
   stackAnnotations: (safe: string, id: number) =>
     req<StackAnnotations>(`/api/targets/${safe}/stack-runs/${id}/annotations`),

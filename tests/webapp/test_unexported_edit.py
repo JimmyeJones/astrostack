@@ -37,6 +37,37 @@ def test_unexported_edit_predicate():
     assert _unexported_edit('{"preview_display_space": true}', saved) is False
 
 
+def test_a_re_edited_auto_run_is_flagged_once_the_baked_look_disagrees():
+    """The in-place-Auto exemption above holds only while the saved recipe really is
+    what the preview shows. Re-open such a run, change a parameter and Save, and the
+    recipe is rewritten while the baked preview PNG is not — a second-round edit as
+    invisible as any other. The baked-look stamp is what lets us tell."""
+    from webapp.routers.stack import _recipe_look
+
+    saved = json.dumps(STRETCH)
+    auto = '{"preview_display_space": true}'
+    baked_same = json.dumps(_recipe_look(saved))
+    baked_other = json.dumps(_recipe_look(json.dumps(
+        {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.9}}]})))
+
+    # Stamped and agreeing: the picture on screen *is* the recipe. Quiet.
+    assert _unexported_edit(auto, saved, None, baked_same) is False
+    # Stamped and disagreeing: the preview shows the older look. Flag it.
+    assert _unexported_edit(auto, saved, None, baked_other) is True
+    # No stamp (every run auto-edited before it existed) ⇒ can't tell ⇒ unchanged.
+    assert _unexported_edit(auto, saved, None, None) is False
+    assert _unexported_edit(auto, saved, None, "") is False
+    # Garbage never crashes and never nags.
+    for junk in ("not json", '{"ops": 1}', "null", "7"):
+        assert _unexported_edit(auto, saved, None, junk) is False, junk
+    # The stamp says nothing about an ordinary linear run, which was already
+    # flagged and stays flagged.
+    assert _unexported_edit("{}", saved, None, baked_same) is True
+    # ...and a drifted run that has since been exported at its *new* look is
+    # finished, like any other exported edit.
+    assert _unexported_edit(auto, saved, saved, baked_other) is False
+
+
 def test_a_re_edited_export_is_still_flagged():
     """An editor *export* writes a new run and stores no recipe on it, so a recipe
     on a display-space run can only have come from the user re-opening that export,
@@ -164,7 +195,11 @@ def test_gallery_reuses_the_run_listings_predicate(client, solved_library, monke
     assert next(x for x in client.get("/api/gallery").json()["items"]
                 if x["run_id"] == rid)["unexported_edit"] is False
 
-    monkeypatch.setattr(stack_mod, "_unexported_edit", lambda options, recipe, exported=None: True)
+    monkeypatch.setattr(
+        stack_mod, "_unexported_edit",
+        # Mirrors the real signature, baked-look stamp included, so the stub stands
+        # in for it exactly rather than tripping over an argument it doesn't take.
+        lambda options, recipe, exported=None, baked=None: True)
     assert next(x for x in client.get("/api/gallery").json()["items"]
                 if x["run_id"] == rid)["unexported_edit"] is True
     # …and no second copy has crept into the gallery module itself.
@@ -241,7 +276,11 @@ def test_unexported_edits_reuses_the_one_predicate(client, solved_library, monke
     _make_run(solved_library, safe, basename="count_one_definition")
     assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
 
-    monkeypatch.setattr(stack_mod, "_unexported_edit", lambda options, recipe, exported=None: True)
+    monkeypatch.setattr(
+        stack_mod, "_unexported_edit",
+        # Mirrors the real signature, baked-look stamp included, so the stub stands
+        # in for it exactly rather than tripping over an argument it doesn't take.
+        lambda options, recipe, exported=None, baked=None: True)
     # Still 0: a run with no recipe at all is never even looked up, which is the
     # cheapness the endpoint is built around.
     assert client.get("/api/gallery/unexported-edits").json()["count"] == 0
@@ -568,3 +607,93 @@ def test_finish_them_all_exports_only_what_the_note_counted(client, solved_libra
     # Exactly one "counted_done_edit" — the batch did not make a second copy.
     assert bases.count("counted_done_edit") == 1
     assert "counted_waiting_edit" in bases
+
+
+# ---- the drifted in-place Auto edit, end to end ----------------------------
+
+def _mark_auto_edited(data_root, safe: str, run_id: int, recipe_json: str) -> None:
+    """Make a run look like a finished in-place "Process target" Auto edit: the
+    ``preview_display_space`` marker, the recipe, and the stamp saying that recipe
+    is what the preview shows — the three things ``_auto_edit_process_run`` writes
+    together."""
+    from seestack.io.library import Library
+    from webapp.routers.editor import (
+        AUTO_EDIT_BAKED_LOOK_PREFIX,
+        RECIPE_META_PREFIX,
+    )
+    from webapp.routers.stack import _recipe_look
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            assert proj.set_run_preview_display_space(run_id) is True
+            proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe_json)
+            proj.set_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run_id}",
+                          json.dumps(_recipe_look(recipe_json)))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_a_second_round_edit_on_a_processed_run_is_flagged_everywhere(
+    client, solved_library,
+):
+    """A "Process target" run is exempt because its preview *is* its recipe — until
+    the user edits it again. Then the app is back to showing a picture they didn't
+    make, with nothing saying so. Pinned on both surfaces that ask: the run listing
+    (History / the Target hero) and the library-wide "finish them all" scan."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="processed_src")
+    _mark_auto_edited(solved_library, safe, rid, json.dumps(STRETCH))
+
+    # Straight off the auto-edit: nothing unfinished, on either surface.
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    assert next(x for x in runs if x["id"] == rid)["unexported_edit"] is False
+    found = client.get("/api/gallery/unexported-edits").json()
+    assert not [x for x in found["items"] if x["run_id"] == rid]
+
+    # The user re-opens it, dials the saturation up and saves.
+    r = client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe",
+                   json={"ops": [{"id": "tone.saturation", "params": {"amount": 1.7}}]})
+    assert r.status_code == 200
+
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    assert next(x for x in runs if x["id"] == rid)["unexported_edit"] is True
+    found = client.get("/api/gallery/unexported-edits").json()
+    assert [x for x in found["items"] if x["run_id"] == rid]
+
+    # Exporting it is what finishes it, exactly as for any other saved edit.
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/export",
+                    json={"output_name": "second_round"})
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    assert next(x for x in runs if x["id"] == rid)["unexported_edit"] is False
+
+
+def test_a_processed_run_from_before_the_stamp_stays_exempt(client, solved_library):
+    """Upgrade safety on the flag side: an older build wrote the marker and the
+    recipe but no stamp. Those runs must keep the exemption they have today rather
+    than every one of the owner's processed targets suddenly asking to be
+    finished."""
+    from seestack.io.library import Library
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="prestamp_src")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            assert proj.set_run_preview_display_space(rid) is True
+            proj.set_meta(f"{RECIPE_META_PREFIX}{rid}", json.dumps(STRETCH))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    assert next(x for x in runs if x["id"] == rid)["unexported_edit"] is False
+    found = client.get("/api/gallery/unexported-edits").json()
+    assert not [x for x in found["items"] if x["run_id"] == rid]

@@ -72,6 +72,19 @@ AUTO_EDIT_SKYCAST_PREFIX = "editor_auto_skycast:"
 # hands-off image was really white-balanced (and by which route). Absent on
 # manual/un-edited runs, so it only ever annotates runs the auto-edit touched.
 AUTO_EDIT_COLORCAL_PREFIX = "editor_auto_colorcal:"
+# The recipe *look* (``stack._recipe_look``, as JSON) that an unattended auto-edit
+# actually baked into this run's stored preview PNG. The auto-edit writes the recipe
+# and the preview in one step, so at that moment the two agree — and several surfaces
+# rely on it, taking the saved recipe to *be* what the stored preview shows (the
+# one-sub-vs-stack reveal renders the "before" through it; ``_unexported_edit``
+# deliberately never flags such a run). But re-opening that run in the editor,
+# changing a parameter and pressing **Save** rewrites the recipe and leaves the baked
+# preview alone, and from then on the assumption is false. This stamp is the only
+# thing on disk that can tell: compare it to the saved recipe's look and a mismatch
+# means "the preview shows something else". Absent on every run auto-edited before it
+# existed (and on every manual run), which reads as "can't tell" — exactly the
+# behaviour those surfaces had before, so an upgrading install is unaffected.
+AUTO_EDIT_BAKED_LOOK_PREFIX = "editor_auto_baked_look:"
 USER_PRESETS_META_KEY = "editor_user_presets"
 # A single, user-designated "house style" recipe stored library-wide (not per
 # target). Once set, the editor offers it as a one-click seed on any run that has

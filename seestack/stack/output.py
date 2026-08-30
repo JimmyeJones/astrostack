@@ -608,6 +608,14 @@ RUN_ARTEFACT_SUFFIXES: dict[str, str] = {
     "rejection_map": "_rejected.fits",
     "progress_webp": "_progress.webp",
     "progress_apng": "_progress.png",
+    # The share-ready zoom clip (webp, or an APNG fallback) and the signature that
+    # says which preview it was built from. Both are *caches* — rebuilt on demand
+    # from the preview, so losing them costs one render — but they must travel
+    # with the run: left behind on a re-stack they'd be a clip of a picture that
+    # no longer exists under that basename.
+    "zoom_webp": "_zoom.webp",
+    "zoom_apng": "_zoom.png",
+    "zoom_sig": "_zoom.sig",
 }
 
 # The artefacts that have a dedicated ``stack_runs`` column, i.e. the only ones a
