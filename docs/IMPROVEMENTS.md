@@ -360,6 +360,52 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **✅ SHIPPED (Builder, v0.318.1, branch `claude/compassionate-galileo-cwqy3x`) — ~~the target classifier reads
+  a thin stack's **grain as colour**, so a picture with no colour in it is suggested the nebula preset until you
+  stack it deep enough.~~** The **second confirmed instance** of the ⭐ "normalises against its own subset" QA
+  lead's *depth* axis (after `seam_residual`, v0.313.1), found by working the follow-on lead the
+  `…-7y6nlj` Builder filed an hour earlier — with the method it prescribed, and it landed on a different cue
+  than the one that entry predicted. *(Severity: wrong verdict on the owner's exact data shape — every stack is
+  thin before it is deep. It mis-suggests a preset (a click to dismiss) on any install, and on one with a
+  stored per-object-type **taste profile** it silently applies the *nebula* taste to a picture that isn't one,
+  which is a wrong picture. Confidence: reproduced and measured before fixing, at six sub counts.)*
+
+  **The mechanism, in one line: R, G and B carry independent noise, so three noisy samples of one grey pixel
+  differ.** `_extended_chroma` took the median of the **per-pixel** `(max−min)/mean` over the extended-signal
+  region, and for pure grain that quantity is ~1.7σ whatever the pixel actually is. Measured across sub counts
+  on one unchanging, **completely colourless** synthetic field, it ran **0.118 at 4 subs → 0.010 at 800** — so a
+  thin stack of a grey object read nearly twice the `chroma >= 0.06` nebula bar on noise alone. The verdict duly
+  flipped with depth on an unchanging sky: *nebula* at 4 and 16 subs, **no class at all** at 64 and beyond.
+
+  **The fix needed no threshold flip, which is why it was shippable at all.** AGENTS.md §1 forbids blind-flipping
+  a constant on the on-by-default hot path, and the `>= 0.06` bar was calibrated against the noise-inflated
+  measure. Instead the *estimator* now measures the thing its own docstring always claimed — the colour of the
+  **region** — by averaging each channel over a 7 px box (masked to the region itself, so the sky and star wings
+  just outside can't bleed a cast in) before taking the chroma. Colour in a nebula varies over tens of pixels;
+  noise is independent per pixel. So a clean image's answer moves by a few percent and the bar still means what
+  it meant, while the grain term falls ~7×.
+
+  **Measured both ways, because a fix that buys invariance by going deaf is worse than the bug.** A genuinely
+  red emission nebula reads **0.596 → 0.600** across σ = 0.004 / 0.02 / 0.05 (i.e. flat across the depth range)
+  and is still classified `nebula` at every one; its **colourless twin** reads **0.002 → 0.021** and is
+  classified at none. Before the fix that same colourless twin read 0.013 / 0.064 / 0.151 and was called a
+  nebula at the latter two.
+
+  **Deliberately not fixed in the same commit:** `ext_frac`, the cue the filed lead actually named. It *does*
+  grow with depth (0.058 → 0.111 on one scene, for the reason filed), but on every scene swept the colour cue
+  moved the verdict first, and correcting it would mean re-tuning the 0.06/0.012/0.05 class boundaries against a
+  synthetic scene — the blind flip §1 rules out. Left open on the lead's entry under "Autonomy &
+  friendliness", now with the chroma noise removed from underneath it.
+
+  **Upgrade-safe (§9):** one pure engine function, no config, schema, on-disk, API or default change; `scipy`'s
+  `uniform_filter` is already a dependency of the same function's neighbour (`grey_opening`).
+
+  **Tests (+4 in `tests/test_target_classify.py`, 3 fail before):** a colourless object never called a nebula at
+  any of three noise levels; the colour cue flat across the depth range for a real nebula *and* its grey twin,
+  with a floor assertion so invariance can't be bought by flattening the signal; a real nebula still caught on a
+  grainy stack (the no-regression half — it passed before too, on purpose); and the estimator itself at unit
+  level, including the too-small-region refusal. The six existing classifier tests are untouched and pass.
+
 - **✅ SHIPPED (Builder, v0.317.1, branch `claude/compassionate-galileo-7y6nlj`) — ~~the Target page's own
   **Share** menu still told the OS share sheet a picture was "captured" the day the **stack ran**~~, on both
   its plain and its keepsake share — the two sites the v0.313.0 sweep missed.** *(Severity: wrong fact on
@@ -9767,6 +9813,44 @@ to **Shipped**.)_
   instances took — make the *threshold* depth-invariant (the 0.06 floor already is; it is the `6·sky_sigma`
   term and the percentile normalisation that are not) rather than re-tuning the constants against one scene.
 
+  **🔎 MEASURED, WITHIN THE HOUR, AND IT MOVES — but not through the cue this entry names.** *(Builder
+  2026-08-30, branch `claude/compassionate-galileo-cwqy3x`; **fixed as v0.318.1**, see the entry at the top of
+  "Bugs (fix these first)".)* Swept exactly as filed — one unchanging scene at 4 / 16 / 64 / 128 / 300 / 800
+  subs, printing every cue — and the verdict really does flip with depth: a scene the classifier called
+  **nebula** at 4 and 16 subs went to **no class at all** at 64+, and a second scene did the reverse. So the
+  hypothesis is confirmed. **The driver is `chroma`, not `ext_frac`**, and the mechanism is a different (and
+  simpler) one than this entry predicts: `_extended_chroma` took the median of the **per-pixel**
+  `(max−min)/mean`, and R/G/B carry *independent* noise, so on a grey pixel that quantity is ~1.7σ of pure
+  grain. A completely colourless field measured **0.118 at 4 subs → 0.010 at 800** — i.e. a thin stack of a
+  grey object cleared the `chroma >= 0.06` nebula bar on noise alone. The fix needed **no threshold flip**:
+  averaging each channel over a 7 px box inside the region before measuring makes the statistic measure what
+  its own docstring always claimed (the colour of the *region*), leaves a clean image's answer within a few
+  percent, and is depth-invariant by construction — a real red nebula reads 0.596–0.600 across the whole σ
+  sweep while its colourless twin reads 0.002–0.021.
+  **`ext_frac` — this entry's own candidate — was measured too and is a real but *second-order* effect,
+  deliberately left alone.** It does grow with depth (0.058 → 0.111 on one scene), for exactly the reason
+  filed, and on the scenes swept it never on its own moved a verdict across a class boundary; the colour cue
+  got there first every time. Fixing it *would* mean the blind threshold flip AGENTS.md §1 forbids, since the
+  0.06/0.012/0.05 constants were calibrated against the depth-varying measure. **Left open as the remaining
+  half of this lead**, now with the chroma noise removed from underneath it so a future measurement sees the
+  geometry alone.
+
+- **NEW IDEA (Builder 2026-08-30, the half deliberately left out of the Stack-form print line v0.318.0) — make
+  the print nudge a *button*, not only a sentence.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size XS;
+  frontend-only, no new data.)* The estimate panel now says *"Turning Drizzle on at ×1.3 would print it at A3
+  instead"*, and the scale it names is already **machine-actionable** — `print_plan.bigger_drizzle_scale` is a
+  number the form could just set, and it is already verified to fit the memory budget and to actually reach that
+  paper. But the two knobs it names (`drizzle`, `drizzle_scale`) live inside the collapsed **advanced**
+  disclosure, so a beginner who reads the sentence still has to go find them. The panel two lines up already has
+  exactly this pattern — the one-click `memoryFix` button — so the shape is settled and copyable.
+  **Why it was left out rather than done:** the filed spec said *keep it to one line*, against the owner's
+  standing "extremely busy" priority, and a button is a second element on a dense form. **What would settle it:**
+  it appears only when there is something to reach for *and* the stack has enough frames for drizzle to pay off,
+  which on a beginner's first stacks is rarely — so it is not an always-on control. **Care:** it must set *both*
+  keys (`drizzle: true` and the scale), and the existing `set()` helper takes one key at a time; check whether a
+  two-key set re-queries the estimate once or twice before wiring it, or the panel will flicker between two
+  verdicts.
+
 - **NEW IDEA (Builder 2026-08-30, the obvious next tap on the per-run night count v0.317.0) — say "over 4
   nights" where a person is *looking at* the picture, not only where they copy a caption.** *(Pillar:
   understand + enjoy — PRIORITY 3; size XS–S; purely additive on machinery that now exists.)* `capture_nights`
@@ -10001,8 +10085,16 @@ to **Shipped**.)_
   capture time — "newest run" is the right ordering for History — and where both dates matter, say both
   ("shot 15 Nov 2024 · stacked 30 Aug 2026") rather than silently swapping one for the other.
 
-- **NEW IDEA (Builder 2026-08-30, noted while fixing the sky-coverage line v0.311.4) — the app writes "full
-  moons" in one sentence and "full Moon" in three others.** *(Pillar: friendliness — PRIORITY 3; size XS.)*
+- **✅ SHIPPED (Builder, v0.318.2, branch `claude/compassionate-galileo-cwqy3x`) — ~~the app writes "full
+  moons" in one sentence and "full Moon" in three others.~~** Exactly as filed, and picked up on its own at the
+  end of a run rather than smuggled into an unrelated commit, as the entry asked. `describeSkyCoverage` now
+  says "full Moon"/"full Moons" like `scalebar`, `angularsize` and the framing hint, with the three test
+  assertions (two in `skyCoverage.test.ts`, one in `Sky.test.tsx`) and the docstring moved with it. The Moon is
+  a proper noun; the Dashboard could show both spellings within a screen of each other.
+
+  Original spec, for the record:
+
+  *(Pillar: friendliness — PRIORITY 3; size XS.)*
   `components/skyCoverage.ts` says *"about 6 full moons' worth of sky"*; `scalebar._moon_comparison`,
   `angularsize` and the framing hint all say *"full Moon"*. Same noun, same product, two spellings, and on the
   Dashboard the two can appear within a screen of each other. One line of copy plus its three test assertions.
@@ -10214,11 +10306,30 @@ to **Shipped**.)_
   **One thing found and NOT fixed, filed on its own below** (it is advisory copy, not a wrong picture): the
   `coverage_min / coverage_max` ratio behind `stackhealth`'s ragged-border note. See the entry under
   "Friendliness".
-  **Left for the next sweep** (candidates from the lead that this run did not reach): the auto-*edit* strength
+  **Left for the next sweep** (candidates from the lead that this run did not reach): ~~the auto-*edit* strength
   pickers downstream of `suggest_denoise_strength` on a genuinely noisy deep stack (this scene's Auto never
-  left the clean end, so the denoise branch was never exercised at depth), and `_fwhm_quality_drift` /
-  `best_frame` along this axis (they were swept along the *position* axis and cleared, which says nothing
-  here).
+  left the clean end, so the denoise branch was never exercised at depth)~~ — **swept and CLEARED, see below** —
+  and `_fwhm_quality_drift` / `best_frame` along this axis (they were swept along the *position* axis and
+  cleared, which says nothing here).
+
+  **🔎 SWEPT AGAIN (Builder 2026-08-30, branch `claude/compassionate-galileo-cwqy3x`) — the auto-EDIT strength
+  pickers are CLEARED; a *third* confirmed instance of the class turned up alongside them and is fixed as
+  v0.318.1** (the target classifier's colour cue — entry at the top of "Bugs (fix these first)").
+  **Cleared — measured with the denoise branch genuinely exercised this time**, on a scene noisy enough that
+  Auto starts saturated and works its way down (1 → 800 subs, one unchanging sky, noise scaled 1/√N):
+  `sky_sigma` 0.0968 → 0.0064, `_noise_fraction` 1.0 → 0.0, `suggest_denoise_strength` 1.0 → 0.2,
+  `detail.denoise` 0.6 → 0.0, `detail.chroma_denoise` 0.5 → 0.0, `detail.sharpen` 0.0 → 0.5, saturation
+  1.05 → 1.21. Every one is monotone **in the direction it should be** — deeper stack, less denoise, more
+  sharpen — with no inversion and no plateau, and the crossfade's two ends land where `_NOISE_LO`/`_NOISE_HI`
+  say they should. The denoise branch is exercised at every depth from 1 to 64, which is what the previous
+  sweep could not say.
+  **One caveat worth recording rather than fixing:** `estimate_noise_sigma` normalises by the image's own
+  0.5–99.5 percentile range, and on a **structure-free** field that range *is* the noise — so the ratio is a
+  fixed point (≈0.194 for Gaussian noise) and stays there however deep you stack. Measured: a blank field reads
+  0.194 at 1 sub and 0.194 at 800. It is **not** filed as a bug because the resulting action is right (a frame
+  that is nothing but noise should be denoised hard) and because a real OSC frame always carries stars that set
+  the percentile. Worth knowing if anyone ever reads that σ as an absolute noise figure rather than a fraction
+  of the visible range — it is the latter, and its docstring says so.
 
 - **NEW IDEA (Builder 2026-08-30, the one case the v0.312.1 tint fix deliberately fenced off rather than
   solved) — a many-sub stack whose canvas is no bigger than its preview still gets the cyan wash.**
@@ -19868,6 +19979,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   behind it ("2 of your targets are this object"). **Don't** fix it by nudging one aside — a fake offset on a
   map whose whole promise is "placed where they really are" is exactly the wrong trade.
 
+- **⚠️ PROCESS NOTE (Builder 2026-08-30) — collision EIGHT, and this one is the control experiment for note
+  seven: its prescribed fix would have prevented it, and I did not do it.** Note seven, filed hours earlier,
+  says in bold: **`git fetch origin main` again immediately before *starting* each new task, not only before
+  merging** — because claiming is a publication, not a lock, and the §12 checklist only fetches at start of run.
+  This run fetched once at 15:04, shipped the print-size item, then picked up the per-run **night count** off
+  the backlog and built it end to end — engine `_capture_hours`, schema 19 `capture_hours_json`,
+  `capture_night_count`, the caption clause, 16 tests, all green. The `…-7y6nlj` Builder had merged the
+  **identical design** — same column name, same helper name, same read-time bucketing, plus the nameplate,
+  gallery and stats surfaces mine deliberately deferred — as **v0.315.0 at 14:30**, i.e. *before this run even
+  started*. A three-second fetch at the top of the task would have found it on `main`, fully merged, with no
+  ambiguity to reason about.
+  **What that costs and what it buys:** roughly an hour of build time thrown away, against a fix that costs one
+  second. **The failure was not the claim protocol — it was reading the backlog as the source of truth for what
+  is done.** It isn't; `main` is. A backlog entry says what *was* open when someone last wrote to the file, and
+  in a two-Builder-per-hour world that is stale by construction. Two habits follow, and they are cheap enough to
+  be unconditional: (1) fetch before *each* task, as note seven says; and (2) before writing a line, `git log
+  --oneline origin/main -20` and grep it for the item's own nouns — "nights", "capture_hours" would each have
+  hit `1b8daaf` immediately. The stand-down itself followed the established pattern (take `main`'s
+  implementation wholesale, re-apply only what is genuinely additive; theirs was strictly more complete, so
+  nothing was re-applied) — but the cheapest collision is the one you never start.
+
 - **⚠️ PROCESS NOTE (Builder 2026-08-30) — collisions SIX AND SEVEN, in one run, against one other Builder —
   and claiming early did NOT prevent them, because the other run claimed early too.** Branch
   `claude/compassionate-galileo-xkjuvl` claimed the recipe-drift guard and the engine QA-lead sweep in its
@@ -20508,9 +20640,53 @@ problems. Dogfood it every big-picture run and fix root causes.
   it will promise fewer files than the zip holds; and the card currently hides below two *targets*, which
   would still hide the button from someone whose only pictures are Moon stills.
 
-- **NEW IDEA (Builder 2026-08-29, the obvious next tap on "what would print bigger?" v0.295.0) — say the print
-  size on the **Stack form**, where the decision that sets it is actually made.** *(Pillar: enjoy + autonomy —
-  PRIORITY 2–3; size S; read-only, additive, no new deps — every ingredient exists.)* v0.295.0 tells a finished
+- **✅ SHIPPED (Builder, v0.318.0, branch `claude/compassionate-galileo-cwqy3x`) — ~~say the print size on the
+  **Stack form**, where the decision that sets it is actually made.~~** *(Pillar: enjoy + autonomy —
+  PRIORITY 2–3.)* Both filed cautions honoured, and the second one turned out to have a *structural* answer
+  rather than a conditional one.
+
+  **The deferral is structural, not a guard.** The entry's hard caution — never offer a bigger print on a canvas
+  the memory guard is refusing — is enforced twice, in the two places it can break. In the browser the print
+  line lives **inside the `estimateOverBudget` else-branch**: the over-budget alert *replaces* the sizing line,
+  so a print sentence cannot render beside a refusal at all, whatever the payload says. And in the engine the
+  nudge itself re-costs the canvas it would produce and returns nothing when that exceeds the same `budget` the
+  guard refuses on — so a payload that *could* argue with the guard is never built either.
+
+  **The offered scale is verified, not extrapolated.** `PrintPlan.bigger_drizzle_scale` is a scale the run can
+  be set to, so it must genuinely land the paper it names. `bigger_print` gives the gap in detail-per-side;
+  multiplying by whatever scale is already set (×1.0 when drizzle is off) only *proposes* a candidate, and
+  rounding, the `int(round(dim·s))` canvas formula and the papers' differing aspects can all leave it a pixel
+  short. So `_print_plan` steps the candidate up the same 0.1 grid the form uses and re-asks `print_options`
+  about the canvas `_estimate_peak_bytes` says the run would really write, taking the first that qualifies —
+  and gives up at `DRIZZLE_MAX_USEFUL_SCALE` (×2.0), because past that the honest lever is a mosaic and a
+  beginner told to type ×3.4 learns nothing they can act on.
+
+  **The frame-count gate is in the browser on purpose.** The form already warns that drizzle needs 200+ dithered
+  subs (`DRIZZLE_TOO_FEW_FRAMES = 100`), so recommending drizzle a line above that warning would be the panel
+  arguing with itself. Rather than duplicate the threshold into the engine, the `bigger_*` half is withheld by
+  the frontend at *the same constant* it warns at — one number, one voice. The "what it prints today" half
+  always shows.
+
+  *(Its commit subject says v0.317.0 — the number was correct when it was written and `main` took it for the
+  per-run night count while this was in flight, so the version was re-picked from `main` at merge time per §11.
+  It ships as **v0.318.0**.)*
+
+  **Upgrade-safe (§9):** one additive optional response field (`print_plan`) and one optional dataclass field on
+  `StackEstimate`; no config, schema, on-disk, default or API-shape change. An older frontend ignores it; an
+  older backend omitting it renders nothing, which a test pins.
+
+  **Tests (+16):** 9 in `tests/test_stack_print_plan.py` — the paper named agrees with what `print_options`
+  gives the same canvas (no second voice); the too-small line says pixels, never subs; the offered scale really
+  qualifies for the paper it names *and* points upward; the scale multiplies the one already set; silence at
+  `DRIZZLE_MAX_USEFUL_SCALE`, at the largest paper, and one byte over budget (with the plain half still told);
+  and the plan riding on `estimate_stack` describing that estimate's own canvas. 3 in
+  `tests/webapp/test_stack_estimate.py` (the payload, the plan following the drizzle knob, and the nudge
+  withheld over budget) and 4 in `Stack.test.tsx` (both lines rendered; the nudge withheld at 12 frames; nothing
+  at all over budget; and a null `print_plan` degrading quietly).
+
+  Original spec, for the record:
+
+  *(Size: S; read-only, additive, no new deps — every ingredient exists.)* v0.295.0 tells a finished
   picture *"about 1.3× more detail would print this at A3 — the lever is re-stacking with Drizzle on."* That is
   the right sentence in the wrong tense: by the time it is read, the stack that fixed the canvas size is
   already made, and the user has to remember it until the next time they open the Stack form. **The Stack form

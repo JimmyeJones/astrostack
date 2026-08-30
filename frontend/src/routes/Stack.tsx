@@ -761,6 +761,18 @@ export function StackView() {
   // prefer the structured memory_fix, which also covers dropping extra outlier
   // passes and always shows the resulting peak; fall back to the coarse fields.
   const memoryFix = memoryFixAction(est?.memory_fix);
+  // The same canvas said in the unit a human actually wants — a paper size —
+  // while the knob that fixes it is still on screen. It renders only in the
+  // fits-the-budget branch below, so it structurally cannot talk over the
+  // over-budget verdict. The "raise Drizzle" half is withheld on a stack with
+  // too few frames for super-resolution to pay off, at the *same* bar
+  // `drizzleTooFewHint` warns at (read from the one constant), so this panel can
+  // never recommend the thing it would then warn against.
+  const printPlan = est?.print_plan ?? null;
+  const printBigger =
+    printPlan?.bigger_text && est && est.n_frames >= DRIZZLE_TOO_FEW_FRAMES
+      ? printPlan.bigger_text
+      : null;
 
   return (
     <Stack maw={720}>
@@ -1256,7 +1268,14 @@ export function StackView() {
               ) : null}
             </Alert>
           ) : estimateLine && !noSolved ? (
-            <Text size="xs" c="dimmed">{estimateLine}</Text>
+            <Stack gap={2}>
+              <Text size="xs" c="dimmed">{estimateLine}</Text>
+              {printPlan ? (
+                <Text size="xs" c="dimmed">
+                  {printPlan.text}{printBigger ? ` ${printBigger}` : ""}
+                </Text>
+              ) : null}
+            </Stack>
           ) : null}
 
           {job ? (

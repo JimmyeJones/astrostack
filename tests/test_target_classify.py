@@ -115,3 +115,107 @@ def test_none_and_mono_inputs_decline_cleanly():
     assert classify_target(None)["preset_id"] is None
     assert classify_target(np.zeros((50, 50), np.float32))["preset_id"] is None
     assert classify_target(np.zeros((10, 10, 3), np.float32))["preset_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# The classifier must not read a stack's *grain* as colour.
+#
+# ``chroma`` used to be the median of the per-pixel ``(max−min)/mean`` over the
+# extended region. R, G and B carry independent noise, so on a grey pixel that
+# is ~1.7σ of pure grain — a statistic that means something different depending
+# on how many subs went in, which is the bug class the QA lead in
+# docs/IMPROVEMENTS.md exists to sweep for. Measured on one unchanging,
+# completely colourless synthetic field, the old number ran 0.118 at 4 subs down
+# to 0.010 at 800, so a thin stack of a *grey* object cleared the ``>= 0.06``
+# nebula bar on grain alone and got the nebula preset suggested — and, for an
+# owner with a stored per-object-type taste profile, the nebula taste applied to
+# their picture. It is now measured on a locally averaged copy of the region,
+# which is depth-invariant because colour is a property of the region and noise
+# is not.
+
+
+def _neutral_object_field(noise: float, seed: int = 2) -> np.ndarray:
+    """A big, bright, extended object with **no colour at all** — every channel
+    identical — under per-channel noise of the given σ."""
+    rng = np.random.default_rng(seed)
+    h = w = 220
+    lum = (np.full((h, w), 0.02, np.float32)
+           + 0.58 * _blob((h, w), 110, 110, 70)
+           + _stars((h, w), 8, rng, sigma=1.0))
+    rgb = np.repeat(lum[..., None], 3, axis=2).astype("float32")
+    return rgb + rng.normal(0, noise, rgb.shape).astype("float32")
+
+
+def _coloured_nebula_field(noise: float, seed: int = 2) -> np.ndarray:
+    """The same geometry, genuinely red-dominant — a real emission nebula."""
+    rng = np.random.default_rng(seed)
+    h = w = 220
+    base = np.full((h, w), 0.02, np.float32) + 0.5 * _blob((h, w), 110, 110, 70)
+    stars = _stars((h, w), 8, rng, sigma=1.0)
+    rgb = np.stack([base * 1.6 + stars, base + stars, base * 0.9 + stars],
+                   axis=-1).astype("float32")
+    return rgb + rng.normal(0, noise, rgb.shape).astype("float32")
+
+
+def test_a_grainy_colourless_object_is_never_called_a_nebula():
+    """The regression. Before the fix this field read chroma 0.064 at σ=0.02 and
+    0.151 at σ=0.05 — over the nebula bar — on a picture with no colour in it."""
+    for noise in (0.004, 0.02, 0.05):
+        out = classify_target(_neutral_object_field(noise))
+        assert out["cues"]["chroma"] < 0.06, f"grain read as colour at σ={noise}"
+        assert out["cls"] != "nebula", f"colourless field called a nebula at σ={noise}"
+
+
+def test_the_colour_cue_does_not_move_with_how_deep_the_stack_is():
+    """The property the whole fix is for: one unchanging sky must give one
+    answer whether it is four subs deep or eight hundred. Noise falls as 1/√N,
+    so sweeping σ *is* sweeping the sub count."""
+    coloured = [classify_target(_coloured_nebula_field(n))["cues"]["chroma"]
+                for n in (0.004, 0.02, 0.05)]
+    # A real colour reads the same at every depth (within a few percent) …
+    assert max(coloured) - min(coloured) < 0.05 * max(coloured)
+    # … and stays far above the bar, so the fix didn't buy invariance by
+    # flattening the signal too.
+    assert min(coloured) >= 0.2
+    neutral = [classify_target(_neutral_object_field(n))["cues"]["chroma"]
+               for n in (0.004, 0.02, 0.05)]
+    # The colourless twin stays near zero at every depth, and — the direction
+    # that matters — never crosses the bar as the stack gets thinner.
+    assert max(neutral) < 0.06
+
+
+def test_a_real_coloured_nebula_survives_a_noisy_stack():
+    """The other half: the fix must not make the classifier deaf. A genuinely
+    red nebula is still called one on a thin, grainy stack."""
+    for noise in (0.004, 0.02, 0.05):
+        out = classify_target(_coloured_nebula_field(noise))
+        assert out["cls"] == "nebula", f"missed a real nebula at σ={noise}"
+        assert out["preset_id"] == "nebula_broadband"
+
+
+def test_extended_chroma_reads_the_region_not_its_pixels():
+    """Unit-level: the estimator itself. A uniformly grey patch under heavy
+    per-channel noise has no colour; a uniformly red one has the same colour
+    however noisy it is."""
+    from seestack.edit.presets import _extended_chroma
+
+    rng = np.random.default_rng(9)
+    mask = np.zeros((80, 80), dtype=bool)
+    mask[10:70, 10:70] = True
+    grey = np.full((80, 80, 3), 0.4, np.float32)
+    grey += rng.normal(0, 0.05, grey.shape).astype("float32")
+    assert _extended_chroma(grey, mask) < 0.03
+
+    red = np.stack([np.full((80, 80), 0.6, np.float32),
+                    np.full((80, 80), 0.3, np.float32),
+                    np.full((80, 80), 0.3, np.float32)], axis=-1)
+    clean = _extended_chroma(red, mask)
+    noisy = _extended_chroma(
+        red + rng.normal(0, 0.05, red.shape).astype("float32"), mask)
+    assert clean > 0.5
+    assert abs(noisy - clean) < 0.05 * clean
+
+    # Too small a region says nothing rather than guessing off a handful of px.
+    tiny = np.zeros((80, 80), dtype=bool)
+    tiny[0:4, 0:4] = True
+    assert _extended_chroma(red, tiny) == 0.0

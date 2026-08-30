@@ -35,7 +35,7 @@ export function formatSkyArea(deg2: number): string {
  * The one-line read-out under "My map", or `""` when there's nothing to say yet
  * (no finished picture carries a position, so any number would be invented).
  *
- * Leads with the honest measurement, then anchors it in full moons — the only
+ * Leads with the honest measurement, then anchors it in full Moons — the only
  * patch of sky a beginner can already picture — and closes with the fraction,
  * which is the number that makes people grin.
  */
@@ -45,8 +45,8 @@ export function describeSkyCoverage(
   if (!Number.isFinite(deg2) || deg2 <= 0 || nPictures <= 0) return "";
   const moons = deg2 / FULL_MOON_DEG2;
   const moonPhrase = moons < 1.5
-    ? "about a full moon's worth of sky"
-    : `about ${Math.round(moons).toLocaleString()} full moons' worth of sky`;
+    ? "about a full Moon's worth of sky"
+    : `about ${Math.round(moons).toLocaleString()} full Moons' worth of sky`;
   // Singular takes its own verb *and* drops the count: "Your 1 picture cover"
   // was both ungrammatical and stilted, and it is the state a beginner is in on
   // the day they meet this sentence — the one picture they just made.
