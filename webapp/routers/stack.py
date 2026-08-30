@@ -2933,11 +2933,11 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         data = Path(path).read_bytes()
         fits_path = run.fits_path
         if fits_path and Path(fits_path).exists():
-            try:
+            # A broken FITS just serves the stored bytes, un-turned — the same
+            # degrade the JPEG path takes for the same reason.
+            with contextlib.suppress(Exception):
                 data = orient_preview_north_up(
                     data, fits_path, already_deg=baked_north_up_deg(run))
-            except Exception:  # noqa: BLE001 — a broken FITS just serves the stored bytes
-                pass
         return Response(
             content=data, media_type=media,
             headers={
