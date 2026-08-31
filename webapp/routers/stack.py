@@ -2776,7 +2776,14 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
                       ("NUNREAD", "n_unreadable"),
                       ("NREADERR", "n_read_errors"),
                       ("NREADREC", "n_read_recovered"),
-                      ("NROUGHAL", "n_roughly_aligned")):
+                      ("NROUGHAL", "n_roughly_aligned"),
+                      # How far sub-pixel refine reached: how many reference
+                      # patches the run built (one per mosaic panel that earned
+                      # one) and how many contributing subs still fell outside
+                      # all of them, so a mosaic owner can read the reach off the
+                      # run rather than infer it. Absent on older masters.
+                      ("NREFPANL", "n_refine_patches"),
+                      ("NREFSKIP", "n_refine_out_of_reach")):
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 frame_accounting[k] = int(header[hk])
         if "n_offered" not in frame_accounting:

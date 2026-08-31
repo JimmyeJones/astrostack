@@ -53,7 +53,10 @@ from seestack.stack.align import (
     REF_PATCH_MIN_COVERAGE, align_one, extract_reference_patch,
 )
 from seestack.stack.output import _sanitize_basename
-from seestack.stack.reference import ReferenceChoice, pick_reference_frame
+from seestack.stack.pointings import pointing_groups
+from seestack.stack.reference import (
+    ReferenceChoice, pick_central_frame, pick_reference_frame,
+)
 from seestack.stack.photometric import PhotometricStats, compute_photometric_scales
 from seestack.stack.weighting import (
     WeightingStats,
@@ -1363,6 +1366,8 @@ def _build_output_header_meta(
     weights_applied: bool = True,
     n_roughly_aligned: int = 0,
     refine_active: bool | None = None,
+    n_refine_out_of_reach: int = 0,
+    n_refine_patches: int = 0,
     n_unreadable: int = 0,
     n_read_errors: int = 0,
     n_read_recovered: int = 0,
@@ -1608,7 +1613,110 @@ def _build_output_header_meta(
     if options.subpixel_refine and not options.drizzle and refine_active is not False:
         meta["NROUGHAL"] = (int(max(0, n_roughly_aligned)),
                             "subs only roughly aligned (over cap)")
+        # …and how far the step actually *reached*. A reference patch can only
+        # refine frames whose footprint overlaps it, so on a mosaic every sub
+        # outside the patches' panels stacks at whole-pixel alignment — correct,
+        # but invisible until now. ``NREFPANL`` is how many reference patches the
+        # run built (1 on a single-field stack, one per substantial panel on a
+        # mosaic) and ``NREFSKIP`` how many contributing subs still fell outside
+        # all of them. Both stamped at 0 for the same reason NROUGHAL is: silence
+        # would be indistinguishable from an older master.
+        meta["NREFPANL"] = (int(max(0, n_refine_patches)),
+                            "sub-pixel refine reference patches")
+        meta["NREFSKIP"] = (int(max(0, n_refine_out_of_reach)),
+                            "subs no refine patch could reach")
     return meta
+
+
+# How many subs a mosaic panel needs before it earns its own sub-pixel refine
+# reference patch. Two is the smallest number that can do anything: a panel of
+# one would only ever correlate its single frame against a patch cut from that
+# same frame, measuring a shift of zero at the cost of an extra frame load. A
+# panel below this floor keeps the target-wide reference patch, i.e. exactly
+# today's behaviour (refined if it overlaps that patch, skipped if it doesn't).
+REFINE_PANEL_MIN_FRAMES = 2
+
+
+def _build_refine_patch(
+    frame: FrameRow,
+    *,
+    dst_wcs_text: str,
+    dst_shape: tuple[int, int],
+    canvas_3: tuple[int, int, int],
+    options: StackOptions,
+    calibration: CalibrationMasters | None,
+    what: str = "reference",
+) -> tuple[np.ndarray, tuple[int, int]] | None:
+    """Align ``frame`` to the output canvas once and cut a luminance patch from
+    the window it lands on — the fixed target every sub is phase-correlated
+    against by the sub-pixel refine step.
+
+    Returns ``(patch, origin)`` in canvas coordinates, or ``None`` when the
+    frame can't be aligned or covers too little of its own patch to be worth
+    correlating against (:data:`REF_PATCH_MIN_COVERAGE`). ``what`` names the
+    patch in the log lines ("reference", "panel 2") — the whole point of the
+    coverage check is that a stand-down is *visible*.
+    """
+    try:
+        ref_result = align_one(
+            fits_path=str(readable_frame_path(frame) or ""),
+            bayer_pattern=frame.bayer_pattern,
+            # The frame's *own* WCS is the source; the canvas WCS is the
+            # destination (these differ once a mosaic canvas is used).
+            src_wcs_text=frame.wcs_json,
+            dst_wcs_text=dst_wcs_text,
+            dst_shape=dst_shape,
+            background_options=options.background_options(),
+            use_gpu=options.use_gpu,
+            suppress_hot_pixels=options.suppress_hot_pixels,
+            hot_pixel_sigma=options.hot_pixel_sigma,
+            # Build the patch in the *same* domain as the frames it will be
+            # phase-correlated against (via _align_for_stack): calibrated when
+            # calibration is applied, and mono-luminance for a mono stack.
+            # Omitting these made the reference OSC-debayered / uncalibrated
+            # while every frame was mono / calibrated — a domain mismatch that
+            # degrades the measured sub-pixel shift.
+            calibration=calibration,
+            mono=options.mono,
+        )
+        if ref_result is None:
+            raise ValueError("frame did not intersect the canvas")
+        ref_win, _ref_valid, ref_y0, ref_x0 = ref_result
+        # Embed the windowed frame into a full canvas once (cheap — one
+        # allocation, freed on return) so extract_reference_patch can take the
+        # patch in canvas coordinates.
+        ref_full = np.full(canvas_3, np.nan, dtype=np.float32)
+        rh, rw = ref_win.shape[:2]
+        ref_full[ref_y0:ref_y0 + rh, ref_x0:ref_x0 + rw] = ref_win
+        # Centre the patch on the frame's *panel*, not blindly on the canvas. On
+        # a mosaic the union canvas is larger than any one tile, so a tile whose
+        # footprint misses the canvas centre used to yield an all-NaN patch — and
+        # then every frame's phase correlation raised and was swallowed, leaving
+        # the whole stack on whole-pixel alignment with nothing to say why. For a
+        # single-field target the panel is the canvas, so this picks the same
+        # window.
+        patch, origin = extract_reference_patch(
+            ref_full, centre=(ref_y0 + rh // 2, ref_x0 + rw // 2))
+        # Belt and braces: even centred, a window clipped to a thin sliver of the
+        # canvas can leave the patch mostly uncovered, and an uncovered pixel is
+        # filled with the patch median. Correlating against a mostly-flat patch
+        # is worse than not refining, so stand down visibly rather than fail
+        # silently once per frame.
+        pph, ppw = patch.shape
+        py0, px0 = origin
+        covered = float(np.isfinite(
+            ref_full[py0:py0 + pph, px0:px0 + ppw, 1]).mean())
+        if covered < REF_PATCH_MIN_COVERAGE:
+            log.info(
+                "Sub-pixel refinement: no %s patch — the frame covers only "
+                "%.0f%% of it at origin %s", what, covered * 100.0, origin)
+            return None
+        log.info("Sub-pixel refinement: %s patch %s at origin %s (%.0f%% covered)",
+                 what, patch.shape, origin, covered * 100.0)
+        return patch, origin
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not build %s patch for sub-pixel refine: %s", what, exc)
+        return None
 
 
 def run_stack(
@@ -1869,71 +1977,66 @@ def run_stack(
     canvas_3 = (dst_shape[0], dst_shape[1], 3)  # needed by the sub-pixel block below
     ref_patch: np.ndarray | None = None
     ref_patch_origin: tuple[int, int] | None = None
+    # Per-frame override of that one patch, for a mosaic: ``{frame id: (patch,
+    # origin)}``. Empty on a single-field stack and on any mosaic that doesn't
+    # split soundly, where every frame keeps the target-wide patch above.
+    refine_patch_by_frame: dict[int, tuple[np.ndarray, tuple[int, int]]] = {}
     if options.subpixel_refine:
-        try:
-            ref_result = align_one(
-                fits_path=str(readable_frame_path(ref) or ""),
-                bayer_pattern=ref.bayer_pattern,
-                # The reference frame's *own* WCS is the source; the canvas WCS
-                # is the destination (these differ once a mosaic canvas is used).
-                src_wcs_text=ref.wcs_json,
-                dst_wcs_text=dst_wcs_text,
-                dst_shape=dst_shape,
-                background_options=options.background_options(),
-                use_gpu=options.use_gpu,
-                suppress_hot_pixels=options.suppress_hot_pixels,
-                hot_pixel_sigma=options.hot_pixel_sigma,
-                # Build the reference patch in the *same* domain as the frames it
-                # will be phase-correlated against (below, via _align_for_stack):
-                # calibrated when calibration is applied, and mono-luminance for a
-                # mono stack. Omitting these made the reference OSC-debayered /
-                # uncalibrated while every frame was mono / calibrated — a domain
-                # mismatch that degrades the measured sub-pixel shift.
-                calibration=calibration,
-                mono=options.mono,
+        built = _build_refine_patch(
+            ref, dst_wcs_text=dst_wcs_text, dst_shape=dst_shape,
+            canvas_3=canvas_3, options=options, calibration=calibration)
+        if built is not None:
+            ref_patch, ref_patch_origin = built
+    # One patch can only refine the frames whose window overlaps it — every other
+    # frame takes the honest "too-small overlap" skip in
+    # ``_apply_subpixel_shift_windowed``. On a single field that's nobody (the
+    # frames all sit on top of each other), but on an N-panel mosaic it is every
+    # sub outside the reference panel: the option quietly delivered its sharpness
+    # to ~1/N of the subs. So give each substantial panel its own patch, cut from
+    # its own central frame and aligned to the *same* canvas WCS — the shifts
+    # therefore stay in one frame of reference, and a panel can't drift relative
+    # to its neighbours. Cost: one extra frame load per panel, once, at setup.
+    if ref_patch is not None and len(frames) > 1:
+        # ``pointing_groups`` is the shared "does this target split into panels?"
+        # gate the QC/photometric/weighting paths already use, and it returns
+        # None unless at least two groups are substantial — so a single-field
+        # target (one cluster) and a mosaic too tightly packed to separate both
+        # keep today's single-patch behaviour by construction.
+        panel_labels = pointing_groups(
+            [(f.ra_center_deg, f.dec_center_deg) for f in frames],
+            min_members=REFINE_PANEL_MIN_FRAMES,
+        )
+        if panel_labels is not None:
+            by_label: dict[int, list[FrameRow]] = {}
+            for f, label in zip(frames, panel_labels, strict=True):
+                if label >= 0:
+                    by_label.setdefault(label, []).append(f)
+            # The panel the target-wide reference already covers keeps that
+            # patch: its frames then correlate against exactly the bytes they do
+            # today, so the common panel is bit-for-bit unchanged.
+            ref_label = next(
+                (label for label, group in by_label.items()
+                 if any(f.id is not None and f.id == ref.id for f in group)),
+                None,
             )
-            if ref_result is None:
-                raise ValueError("reference frame did not intersect the canvas")
-            ref_win, _ref_valid, ref_y0, ref_x0 = ref_result
-            # Embed the windowed reference into a full canvas once (cheap — one
-            # allocation at setup) so extract_reference_patch can take a
-            # central patch in canvas coordinates.
-            ref_full = np.full(canvas_3, np.nan, dtype=np.float32)
-            rh, rw = ref_win.shape[:2]
-            ref_full[ref_y0:ref_y0 + rh, ref_x0:ref_x0 + rw] = ref_win
-            # Centre the patch on the reference *panel*, not blindly on the
-            # canvas. On a mosaic the union canvas is larger than any one tile,
-            # so a reference tile whose footprint misses the canvas centre used
-            # to yield an all-NaN patch — and then every frame's phase
-            # correlation raised and was swallowed, leaving the whole stack on
-            # whole-pixel alignment with nothing to say why. For a single-field
-            # target the panel is the canvas, so this picks the same window.
-            ref_patch, ref_patch_origin = extract_reference_patch(
-                ref_full, centre=(ref_y0 + rh // 2, ref_x0 + rw // 2))
-            # Belt and braces: even centred, a reference window clipped to a thin
-            # sliver of the canvas can leave the patch mostly uncovered, and an
-            # uncovered pixel is filled with the patch median. Correlating against
-            # a mostly-flat patch is worse than not refining, so stand down
-            # visibly rather than fail silently once per frame.
-            _pph, _ppw = ref_patch.shape
-            _py0, _px0 = ref_patch_origin
-            covered = float(np.isfinite(
-                ref_full[_py0:_py0 + _pph, _px0:_px0 + _ppw, 1]).mean())
-            if covered < REF_PATCH_MIN_COVERAGE:
-                log.info(
-                    "Sub-pixel refinement disabled: the reference frame covers "
-                    "only %.0f%% of its patch at origin %s", covered * 100.0,
-                    ref_patch_origin)
-                ref_patch = None
-                ref_patch_origin = None
-            else:
-                log.info("Sub-pixel refinement: ref patch %s at origin %s "
-                         "(%.0f%% covered)",
-                         ref_patch.shape, ref_patch_origin, covered * 100.0)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Could not build reference patch for sub-pixel refine: %s", exc)
-            ref_patch = None
-            ref_patch_origin = None
+            for label, group in sorted(by_label.items()):
+                if label == ref_label:
+                    continue
+                centre_frame = pick_central_frame(group)
+                if centre_frame is None:
+                    continue
+                panel_patch = _build_refine_patch(
+                    centre_frame, dst_wcs_text=dst_wcs_text, dst_shape=dst_shape,
+                    canvas_3=canvas_3, options=options, calibration=calibration,
+                    what=f"panel {label}")
+                if panel_patch is None:
+                    # This panel keeps the target-wide patch — today's behaviour,
+                    # which for a far-off panel means no refinement at all. Losing
+                    # one panel's patch must never cost the others theirs.
+                    continue
+                for f in group:
+                    if f.id is not None:
+                        refine_patch_by_frame[f.id] = panel_patch
     # Whether refinement is actually *running*, as opposed to merely requested:
     # the patch build can stand down (the reference frame missed the canvas, or
     # barely covers its patch). The provenance card and the history row both key
@@ -2120,6 +2223,11 @@ def run_stack(
     # refine the same frames twice, count each frame once. Stays empty when
     # refine is off (drizzle never refines), so a run with it off is unaffected.
     roughly_ids: set[int] = set()
+    # …and the other half of "how did refine actually do?": contributing frames
+    # no reference patch could reach (their window shares too little area with
+    # one to correlate), which stack at whole-pixel alignment. A set, for the
+    # same two-pass reason.
+    out_of_reach_ids: set[int] = set()
 
     # Honest-accounting, storage half: every pass gets a ``_PassFrameLog`` (not
     # only the two-pass ones that re-word their error lines) so the run can count
@@ -2259,11 +2367,13 @@ def run_stack(
             progress=progress, cancel=cancel,
             errors=errors,
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
+            refine_patch_by_frame=refine_patch_by_frame,
             calibration=calibration,
             mono=options.mono,
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
             roughly_aligned_ids=roughly_ids,
+            out_of_reach_ids=out_of_reach_ids,
             frame_log=_new_pass_log(),
         )
         if n_used == 0 and not cancel():
@@ -2297,11 +2407,13 @@ def run_stack(
             progress=progress, cancel=cancel,
             errors=errors,
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
+            refine_patch_by_frame=refine_patch_by_frame,
             calibration=calibration,
             mono=options.mono,
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
             roughly_aligned_ids=roughly_ids,
+            out_of_reach_ids=out_of_reach_ids,
             frame_log=p1_log,
         )
         if n_used_p1 == 0 and not cancel():
@@ -2366,11 +2478,13 @@ def run_stack(
             progress=progress, cancel=cancel,
             errors=errors,
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
+            refine_patch_by_frame=refine_patch_by_frame,
             calibration=calibration,
             mono=options.mono,
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
             roughly_aligned_ids=roughly_ids,
+            out_of_reach_ids=out_of_reach_ids,
             frame_log=p2_log,
         )
         # ...and the presentation half of the same truth: a sub that blipped in
@@ -2430,11 +2544,13 @@ def run_stack(
             progress=progress, cancel=cancel,
             errors=errors,
             ref_patch=ref_patch, ref_patch_origin=ref_patch_origin,
+            refine_patch_by_frame=refine_patch_by_frame,
             calibration=calibration,
             mono=options.mono,
             photometric_scales=pscales,
             max_in_flight=max_in_flight,
             roughly_aligned_ids=roughly_ids,
+            out_of_reach_ids=out_of_reach_ids,
             frame_log=_new_pass_log(),
         )
         if n_used == 0 and not cancel():
@@ -2540,6 +2656,19 @@ def run_stack(
     # fall-back-to-mean when n < 3) does apply the weights.
     weights_applied = not (eff.min_max_reject and not options.drizzle and n >= 3)
     n_roughly = len(roughly_ids)
+    # How far refine reached: subs no patch covered, and how many patches it had.
+    # One patch on a single field; one per substantial panel on a mosaic that
+    # split (plus the target-wide one, which the reference panel keeps).
+    n_out_of_reach = len(out_of_reach_ids)
+    n_refine_patches = (
+        (1 + len({id(p) for p, _o in refine_patch_by_frame.values()}))
+        if refine_active else 0
+    )
+    if refine_active and n_out_of_reach:
+        log.info(
+            "Sub-pixel refinement: %d of %d contributing subs were outside every "
+            "reference patch and stacked at whole-pixel alignment",
+            n_out_of_reach, n_used)
     # Never claim more unreadable subs than actually dropped out of the stack: a
     # frame the preflight found missing whose share came back before its worker
     # read it would otherwise make "couldn't be read" exceed the whole gap.
@@ -2569,6 +2698,8 @@ def run_stack(
                                             weights_applied=weights_applied,
                                             n_roughly_aligned=n_roughly,
                                             refine_active=refine_active,
+                                            n_refine_out_of_reach=n_out_of_reach,
+                                            n_refine_patches=n_refine_patches,
                                             n_unreadable=n_unreadable,
                                             n_read_errors=n_read_errors,
                                             n_read_recovered=n_read_recovered,
@@ -2838,11 +2969,13 @@ def _pass(
     errors: list[str],
     ref_patch: np.ndarray | None = None,
     ref_patch_origin: tuple[int, int] | None = None,
+    refine_patch_by_frame: dict[int, tuple[np.ndarray, tuple[int, int]]] | None = None,
     calibration: "CalibrationMasters | None" = None,
     mono: bool = False,
     photometric_scales: dict[int, float] | None = None,
     max_in_flight: int | None = None,
     roughly_aligned_ids: set[int] | None = None,
+    out_of_reach_ids: set[int] | None = None,
     frame_log: _PassFrameLog | None = None,
 ) -> int:
     """
@@ -2857,6 +2990,15 @@ def _pass(
     (rather than returned) so the same set dedupes across the two κ-σ passes,
     which refine the same frames twice. Left empty when refine is off. Purely an
     honest-accounting signal; it never changes which frames contribute.
+    ``out_of_reach_ids`` is its sibling for the other way refine can decline: no
+    reference patch overlapped the frame's window at all.
+
+    ``refine_patch_by_frame`` (optional): ``{frame id: (patch, origin)}`` — the
+    reference patch a *particular* frame should correlate against, overriding
+    ``ref_patch``. Set by a mosaic run, which builds one patch per panel so the
+    step reaches every panel's subs rather than only the reference panel's; a
+    frame with no entry (single field, an unsplit mosaic, a panel whose patch
+    couldn't be built) falls back to ``ref_patch`` exactly as before.
 
     ``max_in_flight`` caps how many aligned frame buffers may be in flight at once
     (memory-bounded by the caller via :func:`_memory_bounded_in_flight`); when None
@@ -2882,11 +3024,17 @@ def _pass(
     bg_opts = options.background_options()
     sp_refine = options.subpixel_refine and ref_patch is not None
     def _submit(f: FrameRow):
+        # This frame's own panel patch when the run built one, else the
+        # target-wide reference patch (the single-field case, and every frame on
+        # the reference panel).
+        patch, origin = ref_patch, ref_patch_origin
+        if refine_patch_by_frame and f.id is not None:
+            patch, origin = refine_patch_by_frame.get(f.id, (patch, origin))
         return _align_for_stack(
             f, dst_wcs_text, dst_shape, bg_opts,
             options.use_gpu, options.suppress_hot_pixels, options.hot_pixel_sigma,
-            ref_patch if sp_refine else None,
-            ref_patch_origin if sp_refine else None,
+            patch if sp_refine else None,
+            origin if sp_refine else None,
             sp_refine,
             calibration,
             mono,
@@ -2914,12 +3062,16 @@ def _pass(
                 # canvas (e.g. a stray frame from a different target).
                 progress(phase_label, done, total)
                 continue
-            win_rgb, y0, x0, roughly = aligned
+            win_rgb, y0, x0, roughly, out_of_reach = aligned
             if roughly and roughly_aligned_ids is not None and f.id is not None:
                 # Refine measured a shift past the cap, so this contributing
                 # frame stacked only roughly aligned. Record its id (a set, so
                 # a κ-σ two-pass counts it once).
                 roughly_aligned_ids.add(f.id)
+            if out_of_reach and out_of_reach_ids is not None and f.id is not None:
+                # No reference patch overlapped this frame's window, so refine
+                # never ran on it at all — the same set-dedupe reasoning.
+                out_of_reach_ids.add(f.id)
             if photometric_scales is not None:
                 scale = photometric_scales.get(f.id if f.id is not None else -1, 1.0)
                 if scale != 1.0:
@@ -3071,14 +3223,16 @@ def _align_for_stack(
     subpixel_refine: bool,
     calibration: "CalibrationMasters | None" = None,
     mono: bool = False,
-) -> tuple[np.ndarray, int, int, bool] | None:
+) -> tuple[np.ndarray, int, int, bool, bool] | None:
     """
-    Worker entry point. Returns ``(window_rgb, y0, x0, roughly_aligned)`` — the
-    reprojected frame cropped to its footprint, its canvas offset, and a flag
-    that is ``True`` when sub-pixel refine measured a shift past its cap so the
-    frame stacks only *roughly* aligned (unshifted) — or ``None`` on benign
-    failure (missing file, no WCS, footprint off-canvas). The flag is always
-    ``False`` when refine didn't run; it never affects the pixels.
+    Worker entry point. Returns ``(window_rgb, y0, x0, roughly_aligned,
+    refine_out_of_reach)`` — the reprojected frame cropped to its footprint, its
+    canvas offset, and the two ways sub-pixel refine can decline: ``True`` when
+    it measured a shift past its cap so the frame stacks only *roughly* aligned
+    (unshifted), and ``True`` when the frame's window shared too little area with
+    the reference patch to correlate at all (a mosaic panel no patch covers).
+    ``None`` on benign failure (missing file, no WCS, footprint off-canvas). Both
+    flags are ``False`` when refine didn't run; neither affects the pixels.
     """
     path = readable_frame_path(frame)
     if not path:
@@ -3106,7 +3260,8 @@ def _align_for_stack(
     if result is None:
         return None
     win_rgb, _win_valid, y0, x0 = result
-    return win_rgb, y0, x0, bool(refine_stats.get("over_cap"))
+    return (win_rgb, y0, x0, bool(refine_stats.get("over_cap")),
+            bool(refine_stats.get("out_of_reach")))
 
 
 # Keep at most this many evenly-spaced snapshots in the progress reel, so a
