@@ -1135,6 +1135,12 @@ export interface StackFrameAccounting {
   // aligned (its measured shift exceeded the cap, so the frame stacked
   // unshifted → possibly soft/doubled stars). Present only when refine ran.
   n_roughly_aligned?: number;
+  // How many reference patches sub-pixel refine built — one for a single field,
+  // one per substantial panel on a mosaic — and how many contributing subs fell
+  // outside all of them (so they stacked at whole-pixel alignment). Present only
+  // when refine ran; absent on masters stacked before this was recorded.
+  n_refine_patches?: number;
+  n_refine_out_of_reach?: number;
 }
 
 export interface StackProcessingStep {

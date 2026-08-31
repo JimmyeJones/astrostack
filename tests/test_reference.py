@@ -5,7 +5,10 @@ import pytest
 pytest.importorskip("astropy")
 
 from seestack.io.project import FrameRow, Project  # noqa: E402
-from seestack.stack.reference import pick_reference_frame  # noqa: E402
+from seestack.stack.reference import (  # noqa: E402
+    pick_central_frame,
+    pick_reference_frame,
+)
 
 
 def test_no_solved_frames_returns_none(tmp_path):
@@ -109,3 +112,56 @@ def test_skips_rejected_frames(tmp_path):
         assert choice.frame.source_path == "good.fit"
     finally:
         proj.close()
+
+
+# --- pick_central_frame: the same rule, over an arbitrary subset ------------
+# A mosaic panel picks its own sub-pixel-refine reference this way, so the rule
+# has to hold on a list of frames rather than a whole project.
+
+
+def test_central_frame_of_an_empty_list_is_none():
+    assert pick_central_frame([]) is None
+
+
+def test_central_frame_is_the_one_nearest_the_median_pointing():
+    frames = [
+        FrameRow(id=1, source_path="a.fit", ra_center_deg=10.0, dec_center_deg=20.0),
+        FrameRow(id=2, source_path="b.fit", ra_center_deg=10.1, dec_center_deg=20.1),
+        FrameRow(id=3, source_path="c.fit", ra_center_deg=10.2, dec_center_deg=20.2),
+    ]
+    assert pick_central_frame(frames).id == 2
+
+
+def test_central_frame_breaks_ties_on_the_sharpest_frame():
+    # Same pointing for all three — distance can't separate them, so the FWHM
+    # tie-break decides (a frame with no measured FWHM goes last).
+    frames = [
+        FrameRow(id=1, source_path="a.fit", ra_center_deg=10.0, dec_center_deg=20.0),
+        FrameRow(id=2, source_path="b.fit", ra_center_deg=10.0, dec_center_deg=20.0,
+                 fwhm_px=4.0),
+        FrameRow(id=3, source_path="c.fit", ra_center_deg=10.0, dec_center_deg=20.0,
+                 fwhm_px=2.5),
+    ]
+    assert pick_central_frame(frames).id == 3
+
+
+def test_central_frame_ignores_frames_with_no_pointing():
+    # An unsolved frame has no centre to score, so it is skipped rather than
+    # crashing the panel's reference choice.
+    frames = [
+        FrameRow(id=1, source_path="a.fit"),
+        FrameRow(id=2, source_path="b.fit", ra_center_deg=10.0, dec_center_deg=20.0),
+    ]
+    assert pick_central_frame(frames).id == 2
+    assert pick_central_frame([FrameRow(id=1, source_path="a.fit")]) is None
+
+
+def test_central_frame_is_wrap_safe_across_ra_zero():
+    # Frames straddling RA 0h: unwrapped, the median is ~359.95°, so the frame at
+    # 0.0° is central. Without unwrapping the 359.9° frames read as ~360° away.
+    frames = [
+        FrameRow(id=1, source_path="a.fit", ra_center_deg=359.8, dec_center_deg=20.0),
+        FrameRow(id=2, source_path="b.fit", ra_center_deg=359.9, dec_center_deg=20.0),
+        FrameRow(id=3, source_path="c.fit", ra_center_deg=0.1, dec_center_deg=20.0),
+    ]
+    assert pick_central_frame(frames).id == 2
