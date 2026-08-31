@@ -360,9 +360,51 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟡 BROKEN-UX / IMAGE QUALITY (Scout QA audit 2026-08-31, traced + reproduced) — sub-pixel alignment
-  refinement is silently disabled for a whole mosaic stack whenever the reference panel doesn't cover the
-  *union canvas centre*.** The stacking-engine audit that led this run (align/reference/mosaic/drizzle/
+- **✅ SHIPPED (Builder, v0.319.9, branch `claude/wizardly-feynman-pp3yz0`) — ~~sub-pixel alignment refinement
+  is silently disabled for a whole mosaic stack whenever the reference panel doesn't cover the *union canvas
+  centre*.~~** Fixed exactly as the entry proposed, plus the guard it asked for. **The patch is now centred on
+  the reference *panel*** (`extract_reference_patch` gained an optional `centre=`; `run_stack` passes
+  `(ref_y0 + rh//2, ref_x0 + rw//2)`). For a single-field target the panel *is* the canvas, so the default and
+  the panel centre pick the same window — a test asserts the two are array-equal, i.e. the ordinary workflow is
+  bit-for-bit unaffected.
+
+  **Measured on a synthetic four-panel mosaic** (`tests/test_subpixel_mosaic_reference.py`, panel counts
+  4/1/1/1 so the median pointing — and therefore `pick_reference_frame` — lands on an *end* panel, canvas
+  1631 px wide vs a 480 px panel): the reference patch went from **0 % covered** (pure NaN, at the blind canvas
+  centre) to **89 %** covered at origin `(0, 1119)`, and the frames' phase correlations went from *every one
+  raising* `ValueError: NaN values found` and being swallowed → **zero raised, all succeeded**. The 89 % rather
+  than 100 % is just the 512² window overhanging a 480 px-wide panel; it is far above the stand-down floor.
+
+  **Three defences, not one**, because the failure's real sin was being invisible:
+  1. `extract_reference_patch` can no longer return an all-NaN array — `np.nanmedian` of an all-NaN slice is
+     NaN (with a swallowed `RuntimeWarning`), which is what poisoned every downstream correlation. It now
+     computes the fill from the finite pixels and falls back to a flat `0.0`.
+  2. A new `REF_PATCH_MIN_COVERAGE = 0.5`: if the reference frame covers less than half the chosen patch, the
+     build **stands down cleanly** and `log.info`s the percentage and origin, instead of handing the workers a
+     patch that is mostly fill and letting each frame raise-and-swallow in turn.
+  3. **The provenance stopped lying.** `NROUGHAL` ("subs only roughly aligned") and the `stack_runs`
+     `n_roughly_aligned` column were gated on `options.subpixel_refine` — the option being *ticked* — so a run
+     whose patch build failed stamped a reassuring `NROUGHAL = 0` about a step that never executed. Both now
+     key off a new `refine_active` (refine requested **and** a usable patch exists); a stood-down run omits the
+     card and records `NULL`, which is exactly what "refine didn't run" already looked like. `refine_active`
+     defaults to `None` on `_build_output_header_meta` so a caller that doesn't know keeps the old gate.
+
+  **Upgrade-safe (§9):** pure engine change — one new optional kwarg, one new module constant, one new
+  optional parameter with a behaviour-preserving default. No config, schema, on-disk, API-shape or default
+  flip; `subpixel_refine` stays off by default.
+
+  **Tests: +8, all 8 fail before.** Four unit (`tests/test_subpixel_align.py`): the off-centre-panel case
+  end-to-end through `phase_cross_correlation`, the never-all-NaN guard, edge clamping, and the
+  single-field-unchanged equality. Two end-to-end on a real lopsided mosaic stack
+  (`tests/test_subpixel_mosaic_reference.py`): patch coverage, and that correlations actually run and none
+  raise. Two on the honesty gate (`tests/test_stack_pipeline.py`): a failed patch build and a
+  below-threshold one both omit `NROUGHAL` and record `NULL`.
+
+  **The deeper limitation the entry flagged is left open and filed below** ("per-panel reference patches") —
+  a single patch on one panel can only refine frames overlapping that panel; frames on other panels take the
+  benign "too-small overlap" skip in `_apply_subpixel_shift_windowed`. That is a larger, separate task.
+
+    *(Original spec follows.)* The stacking-engine audit that led this run (align/reference/mosaic/drizzle/
   accumulator/calibrate all came back **clean** — no data-corruption bug in the core) surfaced exactly one
   real defect, on the sub-pixel refine path.
 
@@ -18528,6 +18570,32 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **Per-panel reference patches, so sub-pixel refinement reaches a mosaic's *other* panels too (M).**
+  *Filed by the Builder, 2026-08-31, on shipping the mosaic reference-patch fix (v0.319.9) — the deeper
+  limitation that fix deliberately did not take on.* Refinement uses **one** 512² reference patch. It now
+  lands on real data (it used to be all-NaN whenever the reference tile missed the union canvas centre), but
+  it still lives on **one panel**. `_apply_subpixel_shift_windowed` intersects each frame's window with that
+  patch and skips the frame when the overlap is under 64 px — the benign, correct-by-design path — so on an
+  N-panel mosaic, **only the frames overlapping the reference panel are ever refined**; the rest stack at
+  whole-pixel alignment. That is not a bug (nothing is corrupted, and the skip is honest), but it means the
+  sharpness benefit the option promises is delivered to roughly 1/N of a mosaic's subs.
+
+  **Shape:** build a patch per *pointing group* — the mosaic path already clusters frames by pointing for
+  photometric normalization (`PHOTPANL` counts those groups), so the grouping exists. Align one reference
+  frame per group at setup, keep `{group → (patch, origin)}`, and have each frame pick the patch its window
+  overlaps most. The per-panel patches must all be tied to the **same** canvas WCS (they are, since each is
+  aligned to `dst_wcs_text`), so the shifts stay in one frame of reference and panels can't drift relative to
+  each other. Cost is N extra `align_one` calls at setup, once, shared across workers — the same one-off the
+  single patch already pays.
+
+  **Why it's filed rather than done:** it changes the refine path's data structure for every mosaic, wants its
+  own measurement (how many more frames actually refine, and does the seam stay flat), and the one-patch
+  version is now correct as far as it goes. Worth a run of its own. **Serves:** image quality (priority 4) on
+  the mosaic workflow. **Guard:** keep it a no-op for a single-field stack — one group, one patch, today's
+  behaviour exactly. A useful observability half to ship alongside: count how many contributing subs the
+  refine step *skipped* for too-small overlap, next to the existing `NROUGHAL`, so a mosaic owner can see the
+  reach rather than infer it.
+
 - **✅ SHIPPED (Builder, v0.310.0, branch `claude/compassionate-galileo-e1p1x8`) — ~~"Make it your wallpaper"
   built your lock screen out of a **1024 px thumbnail**, so a 1170 × 2532 phone got a ~470 px-wide picture
   blown up 2.5×.~~** The first finding of the **"sweep every download control's copy against what its endpoint
@@ -20219,8 +20287,50 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-31) — "Draw your skyline": a visual horizon editor for the Tonight
-  planner, replacing the raw numeric (azimuth, altitude) pair list.** *(Pillar: plan + friendliness —
+- **✅ SHIPPED (Builder, v0.320.0, branch `claude/wizardly-feynman-pp3yz0`) — ~~"Draw your skyline": a visual
+  horizon editor for the Tonight planner, replacing the raw numeric (azimuth, altitude) pair list.~~** Built
+  as filed, and nothing was removed: the strip is now the primary control and the numeric list lives one
+  disclosure down, under **"Fine-tune exact points"** (the owner's "don't get rid of features, just move them
+  to a more organized layout" rule).
+
+  **What shipped.** `frontend/src/skyline.ts` owns the arithmetic — sampling a saved profile onto 24 buckets
+  of 15°, painting a drag across them, and turning them back into the `[[az, alt], …]` array the backend
+  already consumes — and `frontend/src/components/SkylineEditor.tsx` is the SVG panorama the user drags. Four
+  one-click presets (open sky / suburban garden / building to the south / trees to the north), a plain-language
+  summary line ("Blocking up to 30° towards S, over about 25% of the compass"), and a **Flatten it** that
+  restores the empty profile. **No backend change at all**: `horizon_profile`, `HorizonProfile`, the plan
+  router and the Tonight copy were already wired and are untouched.
+
+  **Three decisions worth recording, because each is a way this could have quietly lied:**
+  1. **A flattened skyline saves `[]`, not 24 zeros.** An empty profile is what an install that never touched
+     this has, so drawing a skyline and then clearing it returns the planner to bit-for-bit what it was —
+     not to a mask that happens to block nothing.
+  2. **Every bucket is emitted, zeros included.** A zero is real information ("the sky is open here"); drop
+     it and the backend's interpolation bridges straight across the gap and invents a wall between two trees.
+     Pinned by a Python test as well as a vitest, because it is a claim about what the *engine* does.
+  3. **The strip draws the same linear interpolation the planner uses,** not a prettier curve — so the picture
+     is an honest preview of what will actually be blocked. `altitudeAtAz` mirrors
+     `HorizonProfile.altitude_at`'s `np.interp(..., period=360)`, and its test pins eight values computed from
+     numpy itself; if the two ever drift, that test goes red.
+
+  **Upgrade-safe (§9):** frontend-only on an existing, already-validated, empty-by-default setting. No config
+  key added or changed, no schema, no on-disk layout, no API shape, no default flip. An install that never
+  opens the control keeps its empty profile and its current plan.
+
+  **Tests: +38.** `frontend/src/skyline.test.ts` (28) — the numpy-parity table, the empty-vs-zeros rule, the
+  gaps-stay-gaps rule, drag painting (short way round the compass, ramping, no mutation), strip geometry
+  inverses and clamping, and every preset. `frontend/src/components/SkylineEditor.test.tsx` (8) — a real drag
+  read back through the planner's own interpolation, the live preview committing only on pointer-up, presets,
+  flatten, and a drag off the top of the strip that can't emit an impossible altitude. *(One trap worth
+  knowing: jsdom implements no `PointerEvent`, so `fireEvent.pointerDown` silently drops `clientX`/`clientY`
+  — a drag test written with it passes while measuring nothing. The tests dispatch a `MouseEvent` of the same
+  type instead.)* `tests/test_nightplan.py` (2) — the exact 24-pair shape the editor emits survives
+  `HorizonProfile.from_pairs` with every point intact and reads back the drawn altitudes.
+
+  **Deliberately not done:** a compass-dial variant, and remembering more than one site's skyline. Neither
+  was asked for and both add surface to a control whose whole point is that it needs no explaining.
+
+    *(Original spec follows.)* *(Pillar: plan + friendliness —
   PRIORITY 2–3; size M; frontend-only — the whole backend already exists. Deepens/simplifies an existing
   capability, which §4 explicitly prefers over new surface.)*
 

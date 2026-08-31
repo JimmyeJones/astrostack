@@ -699,6 +699,41 @@ def test_horizon_profile_interpolates_with_wraparound():
     assert list(empty.altitude_at([12.0, 200.0])) == [0.0, 0.0]
 
 
+def test_drawn_skyline_shape_survives_the_backend_untouched():
+    """The "Draw your skyline" editor emits one pair per 15° of compass, zeros
+    included. Pin that exact shape end to end: the engine must keep every point
+    (a dropped zero would let the interpolation bridge two trees into a wall)
+    and must read back the drawn altitudes, so what the strip shows is what the
+    planner blocks."""
+    step = 15
+    # A treeline over the eastern quadrant, open sky everywhere else — the
+    # frontend's `heightsToProfile` output for that drag.
+    drawn = [[float(az), 25.0 if 60 <= az <= 120 else 0.0]
+             for az in range(0, 360, step)]
+    prof = HorizonProfile.from_pairs(drawn)
+
+    assert len(prof.points) == 360 // step, "every bucket must survive, zeros too"
+    assert [p[0] for p in prof.points] == [float(az) for az in range(0, 360, step)]
+    for az, alt in drawn:
+        assert float(prof.altitude_at(az)) == pytest.approx(alt)
+    # The open sky either side of the trees stays open rather than being
+    # bridged across — the whole reason the zeros are emitted.
+    assert float(prof.altitude_at(180.0)) == pytest.approx(0.0)
+    assert float(prof.altitude_at(300.0)) == pytest.approx(0.0)
+    # …and the strip's linear preview is what the engine interpolates.
+    assert float(prof.altitude_at(52.5)) == pytest.approx(12.5)
+
+
+def test_a_flattened_skyline_is_the_same_as_no_skyline():
+    """"Flatten it" emits `[]`, not 24 zeros — so an install that draws a
+    skyline and then clears it is back to exactly the planner it started with."""
+    assert HorizonProfile.from_pairs([]).is_empty()
+    # And the belt-and-braces case: were 24 zeros ever saved, they must still
+    # block nothing, so no upgrade can turn a cleared mask into an obstruction.
+    zeros = HorizonProfile.from_pairs([[float(az), 0.0] for az in range(0, 360, 15)])
+    assert list(zeros.altitude_at([0.0, 97.0, 300.0])) == [0.0, 0.0, 0.0]
+
+
 # Orion transits around 33° from London — high enough to clear a 20° floor for
 # hours, but a wall raised above its peak hides it entirely.
 _M42 = LibraryTarget(safe="M42", name="Orion Nebula", ra_deg=83.82, dec_deg=-5.39,

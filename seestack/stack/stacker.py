@@ -49,7 +49,9 @@ from seestack.stack.accumulator import (
     WeightedSumAccumulator,
     WelfordAccumulator,
 )
-from seestack.stack.align import align_one, extract_reference_patch
+from seestack.stack.align import (
+    REF_PATCH_MIN_COVERAGE, align_one, extract_reference_patch,
+)
 from seestack.stack.output import _sanitize_basename
 from seestack.stack.reference import ReferenceChoice, pick_reference_frame
 from seestack.stack.photometric import PhotometricStats, compute_photometric_scales
@@ -1360,6 +1362,7 @@ def _build_output_header_meta(
     rstats: "RejectionStats | None" = None,
     weights_applied: bool = True,
     n_roughly_aligned: int = 0,
+    refine_active: bool | None = None,
     n_unreadable: int = 0,
     n_read_errors: int = 0,
     n_read_recovered: int = 0,
@@ -1598,7 +1601,11 @@ def _build_output_header_meta(
     # at 0 — "nothing was rough" is itself an honest, reassuring signal (mirrors
     # REJFRAC stamping at 0%). Drizzle uses a pixmap, not the refine step, so it
     # never leaves a frame "roughly aligned" — don't stamp a meaningless 0 there.
-    if options.subpixel_refine and not options.drizzle:
+    # ``refine_active=False`` means refine was asked for but stood down before any
+    # frame (no usable reference patch), which is the same "it didn't run" as the
+    # option being off — so omit the card rather than claim nothing was rough.
+    # ``None`` (a caller that doesn't know) keeps the option-only gate.
+    if options.subpixel_refine and not options.drizzle and refine_active is not False:
         meta["NROUGHAL"] = (int(max(0, n_roughly_aligned)),
                             "subs only roughly aligned (over cap)")
     return meta
@@ -1894,12 +1901,45 @@ def run_stack(
             ref_full = np.full(canvas_3, np.nan, dtype=np.float32)
             rh, rw = ref_win.shape[:2]
             ref_full[ref_y0:ref_y0 + rh, ref_x0:ref_x0 + rw] = ref_win
-            ref_patch, ref_patch_origin = extract_reference_patch(ref_full)
-            log.info("Sub-pixel refinement: ref patch %s at origin %s",
-                     ref_patch.shape, ref_patch_origin)
+            # Centre the patch on the reference *panel*, not blindly on the
+            # canvas. On a mosaic the union canvas is larger than any one tile,
+            # so a reference tile whose footprint misses the canvas centre used
+            # to yield an all-NaN patch — and then every frame's phase
+            # correlation raised and was swallowed, leaving the whole stack on
+            # whole-pixel alignment with nothing to say why. For a single-field
+            # target the panel is the canvas, so this picks the same window.
+            ref_patch, ref_patch_origin = extract_reference_patch(
+                ref_full, centre=(ref_y0 + rh // 2, ref_x0 + rw // 2))
+            # Belt and braces: even centred, a reference window clipped to a thin
+            # sliver of the canvas can leave the patch mostly uncovered, and an
+            # uncovered pixel is filled with the patch median. Correlating against
+            # a mostly-flat patch is worse than not refining, so stand down
+            # visibly rather than fail silently once per frame.
+            _pph, _ppw = ref_patch.shape
+            _py0, _px0 = ref_patch_origin
+            covered = float(np.isfinite(
+                ref_full[_py0:_py0 + _pph, _px0:_px0 + _ppw, 1]).mean())
+            if covered < REF_PATCH_MIN_COVERAGE:
+                log.info(
+                    "Sub-pixel refinement disabled: the reference frame covers "
+                    "only %.0f%% of its patch at origin %s", covered * 100.0,
+                    ref_patch_origin)
+                ref_patch = None
+                ref_patch_origin = None
+            else:
+                log.info("Sub-pixel refinement: ref patch %s at origin %s "
+                         "(%.0f%% covered)",
+                         ref_patch.shape, ref_patch_origin, covered * 100.0)
         except Exception as exc:  # noqa: BLE001
             log.warning("Could not build reference patch for sub-pixel refine: %s", exc)
             ref_patch = None
+            ref_patch_origin = None
+    # Whether refinement is actually *running*, as opposed to merely requested:
+    # the patch build can stand down (the reference frame missed the canvas, or
+    # barely covers its patch). The provenance card and the history row both key
+    # off this rather than off the option, so a stack that never refined reports
+    # no roughly-aligned count at all instead of a reassuring "0 were rough".
+    refine_active = bool(options.subpixel_refine and ref_patch is not None)
 
     n = len(frames)
     # Effective options with ``auto_reject`` resolved to a concrete method from the
@@ -2528,6 +2568,7 @@ def run_stack(
                                             rstats=rej_stats,
                                             weights_applied=weights_applied,
                                             n_roughly_aligned=n_roughly,
+                                            refine_active=refine_active,
                                             n_unreadable=n_unreadable,
                                             n_read_errors=n_read_errors,
                                             n_read_recovered=n_read_recovered,
@@ -2656,7 +2697,9 @@ def run_stack(
             # (mirrors the NROUGHAL card gate), so an off-by-default run records
             # no signal rather than a misleading 0.
             n_roughly_aligned=(
-                n_roughly if (eff.subpixel_refine and not eff.drizzle) else None
+                n_roughly
+                if (eff.subpixel_refine and not eff.drizzle and refine_active)
+                else None
             ),
             # This stack's own median star size (native-frame px). NULL when too
             # few stars to fit — old runs read NULL and callers self-hide.

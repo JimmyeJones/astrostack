@@ -16,6 +16,7 @@ import { dependencyMet } from "../api/depends";
 import { compassPoint } from "../tonight";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
 import { AmbientSettings } from "../components/AmbientSettings";
+import { SkylineEditor } from "../components/SkylineEditor";
 import { SectionTabs, type PageSection } from "../components/SectionTabs";
 import type { SettingsSection } from "../settingsSections";
 import { minMaxIgnoresWeightingHint } from "../weightingHint";
@@ -65,7 +66,7 @@ export const HINTS: Record<string, string> = {
   site_lon: "Your observing longitude in degrees (east positive). Used by the Tonight planner. Leave blank to read it automatically from a plate-solved Seestar frame.",
   site_elevation_m: "Your elevation above sea level in metres (a small refinement to the Tonight planner; 0 is fine for most).",
   min_target_altitude_deg: "How high a target must climb to count as usable in the Tonight planner. 30° is a good default; lower it for an open horizon, raise it if trees/buildings block low altitudes.",
-  horizon_profile: "Optional: map where trees, buildings or the house block your low sky, so the Tonight planner only counts a target as usable while it's actually clear of them. Each point is a compass direction (azimuth: 0°=N, 90°=E, 180°=S, 270°=W) and the minimum altitude that's unobstructed there; the planner interpolates between points. Leave empty for a flat, open horizon.",
+  horizon_profile: "Optional: map where trees, buildings or the house block your low sky, so the Tonight planner only counts a target as usable while it's actually clear of them. Drag the skyline up where the sky is blocked, or type the numbers yourself under “Fine-tune exact points”: each point is a compass direction (azimuth: 0°=N, 90°=E, 180°=S, 270°=W) and the minimum altitude that's unobstructed there; the planner interpolates between points. Leave it flat for an open horizon.",
 };
 
 // Walk-away mode: one beginner-facing toggle that drives the whole unattended
@@ -744,15 +745,30 @@ export function SettingsView() {
             onChange={(v) => set("min_target_altitude_deg", v === "" ? 30 : Number(v))} />
 
           <div>
-            <HintLabel label="Horizon / tree mask" hint={HINTS.horizon_profile} />
+            <HintLabel label="Your skyline" hint={HINTS.horizon_profile} />
             <Text size="xs" c="dimmed" mb="xs">
-              Mark where trees or buildings block your low sky so the planner only
-              counts a target while it's actually clear of them. Azimuth is a compass
-              bearing (0°=N, 90°=E, 180°=S, 270°=W).
+              Draw where trees or buildings block your low sky, and the planner
+              will only count a target while it's actually clear of them. Leave it
+              flat if nothing is in the way.
             </Text>
-            <HorizonProfileEditor
+            <SkylineEditor
               value={(form.horizon_profile as HorizonPoint[]) ?? []}
               onChange={(v) => set("horizon_profile", v)} />
+            <Accordion variant="separated" mt="sm">
+              <Accordion.Item value="horizon-points">
+                <Accordion.Control>Fine-tune exact points</Accordion.Control>
+                <Accordion.Panel>
+                  <Text size="xs" c="dimmed" mb="xs">
+                    The same skyline as numbers, if you'd rather type bearings.
+                    Azimuth is a compass bearing (0°=N, 90°=E, 180°=S, 270°=W) and
+                    the altitude is the lowest clear sky at that bearing.
+                  </Text>
+                  <HorizonProfileEditor
+                    value={(form.horizon_profile as HorizonPoint[]) ?? []}
+                    onChange={(v) => set("horizon_profile", v)} />
+                </Accordion.Panel>
+              </Accordion.Item>
+            </Accordion>
           </div>
           {saveRow()}
         </Stack>
