@@ -11,7 +11,8 @@ def _run(**kw) -> StackRunRow:
         id=1, timestamp_utc="2026-07-14T00:00:00+00:00", output_basename="m42",
         fits_path="m42.fits", tiff_path=None, preview_path=None,
         n_frames_used=30, canvas_h=1080, canvas_w=1920,
-        coverage_min=30, coverage_max=30, options_json="{}",
+        coverage_min=30, coverage_max=30, coverage_thin_frac=0.0,
+        options_json="{}",
         calstat="dark+flat", is_mosaic=False,
     )
     base.update(kw)
@@ -86,24 +87,80 @@ def test_blank_calstat_counts_as_uncalibrated():
 
 
 def test_ragged_border_suggests_trim():
-    # min far below the peak, and enough frames at the peak for it to matter.
-    notes = stack_health(_run(coverage_min=2, coverage_max=30),
+    # A large share of the picture is thin, and enough frames at the peak for it
+    # to matter.
+    notes = stack_health(_run(coverage_min=2, coverage_max=30,
+                              coverage_thin_frac=0.4),
                          [_frame() for _ in range(10)])
     trim = next(n for n in notes if n.kind == "coverage")
     assert trim.action == "trim_border"
 
 
 def test_even_coverage_does_not_suggest_trim():
-    notes = stack_health(_run(coverage_min=28, coverage_max=30),
+    notes = stack_health(_run(coverage_min=28, coverage_max=30,
+                              coverage_thin_frac=0.0),
                          [_frame() for _ in range(10)])
     assert "coverage" not in _kinds(notes)
 
 
 def test_shallow_coverage_peak_does_not_trip_ragged_border():
-    # A 3-frame peak is below _COVERAGE_MIN_PEAK, so the ratio is meaningless.
-    notes = stack_health(_run(coverage_min=0, coverage_max=3),
+    # A 3-frame peak is below _COVERAGE_MIN_PEAK, so nothing about the coverage
+    # distribution is worth advising on yet.
+    notes = stack_health(_run(coverage_min=0, coverage_max=3,
+                              coverage_thin_frac=0.4),
                          [_frame() for _ in range(3)])
     assert "coverage" not in _kinds(notes)
+
+
+# --- the border note is judged by how much is thin, not by the thinnest pixel --
+# ``coverage_min`` is the extreme minimum, which is 1 on any dithered stack (some
+# fringe pixel was touched once) and 0 on any mosaic (the canvas corners are
+# uncovered) — so the old ``coverage_min <= 0.25 * coverage_max`` test fired on
+# every stack the app has ever produced, and its complement, the "even coverage"
+# praise, could never be earned by anybody.
+
+
+def test_a_dithered_stack_is_not_told_its_edges_are_ragged():
+    # Measured on real run_stack output: a +/-6 px dither on a 480 px frame leaves
+    # 0.2-0.6 % of the picture thin, at 8, 32 and 128 subs alike. The old test saw
+    # coverage_min=8, coverage_max=128 and called that a ragged border.
+    notes = stack_health(_run(coverage_min=8, coverage_max=128,
+                              coverage_thin_frac=0.006),
+                         [_frame() for _ in range(10)])
+    assert "coverage" not in _kinds(notes)
+
+
+def test_a_dithered_stack_can_now_be_praised_for_even_coverage():
+    notes = stack_health(_run(coverage_min=8, coverage_max=128,
+                              coverage_thin_frac=0.006),
+                         [_frame() for _ in range(10)])
+    solid = next(n for n in notes if n.kind == "solid")
+    assert "even coverage" in solid.message
+
+
+def test_a_genuinely_ragged_mosaic_still_gets_the_note_and_says_how_much():
+    # The 12/1/1-panel mosaic this was measured on: 62 % of the picture holds
+    # under a quarter of the peak frame count.
+    notes = stack_health(_run(coverage_min=0, coverage_max=13,
+                              coverage_thin_frac=0.6176, is_mosaic=True),
+                         [_frame() for _ in range(10)])
+    trim = next(n for n in notes if n.kind == "coverage")
+    assert trim.action == "trim_border"
+    assert "62%" in trim.message
+    solid = next((n for n in notes if n.kind == "solid"), None)
+    assert solid is None or "even coverage" not in solid.message
+
+
+def test_a_run_from_before_the_measure_says_nothing_either_way():
+    # An older master (schema < 20) records no share. Neither the warning nor the
+    # praise may be invented from the old proxy: it is known-wrong, so repeating
+    # it for old runs would be knowingly repeating a false alarm.
+    notes = stack_health(_run(coverage_min=1, coverage_max=128,
+                              coverage_thin_frac=None),
+                         [_frame() for _ in range(10)])
+    assert "coverage" not in _kinds(notes)
+    solid = next((n for n in notes if n.kind == "solid"), None)
+    assert solid is None or "even coverage" not in solid.message
 
 
 def test_elongated_stars_flagged_gently():
@@ -136,7 +193,8 @@ def test_no_frames_still_returns_a_note():
 def test_actionable_notes_rank_before_reassurance_and_positives():
     # Uncalibrated + ragged border + rejects: actionable first, reassurance last.
     frames = [_frame() for _ in range(8)] + [_frame(accept=False, reason="user")]
-    notes = stack_health(_run(calstat=None, coverage_min=1, coverage_max=20), frames)
+    notes = stack_health(_run(calstat=None, coverage_min=1, coverage_max=20,
+                              coverage_thin_frac=0.4), frames)
     order = _kinds(notes)
     assert order.index("calibration") < order.index("rejects")
     assert order.index("coverage") < order.index("rejects")

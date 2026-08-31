@@ -23,7 +23,7 @@ def _add_run(data_root: Path, safe: str, **kw) -> int:
                 id=None, timestamp_utc="2026-07-14T00:00:00+00:00",
                 output_basename="m42", fits_path="m42.fits", tiff_path=None,
                 preview_path=None, n_frames_used=30, canvas_h=1080, canvas_w=1920,
-                coverage_min=30, coverage_max=30,
+                coverage_min=30, coverage_max=30, coverage_thin_frac=0.0,
                 options_json=json.dumps({"sigma_clip": True}),  # a genuine run
                 calstat="dark+flat", is_mosaic=False,
             )
@@ -55,7 +55,8 @@ def test_stack_health_reports_notes_for_a_calibrated_stack(client, solved_librar
 
 def test_stack_health_uncalibrated_leads_with_calibration_action(
         client, solved_library, data_root):
-    _add_run(data_root, "M_42", calstat=None, coverage_min=2, coverage_max=30)
+    _add_run(data_root, "M_42", calstat=None, coverage_min=2, coverage_max=30,
+             coverage_thin_frac=0.4)
     body = client.get("/api/targets/M_42/stack-health").json()
     kinds = [n["kind"] for n in body["notes"]]
     assert kinds[0] == "calibration"
