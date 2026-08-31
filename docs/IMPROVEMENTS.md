@@ -20287,8 +20287,50 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-08-31) — "Draw your skyline": a visual horizon editor for the Tonight
-  planner, replacing the raw numeric (azimuth, altitude) pair list.** *(Pillar: plan + friendliness —
+- **✅ SHIPPED (Builder, v0.320.0, branch `claude/wizardly-feynman-pp3yz0`) — ~~"Draw your skyline": a visual
+  horizon editor for the Tonight planner, replacing the raw numeric (azimuth, altitude) pair list.~~** Built
+  as filed, and nothing was removed: the strip is now the primary control and the numeric list lives one
+  disclosure down, under **"Fine-tune exact points"** (the owner's "don't get rid of features, just move them
+  to a more organized layout" rule).
+
+  **What shipped.** `frontend/src/skyline.ts` owns the arithmetic — sampling a saved profile onto 24 buckets
+  of 15°, painting a drag across them, and turning them back into the `[[az, alt], …]` array the backend
+  already consumes — and `frontend/src/components/SkylineEditor.tsx` is the SVG panorama the user drags. Four
+  one-click presets (open sky / suburban garden / building to the south / trees to the north), a plain-language
+  summary line ("Blocking up to 30° towards S, over about 25% of the compass"), and a **Flatten it** that
+  restores the empty profile. **No backend change at all**: `horizon_profile`, `HorizonProfile`, the plan
+  router and the Tonight copy were already wired and are untouched.
+
+  **Three decisions worth recording, because each is a way this could have quietly lied:**
+  1. **A flattened skyline saves `[]`, not 24 zeros.** An empty profile is what an install that never touched
+     this has, so drawing a skyline and then clearing it returns the planner to bit-for-bit what it was —
+     not to a mask that happens to block nothing.
+  2. **Every bucket is emitted, zeros included.** A zero is real information ("the sky is open here"); drop
+     it and the backend's interpolation bridges straight across the gap and invents a wall between two trees.
+     Pinned by a Python test as well as a vitest, because it is a claim about what the *engine* does.
+  3. **The strip draws the same linear interpolation the planner uses,** not a prettier curve — so the picture
+     is an honest preview of what will actually be blocked. `altitudeAtAz` mirrors
+     `HorizonProfile.altitude_at`'s `np.interp(..., period=360)`, and its test pins eight values computed from
+     numpy itself; if the two ever drift, that test goes red.
+
+  **Upgrade-safe (§9):** frontend-only on an existing, already-validated, empty-by-default setting. No config
+  key added or changed, no schema, no on-disk layout, no API shape, no default flip. An install that never
+  opens the control keeps its empty profile and its current plan.
+
+  **Tests: +38.** `frontend/src/skyline.test.ts` (28) — the numpy-parity table, the empty-vs-zeros rule, the
+  gaps-stay-gaps rule, drag painting (short way round the compass, ramping, no mutation), strip geometry
+  inverses and clamping, and every preset. `frontend/src/components/SkylineEditor.test.tsx` (8) — a real drag
+  read back through the planner's own interpolation, the live preview committing only on pointer-up, presets,
+  flatten, and a drag off the top of the strip that can't emit an impossible altitude. *(One trap worth
+  knowing: jsdom implements no `PointerEvent`, so `fireEvent.pointerDown` silently drops `clientX`/`clientY`
+  — a drag test written with it passes while measuring nothing. The tests dispatch a `MouseEvent` of the same
+  type instead.)* `tests/test_nightplan.py` (2) — the exact 24-pair shape the editor emits survives
+  `HorizonProfile.from_pairs` with every point intact and reads back the drawn altitudes.
+
+  **Deliberately not done:** a compass-dial variant, and remembering more than one site's skyline. Neither
+  was asked for and both add surface to a control whose whole point is that it needs no explaining.
+
+    *(Original spec follows.)* *(Pillar: plan + friendliness —
   PRIORITY 2–3; size M; frontend-only — the whole backend already exists. Deepens/simplifies an existing
   capability, which §4 explicitly prefers over new surface.)*
 
