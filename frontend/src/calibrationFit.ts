@@ -185,3 +185,75 @@ export function tempMismatch(
   if (!Number.isFinite(masterTempC) || !Number.isFinite(frameTempC)) return false;
   return Math.abs(masterTempC - frameTempC) >= tol(tolerances?.temp_c, TEMP_MISMATCH_TOL_C);
 }
+
+// --- Which masters the form should recommend -------------------------------
+
+/** The suggestion fields the recommendation needs (a subset of
+ *  `CalibrationSuggestions`, so this stays testable on plain objects). */
+export interface MasterSuggestion {
+  dark_master_id?: number | null;
+  flat_master_id?: number | null;
+  flat_dark_master_id?: number | null;
+  bias_master_id?: number | null;
+  confident?: {
+    dark_master_id?: number | null;
+    flat_master_id?: number | null;
+    flat_dark_master_id?: number | null;
+    bias_master_id?: number | null;
+    scale_dark_to_light?: boolean | null;
+  } | null;
+}
+
+/** What the Stack form should badge, pre-fill and apply in one click. */
+export interface MasterRecommendation {
+  darkId: number | null;
+  flatId: number | null;
+  flatDarkId: number | null;
+  /** The bias to select — either the lights' pedestal (no dark) or the one that
+   *  lets a mismatched-exposure dark be scaled to these subs. */
+  biasId: number | null;
+  /** Turn "scale the dark to my subs" on with that bias. */
+  scaleDark: boolean;
+}
+
+/**
+ * Reconcile the two answers the server gives to "which masters for these subs?".
+ *
+ * `dark_master_id`…`bias_master_id` are the best master of each kind the library
+ * *owns* — always something, with the form's own cautions explaining a poor
+ * match. `confident` is what the **unattended** stack would actually bind: the
+ * stricter "best one we're sure about", which is allowed to say nothing. They
+ * can genuinely disagree — a gain-mismatched but exposure-perfect dark out-ranks
+ * a gain-matched dark that only needs bias-scaling — and when they do, a watched
+ * stack and a walk-away stack of the same subs were calibrated differently for
+ * no reason the user could see.
+ *
+ * So: **prefer the confident pick wherever it has one**, and fall back to the
+ * best available where it doesn't, so the form is never *less* helpful than it
+ * was. Two couplings are deliberate rather than per-field:
+ *
+ *  - a **flat-dark** belongs to the flat it calibrates, so when the confident
+ *    binding chose the flat it also owns the flat-dark answer (including
+ *    "none") — the best-available flat-dark was matched to a different flat.
+ *  - a **bias** is only offered beside a dark when it is there to *scale* that
+ *    dark; otherwise it stays what it always was, the lights' pedestal when no
+ *    dark is recommended (a dark already carries the bias).
+ */
+export function masterRecommendation(
+  sug: MasterSuggestion | null | undefined,
+): MasterRecommendation {
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const c = sug?.confident ?? null;
+  const cDark = num(c?.dark_master_id);
+  const cFlat = num(c?.flat_master_id);
+  const cBias = num(c?.bias_master_id);
+  const darkId = cDark ?? num(sug?.dark_master_id);
+  const flatId = cFlat ?? num(sug?.flat_master_id);
+  const flatDarkId =
+    cFlat !== null ? num(c?.flat_dark_master_id) : num(sug?.flat_dark_master_id);
+  const scaleDark =
+    Boolean(c?.scale_dark_to_light) && cDark !== null && cBias !== null;
+  const biasId = cBias ?? (darkId === null ? num(sug?.bias_master_id) : null);
+  return { darkId, flatId, flatDarkId, biasId, scaleDark };
+}
