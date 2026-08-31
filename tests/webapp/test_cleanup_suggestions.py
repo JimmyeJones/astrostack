@@ -88,6 +88,40 @@ def test_flags_a_photo_capture_target_at_any_frame_count(client, data_root: Path
     assert "photo" in by_safe["Scenery_photo"]["detail"]
 
 
+def test_flags_another_programs_temp_folder_at_any_frame_count(client, data_root: Path):
+    """``batch_stack_tmp`` — some other stacking program's scratch folder in the
+    owner's real ``\\\\TRUENAS\\astro`` share — has no ``_sub`` sibling, so it
+    ingests as an ordinary target and sits in the library forever. Like a capture
+    folder it is decided by *name* at any frame count: a temp folder can hold any
+    number of files, so the on-device-output size gate would never look at it.
+
+    A real target that merely *sounds* temporary is untouched — the list is exact
+    names, never a ``*_tmp`` pattern."""
+    incoming = data_root / "dump"
+    scratch = incoming / "batch_stack_tmp"
+    scratch.mkdir(parents=True)
+    scratch_frames = [scratch / f"w_{i:03d}.fit" for i in range(30)]
+    # A real target whose folder name merely looks temporary.
+    lookalike = incoming / "NGC 7000_tmp"
+    lookalike.mkdir()
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "batch_stack_tmp", scratch_frames)
+        _add_target(
+            lib, "NGC 7000_tmp",
+            [lookalike / f"Light_{i:03d}.fit" for i in range(30)],
+        )
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/cleanup-suggestions").json()
+    by_safe = {s["safe"]: s for s in body}
+    assert set(by_safe) == {"batch_stack_tmp"}
+    assert by_safe["batch_stack_tmp"]["reason"] == "temp_folder"
+    assert "batch_stack_tmp" in by_safe["batch_stack_tmp"]["detail"]
+
+
 def test_flags_a_legacy_mixed_drop_target_regardless_of_size(client, data_root: Path):
     """A target flagged at scan time as a legacy whole-device / mixed-folder drop
     must be surfaced for one-click cleanup even though it is *large* — the cheap

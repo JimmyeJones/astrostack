@@ -23,6 +23,7 @@ from seestack.io.scanner import (
     duplicate_sub_target_base_name,
     is_capture_mode_target_name,
     is_mosaic_target_name,
+    is_temp_folder_target_name,
     junk_output_frame_cap,
     run_qc_and_solve,
     scan_and_organize,
@@ -258,6 +259,48 @@ def test_classify_not_junk_for_a_real_mosaic_stack(tmp_path):
     output.mkdir()
     paths = [str(output / f"Light_{i:04d}.fit") for i in range(400)]
     assert classify_seestar_junk_target("M 44_mosaic", paths, n_frames=400) is None
+
+
+def test_classify_junk_temp_folder_by_target_name():
+    """``batch_stack_tmp`` in the owner's real share is some other program's
+    scratch folder living in ``\\\\TRUENAS\\astro``; it has no ``_sub`` sibling, so
+    it ingests as an ordinary target and lingers as a junk tile. Decided by name
+    at any frame count — a temp folder holds whatever that run was mid-way
+    through, so its size says nothing."""
+    v = classify_seestar_junk_target("batch_stack_tmp", [], n_frames=137)
+    assert v is not None and v.reason == "temp_folder"
+    assert "batch_stack_tmp" in v.detail
+    # Case-insensitive and whitespace-tolerant, like every other name test.
+    assert classify_seestar_junk_target("  Batch_Stack_TMP ", [], 1) is not None
+
+
+def test_classify_junk_temp_folder_by_source_folder(tmp_path):
+    """Even under a different target name, frames sourced entirely from a
+    scratch folder are that program's leftovers."""
+    scratch = tmp_path / "batch_stack_tmp"
+    scratch.mkdir()
+    paths = [str(scratch / f"f{i:03d}.fit") for i in range(9)]
+    v = classify_seestar_junk_target("Some Target", paths, n_frames=9)
+    assert v is not None and v.reason == "temp_folder"
+
+
+def test_classify_not_junk_for_a_real_target_that_merely_sounds_temporary():
+    """The list is EXACT names, not a ``*_tmp`` pattern — a real folder someone
+    named badly must never be condemned by shape alone (AGENTS.md §1: no blind
+    guessing on the on-by-default ingest path)."""
+    assert not is_temp_folder_target_name("M 31_tmp")
+    assert not is_temp_folder_target_name("tmp")
+    assert not is_temp_folder_target_name("batch_stack_tmp_sub")
+    assert classify_seestar_junk_target("NGC 7000_tmp", [], n_frames=500) is None
+
+
+def test_is_temp_folder_target_name_matches_only_the_listed_names():
+    """The shared name test the cleanup endpoint uses to decide by name alone,
+    before paying to open a target's project."""
+    assert is_temp_folder_target_name("batch_stack_tmp")
+    assert is_temp_folder_target_name("  BATCH_STACK_TMP  ")
+    assert not is_temp_folder_target_name("M 31")
+    assert not is_temp_folder_target_name("M 31_sub")
 
 
 def test_junk_output_frame_cap_is_looser_only_for_a_mosaic():

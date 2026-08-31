@@ -37,6 +37,7 @@ from seestack.io.scanner import (
     duplicate_sub_base_name_from_name,
     duplicate_sub_target_base_name,
     is_capture_mode_target_name,
+    is_temp_folder_target_name,
     junk_output_frame_cap,
 )
 
@@ -117,13 +118,14 @@ def junk_verdict(lib, entry) -> JunkTargetVerdict | None:  # noqa: ANN001
 
     Cheap by construction, because it is called for every target on a poll: a
     ``_video``/``_photo`` capture target is decided by **name** at any frame
-    count, and anything else must first be small enough to *be* an on-device
-    output (:func:`junk_output_frame_cap`, looser for a mosaic — whose output is
-    one image per panel) before its project is opened at all. A real target of
-    hundreds of subs is never read.
+    count — as is another program's scratch folder, whose size says nothing about
+    what it holds — and anything else must first be small enough to *be* an
+    on-device output (:func:`junk_output_frame_cap`, looser for a mosaic — whose
+    output is one image per panel) before its project is opened at all. A real
+    target of hundreds of subs is never read.
 
     Read-only: it opens the project, reads source paths and closes it again."""
-    if is_capture_mode_target_name(entry.name):
+    if is_capture_mode_target_name(entry.name) or is_temp_folder_target_name(entry.name):
         return classify_seestar_junk_target(entry.name, [], entry.n_frames)
     if entry.n_frames > junk_output_frame_cap(entry.name):
         return None
