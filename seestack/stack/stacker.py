@@ -2021,12 +2021,14 @@ def run_stack(
     # origin)}``. Empty on a single-field stack and on any mosaic that doesn't
     # split soundly, where every frame keeps the target-wide patch above.
     refine_patch_by_frame: dict[int, tuple[np.ndarray, tuple[int, int]]] = {}
+    n_refine_patches = 0
     if options.subpixel_refine:
         built = _build_refine_patch(
             ref, dst_wcs_text=dst_wcs_text, dst_shape=dst_shape,
             canvas_3=canvas_3, options=options, calibration=calibration)
         if built is not None:
             ref_patch, ref_patch_origin = built
+            n_refine_patches = 1
     # One patch can only refine the frames whose window overlaps it — every other
     # frame takes the honest "too-small overlap" skip in
     # ``_apply_subpixel_shift_windowed``. On a single field that's nobody (the
@@ -2062,7 +2064,12 @@ def run_stack(
             for label, group in sorted(by_label.items()):
                 if label == ref_label:
                     continue
-                centre_frame = pick_central_frame(group)
+                # Only a *solved* frame can be aligned onto the canvas, so pick
+                # this panel's centre from those: an unsolved sub sitting nearest
+                # the panel's median would otherwise cost the whole panel its
+                # patch (align_one raises on a missing WCS).
+                centre_frame = pick_central_frame(
+                    [f for f in group if f.wcs_json])
                 if centre_frame is None:
                     continue
                 panel_patch = _build_refine_patch(
@@ -2074,6 +2081,7 @@ def run_stack(
                     # which for a far-off panel means no refinement at all. Losing
                     # one panel's patch must never cost the others theirs.
                     continue
+                n_refine_patches += 1
                 for f in group:
                     if f.id is not None:
                         refine_patch_by_frame[f.id] = panel_patch
@@ -2696,14 +2704,10 @@ def run_stack(
     # fall-back-to-mean when n < 3) does apply the weights.
     weights_applied = not (eff.min_max_reject and not options.drizzle and n >= 3)
     n_roughly = len(roughly_ids)
-    # How far refine reached: subs no patch covered, and how many patches it had.
-    # One patch on a single field; one per substantial panel on a mosaic that
-    # split (plus the target-wide one, which the reference panel keeps).
+    # How far refine reached: subs no patch covered. (``n_refine_patches`` was
+    # counted as the patches were built, above: one on a single field, plus one
+    # per substantial mosaic panel that earned its own.)
     n_out_of_reach = len(out_of_reach_ids)
-    n_refine_patches = (
-        (1 + len({id(p) for p, _o in refine_patch_by_frame.values()}))
-        if refine_active else 0
-    )
     if refine_active and n_out_of_reach:
         log.info(
             "Sub-pixel refinement: %d of %d contributing subs were outside every "

@@ -303,7 +303,7 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
         scored.append((20, HealthNote(
             kind="coverage",
             severity="info",
-            message=(f"About {round(thin_share * 100):.0f}% of this picture has "
+            message=(f"About {thin_share * 100:.0f}% of this picture has "
                      "far fewer frames than the best-covered part, so it's "
                      "noisier and uneven there. Trim border gives a clean, even "
                      "rectangle."),
