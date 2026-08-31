@@ -32,6 +32,7 @@ function saveDismissed(key: string): void {
 function reasonLabel(reason: CleanupSuggestion["reason"]): string {
   if (reason === "video") return "video";
   if (reason === "photo") return "photo";
+  if (reason === "temp_folder") return "temp folder";
   if (reason === "duplicate_sub") return "duplicate";
   if (reason === "legacy_mixed_drop") return "mixed drop";
   return "on-device output";
@@ -109,9 +110,10 @@ function CleanupAlert({
 /**
  * Friendly, dismissible Library cleanup nudges for the leftovers a pre-convention
  * scan produced. Two independent groups:
- *   • outputs/videos/photos — the Seestar's own finished images, video clips and
- *     single snapshots ingested as if they were raw subs (can't be stacked into a
- *     good picture);
+ *   • outputs/videos/photos/temp folders — the Seestar's own finished images,
+ *     video clips and single snapshots, plus another program's scratch folder
+ *     sharing the astro share, ingested as if they were raw subs (can't be
+ *     stacked into a good picture);
  *   • `<T>_sub` duplicates — the same raw subs the base target `<T>` now owns
  *     (harmless clutter + double compute, not corrupt data).
  * The backend detects both (read-only); this offers a one-confirmation
@@ -156,7 +158,8 @@ export function CleanupSuggestionsCard() {
     (t) =>
       t.reason === "video" ||
       t.reason === "photo" ||
-      t.reason === "on_device_output",
+      t.reason === "on_device_output" ||
+      t.reason === "temp_folder",
   );
   const dupes = items.filter((t) => t.reason === "duplicate_sub");
   const mixed = items.filter((t) => t.reason === "legacy_mixed_drop");
@@ -168,12 +171,13 @@ export function CleanupSuggestionsCard() {
         items={junk}
         lsKey={JUNK_LS_KEY}
         icon={<IconTrash size={18} />}
-        title="Some targets look like Seestar outputs, videos or photos, not raw subs"
+        title="Some targets look like Seestar outputs, videos or photos — or another program's working folder — not raw subs"
         intro={
           <>
             An earlier scan picked up the Seestar's own finished images, video
-            clips and single snapshots as if they were raw sub-frames. These
-            can't be stacked into a good picture — remove them to tidy your
+            clips and single snapshots — and any scratch folder another stacking
+            program left in the same share — as if they were raw sub-frames.
+            These can't be stacked into a good picture — remove them to tidy your
             library. Your raw sub folders on disk are never touched.
           </>
         }

@@ -332,12 +332,46 @@ def junk_output_frame_cap(target_name: str) -> int:
     return _MAX_JUNK_OUTPUT_FRAMES
 
 
+# Scratch folders that some *other* program leaves in a shared astro folder. They
+# are not created by this app (grepped: no match) and hold whatever a run of that
+# tool happened to be working on, so a target built from one is junk — but only
+# **after the fact and with the user confirming**: the cleanup nudge offers to
+# remove the target record, and nothing here ever touches the scan-time ingest.
+#
+# Deliberately an EXACT, explicit list rather than a "*_tmp" pattern. A pattern
+# costs nothing on the folder it was written for and silently condemns a real
+# folder someone named badly — and the on-by-default ingest path is exactly where
+# AGENTS.md §1 says not to guess. Extend it with a name actually observed in a
+# real share, never with one that merely looks temporary.
+_TEMP_FOLDER_NAMES = frozenset({"batch_stack_tmp"})
+
+
 @dataclass(frozen=True)
 class JunkTargetVerdict:
     """Why a target looks like Seestar output/capture junk, not raw subs."""
 
-    reason: str   # "video" | "photo" | "on_device_output"
+    reason: str   # "video" | "photo" | "on_device_output" | "temp_folder"
     detail: str   # plain-language, beginner-facing explanation
+
+
+def is_temp_folder_target_name(target_name: str) -> bool:
+    """True when a target's *name* alone marks it as another program's scratch
+    folder (:data:`_TEMP_FOLDER_NAMES`) rather than an object in the sky. Decided
+    by name at any frame count — a temp folder holds whatever that tool was
+    mid-way through, so its size says nothing — which also lets a caller answer
+    without opening the target's project."""
+    return target_name.strip().lower() in _TEMP_FOLDER_NAMES
+
+
+def _temp_folder_verdict(folder_name: str) -> JunkTargetVerdict:
+    """The verdict for a target built from another program's scratch folder."""
+    return JunkTargetVerdict(
+        "temp_folder",
+        f"Built from a “{folder_name}” folder — a working folder another "
+        "stacking program leaves behind, not one of your capture folders. "
+        "Whatever is in it is a leftover of that program's run, so it isn't "
+        "worth keeping as a target here.",
+    )
 
 
 def is_capture_mode_target_name(target_name: str) -> bool:
@@ -392,16 +426,22 @@ def classify_seestar_junk_target(
       frames all sit in a single **bare** ``<T>/`` folder that has a raw-subs
       ``<T>_sub/`` sibling on disk: the Seestar's own single stacked output, which
       "stacks" to one lower-resolution frame (colour speckle).
+    * ``temp_folder`` — the target name, or the one folder all its frames sit in,
+      is exactly one of :data:`_TEMP_FOLDER_NAMES`: another program's scratch
+      folder sharing the astro share, not a capture folder.
 
     Conservative by design — it only flags a target with positive evidence
-    (a ``_video``/``_photo`` name/folder, or a bare output folder whose ``_sub``
-    sibling is actually present), so a real target is never mistaken for junk.
+    (a ``_video``/``_photo`` name/folder, an exact scratch-folder name, or a bare
+    output folder whose ``_sub`` sibling is actually present), so a real target is
+    never mistaken for junk.
     """
     low_name = target_name.strip().lower()
     if is_capture_mode_target_name(target_name):
         for suffix in _CAPTURE_SUFFIXES:
             if low_name.endswith(suffix):
                 return _capture_folder_verdict(suffix)
+    if is_temp_folder_target_name(target_name):
+        return _temp_folder_verdict(target_name.strip())
 
     folders = {Path(p).parent for p in source_paths}
     if not folders:
@@ -414,6 +454,11 @@ def classify_seestar_junk_target(
     if len(folders) == 1:
         folder = next(iter(folders))
         low = folder.name.lower()
+        # An exact scratch-folder name is positive evidence on its own, whatever
+        # the frame count — unlike an on-device output, a temp folder can hold
+        # any number of files, so no size guard applies.
+        if low in _TEMP_FOLDER_NAMES:
+            return _temp_folder_verdict(folder.name)
         # A raw-subs folder ("_sub"/"_mosaic_sub") is never junk — only a *bare*
         # output folder is. "_mosaic_sub" ends with "_sub", so one test covers both.
         # The cap comes from the FOLDER's name, which is the actual evidence: a

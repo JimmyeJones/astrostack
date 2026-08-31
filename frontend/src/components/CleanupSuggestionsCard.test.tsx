@@ -67,6 +67,32 @@ describe("CleanupSuggestionsCard", () => {
     expect(del).toHaveBeenCalledWith("scenery_photo", false);
   });
 
+  it("puts another program's temp folder in the same not-raw-subs group", async () => {
+    vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([
+      suggestion({
+        safe: "batch_stack_tmp",
+        name: "batch_stack_tmp",
+        n_frames: 30,
+        reason: "temp_folder",
+        detail: "a working folder another stacking program leaves behind",
+      }),
+    ]);
+    const del = vi.spyOn(client.api, "deleteTarget").mockResolvedValue({} as never);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderCard();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/look like Seestar outputs, videos or photos/i),
+      ).toBeInTheDocument(),
+    );
+    // Labelled as itself, not borrowed from the on-device-output wording.
+    expect(screen.getByText(/batch_stack_tmp · temp folder/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Remove this target"));
+    await waitFor(() => expect(del).toHaveBeenCalledWith("batch_stack_tmp", false));
+  });
+
   it("does not delete anything when the confirmation is declined", async () => {
     vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([suggestion()]);
     const del = vi.spyOn(client.api, "deleteTarget").mockResolvedValue({} as never);

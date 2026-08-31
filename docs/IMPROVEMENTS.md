@@ -487,16 +487,43 @@ _(nothing else claimed — claim an item here with your branch name)_
     **did not model** (it replayed the flat convention step only). `MyWorks` almost certainly expands
     correctly. Listed for completeness, explicitly not a finding.
 
-- **🟡 OPEN, SPLIT OUT OF THE `*_photo` ENTRY ABOVE WHEN THAT SHIPPED (v0.319.2) — `batch_stack_tmp` in the
-  owner's share ingests as a target.** Not created by this app (grepped: no match), so it is some other
-  tool's temp folder living in `\\TRUENAS\astro`. It has no `_sub` sibling, so it ingests unchanged if it
-  holds any FITS. *(Severity: low — one junk tile. Confidence: HIGH, from the owner's real `tree`.)*
-  **Deliberately left for a decision rather than blind-added with the `_photo` fix:** a scan-time
-  name-pattern blocklist for "obvious temp folders" is a judgement call an agent should not make on the
-  on-by-default ingest hot path, because the guess that costs nothing here ("anything called `*_tmp`") would
-  silently drop a real folder someone named badly. **The safe half is the cleanup nudge**, which is
-  after-the-fact and user-confirmed: a verdict alongside `photo`/`video` for a target whose frames all sit in
-  a folder matching a small, explicit temp-name list. Size XS. Do the nudge; leave the scan-time skip filed.
+- **✅ SHIPPED — THE NUDGE HALF (Builder, v0.319.6, branch `claude/wizardly-feynman-qzh1td`) —
+  ~~`batch_stack_tmp` in the owner's share ingests as a target.~~ The scan-time skip stays filed, deliberately.**
+  Built exactly the half the entry called safe, and nothing more.
+
+    `classify_seestar_junk_target` grew a fourth verdict, `temp_folder`, alongside
+    `video`/`photo`/`on_device_output`, and it fires on the same two signals every other verdict uses: the
+    **target name**, or the single folder all the target's frames sit in. It is decided by *name* at any frame
+    count — like a capture folder and unlike an on-device output — because a temp folder holds whatever that
+    program's run was mid-way through, so its size says nothing about what it is; that also means
+    `junk_verdict` answers without opening the project, which matters on every Library poll.
+
+    **The list is EXACT names, not a `*_tmp` pattern**, which is the whole judgement the entry asked for. A
+    pattern costs nothing on the folder it was written for and silently condemns a real folder someone named
+    badly, and a test pins that: `NGC 7000_tmp` with 500 frames is not junk, `M 31_tmp` and a bare `tmp` are
+    not either. `_TEMP_FOLDER_NAMES` currently holds the one name actually observed in the owner's real
+    `tree`, and its comment says to extend it only from another observed share.
+
+    **The scan-time skip is still filed, unbuilt** (see the open entry below) — nothing here touches ingest:
+    the verdict is after-the-fact, the user confirms, and removing the target never touches a file on disk.
+
+    **Upgrade-safe (§9):** a new `reason` string on an existing response (the field is already `str`), no
+    config/schema/on-disk/default change. An older frontend renders an unknown reason with its fallback label
+    and the same working Remove button.
+
+    **Tests (+5, all fail before):** the verdict by target name and by source folder, the exact-name
+    guarantee against a lookalike, `is_temp_folder_target_name` directly, and the endpoint end-to-end
+    (`batch_stack_tmp` of 30 frames flagged, `NGC 7000_tmp` of 30 untouched) — plus a vitest that the card
+    puts it in the not-raw-subs group labelled as itself.
+
+- **🟡 OPEN, THE OTHER HALF OF THE ENTRY ABOVE — a scan-time skip for another program's temp folder.**
+  `batch_stack_tmp` has no `_sub` sibling, so it still *ingests* (as of v0.319.6 it is merely offered for
+  cleanup afterwards). *(Severity: low — one junk tile, now self-clearing via the nudge. Confidence: HIGH,
+  from the owner's real `tree`.)* **Deliberately left for a decision rather than blind-added:** a scan-time
+  name blocklist is a judgement call on the on-by-default ingest hot path, and skipping is not reversible from
+  the UI the way a nudge is. If it is ever built it must reuse `_TEMP_FOLDER_NAMES` rather than inventing a
+  second list. Size XS — but the *caution*, not the code, is why it is still here. Low value now that the
+  nudge clears the tile in one click.
 
 - **✅ CLOSES A GATED ENTRY — the owner's real folder tree answers the device-naming question that blocked the
   2026-07-24 "mosaic bare-output skip" item, and the answer is: THERE IS NOTHING TO FIX in the scanner.**

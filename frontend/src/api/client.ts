@@ -327,6 +327,7 @@ export interface CleanupSuggestion {
     | "video"
     | "photo"
     | "on_device_output"
+    | "temp_folder"
     | "duplicate_sub"
     | "legacy_mixed_drop";
   detail: string;
