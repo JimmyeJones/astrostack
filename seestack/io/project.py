@@ -30,7 +30,7 @@ from typing import Any, Iterable, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -73,7 +73,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     preview_crop_json TEXT,
     capture_start_utc TEXT,
     capture_end_utc TEXT,
-    capture_hours_json TEXT
+    capture_hours_json TEXT,
+    coverage_thin_frac REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -636,6 +637,19 @@ class Project:
                     "ALTER TABLE stack_runs ADD COLUMN capture_hours_json TEXT")
             except sqlite3.OperationalError:
                 pass  # already present
+        if from_version < 20:
+            # How much of the picture is *thinly covered* — the share of covered
+            # pixels below a quarter of the peak frame count. The stored
+            # ``coverage_min`` could not answer that: it is the extreme minimum,
+            # which on any dithered stack is 1, so the ratio it forms shrinks with
+            # the sub count instead of describing the border. Additive; runs
+            # recorded before this column existed stay NULL, which reads as
+            # "unknown" and makes the coverage advice self-hide rather than guess.
+            try:
+                self._conn.execute(
+                    "ALTER TABLE stack_runs ADD COLUMN coverage_thin_frac REAL")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -1047,9 +1061,9 @@ class Project:
             "  noise_sigma, calstat, is_mosaic, engine_version,"
             "  rejection_fraction, rejection_mode, n_roughly_aligned, stack_fwhm_px,"
             "  seam_residual, capture_start_utc, capture_end_utc,"
-            "  capture_hours_json"
+            "  capture_hours_json, coverage_thin_frac"
             ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            "         ?, ?, ?, ?)",
+            "         ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -1062,6 +1076,8 @@ class Project:
                 run.stack_fwhm_px, run.seam_residual,
                 run.capture_start_utc, run.capture_end_utc,
                 run.capture_hours_json,
+                (None if run.coverage_thin_frac is None
+                 else float(run.coverage_thin_frac)),
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -1156,6 +1172,10 @@ class Project:
                 capture_hours_json=(
                     row["capture_hours_json"]
                     if "capture_hours_json" in row.keys() else None
+                ),
+                coverage_thin_frac=(
+                    row["coverage_thin_frac"]
+                    if "coverage_thin_frac" in row.keys() else None
                 ),
             )
 
@@ -1375,6 +1395,14 @@ class StackRunRow:
     # this column existed (schema < 19) and for runs whose frames carry no
     # capture time; every caller then drops the clause rather than guessing.
     capture_hours_json: str | None = None
+    # What share of this stack's *covered* pixels hold fewer than a quarter of
+    # the peak frame count — i.e. how much of the picture is a thin border,
+    # rather than how thin its single thinnest pixel is. ``coverage_min`` answers
+    # the latter and is 1 on any dithered stack, so the ratio built from it
+    # shrinks with the sub count on unchanged data; this is stable in N. None for
+    # runs recorded before this column existed (schema < 20) and when nothing was
+    # covered — callers self-hide rather than judge the border on the old proxy.
+    coverage_thin_frac: float | None = None
     # How many contributing subs sub-pixel refine had to leave *only roughly
     # aligned* (its measured shift exceeded the cap, so the frame stacked
     # unshifted → possibly soft/doubled stars). None when refine was off, not

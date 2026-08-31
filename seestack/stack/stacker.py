@@ -1628,6 +1628,46 @@ def _build_output_header_meta(
     return meta
 
 
+# Below this share of the peak per-pixel frame count, a pixel counts as "thinly
+# covered" — the border ramp a dither leaves, or a mosaic panel that got a
+# fraction of the others' subs. The *share of the picture* that is thin is what
+# "How's my stack?" judges a ragged border on (``_COVERAGE_THIN_SHARE`` there).
+COVERAGE_THIN_RATIO = 0.25
+
+
+def coverage_thin_fraction(
+    cov_2d: np.ndarray, *, ratio: float = COVERAGE_THIN_RATIO,
+) -> float | None:
+    """What share of the picture is *thinly covered* — the fraction of covered
+    pixels holding fewer than ``ratio`` of the peak frame count.
+
+    The honest measure of a ragged border, as opposed to the *extreme minimum*
+    (``coverage_min``): on any dithered stack some pixel at the very fringe was
+    touched by exactly one frame, so ``coverage_min`` is 1 and
+    ``coverage_min/coverage_max`` is 1/N — a number that falls with the sub count
+    rather than describing the picture. This one asks how much of the canvas is
+    actually thin, which a 6 px dither on a 480 px frame answers with "a couple
+    of percent" whatever N is.
+
+    Uncovered pixels (NaN gaps, the canvas corners outside every footprint) are
+    excluded: they are not part of the picture. Returns ``None`` when nothing is
+    covered at all, so a caller can tell "no thin border" from "no answer".
+    """
+    cov = np.asarray(cov_2d)
+    peak = float(cov.max()) if cov.size else 0.0
+    if peak <= 0:
+        return None
+    n_covered = int(np.count_nonzero(cov > 0))
+    if n_covered == 0:
+        return None
+    # Counted rather than masked-and-averaged: a boolean count is one temporary
+    # the size of the canvas, where ``cov[covered]`` would copy out a float array
+    # of every covered pixel — on a 100 MP mosaic canvas that is the difference
+    # between ~100 MB and ~800 MB on a path that is already memory-bounded.
+    thin = int(np.count_nonzero((cov > 0) & (cov < ratio * peak)))
+    return thin / n_covered
+
+
 # How many subs a mosaic panel needs before it earns its own sub-pixel refine
 # reference patch. Two is the smallest number that can do anything: a panel of
 # one would only ever correlate its single frame against a patch cut from that
@@ -2786,6 +2826,12 @@ def run_stack(
             canvas_w=dst_shape[1],
             coverage_min=int(cov_2d.min()),
             coverage_max=int(cov_2d.max()),
+            # …and how much of the picture is actually *thin*, which the min/max
+            # pair cannot say: ``coverage_min`` is 1 on any dithered stack, so the
+            # ratio it forms falls with the sub count instead of describing the
+            # border. Persisted so "How's my stack?" can judge a ragged edge by
+            # its size rather than by its extreme.
+            coverage_thin_frac=coverage_thin_fraction(cov_2d),
             # Persist the *effective* options: when auto_reject resolved to a
             # concrete method, record that method (so the History rejection badge
             # and any re-run reflect what actually ran) while ``auto_reject`` stays
