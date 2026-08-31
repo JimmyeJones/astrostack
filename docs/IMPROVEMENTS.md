@@ -43,6 +43,18 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-31, branch `claude/wizardly-feynman-0lyyjh` — CLAIMED, by site.** The top open item under
+> "Image quality": **per-panel reference patches, so sub-pixel refinement reaches a mosaic's *other* panels**
+> (filed by the v0.319.9 run as the deeper limitation it deliberately left). Sites I am editing:
+> `seestack/stack/stacker.py` (the `options.subpixel_refine` setup block that builds `ref_patch`, and `_pass`/
+> `_align_for_stack`'s refine plumbing), `seestack/stack/align.py`
+> (`_apply_subpixel_shift_windowed`'s too-small-overlap skip → an honest `stats` flag),
+> `seestack/stack/reference.py` (a pure `pick_central_frame` extracted from `pick_reference_frame`, so a panel
+> can pick its own reference the same way the target does), and
+> `tests/test_subpixel_mosaic_reference.py`. Guard: a single-field stack must be bit-for-bit unchanged —
+> `pointing_groups` returns `None` when there is no sound split, which is the single-field case by
+> construction.
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-7y6nlj` — claim released, shipped as v0.317.0.**
 > The top open item under "Autonomy & friendliness": **record how many *nights* went into a stack**, so a
 > caption can say "over 4 nights" instead of naming two dates. The entry offered two shapes and named the
