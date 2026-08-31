@@ -342,6 +342,17 @@ _AUTO_BIND_BIAS_MAX_DIST = _AUTO_BIND_FLAT_MAX_DIST
 _AUTO_BIND_DARK_MAX_DIST = _AUTO_BIND_FLAT_MAX_DIST
 
 
+#: ``auto_bind_master_ids`` key → the ``StackOptions`` path key it resolves to.
+#: One table, so the id form and the path form of a confident binding can never
+#: name different things.
+_BOUND_ID_TO_PATH_KEY = {
+    "dark_master_id": "dark_path",
+    "flat_master_id": "flat_path",
+    "flat_dark_master_id": "flat_dark_path",
+    "bias_master_id": "bias_path",
+}
+
+
 def auto_bind_master_paths(
     library_root: str | Path,
     masters: list[dict[str, Any]],
@@ -354,6 +365,49 @@ def auto_bind_master_paths(
 ) -> dict[str, Any]:
     """Calibration master *paths* safe to auto-apply in an *unattended* stack.
 
+    The ``StackOptions``-shaped view of :func:`auto_bind_master_ids` — the same
+    decision, resolved to the on-disk files a run needs. (The interactive Stack
+    form wants the *ids*, because that is what its pickers hold; taking both from
+    one function is what keeps the watched and unattended paths agreeing.)
+
+    Returns only the confident ``StackOptions`` keys (``dark_path`` / ``flat_path``
+    / ``flat_dark_path`` / ``bias_path``, plus ``scale_dark_to_light=True`` when a
+    dark is bound for exposure-scaling); an empty dict means "leave the stack
+    uncalibrated". Never raises.
+    """
+    bound = auto_bind_master_ids(
+        library_root, masters, exposure_s=exposure_s, gain=gain,
+        sensor_temp_c=sensor_temp_c, width_px=width_px, height_px=height_px)
+    out: dict[str, Any] = {}
+    for id_key, path_key in _BOUND_ID_TO_PATH_KEY.items():
+        mid = bound.get(id_key)
+        if mid is None:
+            continue
+        p = master_path(library_root, int(mid))
+        if p is not None:
+            out[path_key] = str(p)
+    if bound.get("scale_dark_to_light") and "dark_path" in out and "bias_path" in out:
+        out["scale_dark_to_light"] = True
+    return out
+
+
+def auto_bind_master_ids(
+    library_root: str | Path,
+    masters: list[dict[str, Any]],
+    *,
+    exposure_s: float | None = None,
+    gain: float | None = None,
+    sensor_temp_c: float | None = None,
+    width_px: int | None = None,
+    height_px: int | None = None,
+) -> dict[str, Any]:
+    """Calibration master *ids* safe to auto-apply in an *unattended* stack.
+
+    The single definition of "which masters are we confident about for these
+    subs?". :func:`auto_bind_master_paths` is the same answer resolved to files
+    (what a run needs); the Stack form reads the ids (what its pickers hold), so
+    a watched stack can land on exactly the masters a walk-away stack would.
+
     :func:`recommend_masters` always returns the best *available* master of each
     kind and leaves the interactive Stack form to *warn* on a poor match. In an
     autonomous chain there is no human to see that warning, so this is stricter —
@@ -364,9 +418,10 @@ def auto_bind_master_paths(
       right exposure) and whose exposure either matches the subs within 25% (the
       Stack form's own mismatch threshold) *or* — when only the exposure is off —
       can be exposure-scaled to the subs because a confident master bias is also
-      available (bound as ``dark_path`` + ``bias_path`` + ``scale_dark_to_light``,
-      the unattended equivalent of the form's "select your master bias and scale
-      the dark"). A dark with a materially mismatched gain/temperature, or a
+      available (bound as ``dark_master_id`` + ``bias_master_id`` +
+      ``scale_dark_to_light``, the unattended equivalent of the form's "select your
+      master bias and scale the dark"). A dark with a materially mismatched
+      gain/temperature, or a
       mismatched exposure with no scalable bias, is left off, so the stack stays
       uncalibrated exactly as today rather than risking an over-/under-subtraction;
     * the recommended **flat** and its **flat-dark** (flats are exposure
@@ -382,11 +437,11 @@ def auto_bind_master_paths(
     contract. The dimension gate is skipped only when the subs' dimensions are
     unknown (then behaviour is unchanged from today).
 
-    Returns only the confident ``StackOptions`` keys (``dark_path`` / ``flat_path``
-    / ``flat_dark_path`` / ``bias_path``, plus ``scale_dark_to_light=True`` when a
-    dark is bound for exposure-scaling); an empty dict means "leave the stack
-    uncalibrated". Never raises — a master that can't be resolved to an on-disk file
-    is simply skipped.
+    Returns only the confident keys (``dark_master_id`` / ``flat_master_id`` /
+    ``flat_dark_master_id`` / ``bias_master_id``, plus ``scale_dark_to_light=True``
+    when a dark is bound for exposure-scaling); an empty dict means "leave the
+    stack uncalibrated". Never raises — a master that can't be resolved to an
+    on-disk file is simply skipped.
     """
     rec = recommend_masters(masters, exposure_s=exposure_s, gain=gain,
                             sensor_temp_c=sensor_temp_c)
@@ -414,11 +469,13 @@ def auto_bind_master_paths(
         except (TypeError, ValueError):
             return False
 
-    def _path(mid: Any) -> str | None:
+    def _bindable(mid: Any) -> int | None:
+        """``mid`` as an int when this master may be bound: its dimensions match
+        the subs' *and* its file still resolves on disk. ``None`` otherwise, so a
+        master whose file has gone is skipped exactly as it always was."""
         if mid is None or not _dims_ok(mid):
             return None
-        p = master_path(library_root, int(mid))
-        return str(p) if p is not None else None
+        return int(mid) if master_path(library_root, int(mid)) is not None else None
 
     out: dict[str, Any] = {}
 
@@ -452,10 +509,11 @@ def auto_bind_master_paths(
     # closest bindable dark wins (an exposure-perfect dark is preferred over one
     # that needs scaling, since its exposure term is 0).
     def _try_bind_dark(cand: dict[str, Any]) -> dict[str, Any] | None:
-        """The confident dark-binding keys for master ``cand`` (``dark_path`` alone,
-        or ``dark_path`` + ``bias_path`` + ``scale_dark_to_light`` when only the
-        exposure is off and a confident bias can scale it), or ``None`` when it
-        can't be confidently bound to these subs."""
+        """The confident dark-binding keys for master ``cand``
+        (``dark_master_id`` alone, or ``dark_master_id`` + ``bias_master_id`` +
+        ``scale_dark_to_light`` when only the exposure is off and a confident bias
+        can scale it), or ``None`` when it can't be confidently bound to these
+        subs."""
         if not exposure_s or not _dark_match_confident(
                 cand, gain=gain, sensor_temp_c=sensor_temp_c):
             return None
@@ -464,18 +522,19 @@ def auto_bind_master_paths(
             return None  # a dark's thermal signal is exposure-specific — can't gate
         mid = cand.get("id")
         if abs(float(dexp) - exposure_s) / exposure_s <= _AUTO_BIND_EXP_MISMATCH_FRAC:
-            p = _path(mid)
-            return {"dark_path": p} if p else None
+            d = _bindable(mid)
+            return {"dark_master_id": d} if d is not None else None
         # Exposure mismatch, gain/temp confident: recover via exposure-scaling if a
         # confident master bias (with matching dimensions) is available.
         bias_id = rec.get("bias_master_id")
         bm = by_id.get(int(bias_id)) if bias_id is not None else None
         if bm is not None and _bias_match_confident(
                 bm, gain=gain, sensor_temp_c=sensor_temp_c):
-            dp = _path(mid)
-            bp = _path(bias_id)
-            if dp and bp:
-                return {"dark_path": dp, "bias_path": bp, "scale_dark_to_light": True}
+            dp = _bindable(mid)
+            bp = _bindable(bias_id)
+            if dp is not None and bp is not None:
+                return {"dark_master_id": dp, "bias_master_id": bp,
+                        "scale_dark_to_light": True}
         return None
 
     dark_bound = False
@@ -515,15 +574,15 @@ def auto_bind_master_paths(
     for cand in flat_candidates:
         if not _flat_match_confident(cand, gain=gain, sensor_temp_c=sensor_temp_c):
             continue
-        p = _path(cand.get("id"))
-        if not p:
+        p = _bindable(cand.get("id"))
+        if p is None:
             continue
-        out["flat_path"] = p
+        out["flat_master_id"] = p
         # The flat-dark calibrates *this* flat, so match it to the flat we bound
         # (not necessarily ``recommend_masters``' top flat).
-        fd = _path(_recommend_flat_dark(dark_candidates, cand))
-        if fd:
-            out["flat_dark_path"] = fd
+        fd = _bindable(_recommend_flat_dark(dark_candidates, cand))
+        if fd is not None:
+            out["flat_dark_master_id"] = fd
         break
 
     # Bias — only meaningful for the lights when no dark was applied, and (like the
@@ -543,10 +602,10 @@ def auto_bind_master_paths(
         for cand in bias_candidates:
             if not _bias_match_confident(cand, gain=gain, sensor_temp_c=sensor_temp_c):
                 continue
-            bp = _path(cand.get("id"))
-            if not bp:
+            bp = _bindable(cand.get("id"))
+            if bp is None:
                 continue
-            out["bias_path"] = bp
+            out["bias_master_id"] = bp
             break
 
     return out
@@ -876,7 +935,11 @@ def master_coverage(
     bound_dark: list[bool] = []
     for t in targets:
         try:
-            paths = auto_bind_master_paths(
+            # The *id* form of the same binding the unattended stack uses: this
+            # roll-up only ever wanted "which masters", and taking the ids
+            # directly saves resolving each one to a file and looking it back up
+            # in the registry to recover the id it started as.
+            bound = auto_bind_master_ids(
                 library_root, masters,
                 exposure_s=t.get("exposure_s"), gain=t.get("gain"),
                 sensor_temp_c=t.get("sensor_temp_c"),
@@ -884,14 +947,11 @@ def master_coverage(
             )
         except Exception:  # noqa: BLE001 — a roll-up is a nicety, never a 500
             log.warning("master coverage probe failed for %r", t.get("name"))
-            paths = {}
-        ids = set()
-        for key in ("dark_path", "flat_path", "flat_dark_path", "bias_path"):
-            mid = master_id_for_path(library_root, paths.get(key))
-            if mid is not None:
-                ids.add(mid)
+            bound = {}
+        ids = {int(mid) for key in _BOUND_ID_TO_PATH_KEY
+               if (mid := bound.get(key)) is not None}
         bound_ids.append(ids)
-        bound_dark.append(bool(paths.get("dark_path")))
+        bound_dark.append(bound.get("dark_master_id") is not None)
 
     names = [str(t.get("name") or t.get("safe_name") or "?") for t in targets]
     rows: list[dict[str, Any]] = []

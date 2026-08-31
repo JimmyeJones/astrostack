@@ -10306,7 +10306,22 @@ to **Shipped**.)_
   time `GET /api/targets/cleanup-suggestions` on a library with several thousand-frame duplicate pairs before
   adding a cache, because a stale cleanup list after a scan is its own (worse) bug.
 
-- **LATENT HAZARD (Builder 2026-08-30, spotted while wiring mosaic duplicates to their base target for
+- **⚪ CLOSED AS A NON-FINDING — RUN, NOT READ (Builder 2026-08-31, branch `claude/wizardly-feynman-isps6l`).
+  ~~A lowercase `<T>_mosaic/` folder would collide with the `<T> (mosaic)` target's safe name.~~ It would not:
+  the Library has handled this for a long time, and there is a test on it.** The entry's arithmetic is right —
+  `make_safe_name("M 3 (mosaic)")` and `make_safe_name("M 3_mosaic")` are **both** `M_3_mosaic` — but
+  `make_safe_name` is not what decides a target's folder. `Library._allocate_safe_name` does, and it exists for
+  exactly this: it keeps the readable name only when it is free *or already owned by this same display name*,
+  and otherwise appends a stable hash of the display name. **Run both ways round on a real `Library`:** the
+  first-registered target gets `M_3_mosaic` and the second gets `M_3_mosaic-3417e3ef` (or `-dfffdc4f` in the
+  other order) — two display names, two project directories, in either order. **Already pinned**, by
+  `tests/test_library.py::test_names_differing_only_in_punctuation_do_not_merge` (`M 31` vs `M_31`) and
+  `…::test_all_unicode_names_get_distinct_targets`, which cover this as a *class* rather than as the two
+  instances. So there is nothing to detect and nothing to report; the "cheap, safe slice" the entry proposes
+  would be a nudge about a collision that cannot happen. **Read `_allocate_safe_name`, not just
+  `make_safe_name`, before re-filing anything in this shape.**
+
+    *(Original entry follows.)* **LATENT HAZARD (Builder 2026-08-30, spotted while wiring mosaic duplicates to their base target for
   v0.319.3 — traced, NOT reproduced, do not "fix" it blind) — a lowercase `<T>_mosaic/` folder would collide
   with the `<T> (mosaic)` target's safe name.** *(Pillar: correctness / data integrity — PRIORITY 4. Size: M,
   and most of that is deciding what is even safe to do. Confidence: the collision is arithmetic;
@@ -10425,6 +10440,26 @@ to **Shipped**.)_
   places a grep can't see:** a *client-side* comparison against `Math.min(...history)` in a React component, a
   baseline built by sorting and taking `[0]`, an SQL `MIN()`/`ORDER BY … LIMIT 1`, or a "personal best" phrase
   in copy whose number comes from somewhere else. Those are the four shapes worth an hour.
+
+  **⚪ ALL FOUR SHAPES SWEPT — NO SECOND LIVE SITE (Builder 2026-08-31, branch
+  `claude/wizardly-feynman-isps6l`). Recorded so nobody spends the hour again; re-open only with a *new* shape,
+  not by re-running these.** Every hit, and why it is not the bug:
+  - **`Math.min(...)`/`Math.max(...)` over a history, client-side.** Six non-test hits, all **chart scaling**
+    (`focusTrend.sparklinePoints`, `transparencyTrend`, `Sparkline`, `skyline`'s tallest) — a plot's own axis
+    range, judged against nothing.
+  - **A baseline built by sorting and taking `[0]`.** Nothing takes `[0]` of a sorted history as a yardstick.
+    The near-misses sort for *display order* (`Gallery.sortGallery`'s "cleanest first", `Library`'s sorts) or
+    compute a **median** (`softStars.median`, `clearNights`, `Target`/`Stack`'s local median helpers).
+  - **SQL `MIN()` / `ORDER BY … LIMIT 1`.** Five hits total, none a baseline: one `MIN(timestamp_utc)` for a
+    target's first-light date (a *fact*), the rest plain newest-first listings and the jobs-table prune.
+  - **"Personal best" copy whose number comes from elsewhere.** The two live sites are the pair the v0.319.1
+    fix already separated, and they are on the right side of the line: `sharpestYet` is a record **reported**
+    (a positive beat — it must stay a min, that is what "sharpest yet" means), and `softerThanUsual` — the one
+    that **judges** — is already a **median of the priors**. `focusChips` composes exactly those two per
+    history row, so it inherits both.
+  What this leaves is the lead's own conclusion, now tested rather than assumed: **the class had one live
+  instance and it is fixed.** The generative test in this entry is still the right one to apply to *new* code —
+  it costs nothing at review time — but a repository-wide re-sweep is spent.
 
 - **✅ SHIPPED (Builder, v0.319.5, branch `claude/compassionate-galileo-ehnbid`) — ~~let the Nights card's
   "soft" badge say what it was compared against.~~** Built as filed, with the entry's own decision taken the
@@ -14715,6 +14750,46 @@ problems. Dogfood it every big-picture run and fix root causes.
   chosen". The worthwhile slice is therefore **agreement, not more copy**: surface the confident binding as the
   pre-selection / one-click recommendation so the interactive path lands where the walk-away path would, and let
   the *existing* cautions keep doing the explaining. Do not add another advisory line.
+
+  **✅ SHIPPED — that remaining slice (Builder, v0.321.0, branch `claude/wizardly-feynman-isps6l`).** Built exactly
+  as the reshape asked: **agreement, and not one new line of copy.**
+
+  **What the disagreement actually was.** `recommend_masters` ranks a dark by *combined* distance
+  (exposure ×3 + gain + temp) and returns the single closest, so an **exposure-perfect but gain-mismatched**
+  dark out-ranks a **gain-matched** dark that only needs bias-scaling. The unattended binder already knows
+  better — it tries every dark in ascending distance and takes the first that clears a confidence gate — so on
+  that library the Stack form recommended one dark and a walk-away stack of the same subs used another, and
+  nothing on screen said so.
+
+  **One function now answers "which masters for these subs?".** `auto_bind_master_paths` is refactored into a
+  new `auto_bind_master_ids` (the decision) plus a thin path-resolving wrapper (what a run needs), sharing one
+  `_BOUND_ID_TO_PATH_KEY` table, and `/calibration-suggestions` serves the ids as an additive `confident` key.
+  A test pins the two forms as **one decision by construction** — every id resolves to exactly the path the
+  unattended binding produces, and a kind absent from one is absent from the other — so they cannot drift
+  apart again. The coverage roll-up (`master_coverage`) now reads the ids directly instead of resolving each
+  binding to a file and looking the id back up in the registry.
+
+  **The form prefers the confident pick where there is one, and is never *less* helpful than before.** The
+  reconciliation is a pure `masterRecommendation` in `calibrationFit.ts`, with two deliberate couplings rather
+  than a per-field merge: a **flat-dark travels with its flat** (the best-available flat-dark was matched to a
+  different flat, so it is stale the moment the confident binding picks another), and a **bias is only offered
+  beside a dark when it is there to *scale* that dark** — in which case "Use recommended" turns
+  `scale_dark_to_light` on with it, because half of that pairing leaves the pedestal mis-subtracted. Where the
+  binder is silent (nothing confident, or an older backend), every field falls back to today's best-available
+  answer and the existing cautions explain it — which is the right behaviour with a human watching.
+
+  **Upgrade-safe (§9):** one additive response key, one additive optional client field, no config, schema,
+  on-disk, default or existing-response-shape change; `auto_bind_master_paths` returns exactly what it did
+  (its 78 existing tests pass untouched), so the unattended path is byte-for-byte unchanged.
+
+  **Tests (+5 python, +8 frontend; the two Stack-form ones fail before).** Python: the ids-and-paths
+  agreement-by-construction, the scaling triple carried in id form, an empty answer when nothing is confident,
+  and the endpoint serving `confident` — asserted **against the binder itself** rather than a copy of its
+  answer — plus the wrong-camera case where the best-available recommendation still names a master and the
+  confident one says nothing. Frontend: six `masterRecommendation` cases (fallback, preference, the flat-dark
+  pairing, the bias+switch pairing, never half a pairing, bias-only-without-a-dark) and two on the real form —
+  the badge and one-click landing on the gain-matched dark *with* its bias and the scaling switch, and the
+  no-confident-pick case keeping today's recommendation and its warning.
 
 - **NEW IDEA (Scout 2026-08-26 #6) — auto-detect the Seestar's calibration-frame folders sitting in `incoming/`
   and offer a one-click "Build master darks" instead of making the beginner know what calibration is.**
@@ -23211,6 +23286,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   which has no pace). **Care:** a mosaic's per-panel integration is a fraction of a single-field target's, so
   don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
   already thinks in.
+
+  **⚠️ SIZED AND STOOD DOWN — READ THIS BEFORE PICKING IT UP; TWO OF ITS PREMISES ARE WRONG (Builder
+  2026-08-31, branch `claude/wizardly-feynman-isps6l`).** Not declined on value — the question ("can I do that
+  tonight?") is a real beginner question — but the entry's proposed slice cannot be built as written, and the
+  gap is a *design* call rather than code.
+  1. **The row that carries a mosaic plan has no pace, and never will.** `nightplan.py` fills `mosaic` on
+     **catalog** rows only (the comment on `LibraryTarget.size_arcmin` says why: a library row's framing is
+     already on the Target page) and `recent_pace_s` on **library** rows only — it comes from
+     `recent_night_pace_s(proj)`, which is per-target history for a target you have already shot. A mosaic
+     candidate is by definition one you have *not*. So "the Tonight row's mosaic tooltip" has neither number
+     in hand; the honest source would have to be a new **library-wide** pace (a median of the per-target paces),
+     which is a new statistic, not a plumbing job.
+  2. **"Per-panel integration is a fraction of a single field's" is an assertion with no number behind it.**
+     Covering N panels to the *same* depth costs N× the time — that much is arithmetic — and the entry's
+     caution is really "beginners shoot mosaics shallower", which is true and unquantified. Writing a sentence
+     needs a per-panel depth constant that nothing in the repo supplies, and inventing one puts a fabricated
+     number in front of a beginner deciding how to spend their evening.
+  **If it is picked up, pick a shape first, and prefer the one that states the multiplier instead of hiding
+  it:** "6 panels is about 6× a single target's time — at your usual pace, about N clear nights to give every
+  panel the depth you'd give one field" is honest with no new constant, at the cost of being long for a
+  tooltip on the page the owner already calls busy. The alternative (a per-panel fraction) needs the owner to
+  say what depth they actually shoot mosaics at. **Do not ship a number chosen by an agent for this.**
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #2) — "My deep-sky wall": one-click, share-ready montage of a
   beginner's best finished pictures.**~~ — **SHIPPED v0.275.0** (Builder 2026-08-26, branch

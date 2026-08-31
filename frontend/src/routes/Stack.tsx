@@ -17,7 +17,7 @@ import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import {
   biasSizeWarning, darkScalingBlockedNote, exposureMismatch, masterOptionSuffix,
-  masterSizeWarning, tempMismatch,
+  masterRecommendation, masterSizeWarning, tempMismatch,
 } from "../calibrationFit";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
@@ -322,10 +322,21 @@ export function StackView() {
   const advanced = fields.filter((f) => f.group === "advanced");
 
   const sug = suggestions.data;
-  const recDarkId = sug?.dark_master_id ?? null;
-  const recFlatId = sug?.flat_master_id ?? null;
-  const recFlatDarkId = sug?.flat_dark_master_id ?? null;
-  const recBiasId = sug?.bias_master_id ?? null;
+  // What to badge, pre-fill and apply — the *unattended* stack's confident pick
+  // where it has one, else the best master of each kind the library owns. The
+  // reconciliation (and why a flat-dark and a bias travel with their partner)
+  // lives in `masterRecommendation`, so this form and the walk-away path can't
+  // recommend different masters for the same subs.
+  const rec = masterRecommendation(sug);
+  const recDarkId = rec.darkId;
+  const recFlatId = rec.flatId;
+  const recFlatDarkId = rec.flatDarkId;
+  const recScaleDark = rec.scaleDark;
+  // Which bias to *badge* in the picker and prefer for the scale-the-dark nudge.
+  // That question has an answer even when no bias is being recommended for the
+  // lights (a dark is recommended, so a bias would be inert), so it falls back
+  // to the best available rather than going blank.
+  const recBiasId = rec.biasId ?? sug?.bias_master_id ?? null;
   // The target's own frame size, when its subs recorded one. A master whose
   // dimensions differ was built for a different camera or binning mode and is
   // refused outright by the engine, so the form flags it rather than letting the
@@ -356,16 +367,24 @@ export function StackView() {
   // hasn't already applied. The flat-dark is only relevant once a flat is set.
   // A bias is only worth recommending for the lights when there's no dark to
   // recommend — a dark already carries the bias, so the engine would ignore it.
-  const recBiasForLights = recBiasId !== null && recDarkId === null ? recBiasId : null;
+  // The recommended bias is offered either as the lights' pedestal (no dark) or
+  // as the one that scales a mismatched-exposure dark — `masterRecommendation`
+  // has already decided which, and returns null when neither applies.
+  const recBiasForLights = rec.biasId;
   const canApplyRec = (recDarkId !== null && String(values.dark_master_id ?? "") !== String(recDarkId))
     || (recFlatId !== null && String(values.flat_master_id ?? "") !== String(recFlatId))
     || (recFlatDarkId !== null && String(values.flat_dark_master_id ?? "") !== String(recFlatDarkId))
-    || (recBiasForLights !== null && String(values.bias_master_id ?? "") !== String(recBiasForLights));
+    || (recBiasForLights !== null && String(values.bias_master_id ?? "") !== String(recBiasForLights))
+    || (recScaleDark && !values.scale_dark_to_light);
   const applyRecommended = () => {
     if (recDarkId !== null) set("dark_master_id", String(recDarkId));
     if (recFlatId !== null) set("flat_master_id", String(recFlatId));
     if (recFlatDarkId !== null) set("flat_dark_master_id", String(recFlatDarkId));
     if (recBiasForLights !== null) set("bias_master_id", String(recBiasForLights));
+    // A dark bound for exposure-scaling is only correct *with* the switch on —
+    // that pairing is the whole reason the unattended path could use this dark
+    // at all, so applying half of it would leave the pedestal mis-subtracted.
+    if (recScaleDark) set("scale_dark_to_light", true);
   };
   const asStr = (v: unknown) => (v === undefined || v === null ? null : String(v));
 
