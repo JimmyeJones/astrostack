@@ -750,6 +750,72 @@ def test_roughly_aligned_card_absent_when_refine_off(tmp_path):
         assert "NROUGHAL" not in hdul[0].header
 
 
+def test_roughly_aligned_card_absent_when_refine_stood_down(tmp_path, monkeypatch):
+    """Refine *requested* but stood down before any frame → still no NROUGHAL.
+
+    The reference-patch build can fail (no intersection with the canvas) or
+    decline (a patch the reference frame barely covers). Either way not one
+    frame was refined, so stamping a reassuring 'NROUGHAL = 0 subs were only
+    roughly aligned' would be a claim about a step that never ran. The card is
+    keyed off refinement actually running, not off the option being ticked.
+    """
+    from astropy.io import fits
+
+    import seestack.stack.stacker as st
+
+    def boom(*_a, **_k):
+        raise ValueError("no reference patch here")
+
+    monkeypatch.setattr(st, "extract_reference_patch", boom)
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(proj, StackOptions(sigma_clip=True, subpixel_refine=True,
+                                              max_workers=1, output_name="stooddown"))
+        runs = list(proj.iter_stack_runs())
+    finally:
+        proj.close()
+
+    with fits.open(result.fits_path) as hdul:
+        assert "NROUGHAL" not in hdul[0].header
+    # …and the history row records "no signal", not a misleading 0.
+    assert runs and runs[0].n_roughly_aligned is None
+
+
+def test_refine_declines_a_barely_covered_reference_patch(tmp_path, monkeypatch):
+    """A patch the reference frame hardly covers is mostly its own median fill,
+    and correlating against a flat fill is worse than not refining. The build
+    stands down cleanly instead — no patch handed to the workers, and no
+    roughly-aligned card claiming a step ran."""
+    from astropy.io import fits
+
+    import seestack.stack.stacker as st
+
+    # Demand more coverage than any patch can have, so the guard always fires.
+    monkeypatch.setattr(st, "REF_PATCH_MIN_COVERAGE", 2.0)
+
+    handed: list = []
+    real_align_one = st.align_one
+
+    def spy(**kwargs):
+        if "subpixel_refine" in kwargs:  # a per-frame call, not the setup one
+            handed.append(kwargs.get("ref_patch"))
+        return real_align_one(**kwargs)
+
+    monkeypatch.setattr(st, "align_one", spy)
+
+    proj = _build_project(tmp_path, n=4)
+    try:
+        result = run_stack(proj, StackOptions(sigma_clip=True, subpixel_refine=True,
+                                              max_workers=1, output_name="thinref"))
+    finally:
+        proj.close()
+
+    assert handed and all(p is None for p in handed)
+    with fits.open(result.fits_path) as hdul:
+        assert "NROUGHAL" not in hdul[0].header
+
+
 def test_output_name_is_sanitized_against_path_traversal(tmp_path):
     from seestack.stack.output import safe_basename
 

@@ -37,6 +37,70 @@ def test_extract_reference_patch_is_centred():
     assert abs(x0 - 86) < 2  # (300-128)/2 = 86
 
 
+def test_reference_patch_can_be_centred_on_an_off_centre_panel():
+    """Regression: on a mosaic the reference tile need not cover the *canvas*
+    centre, and the blind central patch was then pure NaN.
+
+    ``run_stack`` embeds only the reference frame's aligned window into an
+    otherwise-NaN full canvas before extracting the patch. A mosaic's union
+    canvas is bigger than any one panel, so a reference tile in a corner leaves
+    the canvas centre empty — every later ``phase_cross_correlation`` against
+    that patch raises ``ValueError: NaN values found``, the broad ``except``
+    swallows it, and the whole stack silently falls back to whole-pixel
+    alignment. Centring the patch on the panel keeps it on real data.
+    """
+    from skimage.registration import phase_cross_correlation
+
+    canvas = np.full((900, 1600, 3), np.nan, dtype=np.float32)
+    panel = _frame_with_stars(320, 480, seed=3)
+    py0, px0 = 0, 0  # a corner tile, nowhere near the canvas centre
+    canvas[py0:py0 + 320, px0:px0 + 480] = panel
+
+    # What the code used to do: a patch from the geometric canvas centre.
+    blind, _ = extract_reference_patch(canvas, size=256)
+    assert np.all(blind == 0.0), "the canvas centre is empty on this geometry"
+
+    # What it does now: centred on the reference panel's own centre.
+    patch, (y0, x0) = extract_reference_patch(
+        canvas, size=256, centre=(py0 + 320 // 2, px0 + 480 // 2))
+    assert np.all(np.isfinite(patch))
+    # The patch stays inside the panel, so it is fully covered by real data.
+    assert np.all(np.isfinite(canvas[y0:y0 + 256, x0:x0 + 256, 1]))
+    # …and it is usable: correlating against it no longer raises.
+    frame = patch.copy()
+    shift, _, _ = phase_cross_correlation(patch, frame, upsample_factor=10)
+    assert abs(float(shift[0])) < 0.5 and abs(float(shift[1])) < 0.5
+
+
+def test_reference_patch_never_comes_back_all_nan():
+    """An entirely-uncovered patch used to be all-NaN (``nanmedian`` of an
+    all-NaN slice is NaN), which made *every* frame's correlation raise. The
+    array now comes back finite; whether refining is worth doing is the
+    caller's coverage decision, not a per-frame exception."""
+    empty = np.full((300, 300, 3), np.nan, dtype=np.float32)
+    patch, _ = extract_reference_patch(empty, size=128)
+    assert np.all(np.isfinite(patch))
+
+
+def test_reference_patch_centre_is_clamped_into_the_canvas():
+    """A panel centre near an edge must not push the patch off the canvas."""
+    rgb = _frame_with_stars(200, 300)
+    patch, (y0, x0) = extract_reference_patch(rgb, size=128, centre=(5, 290))
+    assert patch.shape == (128, 128)
+    assert y0 == 0 and x0 == 300 - 128
+
+
+def test_reference_patch_default_is_unchanged_by_the_centre_option():
+    """A single-field stack must be bit-for-bit unaffected: there the frame *is*
+    the canvas, so the panel centre and the canvas centre are the same point."""
+    rgb = _frame_with_stars(320, 480, seed=4)
+    default, origin = extract_reference_patch(rgb, size=256)
+    centred, c_origin = extract_reference_patch(
+        rgb, size=256, centre=(320 // 2, 480 // 2))
+    assert origin == c_origin
+    np.testing.assert_array_equal(default, centred)
+
+
 def test_subpixel_shift_corrects_known_offset():
     """Apply a known sub-pixel shift, verify it's corrected."""
     from scipy.ndimage import shift as nd_shift

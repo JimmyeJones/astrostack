@@ -52,6 +52,15 @@ GPU_PIXEL_THRESHOLD = 1_500_000
 # is fast.
 REF_PATCH_SIZE = 512
 
+# Refinement only makes sense if the reference frame actually *covers* the patch
+# it will be correlated against: uncovered pixels are filled with the patch's own
+# median, so a mostly-uncovered patch is mostly a flat constant and correlating
+# against it is worse than not refining at all. Below this covered fraction the
+# caller stands down cleanly (and says so) instead of letting every frame's
+# correlation fail and be swallowed. Half is generous — a centred patch on a
+# panel that intersects the canvas is normally ~100 % covered.
+REF_PATCH_MIN_COVERAGE = 0.5
+
 # Each source frame's outermost N pixels are ignored when building the
 # valid-mask, so they never contribute to the stack. They suffer from:
 #   - Bilinear debayer artefacts (insufficient same-channel neighbours at the
@@ -349,24 +358,47 @@ def reproject_rgb(
 
 def extract_reference_patch(
     rgb: np.ndarray, size: int = REF_PATCH_SIZE,
+    centre: tuple[int, int] | None = None,
 ) -> tuple[np.ndarray, tuple[int, int]]:
     """
-    Pull a central luminance patch from an aligned RGB array.
+    Pull a luminance patch from an aligned RGB array.
 
     Returned shape is (h, w) where (h, w) = (min(size, H), min(size, W)).
     Origin is the (y0, x0) top-left corner in the parent canvas, so the
     caller can crop the same region from other frames for cross-correlation.
+
+    ``centre`` (optional): the (y, x) canvas point to centre the patch on,
+    clamped so the patch stays inside the canvas. Defaults to the canvas centre.
+    That default is only right when the reference frame covers the middle of the
+    canvas — true for a single-field stack, where the frame *is* the canvas, but
+    not for a **mosaic**, whose union canvas is bigger than any one panel. A
+    reference tile that misses the canvas centre would hand back a patch of pure
+    NaN, so callers with a windowed reference should pass that window's own
+    centre. For a single-field stack both answers are the same window.
     """
     h, w = rgb.shape[:2]
     ph = min(size, h)
     pw = min(size, w)
-    y0 = (h - ph) // 2
-    x0 = (w - pw) // 2
+    if centre is None:
+        y0 = (h - ph) // 2
+        x0 = (w - pw) // 2
+    else:
+        cy, cx = centre
+        y0 = int(min(max(int(cy) - ph // 2, 0), h - ph))
+        x0 = int(min(max(int(cx) - pw // 2, 0), w - pw))
     luma = 0.299 * rgb[y0:y0 + ph, x0:x0 + pw, 0] \
         + 0.587 * rgb[y0:y0 + ph, x0:x0 + pw, 1] \
         + 0.114 * rgb[y0:y0 + ph, x0:x0 + pw, 2]
-    # Replace NaN with the median so phase correlation isn't biased.
-    luma = np.where(np.isfinite(luma), luma, np.nanmedian(luma))
+    # Replace NaN with the median so phase correlation isn't biased. Guard the
+    # all-NaN case explicitly: ``np.nanmedian`` of an empty selection is NaN (with
+    # a swallowed RuntimeWarning), which would leave the whole patch NaN and make
+    # *every* frame's phase correlation raise ``ValueError: NaN values found`` —
+    # refinement silently off for the entire stack. A flat fill keeps the array
+    # usable; whether refining is worth doing at all is the caller's coverage
+    # check (:data:`REF_PATCH_MIN_COVERAGE`).
+    finite = np.isfinite(luma)
+    fill = float(np.median(luma[finite])) if finite.any() else 0.0
+    luma = np.where(finite, luma, fill)
     return luma.astype(np.float32, copy=False), (y0, x0)
 
 
