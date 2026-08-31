@@ -485,7 +485,11 @@ def _sky_coverage_inputs(lib) -> tuple[list[str], str]:  # noqa: ANN001, ANN202
     """
     from seestack.io.project import Project
 
-    fingerprint: dict[str, list] = {"v": 1, "runs": []}
+    # ``v`` versions the *measurement*, not the walk: bumping it retires every
+    # cached answer on upgrade, which is what makes a change to how the total is
+    # computed reach an install whose pictures have not moved since. (v2: the
+    # total became a union of the pictures rather than a sum of them.)
+    fingerprint: dict[str, list] = {"v": 2, "runs": []}
     paths: list[str] = []
     for t in lib.list_targets():
         proj = None
@@ -518,27 +522,23 @@ def _sky_coverage_inputs(lib) -> tuple[list[str], str]:  # noqa: ANN001, ANN202
 def _measure_sky_coverage(paths: list[str]) -> dict:
     """Total sky area (deg²) across those masters, as the endpoint's payload.
 
-    Each is measured by :func:`seestack.skyarea.stack_sky_area_deg2`, so what
-    counts as "photographed" is the same well-covered definition the map masks
-    with, and nothing about how the map is *drawn* can move the number. A run
-    with no usable WCS contributes nothing rather than a guessed field.
+    Each is measured off its own WCS by :mod:`seestack.skyarea`, so what counts
+    as "photographed" is the same well-covered definition the map masks with, and
+    nothing about how the map is *drawn* can move the number. A run with no
+    usable WCS contributes nothing rather than a guessed field.
 
-    Targets are simply summed. Two different targets overlapping on the sky would
-    be double-counted, but that needs two library targets aimed at the same patch
-    — which the library already models as one target with more frames.
+    The targets are **unioned, not summed** — a patch two of them both cover is
+    sky the owner has seen once, and the owner's own library holds several such
+    pairs (a mosaic and the single field it grew from; both folder spellings of
+    one object). ``summed_deg2`` reports what plain addition would have said, so
+    the read-out can explain itself when the two differ.
     """
-    from seestack.skyarea import WHOLE_SKY_DEG2, sky_fraction, stack_sky_area_deg2
+    from seestack.skyarea import WHOLE_SKY_DEG2, sky_area_union_deg2, sky_fraction
 
-    total = 0.0
-    n_pictures = 0
-    for fits_path in paths:
-        area = stack_sky_area_deg2(fits_path)
-        if area is None:
-            continue
-        total += area
-        n_pictures += 1
-    return {"deg2": total, "sky_fraction": sky_fraction(total),
-            "n_pictures": n_pictures, "whole_sky_deg2": WHOLE_SKY_DEG2}
+    cov = sky_area_union_deg2(paths)
+    return {"deg2": cov.union_deg2, "sky_fraction": sky_fraction(cov.union_deg2),
+            "n_pictures": cov.n_pictures, "whole_sky_deg2": WHOLE_SKY_DEG2,
+            "summed_deg2": cov.summed_deg2}
 
 
 @router.get("/api/sky/coverage")
@@ -549,7 +549,9 @@ async def sky_coverage(request: Request) -> dict:
     of the whole sky"*. Measured from each run's **own WCS**, never by counting
     pixels on the map (Aitoff isn't equal-area, and the map draws every picture
     several times life size), so the stat can't quietly disagree with the picture
-    it sits under. Read-only, and cached in the app's own state dir against the
+    it sits under. Pictures that overlap on the sky are counted **once**;
+    ``summed_deg2`` carries what adding them up would have said, so the read-out
+    can say so. Read-only, and cached in the app's own state dir against the
     same "has any target's newest picture changed?" fingerprint the map uses, so
     the coverage-map reads happen once per change rather than once per page view.
     """

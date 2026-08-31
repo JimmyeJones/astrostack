@@ -487,16 +487,43 @@ _(nothing else claimed — claim an item here with your branch name)_
     **did not model** (it replayed the flat convention step only). `MyWorks` almost certainly expands
     correctly. Listed for completeness, explicitly not a finding.
 
-- **🟡 OPEN, SPLIT OUT OF THE `*_photo` ENTRY ABOVE WHEN THAT SHIPPED (v0.319.2) — `batch_stack_tmp` in the
-  owner's share ingests as a target.** Not created by this app (grepped: no match), so it is some other
-  tool's temp folder living in `\\TRUENAS\astro`. It has no `_sub` sibling, so it ingests unchanged if it
-  holds any FITS. *(Severity: low — one junk tile. Confidence: HIGH, from the owner's real `tree`.)*
-  **Deliberately left for a decision rather than blind-added with the `_photo` fix:** a scan-time
-  name-pattern blocklist for "obvious temp folders" is a judgement call an agent should not make on the
-  on-by-default ingest hot path, because the guess that costs nothing here ("anything called `*_tmp`") would
-  silently drop a real folder someone named badly. **The safe half is the cleanup nudge**, which is
-  after-the-fact and user-confirmed: a verdict alongside `photo`/`video` for a target whose frames all sit in
-  a folder matching a small, explicit temp-name list. Size XS. Do the nudge; leave the scan-time skip filed.
+- **✅ SHIPPED — THE NUDGE HALF (Builder, v0.319.6, branch `claude/wizardly-feynman-qzh1td`) —
+  ~~`batch_stack_tmp` in the owner's share ingests as a target.~~ The scan-time skip stays filed, deliberately.**
+  Built exactly the half the entry called safe, and nothing more.
+
+    `classify_seestar_junk_target` grew a fourth verdict, `temp_folder`, alongside
+    `video`/`photo`/`on_device_output`, and it fires on the same two signals every other verdict uses: the
+    **target name**, or the single folder all the target's frames sit in. It is decided by *name* at any frame
+    count — like a capture folder and unlike an on-device output — because a temp folder holds whatever that
+    program's run was mid-way through, so its size says nothing about what it is; that also means
+    `junk_verdict` answers without opening the project, which matters on every Library poll.
+
+    **The list is EXACT names, not a `*_tmp` pattern**, which is the whole judgement the entry asked for. A
+    pattern costs nothing on the folder it was written for and silently condemns a real folder someone named
+    badly, and a test pins that: `NGC 7000_tmp` with 500 frames is not junk, `M 31_tmp` and a bare `tmp` are
+    not either. `_TEMP_FOLDER_NAMES` currently holds the one name actually observed in the owner's real
+    `tree`, and its comment says to extend it only from another observed share.
+
+    **The scan-time skip is still filed, unbuilt** (see the open entry below) — nothing here touches ingest:
+    the verdict is after-the-fact, the user confirms, and removing the target never touches a file on disk.
+
+    **Upgrade-safe (§9):** a new `reason` string on an existing response (the field is already `str`), no
+    config/schema/on-disk/default change. An older frontend renders an unknown reason with its fallback label
+    and the same working Remove button.
+
+    **Tests (+5, all fail before):** the verdict by target name and by source folder, the exact-name
+    guarantee against a lookalike, `is_temp_folder_target_name` directly, and the endpoint end-to-end
+    (`batch_stack_tmp` of 30 frames flagged, `NGC 7000_tmp` of 30 untouched) — plus a vitest that the card
+    puts it in the not-raw-subs group labelled as itself.
+
+- **🟡 OPEN, THE OTHER HALF OF THE ENTRY ABOVE — a scan-time skip for another program's temp folder.**
+  `batch_stack_tmp` has no `_sub` sibling, so it still *ingests* (as of v0.319.6 it is merely offered for
+  cleanup afterwards). *(Severity: low — one junk tile, now self-clearing via the nudge. Confidence: HIGH,
+  from the owner's real `tree`.)* **Deliberately left for a decision rather than blind-added:** a scan-time
+  name blocklist is a judgement call on the on-by-default ingest hot path, and skipping is not reversible from
+  the UI the way a nudge is. If it is ever built it must reuse `_TEMP_FOLDER_NAMES` rather than inventing a
+  second list. Size XS — but the *caution*, not the code, is why it is still here. Low value now that the
+  nudge clears the tile in one click.
 
 - **✅ CLOSES A GATED ENTRY — the owner's real folder tree answers the device-naming question that blocked the
   2026-07-24 "mosaic bare-output skip" item, and the answer is: THERE IS NOTHING TO FIX in the scanner.**
@@ -594,10 +621,34 @@ _(nothing else claimed — claim an item here with your branch name)_
     the safety note. Confidence: HIGH, traced end-to-end in code against the owner's real library data.
     Owner's words: "it is still having issues with combining/distinguishing target folders.")*
 
-- **🟡 THE SAME MOSAIC-CAP ASYMMETRY EXISTS ONE LAYER DOWN, ON THE *FRAME* AUTO-REJECT — traced while
-  shipping v0.319.3, deliberately NOT changed in the same run because it is the ingest hot path.**
-  *(Severity: low-moderate — a handful of low-resolution on-device panel images silently join a real mosaic's
-  stack. Confidence: traced in code; NOT reproduced against owner data. Size S.)*
+- **⚪ CLOSED AS A NON-BUG — CHECKED, NOT ASSUMED (Builder, v0.319.8, branch `claude/wizardly-feynman-qzh1td`).
+  ~~The same mosaic-cap asymmetry exists one layer down, on the *frame* auto-reject.~~ The stated failure
+  ("a handful of on-device panel images silently join a real mosaic's stack") **cannot happen**, and the
+  entry's own prescribed fix — raise the frame-level cap to the scanner's mosaic-aware one — would have been
+  a threshold flip on the on-by-default ingest path buying nothing. Do not re-pick it; the caution the entry
+  ends on was right, and the reason is better than it knew.**
+
+  **Three independent things keep a mosaic's output away from that guard, and it only takes one.**
+  (1) `_seestar_output_bases` skips `*_mosaic_sub` outright, so no base is registered for a mosaic at all.
+  (2) Even with that skip removed, the key it would produce is `<T>_mosaic`, while `scan_and_organize` looks
+  the base up by the **target** name the convention gives — `<T> (mosaic)`. The lookup cannot match.
+  (3) Upstream of both, `_apply_seestar_convention` never ingests a bare `<T>_mosaic/` beside its
+  `<T>_mosaic_sub/` sibling, so on today's scanner those panel images enter no target at all. The owner's
+  real library agrees: the 11 `M 44_MOSAIC` and 7 `NGC 6960_MOSAIC` frames sit in their **own** leftover
+  pre-v0.184.9 targets (which the *target*-level cap, already fixed in v0.319.3, now offers to clean up),
+  not inside `M 44 (mosaic)`.
+
+  **What shipped instead of a threshold flip:** two tests that pin the invariant, so a future change to any
+  of the three things above fails in `tests/test_scanner.py` rather than in the owner's stack — the pure one
+  (`_seestar_output_bases` registers nothing against a mosaic target, *and* still registers the single-field
+  base it exists for) and the end-to-end one (a real `M 44_mosaic/` of 11 frames beside `M 44_mosaic_sub/`
+  leaves the mosaic target holding only raw subs, with the panel images in no target in the library). Plus
+  the comment on `_MAX_SEESTAR_OUTPUT_FRAMES`, which claimed to *mirror* the scanner's cap and stopped being
+  true in v0.319.3 — it now says why the two deliberately differ and what would have to change before this
+  one needs revisiting. *(Original entry follows.)*
+
+    *(Severity as filed: low-moderate — a handful of low-resolution on-device panel images silently join a
+    real mosaic's stack. Confidence as filed: traced in code; NOT reproduced against owner data. Size S.)*
 
   `seestack/io/project.py:265` defines `_MAX_SEESTAR_OUTPUT_FRAMES = 2` with the comment *"Mirrors the
   scanner's `_MAX_JUNK_OUTPUT_FRAMES`"* — and as of v0.319.3 it no longer does, because the scanner's cap is
@@ -20124,9 +20175,10 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **🟡 SLICE 1 SHIPPED (Builder, v0.306.3, branch `claude/compassionate-galileo-aj7ysy`); SLICE 2 STILL OPEN —
-  ~~put "how much of the sky have you seen" where the owner already looks~~, and stop it double-counting
-  neighbours.** *(Pillar: enjoy + trust — PRIORITY 3; size S each; both read-only.)*
+- **✅ BOTH SLICES SHIPPED (slice 1: Builder v0.306.3, branch `claude/compassionate-galileo-aj7ysy`;
+  slice 2: Builder v0.319.7, branch `claude/wizardly-feynman-qzh1td`) — ~~put "how much of the sky have you
+  seen" where the owner already looks, and stop it double-counting neighbours.~~** *(Pillar: enjoy + trust —
+  PRIORITY 3; size S each; both read-only.)*
 
   **Slice 1 — shipped.** The line is on the Dashboard, directly under the stat grid it belongs with: one
   quiet dimmed line, not another card, because the standing owner priority is that the page is already busy
@@ -20153,17 +20205,48 @@ problems. Dogfood it every big-picture run and fix root causes.
   it is absent on a library with no located picture. `Sky.test.tsx` — `initialSkyMode` over the link, the
   remembered default, and three junk values.
 
-  **Slice 2 is still open, unchanged, and still gated on the same check:**
-  2. **Overlapping targets are summed twice.** `_measure_sky_coverage` adds each target's area independently.
-     Two library targets aimed at the same patch of sky would be counted twice — the library normally models
-     that as *one* target with more frames, which is why this was shipped as-is, but a deliberately
-     re-framed second target (a wider mosaic over an earlier single field is the realistic case) really does
-     double-count. **Honest fix:** rasterise each run's covered footprint onto one coarse equal-area sky grid
-     (HEALPix-style, or a simple sin(dec) band grid — no new dependency needed at ~0.1° resolution) and count
-     *set* cells. Only worth it if the owner ever has adjacent targets; check before building, and note that
-     the fix makes the number go *down*, which needs a word of explanation if it visibly moves. **Now that
-     the sentence is on the Dashboard too, a visible move would be seen in two places** — so if this is ever
-     built, both surfaces get the explanation from the one helper, not a second sentence.
+  **Slice 2 — ✅ SHIPPED (Builder, v0.319.7, branch `claude/wizardly-feynman-qzh1td`).** Its own gate
+  ("only worth it if the owner ever has adjacent targets; check before building") is answered by the owner's
+  real library, recorded in the merge-suggestions bug entry further up this file: **six** near-identical pairs
+  sit at exactly the same coordinates (`M 3` / `M 3_SUB`, `M 13` / `M 13_SUB`, `M 101` / `M 101_SUB`,
+  `NGC 281W` / `NGC 281W_SUB`, plus `M 44 (mosaic)` / `M 44_MOSAIC_SUB` and `NGC 6960 (mosaic)` /
+  `NGC 6960_MOSAIC_SUB`) — the pride stat on the Dashboard was counting most of that library's sky twice.
+
+  **Built as filed, with one refinement the filed shape needed.** A pure "count set cells" answer measures
+  *area from the grid*, which would move every single-picture number by the grid's own rounding — a stat that
+  changes when nothing overlapped is the one thing this feature can't afford. So the grid decides only
+  **identity**: each picture keeps its own exact WCS area (`stack_sky_area_deg2`, untouched), and the grid
+  answers "what share of this picture lands where an earlier one already reached", which is subtracted. A
+  lone picture, and a library whose pictures never overlap, measure **bit-for-bit** what they did before —
+  pinned by tests. Largest picture first, so a mosaic keeps its exact area and the single field inside it is
+  the one discounted.
+
+  `seestack/skyarea.py` gains `sky_area_union_deg2` → `SkyCoverage(union_deg2, summed_deg2, n_pictures)`,
+  a roughly-square sin-free band grid (`_sky_cell_keys`, uniform in dec, `360·cos(dec)/cell` cells per band,
+  0.05°) and a block reduction (`_mask_weights_by_cell`) that folds a mosaic's tens of millions of pixels to
+  a few thousand cells without moving any pixel's area — blocks are a quarter of a cell, so attribution is
+  rounded by at most half a block. No new dependency, as the entry required.
+
+  **The word of explanation the entry asked for, and only when it is owed.** `GET /api/sky/coverage` now also
+  returns `summed_deg2` (what plain addition would have said), and `describeSkyCoverage` appends *"Where two
+  of them overlap, that patch counts once."* — from the **one** helper, so both surfaces say it or neither
+  does. The trigger is the *rendered* figure, not the raw one: a sliver of overlap that doesn't change the
+  number on screen says nothing, and the owner whose total visibly dropped is told why in the same breath.
+
+  **Upgrade-safe (§9), with one thing that had to be handled:** the answer is cached in the state dir against
+  a fingerprint of the input files, so an upgraded install would have kept serving the *old, summed* number
+  until a picture changed. The fingerprint's `"v"` — which versions the measurement, not the walk — is bumped
+  to 2, retiring every stale answer on upgrade. Otherwise purely additive: one new response field, no config,
+  schema, on-disk or default change, and an older frontend ignores the field and renders exactly as before.
+
+  **Tests (+8, and one existing test corrected rather than weakened).** New `tests/test_skyarea.py` pins the
+  engine: one picture is exactly its own WCS area; two pictures 5° apart still add up exactly; two on the
+  same patch count once while both still count as *pictures*; a half-overlapping pair lands between the two
+  wrong answers; no WCS and no pictures at all. `tests/webapp/test_sky_coverage.py`'s
+  `test_two_targets_are_summed` **built both runs at the same CRVAL** and asserted twice the area — it was
+  pinning the bug. It is now two tests: `…_on_different_sky_are_summed` (the summation it meant to pin, with
+  the second target actually moved 5° away) and `…_on_the_same_sky_are_counted_once`. Plus two vitest cases
+  for when the clause speaks and when it stays quiet.
 
   Original slice 1 spec, for the record:
 

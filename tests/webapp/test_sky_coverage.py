@@ -32,7 +32,7 @@ _PX_DEG2 = _SCALE_DEG * _SCALE_DEG      # solid angle of one pixel
 
 def _make_run(data_root, safe: str, *, n_uncovered_cols: int = 0,
               n_thin_cols: int = 0, with_wcs: bool = True,
-              name: str = "m") -> int:
+              name: str = "m", crval1: float = 150.0, crval2: float = 20.0) -> int:
     """A run whose canvas has a known number of well-covered pixels.
 
     ``n_uncovered_cols`` are NaN (no data at all); ``n_thin_cols`` carry data but
@@ -51,8 +51,8 @@ def _make_run(data_root, safe: str, *, n_uncovered_cols: int = 0,
             hdr["CTYPE2"] = "DEC--TAN"
             hdr["CRPIX1"] = (_W - 1) / 2 + 1
             hdr["CRPIX2"] = (_H - 1) / 2 + 1
-            hdr["CRVAL1"] = 150.0
-            hdr["CRVAL2"] = 20.0
+            hdr["CRVAL1"] = crval1
+            hdr["CRVAL2"] = crval2
             hdr["CD1_1"] = -_SCALE_DEG
             hdr["CD1_2"] = 0.0
             hdr["CD2_1"] = 0.0
@@ -177,9 +177,8 @@ def test_the_stat_is_blind_to_how_the_map_draws_it(client, solved_library):
     assert before == pytest.approx(_H * _W * _PX_DEG2, rel=1e-6)
 
 
-def test_two_targets_are_summed(client, solved_library, data_root):
-    """Each target's newest picture contributes; the total is what the owner is
-    told they have seen."""
+def _two_targets(client, solved_library) -> list[str]:
+    """Two library targets, so the endpoint has two pictures to reconcile."""
     lib = Library.open_or_create(solved_library / "library")
     try:
         _entry, proj = lib.create_target("NGC 7000", ra_deg=314.0, dec_deg=44.0)
@@ -188,9 +187,36 @@ def test_two_targets_are_summed(client, solved_library, data_root):
         lib.close()
     safes = [t["safe_name"] for t in client.get("/api/targets").json()]
     assert len(safes) >= 2
-    for s in safes[:2]:
-        _make_run(solved_library, s)
+    return safes[:2]
+
+
+def test_two_targets_on_different_sky_are_summed(client, solved_library, data_root):
+    """Each target's newest picture contributes; two patches the owner really
+    did photograph separately still add up, exactly as before."""
+    for i, s in enumerate(_two_targets(client, solved_library)):
+        _make_run(solved_library, s, crval1=150.0 + 5.0 * i)
 
     body = client.get("/api/sky/coverage").json()
     assert body["n_pictures"] == 2
     assert body["deg2"] == pytest.approx(2 * _H * _W * _PX_DEG2, rel=1e-6)
+    assert body["summed_deg2"] == pytest.approx(body["deg2"], rel=1e-9)
+
+
+def test_two_targets_on_the_same_sky_are_counted_once(client, solved_library,
+                                                      data_root):
+    """The bug: the total simply added the targets up, so every pair aimed at
+    one patch — a mosaic and the single field it grew from, or both folder
+    spellings of one object, several of which sit in the owner's real library —
+    told them they had seen twice the sky they had.
+
+    Both pictures still count as pictures; only the sky is not counted twice."""
+    for s in _two_targets(client, solved_library):
+        _make_run(solved_library, s)      # same CRVAL: the very same patch
+
+    body = client.get("/api/sky/coverage").json()
+    assert body["n_pictures"] == 2
+    assert body["deg2"] == pytest.approx(_H * _W * _PX_DEG2, rel=1e-6)
+    # The naive total is still reported, so the read-out can explain itself.
+    assert body["summed_deg2"] == pytest.approx(2 * _H * _W * _PX_DEG2, rel=1e-6)
+    assert body["sky_fraction"] == pytest.approx(
+        body["deg2"] / body["whole_sky_deg2"], rel=1e-9)

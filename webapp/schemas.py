@@ -696,6 +696,8 @@ class CleanupSuggestionOut(BaseModel):
     (``DELETE /api/targets/{safe}``). ``reason`` is one of ``"video"`` /
     ``"photo"`` / ``"on_device_output"`` (built from a Seestar output, ``_video``
     or ``_photo`` folder rather than raw sub-frames — cannot be stacked) or
+    ``"temp_folder"`` (built from another program's scratch folder sharing the
+    astro share, e.g. ``batch_stack_tmp`` — not a capture folder at all) or
     ``"duplicate_sub"`` (a
     ``<T>_sub``-named duplicate holding the *same* raw subs the base target ``<T>``
     now owns — a harmless clutter/wasted-compute leftover, not corrupt data) or

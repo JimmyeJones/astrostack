@@ -260,8 +260,18 @@ REJECT_REASON_SEESTAR_OUTPUT = "auto:seestar_output"
 # The Seestar's on-device output folder holds a *single* stacked image (allow a
 # tiny margin for an occasional two-file output). A bare ``<T>/`` folder that
 # holds more than this is a user's real subs, not the on-device output, so its
-# frames must never be auto-rejected as output. Mirrors the scanner's
-# ``_MAX_JUNK_OUTPUT_FRAMES`` (kept local to avoid a scanner→project import cycle).
+# frames must never be auto-rejected as output.
+#
+# This is deliberately NOT the scanner's ``junk_output_frame_cap``, which since
+# v0.319.3 is looser for a mosaic (whose on-device output is one image *per*
+# panel). The two answer different questions: that one gates a cleanup the user
+# confirms, this one auto-rejects frames on ingest, on by default. It never
+# needs the mosaic case, because a mosaic's output never reaches this code —
+# ``_seestar_output_bases`` skips ``*_mosaic_sub`` and the key it would produce
+# (``<T>_mosaic``) is not the name the convention gives the target
+# (``<T> (mosaic)``) either, so the reject is never armed for one. Both halves
+# of that are pinned in ``tests/test_scanner.py``; if either changes, this cap
+# has to be revisited before a mosaic's panels can slip past it.
 _MAX_SEESTAR_OUTPUT_FRAMES = 2
 
 # Seestar capture folders that hold finished pictures rather than raw subs — a
