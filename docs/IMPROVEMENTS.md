@@ -16448,6 +16448,24 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-08-31, the one thing the v0.320.2 coverage-share fix knowingly leaves undone) —
+  heal an existing run's coverage advice from the coverage map it already wrote, instead of waiting for a
+  re-stack.** *(Pillar: friendliness + trust — PRIORITY 3; size S–M; the decision it depends on is already
+  taken, so this is implementation, not design.)* v0.320.2 judges a ragged border on
+  `stack_runs.coverage_thin_frac`, and every run recorded before schema 20 has NULL there, which the panel
+  reads as "say nothing". That is the right default — the old test is known-wrong, so re-using it would be
+  repeating a false alarm — but it means the owner's whole existing library gets **no** coverage advice, good
+  or bad, until each target is stacked again. **The data to fix it is already on disk:** the stack writes a
+  coverage sibling (`master_coverage.fits` / the `_framecov.fits` frame-count map), and
+  `stacker.coverage_thin_fraction` is a pure function of exactly that array. So the heal is: when
+  `coverage_thin_frac` is NULL and the sibling exists, compute it once, **write it back to the row**, and
+  answer from it thereafter. **Care, in order:** (1) it must be a *lazy backfill*, never a startup sweep over
+  the library — one canvas-sized read per run, on the request that needs it, or the first "How's my stack?" on
+  a big library becomes a stall; (2) prefer the honest frame-count sibling over the weighted coverage map,
+  the same preference `run_stack` itself makes; (3) a missing/unreadable sibling must leave the row NULL and
+  stay silent — never fall back to the old `coverage_min` test; (4) it writes to the project DB from a read
+  path, so it needs the same care as any other lazy write there (skip silently if the DB is read-only).
+
 - **✅ SHIPPED (Builder, v0.320.2, branch `claude/wizardly-feynman-0lyyjh`) — ~~"How's my stack?" tells every
   deep stack its edges are ragged, and can never praise one for even coverage.~~** Fixed as the entry's
   "honest shape" prescribed — the note is judged on **how much of the picture is thin**, not on how thin its
@@ -18642,6 +18660,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **NEW IDEA (Builder 2026-08-31, the anchoring question the v0.320.1 per-panel patches deliberately left
+  measured-but-unaddressed) — chain each mosaic panel's refine reference to a neighbour it overlaps, so the
+  whole mosaic keys off *one* plate solve instead of one per panel.** *(Pillar: image quality — PRIORITY 4;
+  size M; **do not start this without a measurement that says it is needed** — see below.)* Every panel now
+  cuts its reference patch from its own central sub, and every patch is aligned to the same canvas WCS, so the
+  panels are tied together only as tightly as their two reference frames' *plate solves* agree. In principle a
+  panel can therefore sit a fraction of a pixel off its neighbour where before it sat wherever its solve put
+  it. **The measurement says this is not currently costing anything:** on the four-panel fixture the finished
+  seam step went **down**, 0.052 → 0.039 sky sigma, because individually-sharper panels beat the notional
+  drift. So this is filed as a *lead*, not a defect.
+  **The shape if a real mosaic ever shows it:** mosaics overlap by design (a Seestar steps ~0.8 of a field, and
+  the 512² patch is wider than a 480 px panel — measured overlap ~116 px, well over the 64 px correlation
+  floor), so a panel's reference frame can itself be refined against an already-built neighbouring patch
+  *before* its own patch is cut, walking one anchor outward from the reference panel. **What would justify it:**
+  `SEAMRES` measured on a real multi-panel Seestar mosaic with `subpixel_refine` on, compared against the same
+  subs stacked with refine off. If the seam is not worse, leave this alone — it adds an ordering dependency
+  between panels for no measured gain.
 
 - **✅ SHIPPED (Builder, v0.320.1, branch `claude/wizardly-feynman-0lyyjh`) — ~~per-panel reference patches, so
   sub-pixel refinement reaches a mosaic's *other* panels too.~~** Built to the filed shape: each substantial
