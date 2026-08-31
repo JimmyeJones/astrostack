@@ -621,10 +621,34 @@ _(nothing else claimed — claim an item here with your branch name)_
     the safety note. Confidence: HIGH, traced end-to-end in code against the owner's real library data.
     Owner's words: "it is still having issues with combining/distinguishing target folders.")*
 
-- **🟡 THE SAME MOSAIC-CAP ASYMMETRY EXISTS ONE LAYER DOWN, ON THE *FRAME* AUTO-REJECT — traced while
-  shipping v0.319.3, deliberately NOT changed in the same run because it is the ingest hot path.**
-  *(Severity: low-moderate — a handful of low-resolution on-device panel images silently join a real mosaic's
-  stack. Confidence: traced in code; NOT reproduced against owner data. Size S.)*
+- **⚪ CLOSED AS A NON-BUG — CHECKED, NOT ASSUMED (Builder, v0.319.8, branch `claude/wizardly-feynman-qzh1td`).
+  ~~The same mosaic-cap asymmetry exists one layer down, on the *frame* auto-reject.~~ The stated failure
+  ("a handful of on-device panel images silently join a real mosaic's stack") **cannot happen**, and the
+  entry's own prescribed fix — raise the frame-level cap to the scanner's mosaic-aware one — would have been
+  a threshold flip on the on-by-default ingest path buying nothing. Do not re-pick it; the caution the entry
+  ends on was right, and the reason is better than it knew.**
+
+  **Three independent things keep a mosaic's output away from that guard, and it only takes one.**
+  (1) `_seestar_output_bases` skips `*_mosaic_sub` outright, so no base is registered for a mosaic at all.
+  (2) Even with that skip removed, the key it would produce is `<T>_mosaic`, while `scan_and_organize` looks
+  the base up by the **target** name the convention gives — `<T> (mosaic)`. The lookup cannot match.
+  (3) Upstream of both, `_apply_seestar_convention` never ingests a bare `<T>_mosaic/` beside its
+  `<T>_mosaic_sub/` sibling, so on today's scanner those panel images enter no target at all. The owner's
+  real library agrees: the 11 `M 44_MOSAIC` and 7 `NGC 6960_MOSAIC` frames sit in their **own** leftover
+  pre-v0.184.9 targets (which the *target*-level cap, already fixed in v0.319.3, now offers to clean up),
+  not inside `M 44 (mosaic)`.
+
+  **What shipped instead of a threshold flip:** two tests that pin the invariant, so a future change to any
+  of the three things above fails in `tests/test_scanner.py` rather than in the owner's stack — the pure one
+  (`_seestar_output_bases` registers nothing against a mosaic target, *and* still registers the single-field
+  base it exists for) and the end-to-end one (a real `M 44_mosaic/` of 11 frames beside `M 44_mosaic_sub/`
+  leaves the mosaic target holding only raw subs, with the panel images in no target in the library). Plus
+  the comment on `_MAX_SEESTAR_OUTPUT_FRAMES`, which claimed to *mirror* the scanner's cap and stopped being
+  true in v0.319.3 — it now says why the two deliberately differ and what would have to change before this
+  one needs revisiting. *(Original entry follows.)*
+
+    *(Severity as filed: low-moderate — a handful of low-resolution on-device panel images silently join a
+    real mosaic's stack. Confidence as filed: traced in code; NOT reproduced against owner data. Size S.)*
 
   `seestack/io/project.py:265` defines `_MAX_SEESTAR_OUTPUT_FRAMES = 2` with the comment *"Mirrors the
   scanner's `_MAX_JUNK_OUTPUT_FRAMES`"* — and as of v0.319.3 it no longer does, because the scanner's cap is
