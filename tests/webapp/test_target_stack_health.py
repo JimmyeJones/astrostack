@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from seestack.io.library import Library
 from seestack.io.project import StackRunRow
 
@@ -162,6 +164,85 @@ def test_stack_runs_listing_reads_the_seam_figure_into_a_verdict(
     # nothing at all, so the chip self-hides rather than guessing.
     assert by_name["ambiguous"]["seam_verdict"] is None
     assert by_name["single"]["seam_verdict"] is None
+
+
+def _stored_thin_frac(data_root: Path, safe: str, run_id: int) -> float | None:
+    """What the run row itself now holds — the heal is only worth doing if it is
+    written back, not recomputed on every request."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return next(r.coverage_thin_frac for r in proj.iter_stack_runs()
+                        if r.id == run_id)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def _write_coverage_map(fits_path: Path, cov) -> None:
+    """The per-pixel frame-count sibling a stack writes beside its master."""
+    from astropy.io import fits as _fits
+    import numpy as np
+
+    fits_path.parent.mkdir(parents=True, exist_ok=True)
+    _fits.PrimaryHDU(data=np.asarray(cov, dtype=np.float32)).writeto(
+        fits_path.with_name(f"{fits_path.stem}_framecov.fits"), overwrite=True)
+
+
+def test_an_older_run_gets_its_coverage_advice_from_the_map_on_disk(
+        client, solved_library, data_root):
+    """A run stacked before schema 20 has no thin-coverage share, and the note
+    self-hides on None — so the owner's whole existing library was silent about
+    coverage until each target happened to be stacked again. The number is
+    recoverable from the coverage map the run already wrote."""
+    import numpy as np
+
+    fits_path = data_root / "out" / "old.fits"
+    cov = np.ones((300, 300), dtype=np.float32)
+    cov[:, 200:] = 12.0  # two thirds of the picture on a single frame
+    _write_coverage_map(fits_path, cov)
+    rid = _add_run(data_root, "M_42", fits_path=str(fits_path),
+                   coverage_thin_frac=None, coverage_min=1, coverage_max=12)
+
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    note = next(n for n in body["notes"] if n["kind"] == "coverage")
+    assert "67%" in note["message"]
+    assert note["action"] == "trim_border"
+
+    # …and it is remembered, so the next read costs no canvas-sized map read.
+    assert _stored_thin_frac(data_root, "M_42", rid) == pytest.approx(
+        2 / 3, abs=0.01)
+
+
+def test_an_evenly_covered_older_run_earns_the_compliment_too(
+        client, solved_library, data_root):
+    """The heal restores both halves of the advice, not just the warning."""
+    import numpy as np
+
+    fits_path = data_root / "out" / "even.fits"
+    _write_coverage_map(fits_path, np.full((200, 200), 12.0, dtype=np.float32))
+    rid = _add_run(data_root, "M_42", fits_path=str(fits_path),
+                   coverage_thin_frac=None, coverage_min=1, coverage_max=12)
+
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    solid = next(n for n in body["notes"] if n["kind"] == "solid")
+    assert "even coverage" in solid["message"]
+    assert not any(n["kind"] == "coverage" for n in body["notes"])
+
+
+def test_an_older_run_with_no_map_left_says_nothing_either_way(
+        client, solved_library, data_root):
+    """Deleted output, or a run whose master was moved: stay silent rather than
+    fall back to the ``coverage_min`` test this column replaced."""
+    rid = _add_run(data_root, "M_42", fits_path=str(data_root / "gone.fits"),
+                   coverage_thin_frac=None, coverage_min=1, coverage_max=12)
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    kinds = [n["kind"] for n in body["notes"]]
+    assert "coverage" not in kinds
+    assert not any("even coverage" in n["message"] for n in body["notes"])
+    assert _stored_thin_frac(data_root, "M_42", rid) is None
 
 
 def test_the_run_verdict_and_the_health_note_always_agree(

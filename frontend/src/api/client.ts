@@ -2060,6 +2060,20 @@ export interface CalibrationSuggestions {
   // complain about. Optional: an older backend omits it and the form falls back
   // to its mirrored constants (see `calibrationFit.ts`).
   tolerances?: { exposure_frac?: number | null; temp_c?: number | null } | null;
+  // What the *unattended* stack would bind for these same subs — the stricter
+  // "best master we're confident about", as opposed to the fields above, which
+  // are the best master of each kind you own. The two can disagree, so the form
+  // prefers these where they exist and its "Use recommended" then lands on the
+  // masters a walk-away stack would have used. Absent on an older backend, and
+  // an empty object means "nothing confident" — in both cases the form keeps its
+  // best-available recommendation and its existing cautions.
+  confident?: {
+    dark_master_id?: number | null;
+    flat_master_id?: number | null;
+    flat_dark_master_id?: number | null;
+    bias_master_id?: number | null;
+    scale_dark_to_light?: boolean | null;
+  } | null;
 }
 
 export interface UploadResult {

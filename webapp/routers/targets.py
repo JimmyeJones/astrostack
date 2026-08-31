@@ -892,8 +892,9 @@ def target_stack_health(
     grades that specific run (the History card for a run you're viewing). Returns
     ``null`` when there's no matching genuine stack. Read-only; never a gate.
     """
-    from webapp.pipeline import _newest_genuine_stack_run, _stack_options_from_run_json
+    from seestack.coverage_backfill import backfill_coverage_thin_frac
     from seestack.stackhealth import recommended_dark_spec, stack_health
+    from webapp.pipeline import _newest_genuine_stack_run, _stack_options_from_run_json
 
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -911,6 +912,14 @@ def target_stack_health(
             )
         if run is None:
             return None
+        # A run stacked before schema 20 has no thin-coverage share, and the
+        # coverage note self-hides on None — so a library stacked before the
+        # upgrade would get no coverage advice until each target was stacked
+        # again. The number is a pure function of the coverage map the run
+        # already wrote, so fill it in here, once, for the one run being graded
+        # (a no-op for every run that has it). Never a sweep: see
+        # `seestack.coverage_backfill`.
+        backfill_coverage_thin_frac(proj, run)
         frames = list(proj.iter_frames())
         notes = stack_health(run, frames)
         spec = recommended_dark_spec(frames)

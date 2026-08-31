@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   biasCanScaleDark, biasSizeWarning, darkScalingBlockedNote, exposureMismatch,
-  masterFitsFrames, masterOptionSuffix, masterSizeWarning, tempMismatch,
+  masterFitsFrames, masterOptionSuffix, masterRecommendation, masterSizeWarning,
+  tempMismatch,
 } from "./calibrationFit";
 
 const SUBS = { width_px: 1080, height_px: 1920 };
@@ -187,5 +188,80 @@ describe("biasCanScaleDark / darkScalingBlockedNote", () => {
     expect(darkScalingBlockedNote(DARK, { width_px: null, height_px: null })).toBeNull();
     expect(darkScalingBlockedNote(DARK, null)).toBeNull();
     expect(darkScalingBlockedNote(null, { width_px: 540, height_px: 960 })).toBeNull();
+  });
+});
+
+// --- masterRecommendation: reconciling "best owned" with "best confident" ----
+
+describe("masterRecommendation", () => {
+  const best = {
+    dark_master_id: 1, flat_master_id: 3, flat_dark_master_id: 2,
+    bias_master_id: 4,
+  };
+
+  it("falls back to the best available when the backend sends no confident pick", () => {
+    // An older backend, or a library where nothing clears the confidence gates.
+    // The form must be exactly as helpful as it was before this existed.
+    expect(masterRecommendation(best)).toEqual({
+      darkId: 1, flatId: 3, flatDarkId: 2,
+      // A dark is recommended, so a bias would be inert (the dark carries it).
+      biasId: null, scaleDark: false,
+    });
+    expect(masterRecommendation({ ...best, confident: {} })).toEqual(
+      masterRecommendation(best));
+    expect(masterRecommendation(null)).toEqual({
+      darkId: null, flatId: null, flatDarkId: null, biasId: null, scaleDark: false,
+    });
+  });
+
+  it("prefers the master the unattended stack would actually bind", () => {
+    // The disagreement this exists for: `recommend_masters` ranks a dark by
+    // *combined* distance, so a gain-mismatched but exposure-perfect dark can
+    // out-rank the one the walk-away path would use.
+    const rec = masterRecommendation({ ...best, confident: { dark_master_id: 9 } });
+    expect(rec.darkId).toBe(9);
+    // Kinds the confident binding is silent on keep the best-available answer.
+    expect(rec.flatId).toBe(3);
+  });
+
+  it("keeps a flat-dark with the flat it calibrates", () => {
+    // The best-available flat-dark was matched to the best-available *flat*. If
+    // the confident binding picked a different flat, that pairing is stale.
+    const rec = masterRecommendation({ ...best, confident: { flat_master_id: 7 } });
+    expect(rec.flatId).toBe(7);
+    expect(rec.flatDarkId).toBeNull();
+    const paired = masterRecommendation({
+      ...best, confident: { flat_master_id: 7, flat_dark_master_id: 8 },
+    });
+    expect(paired.flatDarkId).toBe(8);
+  });
+
+  it("offers the bias that scales a dark, together with the switch", () => {
+    const rec = masterRecommendation({
+      ...best,
+      confident: { dark_master_id: 1, bias_master_id: 4, scale_dark_to_light: true },
+    });
+    expect(rec.biasId).toBe(4);
+    expect(rec.scaleDark).toBe(true);
+  });
+
+  it("never asks to scale a dark it isn't recommending", () => {
+    // The switch is only correct as part of the dark+bias pair; half of it would
+    // leave the pedestal mis-subtracted.
+    const noDark = masterRecommendation({
+      ...best, dark_master_id: null,
+      confident: { bias_master_id: 4, scale_dark_to_light: true },
+    });
+    expect(noDark.scaleDark).toBe(false);
+    expect(noDark.biasId).toBe(4);
+    const noBias = masterRecommendation({
+      ...best, confident: { dark_master_id: 1, scale_dark_to_light: true },
+    });
+    expect(noBias.scaleDark).toBe(false);
+  });
+
+  it("recommends a bias for the lights only when no dark is recommended", () => {
+    const rec = masterRecommendation({ ...best, dark_master_id: null });
+    expect(rec.biasId).toBe(4);
   });
 });

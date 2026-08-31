@@ -117,6 +117,22 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
         "exposure_frac": float(EXPOSURE_MISMATCH_TOL),
         "temp_c": float(TEMP_MISMATCH_TOL_C),
     }
+    # …and what the *unattended* stack would have picked for these same subs.
+    # ``recommend_masters`` above answers "the best master of each kind you own";
+    # the walk-away chain answers the stricter "the best one we're confident
+    # about", and the two can differ — a gain-mismatched-but-exposure-perfect
+    # dark out-ranks a gain-matched dark that only needs bias-scaling, so the
+    # form and the walk-away path could recommend different masters for one
+    # target. Served as ids (what the form's pickers hold) from the same function
+    # the unattended binding uses, so "Use recommended" lands where an unattended
+    # stack would. Empty when nothing is confident — the form then keeps its
+    # best-available recommendation and its existing cautions, which is right
+    # when a human is watching.
+    rec["confident"] = calibration.auto_bind_master_ids(
+        settings.resolved_library_root, masters,
+        exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c,
+        width_px=rec["params"]["width_px"], height_px=rec["params"]["height_px"],
+    )
     return rec
 
 
