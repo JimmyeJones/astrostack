@@ -139,7 +139,7 @@ export function Dashboard() {
   const usedSub = total ? `of ${total}` : undefined;
   const coverageLine = coverage.data
     ? describeSkyCoverage(coverage.data.deg2, coverage.data.sky_fraction,
-                          coverage.data.n_pictures)
+                          coverage.data.n_pictures, coverage.data.summed_deg2)
     : "";
 
   return (

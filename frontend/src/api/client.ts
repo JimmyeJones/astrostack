@@ -2556,12 +2556,14 @@ export const api = {
   /**
    * How much sky those pictures actually cover, measured from each run's own
    * WCS — never by counting pixels on the map, which is a non-equal-area
-   * projection that also draws every picture larger than life.
+   * projection that also draws every picture larger than life. Pictures that
+   * overlap on the sky are counted once; `summed_deg2` is what plain addition
+   * would have said (absent on an older backend).
    */
   skyCoverage: () =>
     req<{
       deg2: number; sky_fraction: number; n_pictures: number;
-      whole_sky_deg2: number;
+      whole_sky_deg2: number; summed_deg2?: number;
     }>("/api/sky/coverage"),
   /** "Your universe" — the captured objects placed in depth by catalog distance. */
   getUniverse: () => req<UniverseData>("/api/sky/universe"),
