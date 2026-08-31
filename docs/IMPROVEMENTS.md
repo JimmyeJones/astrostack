@@ -360,6 +360,50 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🟡 BROKEN-UX / IMAGE QUALITY (Scout QA audit 2026-08-31, traced + reproduced) — sub-pixel alignment
+  refinement is silently disabled for a whole mosaic stack whenever the reference panel doesn't cover the
+  *union canvas centre*.** The stacking-engine audit that led this run (align/reference/mosaic/drizzle/
+  accumulator/calibrate all came back **clean** — no data-corruption bug in the core) surfaced exactly one
+  real defect, on the sub-pixel refine path.
+
+  **Mechanism (reproduced end-to-end):** at setup, `run_stack` (`seestack/stack/stacker.py:1894-1897`) embeds
+  *only the reference frame's* aligned window into a full-canvas `ref_full` (all-NaN elsewhere) and calls
+  `extract_reference_patch(ref_full)` (`seestack/stack/align.py:350`). That helper always takes the patch from
+  the **geometric centre of the whole canvas** (`y0 = (h - ph) // 2`, `REF_PATCH_SIZE = 512`). On a mosaic the
+  union canvas is bigger than any one panel, so if the reference tile's footprint misses the central 512×512
+  window, every pixel there is NaN → `np.nanmedian` of an all-NaN slice is NaN (with a swallowed
+  `RuntimeWarning: All-NaN slice encountered`) → **the reference patch is entirely NaN**. Setup does not fail
+  (ref_patch is non-None), so refinement is left "on". Then for *every frame*, `_apply_subpixel_shift`
+  (`align.py:396-…`) calls `skimage.registration.phase_cross_correlation` with the NaN reference, which raises
+  `ValueError: NaN values found…`; the broad `except Exception` (`align.py:~521` windowed variant / `~430`)
+  swallows it and returns the frame **unshifted**. Net: the whole stack falls back to whole-pixel alignment,
+  silently — no `over_cap`/`stats` signal, no log beyond the buried warning — so the finished mosaic is
+  softer than it should be and nothing tells the user why.
+
+  **Reproduced:** `REF_PATCH_SIZE=512`; a `ref_full` whose only finite data is a corner panel yields an
+  all-NaN 512×512 patch (`np.all(np.isnan(patch)) is True`), and `phase_cross_correlation(patch, finite_frame)`
+  raises `ValueError: NaN values found` (installed skimage 0.26). For a single-field target the reference
+  window covers ~the whole canvas centred, so the patch is finite and nothing changes — this only ever bites
+  mosaics whose reference tile is off-centre relative to the union canvas.
+
+  **Severity:** broken-UX / image quality (degraded sharpness on the OSC **mosaic** workflow — a §1 priority-4
+  and an explicit focus area), **not** wrong-result: no pixel is corrupted, frames just stack roughly aligned.
+  **Confidence:** traced + reproduced (mechanism reproduced in isolation; the exact field geometry that
+  triggers it depends on which tile `pick_reference_frame` selects).
+
+  **Proposed fix (for the Builder — not a one-liner, so filed rather than rushed):** the patch must be pulled
+  from a region the reference frame *actually covers*. The reference window's origin and size are already in
+  hand at the call site (`ref_y0, ref_x0, rh, rw`), so centring the patch on the reference **panel's** centre
+  (`ref_y0 + rh//2, ref_x0 + rw//2`) instead of the blind canvas centre keeps refinement working and is
+  byte-for-byte identical for a single-field target (there the panel *is* the canvas). Guard belt-and-braces:
+  if the chosen patch is still >~50% NaN, disable refine cleanly and `log.info` it (and ideally set a
+  `stats` flag) rather than letting every frame raise-and-swallow — a silent quality regression should at
+  least be visible. Note the deeper limitation this exposes and should be weighed: a *single* patch on one
+  panel can only refine frames that overlap that panel; other panels' frames get the benign "too-small
+  overlap" skip, so a fully-correct mosaic refine ultimately wants **per-panel reference patches** (a larger,
+  separate task — file it if you take the minimal fix). Add a regression test with a synthetic multi-panel
+  mosaic whose reference tile is off-centre, asserting the patch is finite and at least some frames refine.
+
 - **✅ SHIPPED (Builder, v0.319.1, branch `claude/compassionate-galileo-go263h`) — ~~"your last night was
   softer than usual" gets **more likely the longer you shoot the same target**, because the baseline it
   compares against is the *sharpest* night you have ever had — and on the Nights card the same comparison
@@ -20174,6 +20218,41 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-31) — "Draw your skyline": a visual horizon editor for the Tonight
+  planner, replacing the raw numeric (azimuth, altitude) pair list.** *(Pillar: plan + friendliness —
+  PRIORITY 2–3; size M; frontend-only — the whole backend already exists. Deepens/simplifies an existing
+  capability, which §4 explicitly prefers over new surface.)*
+
+  **The gap (verified, not assumed).** The engine already has a fully-wired horizon/obstruction feature:
+  `HorizonProfile` (`seestack/nightplan.py:127`) shapes every target's usable window, the setting
+  `horizon_profile` is persisted in `webapp/config.py:213` (additive, empty-default, upgrade-safe), the plan
+  router feeds it in (`webapp/routers/plan.py:271,315`), and Tonight even explains when it was applied
+  ("Time-up accounts for your horizon / tree mask", `frontend/src/routes/Tonight.tsx:256`). **The only way a
+  user can set it is `HorizonProfileEditor` in Settings (`frontend/src/routes/Settings.tsx:138`) — a
+  hand-entered list of `(azimuth°, min-clear-altitude°)` number pairs.** That is the single least
+  beginner-friendly control in an app whose whole thesis is "no PixInsight expertise required": a real
+  backyard Seestar owner knows "my house blocks the south and there's a tree to the east," not that the tree
+  sits at "az 95°, alt 22°." So the capability that would stop the planner recommending targets they
+  physically cannot see is present but effectively unreachable for the target user.
+
+  **The feature.** A visual editor — a horizontal panorama strip (or a compass dial) labelled N/E/S/W where
+  the user **drags the skyline up** where their house, trees or fence block the low sky, and the control
+  emits the same `[[az, alt], …]` array the backend already consumes. Sane default: an empty profile = flat
+  open horizon = today's behaviour byte-for-byte (an install that never touches it is unaffected). Keep the
+  numeric list available (behind a "fine-tune / advanced" disclosure) so nothing is removed — the owner's
+  "don't remove features, just organise them" rule. Plain-language throughout ("drag the line up to where the
+  trees start"). A few coarse presets ("open field", "suburban backyard", "trees to the north") give a
+  one-click start.
+
+  **Why it clears the beginner bar.** A non-expert understands it instantly and it directly makes the
+  plan/get pillar work for them (fewer "why is my recommended target behind the house?" moments, honest
+  time-above-obstruction budgets). No new engine surface, no heavy/networked dependency, no expert knob — it
+  makes an existing, already-tested capability usable. **Buildable in one Builder run:** pure frontend on top
+  of the live `horizon_profile` setting; component + a vitest that dragging produces a monotone-safe
+  `(az, alt)` array the backend validator (`config.py:_clean_horizon_profile`) accepts, and that an empty
+  drag round-trips to `[]`. **Watch-outs:** keep az convention identical to the numeric editor (0°=N, 90°=E),
+  round to whole degrees, and clamp altitude to a sane range so a stray drag can't emit `alt > 90`.
 
 - **✅ BOTH SLICES SHIPPED (slice 1: Builder v0.306.3, branch `claude/compassionate-galileo-aj7ysy`;
   slice 2: Builder v0.319.7, branch `claude/wizardly-feynman-qzh1td`) — ~~put "how much of the sky have you
