@@ -10291,6 +10291,28 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-08-31, the generalisation of the v0.320.3 coverage heal) — sweep the *other*
+  later-added run measurements for the ones that are also recoverable from what is already on disk.**
+  *(Pillar: friendliness + trust — PRIORITY 3; size S per column, and the *audit* is the task — do it before
+  building anything. Confidence: the shape is proven once; the remaining sites are not yet checked.)*
+  `stack_runs` has grown a series of measured columns, and each one arrived with a schema bump that leaves
+  every *existing* run NULL. The code is consistent and correct about what NULL means — `stack_fwhm_px`,
+  `seam_residual`, `n_roughly_aligned` and (until v0.320.3) `coverage_thin_frac` all read as "unknown →
+  self-hide" — so each addition silently makes the owner's whole existing library mute on that subject until
+  every target happens to be re-stacked. v0.320.3 showed the cure is often cheap: the number was a **pure
+  function of a file the run already wrote**, so it could be recomputed once, lazily, on the request that
+  needed it, and written back.
+  **The task is the audit, not the code.** For each such column ask: is its input still on disk beside the
+  master (the coverage siblings, the `_rejected.fits` map, the master FITS itself), and is the function that
+  computes it pure? `seam_residual` looks like the strongest candidate (`measure_seam_residual` takes the
+  master and a coverage map, both of which survive); `stack_fwhm_px` needs a star measurement over the master,
+  which is real work and probably belongs behind an explicit action rather than a lazy read.
+  **Reuse `seestack/coverage_backfill.py`'s shape** — a per-column function that no-ops when the value is
+  present, returns `None` when the input is gone, writes back through a small `Project.set_…`, and is called
+  from the one endpoint already looking at that run. **Two rules it must keep:** never a startup sweep over the
+  library (one map read for one run, on the request that needs it), and never a *substitute* measurement — if
+  the real input is missing, stay NULL and stay silent rather than answering from something else.
+
 - **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by the v0.319.3–4 merge/cleanup unification) — the
   Library page now pays for the same library walk twice per refresh.** *(Pillar: performance — file, don't
   pre-optimise. Size: S. Confidence: certain by construction; the cost is unmeasured on real data.)*
