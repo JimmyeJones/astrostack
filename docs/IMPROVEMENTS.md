@@ -16448,10 +16448,45 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-08-31, the one thing the v0.320.2 coverage-share fix knowingly leaves undone) —
-  heal an existing run's coverage advice from the coverage map it already wrote, instead of waiting for a
-  re-stack.** *(Pillar: friendliness + trust — PRIORITY 3; size S–M; the decision it depends on is already
-  taken, so this is implementation, not design.)* v0.320.2 judges a ragged border on
+- **✅ SHIPPED (Builder, v0.320.3, branch `claude/wizardly-feynman-isps6l`) — ~~heal an existing run's coverage
+  advice from the coverage map it already wrote, instead of waiting for a re-stack.~~** Built to the filed
+  shape, all four care points honoured, in a new `seestack/coverage_backfill.py` whose single function
+  `backfill_coverage_thin_frac(project, run)` the "How's my stack?" endpoint calls on the one run it is about
+  to grade.
+
+  **What it does:** on a NULL `coverage_thin_frac` it loads the run's own coverage sibling, measures the share
+  with the **same** `stacker.coverage_thin_fraction` a fresh stack stamps, writes it back to the row through a
+  new additive `Project.set_stack_coverage_thin_frac`, and updates the in-hand row so this very request grades
+  like a freshly-stacked one. A run that already has a share returns it and touches nothing — the common case
+  (every run since v0.320.2) costs one attribute read.
+
+  **The four cautions, each answered and each tested:** (1) **lazy, never a sweep** — the call sits inside
+  `target_stack_health` after the run is chosen, so it is one map read for the one run being looked at;
+  (2) **frame count first** — `load_frame_coverage` then `load_coverage`, the same order and for the same
+  reason `run_stack` uses when it stamps the column (the weighted map is Σ of per-frame *weights*, so binning
+  it describes how good the subs were as much as how many); (3) **silence, not a guess** — no master path, no
+  sibling, an unreadable one, or a map with nothing covered all leave the row NULL and the panel quiet, and
+  the `coverage_min` test this column replaced is never reachable from here; (4) **a read-only DB costs the
+  memory, not the answer** — the write is wrapped, logged at debug, and the note is still made.
+
+  **Why it matters on the live install:** v0.320.2's NULL default was right and is unchanged, but it meant the
+  owner's entire existing library was silent about coverage — no warning on a genuinely ragged mosaic, and no
+  "even coverage" compliment on a good one — until each target happened to be re-stacked. Both halves of the
+  advice come back on the first visit to the card, from data already on disk.
+
+  **Upgrade-safe (§9):** no schema change (schema 20's column is simply filled in), no config, on-disk layout,
+  API-shape or default change; nothing is written that a re-stack would not have written itself, and a run
+  whose map is gone is left exactly as it is.
+
+  **Tests: +9 engine (`tests/test_coverage_backfill.py`), +3 endpoint (`tests/webapp/
+  test_target_stack_health.py`, 2 fail before).** The engine set covers the heal end-to-end through a real
+  `Project`, the frame-count-over-weighted preference, the weighted fallback, all three silent cases, the
+  already-has-a-share no-op, the read-only DB, and — pinned by construction rather than by a literal — that
+  the healed number is exactly what the stacker would have stamped, so an old run and a re-stacked one can
+  never give different advice. The endpoint set covers the warning, the compliment, and the run with no map
+  left saying nothing either way.
+
+    *(Original spec follows.)* v0.320.2 judges a ragged border on
   `stack_runs.coverage_thin_frac`, and every run recorded before schema 20 has NULL there, which the panel
   reads as "say nothing". That is the right default — the old test is known-wrong, so re-using it would be
   repeating a false alarm — but it means the owner's whole existing library gets **no** coverage advice, good
