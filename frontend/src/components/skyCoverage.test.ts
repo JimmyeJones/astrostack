@@ -65,6 +65,27 @@ describe("describeSkyCoverage", () => {
       .toContain("about a full Moon's worth of sky");
   });
 
+  // Overlapping pictures are counted once server-side, which makes the number
+  // *smaller* than adding the pictures up would. That is the honest total, but
+  // an owner who watched it drop deserves the reason in the same sentence.
+  it("explains itself when overlapping pictures visibly changed the number", () => {
+    const s = describeSkyCoverage(12.0, 12.0 / 41252.96, 5, 18.4);
+    expect(s).toContain("12.0 square degrees");
+    expect(s).toContain("Where two of them overlap, that patch counts once.");
+  });
+
+  it("stays quiet about overlap that doesn't move the number it shows", () => {
+    // A sliver of shared sky, too small to change the rendered figure — the
+    // clause would be an explanation of nothing.
+    const s = describeSkyCoverage(18.4, 18.4 / 41252.96, 12, 18.401);
+    expect(s).not.toContain("overlap");
+    // …as is the ordinary case of no overlap at all, and an older backend
+    // that doesn't send the naive total.
+    expect(describeSkyCoverage(18.4, 18.4 / 41252.96, 12, 18.4))
+      .not.toContain("overlap");
+    expect(describeSkyCoverage(18.4, 18.4 / 41252.96, 12)).not.toContain("overlap");
+  });
+
   it("says nothing at all when there is nothing to measure", () => {
     expect(describeSkyCoverage(0, 0, 0)).toBe("");
     expect(describeSkyCoverage(12, 0.0003, 0)).toBe("");

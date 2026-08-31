@@ -23,7 +23,9 @@ from seestack.io.scanner import (
     duplicate_sub_target_base_name,
     is_capture_mode_target_name,
     is_mosaic_target_name,
+    is_temp_folder_target_name,
     junk_output_frame_cap,
+    mosaic_target_name,
     run_qc_and_solve,
     scan_and_organize,
 )
@@ -258,6 +260,48 @@ def test_classify_not_junk_for_a_real_mosaic_stack(tmp_path):
     output.mkdir()
     paths = [str(output / f"Light_{i:04d}.fit") for i in range(400)]
     assert classify_seestar_junk_target("M 44_mosaic", paths, n_frames=400) is None
+
+
+def test_classify_junk_temp_folder_by_target_name():
+    """``batch_stack_tmp`` in the owner's real share is some other program's
+    scratch folder living in ``\\\\TRUENAS\\astro``; it has no ``_sub`` sibling, so
+    it ingests as an ordinary target and lingers as a junk tile. Decided by name
+    at any frame count — a temp folder holds whatever that run was mid-way
+    through, so its size says nothing."""
+    v = classify_seestar_junk_target("batch_stack_tmp", [], n_frames=137)
+    assert v is not None and v.reason == "temp_folder"
+    assert "batch_stack_tmp" in v.detail
+    # Case-insensitive and whitespace-tolerant, like every other name test.
+    assert classify_seestar_junk_target("  Batch_Stack_TMP ", [], 1) is not None
+
+
+def test_classify_junk_temp_folder_by_source_folder(tmp_path):
+    """Even under a different target name, frames sourced entirely from a
+    scratch folder are that program's leftovers."""
+    scratch = tmp_path / "batch_stack_tmp"
+    scratch.mkdir()
+    paths = [str(scratch / f"f{i:03d}.fit") for i in range(9)]
+    v = classify_seestar_junk_target("Some Target", paths, n_frames=9)
+    assert v is not None and v.reason == "temp_folder"
+
+
+def test_classify_not_junk_for_a_real_target_that_merely_sounds_temporary():
+    """The list is EXACT names, not a ``*_tmp`` pattern — a real folder someone
+    named badly must never be condemned by shape alone (AGENTS.md §1: no blind
+    guessing on the on-by-default ingest path)."""
+    assert not is_temp_folder_target_name("M 31_tmp")
+    assert not is_temp_folder_target_name("tmp")
+    assert not is_temp_folder_target_name("batch_stack_tmp_sub")
+    assert classify_seestar_junk_target("NGC 7000_tmp", [], n_frames=500) is None
+
+
+def test_is_temp_folder_target_name_matches_only_the_listed_names():
+    """The shared name test the cleanup endpoint uses to decide by name alone,
+    before paying to open a target's project."""
+    assert is_temp_folder_target_name("batch_stack_tmp")
+    assert is_temp_folder_target_name("  BATCH_STACK_TMP  ")
+    assert not is_temp_folder_target_name("M 31")
+    assert not is_temp_folder_target_name("M 31_sub")
 
 
 def test_junk_output_frame_cap_is_looser_only_for_a_mosaic():
@@ -1012,3 +1056,60 @@ def test_run_qc_and_solve_honours_should_stop(tmp_path):
             proj.close()
     finally:
         lib.close()
+def test_no_output_base_is_registered_against_a_mosaic_target():
+    """The *frame-level* on-device-output reject is never armed for a mosaic.
+
+    `Project.reject_seestar_output_frames` carries a ≤2-frame guard, and a
+    mosaic's on-device output is one image *per panel* (11 in the owner's real
+    `M 44_mosaic/`) — so if that reject ever ran over a mosaic target it would
+    spare exactly the frames it exists to catch. It never runs over one:
+    `_seestar_output_bases` skips `*_mosaic_sub` outright, and the key it would
+    otherwise have produced (`M 44_mosaic`) is not the name the convention gives
+    the target anyway (`M 44 (mosaic)`), so the lookup in `scan_and_organize`
+    could not match even if the skip were removed. Both halves are pinned here.
+    """
+    bases = _seestar_output_bases(_fake("M 44_mosaic_sub", "M 44_mosaic"))
+    assert bases.get(mosaic_target_name("M 44")) is None
+    assert bases.get("M 44_mosaic") is None
+    # …while the single-field case it *is* for still registers, so this test
+    # can't pass by the helper having stopped working altogether.
+    single = _seestar_output_bases(_fake("M 31_sub"))
+    assert single.get("M 31") == "M 31"
+
+
+def test_a_mosaics_on_device_output_never_reaches_the_mosaic_target(tmp_path):
+    """…and the same invariant end-to-end, which is the one that matters: the
+    11 panel images in a bare `<T>_mosaic/` folder are not in the mosaic's
+    stack pool, because they are not ingested into any target at all."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 44_mosaic").mkdir(parents=True)
+    for i in range(11):
+        write_seestar_fits(scan_root / "M 44_mosaic" / f"Stacked_{i:02d}.fit",
+                           n_stars=5, seed=100 + i)
+    (scan_root / "M 44_mosaic_sub").mkdir(parents=True)
+    for i in range(4):
+        write_seestar_fits(scan_root / "M 44_mosaic_sub" / f"Light_{i:03d}.fit",
+                           n_stars=5, seed=i)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, scan_root)
+        entry = lib.find_target(mosaic_target_name("M 44"))
+        assert entry is not None, [t.name for t in lib.list_targets()]
+        proj = lib.open_target(entry.safe_name)
+        try:
+            sources = proj.source_paths()
+        finally:
+            proj.close()
+        assert sources and all("M 44_mosaic_sub" in s for s in sources)
+        # Not merely absent from the mosaic target — absent from the library.
+        for t in lib.list_targets():
+            other = lib.open_target(t.safe_name)
+            try:
+                assert not any(Path(s).parent.name == "M 44_mosaic"
+                               for s in other.source_paths()), t.name
+            finally:
+                other.close()
+    finally:
+        lib.close()
+

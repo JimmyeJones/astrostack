@@ -38,9 +38,18 @@ export function formatSkyArea(deg2: number): string {
  * Leads with the honest measurement, then anchors it in full Moons — the only
  * patch of sky a beginner can already picture — and closes with the fraction,
  * which is the number that makes people grin.
+ *
+ * `summedDeg2` is what plain addition would have said before overlapping
+ * pictures were counted once (absent on an older backend). It buys one extra
+ * clause, and only when the deduplication actually changed the number the reader
+ * is looking at — otherwise explaining it would be clutter about nothing. That
+ * test is deliberately the *rendered* number, not the raw one: a library with a
+ * sliver of overlap says nothing, and the owner whose total visibly moved is
+ * told why in the same breath.
  */
 export function describeSkyCoverage(
   deg2: number, fraction: number, nPictures: number,
+  summedDeg2?: number | null,
 ): string {
   if (!Number.isFinite(deg2) || deg2 <= 0 || nPictures <= 0) return "";
   const moons = deg2 / FULL_MOON_DEG2;
@@ -51,8 +60,12 @@ export function describeSkyCoverage(
   // was both ungrammatical and stilted, and it is the state a beginner is in on
   // the day they meet this sentence — the one picture they just made.
   const subject = nPictures === 1 ? "picture covers" : `${nPictures} pictures cover`;
+  const overlapped =
+    typeof summedDeg2 === "number" && Number.isFinite(summedDeg2) &&
+    summedDeg2 > deg2 && formatSkyArea(summedDeg2) !== formatSkyArea(deg2);
   return (
     `Your ${subject} ${formatSkyArea(deg2)} square degrees — ` +
-    `${moonPhrase}, and ${formatSkyFraction(fraction)} of the whole sky.`
+    `${moonPhrase}, and ${formatSkyFraction(fraction)} of the whole sky.` +
+    (overlapped ? " Where two of them overlap, that patch counts once." : "")
   );
 }
