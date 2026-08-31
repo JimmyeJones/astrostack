@@ -124,8 +124,10 @@ def align_one(
         Optional dict populated by the sub-pixel refine step: when refinement
         runs but the measured shift exceeds ``SUBPIXEL_SHIFT_CAP_PX`` (so the
         frame stacks only *roughly* aligned, unshifted), ``refine_stats
-        ["over_cap"]`` is set ``True``. Left untouched otherwise. Purely an
-        honest-accounting signal; it never changes the returned pixels.
+        ["over_cap"]`` is set ``True``; when the frame's window doesn't share
+        enough area with the reference patch to correlate at all,
+        ``refine_stats["out_of_reach"]`` is. Left untouched otherwise. Purely
+        honest-accounting signals; neither changes the returned pixels.
 
     Returns
     -------
@@ -509,8 +511,11 @@ def _apply_subpixel_shift_windowed(
 
     ``stats`` (optional): like :func:`_apply_subpixel_shift`, when a dict is
     passed ``stats["over_cap"]`` is set ``True`` iff the measured shift exceeded
-    ``SUBPIXEL_SHIFT_CAP_PX`` (the frame stacks only roughly aligned). Untouched
-    on every other outcome; observational only.
+    ``SUBPIXEL_SHIFT_CAP_PX`` (the frame stacks only roughly aligned), and
+    ``stats["out_of_reach"]`` ``True`` iff the frame's window shares too little
+    area with the reference patch to correlate at all (a mosaic panel the patch
+    doesn't touch). Untouched on every other outcome; observational only —
+    neither ever changes the pixel decision.
     """
     try:
         from skimage.registration import phase_cross_correlation
@@ -528,7 +533,13 @@ def _apply_subpixel_shift_windowed(
     ox0 = max(win_x0, rpx0)
     ox1 = min(win_x0 + ww, rpx0 + rpw)
     if (oy1 - oy0) < 64 or (ox1 - ox0) < 64:
-        # Not enough common area to correlate reliably.
+        # Not enough common area to correlate reliably — this frame stacks at
+        # whole-pixel alignment. Correct by design, but not free: on a mosaic
+        # given only *one* reference patch it is every sub outside that patch's
+        # panel, so record it (see ``stats["out_of_reach"]``) rather than let the
+        # option's reach be something the owner has to infer.
+        if stats is not None:
+            stats["out_of_reach"] = True
         return win_rgb
 
     # Crop both to the overlap.

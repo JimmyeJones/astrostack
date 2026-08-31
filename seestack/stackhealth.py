@@ -42,12 +42,23 @@ _ECC_ELONGATED = 0.6
 _UNSOLVED_MIN_ACCEPTED = 8
 _UNSOLVED_NOTE_FRACTION = 0.30  # ≥30% of accepted subs unlocated → worth surfacing
 
-# A pixel is "thin coverage" when far fewer frames overlap it than the best-covered
-# region. Only fires when there's real unevenness (a dithered/mosaic border), so a
-# flat single-field stack (min≈max) never trips it. Needs a few frames at the peak
-# for the ratio to mean anything.
-_COVERAGE_RAGGED_RATIO = 0.25
+# A pixel is "thin coverage" when far fewer frames overlap it than the
+# best-covered region — under a quarter of the peak frame count, the ratio
+# :func:`seestack.stack.stacker.coverage_thin_fraction` measures the share with.
+# Needs a few frames at the peak for any of it to mean anything.
 _COVERAGE_MIN_PEAK = 4
+# …and a *picture* has a ragged border when enough of it is thin to be worth
+# trimming. This is the share of the covered canvas, not the single thinnest
+# pixel: judging it on ``coverage_min`` (as this did until v0.320.2) meant judging
+# it on the fringe pixel that exactly one frame touched, so the test was really
+# "1/N ≤ 0.25", which every dithered stack of ≥4 subs passes — and every mosaic,
+# whose canvas corners are uncovered, so ``coverage_min`` is 0. Measured on real
+# ``run_stack`` output: a ±6 px-dithered single field is 0.2–0.6 % thin at 8, 32
+# and 128 subs (stable in N, where the old ratio ran 0.00 → 0.03 → 0.06), an even
+# three-panel mosaic is 0.0 %, and a genuinely lopsided 12/1/1 mosaic is 62 %. The
+# 5 % floor sits an order of magnitude above the honest cases and two below the
+# ragged one.
+_COVERAGE_THIN_SHARE = 0.05
 
 # The κ-σ / drizzle outlier-rejection fraction band in which the "we cleaned the
 # trails out" reassurance is both meaningful and honest. Below the floor a stack
@@ -280,14 +291,22 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
         )))
 
     # --- Ragged low-coverage border (dithered/mosaic edges) --------------------
-    if (run.coverage_max >= _COVERAGE_MIN_PEAK
-            and run.coverage_min <= run.coverage_max * _COVERAGE_RAGGED_RATIO):
+    # Judged on *how much* of the picture is thin, not on how thin its thinnest
+    # pixel is — see ``_COVERAGE_THIN_SHARE``. A run recorded before that share
+    # was measured (schema < 20) reports None, and we say nothing rather than fall
+    # back to the old test: it fired on every stack the app has ever made, so
+    # keeping it for old runs would mean knowingly repeating a false alarm. Those
+    # runs get the note back the next time they are stacked.
+    thin_share = run.coverage_thin_frac
+    if (thin_share is not None and run.coverage_max >= _COVERAGE_MIN_PEAK
+            and thin_share >= _COVERAGE_THIN_SHARE):
         scored.append((20, HealthNote(
             kind="coverage",
             severity="info",
-            message=("The edges have far fewer frames than the centre, so the "
-                     "border is noisier and uneven. Trim border gives a clean, "
-                     "even rectangle."),
+            message=(f"About {thin_share * 100:.0f}% of this picture has "
+                     "far fewer frames than the best-covered part, so it's "
+                     "noisier and uneven there. Trim border gives a clean, even "
+                     "rectangle."),
             action="trim_border",
         )))
 
@@ -469,8 +488,12 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
         strengths.append(f"calibrated ({run.calstat})")
     if med_ecc is not None and med_ecc < _ECC_ELONGATED:
         strengths.append("round stars")
-    if (run.coverage_max > 0
-            and run.coverage_min > run.coverage_max * _COVERAGE_RAGGED_RATIO):
+    # The exact complement of the ragged-border note above, so the panel can never
+    # both praise and warn. On the old ``coverage_min`` test this praise was
+    # *unreachable*: a dithered stack always has a one-frame fringe pixel, so no
+    # real stack could earn it. None (an older run) stays silent either way.
+    if (run.coverage_max > 0 and run.coverage_thin_frac is not None
+            and run.coverage_thin_frac < _COVERAGE_THIN_SHARE):
         strengths.append("even coverage")
     if strengths:
         scored.append((70, HealthNote(

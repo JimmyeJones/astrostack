@@ -1691,3 +1691,55 @@ def test_stack_info_calibration_warnings_is_empty_for_an_ordinary_run(
 
     body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
     assert body["calibration_warnings"] == []
+
+
+def test_stack_info_frame_accounting_reports_the_refine_reach(client, solved_library):
+    """How far sub-pixel refine reached — how many reference patches the run
+    built, and how many contributing subs no patch covered. On a mosaic one
+    patch could only refine the reference panel's subs, so "did it reach mine?"
+    is a question the run should answer rather than the owner infer."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["NOFFERED"] = 120
+                hdul[0].header["NREFPANL"] = 4
+                hdul[0].header["NREFSKIP"] = 7
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    fa = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["frame_accounting"]
+    assert fa["n_refine_patches"] == 4
+    assert fa["n_refine_out_of_reach"] == 7
+
+
+def test_stack_info_frame_accounting_omits_refine_reach_on_an_older_master(
+        client, solved_library):
+    """A master stacked before the reach was recorded carries neither card — the
+    summary still resolves, just without the keys, so an older run reads exactly
+    as it does today rather than claiming a reach of zero."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["NOFFERED"] = 120
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    fa = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["frame_accounting"]
+    assert "n_refine_patches" not in fa
+    assert "n_refine_out_of_reach" not in fa

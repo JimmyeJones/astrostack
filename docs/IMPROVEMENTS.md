@@ -43,6 +43,25 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-08-31, branch `claude/wizardly-feynman-0lyyjh` — second claim, by site.** The top open item
+> under "Friendliness": **"How's my stack?" tells every deep stack its edges are ragged**. Sites:
+> `seestack/stack/stacker.py` (`coverage_thin_fraction` + the `add_stack_run` call),
+> `seestack/io/project.py` (schema **20**, additive `coverage_thin_frac`), `seestack/stackhealth.py` (the
+> coverage note and the "even coverage" strength), `tests/test_stackhealth.py` and a new
+> `tests/test_coverage_thin_fraction.py`. — **claim released, shipped as v0.320.2.**
+
+> **Builder 2026-08-31, branch `claude/wizardly-feynman-0lyyjh` — claim released, shipped as v0.320.1.** The top open item under
+> "Image quality": **per-panel reference patches, so sub-pixel refinement reaches a mosaic's *other* panels**
+> (filed by the v0.319.9 run as the deeper limitation it deliberately left). Sites I am editing:
+> `seestack/stack/stacker.py` (the `options.subpixel_refine` setup block that builds `ref_patch`, and `_pass`/
+> `_align_for_stack`'s refine plumbing), `seestack/stack/align.py`
+> (`_apply_subpixel_shift_windowed`'s too-small-overlap skip → an honest `stats` flag),
+> `seestack/stack/reference.py` (a pure `pick_central_frame` extracted from `pick_reference_frame`, so a panel
+> can pick its own reference the same way the target does), and
+> `tests/test_subpixel_mosaic_reference.py`. Guard: a single-field stack must be bit-for-bit unchanged —
+> `pointing_groups` returns `None` when there is no sound split, which is the single-field case by
+> construction.
+
 > **Builder 2026-08-30, branch `claude/compassionate-galileo-7y6nlj` — claim released, shipped as v0.317.0.**
 > The top open item under "Autonomy & friendliness": **record how many *nights* went into a stack**, so a
 > caption can say "over 4 nights" instead of naming two dates. The entry offered two shapes and named the
@@ -16429,7 +16448,79 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-08-30, MEASURED — the one other finding of the sub-count sweep that shipped
+- **NEW IDEA (Builder 2026-08-31, the one thing the v0.320.2 coverage-share fix knowingly leaves undone) —
+  heal an existing run's coverage advice from the coverage map it already wrote, instead of waiting for a
+  re-stack.** *(Pillar: friendliness + trust — PRIORITY 3; size S–M; the decision it depends on is already
+  taken, so this is implementation, not design.)* v0.320.2 judges a ragged border on
+  `stack_runs.coverage_thin_frac`, and every run recorded before schema 20 has NULL there, which the panel
+  reads as "say nothing". That is the right default — the old test is known-wrong, so re-using it would be
+  repeating a false alarm — but it means the owner's whole existing library gets **no** coverage advice, good
+  or bad, until each target is stacked again. **The data to fix it is already on disk:** the stack writes a
+  coverage sibling (`master_coverage.fits` / the `_framecov.fits` frame-count map), and
+  `stacker.coverage_thin_fraction` is a pure function of exactly that array. So the heal is: when
+  `coverage_thin_frac` is NULL and the sibling exists, compute it once, **write it back to the row**, and
+  answer from it thereafter. **Care, in order:** (1) it must be a *lazy backfill*, never a startup sweep over
+  the library — one canvas-sized read per run, on the request that needs it, or the first "How's my stack?" on
+  a big library becomes a stall; (2) prefer the honest frame-count sibling over the weighted coverage map,
+  the same preference `run_stack` itself makes; (3) a missing/unreadable sibling must leave the row NULL and
+  stay silent — never fall back to the old `coverage_min` test; (4) it writes to the project DB from a read
+  path, so it needs the same care as any other lazy write there (skip silently if the DB is read-only).
+
+- **✅ SHIPPED (Builder, v0.320.2, branch `claude/wizardly-feynman-0lyyjh`) — ~~"How's my stack?" tells every
+  deep stack its edges are ragged, and can never praise one for even coverage.~~** Fixed as the entry's
+  "honest shape" prescribed — the note is judged on **how much of the picture is thin**, not on how thin its
+  thinnest pixel is — and the entry's own diagnosis was right on the mechanism and *understated* on the reach.
+
+  **Measured on real `run_stack` output** (a new `coverage_thin_fraction`, the share of *covered* pixels below
+  a quarter of the peak frame count):
+
+  | scene | `coverage_min/max` (old test) | old note fires? | thin share (new) |
+  |---|---|---|---|
+  | ±6 px-dithered field, 8 subs | 0.000 | **yes** | 0.23 % |
+  | …32 subs | 0.031 | **yes** | 0.58 % |
+  | …128 subs | 0.063 | **yes** | 0.27 % |
+  | even 3-panel mosaic (6/5/6) | 0.000 | **yes** | **0.00 %** |
+  | lopsided mosaic (12/1/1) | 0.000 | yes | **61.8 %** |
+
+  **The extra finding: it is worse on a mosaic than on a dithered field, and for a second reason.** A mosaic's
+  union canvas has corners no frame covers, so `coverage_min` is **0** — the ratio is 0 whatever the data, and
+  a *perfectly even* mosaic was told its edges were ragged just as loudly as a 12/1/1 one. The new measure
+  excludes uncovered pixels outright (they are not part of the picture, so they are neither thin nor even),
+  which is what separates the two mosaics above 0.00 % from 61.8 %.
+
+  **The threshold is 5 %** (`_COVERAGE_THIN_SHARE`), an order of magnitude above the honest dithered cases and
+  two below the ragged one — the entry's "silent below a few percent", placed with the measurements rather
+  than guessed. The 0.25-of-peak definition of *thin* is unchanged and now has one home,
+  `stacker.COVERAGE_THIN_RATIO`. The note also **says the number** ("About 62% of this picture has far fewer
+  frames than the best-covered part"), because a share is a thing a beginner can check against their own
+  picture in a way a bare "the edges are ragged" is not.
+
+  **The schema decision the entry demanded, and why.** New additive `stack_runs.coverage_thin_frac`
+  (`SCHEMA_VERSION` **20**, `ALTER TABLE`, old rows NULL). On a NULL the panel says **nothing either way** —
+  neither the warning nor the praise. Rejected the alternative (fall back to today's test on old runs) for one
+  reason: the old test is now *known* to fire on every stack the app has ever made, so keeping it would be
+  knowingly repeating a false alarm on the runs the owner has most of. NULL already means "unknown → self-hide"
+  everywhere else in this row (`stack_fwhm_px`, `seam_residual`, `n_roughly_aligned`), so this is the
+  established reading rather than a new one; an old run gets its coverage advice back the first time it is
+  re-stacked.
+
+  **A second thing the fix removes, unasked:** an *editor export* / channel-combine run records the placeholder
+  `coverage_min = coverage_max = 1`, which passed the old praise test — so a picture with no coverage
+  measurement at all was being congratulated on its "even coverage". It now reports NULL and stays quiet.
+
+  **Upgrade-safe (§9):** additive column with an additive migration, no default flip, no API-shape change, no
+  on-disk change; the frontend `StackHealthCard` reads the note's `action`, not its wording, so no frontend
+  change was needed.
+
+  **Tests (+9 in a new `tests/test_coverage_thin_fraction.py`, +4 in `tests/test_stackhealth.py`):** the
+  measure's depth-invariance against the old ratio's, a lopsided mosaic, uncovered pixels excluded, the
+  no-coverage `None`, the ratio itself, the DB round-trip, a **schema-19 project migrating and reading NULL**,
+  and the end-to-end wiring off a genuine `run_stack`; plus the four behaviour tests — a dithered stack is no
+  longer nagged, *can* now earn "even coverage", a genuinely ragged mosaic still gets the note **and quotes the
+  share**, and an older run says nothing either way. Four existing tests were updated to drive the note through
+  the new field (same intent, same assertions); none was loosened or removed.
+
+    *(Original spec follows.)* **NEW IDEA (Builder 2026-08-30, MEASURED — the one other finding of the sub-count sweep that shipped
   v0.313.1, filed rather than fixed because it is advisory copy, not a wrong picture) — "How's my stack?"
   tells every deep stack its edges are ragged, and can never praise one for even coverage.** *(Pillar:
   friendliness + trust — PRIORITY 3; size S–M; **needs a small schema decision, read it before starting**.)*
@@ -18570,7 +18661,77 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **Per-panel reference patches, so sub-pixel refinement reaches a mosaic's *other* panels too (M).**
+- **NEW IDEA (Builder 2026-08-31, the anchoring question the v0.320.1 per-panel patches deliberately left
+  measured-but-unaddressed) — chain each mosaic panel's refine reference to a neighbour it overlaps, so the
+  whole mosaic keys off *one* plate solve instead of one per panel.** *(Pillar: image quality — PRIORITY 4;
+  size M; **do not start this without a measurement that says it is needed** — see below.)* Every panel now
+  cuts its reference patch from its own central sub, and every patch is aligned to the same canvas WCS, so the
+  panels are tied together only as tightly as their two reference frames' *plate solves* agree. In principle a
+  panel can therefore sit a fraction of a pixel off its neighbour where before it sat wherever its solve put
+  it. **The measurement says this is not currently costing anything:** on the four-panel fixture the finished
+  seam step went **down**, 0.052 → 0.039 sky sigma, because individually-sharper panels beat the notional
+  drift. So this is filed as a *lead*, not a defect.
+  **The shape if a real mosaic ever shows it:** mosaics overlap by design (a Seestar steps ~0.8 of a field, and
+  the 512² patch is wider than a 480 px panel — measured overlap ~116 px, well over the 64 px correlation
+  floor), so a panel's reference frame can itself be refined against an already-built neighbouring patch
+  *before* its own patch is cut, walking one anchor outward from the reference panel. **What would justify it:**
+  `SEAMRES` measured on a real multi-panel Seestar mosaic with `subpixel_refine` on, compared against the same
+  subs stacked with refine off. If the seam is not worse, leave this alone — it adds an ordering dependency
+  between panels for no measured gain.
+
+- **✅ SHIPPED (Builder, v0.320.1, branch `claude/wizardly-feynman-0lyyjh`) — ~~per-panel reference patches, so
+  sub-pixel refinement reaches a mosaic's *other* panels too.~~** Built to the filed shape: each substantial
+  pointing group now gets its own 512² patch, cut from that panel's own central sub
+  (`pick_central_frame`, extracted verbatim from `pick_reference_frame` so the target-wide choice is
+  unchanged) and aligned to the **same** canvas WCS, so the shifts all stay in one frame of reference.
+
+  **Measured on a four-panel synthetic mosaic** (13 subs, panels stepped 0.8 of a field, each sub carrying a
+  known 2 px residual offset; `tests/test_subpixel_mosaic_reference.py`), one patch → per panel:
+
+  | | one patch | per panel |
+  |---|---|---|
+  | subs correlated at all | 10 of 13 | **13 of 13** |
+  | median correlation area | 37,908 px | **157,140 px** (4.1×) |
+  | subs whose 2 px offset was measured | 2 of 9 | **9 of 9** |
+  | subs discarded as "only roughly aligned" (`NROUGHAL`) | 7 | **0** |
+  | panel-seam step (`SEAMRES`) | 0.052 σ | **0.039 σ** |
+
+  **The filed "1/N of a mosaic's subs" estimate turned out to understate the *reach* and understate the
+  *damage*, in different directions — worth knowing before reading the numbers.** Reach: because the patch is
+  512 px and a panel is 480, an *adjacent* panel's subs did overlap the single patch — through the ~116 px seam
+  strip the two panels share, i.e. a quarter of the area, so 10 of 13 subs correlated rather than 4. Damage: a
+  sliver correlation is not a weak refinement, it is a **wrong** one — against a strip of another panel's field
+  it returned shifts of tens of pixels (−119.8, −56.0, −21.9 px along y on this fixture, against a true offset
+  of 0), every one of which the 5 px cap had to throw away. That is what the `NROUGHAL` row is, and it is why
+  the honest headline is not "1/N got refined" but "**2 of 9 subs had their offset measured; now all 9 do**".
+  The seam did not merely hold, it tightened (0.052 → 0.039 σ) — the panels being individually sharper is
+  worth more here than the notional risk of each panel keying off its own reference, which is the risk the
+  shared canvas WCS bounds.
+
+  **Upgrade-safe (§9):** pure engine change plus two additive FITS cards and two additive API keys. No config,
+  schema, on-disk or default change; `subpixel_refine` stays off by default, and a single-field stack is
+  bit-for-bit unchanged **by construction** — `pointing_groups` returns `None` unless at least two groups carry
+  `REFINE_PANEL_MIN_FRAMES = 2` subs, which is the single-field case and the too-tight mosaic, and a test pins
+  that exactly one patch is built there.
+
+  **The observability half shipped with it**, as the entry asked: `_apply_subpixel_shift_windowed` now records
+  its too-small-overlap skip (`stats["out_of_reach"]`) instead of returning silently, and `run_stack` stamps
+  **`NREFPANL`** (patches built) and **`NREFSKIP`** (contributing subs no patch could reach) beside the
+  existing `NROUGHAL`, gated identically, plus an `INFO` line naming the count. Both are carried through
+  `/stack-runs/{id}/info` → `frame_accounting` as `n_refine_patches` / `n_refine_out_of_reach`. **Deliberately
+  no frontend note:** refine is an off-by-default advanced option, `NREFSKIP` is now normally 0, and the owner's
+  standing priority is that the UI is already too busy — the number is recorded where someone asking the
+  question can read it, not surfaced as a tenth banner.
+
+  **Tests (+6 in `tests/test_subpixel_mosaic_reference.py`, +5 in `tests/test_reference.py`, +2 in
+  `tests/webapp/test_stack_render.py`; all 6 mosaic ones fail before).** The pre-change behaviour is
+  reproduced honestly rather than described — the "before" arm makes the panel split unavailable
+  (`pointing_groups → None`), which is the exact code path a single field takes — so both arms run the real
+  stacker. Covered: reach and patch count; correlation *area*; every sub's dither measured and nothing left
+  rough; the seam not growing; the single-field guard; and one panel's failed patch not costing the others
+  theirs.
+
+    *(Original spec follows.)* **Per-panel reference patches, so sub-pixel refinement reaches a mosaic's *other* panels too (M).**
   *Filed by the Builder, 2026-08-31, on shipping the mosaic reference-patch fix (v0.319.9) — the deeper
   limitation that fix deliberately did not take on.* Refinement uses **one** 512² reference patch. It now
   lands on real data (it used to be all-NaN whenever the reference tile missed the union canvas centre), but
