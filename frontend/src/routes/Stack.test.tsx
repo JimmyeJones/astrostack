@@ -260,6 +260,82 @@ describe("StackView", () => {
     expect(screen.queryByText(/but your subs are 30s/)).not.toBeInTheDocument();
   });
 
+  it("recommends the masters a walk-away stack would have used", async () => {
+    // `recommend_masters` ranks a dark by *combined* distance, so an
+    // exposure-perfect but gain-mismatched dark out-ranks the gain-matched one
+    // the unattended binder would take. The form used to follow the first and
+    // the walk-away path the second, so one target got calibrated two ways.
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 30s gain 400", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 400, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+      { id: 2, name: "Dark 120s gain 80", kind: "dark", filename: "d2.fits", n_frames: 20,
+        method: "median", exposure_s: 120, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+      { id: 3, name: "Bias", kind: "bias", filename: "b.fits", n_frames: 20,
+        method: "median", exposure_s: 0, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null, bias_master_id: 3,
+      confident: { dark_master_id: 2, bias_master_id: 3, scale_dark_to_light: true },
+      scores: { "1": 1, "2": 0.3, "3": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    // The badge follows the confident pick, not the top-ranked one.
+    await waitFor(() =>
+      expect(screen.getByText(/Dark 120s gain 80.*★ recommended/)).toBeInTheDocument());
+    expect(screen.queryByText(/Dark 30s gain 400.*★ recommended/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Use recommended"));
+
+    // …and applying it brings the whole pairing: that dark is only usable here
+    // *because* the bias scales it to the subs, so the switch comes with it.
+    await waitFor(() =>
+      expect(screen.getByText(/Dark exposure-scaling is on/)).toBeInTheDocument());
+    expect(screen.queryByText(/shot at 120s but your subs are 30s/)).not.toBeInTheDocument();
+    // Nothing left to apply.
+    expect(screen.queryByText("Use recommended")).not.toBeInTheDocument();
+  });
+
+  it("keeps its best-available recommendation when nothing is confident", async () => {
+    // A library whose only dark is a poor match still gets recommended, with the
+    // existing caution doing the explaining — the form must not go blank just
+    // because the unattended path would have declined.
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 2, name: "Dark 120s", kind: "dark", filename: "d2.fits", n_frames: 20,
+        method: "median", exposure_s: 120, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: 2, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
+      confident: {},
+      scores: { "2": 0.3 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    expect(screen.getByText(/Dark 120s.*★ recommended/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Use recommended"));
+    await waitFor(() =>
+      expect(screen.getByText(/shot at 120s but your subs are 30s/)).toBeInTheDocument());
+  });
+
   it("offers a one-click dark exposure-scaling when a bias is also selected, then confirms", async () => {
     mockSchema([]);
     // A mismatched 120 s dark and a master bias both already selected.

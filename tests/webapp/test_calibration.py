@@ -1455,3 +1455,92 @@ def test_calibration_coverage_endpoint_with_no_masters(client):
     body = client.get("/api/calibration/coverage").json()
     assert body["masters"] == []
     assert len(body["uncovered"]) == body["n_targets"]
+
+
+# --- The confident binding, served to the Stack form as ids -------------------
+#
+# `recommend_masters` answers "the best master of each kind you own"; the
+# unattended binder answers the stricter "the best one we're confident about".
+# The two can disagree, and until the form could read the second, a watched stack
+# and a walk-away stack of the same subs were calibrated differently.
+
+
+def test_bound_ids_and_bound_paths_are_one_decision(tmp_path):
+    """Pinned by construction, not by a literal: whatever the confidence gates
+    do, the ids the form reads must resolve to exactly the paths the unattended
+    stack binds — otherwise the two answers can drift apart again."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=30.0, gain=80.0)
+    _register(root, "flat", exposure_s=2.0, gain=80.0)
+    _register(root, "bias", exposure_s=0.0, gain=80.0)
+    masters = calibration.list_masters(root)
+
+    kw = dict(exposure_s=30.0, gain=80.0)
+    ids = calibration.auto_bind_master_ids(root, masters, **kw)
+    paths = calibration.auto_bind_master_paths(root, masters, **kw)
+
+    assert ids, "the fixture should bind something, or this proves nothing"
+    for id_key, path_key in calibration._BOUND_ID_TO_PATH_KEY.items():
+        if id_key in ids:
+            assert str(calibration.master_path(root, ids[id_key])) == paths[path_key]
+        else:
+            assert path_key not in paths
+    assert ids.get("scale_dark_to_light") == paths.get("scale_dark_to_light")
+
+
+def test_bound_ids_carry_the_scaling_pair(tmp_path):
+    """A dark recovered by exposure-scaling is only correct *with* its bias and
+    the switch, so the id form has to carry all three."""
+    root = tmp_path / "lib"
+    dark = _register(root, "dark", exposure_s=30.0, gain=80.0)
+    bias = _register(root, "bias", exposure_s=0.0, gain=80.0)
+
+    ids = calibration.auto_bind_master_ids(
+        root, calibration.list_masters(root), exposure_s=10.0, gain=80.0)
+    assert ids["dark_master_id"] == dark["id"]
+    assert ids["bias_master_id"] == bias["id"]
+    assert ids["scale_dark_to_light"] is True
+
+
+def test_bound_ids_are_empty_when_nothing_is_confident(tmp_path):
+    """"Nothing confident" must be sayable — the form falls back to its
+    best-available recommendation there, which is right with a human watching."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=300.0, gain=400.0)  # wrong gain and exposure
+    assert calibration.auto_bind_master_ids(
+        root, calibration.list_masters(root), exposure_s=30.0, gain=80.0) == {}
+
+
+def test_suggestions_serve_what_the_unattended_stack_would_bind(
+        client, solved_library, data_root):
+    """The Stack form's endpoint carries the confident binding beside the
+    best-available one, so the form can land where a walk-away stack would."""
+    root = data_root / "library"
+    # Build the dark against what the endpoint says the subs actually are, so
+    # the fixture can't drift from the synthetic frames' own header values.
+    params = client.get("/api/targets/M_42/calibration-suggestions").json()["params"]
+    dark = _register(root, "dark", exposure_s=params["exposure_s"],
+                     gain=params["gain"], width=params["width_px"],
+                     height=params["height_px"])
+    body = client.get("/api/targets/M_42/calibration-suggestions").json()
+    assert body["confident"]["dark_master_id"] == dark["id"]
+    # …and it agrees with the binder itself, rather than being re-derived here.
+    assert body["confident"] == calibration.auto_bind_master_ids(
+        root, calibration.list_masters(root),
+        exposure_s=body["params"]["exposure_s"], gain=body["params"]["gain"],
+        sensor_temp_c=body["params"]["sensor_temp_c"],
+        width_px=body["params"]["width_px"], height_px=body["params"]["height_px"])
+
+
+def test_suggestions_confident_is_empty_when_no_master_matches(
+        client, solved_library, data_root):
+    """A library whose only dark is for another camera: the best-available
+    recommendation still names it (the form warns), the confident binding says
+    nothing at all."""
+    root = data_root / "library"
+    params = client.get("/api/targets/M_42/calibration-suggestions").json()["params"]
+    dark = _register(root, "dark", exposure_s=params["exposure_s"],
+                     gain=params["gain"], width=8, height=8)  # another camera
+    body = client.get("/api/targets/M_42/calibration-suggestions").json()
+    assert body["dark_master_id"] == dark["id"]
+    assert body["confident"] == {}
