@@ -16930,6 +16930,45 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **✅ SHIPPED (Builder, v0.322.5, branch `claude/wizardly-feynman-yryq05`) — ~~"Your first image" says *"Let it
+  work out where each frame points"* but ticks on whether **ASTAP is installed**, so the app's own first-run
+  path shows a finished picture beside "3 of 4 done" with that step unticked.~~** *(Second dogfood finding of
+  the same run — visible in the very first Dashboard screenshot; friendliness, PRIORITY 3, size XS.)*
+
+  **The contradiction, on the path the app itself offers.** A fresh install with no ASTAP loads the bundled
+  sample and presses "Stack it". The sample ships **pre-solved**, so it stacks: steps 1, 3 and 4 tick, step 2
+  does not, and the same screen carries a banner reading *"solving … is required before you can stack
+  anything"* directly above a ticked *"Stack them into your first picture"*. The step's `hint` ("Set it up once
+  and forget it") and its `done` (`astap.found && star_db_found !== false`) always agreed it was a **setup**
+  step; the label was the only part claiming something about the user's frames.
+
+  **Fixed by making the label say what is measured** — *"Set up plate solving (ASTAP)"* — rather than by
+  loosening the tick. The tick is right: someone whose ASTAP is missing genuinely cannot solve their *own*
+  subs, and "set up plate solving" is exactly the next thing they should do, which is what the card's "Next:"
+  line already said.
+
+  **Upgrade-safe (§9):** one string in a pure frontend helper. No config, schema, on-disk, API or default change.
+
+  **Tests (+1, fails before):** `firstImageSteps.test.ts` reproduces the sample journey exactly as the dogfood
+  run found it — ASTAP missing, 6 frames, 6 accepted, 1 stack run → `[true, false, true, true]`, the card
+  leading with the setup step — and pins the label. The follow-on (tick on frames that *actually* solved) is
+  filed directly below with its cost.
+
+- **NEW IDEA (Builder 2026-09-01, the half the v0.322.5 label fix deliberately did not build) — tick the
+  first-image solve step on frames that **actually got solved**, not only on ASTAP being installed.**
+  *(Pillar: friendliness — PRIORITY 3; size S, but **read the cost note**; the label fix already removed the
+  untruth, so this is polish, not a correction.)* The honest signal for *"your subs have sky coordinates"* is a
+  count of frames with a WCS, and today nothing carries one: `library.campaign_stats` aggregates only the
+  registry columns (`n_frames`, `n_frames_accepted`, `total_exposure_s`), and `wcs_json` lives in each
+  **per-target** `project.sqlite`. **The cost is the reason this is filed rather than built:** `/api/stats` is
+  the Dashboard's hot path, and its existing per-project work (`_rollup_stacks`) opens only targets that *have*
+  stacks — a solved count would open **every** target, on every uncached stats call. **If it is built:** put
+  the count behind the same `stats_cache` signature, and add it as an additive optional field that reads as
+  "unknown" (never as zero) when an older backend omits it — the step must not un-tick itself on an upgrade.
+  **Care:** don't let it *replace* the ASTAP check. Someone with pre-solved frames and no ASTAP still needs the
+  setup before their own subs will solve, so the tick wants to stay the setup's, with the frame count as an
+  extra reassurance line at most.
+
 - **✅ SHIPPED (Builder, v0.322.4, branch `claude/wizardly-feynman-yryq05`) — ~~the Gallery card cut the target
   name down to "Sample: …", on the page whose entire job is browsing your pictures.~~** *(Dogfood finding —
   found by **running** the app via `scripts/agent-dogfood.sh`, not by reading it; the code already carried a

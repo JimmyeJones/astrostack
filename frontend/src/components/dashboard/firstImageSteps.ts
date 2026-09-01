@@ -59,7 +59,14 @@ export function firstImageSteps(
     },
     {
       key: "solve",
-      label: "Let it work out where each frame points",
+      // Says what the tick below actually measures. It used to read "Let it work
+      // out where each frame points" — a claim about *your frames* — while the
+      // tick reads whether ASTAP is installed. Those come apart on the app's own
+      // first-run path: the bundled sample ships pre-solved, so someone who
+      // presses "Stack it" gets a finished picture and a card reading "3 of 4
+      // done" with *this* step, the one before it, unticked. The hint and the
+      // tick always agreed it was a setup step; only the label didn't.
+      label: "Set up plate solving (ASTAP)",
       hint: "Plate solving (ASTAP) is how AstroStack recognises the patch of sky "
         + "in each sub, so it can line them all up. Set it up once and forget it.",
       href: settingsLink("plate-solving"),
