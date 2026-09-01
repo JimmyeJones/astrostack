@@ -520,6 +520,32 @@ export interface LiveSession {
   reject_buckets: Record<string, number>;
   newest_kept_frame_id: number | null;
   goal_exposure_s: number | null;
+  /** "Capture seems to have gone quiet": this session was *mid-run* and the subs
+   *  stopped, judged against the cadence this target had been keeping. Narrower
+   *  than `!active` — a night finished on purpose never sets it. Optional:
+   *  absent on an older backend, which reads as "nothing to say". */
+  quiet?: boolean;
+  /** The cadence behind that verdict, in minutes between subs. */
+  typical_gap_minutes?: number | null;
+  /** How long the silence had to run before it was worth mentioning. */
+  quiet_after_minutes?: number | null;
+}
+
+/** What re-stacking this target's newest picture would *give* the owner.
+ *  A picture stacked before the app recorded when its subs were shot can never
+ *  say which night it is from — and unlike the coverage share and the seam
+ *  figure, that can't be healed from disk. `null` when there is nothing honest
+ *  to offer, including when the subs aren't datable enough for a re-stack to
+ *  fill the gap. */
+export interface RestackGain {
+  run_id: number;
+  timestamp_utc: string;
+  /** How many subs the old picture combined. */
+  n_frames_used: number;
+  /** How many accepted subs a re-stack would combine — the cost half. */
+  n_frames_ready: number;
+  missing_capture_window: boolean;
+  missing_night_count: boolean;
 }
 
 export interface HealthNote {
@@ -2151,6 +2177,10 @@ export const api = {
     req<CleanestShot | null>(`/api/targets/${safe}/cleanest-shot`),
   grainierNewest: (safe: string) =>
     req<GrainierNewest | null>(`/api/targets/${safe}/grainier-newest`),
+  // "This picture was made by an older AstroStack" — what a re-stack would give
+  // back, named as a gain. `null` (the common case) means say nothing.
+  restackGain: (safe: string) =>
+    req<RestackGain | null>(`/api/targets/${safe}/restack-gain`),
   stackHealth: (safe: string, runId?: number) =>
     req<StackHealth | null>(
       `/api/targets/${safe}/stack-health` +

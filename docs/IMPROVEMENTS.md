@@ -10313,67 +10313,218 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Scout 2026-09-01) — "your capture seems to have gone quiet": a per-target heads-up when subs
-  stopped arriving mid-session, so a clear night isn't silently lost to a stalled Seestar.** *(Pillar: get +
-  autonomy — PRIORITY 2–3; size S–M; the whole signal is already on disk — this is a read + a note, never a
-  new watch.)* The owner walks away and lets AstroStack watch `incoming/`; the failure this catches is the one
-  they can't see happening — the Seestar disconnects, its microSD fills, or the app's dew heater trips and the
-  scope parks — and **no new subs arrive for the rest of an otherwise-clear night**. Today nothing notices: the
-  watcher fires only *on* arrival, so a target that stops feeding simply goes still, and the owner finds out in
-  the morning that four of their eight planned hours are missing. **The data already exists:** ingest stamps
-  each frame's arrival time, so "this target's newest accepted sub is N hours old while it was actively
-  accumulating an hour ago" is a pure query. **Shape:** a self-hiding note (the Target page's existing
-  `NoticeBoard`, per the standing IA priority — *not* a new banner) reading e.g. *"No new subs from this target
-  in the last 90 min — capture may have stopped (Seestar disconnected, card full, or you're done for the
-  night)."* Informational only; it must **never** act — no auto-anything, and strictly read-only over
-  `incoming/` (§10). **Sane default and the care that makes it not-annoying:** it may only fire on a target that
-  *was* recently active (had a run of arrivals that then stopped), never on a target the owner deliberately
-  finished or hasn't started, and the threshold wants to be generous (a Seestar's own dithers/refocus gap plus
-  SMB latency, so ~1–2× a typical inter-sub interval, not a fixed clock). **Grep before building:** it overlaps
-  the live device layer — `webapp/seestar/manager.py` already tracks a Seestar's `last_seen_utc` over a
-  telemetry connection — so first decide whether this belongs there (device-connectivity truth, when a scope is
-  paired) or on the incoming-folder side (works for the file-drop-only owner who never pairs). The
-  folder-arrival side is the one that always applies and needs no device link; the manager may already answer
-  the paired case, in which case this is the *unpaired* complement, not a second copy. It is a §9-safe additive
-  read; nothing persisted, no default flipped.
+- **NEW IDEA (Builder 2026-09-01, verified by reading while shipping the v0.322.1 Compare dates) — Compare
+  tells you one stack is "the cleaner stack" even when the two are *different objects*.** *(Pillar:
+  understand / trust — PRIORITY 3; size XS–S; traced, not a data bug — advisory copy only.)* The Gallery's
+  multi-select builds `/compare?a=<safe>:<run>&b=<safe>:<run>` from **any** two selected pictures, across
+  targets (`Gallery.tsx` ~690), and `noiseComparison` then prints *"**B** has **12% lower** background noise —
+  it's the cleaner stack"* for, say, M 42 against NGC 7000. Normalised σ is comparable across gain and
+  exposure, which is what the parenthetical claims, but it is **not** comparable across two different fields:
+  the number is then mostly about the sky and the object, not about which stack came out better. **Shape:**
+  the v0.322.1 depth line already gates itself on `a.safe === b.safe` for exactly this reason — either give
+  the noise verdict the same gate, or (better, since comparing two objects is a legitimate thing to do) keep
+  the figure and change the *claim*: name the two targets in the sentence and drop "it's the cleaner stack"
+  when they differ. **Care:** don't gate the panel-flatness line the same way without thinking — "did the
+  panels even out" is a like-for-like verdict about each mosaic on its own, so it survives a cross-target
+  comparison in a way "which is cleaner" does not.
 
-- **NEW IDEA (Builder 2026-09-01, the conclusion the v0.321.1 heal audit forced) — "this picture was made by an
-  older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it would
-  gain.** *(Pillar: autonomy + trust — PRIORITY 2–3; size M; **the nudge must name a concrete gain, never
-  "newer is better"**.)* The audit above established something the backlog had been assuming away: **most of
-  what an old run is missing cannot be healed from disk.** `seam_residual` could be (and now is);
-  `coverage_thin_frac` could be (v0.320.3); but the capture window, the night count and the run's own star size
-  cannot — the first two because nothing on disk records *which frames that run used*, the third because it is a
-  fresh measurement. So the owner's back catalogue will read **"Stacked 30 Aug 2026"** instead of *"Shot over 4
-  nights, 15–18 Nov 2024"* on its captions, nameplates, share sheets, Gallery cards, History rows and Sky
-  footprints **forever**, and nothing anywhere tells them the one thing that would fix it: press Stack again.
-  **The signal already exists** — every run records `engine_version`, and the NULL-ness of each later column is
-  itself the list of what is missing. **Shape:** a self-hiding note (in the Target page's existing
-  `NoticeBoard`, per the standing IA priority — *not* a tenth banner) on a target whose newest genuine stack is
-  missing things a re-stack would supply, worded as the gain rather than the version: *"This picture was made
-  before AstroStack recorded when your subs were shot, so it can't say what night it's from. Stacking it again
-  would fix that — and it'd use the newer alignment."* One button, reusing the existing stack path; **never
-  auto-restack** (it is hours of CPU on a NAS, and §9 says new behaviour is opt-in).
-  **Care, and why it is M not S:** (a) the honest gain list has to be computed from the *run*, not from a
-  version comparison — "your version is old" is not a reason a beginner can act on, and a version table would go
-  stale the moment anyone edits it; (b) it must not fire on a target that has no new frames and a perfectly good
-  picture unless the gain is real; and (c) it wants a cost estimate beside it (`estimate_stack` already exists),
-  because "stack 5,000 subs again" is not a one-click decision on the owner's box. **Grep before building:**
-  `ReprocessCard` / "Reprocess everything" in Settings, the `outdated targets` badge, and `RestackNote` — one of
-  them may already be the right home, and a fourth restack surface would be exactly the feature-piling the
-  owner's "extremely busy" priority warns against.
+- **NEW IDEA (Builder 2026-09-01, the surface the v0.322.0 quiet-capture note deliberately did not add) — one
+  library-wide "a target went quiet last night" line, for the morning.** *(Pillar: autonomy — PRIORITY 2;
+  size S; **read the "why not simply widen the window" note below before building**.)* v0.322.0 tells a
+  *target's own page* when its subs stopped mid-session, and self-hides once the silence outlasts the 6 h
+  session gap — past that the night is over and a live "capture may have stopped" warning would be nonsense.
+  That is right for the note, and it means **the owner who was asleep never sees it**: by breakfast the note
+  is gone, and the Dashboard — where they actually start — never said anything. **Shape:** a past-tense,
+  library-wide line for the morning, e.g. *"M 42 stopped getting subs at 23:40 last night, about 4 h before
+  you usually stop"*, on the Dashboard's existing *Recent* group (**not** a new always-on banner — the
+  standing IA priority). **Why it is not just a wider window on the existing note:** the tense and the claim
+  both have to change. "Capture may have stopped" is actionable while the scope is out; in the morning the
+  only honest version is "here is what last night cost you", which wants a comparison against how the night
+  *should* have ended — the observing-night length the planner already computes, or simply this target's own
+  usual stop time — and neither is on the live path. **Care:** it must never fire on a night the owner ended
+  deliberately, which across a whole library is a much harder call than on one target; a false "you lost half
+  a night" in the morning is worse than silence. Reuse `livesession.quiet_after_minutes` and the shared
+  session cut rather than inventing a second definition.
 
-- **NEW IDEA (Builder 2026-09-01, spotted finishing the date sweep in v0.321.2/3) — the Compare view still dates
-  two stacks by when they were *processed*.** *(Pillar: understand / trust — PRIORITY 3; size S; frontend-only
-  if the payload already carries it, one additive field if not.)* `Compare.tsx` sets
-  `compareDateLabel = formatStampDate`, i.e. the run's `timestamp_utc`. On every other picture surface that is
-  now either the capture window or an explicitly labelled "Stacked …", and Compare is the one screen whose whole
-  question is *"did it get better?"* — where the honest answer is usually *"yes, because the second one has two
-  more nights in it"*, which is exactly the fact the processing stamp cannot show. **Shape:** the same
-  `pictureDateLabel`, and if the two runs' capture windows differ, that difference is the most interesting line
-  on the page. **Care:** unlike the Gallery, a Compare row's date may also be doing identity work (two runs of
-  one target), so check what else distinguishes the two columns before dropping the processing stamp — the
-  History row's answer (say both, each labelled) is probably right here too.
+- **✅ SHIPPED (Builder, v0.322.0, branch `claude/wizardly-feynman-qw8j45`) — ~~"your capture seems to have
+  gone quiet": a per-target heads-up when subs stopped arriving mid-session, so a clear night isn't silently
+  lost to a stalled Seestar.~~** Built as the entry asked — a self-hiding note in the Target page's existing
+  `NoticeBoard`, informational only, strictly read-only over `incoming/` (§10).
+
+  **The grep the entry asked for changed the shape, and for the better: no new endpoint and no second
+  definition of a session.** `seestack/livesession.py` ("Tonight, live") already cut the trailing session with
+  the shared `_split_sessions` gap walk and already knew the newest sub was stale (`active`). What it could not
+  say is the only thing that matters here: whether the target was **mid-run** when it stopped (worth a
+  heads-up) or simply **finished** (worth nothing at all). So the verdict lives beside `active`, on the
+  `live-session` payload the Live page already fetches, rather than as a fourth surface asking the same
+  question. The `webapp/seestar/manager.py` device layer is untouched — this is the folder-arrival side, which
+  works for the file-drop-only owner who never pairs a scope.
+
+  **The care is all in *not* crying wolf**, and every clause of it is a test:
+  * **The wait scales with the target's own cadence.** "No sub for 45 minutes" means something very different
+    for 10 s subs than for one 5-minute frame at a time, so the wait is `6 ×` the *median* inter-sub gap over
+    the trailing 30 subs — the median precisely because a real night contains dither/refocus/cloud pauses, and
+    one 40-minute hole must not redefine "normal" (a test pins exactly that).
+  * **Floored at `LIVE_STALE_MINUTES`,** so "still going" and "gone quiet" can never both be true of one
+    session, and **capped at 180 min**, so even a very slow cadence gets noticed the same night.
+  * **It needs a run of arrivals to have stopped** — ≥6 datable subs spanning ≥20 minutes, so a couple of test
+    frames going quiet says nothing.
+  * **And it self-hides once the silence outlasts the 6 h session gap:** past that this is *last night*, and
+    the recap is the surface that tells that story. A night the owner deliberately finished never trips it.
+
+  The copy names the cadence, the silence and what the session already got ("This target was getting a sub
+  about every 30 s, then nothing arrived for 1.2 h… If you finished for the night, nothing is wrong and you can
+  ignore this."), with one button through to "Tonight, live". The Live page's own `freshnessLine` gained the
+  same distinction: a stalled session no longer reads "this session looks finished", which was the comfortable
+  wrong answer.
+
+  **Upgrade-safe (§9):** three additive optional fields on one existing response, three new dataclass fields
+  with behaviour-preserving defaults, no config/schema/on-disk/API-shape change and no default flipped. The
+  frontend types them optional, so an older backend renders nothing — exactly as before this existed.
+
+  **Tests: +9 engine (`tests/test_livesession.py`), +2 endpoint
+  (`tests/webapp/test_target_live_session.py`), +5 component (`CaptureQuietNote.test.tsx`), +5 phrasing
+  (`liveSession.test.ts`).** Most of them assert *silence*: a finished night, a handful of subs, a session that
+  never got going, an older backend, a failed fetch.
+
+    *(Original spec follows.)* **"your capture seems to have gone quiet": a per-target heads-up when subs
+    stopped arriving mid-session, so a clear night isn't silently lost to a stalled Seestar.** *(Pillar: get +
+    autonomy — PRIORITY 2–3; size S–M; the whole signal is already on disk — this is a read + a note, never a
+    new watch.)* The owner walks away and lets AstroStack watch `incoming/`; the failure this catches is the one
+    they can't see happening — the Seestar disconnects, its microSD fills, or the app's dew heater trips and the
+    scope parks — and **no new subs arrive for the rest of an otherwise-clear night**. Today nothing notices: the
+    watcher fires only *on* arrival, so a target that stops feeding simply goes still, and the owner finds out in
+    the morning that four of their eight planned hours are missing. **The data already exists:** ingest stamps
+    each frame's arrival time, so "this target's newest accepted sub is N hours old while it was actively
+    accumulating an hour ago" is a pure query. **Shape:** a self-hiding note (the Target page's existing
+    `NoticeBoard`, per the standing IA priority — *not* a new banner) reading e.g. *"No new subs from this target
+    in the last 90 min — capture may have stopped (Seestar disconnected, card full, or you're done for the
+    night)."* Informational only; it must **never** act — no auto-anything, and strictly read-only over
+    `incoming/` (§10). **Sane default and the care that makes it not-annoying:** it may only fire on a target that
+    *was* recently active (had a run of arrivals that then stopped), never on a target the owner deliberately
+    finished or hasn't started, and the threshold wants to be generous (a Seestar's own dithers/refocus gap plus
+    SMB latency, so ~1–2× a typical inter-sub interval, not a fixed clock). **Grep before building:** it overlaps
+    the live device layer — `webapp/seestar/manager.py` already tracks a Seestar's `last_seen_utc` over a
+    telemetry connection — so first decide whether this belongs there (device-connectivity truth, when a scope is
+    paired) or on the incoming-folder side (works for the file-drop-only owner who never pairs). The
+    folder-arrival side is the one that always applies and needs no device link; the manager may already answer
+    the paired case, in which case this is the *unpaired* complement, not a second copy. It is a §9-safe additive
+    read; nothing persisted, no default flipped.
+
+- **✅ SHIPPED (Builder, v0.322.2, branch `claude/wizardly-feynman-qw8j45`) — ~~"this picture was made by an
+  older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it
+  would gain.~~** Built to the entry's three rules — it names a **gain, never a version**; it never appears
+  unless a re-stack could actually deliver that gain; and it only ever **offers** (re-stacking is hours of NAS
+  CPU, and §9 says new behaviour is opt-in). New `seestack/restackgain.py` + `GET
+  /api/targets/{safe}/restack-gain` + a self-hiding `RestackGainNote` in the Target page's existing
+  `NoticeBoard`.
+
+  **The scope call the entry's care point (a) forces, and it is the whole design.** "Compute the gain from the
+  *run*, not from a version comparison" is easy to say and it **rules out most of the gain list**, because
+  NULL-ness alone is ambiguous: `stack_fwhm_px` is NULL both for a run predating the column *and* for one with
+  too few stars to fit, and nothing at the run level can tell those apart. Promising sharpness a re-stack might
+  then not measure is exactly the "newer is better" hand-wave the entry bans, so **the sharpness gain is
+  deliberately not offered** — only the date one is, because it is the one whose deliverability is *checkable*:
+  the missing window is fixable only if the target's own accepted subs carry capture times **now**, and that is
+  a fact about the frames, not about a release. `MIN_DATABLE_SHARE = 0.5` on top, because one datable sub in
+  five hundred *would* record a window — a single-night one, misdescribing a picture made of five.
+
+  **Two gains, one story, at different resolutions:** no capture window at all (the picture's date is the day
+  it was stacked, everywhere) and — for the in-between run — a window but no night count, so a caption can name
+  two dates but never say "over four nights". The note says which, quotes the cost in the only unit that
+  matters (`n_frames_ready` subs to re-combine, against the `n_frames_used` behind the current picture), and
+  reassures that nothing is replaced: the existing picture stays in the target's history.
+
+  **The "grep before building" check, answered — no fourth restack surface.** `reprocess-status` +
+  Settings' reprocess card are **library-wide and version-based**, i.e. precisely the reason the entry says is
+  not actionable for a beginner; the Target page's "N new subs since your last stack" note is per-target but
+  for a different, more pressing reason. So this note **stands down entirely while that one speaks**
+  (`newSubsSinceStack > 0`), since its restack fixes the dates too — pinned by a test. It sits at
+  `advisory`, so it can never take a warning's inline slot.
+
+  **Upgrade-safe (§9):** one new read-only endpoint, one new pure module, no schema/config/on-disk/API-shape
+  change and no default flipped; the frontend types the payload optional, so an older backend renders nothing.
+  It never starts a stack by itself.
+
+  **Tests: +8 engine (`tests/test_restackgain.py`), +6 endpoint
+  (`tests/webapp/test_target_restack_gain.py`), +5 component (`RestackGainNote.test.tsx`), +2 page
+  (`Target.test.tsx`).** The honesty cases are the point: undatable subs, a minority of datable subs, an
+  editor export standing in for the picture, and the stand-down beside the new-subs note.
+
+  **Left open, deliberately:** the *sharpness* gain above (it needs a way to tell "the column didn't exist"
+  from "not measurable", which no run-level check can supply), and any library-wide roll-up of this — the
+  per-target note is where a beginner is standing when they look at the picture that is wrong.
+
+    *(Original spec follows.)* **"this picture was made by an
+    older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it would
+    gain.** *(Pillar: autonomy + trust — PRIORITY 2–3; size M; **the nudge must name a concrete gain, never
+    "newer is better"**.)* The audit above established something the backlog had been assuming away: **most of
+    what an old run is missing cannot be healed from disk.** `seam_residual` could be (and now is);
+    `coverage_thin_frac` could be (v0.320.3); but the capture window, the night count and the run's own star size
+    cannot — the first two because nothing on disk records *which frames that run used*, the third because it is a
+    fresh measurement. So the owner's back catalogue will read **"Stacked 30 Aug 2026"** instead of *"Shot over 4
+    nights, 15–18 Nov 2024"* on its captions, nameplates, share sheets, Gallery cards, History rows and Sky
+    footprints **forever**, and nothing anywhere tells them the one thing that would fix it: press Stack again.
+    **The signal already exists** — every run records `engine_version`, and the NULL-ness of each later column is
+    itself the list of what is missing. **Shape:** a self-hiding note (in the Target page's existing
+    `NoticeBoard`, per the standing IA priority — *not* a tenth banner) on a target whose newest genuine stack is
+    missing things a re-stack would supply, worded as the gain rather than the version: *"This picture was made
+    before AstroStack recorded when your subs were shot, so it can't say what night it's from. Stacking it again
+    would fix that — and it'd use the newer alignment."* One button, reusing the existing stack path; **never
+    auto-restack** (it is hours of CPU on a NAS, and §9 says new behaviour is opt-in).
+    **Care, and why it is M not S:** (a) the honest gain list has to be computed from the *run*, not from a
+    version comparison — "your version is old" is not a reason a beginner can act on, and a version table would go
+    stale the moment anyone edits it; (b) it must not fire on a target that has no new frames and a perfectly good
+    picture unless the gain is real; and (c) it wants a cost estimate beside it (`estimate_stack` already exists),
+    because "stack 5,000 subs again" is not a one-click decision on the owner's box. **Grep before building:**
+    `ReprocessCard` / "Reprocess everything" in Settings, the `outdated targets` badge, and `RestackNote` — one of
+    them may already be the right home, and a fourth restack surface would be exactly the feature-piling the
+    owner's "extremely busy" priority warns against.
+
+- **✅ SHIPPED (Builder, v0.322.1, branch `claude/wizardly-feynman-qw8j45`) — ~~the Compare view still dates
+  two stacks by when they were *processed*.~~** Frontend-only, as the entry predicted: every field was already
+  on the gallery payload. `compareDateLabel` now takes the item and returns `pictureDateLabel(…)` — the same
+  helper the Gallery card, the Sky footprint and the share sheet use, so no two surfaces can date one picture
+  differently — which means each side reads **"Shot over 4 nights, 15–18 Nov 2024"**, or a *labelled*
+  "Stacked 30 Aug 2026" for a run made before the app recorded when its subs were taken. Never a bare date:
+  a bare one reads as "the night I took this", which on a re-stack of a back catalogue is years out.
+
+  **The identity caution the entry raised, answered.** A Compare row's date *was* doing identity work, so the
+  fix keeps identity intact rather than trading it away: the run's `output_basename` already sits beside the
+  date on both meta blocks, and `pictureDateLabel` is self-labelling, so "which run is this?" and "when was it
+  shot?" are now separately answerable. History's both-dates-labelled answer wasn't copied wholesale — its two
+  columns are rows in one list, where the clock time disambiguates two re-stacks made the same afternoon;
+  Compare's are two named, badged, basenamed panels.
+
+  **Two things beyond the entry, both from the same reading of the page.** (a) The **"Side by side" mode — the
+  one most people compare in — carried no date at all**, so the fact that usually explains the difference was
+  simply invisible there; it now carries the same labelled line. (b) The entry's own observation that *"if the
+  two runs' capture windows differ, that difference is the most interesting line on the page"* is now that
+  line: a third verdict beside the noise and panel-flatness ones, reading **"B is made of subs from 4 nights
+  against 2 — on the same target that's usually the biggest difference between two stacks, whatever the
+  settings."** Deliberately narrow — both runs must have *recorded* their night count (never inferred from the
+  window: 15→18 Nov is equally two nights and four), the counts must differ, and **both sides must be the same
+  target**, since "M 42 has more nights than NGC 7000" compares nothing.
+
+  **Upgrade-safe (§9):** pure frontend, reading optional fields that are already optional. A run with no
+  capture window falls back to the labelled processing stamp; a run with no night count says nothing about
+  depth.
+
+  **Tests: +7 in `Compare.test.tsx`** (5 unit on the new `nightsComparison` + the rewritten `compareDateLabel`,
+  2 rendered: the depth line appearing with the labelled "Shot over N nights" dates, and staying silent — with
+  a labelled "Stacked …" still on both sides — when the runs never recorded their nights).
+
+    *(Original spec follows.)* **the Compare view still dates
+    two stacks by when they were *processed*.** *(Pillar: understand / trust — PRIORITY 3; size S; frontend-only
+    if the payload already carries it, one additive field if not.)* `Compare.tsx` sets
+    `compareDateLabel = formatStampDate`, i.e. the run's `timestamp_utc`. On every other picture surface that is
+    now either the capture window or an explicitly labelled "Stacked …", and Compare is the one screen whose whole
+    question is *"did it get better?"* — where the honest answer is usually *"yes, because the second one has two
+    more nights in it"*, which is exactly the fact the processing stamp cannot show. **Shape:** the same
+    `pictureDateLabel`, and if the two runs' capture windows differ, that difference is the most interesting line
+    on the page. **Care:** unlike the Gallery, a Compare row's date may also be doing identity work (two runs of
+    one target), so check what else distinguishes the two columns before dropping the processing stamp — the
+    History row's answer (say both, each labelled) is probably right here too.
 
 - **✅ AUDITED AND CLOSED (Builder, v0.321.1, branch `claude/wizardly-feynman-be4ubk`) — ~~sweep the *other*
   later-added run measurements for the ones that are also recoverable from what is already on disk.~~
