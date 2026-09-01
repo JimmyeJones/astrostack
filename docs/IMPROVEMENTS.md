@@ -10291,6 +10291,44 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-09-01, the conclusion the v0.321.1 heal audit forced) — "this picture was made by an
+  older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it would
+  gain.** *(Pillar: autonomy + trust — PRIORITY 2–3; size M; **the nudge must name a concrete gain, never
+  "newer is better"**.)* The audit above established something the backlog had been assuming away: **most of
+  what an old run is missing cannot be healed from disk.** `seam_residual` could be (and now is);
+  `coverage_thin_frac` could be (v0.320.3); but the capture window, the night count and the run's own star size
+  cannot — the first two because nothing on disk records *which frames that run used*, the third because it is a
+  fresh measurement. So the owner's back catalogue will read **"Stacked 30 Aug 2026"** instead of *"Shot over 4
+  nights, 15–18 Nov 2024"* on its captions, nameplates, share sheets, Gallery cards, History rows and Sky
+  footprints **forever**, and nothing anywhere tells them the one thing that would fix it: press Stack again.
+  **The signal already exists** — every run records `engine_version`, and the NULL-ness of each later column is
+  itself the list of what is missing. **Shape:** a self-hiding note (in the Target page's existing
+  `NoticeBoard`, per the standing IA priority — *not* a tenth banner) on a target whose newest genuine stack is
+  missing things a re-stack would supply, worded as the gain rather than the version: *"This picture was made
+  before AstroStack recorded when your subs were shot, so it can't say what night it's from. Stacking it again
+  would fix that — and it'd use the newer alignment."* One button, reusing the existing stack path; **never
+  auto-restack** (it is hours of CPU on a NAS, and §9 says new behaviour is opt-in).
+  **Care, and why it is M not S:** (a) the honest gain list has to be computed from the *run*, not from a
+  version comparison — "your version is old" is not a reason a beginner can act on, and a version table would go
+  stale the moment anyone edits it; (b) it must not fire on a target that has no new frames and a perfectly good
+  picture unless the gain is real; and (c) it wants a cost estimate beside it (`estimate_stack` already exists),
+  because "stack 5,000 subs again" is not a one-click decision on the owner's box. **Grep before building:**
+  `ReprocessCard` / "Reprocess everything" in Settings, the `outdated targets` badge, and `RestackNote` — one of
+  them may already be the right home, and a fourth restack surface would be exactly the feature-piling the
+  owner's "extremely busy" priority warns against.
+
+- **NEW IDEA (Builder 2026-09-01, spotted finishing the date sweep in v0.321.2/3) — the Compare view still dates
+  two stacks by when they were *processed*.** *(Pillar: understand / trust — PRIORITY 3; size S; frontend-only
+  if the payload already carries it, one additive field if not.)* `Compare.tsx` sets
+  `compareDateLabel = formatStampDate`, i.e. the run's `timestamp_utc`. On every other picture surface that is
+  now either the capture window or an explicitly labelled "Stacked …", and Compare is the one screen whose whole
+  question is *"did it get better?"* — where the honest answer is usually *"yes, because the second one has two
+  more nights in it"*, which is exactly the fact the processing stamp cannot show. **Shape:** the same
+  `pictureDateLabel`, and if the two runs' capture windows differ, that difference is the most interesting line
+  on the page. **Care:** unlike the Gallery, a Compare row's date may also be doing identity work (two runs of
+  one target), so check what else distinguishes the two columns before dropping the processing stamp — the
+  History row's answer (say both, each labelled) is probably right here too.
+
 - **✅ AUDITED AND CLOSED (Builder, v0.321.1, branch `claude/wizardly-feynman-be4ubk`) — ~~sweep the *other*
   later-added run measurements for the ones that are also recoverable from what is already on disk.~~
   The audit ran over every column; exactly one passed, and it shipped.** *(Read the audit before re-opening
