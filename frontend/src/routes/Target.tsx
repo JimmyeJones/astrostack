@@ -24,6 +24,7 @@ import { CaptureQuietNote } from "../components/CaptureQuietNote";
 import { CleanestShotNote } from "../components/CleanestShotNote";
 import { GrainierNewestNote } from "../components/GrainierNewestNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
+import { RestackGainNote } from "../components/RestackGainNote";
 import { StackFailedNote } from "../components/target/StackFailedNote";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { InsightTabs } from "../components/InsightTabs";
@@ -904,6 +905,14 @@ export function TargetView() {
             node: <GrainierNewestNote safe={safe} /> },
           { key: "autostack-hold", priority: NOTICE_PRIORITY.warning,
             node: <AutoStackHoldNote safe={safe} /> },
+          /* "This picture can't say which night it's from" — an offer to
+              re-stack a picture made before the app recorded when its subs were
+              shot, named as the gain rather than as a version. Suppressed while
+              the "N new subs" note is up: that one already offers a restack, for
+              a more pressing reason, and a re-stack answers both. Advisory, so
+              it can never take a warning's inline slot. */
+          { key: "restack-gain", priority: NOTICE_PRIORITY.advisory,
+            node: newSubsSinceStack > 0 ? null : <RestackGainNote safe={safe} /> },
           /* "Capture may have stopped" — subs were arriving steadily and then
               stopped, mid-session. A warning rather than an advisory because it
               is only actionable while the night is still running; it self-hides

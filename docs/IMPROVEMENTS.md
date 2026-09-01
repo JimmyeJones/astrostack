@@ -10378,31 +10378,75 @@ to **Shipped**.)_
     the paired case, in which case this is the *unpaired* complement, not a second copy. It is a §9-safe additive
     read; nothing persisted, no default flipped.
 
-- **NEW IDEA (Builder 2026-09-01, the conclusion the v0.321.1 heal audit forced) — "this picture was made by an
-  older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it would
-  gain.** *(Pillar: autonomy + trust — PRIORITY 2–3; size M; **the nudge must name a concrete gain, never
-  "newer is better"**.)* The audit above established something the backlog had been assuming away: **most of
-  what an old run is missing cannot be healed from disk.** `seam_residual` could be (and now is);
-  `coverage_thin_frac` could be (v0.320.3); but the capture window, the night count and the run's own star size
-  cannot — the first two because nothing on disk records *which frames that run used*, the third because it is a
-  fresh measurement. So the owner's back catalogue will read **"Stacked 30 Aug 2026"** instead of *"Shot over 4
-  nights, 15–18 Nov 2024"* on its captions, nameplates, share sheets, Gallery cards, History rows and Sky
-  footprints **forever**, and nothing anywhere tells them the one thing that would fix it: press Stack again.
-  **The signal already exists** — every run records `engine_version`, and the NULL-ness of each later column is
-  itself the list of what is missing. **Shape:** a self-hiding note (in the Target page's existing
-  `NoticeBoard`, per the standing IA priority — *not* a tenth banner) on a target whose newest genuine stack is
-  missing things a re-stack would supply, worded as the gain rather than the version: *"This picture was made
-  before AstroStack recorded when your subs were shot, so it can't say what night it's from. Stacking it again
-  would fix that — and it'd use the newer alignment."* One button, reusing the existing stack path; **never
-  auto-restack** (it is hours of CPU on a NAS, and §9 says new behaviour is opt-in).
-  **Care, and why it is M not S:** (a) the honest gain list has to be computed from the *run*, not from a
-  version comparison — "your version is old" is not a reason a beginner can act on, and a version table would go
-  stale the moment anyone edits it; (b) it must not fire on a target that has no new frames and a perfectly good
-  picture unless the gain is real; and (c) it wants a cost estimate beside it (`estimate_stack` already exists),
-  because "stack 5,000 subs again" is not a one-click decision on the owner's box. **Grep before building:**
-  `ReprocessCard` / "Reprocess everything" in Settings, the `outdated targets` badge, and `RestackNote` — one of
-  them may already be the right home, and a fourth restack surface would be exactly the feature-piling the
-  owner's "extremely busy" priority warns against.
+- **✅ SHIPPED (Builder, v0.322.2, branch `claude/wizardly-feynman-qw8j45`) — ~~"this picture was made by an
+  older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it
+  would gain.~~** Built to the entry's three rules — it names a **gain, never a version**; it never appears
+  unless a re-stack could actually deliver that gain; and it only ever **offers** (re-stacking is hours of NAS
+  CPU, and §9 says new behaviour is opt-in). New `seestack/restackgain.py` + `GET
+  /api/targets/{safe}/restack-gain` + a self-hiding `RestackGainNote` in the Target page's existing
+  `NoticeBoard`.
+
+  **The scope call the entry's care point (a) forces, and it is the whole design.** "Compute the gain from the
+  *run*, not from a version comparison" is easy to say and it **rules out most of the gain list**, because
+  NULL-ness alone is ambiguous: `stack_fwhm_px` is NULL both for a run predating the column *and* for one with
+  too few stars to fit, and nothing at the run level can tell those apart. Promising sharpness a re-stack might
+  then not measure is exactly the "newer is better" hand-wave the entry bans, so **the sharpness gain is
+  deliberately not offered** — only the date one is, because it is the one whose deliverability is *checkable*:
+  the missing window is fixable only if the target's own accepted subs carry capture times **now**, and that is
+  a fact about the frames, not about a release. `MIN_DATABLE_SHARE = 0.5` on top, because one datable sub in
+  five hundred *would* record a window — a single-night one, misdescribing a picture made of five.
+
+  **Two gains, one story, at different resolutions:** no capture window at all (the picture's date is the day
+  it was stacked, everywhere) and — for the in-between run — a window but no night count, so a caption can name
+  two dates but never say "over four nights". The note says which, quotes the cost in the only unit that
+  matters (`n_frames_ready` subs to re-combine, against the `n_frames_used` behind the current picture), and
+  reassures that nothing is replaced: the existing picture stays in the target's history.
+
+  **The "grep before building" check, answered — no fourth restack surface.** `reprocess-status` +
+  Settings' reprocess card are **library-wide and version-based**, i.e. precisely the reason the entry says is
+  not actionable for a beginner; the Target page's "N new subs since your last stack" note is per-target but
+  for a different, more pressing reason. So this note **stands down entirely while that one speaks**
+  (`newSubsSinceStack > 0`), since its restack fixes the dates too — pinned by a test. It sits at
+  `advisory`, so it can never take a warning's inline slot.
+
+  **Upgrade-safe (§9):** one new read-only endpoint, one new pure module, no schema/config/on-disk/API-shape
+  change and no default flipped; the frontend types the payload optional, so an older backend renders nothing.
+  It never starts a stack by itself.
+
+  **Tests: +8 engine (`tests/test_restackgain.py`), +6 endpoint
+  (`tests/webapp/test_target_restack_gain.py`), +5 component (`RestackGainNote.test.tsx`), +2 page
+  (`Target.test.tsx`).** The honesty cases are the point: undatable subs, a minority of datable subs, an
+  editor export standing in for the picture, and the stand-down beside the new-subs note.
+
+  **Left open, deliberately:** the *sharpness* gain above (it needs a way to tell "the column didn't exist"
+  from "not measurable", which no run-level check can supply), and any library-wide roll-up of this — the
+  per-target note is where a beginner is standing when they look at the picture that is wrong.
+
+    *(Original spec follows.)* **"this picture was made by an
+    older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it would
+    gain.** *(Pillar: autonomy + trust — PRIORITY 2–3; size M; **the nudge must name a concrete gain, never
+    "newer is better"**.)* The audit above established something the backlog had been assuming away: **most of
+    what an old run is missing cannot be healed from disk.** `seam_residual` could be (and now is);
+    `coverage_thin_frac` could be (v0.320.3); but the capture window, the night count and the run's own star size
+    cannot — the first two because nothing on disk records *which frames that run used*, the third because it is a
+    fresh measurement. So the owner's back catalogue will read **"Stacked 30 Aug 2026"** instead of *"Shot over 4
+    nights, 15–18 Nov 2024"* on its captions, nameplates, share sheets, Gallery cards, History rows and Sky
+    footprints **forever**, and nothing anywhere tells them the one thing that would fix it: press Stack again.
+    **The signal already exists** — every run records `engine_version`, and the NULL-ness of each later column is
+    itself the list of what is missing. **Shape:** a self-hiding note (in the Target page's existing
+    `NoticeBoard`, per the standing IA priority — *not* a tenth banner) on a target whose newest genuine stack is
+    missing things a re-stack would supply, worded as the gain rather than the version: *"This picture was made
+    before AstroStack recorded when your subs were shot, so it can't say what night it's from. Stacking it again
+    would fix that — and it'd use the newer alignment."* One button, reusing the existing stack path; **never
+    auto-restack** (it is hours of CPU on a NAS, and §9 says new behaviour is opt-in).
+    **Care, and why it is M not S:** (a) the honest gain list has to be computed from the *run*, not from a
+    version comparison — "your version is old" is not a reason a beginner can act on, and a version table would go
+    stale the moment anyone edits it; (b) it must not fire on a target that has no new frames and a perfectly good
+    picture unless the gain is real; and (c) it wants a cost estimate beside it (`estimate_stack` already exists),
+    because "stack 5,000 subs again" is not a one-click decision on the owner's box. **Grep before building:**
+    `ReprocessCard` / "Reprocess everything" in Settings, the `outdated targets` badge, and `RestackNote` — one of
+    them may already be the right home, and a fourth restack surface would be exactly the feature-piling the
+    owner's "extremely busy" priority warns against.
 
 - **✅ SHIPPED (Builder, v0.322.1, branch `claude/wizardly-feynman-qw8j45`) — ~~the Compare view still dates
   two stacks by when they were *processed*.~~** Frontend-only, as the entry predicted: every field was already

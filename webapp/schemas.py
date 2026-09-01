@@ -322,6 +322,27 @@ class LiveSessionOut(BaseModel):
     quiet_after_minutes: float | None = None
 
 
+class RestackGainOut(BaseModel):
+    """What re-stacking this target's newest picture would *give* the owner —
+    named as a gain, never as a version number.
+
+    A picture stacked before the app recorded when its subs were shot can never
+    say which night it is from, on any surface, and unlike the coverage share and
+    the seam figure that fact cannot be healed from disk. This is the one place
+    that says so, with the button that fixes it. ``null`` whenever there is
+    nothing honest to offer — including when the target's own subs aren't datable
+    enough for a re-stack to fill the gap (see
+    :func:`seestack.restackgain.restack_gain`).
+    """
+
+    run_id: int
+    timestamp_utc: str
+    n_frames_used: int
+    n_frames_ready: int
+    missing_capture_window: bool
+    missing_night_count: bool
+
+
 class NightSummaryOut(BaseModel):
     """One capture night in the per-target "Nights" breakdown."""
 
