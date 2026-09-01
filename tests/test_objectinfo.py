@@ -203,3 +203,53 @@ def test_the_previously_blank_targets_now_say_something_real():
         assert info is not None, name
         assert info.blurb, f"{name} still has no blurb"
         assert len(info.blurb) >= 60, name
+
+
+# --- confident_object_title: what a *shared* picture may be captioned ---------
+#
+# The card can afford a wider cone than a baked caption can: a bad guess on a
+# card is dismissed in a glance, a bad name printed into shared pixels is a wrong
+# fact that outlives the session. These pin both sides of that line.
+
+def test_a_folder_name_that_identifies_nothing_takes_the_catalog_name():
+    from seestack.objectinfo import confident_object_title
+
+    assert confident_object_title("MyWorks_2026-08-14", 10.685, 41.269) == (
+        "Andromeda Galaxy")
+    assert confident_object_title("Unsorted", 83.822, -5.391) == "Orion Nebula"
+    # No name at all is the same case — the sky is all there is to go on.
+    assert confident_object_title(None, 83.822, -5.391) == "Orion Nebula"
+
+
+def test_a_name_that_identifies_the_object_is_left_alone():
+    from seestack.objectinfo import confident_object_title
+
+    for name in ("M 31", "M31", "M_31", "Andromeda Galaxy"):
+        assert confident_object_title(name, 10.685, 41.269) is None, name
+    # A designation the bundled catalog doesn't carry (it lists M31, not its NGC
+    # alias) reads as "identifies nothing", so the coordinates decide — and what
+    # they say is still true, which is the bar for a baked caption.
+    assert confident_object_title("NGC 224", 10.685, 41.269) == "Andromeda Galaxy"
+
+
+def test_the_title_cone_is_tighter_than_the_cards():
+    """0.5° away is a neighbour. The card would still claim it; the caption
+    must not."""
+    from seestack.objectinfo import _CONE_MATCH_DEG, _TITLE_MATCH_DEG
+
+    assert _TITLE_MATCH_DEG < _CONE_MATCH_DEG
+    from seestack.objectinfo import confident_object_title
+
+    assert identify_object("Unsorted", 10.685, 41.269 + 0.5) is not None
+    assert confident_object_title("Unsorted", 10.685, 41.269 + 0.5) is None
+
+
+def test_no_solved_centre_and_bad_numbers_say_nothing():
+    import math
+
+    from seestack.objectinfo import confident_object_title
+
+    assert confident_object_title("Unsorted") is None
+    assert confident_object_title("Unsorted", 10.685, None) is None
+    assert confident_object_title("Unsorted", math.nan, 41.269) is None
+    assert confident_object_title("Unsorted", "not a number", 41.269) is None
