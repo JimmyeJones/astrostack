@@ -1252,6 +1252,20 @@ class Project:
             (None if frac is None else float(frac), run_id))
         return cur.rowcount > 0
 
+    def set_stack_seam_residual(self, run_id: int,
+                                ratio: float | None) -> bool:
+        """Record how flat a mosaic run's panel joins came out — normally stamped
+        by the stack itself, but also filled in after the fact for a run recorded
+        before the column existed
+        (:func:`seestack.coverage_backfill.backfill_seam_residual`, which
+        re-measures it from the master and coverage map the run wrote). Returns
+        True if a row was updated, False if no run with ``run_id`` exists."""
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "UPDATE stack_runs SET seam_residual = ? WHERE id = ?",
+            (None if ratio is None else float(ratio), run_id))
+        return cur.rowcount > 0
+
     def set_stack_preview_stretch(
         self, run_id: int, stretch: float | None, black: float | None
     ) -> bool:

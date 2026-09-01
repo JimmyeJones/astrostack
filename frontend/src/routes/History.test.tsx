@@ -2106,3 +2106,45 @@ describe("HistoryView heading", () => {
     expect(await screen.findByText("Stack history — M_42")).toBeInTheDocument();
   });
 });
+
+describe("HistoryView — the run's two dates, each labelled", () => {
+  it("says both when the run knows when its subs were shot", async () => {
+    // This row's stamp is *which run* it is; the capture window is what the
+    // picture is of. On a re-stack of a back catalogue they are years apart, and
+    // the raw `2026-08-30T22:14:03` this replaces read as the latter.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ timestamp_utc: "2026-08-30T22:14:03",
+        capture_night_start: "2024-11-15", capture_night_end: "2024-11-18" }),
+    ]);
+    renderHistory();
+    const line = await screen.findByText(/Shot 15–18 Nov 2024/);
+    expect(line).toHaveTextContent(/Stacked/);
+    expect(line.textContent).not.toMatch(/2026-08-30T/);
+  });
+
+  it("keeps the clock time, so two re-stacks in one afternoon stay apart", async () => {
+    // `output_basename` is reused across a re-stack, so the stamp is the only
+    // thing separating these two rows — the date alone would collapse them.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 1, timestamp_utc: "2026-08-30T14:05:00" }),
+      mkRun({ id: 2, timestamp_utc: "2026-08-30T17:41:00" }),
+    ]);
+    renderHistory();
+    const lines = await screen.findAllByText(/^Stacked /);
+    expect(lines).toHaveLength(2);
+    expect(lines[0].textContent).not.toBe(lines[1].textContent);
+    // …and a run with no capture window says nothing about when it was shot.
+    for (const l of lines) expect(l.textContent).not.toMatch(/Shot/);
+  });
+
+  it("drops the label and its separator when the stamp is unreadable", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ timestamp_utc: "not-a-date" }),
+    ]);
+    renderHistory();
+    const line = await screen.findByText(/100×100/);
+    expect(line.textContent).not.toMatch(/Stacked/);
+    expect(line.textContent).not.toMatch(/Invalid/);
+    expect(line.textContent?.trimStart()).toMatch(/^100×100/);
+  });
+});

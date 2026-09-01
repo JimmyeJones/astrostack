@@ -10291,7 +10291,100 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-31, the generalisation of the v0.320.3 coverage heal) — sweep the *other*
+- **NEW IDEA (Builder 2026-09-01, the conclusion the v0.321.1 heal audit forced) — "this picture was made by an
+  older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it would
+  gain.** *(Pillar: autonomy + trust — PRIORITY 2–3; size M; **the nudge must name a concrete gain, never
+  "newer is better"**.)* The audit above established something the backlog had been assuming away: **most of
+  what an old run is missing cannot be healed from disk.** `seam_residual` could be (and now is);
+  `coverage_thin_frac` could be (v0.320.3); but the capture window, the night count and the run's own star size
+  cannot — the first two because nothing on disk records *which frames that run used*, the third because it is a
+  fresh measurement. So the owner's back catalogue will read **"Stacked 30 Aug 2026"** instead of *"Shot over 4
+  nights, 15–18 Nov 2024"* on its captions, nameplates, share sheets, Gallery cards, History rows and Sky
+  footprints **forever**, and nothing anywhere tells them the one thing that would fix it: press Stack again.
+  **The signal already exists** — every run records `engine_version`, and the NULL-ness of each later column is
+  itself the list of what is missing. **Shape:** a self-hiding note (in the Target page's existing
+  `NoticeBoard`, per the standing IA priority — *not* a tenth banner) on a target whose newest genuine stack is
+  missing things a re-stack would supply, worded as the gain rather than the version: *"This picture was made
+  before AstroStack recorded when your subs were shot, so it can't say what night it's from. Stacking it again
+  would fix that — and it'd use the newer alignment."* One button, reusing the existing stack path; **never
+  auto-restack** (it is hours of CPU on a NAS, and §9 says new behaviour is opt-in).
+  **Care, and why it is M not S:** (a) the honest gain list has to be computed from the *run*, not from a
+  version comparison — "your version is old" is not a reason a beginner can act on, and a version table would go
+  stale the moment anyone edits it; (b) it must not fire on a target that has no new frames and a perfectly good
+  picture unless the gain is real; and (c) it wants a cost estimate beside it (`estimate_stack` already exists),
+  because "stack 5,000 subs again" is not a one-click decision on the owner's box. **Grep before building:**
+  `ReprocessCard` / "Reprocess everything" in Settings, the `outdated targets` badge, and `RestackNote` — one of
+  them may already be the right home, and a fourth restack surface would be exactly the feature-piling the
+  owner's "extremely busy" priority warns against.
+
+- **NEW IDEA (Builder 2026-09-01, spotted finishing the date sweep in v0.321.2/3) — the Compare view still dates
+  two stacks by when they were *processed*.** *(Pillar: understand / trust — PRIORITY 3; size S; frontend-only
+  if the payload already carries it, one additive field if not.)* `Compare.tsx` sets
+  `compareDateLabel = formatStampDate`, i.e. the run's `timestamp_utc`. On every other picture surface that is
+  now either the capture window or an explicitly labelled "Stacked …", and Compare is the one screen whose whole
+  question is *"did it get better?"* — where the honest answer is usually *"yes, because the second one has two
+  more nights in it"*, which is exactly the fact the processing stamp cannot show. **Shape:** the same
+  `pictureDateLabel`, and if the two runs' capture windows differ, that difference is the most interesting line
+  on the page. **Care:** unlike the Gallery, a Compare row's date may also be doing identity work (two runs of
+  one target), so check what else distinguishes the two columns before dropping the processing stamp — the
+  History row's answer (say both, each labelled) is probably right here too.
+
+- **✅ AUDITED AND CLOSED (Builder, v0.321.1, branch `claude/wizardly-feynman-be4ubk`) — ~~sweep the *other*
+  later-added run measurements for the ones that are also recoverable from what is already on disk.~~
+  The audit ran over every column; exactly one passed, and it shipped.** *(Read the audit before re-opening
+  this: the remaining columns are not "unchecked", they are checked and refused, each for a stated reason.)*
+
+  **`seam_residual` (schema 15) — the entry's own prediction, and it holds.** A mosaic stacked before v0.233.0
+  never says whether its panels matched, on the "How's my stack?" card, the History chip or the Gallery card
+  alike, because all three read one NULL column. `measure_seam_residual` takes the master and the coverage
+  sibling, both of which survive on disk, so `backfill_seam_residual` re-measures it lazily on the one run the
+  health endpoint is already grading, and writes it back — after which all three surfaces answer.
+
+  **The one thing the shape needed that the coverage heal did not: a size bound.** The seam measure wants the
+  *picture*, not just a map, and a mosaic master is the biggest file the app owns. It is read **strided** off
+  the memory map (never area-averaged: striding samples the same pixels, so the sky step and the grain the
+  ratio divides keep their scale, while an area average would shrink the grain and inflate the ratio), and
+  the stride is capped where the answer starts to drift rather than the canvas being capped. **Measured on
+  the same 4-panel scene the "flat"/"visible" thresholds were themselves set on** — the answer against the
+  full-resolution one at stride 1/2/3/4/6/8: a ~1.0 seam reads 0.997 / 0.987 / 0.961 / 0.966 / 0.942 / 0.879,
+  a ~1.5 seam 1.498 / 1.487 / 1.464 / 1.464 / 1.443 / 1.376, and a gross 23× seam is flat to 0.2 % throughout.
+  Through **stride 4** the drift is under 3.5 %, an order below the 1.0 → 1.5 gap between the bars, so a healed
+  run and a re-stacked one give the same verdict; past it the standard-error deduction starts eating real
+  seam, so a master too big to read within the cap keeps its NULL.
+
+  **Refused, with reasons — this is the audit, and it is the part worth keeping.**
+  - `stack_fwhm_px` (14) — needs a star fit over the master. Real work; belongs behind an explicit action, as
+    the entry itself guessed.
+  - `capture_start_utc` / `capture_end_utc` (18) and `capture_hours_json` (19) — **not recoverable at all**,
+    and this is the most valuable finding here because they are the *newest* columns and therefore the ones
+    the whole library is currently mute on. They are functions of **which frames that run used**, and nothing
+    on disk records that set. Re-deriving them from today's accepted frames would be a guess wearing a fact's
+    clothes, on the one class of statement — "shot on…" — a previous run already had to fix for lying.
+  - `noise_sigma` (6) — recomputable from the master in principle, but it is measured from *adjacent-pixel*
+    differences, so it cannot be taken off a decimated read at all; and the runs affected predate every column
+    above it.
+  - **The tempting shortcut does not exist.** The obvious cheap heal is to read the number off the master's own
+    FITS header instead of re-measuring it — one small read, no arrays. Checked commit by commit, and it fails:
+    `BKGSIGMA`, `STKFWHM`, `SEAMRES` and `CALSTAT` were each added *in the same change as their column*
+    (`NROUGHAL` leads its column by one patch release, `CALSTAT` by fifty minutes, and `BKGSIGMA` actually
+    *trails* its column), so a run old enough to hold a NULL has no card either. **Don't re-derive this;
+    it cost a run to establish and it will not change.**
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change — one new engine function, one
+  additive `Project.set_stack_seam_residual`, and one extra call inside an endpoint that already heals the
+  column beside it. Free on a single-field run (it declines before opening a file) and a no-op on every run
+  stacked since v0.233.0.
+
+  **Tests (+16 in `tests/test_seam_backfill.py`, +3 in `tests/webapp/test_target_stack_health.py`, 2 of which
+  fail before):** the heal end-to-end on a stranded-level mosaic and on a flat one, pinned **against the
+  in-memory full-resolution measurement** rather than a literal (so an old run and a re-stacked one can never
+  give different advice) at both stride 1 and a strided canvas; the write-back; the weighted map alone as the
+  only sibling; and the whole silence contract — a single-field run that never opens its master, a
+  pre-schema-8 run that will not *guess* it was a mosaic, a missing master, a missing coverage sibling, a
+  sibling from a different canvas, a run that already has a verdict (never re-measured), a read-only DB, and
+  the three size-bound cases.
+
+    *(Original entry follows.)* **NEW IDEA (Builder 2026-08-31, the generalisation of the v0.320.3 coverage heal) — sweep the *other*
   later-added run measurements for the ones that are also recoverable from what is already on disk.**
   *(Pillar: friendliness + trust — PRIORITY 3; size S per column, and the *audit* is the task — do it before
   building anything. Confidence: the shape is proven once; the remaining sites are not yet checked.)*
@@ -10809,6 +10902,57 @@ to **Shipped**.)_
   capture side, so most of this is a decision plus a label, not new data. **Care:** don't flip a *sort* to
   capture time — "newest run" is the right ordering for History — and where both dates matter, say both
   ("shot 15 Nov 2024 · stacked 30 Aug 2026") rather than silently swapping one for the other.
+
+  **✅ THE LAST TWO NAMED SURFACES ARE DONE (Builder, v0.321.2, branch `claude/wizardly-feynman-be4ubk`) — the
+  Gallery card and the History row, which were the two still printing a *raw machine stamp* with no label at
+  all.** The entry names five surfaces; the Dashboard strip, the keepsake and the Target hero were closed by
+  earlier runs, and **the Library tile turns out to show no date at all** (`Library.tsx` reads
+  `last_activity_utc` only to *sort* by it, which is the right use and the Care note's own exception) — so these
+  two were the whole remainder, and the sweep is finished. Both printed `run.timestamp_utc` sliced with `.replace("T", " ")`
+  — `2026-08-30 14:32` on the Gallery card, `2026-08-30T14:32:05` on the History row — which is (a) the moment
+  the *stack ran*, years out from the capture on a re-stack of a back catalogue, and (b) not a date format the
+  app uses anywhere else a person reads.
+
+  **Gallery card → `pictureDateLabel`**, the same helper the Dashboard strip and the Target hero already use, so
+  it says *"Shot 15–18 Nov 2024"* and falls back to a **labelled** *"Stacked 30 Aug 2026"* when the run predates
+  the capture window (schema < 18 — i.e. almost everything in the owner's library today). The night count is
+  deliberately **not** passed: the card's line is already five segments long, and "over 4 nights" belongs on the
+  caption, not the tile. The run's identity there is its `output_basename` printed beside the date, so the clock
+  time was not needed.
+
+  **History row → both dates, each labelled** — *"Shot 15–18 Nov 2024 · Stacked 30 Aug 2026, 14:32"* — because
+  this is the one list where they answer different questions: which run this row *is*, and what the picture is
+  *of*. That is the entry's own "where both dates matter, say both" rule, and the sort is untouched (still newest
+  run first, as the Care note requires). **The clock time is load-bearing here and is why this needed a new
+  helper:** `output_basename` is reused across a re-stack, so two re-stacks made the same afternoon are
+  distinguished by nothing else — a date-only label would collapse two rows into identical text.
+  `formatStampDateTime` is `formatStampDate` plus `HH:MM`, keeping the never-a-numeric-month rule and the same
+  empty-string-on-junk contract.
+
+  **Frontend-only:** no API, schema, config, on-disk or default change; both fields were already on the payloads
+  (`GalleryItem`/`StackRun` have carried `capture_night_start`/`_end` since schema 18) and an older backend
+  omitting them lands on the labelled "Stacked" form, which is exactly right.
+
+  **Tests (+6; the 4 component ones fail before):** `format.test.ts` (+2 — the clock time added to the same named
+  month, and the junk contract), `Gallery.test.tsx` (+2 — a 2024 capture window shown as *Shot* with the 2026
+  processing stamp gone from the card, and the labelled fallback with no "Shot" on a run that has no window) and
+  `History.test.tsx` (+2 — both labels on one line with no raw ISO stamp, and two same-afternoon re-stacks whose
+  lines stay distinct while neither claims a shoot date).
+
+  **✅ AND THE SKY FOOTPRINT LINE, THE LAST ONE ON THE LIST (Builder, v0.321.3, same branch).** The Sky Map's
+  selected-footprint caption read `RA 83.822° · Dec −5.391° · 17 Aug 2026` — a bare, unlabelled date beside a
+  picture, i.e. the exact shape of this whole entry, and the leftover the v0.313.0 run explicitly named. It now
+  goes through the same `pictureDateLabel`. The field it needed was genuinely missing (unlike the Gallery and
+  History, which already had it): `SkyImage` gained **additive optional** `capture_night_start`/`_end`, bucketed
+  with the same `capture_night_range` and the same `Settings.site_lon` the Gallery card and the Nights card use,
+  so all three can't name one session differently. `timestamp_utc` stays on the payload untouched — the viewer
+  draws newer tiles on top by it, which is the right use of a processing stamp and the Care note's own exception.
+  **Upgrade-safe:** two optional response fields (an older frontend ignores them; an older backend omitting them
+  reads as "no capture window", which lands on the labelled "Stacked …" form). **Tests (+5, 4 failing before):**
+  `tests/webapp/test_sky.py` (+2 — the window carried through as observing nights with the stack stamp intact,
+  and a pre-schema-18 run reporting null rather than borrowing it) and `Sky.test.tsx` (+2 new, +1 updated — a
+  capture window shown as "Shot 15–18 Nov 2024" with no 2026 anywhere in the line, and the labelled fallback; the
+  existing "dates it like every other surface" assertion gained the label and keeps its no-raw-ISO check).
 
 - **✅ SHIPPED (Builder, v0.318.2, branch `claude/compassionate-galileo-cwqy3x`) — ~~the app writes "full
   moons" in one sentence and "full Moon" in three others.~~** Exactly as filed, and picked up on its own at the
@@ -12675,6 +12819,26 @@ to **Shipped**.)_
   target's stored name is generic/Unsorted and `identify` matched by coords with a confident separation, show a
   dismissible one-click "Rename to **{name}**?" chip on the card (reuse the existing `PATCH /api/targets/{safe}`
   rename; never auto-rename). Everything below is now historical context for that last chip.
+
+  **🛑 BLOCKED — TWO PREMISES CHECKED AND BOTH ARE FALSE; READ THIS BEFORE PICKING IT UP (Builder 2026-09-01,
+  branch `claude/wizardly-feynman-be4ubk`, traced in code, not run).** This is filed as "add a chip", and it is
+  not: as written it would **split the owner's library on the next scan.**
+  1. **There is no existing rename path to reuse.** `PATCH /api/targets/{safe}` (`targets.py`) takes
+     `notes` and `tags` only, and `Library.update_target` can set exactly those two columns. A target's display
+     `name` has never been editable through any API.
+  2. **And a rename is not a metadata edit — it silently re-homes the target.** A target's project directory is
+     `_allocate_safe_name(display_name)`, which keeps the readable safe name only while it is free *or already
+     owned by this same display name*, and otherwise appends a stable hash. The scanner resolves a folder with
+     `library.open_or_create_target(target_name)` (`scanner.py`), i.e. **by display name**. So rename `Unsorted`
+     → `M 31` and the next scan of that same folder asks for `Unsorted`, finds its safe name now owned by a
+     *different* display name, and gets `Unsorted-<sha1>` — **a second target, a second project directory, the
+     same sky**. Tonight's subs land in the new one and the old picture stays behind in the other. That is the
+     duplicate-target class v0.319.3 spent a run cleaning up, manufactured deliberately.
+  **What a safe version needs first,** and it is the real item: the scanner must resolve a folder to a target by
+  something that does **not** move when the name does — the existing `source_paths` / folder identity that
+  `library_hygiene`'s duplicate detection already reads, or an explicit alias row recording "this folder is that
+  target". Only once a rename cannot orphan a folder is the chip an S. **Do not ship the chip on its own**, and
+  do not "fix" it by renaming the directory either — §9 rules out moving on-disk layout outright.
 
     A beginner who drops loose FITS, or a folder the Seestar named
   something un-obvious, ends up with a target tile reading `Unsorted` or a cryptic folder name — and no plain

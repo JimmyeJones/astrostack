@@ -268,3 +268,101 @@ def test_the_run_verdict_and_the_health_note_always_agree(
             assert "seams" not in note_kinds and "seams_flat" not in note_kinds
         else:
             assert expect_kind in note_kinds
+
+
+def _stored_seam(data_root: Path, safe: str, run_id: int) -> float | None:
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return next(r.seam_residual for r in proj.iter_stack_runs()
+                        if r.id == run_id)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def _write_mosaic_outputs(fits_path: Path, *, stranded: float) -> None:
+    """A four-panel mosaic's master and coverage siblings on disk, correctly
+    leveled but for one stranded coverage level — the failure the seam
+    measurement exists to catch, at ``stranded`` times the scene's own grain."""
+    import numpy as np
+    from astropy.io import fits as _fits
+
+    from seestack.bg.coverage_leveling import level_by_coverage
+
+    rng = np.random.default_rng(3)
+    h, w, noise = 400, 600, 2.0
+    cov = np.zeros((h, w), dtype=np.int32)
+    for i, cols in enumerate(np.array_split(np.arange(w), 4)):
+        cov[:, cols] = i + 1
+    rgb = rng.normal(0.0, noise, size=(h, w, 3)).astype(np.float32)
+    for lvl, off in zip((1, 2, 3, 4), (0.0, 15.0, 30.0, 45.0), strict=True):
+        rgb[cov == lvl] += off
+    for _ in range(200):
+        y, x = int(rng.integers(6, h - 6)), int(rng.integers(6, w - 6))
+        rgb[y - 2:y + 3, x - 2:x + 3, :] += float(rng.uniform(200, 4000))
+    out = level_by_coverage(rgb, cov, frame_coverage=cov)
+    out[cov == 3] += stranded * noise
+
+    fits_path.parent.mkdir(parents=True, exist_ok=True)
+    _fits.PrimaryHDU(data=np.transpose(out, (2, 0, 1))).writeto(
+        fits_path, overwrite=True)
+    for suffix in ("_coverage", "_framecov"):
+        _fits.PrimaryHDU(data=cov.astype("float32")).writeto(
+            fits_path.with_name(f"{fits_path.stem}{suffix}.fits"),
+            overwrite=True)
+
+
+def test_an_older_mosaic_gets_its_panel_verdict_from_the_files_on_disk(
+        client, solved_library, data_root):
+    """``seam_residual`` arrived with schema 15, so a mosaic stacked before that
+    never says whether its panels matched — on this card, the History chip or
+    the Gallery. It is a measurement over the master and coverage map the run
+    already wrote, so it is recoverable rather than something to wait for."""
+    fits_path = data_root / "out" / "old_mosaic.fits"
+    _write_mosaic_outputs(fits_path, stranded=3.0)
+    rid = _add_run(data_root, "M_42", fits_path=str(fits_path), is_mosaic=True,
+                   seam_residual=None, canvas_h=400, canvas_w=600,
+                   coverage_min=1, coverage_max=4)
+
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    note = next(n for n in body["notes"] if n["kind"] == "seams")
+    assert "faint seams may show" in note["message"]
+
+    # …remembered, so the next read costs no master read…
+    assert _stored_seam(data_root, "M_42", rid) is not None
+    # …and the chip that reads the same column now agrees with the note.
+    runs = {r["id"]: r for r in client.get("/api/targets/M_42/stack-runs").json()}
+    assert runs[rid]["seam_verdict"] == "check"
+
+
+def test_an_older_mosaic_whose_panels_matched_earns_the_compliment(
+        client, solved_library, data_root):
+    fits_path = data_root / "out" / "flat_mosaic.fits"
+    _write_mosaic_outputs(fits_path, stranded=0.0)
+    rid = _add_run(data_root, "M_42", fits_path=str(fits_path), is_mosaic=True,
+                   seam_residual=None, canvas_h=400, canvas_w=600,
+                   coverage_min=1, coverage_max=4)
+
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    assert any(n["kind"] == "seams_flat" for n in body["notes"])
+    runs = {r["id"]: r for r in client.get("/api/targets/M_42/stack-runs").json()}
+    assert runs[rid]["seam_verdict"] == "flat"
+
+
+def test_a_single_field_run_gains_no_seam_note_from_the_heal(
+        client, solved_library, data_root):
+    """The heal must not turn the ordinary Target page into a mosaic verdict for
+    every stack the owner has: a single-field run has no joins to compare, and
+    it stays silent (and never opens its master to find that out)."""
+    fits_path = data_root / "out" / "single_field.fits"
+    _write_mosaic_outputs(fits_path, stranded=3.0)   # would measure a big seam
+    rid = _add_run(data_root, "M_42", fits_path=str(fits_path), is_mosaic=False,
+                   seam_residual=None, canvas_h=400, canvas_w=600)
+
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    kinds = [n["kind"] for n in body["notes"]]
+    assert "seams" not in kinds and "seams_flat" not in kinds
+    assert _stored_seam(data_root, "M_42", rid) is None
