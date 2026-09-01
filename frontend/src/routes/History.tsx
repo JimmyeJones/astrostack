@@ -1132,12 +1132,16 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             time. The raw `2026-08-30T14:32:05` it used to print answered
             neither question in plain language, and on a re-stack of a back
             catalogue it read as a capture date years out. */}
+        {/* Each clause drops itself *and its separator* when it has nothing to
+            say — an unreadable stamp must not leave "Stacked  · " behind. */}
         {(() => {
           const shot = formatCaptureNights(
             run.capture_night_start, run.capture_night_end);
-          return shot ? `Shot ${shot} · ` : "";
+          const stacked = formatStampDateTime(run.timestamp_utc);
+          return [shot ? `Shot ${shot}` : "", stacked ? `Stacked ${stacked}` : ""]
+            .filter(Boolean).map((part) => `${part} · `).join("");
         })()}
-        Stacked {formatStampDateTime(run.timestamp_utc)} · {run.canvas_w}×{run.canvas_h}
+        {run.canvas_w}×{run.canvas_h}
         {run.total_exposure_s ? ` · ${formatIntegration(run.total_exposure_s)}` : ""}
         {hasNoise(run.noise_sigma) ? <> · <NoiseReadout sigma={run.noise_sigma} /></> : null}
         {formatEngineVersion(run.engine_version) ? ` · ${formatEngineVersion(run.engine_version)}` : ""}
