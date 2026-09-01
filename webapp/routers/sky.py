@@ -29,6 +29,7 @@ from seestack.post.skymap import bright_star_catalog
 from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from webapp import deps
+from webapp.capture_nights import capture_night_range
 from webapp.preview_orient import baked_north_up_deg
 
 router = APIRouter(tags=["sky"])
@@ -51,6 +52,15 @@ class SkyImage(BaseModel):
     rotation_deg: float
     preview_url: str
     timestamp_utc: str | None
+    # When this picture's subs were **shot** — the observing nights (ISO
+    # `YYYY-MM-DD`) of its first and last sub, bucketed for the observer's own
+    # longitude like every other night surface. The footprint's caption reads
+    # these first: `timestamp_utc` above is when the *stack ran*, which is the
+    # right key for "draw the newer tile on top" and the wrong fact to date a
+    # picture by. Null for a run recorded before the app knew (schema < 18), and
+    # the caption then says "Stacked …" rather than passing one off as the other.
+    capture_night_start: str | None = None
+    capture_night_end: str | None = None
     run_id: int
     # FITS WCS keywords matching the *preview PNG* pixel grid, so a sky atlas
     # (Aladin Lite) can place the PNG by WCS. None if the preview size is
@@ -109,6 +119,10 @@ def get_sky(request: Request) -> SkyResponse:
     stars = [SkyStar(**s) for s in bright_star_catalog()]
 
     images: list[SkyImage] = []
+    # The observer's longitude buckets a capture window into observing nights —
+    # unset (the common case) falls back to UTC noon-to-noon, exactly as the rest
+    # of the app does.
+    lon_deg = deps.get_settings(request).site_lon
     lib = deps.open_library(request)
     try:
         for t in lib.list_targets():
@@ -163,6 +177,11 @@ def get_sky(request: Request) -> SkyResponse:
                 crop = parse_preview_crop(run.preview_crop_json)
                 crop_ok = crop != CROP_UNKNOWN
                 crop = crop if crop_ok else None
+                # When the subs were shot, named as observing nights for this
+                # observer's longitude — the same helper, and so the same answer,
+                # as the Gallery card and the Nights card.
+                night_start, night_end = capture_night_range(
+                    run.capture_start_utc, run.capture_end_utc, lon_deg)
                 # Prefer the stack's *stored* canvas WCS for the tile's size and
                 # rotation too — that is the true union-canvas geometry the pixels
                 # were reprojected onto, so a mosaic (or a rotated canvas) is sized
@@ -228,6 +247,8 @@ def get_sky(request: Request) -> SkyResponse:
                     # endpoint takes through the same rotation.
                     preview_url=f"/api/targets/{t.safe_name}/stack-runs/{run.id}/sky-overlay",
                     timestamp_utc=run.timestamp_utc,
+                    capture_night_start=night_start,
+                    capture_night_end=night_end,
                     run_id=run.id,
                     wcs=wcs,
                 ))

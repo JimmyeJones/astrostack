@@ -10901,6 +10901,21 @@ to **Shipped**.)_
   `History.test.tsx` (+2 — both labels on one line with no raw ISO stamp, and two same-afternoon re-stacks whose
   lines stay distinct while neither claims a shoot date).
 
+  **✅ AND THE SKY FOOTPRINT LINE, THE LAST ONE ON THE LIST (Builder, v0.321.3, same branch).** The Sky Map's
+  selected-footprint caption read `RA 83.822° · Dec −5.391° · 17 Aug 2026` — a bare, unlabelled date beside a
+  picture, i.e. the exact shape of this whole entry, and the leftover the v0.313.0 run explicitly named. It now
+  goes through the same `pictureDateLabel`. The field it needed was genuinely missing (unlike the Gallery and
+  History, which already had it): `SkyImage` gained **additive optional** `capture_night_start`/`_end`, bucketed
+  with the same `capture_night_range` and the same `Settings.site_lon` the Gallery card and the Nights card use,
+  so all three can't name one session differently. `timestamp_utc` stays on the payload untouched — the viewer
+  draws newer tiles on top by it, which is the right use of a processing stamp and the Care note's own exception.
+  **Upgrade-safe:** two optional response fields (an older frontend ignores them; an older backend omitting them
+  reads as "no capture window", which lands on the labelled "Stacked …" form). **Tests (+5, 4 failing before):**
+  `tests/webapp/test_sky.py` (+2 — the window carried through as observing nights with the stack stamp intact,
+  and a pre-schema-18 run reporting null rather than borrowing it) and `Sky.test.tsx` (+2 new, +1 updated — a
+  capture window shown as "Shot 15–18 Nov 2024" with no 2026 anywhere in the line, and the labelled fallback; the
+  existing "dates it like every other surface" assertion gained the label and keeps its no-raw-ISO check).
+
 - **✅ SHIPPED (Builder, v0.318.2, branch `claude/compassionate-galileo-cwqy3x`) — ~~the app writes "full
   moons" in one sentence and "full Moon" in three others.~~** Exactly as filed, and picked up on its own at the
   end of a run rather than smuggled into an unrelated commit, as the entry asked. `describeSkyCoverage` now
@@ -12766,6 +12781,26 @@ to **Shipped**.)_
   target's stored name is generic/Unsorted and `identify` matched by coords with a confident separation, show a
   dismissible one-click "Rename to **{name}**?" chip on the card (reuse the existing `PATCH /api/targets/{safe}`
   rename; never auto-rename). Everything below is now historical context for that last chip.
+
+  **🛑 BLOCKED — TWO PREMISES CHECKED AND BOTH ARE FALSE; READ THIS BEFORE PICKING IT UP (Builder 2026-09-01,
+  branch `claude/wizardly-feynman-be4ubk`, traced in code, not run).** This is filed as "add a chip", and it is
+  not: as written it would **split the owner's library on the next scan.**
+  1. **There is no existing rename path to reuse.** `PATCH /api/targets/{safe}` (`targets.py`) takes
+     `notes` and `tags` only, and `Library.update_target` can set exactly those two columns. A target's display
+     `name` has never been editable through any API.
+  2. **And a rename is not a metadata edit — it silently re-homes the target.** A target's project directory is
+     `_allocate_safe_name(display_name)`, which keeps the readable safe name only while it is free *or already
+     owned by this same display name*, and otherwise appends a stable hash. The scanner resolves a folder with
+     `library.open_or_create_target(target_name)` (`scanner.py`), i.e. **by display name**. So rename `Unsorted`
+     → `M 31` and the next scan of that same folder asks for `Unsorted`, finds its safe name now owned by a
+     *different* display name, and gets `Unsorted-<sha1>` — **a second target, a second project directory, the
+     same sky**. Tonight's subs land in the new one and the old picture stays behind in the other. That is the
+     duplicate-target class v0.319.3 spent a run cleaning up, manufactured deliberately.
+  **What a safe version needs first,** and it is the real item: the scanner must resolve a folder to a target by
+  something that does **not** move when the name does — the existing `source_paths` / folder identity that
+  `library_hygiene`'s duplicate detection already reads, or an explicit alias row recording "this folder is that
+  target". Only once a rename cannot orphan a folder is the chip an S. **Do not ship the chip on its own**, and
+  do not "fix" it by renaming the directory either — §9 rules out moving on-disk layout outright.
 
     A beginner who drops loose FITS, or a folder the Seestar named
   something un-obvious, ends up with a target tile reading `Unsorted` or a cryptic folder name — and no plain
