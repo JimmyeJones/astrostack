@@ -10404,17 +10404,50 @@ to **Shipped**.)_
   them may already be the right home, and a fourth restack surface would be exactly the feature-piling the
   owner's "extremely busy" priority warns against.
 
-- **NEW IDEA (Builder 2026-09-01, spotted finishing the date sweep in v0.321.2/3) — the Compare view still dates
-  two stacks by when they were *processed*.** *(Pillar: understand / trust — PRIORITY 3; size S; frontend-only
-  if the payload already carries it, one additive field if not.)* `Compare.tsx` sets
-  `compareDateLabel = formatStampDate`, i.e. the run's `timestamp_utc`. On every other picture surface that is
-  now either the capture window or an explicitly labelled "Stacked …", and Compare is the one screen whose whole
-  question is *"did it get better?"* — where the honest answer is usually *"yes, because the second one has two
-  more nights in it"*, which is exactly the fact the processing stamp cannot show. **Shape:** the same
-  `pictureDateLabel`, and if the two runs' capture windows differ, that difference is the most interesting line
-  on the page. **Care:** unlike the Gallery, a Compare row's date may also be doing identity work (two runs of
-  one target), so check what else distinguishes the two columns before dropping the processing stamp — the
-  History row's answer (say both, each labelled) is probably right here too.
+- **✅ SHIPPED (Builder, v0.322.1, branch `claude/wizardly-feynman-qw8j45`) — ~~the Compare view still dates
+  two stacks by when they were *processed*.~~** Frontend-only, as the entry predicted: every field was already
+  on the gallery payload. `compareDateLabel` now takes the item and returns `pictureDateLabel(…)` — the same
+  helper the Gallery card, the Sky footprint and the share sheet use, so no two surfaces can date one picture
+  differently — which means each side reads **"Shot over 4 nights, 15–18 Nov 2024"**, or a *labelled*
+  "Stacked 30 Aug 2026" for a run made before the app recorded when its subs were taken. Never a bare date:
+  a bare one reads as "the night I took this", which on a re-stack of a back catalogue is years out.
+
+  **The identity caution the entry raised, answered.** A Compare row's date *was* doing identity work, so the
+  fix keeps identity intact rather than trading it away: the run's `output_basename` already sits beside the
+  date on both meta blocks, and `pictureDateLabel` is self-labelling, so "which run is this?" and "when was it
+  shot?" are now separately answerable. History's both-dates-labelled answer wasn't copied wholesale — its two
+  columns are rows in one list, where the clock time disambiguates two re-stacks made the same afternoon;
+  Compare's are two named, badged, basenamed panels.
+
+  **Two things beyond the entry, both from the same reading of the page.** (a) The **"Side by side" mode — the
+  one most people compare in — carried no date at all**, so the fact that usually explains the difference was
+  simply invisible there; it now carries the same labelled line. (b) The entry's own observation that *"if the
+  two runs' capture windows differ, that difference is the most interesting line on the page"* is now that
+  line: a third verdict beside the noise and panel-flatness ones, reading **"B is made of subs from 4 nights
+  against 2 — on the same target that's usually the biggest difference between two stacks, whatever the
+  settings."** Deliberately narrow — both runs must have *recorded* their night count (never inferred from the
+  window: 15→18 Nov is equally two nights and four), the counts must differ, and **both sides must be the same
+  target**, since "M 42 has more nights than NGC 7000" compares nothing.
+
+  **Upgrade-safe (§9):** pure frontend, reading optional fields that are already optional. A run with no
+  capture window falls back to the labelled processing stamp; a run with no night count says nothing about
+  depth.
+
+  **Tests: +7 in `Compare.test.tsx`** (5 unit on the new `nightsComparison` + the rewritten `compareDateLabel`,
+  2 rendered: the depth line appearing with the labelled "Shot over N nights" dates, and staying silent — with
+  a labelled "Stacked …" still on both sides — when the runs never recorded their nights).
+
+    *(Original spec follows.)* **the Compare view still dates
+    two stacks by when they were *processed*.** *(Pillar: understand / trust — PRIORITY 3; size S; frontend-only
+    if the payload already carries it, one additive field if not.)* `Compare.tsx` sets
+    `compareDateLabel = formatStampDate`, i.e. the run's `timestamp_utc`. On every other picture surface that is
+    now either the capture window or an explicitly labelled "Stacked …", and Compare is the one screen whose whole
+    question is *"did it get better?"* — where the honest answer is usually *"yes, because the second one has two
+    more nights in it"*, which is exactly the fact the processing stamp cannot show. **Shape:** the same
+    `pictureDateLabel`, and if the two runs' capture windows differ, that difference is the most interesting line
+    on the page. **Care:** unlike the Gallery, a Compare row's date may also be doing identity work (two runs of
+    one target), so check what else distinguishes the two columns before dropping the processing stamp — the
+    History row's answer (say both, each labelled) is probably right here too.
 
 - **✅ AUDITED AND CLOSED (Builder, v0.321.1, branch `claude/wizardly-feynman-be4ubk`) — ~~sweep the *other*
   later-added run measurements for the ones that are also recoverable from what is already on disk.~~
