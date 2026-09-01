@@ -38,15 +38,27 @@ export function compareHref(a: GalleryItem, b: GalleryItem): string {
 // must carry a measured σ; returns null otherwise (nothing to say). The σ is
 // normalized to each image's own signal range so it's comparable across
 // gain/exposure. `pct` is how much lower the cleaner one's noise is (0–100).
+//
+// `sameTarget` is what the *claim* hangs on. Normalising for gain and exposure
+// makes the figure comparable between two stacks **of the same field**; it does
+// not make it comparable across two different objects, where the number is
+// mostly about how bright and busy that patch of sky is. The Gallery lets you
+// select any two pictures, so "B is the cleaner stack" was being said about
+// M 42 against NGC 7000. The figure survives a cross-target comparison (it is
+// still each picture's own measured noise) — the verdict doesn't, so the caller
+// keeps one and drops the other rather than hiding the line entirely.
 export function noiseComparison(
   a: GalleryItem, b: GalleryItem,
-): { winner: "A" | "B"; pct: number } | null {
+): { winner: "A" | "B"; loser: "A" | "B"; pct: number; sameTarget: boolean } | null {
   if (!hasNoise(a.noise_sigma) || !hasNoise(b.noise_sigma)) return null;
   const sa = a.noise_sigma as number;
   const sb = b.noise_sigma as number;
   if (sa <= 0 || sb <= 0 || sa === sb) return null;
-  const [winner, hi, lo] = sa < sb ? ["A", sb, sa] as const : ["B", sa, sb] as const;
-  return { winner, pct: Math.round((1 - lo / hi) * 100) };
+  const [winner, loser, hi, lo] =
+    sa < sb ? ["A", "B", sb, sa] as const : ["B", "A", sa, sb] as const;
+  return {
+    winner, loser, pct: Math.round((1 - lo / hi) * 100), sameTarget: a.safe === b.safe,
+  };
 }
 
 // Compare the two stacks' panel-flatness verdicts into a plain sentence — the
@@ -385,11 +397,24 @@ export function CompareView() {
       {verdict || panels || nights ? (
         <Alert color="teal" variant="light" py="xs" title={undefined}>
           <Stack gap={4}>
-            {verdict ? (
-              <Text size="sm">
+            {verdict && verdict.sameTarget ? (
+              <Text size="sm" data-testid="noise-verdict">
                 <b>{verdict.winner}</b> has <b>{verdict.pct}% lower</b> background noise
                 {" "}— it's the cleaner stack. (Noise σ is normalized so it's comparable
                 across gain/exposure; it isn't the only measure of a better image.)
+              </Text>
+            ) : null}
+            {/* Two different objects: keep the measurement, drop the verdict. A
+                darker, emptier field reads quieter than a bright nebula however
+                well either was stacked, so "the cleaner stack" would be a claim
+                about the sky, not about the stacking. */}
+            {verdict && !verdict.sameTarget ? (
+              <Text size="sm" data-testid="noise-verdict">
+                <b>{verdict.winner}</b> ({verdict.winner === "A" ? a.target_name : b.target_name})
+                {" "}reads <b>{verdict.pct}% lower</b> background noise than <b>{verdict.loser}</b>
+                {" "}({verdict.loser === "A" ? a.target_name : b.target_name}) — but these are two
+                {" "}different objects, so that's mostly about the sky you were pointing at, not
+                {" "}about which stack came out better.
               </Text>
             ) : null}
             {panels ? (
