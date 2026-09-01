@@ -407,8 +407,12 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
             on the page for browsing your pictures. The run's identity here is
             its basename beside it, so the clock time is not needed (History,
             where two re-stacks can share a name, keeps it). */}
-        {item.output_basename} · {pictureDateLabel(
-          item.capture_night_start, item.capture_night_end, item.timestamp_utc)}
+        {item.output_basename}
+        {/* The label drops itself *and its separator* on an unreadable stamp,
+            rather than leaving " ·  · " behind — the same contract every other
+            optional segment on this line already keeps. */}
+        {((d) => (d ? ` · ${d}` : ""))(pictureDateLabel(
+          item.capture_night_start, item.capture_night_end, item.timestamp_utc))}
         {" · "}{item.canvas_w}×{item.canvas_h}
         {item.total_exposure_s ? ` · ${formatIntegration(item.total_exposure_s)}` : ""}
         {hasNoise(item.noise_sigma) ? <> · <NoiseReadout sigma={item.noise_sigma} /></> : null}

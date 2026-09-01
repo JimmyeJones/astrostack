@@ -1054,4 +1054,13 @@ describe("Gallery — the date on a picture says which date it is", () => {
     expect(await screen.findByText(/Stacked/)).toBeInTheDocument();
     expect(screen.queryByText(/Shot/)).not.toBeInTheDocument();
   });
+
+  it("drops the separator too when there is no readable date at all", async () => {
+    // The date is now an optional segment like every other one on this line, so
+    // an unreadable stamp must not leave " ·  · " behind.
+    galleryOf({ timestamp_utc: "not-a-date" });
+    const line = await screen.findByText(/100×80/);
+    expect(line.textContent).not.toMatch(/·\s*·/);
+    expect(line.textContent).not.toMatch(/Invalid/);
+  });
 });

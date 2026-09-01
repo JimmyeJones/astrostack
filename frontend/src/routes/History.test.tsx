@@ -2136,4 +2136,15 @@ describe("HistoryView — the run's two dates, each labelled", () => {
     // …and a run with no capture window says nothing about when it was shot.
     for (const l of lines) expect(l.textContent).not.toMatch(/Shot/);
   });
+
+  it("drops the label and its separator when the stamp is unreadable", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ timestamp_utc: "not-a-date" }),
+    ]);
+    renderHistory();
+    const line = await screen.findByText(/100×100/);
+    expect(line.textContent).not.toMatch(/Stacked/);
+    expect(line.textContent).not.toMatch(/Invalid/);
+    expect(line.textContent?.trimStart()).toMatch(/^100×100/);
+  });
 });
