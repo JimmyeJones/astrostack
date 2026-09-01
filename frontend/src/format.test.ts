@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   captureNightsClause, formatCaptureNights, formatDiskSize, formatIntegration,
   formatMonthYear, formatNightDate, formatNightDayMonth, formatStampDate,
-  isRecentNight, nightAgeDays, pictureDateLabel,
+  formatStampDateTime, isRecentNight, nightAgeDays, pictureDateLabel,
 } from "./format";
 
 describe("formatIntegration", () => {
@@ -92,6 +92,25 @@ describe("formatStampDate", () => {
     expect(formatStampDate(undefined)).toBe("");
     expect(formatStampDate("")).toBe("");
     expect(formatStampDate("not-a-date")).toBe("");
+  });
+});
+
+describe("formatStampDateTime", () => {
+  it("adds the clock time to the same date, keeping the named month", () => {
+    // History lists every run of one target, and two re-stacks made the same
+    // afternoon differ only by the clock — so this form exists, and it must
+    // still never print a numeric month.
+    const out = formatStampDateTime("2026-08-16T12:34:00Z");
+    expect(out).toContain(formatStampDate("2026-08-16T12:34:00Z"));
+    expect(out).toMatch(/\d{1,2}:\d{2}/);
+    expect(out).not.toMatch(/\b\d{1,2}\/\d{1,2}\//);
+  });
+
+  it("drops the clause rather than printing Invalid Date", () => {
+    expect(formatStampDateTime(null)).toBe("");
+    expect(formatStampDateTime(undefined)).toBe("");
+    expect(formatStampDateTime("")).toBe("");
+    expect(formatStampDateTime("not-a-date")).toBe("");
   });
 });
 
