@@ -16930,6 +16930,38 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **✅ SHIPPED (Builder, v0.322.4, branch `claude/wizardly-feynman-yryq05`) — ~~the Gallery card cut the target
+  name down to "Sample: …", on the page whose entire job is browsing your pictures.~~** *(Dogfood finding —
+  found by **running** the app via `scripts/agent-dogfood.sh`, not by reading it; the code already carried a
+  comment describing the truncation as expected and a test pinning the hover fallback as the fix.)*
+
+  **What was wrong.** The name shared one `wrap="nowrap"` row with a badge group marked `flexShrink: 0`, so the
+  badges took whatever width they wanted and the name absorbed the entire squeeze. Measured on the real app at
+  1440 px: a 280 px card, ~150 px of it spent on the ordinary two badges (`MIN-MAX`, `6 FRAMES`), leaving the
+  name about 95 px — **"Sample: …"**. Not an edge case: that is the *bundled sample*, with the *fewest* badges
+  the card can show; five are possible, and "NGC 7000 (mosaic)" is an ordinary Seestar target name. A phone has
+  no hover, so the `title` fallback the previous run added recovers nothing there.
+
+  **The fix is the shape the Library card already uses** — name on its own line, badges on theirs — so the two
+  browse surfaces now agree instead of one of them being the odd one out. **Nothing removed or hidden** (the
+  owner's standing constraint): every badge still renders, in the same order, one line lower. **Measured
+  before/after with the same probe**: desktop Gallery card 432 px → 455 px tall (one line), full name
+  **"Sample: Orion Nebula (M42)"** readable; the page is not among the app's eight tallest on either viewport,
+  before or after; no overflow, no console errors.
+
+  **Fixed at the second site in the same pass**, because it is the identical construct and leaving one is
+  exactly how a swept class stays half-fixed: Compare's `CardMeta`. It matters *more* there — on a phone the
+  two compare cards stack full-width and that name is the only thing saying which object each side is.
+
+  **Upgrade-safe (§9):** frontend layout only — no config, schema, on-disk, API or default change.
+
+  **Tests (+2, both fail before):** `Gallery.test.tsx` and `Compare.test.tsx`. jsdom cannot measure a layout, so
+  each is pinned structurally — the name's parent now holds the card's *other* lines (the Edit control; the
+  dated provenance line) rather than being a row that held only the name and the badges — plus an assertion
+  that the frame-count badge still renders, so a future "tidy" can't quietly drop a badge to buy width. The
+  existing hover-fallback assertion is kept: the `title` is still there, it is just no longer the only way to
+  read the name.
+
 - **✅ SHIPPED (Builder, v0.320.3, branch `claude/wizardly-feynman-isps6l`) — ~~heal an existing run's coverage
   advice from the coverage map it already wrote, instead of waiting for a re-stack.~~** Built to the filed
   shape, all four care points honoured, in a new `seestack/coverage_backfill.py` whose single function

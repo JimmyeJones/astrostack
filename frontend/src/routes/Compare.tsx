@@ -110,17 +110,22 @@ type CompareMode = "side" | "split" | "blink";
 function CardMeta({ item }: { item: GalleryItem }) {
   return (
     <Stack gap={2}>
-      <Group justify="space-between" wrap="nowrap">
-        <Text fw={600} truncate component={Link} to={`/targets/${item.safe}/history`}>
-          {item.target_name}
-        </Text>
-        <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
-          <RejectionBadge options={item.options} />
-          <HazyNightBadge ratio={item.transparency_ratio} />
-          <PanelSeamsBadge verdict={item.seam_verdict} />
-          <CalibrationBadge calstat={item.calstat} />
-          <Badge variant="light">{item.n_frames_used} frames</Badge>
-        </Group>
+      {/* Same squeeze the Gallery card had, and it matters more here: on a phone
+          the two compare cards stack full-width and the *only* thing telling you
+          which object each one is, is this name. Sharing a no-wrap row with a
+          ``flexShrink: 0`` badge group meant the badges took what they needed and
+          the name absorbed all of it. Own line for the name, own line for the
+          badges — nothing removed, same order. */}
+      <Text fw={600} truncate title={item.target_name}
+            component={Link} to={`/targets/${item.safe}/history`}>
+        {item.target_name}
+      </Text>
+      <Group gap={4}>
+        <RejectionBadge options={item.options} />
+        <HazyNightBadge ratio={item.transparency_ratio} />
+        <PanelSeamsBadge verdict={item.seam_verdict} />
+        <CalibrationBadge calstat={item.calstat} />
+        <Badge variant="light">{item.n_frames_used} frames</Badge>
       </Group>
       <Text size="xs" c="dimmed" truncate>
         {item.output_basename} · {item.canvas_w}×{item.canvas_h}

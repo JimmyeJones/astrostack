@@ -834,10 +834,18 @@ describe("Gallery card layout", () => {
     expect(edit).toHaveStyle({ flex: "1 1 auto" });
   });
 
-  it("keeps a long target name readable even when the card truncates it", async () => {
-    // The badges beside the name are `flexShrink: 0`, so a long name truncates
-    // to "Sample: …". The full name has to stay recoverable on hover, the way
-    // the notes line right below it already is.
+  it("gives the target name a line of its own, so the badges can't squeeze it away", async () => {
+    // The name used to share a no-wrap row with a `flexShrink: 0` badge group:
+    // the badges took the width they needed and the name absorbed the whole
+    // squeeze, so even the ordinary two-badge case cut "Sample: Orion Nebula
+    // (M42)" down to "Sample: …" on a 280 px card — and a phone has no hover to
+    // recover it from the `title`. On the page whose job is browsing your
+    // pictures, the name is the identifier and can't be what gives way.
+    //
+    // jsdom can't measure a layout, so this is pinned structurally: the name now
+    // sits at the card's top level — its parent holds the card's other lines
+    // (the Edit control below it) — rather than inside a row shared with the
+    // badges, which held neither.
     vi.spyOn(client.api, "getGallery").mockResolvedValue({
       items: [{ ...item(1), target_name: "Sample: Orion Nebula (M42)" }],
     });
@@ -847,6 +855,11 @@ describe("Gallery card layout", () => {
     renderGallery();
 
     const name = await screen.findByText("Sample: Orion Nebula (M42)");
+    expect(name.parentElement)
+      .toContainElement(screen.getByRole("link", { name: "Edit image" }));
+    // Nothing was removed to make room: every badge still renders, below.
+    expect(screen.getByText("5 frames")).toBeInTheDocument();
+    // ...and the full name is still recoverable on hover, as it was before.
     expect(name).toHaveAttribute("title", "Sample: Orion Nebula (M42)");
   });
 });
