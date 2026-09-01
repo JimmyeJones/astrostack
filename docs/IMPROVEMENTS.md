@@ -12755,7 +12755,44 @@ to **Shipped**.)_
   future Pillow that maps unmapped codepoints to a blank would silently turn the check into one that can never
   fail (that trap is already commented in `test_nameplate.py`).
 
-- **NEW IDEA (Builder 2026-08-27, the natural next tap on the v0.283.0 keepsake) — the keepsake titles itself
+- **✅ SHIPPED (Builder, v0.322.7, branch `claude/wizardly-feynman-a8b379`) — ~~the keepsake titles itself from
+  the FITS `OBJECT` card, so an Unsorted or folder-named target gets a keepsake titled with a folder name.~~**
+  Built as filed, and **fixed at `_nameplate_fields` rather than at the keepsake**, so all three baked-caption
+  surfaces get it from one place: the keepsake, the share JPEG, and the print. A beginner who drops loose FITS
+  in no longer posts a picture captioned `MyWorks_2026-08-14`.
+
+  **The whole design is the confidence rule, and it is a new pure helper —
+  `seestack.objectinfo.confident_object_title(name, ra, dec)` — so it is testable on its own.** It returns a
+  catalog title only when **both** halves hold:
+  1. **The stored name identifies nothing.** If `identify_object(name)` matches by designation or common name,
+     the helper returns `None` and the user's own words stand. This is the entry's "keep the fallback chain
+     honest" Care note made mechanical: the caption can only ever replace a name that *said nothing*, and it
+     can never "correct" `M 31` into `Andromeda Galaxy` or overrule a name that disagrees with the sky.
+  2. **The solved centre is within `_TITLE_MATCH_DEG = 0.25°`** — three times tighter than the object card's
+     `_CONE_MATCH_DEG = 0.75°`, and that gap is the point. A wrong "What am I looking at?" card is a guess the
+     reader dismisses in a glance; a wrong object name **baked into pixels the user shares** is a wrong fact
+     that outlives the session. At 0.25° a Seestar field is still centred on the object, while a neighbouring
+     showpiece (Stephan's Quintet beside NGC 7331, ~0.5°) is safely out of reach. A test asserts the two radii
+     stay ordered, with the 0.5°-off case matching the card and *not* the caption.
+
+  **One honest edge, recorded rather than hidden:** the bundled catalog lists `M31`, not its `NGC 224` alias, so
+  a target named `NGC 224` reads as "identifies nothing" and gets captioned `Andromeda Galaxy`. That is still
+  *true*, which is the bar for a baked caption; a test pins it so the behaviour is a decision, not a surprise.
+
+  **The Care note is honoured exactly:** display-time only. Nothing is written back to the target, the library
+  entry or the FITS — a test asserts the entry it was built from is untouched — so the still-open "Rename to
+  {name}?" chip remains the separate, user-tapped half.
+
+  **Upgrade-safe (§9):** additive pure helper plus a caption-time fallback. No config, schema, on-disk, API or
+  default change; a target with no solved centre, or one whose name already identifies it, produces exactly the
+  caption it did before.
+
+  **Tests (+7 endpoint-level in `tests/webapp/test_nameplate_object_title.py`, +4 in `tests/test_objectinfo.py`):**
+  a folder-named and an `Unsorted` target take the catalog name; a meaningful name is never overruled; no solved
+  centre and a 0.5°-off centre are both left alone; the two cone radii stay ordered; NaN/None/non-numeric
+  coordinates say nothing; and the entry is not mutated.
+
+  *(Original spec.)* **NEW IDEA (Builder 2026-08-27, the natural next tap on the v0.283.0 keepsake) — the keepsake titles itself
   from the FITS `OBJECT` card, so an Unsorted or folder-named target gets a keepsake titled with a folder
   name.** *(Pillar: enjoy + share / friendliness — PRIORITY 3. Size: S — both halves already exist.)*
   `_nameplate_fields` takes the title from `OBJECT`, falling back to the library entry's name. For a beginner
@@ -14753,6 +14790,24 @@ to **Shipped**.)_
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
+
+- **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via `scripts/agent-dogfood.sh`) — the
+  editor's export panel asks the beginner a question whose own help text says the answer doesn't matter.**
+  *(Pillar: friendliness / editor — PRIORITY 1; size XS to decide, S to build whichever way it goes. Traced,
+  high confidence.)* "Export full resolution" carries a **TIFF: Linear / Auto-stretched** `Select`
+  (`routes/Editor.tsx:2306`) whose `HintLabel` reads *"It's already display-ready, so **both options produce
+  that same result**."* That is accurate — `_write_tiff`'s `already_display` branch short-circuits **before**
+  `mode` is read, and `pipeline.py:1432` passes `tiff_mode=…` and `already_display=True` together, so an editor
+  export's TIFF ignores the control entirely — which makes it a decision a beginner has to stop and make, on
+  the priority-1 surface, that changes nothing. **Two honest shapes, and the choice is the work:** (a) make it
+  *mean* something — `autostretch` is already what the mode does on a stacker run, so the branch could honour
+  `mode` for a *linear* re-render of the same edit, which is a real second artefact; or (b) keep one output and
+  fold the sentence into the panel's existing info text, so nothing is asked. **Care:** the owner's standing
+  constraint is that nothing may be *removed* — (b) is a removal of a control, so it needs the setting's
+  meaning to genuinely not exist, which is exactly what the tooltip already asserts; either way say so in the
+  commit rather than deleting it quietly. Grep `tiff_mode` first: `frontend/src/tiffDownload.ts` reads it off
+  `options_json` to choose the History download hint, so whichever way this goes, that copy has to still be
+  true.
 - **Background-mesh box floor (`_scaled_box` `minimum=16`) is the one pixel-scale divergence with
   no honest advisory.** *(Traced, Builder editor-parity audit 2026-07-16; low confidence it's a
   visible defect — arguably a defensible tradeoff.)* `seestack/edit/ops/background.py::_scaled_box`
@@ -16929,6 +16984,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via `scripts/agent-dogfood.sh`) — "My best
+  pictures" offers **Play slideshow** on a wall that is empty, and the obvious gate is the wrong one.**
+  *(Pillar: friendliness — PRIORITY 3; size XS; **read the trap before writing the one-line fix**.)* On a fresh
+  install the page reads *"Once you've finished stacking a couple of targets, your best pictures will gather
+  here automatically"* — the wall self-hides below `BEST_PICTURES_MIN` — and directly above that sentence sits
+  a primary-looking **Play slideshow** button. `routes/BestPictures.tsx:100` renders it unconditionally, while
+  the count badge three lines above it *is* gated on `items.length > 0`, so this is an oversight rather than a
+  decision. It is not a crash: `/show` has a graceful "Nothing to show yet" state. It is a beginner's first
+  visit to a page whose only call to action goes nowhere.
+  **⚠ The trap, and why this is filed rather than fixed in passing:** the slideshow is **not** built from the
+  best-pictures wall alone — `ShowAndTellView` calls `buildSlides(best.items, gallery.videos)`, so someone with
+  no ranked stacks but a finished **Moon or Sun still** has a perfectly good show. Gating the button on
+  `items.length > 0` would hide a working slideshow from exactly the beginner whose first picture was a lunar
+  video, which is a worse bug than the one being fixed. The honest gate is "would `buildSlides` produce
+  anything", which this page cannot answer today because it never runs the `gallery` query. So the shapes are:
+  add that query here (one extra request on a page that already makes one), or export a tiny shared
+  `hasAnythingToShow` the two pages agree on. Either way, pin it with a test for the Moon-still-only library —
+  that is the case a naive fix breaks.
+
+- **DOGFOOD FINDING, LOW VALUE — recorded so it is not re-found, not because it should be fixed (Builder
+  2026-09-01).** The **Library**'s target card truncates a long name (*"Sample: Orion Nebula (…"*) where the
+  Gallery's, since v0.322.4, does not. Measured on the running app: it is **desktop-only** — at 1440 px the
+  grid gives ~280 px cards and `Library.tsx:101`'s `truncate` bites, while at 420 px the card is full-width and
+  the whole name fits. That is the opposite of the v0.322.4 Gallery finding, whose severity came precisely from
+  a phone having no hover to recover the name; here the one width that truncates is the one width where the
+  `title=` tooltip works. **If it is ever touched**, the shape is `lineClamp={2}` with `align="flex-start"` on
+  the `Group`, which lets the name use a second line while the chevron stays pinned to the first — the existing
+  comment on that row explains why the chevron must not wrap, and that constraint survives. Not worth a run on
+  its own.
 
 - **✅ SHIPPED (Builder, v0.322.5, branch `claude/wizardly-feynman-yryq05`) — ~~"Your first image" says *"Let it
   work out where each frame points"* but ticks on whether **ASTAP is installed**, so the app's own first-run
@@ -19815,7 +19900,59 @@ problems. Dogfood it every big-picture run and fix root causes.
   so the no-data path is safe either way. **Prereq:** the mosaic item's coverage-map interaction is already
   handled by v0.270.4's `{base}_framecov.fits`, so the single-field extension inherits that safety for free.
 
-- **IDEA (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — the 16-bit *linear* export TIFF clips the
+- **✅ SHIPPED (Builder, v0.322.6, branch `claude/wizardly-feynman-a8b379`) — ~~the 16-bit *linear* export TIFF
+  clips the brightest 0.1% (star / galaxy / nebula cores) to pure white, which its own docstring calls "the full
+  data preserved".~~ The 2026-08-16 counter-argument below was the right question and it is now MEASURED — on
+  ADU-scale data, as it demanded — and the answer is that the precision it worried about costs under 1 %.**
+  `_to_uint16_linear` now maps the **full covered range** (`min`→0, `max`→65535) instead of the robust
+  0.5 %–99.9 % window, so nothing is clipped at either end.
+
+  **The measurement that settles the gate.** The counter-argument's objection was specific and correct in shape:
+  the stack is in **ADU**, not [0,1], the sky is zeroed with half its noise negative, and star cores sit near
+  saturation — so widening the white point from p99.9 (~3.3 k ADU) to the true max (~46 k ADU here) makes the
+  16-bit step ~14× coarser (0.050 → 0.71 ADU). What it did not check is where that step *starts*: far below the
+  grain. Round-tripping a synthetic ADU-scale stack (sky zeroed, faint nebulosity, a Pareto star field with
+  saturated cores) through both packings and re-measuring `estimate_noise_sigma`:
+
+  | sky grain | `noise_sigma` | old window: σ after round-trip | full range: σ after round-trip |
+  |---|---|---|---|
+  | 60 ADU | 0.0293 | −0.32 % | **−0.26 %** |
+  | 20 ADU | 0.0110 | −0.55 % | **+0.73 %** |
+  | 6 ADU | 0.0039 | −0.50 % | **+2.52 %** |
+
+  The owner's own deepest real stacks measure **0.015–0.020** (`grainProjection`'s `CLEAN_SIGMA` anchor), i.e.
+  between the first two rows; the third is four times cleaner than anything this app has ever produced, and even
+  there the cost is 2.5 %. Against that: on the same scene the old packing put **720 pixels at pure white and
+  3,607 at pure black** where only **one** of each is at the data's own extremes. A star core read as a
+  *plateau* — measured profile `[65535, 65535, 55474, 42019, …]` against the new `[65535, 61993, 52476,
+  39748, …]`. So the trade is ~0.3–2.5 % of a noise measurement against the object's own brightest structure,
+  and it is not close.
+
+  **The counter-argument's other requirement is met, not dodged:** it insisted the black point stay
+  negative-aware, because `_zero_sky_per_channel` leaves half the sky noise below zero and a Siril-style
+  "write it as-is, clip at 0" would delete that half. The covered **minimum** is negative-aware by
+  construction — strictly more so than the p0.5 it replaces — and a test pins that the packer's black point
+  follows the data below zero.
+
+  **The file is now reversible, which is what "the full data" ought to mean.** `_write_tiff` records the two
+  anchors in the TIFF's description (`black=… white=…; float = black + dn / 65535 * (white - black)`), so a
+  reader can recover the stack's own float levels exactly. `linear_scale_anchors` is the one place they are
+  computed, so the bytes and the description cannot drift.
+
+  **Upgrade-safe (§9):** pure output-formatting change. No config, schema, on-disk-layout, API or default change;
+  TIFFs already written are untouched (only a *new* export differs), the `autostretch` mode and the editor's
+  `already_display` path are byte-for-byte unchanged, and nothing in the app reads these files back.
+  `frontend/src/tiffDownload.ts`'s "opens dark until you stretch it" stays true — more so, since the sky now
+  sits lower in the range.
+
+  **Tests (+9, `tests/test_linear_tiff_no_clip.py`; the clipping ones fail before):** only pixels at the data's
+  true max reach full scale (1, not 130) and only pixels at the true min reach 0 (1, not 651); a star core keeps
+  a strictly monotone profile with no saturated plateau; 16 bits still resolves the sky grain; the precision
+  trade above, pinned across three depths so it cannot silently rot; the black point follows the data below
+  zero; a mosaic's NaN gaps still write black and still don't set the anchors; the description round-trips to
+  the float levels within one 16-bit step; and the editor export's `already_display` TIFF is untouched.
+
+  *(Original spec.)* **IDEA (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — the 16-bit *linear* export TIFF clips the
   brightest 0.1% (star / galaxy / nebula cores) to pure white, which its own docstring calls "the full data
   preserved".** *(Pillar: image quality / trust — PRIORITY 4; size S; **VERIFY the convention before changing —
   every existing linear TIFF's pixels would move**, so this is filed as an idea, not a bug.)* `output.py`
