@@ -10865,6 +10865,42 @@ to **Shipped**.)_
   capture time — "newest run" is the right ordering for History — and where both dates matter, say both
   ("shot 15 Nov 2024 · stacked 30 Aug 2026") rather than silently swapping one for the other.
 
+  **✅ THE LAST TWO NAMED SURFACES ARE DONE (Builder, v0.321.2, branch `claude/wizardly-feynman-be4ubk`) — the
+  Gallery card and the History row, which were the two still printing a *raw machine stamp* with no label at
+  all.** The entry names five surfaces; the Dashboard strip, the keepsake and the Target hero were closed by
+  earlier runs, and **the Library tile turns out to show no date at all** (`Library.tsx` reads
+  `last_activity_utc` only to *sort* by it, which is the right use and the Care note's own exception) — so these
+  two were the whole remainder, and the sweep is finished. Both printed `run.timestamp_utc` sliced with `.replace("T", " ")`
+  — `2026-08-30 14:32` on the Gallery card, `2026-08-30T14:32:05` on the History row — which is (a) the moment
+  the *stack ran*, years out from the capture on a re-stack of a back catalogue, and (b) not a date format the
+  app uses anywhere else a person reads.
+
+  **Gallery card → `pictureDateLabel`**, the same helper the Dashboard strip and the Target hero already use, so
+  it says *"Shot 15–18 Nov 2024"* and falls back to a **labelled** *"Stacked 30 Aug 2026"* when the run predates
+  the capture window (schema < 18 — i.e. almost everything in the owner's library today). The night count is
+  deliberately **not** passed: the card's line is already five segments long, and "over 4 nights" belongs on the
+  caption, not the tile. The run's identity there is its `output_basename` printed beside the date, so the clock
+  time was not needed.
+
+  **History row → both dates, each labelled** — *"Shot 15–18 Nov 2024 · Stacked 30 Aug 2026, 14:32"* — because
+  this is the one list where they answer different questions: which run this row *is*, and what the picture is
+  *of*. That is the entry's own "where both dates matter, say both" rule, and the sort is untouched (still newest
+  run first, as the Care note requires). **The clock time is load-bearing here and is why this needed a new
+  helper:** `output_basename` is reused across a re-stack, so two re-stacks made the same afternoon are
+  distinguished by nothing else — a date-only label would collapse two rows into identical text.
+  `formatStampDateTime` is `formatStampDate` plus `HH:MM`, keeping the never-a-numeric-month rule and the same
+  empty-string-on-junk contract.
+
+  **Frontend-only:** no API, schema, config, on-disk or default change; both fields were already on the payloads
+  (`GalleryItem`/`StackRun` have carried `capture_night_start`/`_end` since schema 18) and an older backend
+  omitting them lands on the labelled "Stacked" form, which is exactly right.
+
+  **Tests (+6; the 4 component ones fail before):** `format.test.ts` (+2 — the clock time added to the same named
+  month, and the junk contract), `Gallery.test.tsx` (+2 — a 2024 capture window shown as *Shot* with the 2026
+  processing stamp gone from the card, and the labelled fallback with no "Shot" on a run that has no window) and
+  `History.test.tsx` (+2 — both labels on one line with no raw ISO stamp, and two same-afternoon re-stacks whose
+  lines stay distinct while neither claims a shoot date).
+
 - **✅ SHIPPED (Builder, v0.318.2, branch `claude/compassionate-galileo-cwqy3x`) — ~~the app writes "full
   moons" in one sentence and "full Moon" in three others.~~** Exactly as filed, and picked up on its own at the
   end of a run rather than smuggled into an unrelated commit, as the entry asked. `describeSkyCoverage` now

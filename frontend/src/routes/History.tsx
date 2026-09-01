@@ -10,7 +10,9 @@ import { IconAdjustments, IconCheck, IconChevronDown, IconClipboardText, IconCop
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded } from "../api/client";
-import { formatCaptureNights, formatIntegration } from "../format";
+import {
+  formatCaptureNights, formatIntegration, formatStampDateTime,
+} from "../format";
 import { postCaption } from "../components/postCaption";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
@@ -1123,7 +1125,19 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         </Group>
       </Group>
       <Text size="xs" c="dimmed">
-        {run.timestamp_utc.replace("T", " ").slice(0, 19)} · {run.canvas_w}×{run.canvas_h}
+        {/* Both dates, labelled — this is the one list where they answer
+            different questions. "Shot …" is what the picture is *of*; "Stacked
+            …" is which run this row is, and two re-stacks made the same
+            afternoon can share an output name, so this stamp keeps its clock
+            time. The raw `2026-08-30T14:32:05` it used to print answered
+            neither question in plain language, and on a re-stack of a back
+            catalogue it read as a capture date years out. */}
+        {(() => {
+          const shot = formatCaptureNights(
+            run.capture_night_start, run.capture_night_end);
+          return shot ? `Shot ${shot} · ` : "";
+        })()}
+        Stacked {formatStampDateTime(run.timestamp_utc)} · {run.canvas_w}×{run.canvas_h}
         {run.total_exposure_s ? ` · ${formatIntegration(run.total_exposure_s)}` : ""}
         {hasNoise(run.noise_sigma) ? <> · <NoiseReadout sigma={run.noise_sigma} /></> : null}
         {formatEngineVersion(run.engine_version) ? ` · ${formatEngineVersion(run.engine_version)}` : ""}

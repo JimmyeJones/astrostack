@@ -251,6 +251,27 @@ export function formatStampDate(iso: string | null | undefined): string {
   });
 }
 
+/**
+ * The same moment as {@link formatStampDate}, plus its clock time: "30 Aug
+ * 2026, 14:32".
+ *
+ * For the one place a processing stamp is also an *identity*: History lists
+ * every run of one target, and two re-stacks made the same afternoon differ
+ * only by the clock. The date alone would leave two rows reading identically,
+ * which is why that list showed a raw `2026-08-30T14:32:05` for so long. Same
+ * never-a-numeric-month rule and same empty-string-on-junk contract as the
+ * date-only form, so a caller drops the clause rather than printing "Invalid
+ * Date".
+ */
+export function formatStampDateTime(iso: string | null | undefined): string {
+  const date = formatStampDate(iso);
+  if (!date) return "";
+  const time = new Date(iso as string).toLocaleTimeString(undefined, {
+    hour: "2-digit", minute: "2-digit",
+  });
+  return `${date}, ${time}`;
+}
+
 /** The `YYYY-MM-DD` head of an ISO date/stamp, validated. `null` when absent or
  *  malformed, so every caller can distinguish "no night" from a real one. */
 function parseNightDate(
