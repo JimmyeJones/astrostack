@@ -20,6 +20,7 @@ import { integrationReadiness, readinessColor, noiseReductionHint } from "../rea
 import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
 import { AutoStackHoldNote } from "../components/AutoStackHoldNote";
+import { CaptureQuietNote } from "../components/CaptureQuietNote";
 import { CleanestShotNote } from "../components/CleanestShotNote";
 import { GrainierNewestNote } from "../components/GrainierNewestNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
@@ -903,6 +904,13 @@ export function TargetView() {
             node: <GrainierNewestNote safe={safe} /> },
           { key: "autostack-hold", priority: NOTICE_PRIORITY.warning,
             node: <AutoStackHoldNote safe={safe} /> },
+          /* "Capture may have stopped" — subs were arriving steadily and then
+              stopped, mid-session. A warning rather than an advisory because it
+              is only actionable while the night is still running; it self-hides
+              the moment the silence outlasts the session, and never fires on a
+              night the owner simply finished. */
+          { key: "capture-quiet", priority: NOTICE_PRIORITY.warning,
+            node: <CaptureQuietNote safe={safe} /> },
           { key: "missing-files", priority: NOTICE_PRIORITY.warning, node: missingFiles !== null ? (
             <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
               title={missingFiles.title}>

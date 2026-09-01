@@ -663,6 +663,11 @@ def target_live_session(safe: str, request: Request) -> LiveSessionOut | None:
     target's goal when one is set. ``null`` when the target has no datable frames
     at all, so the page shows its empty state rather than an invented night.
 
+    It also carries ``quiet``: the session was *mid-run* and the subs stopped, so
+    a walked-away owner can be told a stalled Seestar cost them the rest of an
+    otherwise-clear night. Deliberately narrower than "not active" — a night they
+    finished on purpose never sets it.
+
     Read-only aggregation over the ``frames`` table — safe to call while a scan,
     an ingest or a stack is running, which is exactly when it will be called.
     """
@@ -699,6 +704,9 @@ def target_live_session(safe: str, request: Request) -> LiveSessionOut | None:
         reject_buckets=live.reject_buckets,
         newest_kept_frame_id=live.newest_kept_frame_id,
         goal_exposure_s=goal_s,
+        quiet=live.quiet,
+        typical_gap_minutes=live.typical_gap_minutes,
+        quiet_after_minutes=live.quiet_after_minutes,
     )
 
 

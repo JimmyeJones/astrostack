@@ -520,6 +520,15 @@ export interface LiveSession {
   reject_buckets: Record<string, number>;
   newest_kept_frame_id: number | null;
   goal_exposure_s: number | null;
+  /** "Capture seems to have gone quiet": this session was *mid-run* and the subs
+   *  stopped, judged against the cadence this target had been keeping. Narrower
+   *  than `!active` — a night finished on purpose never sets it. Optional:
+   *  absent on an older backend, which reads as "nothing to say". */
+  quiet?: boolean;
+  /** The cadence behind that verdict, in minutes between subs. */
+  typical_gap_minutes?: number | null;
+  /** How long the silence had to run before it was worth mentioning. */
+  quiet_after_minutes?: number | null;
 }
 
 export interface HealthNote {

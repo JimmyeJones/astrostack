@@ -23,6 +23,14 @@ it is not a nag — it reports, and says "no session in progress" plainly when t
 last sub is hours old, so it self-hides on a quiet night rather than inventing
 one.
 
+It also answers a third question the owner can only ask *after* walking away —
+**"did it keep going?"** A stalled Seestar (disconnected, card full, parked by a
+dew-heater trip) doesn't fail loudly; the subs simply stop, and the owner finds
+out in the morning that half a clear night is missing. ``active`` already knew
+the newest sub was stale; ``quiet`` is the narrower, mentionable case: this
+session was *mid-run* and fell silent, judged against the cadence the target
+itself had been keeping. A night the owner deliberately finished never trips it.
+
 Pure, offline and read-only: it aggregates ``frames`` rows and nothing else. The
 clock is injected (``now``), so every window it computes is unit-testable without
 sleeping or patching.
@@ -66,6 +74,46 @@ CONDITIONS_MIN_FRAMES = 5
 # signal a beginner would otherwise only discover in the morning.
 CONDITIONS_GOOD_KEEP_RATE = 0.8
 CONDITIONS_POOR_KEEP_RATE = 0.5
+
+# --- "capture seems to have gone quiet" -------------------------------------
+#
+# The failure the owner cannot see happening: they walk away, and part-way
+# through an otherwise-clear night the Seestar disconnects, fills its card, or
+# parks itself — so subs simply stop arriving and they find out in the morning.
+# ``active`` above already knows the newest sub is stale; what it *doesn't* say
+# is whether the target was mid-run when it stopped (worth a heads-up) or simply
+# finished (worth nothing at all). These constants draw that line.
+#
+# The cadence is measured, never assumed: "no sub for 45 minutes" means something
+# very different for 10 s subs than for a target the owner shoots one 5-minute
+# frame at a time, so the wait scales with the gap this target has actually been
+# keeping — with a floor and a ceiling either side of it.
+
+# How many of the session's trailing subs the cadence is measured over. Long
+# enough that one dither or refocus pause can't move the median, short enough
+# that a cadence change part-way through the night is reflected quickly.
+QUIET_WINDOW_FRAMES = 30
+
+# Below this many datable subs in the session there is no "run of arrivals" to
+# have stopped — a couple of test frames that go quiet is just a couple of test
+# frames, so the note stays silent rather than guessing.
+QUIET_MIN_FRAMES = 6
+
+# ...and below this much elapsed capture the session never really got going
+# (six 10 s subs span a minute). Both floors must clear before anything is said.
+QUIET_MIN_SESSION_MINUTES = 20.0
+
+# The wait, in multiples of the target's own typical inter-sub gap. Six is
+# deliberately generous: a Seestar's dither, refocus and re-point pauses are a
+# small number of sub-lengths, and the cost of crying wolf on a working scope is
+# much higher than the cost of noticing a stall a few minutes later.
+QUIET_GAP_MULTIPLE = 6.0
+
+# Never say anything sooner than the session stops counting as live (so "still
+# going" and "gone quiet" can never both be true), and never wait longer than the
+# ceiling however slow the cadence — three hours of silence is worth mentioning
+# even to someone shooting half-hour subs.
+QUIET_CEILING_MINUTES = 180.0
 
 
 @dataclass
@@ -111,6 +159,16 @@ class LiveSession:
     # The newest *accepted* sub's id, so the page can show the freshest thumbnail
     # the app actually kept — never a frame it just set aside.
     newest_kept_frame_id: int | None = None
+    # "Capture seems to have gone quiet": this session was mid-run and has since
+    # fallen silent for longer than ``quiet_after_minutes``. Strictly narrower
+    # than ``not active`` — a night the owner deliberately finished, a target
+    # that only ever got a handful of subs, and a session that stopped so long
+    # ago it is simply history all read ``quiet=False``. The cadence it is judged
+    # against travels with it, so a caller can say *why* ("a sub about every
+    # 40 s, then nothing") instead of quoting a bare threshold.
+    quiet: bool = False
+    typical_gap_minutes: float | None = None
+    quiet_after_minutes: float | None = None
 
 
 def _conditions(frames: list[FrameRow]) -> LiveConditions:
@@ -147,6 +205,48 @@ def _conditions(frames: list[FrameRow]) -> LiveConditions:
     return LiveConditions(
         verdict=verdict, n_recent=n_recent, n_recent_kept=n_kept,
         median_fwhm_px=med, recent_buckets=buckets,
+    )
+
+
+def typical_gap_minutes(frames: list[FrameRow]) -> float | None:
+    """The median minutes between consecutive subs over the session's trailing
+    window, or ``None`` when there aren't enough datable arrivals to say.
+
+    The *median*, not the mean, precisely because a real night contains pauses —
+    a dither, a refocus, a cloud the mount waits out — and one 20-minute hole
+    must not be allowed to redefine what "normal" looks like for this target.
+    Non-positive gaps (two subs sharing a stamp, or a clock that stepped
+    backwards) are dropped rather than counted as an infinitely fast cadence.
+    """
+    stamps = [
+        dt for f in frames[-QUIET_WINDOW_FRAMES:]
+        if (dt := parse_capture_time(f.timestamp_utc)) is not None
+    ]
+    if len(stamps) < QUIET_MIN_FRAMES:
+        return None
+    gaps = [
+        (b - a).total_seconds() / 60.0
+        for a, b in zip(stamps, stamps[1:])
+        if (b - a).total_seconds() > 0
+    ]
+    if len(gaps) < QUIET_MIN_FRAMES - 1:
+        return None
+    return float(median(gaps))
+
+
+def quiet_after_minutes(
+    typical_gap_min: float, *, stale_minutes: float = LIVE_STALE_MINUTES
+) -> float:
+    """How long this target's silence has to run before it is worth mentioning,
+    given the cadence it has been keeping.
+
+    Clamped by ``stale_minutes`` below — so "still going" and "gone quiet" can
+    never both be true of one session — and by :data:`QUIET_CEILING_MINUTES`
+    above, so even a very slow cadence gets noticed the same night.
+    """
+    return min(
+        QUIET_CEILING_MINUTES,
+        max(stale_minutes, QUIET_GAP_MULTIPLE * typical_gap_min),
     )
 
 
@@ -204,6 +304,33 @@ def live_session(
     )
     newest_kept = next((f for f in reversed(session) if f.accept), None)
 
+    # "Gone quiet": the session was mid-run and the subs stopped. Everything here
+    # is a narrowing of ``not active``, and each clause exists to keep the note
+    # off a night that is simply *over*:
+    #   * a measurable cadence (so there was a run of arrivals to stop, and so
+    #     the wait is scaled to this target rather than to a fixed clock);
+    #   * a session that actually got going, not six subs spanning a minute;
+    #   * silence longer than that scaled wait; and
+    #   * silence still inside the session gap — past it this is last night, and
+    #     the recap is the surface that tells that story, not a live warning.
+    start_dt = parse_capture_time(session[0].timestamp_utc)
+    span_min = (
+        (latest_dt - start_dt).total_seconds() / 60.0
+        if latest_dt is not None and start_dt is not None else 0.0
+    )
+    typical = typical_gap_minutes(session)
+    quiet_after = (
+        quiet_after_minutes(typical, stale_minutes=stale_minutes)
+        if typical is not None else None
+    )
+    quiet = (
+        since is not None
+        and quiet_after is not None
+        and span_min >= QUIET_MIN_SESSION_MINUTES
+        and since >= quiet_after
+        and since < gap_hours * 60.0
+    )
+
     return LiveSession(
         active=since is not None and since <= stale_minutes,
         n_frames=len(session),
@@ -218,6 +345,9 @@ def live_session(
         conditions=_conditions(session),
         reject_buckets=buckets,
         newest_kept_frame_id=newest_kept.id if newest_kept is not None else None,
+        quiet=quiet,
+        typical_gap_minutes=typical,
+        quiet_after_minutes=quiet_after,
     )
 
 
@@ -227,7 +357,14 @@ __all__ = [
     "CONDITIONS_POOR_KEEP_RATE",
     "CONDITIONS_WINDOW_FRAMES",
     "LIVE_STALE_MINUTES",
+    "QUIET_CEILING_MINUTES",
+    "QUIET_GAP_MULTIPLE",
+    "QUIET_MIN_FRAMES",
+    "QUIET_MIN_SESSION_MINUTES",
+    "QUIET_WINDOW_FRAMES",
     "LiveConditions",
     "LiveSession",
     "live_session",
+    "quiet_after_minutes",
+    "typical_gap_minutes",
 ]
