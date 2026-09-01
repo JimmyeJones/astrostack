@@ -16954,6 +16954,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   leading with the setup step — and pins the label. The follow-on (tick on frames that *actually* solved) is
   filed directly below with its cost.
 
+- **⚠️ PROCESS NOTE (Builder 2026-09-01, after it briefly looked like a 32-error regression) — don't run the
+  Python suite and a `vite build` at the same time.** The webapp serves the SPA out of `webapp/static`, which
+  `npx vite build` **deletes and rewrites**; a pytest run overlapping it reported `3792 passed, 32 errors`
+  where the same tree, run alone, gives the baseline `3824 passed, 2 skipped`. The errors land in
+  `tests/webapp/*` and look like real fixture failures, not like an I/O race, so the temptation is to go
+  hunting. **Both halves of the trap are worth knowing:** `scripts/agent-dogfood.sh` runs a `vite build` of its
+  own (always with `--build`, and automatically when `webapp/static/index.html` is missing), so "just the
+  dogfood pass" counts as a concurrent build. Serialise them, and re-run alone before believing any webapp
+  error you didn't cause.
+
+- **⚪ CLASS SWEPT — two sites, both fixed in v0.322.4; recorded so nobody re-sweeps it (Builder 2026-09-01).**
+  The construct: a card header where a `truncate`d name and a badge group share one `wrap="nowrap"` row and the
+  badge group carries `flexShrink: 0`. The badges then take the width they want and the **name** absorbs every
+  pixel of the squeeze — which is backwards, because the name is the identifier and the badges are the
+  decoration. Grepped `flexShrink: 0` across `frontend/src` and read every hit that sits beside a truncating
+  name. **Every other hit is on the right side of the line:** `Library.tsx`'s target card already puts the name
+  on its own row with the badges below (that is the shape v0.322.4 adopted, so the browse surfaces now agree),
+  and its `flexShrink: 0` is on a **chevron icon**, which is 16 px and must not shrink; the Gallery's
+  video-still card pairs a label with a *single* small badge, which cannot squeeze a name to nothing. **The
+  generative test for new code, since it costs nothing at review time:** if a name and a badge group share a
+  no-wrap row, ask what the row does when the name is long — if the answer is "the name disappears", the badges
+  belong on their own line.
+
 - **NEW IDEA (Builder 2026-09-01, the half the v0.322.5 label fix deliberately did not build) — tick the
   first-image solve step on frames that **actually got solved**, not only on ASTAP being installed.**
   *(Pillar: friendliness — PRIORITY 3; size S, but **read the cost note**; the label fix already removed the
