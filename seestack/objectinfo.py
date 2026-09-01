@@ -14,6 +14,7 @@ a tight cone around a *solved* centre) so it never guesses.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 
@@ -156,6 +157,70 @@ def identify_object(
             return _to_info(best, "coords")
 
     return None
+
+
+#: How close a solved centre must sit to a catalog object before we are willing
+#: to put that object's name on a picture the user is about to *share*. Three
+#: times tighter than :data:`_CONE_MATCH_DEG`, and deliberately so: showing the
+#: wrong "what am I looking at?" card is a bad guess the reader can dismiss;
+#: printing the wrong object name into a shared image is a wrong fact that
+#: outlives the session. At 0.25° a Seestar field is still centred on the object,
+#: while a neighbouring showpiece (Stephan's Quintet beside NGC 7331, ~0.5°) is
+#: safely out of reach.
+_TITLE_MATCH_DEG = 0.25
+
+
+def confident_object_title(
+    name: str | None,
+    ra_deg: float | None = None,
+    dec_deg: float | None = None,
+    *,
+    catalog: tuple[CatalogObject, ...] | None = None,
+) -> str | None:
+    """A catalog title for a picture whose stored ``name`` says nothing useful.
+
+    A beginner who drops loose FITS in gets a target called ``Unsorted`` or
+    ``MyWorks_2026-08-14``, and that folder name is what ends up printed in serif
+    under the picture they were about to post. When the plate solve puts the
+    field squarely on a catalog object *and the stored name identifies nothing*,
+    the catalog's own name is strictly more informative — so this returns it.
+
+    Deliberately conservative, in both directions:
+
+    * If ``name`` already resolves to a catalog object (by designation or common
+      name), this returns ``None`` — the user's own words win, and we never
+      "correct" ``M 31`` into ``Andromeda Galaxy`` or overrule a name that
+      disagrees with the coordinates.
+    * The cone is :data:`_TITLE_MATCH_DEG`, not the card's wider
+      :data:`_CONE_MATCH_DEG`, because this name gets baked into shared pixels.
+
+    Returns the object's common name, falling back to its designation, or
+    ``None`` when there is nothing confident to say.
+    """
+    if ra_deg is None or dec_deg is None:
+        return None
+    try:
+        ra = float(ra_deg)
+        dec = float(dec_deg)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(ra) and math.isfinite(dec)):
+        return None
+
+    cat = catalog if catalog is not None else load_catalog()
+    if name and identify_object(name, catalog=cat) is not None:
+        return None
+
+    best: CatalogObject | None = None
+    best_sep = _TITLE_MATCH_DEG
+    for obj in cat:
+        sep = _angular_sep_deg(ra, dec, obj.ra_deg, obj.dec_deg)
+        if sep < best_sep:
+            best, best_sep = obj, sep
+    if best is None:
+        return None
+    title = (best.name or "").strip() or (best.id or "").strip()
+    return title or None
 
 
 def _to_info(obj: CatalogObject, matched_by: str) -> ObjectInfo:
