@@ -3,7 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CompareView, parseRef, compareHref, noiseComparison, panelComparison, compareDateLabel } from "./Compare";
+import {
+  CompareView, parseRef, compareHref, noiseComparison, panelComparison,
+  nightsComparison, compareDateLabel,
+} from "./Compare";
 import * as client from "../api/client";
 import type { GalleryItem } from "../api/client";
 
@@ -58,16 +61,62 @@ describe("compareHref", () => {
 });
 
 describe("compareDateLabel", () => {
-  it("formats a valid timestamp to a short date", () => {
-    // Locale-dependent exact form, but must name the year and be non-empty.
-    const out = compareDateLabel("2026-05-02T00:00:00Z");
-    expect(out).not.toBe("");
+  it("dates a picture by when its subs were SHOT, not when the stack ran", () => {
+    // The page's question is "did it get better?", and the usual answer is "it
+    // has more nights in it" — which the processing stamp cannot show.
+    const it2 = item(3, "M_42");
+    it2.capture_night_start = "2024-11-15";
+    it2.capture_night_end = "2024-11-18";
+    it2.capture_nights = 4;
+    const out = compareDateLabel(it2);
+    expect(out).toContain("Shot");
+    expect(out).toContain("4 nights");
+    expect(out).toContain("2024");
+    expect(out).not.toContain("2026");
+  });
+
+  it("falls back to a LABELLED processing date for an older run", () => {
+    // Never a bare date: a bare one reads as "the night I took this".
+    // Locale-dependent day/month order, but the label and year are fixed.
+    const out = compareDateLabel(item(3, "M_42"));
+    expect(out).toMatch(/^Stacked /);
     expect(out).toContain("2026");
   });
-  it("returns an empty string for a missing or unparseable timestamp", () => {
-    expect(compareDateLabel(null)).toBe("");
-    expect(compareDateLabel(undefined)).toBe("");
-    expect(compareDateLabel("not-a-date")).toBe("");
+
+  it("returns an empty string when neither date is usable", () => {
+    const broken = item(3, "M_42");
+    broken.timestamp_utc = "not-a-date";
+    expect(compareDateLabel(broken)).toBe("");
+  });
+});
+
+describe("nightsComparison", () => {
+  const withNights = (run_id: number, nights: number | null, safe = "M_42") => {
+    const g = item(run_id, safe);
+    g.capture_nights = nights;
+    return g;
+  };
+
+  it("names the deeper stack and both counts", () => {
+    expect(nightsComparison(withNights(1, 2), withNights(2, 4)))
+      .toEqual({ winner: "B", more: 4, fewer: 2 });
+    expect(nightsComparison(withNights(1, 5), withNights(2, 1)))
+      .toEqual({ winner: "A", more: 5, fewer: 1 });
+  });
+
+  it("says nothing when the two are equally deep", () => {
+    expect(nightsComparison(withNights(1, 3), withNights(2, 3))).toBeNull();
+  });
+
+  it("says nothing when a run never recorded its night count", () => {
+    expect(nightsComparison(withNights(1, null), withNights(2, 4))).toBeNull();
+    expect(nightsComparison(item(1, "M_42"), withNights(2, 4))).toBeNull();
+  });
+
+  it("never compares the depth of two different targets", () => {
+    // "M 42 has more nights than NGC 7000" compares nothing at all.
+    expect(nightsComparison(withNights(1, 2), withNights(2, 4, "NGC_7000")))
+      .toBeNull();
   });
 });
 
@@ -163,6 +212,39 @@ describe("CompareView", () => {
     // Both chips still render; the sentence would only repeat them.
     await waitFor(() => expect(screen.getAllByText("Panels even")).toHaveLength(2));
     expect(screen.queryByText(/mosaic panels evened out/)).not.toBeInTheDocument();
+  });
+
+  it("says out loud which stack has more nights in it", async () => {
+    // The usual honest answer to "did it get better?" — and the one fact the
+    // two thumbnails, the frame counts and the noise figure can't supply.
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.capture_night_start = "2024-11-15";
+    a.capture_night_end = "2024-11-16";
+    a.capture_nights = 2;
+    b.capture_night_start = "2024-11-15";
+    b.capture_night_end = "2024-11-19";
+    b.capture_nights = 4;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() =>
+      expect(screen.getByText(/is made of subs from/)).toBeInTheDocument());
+    // ...and each side is dated by when it was shot, labelled, not by when the
+    // stack happened to run.
+    expect(screen.getAllByText(/Shot over 4 nights/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Shot over 2 nights/).length).toBeGreaterThan(0);
+  });
+
+  it("says nothing about depth when the runs never recorded their nights", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [item(3, "M_42", "Orion"), item(7, "M_42", "OrionV2")],
+    });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Orion")).toBeInTheDocument());
+    expect(screen.queryByText(/is made of subs from/)).not.toBeInTheDocument();
+    // The date is still labelled rather than bare, so it can't read as a
+    // capture date on a re-stack of a back catalogue.
+    expect(screen.getAllByText(/^Stacked /).length).toBe(2);
   });
 
   it("shows no panel chip when neither stack is a mosaic", async () => {
