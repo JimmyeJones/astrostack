@@ -14790,6 +14790,24 @@ to **Shipped**.)_
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
+
+- **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via `scripts/agent-dogfood.sh`) — the
+  editor's export panel asks the beginner a question whose own help text says the answer doesn't matter.**
+  *(Pillar: friendliness / editor — PRIORITY 1; size XS to decide, S to build whichever way it goes. Traced,
+  high confidence.)* "Export full resolution" carries a **TIFF: Linear / Auto-stretched** `Select`
+  (`routes/Editor.tsx:2306`) whose `HintLabel` reads *"It's already display-ready, so **both options produce
+  that same result**."* That is accurate — `_write_tiff`'s `already_display` branch short-circuits **before**
+  `mode` is read, and `pipeline.py:1432` passes `tiff_mode=…` and `already_display=True` together, so an editor
+  export's TIFF ignores the control entirely — which makes it a decision a beginner has to stop and make, on
+  the priority-1 surface, that changes nothing. **Two honest shapes, and the choice is the work:** (a) make it
+  *mean* something — `autostretch` is already what the mode does on a stacker run, so the branch could honour
+  `mode` for a *linear* re-render of the same edit, which is a real second artefact; or (b) keep one output and
+  fold the sentence into the panel's existing info text, so nothing is asked. **Care:** the owner's standing
+  constraint is that nothing may be *removed* — (b) is a removal of a control, so it needs the setting's
+  meaning to genuinely not exist, which is exactly what the tooltip already asserts; either way say so in the
+  commit rather than deleting it quietly. Grep `tiff_mode` first: `frontend/src/tiffDownload.ts` reads it off
+  `options_json` to choose the History download hint, so whichever way this goes, that copy has to still be
+  true.
 - **Background-mesh box floor (`_scaled_box` `minimum=16`) is the one pixel-scale divergence with
   no honest advisory.** *(Traced, Builder editor-parity audit 2026-07-16; low confidence it's a
   visible defect — arguably a defensible tradeoff.)* `seestack/edit/ops/background.py::_scaled_box`
@@ -16966,6 +16984,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via `scripts/agent-dogfood.sh`) — "My best
+  pictures" offers **Play slideshow** on a wall that is empty, and the obvious gate is the wrong one.**
+  *(Pillar: friendliness — PRIORITY 3; size XS; **read the trap before writing the one-line fix**.)* On a fresh
+  install the page reads *"Once you've finished stacking a couple of targets, your best pictures will gather
+  here automatically"* — the wall self-hides below `BEST_PICTURES_MIN` — and directly above that sentence sits
+  a primary-looking **Play slideshow** button. `routes/BestPictures.tsx:100` renders it unconditionally, while
+  the count badge three lines above it *is* gated on `items.length > 0`, so this is an oversight rather than a
+  decision. It is not a crash: `/show` has a graceful "Nothing to show yet" state. It is a beginner's first
+  visit to a page whose only call to action goes nowhere.
+  **⚠ The trap, and why this is filed rather than fixed in passing:** the slideshow is **not** built from the
+  best-pictures wall alone — `ShowAndTellView` calls `buildSlides(best.items, gallery.videos)`, so someone with
+  no ranked stacks but a finished **Moon or Sun still** has a perfectly good show. Gating the button on
+  `items.length > 0` would hide a working slideshow from exactly the beginner whose first picture was a lunar
+  video, which is a worse bug than the one being fixed. The honest gate is "would `buildSlides` produce
+  anything", which this page cannot answer today because it never runs the `gallery` query. So the shapes are:
+  add that query here (one extra request on a page that already makes one), or export a tiny shared
+  `hasAnythingToShow` the two pages agree on. Either way, pin it with a test for the Moon-still-only library —
+  that is the case a naive fix breaks.
+
+- **DOGFOOD FINDING, LOW VALUE — recorded so it is not re-found, not because it should be fixed (Builder
+  2026-09-01).** The **Library**'s target card truncates a long name (*"Sample: Orion Nebula (…"*) where the
+  Gallery's, since v0.322.4, does not. Measured on the running app: it is **desktop-only** — at 1440 px the
+  grid gives ~280 px cards and `Library.tsx:101`'s `truncate` bites, while at 420 px the card is full-width and
+  the whole name fits. That is the opposite of the v0.322.4 Gallery finding, whose severity came precisely from
+  a phone having no hover to recover the name; here the one width that truncates is the one width where the
+  `title=` tooltip works. **If it is ever touched**, the shape is `lineClamp={2}` with `align="flex-start"` on
+  the `Group`, which lets the name use a second line while the chevron stays pinned to the first — the existing
+  comment on that row explains why the chevron must not wrap, and that constraint survives. Not worth a run on
+  its own.
 
 - **✅ SHIPPED (Builder, v0.322.5, branch `claude/wizardly-feynman-yryq05`) — ~~"Your first image" says *"Let it
   work out where each frame points"* but ticks on whether **ASTAP is installed**, so the app's own first-run
