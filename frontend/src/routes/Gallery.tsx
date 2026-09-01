@@ -371,27 +371,29 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
         )}
       </Card.Section>
 
-      <Group justify="space-between" mt="sm" wrap="nowrap">
-        {/* The badge group beside this is ``flexShrink: 0``, so on a narrow card
-            a long target name truncates hard — "Sample: Orion Nebula (M42)" can
-            end up as "Sample: …". Carry the full name as a ``title`` so it is
-            still readable on hover, exactly as the notes line below already
-            does. */}
-        <Text fw={600} truncate title={item.target_name}
-              component={Link} to={`/targets/${item.safe}/history`}>
-          {item.target_name}
-        </Text>
-        <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
-          <RejectionBadge options={item.options} />
-          <HazyNightBadge ratio={item.transparency_ratio} />
-          <PanelSeamsBadge verdict={item.seam_verdict} />
-          <CalibrationBadge calstat={item.calstat} />
-          {/* This card's thumbnail is the run's baked preview, so a saved-but-
-              never-exported edit isn't in it — say so here too, not just on
-              History and the Target hero. */}
-          <UnexportedEditBadge show={item.unexported_edit} />
-          <FrameCountBadge nFramesUsed={item.n_frames_used} />
-        </Group>
+      {/* The name gets its own line, and the badges theirs. They used to share
+          one no-wrap row where the badge group was ``flexShrink: 0``, so the
+          badges took what they needed and the name absorbed the whole squeeze:
+          on a 280 px card even the ordinary two-badge case cut "Sample: Orion
+          Nebula (M42)" down to "Sample: …", and a phone has no hover to recover
+          it from the ``title``. On the page whose whole job is *browsing your
+          pictures*, the target name is the identifier — it can't be the thing
+          that gives way. Nothing is removed or hidden: the badges simply wrap
+          below, in the same order. */}
+      <Text fw={600} truncate mt="sm" title={item.target_name}
+            component={Link} to={`/targets/${item.safe}/history`}>
+        {item.target_name}
+      </Text>
+      <Group gap={4} mt={4}>
+        <RejectionBadge options={item.options} />
+        <HazyNightBadge ratio={item.transparency_ratio} />
+        <PanelSeamsBadge verdict={item.seam_verdict} />
+        <CalibrationBadge calstat={item.calstat} />
+        {/* This card's thumbnail is the run's baked preview, so a saved-but-
+            never-exported edit isn't in it — say so here too, not just on
+            History and the Target hero. */}
+        <UnexportedEditBadge show={item.unexported_edit} />
+        <FrameCountBadge nFramesUsed={item.n_frames_used} />
       </Group>
       {item.notes ? (
         <Text size="sm" c="violet.4" fw={500} truncate title={item.notes}>

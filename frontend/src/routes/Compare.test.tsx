@@ -121,20 +121,30 @@ describe("nightsComparison", () => {
 });
 
 describe("noiseComparison", () => {
-  const withNoise = (run_id: number, sigma: number | null) => {
-    const it = item(run_id, "M_42");
+  const withNoise = (run_id: number, sigma: number | null, safe = "M_42") => {
+    const it = item(run_id, safe);
     it.noise_sigma = sigma;
     return it;
   };
   it("reports which stack is cleaner and by how much", () => {
     // A=0.04, B=0.05 → A is (1 - 0.04/0.05) = 20% lower.
-    expect(noiseComparison(withNoise(1, 0.04), withNoise(2, 0.05))).toEqual({ winner: "A", pct: 20 });
-    expect(noiseComparison(withNoise(1, 0.05), withNoise(2, 0.04))).toEqual({ winner: "B", pct: 20 });
+    expect(noiseComparison(withNoise(1, 0.04), withNoise(2, 0.05)))
+      .toEqual({ winner: "A", loser: "B", pct: 20, sameTarget: true });
+    expect(noiseComparison(withNoise(1, 0.05), withNoise(2, 0.04)))
+      .toEqual({ winner: "B", loser: "A", pct: 20, sameTarget: true });
   });
   it("returns null when a σ is missing, non-positive, or equal", () => {
     expect(noiseComparison(withNoise(1, null), withNoise(2, 0.05))).toBeNull();
     expect(noiseComparison(withNoise(1, 0.05), withNoise(2, 0.05))).toBeNull();
     expect(noiseComparison(withNoise(1, 0), withNoise(2, 0.05))).toBeNull();
+  });
+  it("flags a cross-target comparison, so the caller can drop the verdict", () => {
+    // Normalising for gain/exposure makes σ comparable between two stacks of the
+    // same field — not between two different objects, where the figure is mostly
+    // about how bright and busy that patch of sky is. The number still stands;
+    // "the cleaner stack" does not.
+    const v = noiseComparison(withNoise(1, 0.05), withNoise(2, 0.04, "NGC_7000"));
+    expect(v).toEqual({ winner: "B", loser: "A", pct: 20, sameTarget: false });
   });
 });
 
@@ -184,6 +194,28 @@ describe("CompareView", () => {
     // Both A and B tags present.
     expect(screen.getByText("A")).toBeInTheDocument();
     expect(screen.getByText("B")).toBeInTheDocument();
+  });
+
+  it("gives each side's target name a line of its own, so the badges can't squeeze it", async () => {
+    // Same squeeze the Gallery card had, and it matters more here: on a phone
+    // the two cards stack full-width and this name is the only thing saying
+    // which object you are looking at. It shared a no-wrap row with a
+    // `flexShrink: 0` badge group, so the name absorbed all of the squeeze.
+    // Pinned structurally (jsdom can't measure): the name's parent now holds the
+    // card's other lines — the dated provenance line — instead of being a row
+    // that held only the name and the badges.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [
+        item(3, "M_42", "Sample: Orion Nebula (M42)"),
+        item(7, "NGC_7000", "North America Nebula"),
+      ],
+    });
+    renderCompare("?a=M_42:3&b=NGC_7000:7");
+
+    const name = await screen.findByText("Sample: Orion Nebula (M42)");
+    expect(name.parentElement).toContainElement(screen.getAllByText(/^Stacked /)[0]);
+    // Nothing removed to make room — the frame-count badge still renders.
+    expect(screen.getAllByText("5 frames")).toHaveLength(2);
   });
 
   it("shows each mosaic's panel-flatness verdict, the third axis of \"did it get better?\"", async () => {
@@ -275,6 +307,28 @@ describe("CompareView", () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
     renderCompare("?a=M_42:3&b=M_42:7");
     await waitFor(() => expect(screen.getByText(/20% lower/)).toBeInTheDocument());
+    expect(screen.getByText(/it's the cleaner stack/)).toBeInTheDocument();
+  });
+
+  it("never calls one stack cleaner when the two are different objects", async () => {
+    // The Gallery lets you select any two pictures, so this comparison is easy
+    // to land on by accident — and a darker, emptier field reads quieter than a
+    // bright nebula however well either was stacked. Keep the measurement, name
+    // both objects, drop the verdict.
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "NGC_7000", "North America");
+    a.noise_sigma = 0.05;
+    b.noise_sigma = 0.04;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=NGC_7000:7");
+    await waitFor(() => expect(screen.getByTestId("noise-verdict")).toBeInTheDocument());
+    const line = screen.getByTestId("noise-verdict").textContent ?? "";
+    expect(line).toContain("20% lower");
+    expect(line).not.toContain("cleaner stack");
+    expect(line).toContain("two different objects");
+    // Both objects are named in the sentence, so the reader can see why.
+    expect(line).toContain("Orion");
+    expect(line).toContain("North America");
   });
 
   it("offers a Split mode that overlays A over B under one draggable divider", async () => {
