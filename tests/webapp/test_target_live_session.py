@@ -133,3 +133,41 @@ def test_live_session_null_for_an_empty_target(client):
 
 def test_live_session_unknown_target_404(client):
     assert client.get("/api/targets/does_not_exist/live-session").status_code == 404
+
+
+def test_a_stalled_night_reaches_the_page_as_quiet(client, built_library):
+    """The walk-away failure: subs arrive steadily, then stop mid-session. The
+    verdict — and the cadence behind it — has to survive serialisation, or the
+    Target page's note has nothing to say."""
+    from seestack.io.library import Library
+    from seestack.io.project import FrameRow
+
+    now = dt.datetime.now(dt.timezone.utc)
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            # 30 subs a minute apart, the newest 90 minutes ago.
+            for i in range(30):
+                proj.add_frame(FrameRow(
+                    source_path=f"/x/stall{i}.fit",
+                    timestamp_utc=(now - dt.timedelta(minutes=119 - i)).isoformat(),
+                    exposure_s=10.0))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    live = client.get("/api/targets/M_42/live-session").json()
+    assert live["active"] is False
+    assert live["quiet"] is True
+    assert live["typical_gap_minutes"] == 1.0
+    assert live["quiet_after_minutes"] == 45.0
+
+
+def test_a_night_that_merely_ended_is_not_reported_as_quiet(client, built_library):
+    """The fixture's 2024 night is long over — "capture may have stopped" would
+    be nonsense about it, so the endpoint must not say it."""
+    live = client.get("/api/targets/M_42/live-session").json()
+    assert live["active"] is False
+    assert live["quiet"] is False

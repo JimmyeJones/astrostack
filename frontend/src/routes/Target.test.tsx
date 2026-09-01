@@ -1200,6 +1200,52 @@ describe("TargetView new-subs-since-stack nudge", () => {
   });
 });
 
+describe("TargetView older-stack restack offer", () => {
+  it("offers to re-stack a picture that can't say which night it's from", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ reusable: true, timestamp_utc: "2026-03-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "restackGain").mockResolvedValue({
+      run_id: 1, timestamp_utc: "2026-03-01T00:00:00+00:00",
+      n_frames_used: 200, n_frames_ready: 512,
+      missing_capture_window: true, missing_night_count: false,
+    });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("restack-gain-note")).toBeInTheDocument());
+  });
+
+  it("stands down while the 'new subs' note is already offering a restack", async () => {
+    // Two restack offers stacked on one page is exactly the banner-piling the
+    // owner complained about — and the new-subs one is the more pressing, since
+    // its restack fixes the dates too.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ reusable: true, timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { timestamp_utc: "2026-02-05T00:00:00+00:00" }),  // a new night
+    ]);
+    vi.spyOn(client.api, "restackGain").mockResolvedValue({
+      run_id: 1, timestamp_utc: "2026-01-01T00:00:00+00:00",
+      n_frames_used: 200, n_frames_ready: 512,
+      missing_capture_window: true, missing_night_count: false,
+    });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("1 new sub since your last stack")).toBeInTheDocument());
+    expect(screen.queryByTestId("restack-gain-note")).toBeNull();
+  });
+});
+
 describe("TargetView streaked badge", () => {
   it("shows a streaked-frame count for accepted frames carrying a trail", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());

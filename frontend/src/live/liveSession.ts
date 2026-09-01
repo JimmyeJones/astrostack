@@ -95,15 +95,66 @@ export function goalLine(live: LiveSession): string | null {
     + `about ${formatIntegration(left)} to go.`;
 }
 
-/** How long since the last sub landed, for the "is it still going?" line. */
+/** How long since the last sub landed, for the "is it still going?" line.
+ *
+ * The `quiet` branch matters: "this session looks finished" is a comfortable
+ * thing to say about a night that ended, and exactly the wrong thing to say
+ * about one that *stopped*. The backend draws that line (see
+ * `seestack/livesession.py`), so this only has to phrase it. */
 export function freshnessLine(live: LiveSession): string {
   const m = live.minutes_since_latest;
   if (m == null || !Number.isFinite(m)) return "Waiting for the first sub.";
+  if (live.quiet) {
+    return `No new subs for ${quietGap(m)} — capture may have stopped.`;
+  }
   if (!live.active) {
     return "No subs for a while — this session looks finished.";
   }
   if (m < 2) return "Newest sub just landed.";
   return `Newest sub ${Math.round(m)} min ago.`;
+}
+
+/** A span of minutes in the app's shared duration idiom ("50 min", "1.2 h"). */
+export function quietGap(minutes: number): string {
+  return formatIntegration(Math.max(0, minutes) * 60);
+}
+
+/** How often this target had been getting a sub, in words — "about every 40 s",
+ * "about every 3 min". Null when the cadence wasn't measurable, so the caller
+ * drops the clause rather than inventing a number. */
+export function cadencePhrase(live: LiveSession): string | null {
+  const g = live.typical_gap_minutes;
+  if (g == null || !Number.isFinite(g) || g <= 0) return null;
+  return `about every ${formatIntegration(g * 60)}`;
+}
+
+/**
+ * "Capture seems to have gone quiet" — the whole note, or null when there is
+ * nothing to say.
+ *
+ * The failure this is for is the one the owner can't watch happen: they walk
+ * away, the Seestar stalls (lost connection, full card, a dew-heater trip that
+ * parks it), and the rest of a clear night is simply missing in the morning. The
+ * wording has one job beyond the fact — it must not scold someone who just
+ * finished for the night, because that reader is the common case and this note
+ * costs them a second either way.
+ */
+export function captureQuietMessage(live: LiveSession): string | null {
+  if (!live.quiet) return null;
+  const m = live.minutes_since_latest;
+  if (m == null || !Number.isFinite(m)) return null;
+  const cadence = cadencePhrase(live);
+  const got = live.n_frames > 0
+    ? ` You've got ${live.n_frames.toLocaleString()} sub`
+      + `${live.n_frames === 1 ? "" : "s"}`
+      + `${live.kept_exposure_s > 0
+        ? ` (${formatIntegration(live.kept_exposure_s)} kept)` : ""}`
+      + " from this session so far."
+    : "";
+  return `This target was getting a sub ${cadence ?? "steadily"}, then nothing `
+    + `arrived for ${quietGap(m)}. Capture may have stopped — a Seestar can lose `
+    + "its connection, fill its card, or park itself. If you finished for the "
+    + `night, nothing is wrong and you can ignore this.${got}`;
 }
 
 /** Which target the live page should open on, with no navigating: the one whose

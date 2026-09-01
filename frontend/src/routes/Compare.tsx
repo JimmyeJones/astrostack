@@ -7,7 +7,7 @@ import { IconArrowLeft, IconGitCompare } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type GalleryItem } from "../api/client";
-import { formatIntegration, formatStampDate } from "../format";
+import { formatIntegration, pictureDateLabel } from "../format";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
@@ -70,6 +70,29 @@ export function panelComparison(
     : { winner: "B", loser: "A" };
 }
 
+// "Did it get better?" is, more often than not, answered by *depth* rather than
+// by processing: the second stack is better because it has two more nights in
+// it. That is the one fact this page's own dates can't show — so say it.
+//
+// Deliberately narrow. Both runs must have **recorded** their night count
+// (schema 19+); a count is never inferred from the window, because 15→18 Nov is
+// equally consistent with two nights and with four. The counts must differ (when
+// they agree there is nothing to weigh), and both sides must be the *same
+// target* — "M 42 has more nights than NGC 7000" compares nothing.
+export function nightsComparison(
+  a: GalleryItem, b: GalleryItem,
+): { winner: "A" | "B"; more: number; fewer: number } | null {
+  if (a.safe !== b.safe) return null;
+  const na = a.capture_nights;
+  const nb = b.capture_nights;
+  const ok = (n?: number | null): n is number =>
+    typeof n === "number" && Number.isFinite(n) && n >= 1;
+  if (!ok(na) || !ok(nb) || na === nb) return null;
+  return na > nb
+    ? { winner: "A", more: na, fewer: nb }
+    : { winner: "B", more: nb, fewer: na };
+}
+
 type CompareMode = "side" | "split" | "blink";
 
 function CardMeta({ item }: { item: GalleryItem }) {
@@ -92,15 +115,37 @@ function CardMeta({ item }: { item: GalleryItem }) {
         {item.total_exposure_s ? ` · ${formatIntegration(item.total_exposure_s)}` : ""}
         {hasNoise(item.noise_sigma) ? <> · <NoiseReadout sigma={item.noise_sigma} /></> : null}
       </Text>
+      {/* "Side by side" is the mode most people compare in, and it carried no
+          date at all — so the one thing that usually explains the difference
+          (this stack has more nights in it) was invisible here. Labelled, and it
+          drops itself and its separator when there is no usable date. */}
+      {compareDateLabel(item) ? (
+        <Text size="xs" c="dimmed" truncate>{compareDateLabel(item)}</Text>
+      ) : null}
     </Stack>
   );
 }
 
-/** Short, locale-friendly capture date for a compare side ("18 Jul 2026"), or
- * "" for a missing/unparseable timestamp so the clause is simply dropped. This
- * shape is now the app-wide one (`formatStampDate`); the name is kept for its
- * callers and tests. */
-export const compareDateLabel = formatStampDate;
+/**
+ * The one-line date for a compare side, **labelled** — "Shot over 4 nights,
+ * 15–18 Nov 2024", or a labelled "Stacked 30 Aug 2026" for a run made before the
+ * app recorded when its subs were taken. "" when neither date is usable, so the
+ * clause is simply dropped.
+ *
+ * This page's whole question is *"did it get better?"*, and the honest answer is
+ * usually *"yes, because the second one has two more nights in it"* — precisely
+ * the fact a **processing** stamp cannot show. Printing the run's
+ * `timestamp_utc` bare (as this did) also read as a capture date, which on a
+ * re-stack of a back catalogue is years out. `pictureDateLabel` is the same
+ * helper the Gallery card, the Sky footprint and the share sheet use, so no two
+ * surfaces can date one picture differently.
+ */
+export function compareDateLabel(item: GalleryItem): string {
+  return pictureDateLabel(
+    item.capture_night_start, item.capture_night_end, item.timestamp_utc,
+    item.capture_nights,
+  );
+}
 
 /** One side of the A/B provenance strip: which stack this is (colour-keyed to the
  * split/blink badge) and its plain-language provenance — basename, frame count,
@@ -108,7 +153,7 @@ export const compareDateLabel = formatStampDate;
  * tell *which* stack is which (is A the deep 5-night one or the old 2-night one?),
  * the exact thing the bare "A"/"B" badges couldn't answer. */
 function AbSide({ label, color, item }: { label: string; color: string; item: GalleryItem }) {
-  const date = compareDateLabel(item.timestamp_utc);
+  const date = compareDateLabel(item);
   return (
     <Stack gap={2} style={{ flex: 1, minWidth: 0 }} data-testid={`ab-side-${label}`}>
       <Group gap={6} wrap="nowrap">
@@ -314,6 +359,7 @@ export function CompareView() {
 
   const verdict = noiseComparison(a, b);
   const panels = panelComparison(a, b);
+  const nights = nightsComparison(a, b);
 
   return (
     <Stack>
@@ -336,7 +382,7 @@ export function CompareView() {
         </Group>
       </Group>
 
-      {verdict || panels ? (
+      {verdict || panels || nights ? (
         <Alert color="teal" variant="light" py="xs" title={undefined}>
           <Stack gap={4}>
             {verdict ? (
@@ -351,6 +397,13 @@ export function CompareView() {
                 <b>{panels.winner}</b>'s mosaic panels evened out, while <b>{panels.loser}</b>'s
                 {" "}sky still steps where its panels join — so <b>{panels.loser}</b> may show
                 {" "}faint seams once it's stretched.
+              </Text>
+            ) : null}
+            {nights ? (
+              <Text size="sm">
+                <b>{nights.winner}</b> is made of subs from <b>{nights.more} nights</b>
+                {" "}against {nights.fewer} — on the same target that's usually the
+                {" "}biggest difference between two stacks, whatever the settings.
               </Text>
             ) : null}
           </Stack>

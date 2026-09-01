@@ -37,6 +37,7 @@ from webapp.schemas import (
     MosaicPlanOut,
     NightSummaryOut,
     ObjectInfoOut,
+    RestackGainOut,
     SessionQualityDriftOut,
     SessionRecapOut,
     SetCoverRequest,
@@ -467,6 +468,57 @@ def target_cleanest_shot(safe: str, request: Request) -> CleanestShotOut | None:
     )
 
 
+@router.get("/{safe}/restack-gain", response_model=RestackGainOut | None)
+def target_restack_gain(safe: str, request: Request) -> RestackGainOut | None:
+    """**"This picture was made by an older AstroStack"** — what stacking this
+    target again would *give* the owner, named as a gain rather than a version.
+
+    Most of what an old run is missing can be healed from disk later; **when its
+    subs were shot cannot**, because nothing on disk records which frames that
+    run used. So a picture from before the app recorded that reads "Stacked 30
+    Aug 2026" instead of "Shot over 4 nights, 15–18 Nov 2024" on its captions,
+    nameplate, share sheet, Gallery card, History row and Sky footprint —
+    forever, and nothing anywhere says that pressing Stack again would fix it.
+
+    Only *genuine* stack runs count (an editor export inherits its source run's
+    window, so it can neither gain nor lose one here), and the offer is gated on
+    this target's accepted subs actually being datable now — the check that keeps
+    it from promising a date a re-stack could not supply. ``null`` whenever there
+    is nothing honest to offer, which is the common case. Read-only; it never
+    starts a stack.
+    """
+    from seestack.restackgain import restack_gain
+    from seestack.session_recap import parse_capture_time
+    from webapp.pipeline import _stack_options_from_run_json
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        runs = [r for r in proj.iter_stack_runs()  # newest first
+                if _stack_options_from_run_json(r.options_json) is not None]
+        n_accepted = 0
+        n_datable = 0
+        for f in proj.iter_frames():
+            if not f.accept:
+                continue
+            n_accepted += 1
+            if parse_capture_time(f.timestamp_utc) is not None:
+                n_datable += 1
+    finally:
+        proj.close()
+        lib.close()
+    gain = restack_gain(runs, n_accepted=n_accepted, n_accepted_datable=n_datable)
+    if gain is None:
+        return None
+    return RestackGainOut(
+        run_id=gain.run_id,
+        timestamp_utc=gain.timestamp_utc,
+        n_frames_used=gain.n_frames_used,
+        n_frames_ready=gain.n_frames_ready,
+        missing_capture_window=gain.missing_capture_window,
+        missing_night_count=gain.missing_night_count,
+    )
+
+
 @router.get("/{safe}/grainier-newest", response_model=GrainierNewestOut | None)
 def target_grainier_newest(safe: str, request: Request) -> GrainierNewestOut | None:
     """Offer to pin an earlier, cleaner stack when the newest one came out
@@ -663,6 +715,11 @@ def target_live_session(safe: str, request: Request) -> LiveSessionOut | None:
     target's goal when one is set. ``null`` when the target has no datable frames
     at all, so the page shows its empty state rather than an invented night.
 
+    It also carries ``quiet``: the session was *mid-run* and the subs stopped, so
+    a walked-away owner can be told a stalled Seestar cost them the rest of an
+    otherwise-clear night. Deliberately narrower than "not active" — a night they
+    finished on purpose never sets it.
+
     Read-only aggregation over the ``frames`` table — safe to call while a scan,
     an ingest or a stack is running, which is exactly when it will be called.
     """
@@ -699,6 +756,9 @@ def target_live_session(safe: str, request: Request) -> LiveSessionOut | None:
         reject_buckets=live.reject_buckets,
         newest_kept_frame_id=live.newest_kept_frame_id,
         goal_exposure_s=goal_s,
+        quiet=live.quiet,
+        typical_gap_minutes=live.typical_gap_minutes,
+        quiet_after_minutes=live.quiet_after_minutes,
     )
 
 
