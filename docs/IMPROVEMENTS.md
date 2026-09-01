@@ -379,6 +379,28 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **⚪ SCOUT QA RE-AUDIT (2026-09-01, stacking engine core) — swept and CLEAN; no new verified bug.
+  Recorded so the next Scout can rotate away from this ground rather than re-tread it.** Read
+  adversarially this run, end to end, hunting NaN/coverage semantics, rejection/weighting math,
+  memory bounds and error paths: `seestack/stack/accumulator.py` (all three accumulators — the
+  WeightedSum any-channel frame count, the MinMaxReject k-set insertion + graceful count-band
+  degrade, and Welford's NaN-for-`n<2` variance contract), `seestack/stack/weighting.py` +
+  `photometric.py` (the per-panel `pointing_groups` split, the geometric-mean weight floor, the
+  `1/s²` photometric-into-combine variance fold), `seestack/calibrate/{masters,apply}.py` (the
+  no-data-pedestal → 0 sanitisation, the flat floor, the exposure-scaling `bias + (dark−bias)·ratio`
+  with its two no-data masks, `_bias_applies` never double-subtracting), `seestack/stack/drizzle_path.py`
+  (the frame-count `neff` gate vs pixfrac-deflated weight, the float64 variance + resolution floor,
+  the per-channel reject tally + scatter map), `seestack/stack/mosaic.py` (wrap-safe circular-mean
+  outlier rejection, the px/MP canvas caps), `seestack/stack/pointings.py` (union-find single-linkage,
+  the ≥2-substantial-groups soundness gate), `seestack/stack/align.py` (windowed reproject inset/valid
+  mask, the order-1 NaN-propagation ring on both sub-pixel shift paths, the `REF_PATCH_MIN_COVERAGE`
+  stand-down), and `seestack/stack/output.py` (linear-percentile pack, `_autostretch_for_export` ↔
+  saved-preview parity via the shared `EXPORT_AUTOSTRETCH_TARGET_BG`). QC feeders `noise_ratio.py`
+  and `grading.py` spot-checked too. Every file carries dense prior-audit provenance and its edge
+  cases hold. Baseline suite green this run (**3799 passed, 2 skipped**). The genuinely novel-bug
+  surface in the engine core is drained; the higher-marginal QA value has moved to the webapp
+  routers / ingest / plate-solve, which this run did not sweep.
+
 - **✅ SHIPPED (Builder, v0.319.9, branch `claude/wizardly-feynman-pp3yz0`) — ~~sub-pixel alignment refinement
   is silently disabled for a whole mosaic stack whenever the reference panel doesn't cover the *union canvas
   centre*.~~** Fixed exactly as the entry proposed, plus the guard it asked for. **The patch is now centred on
@@ -10290,6 +10312,30 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **NEW IDEA (Scout 2026-09-01) — "your capture seems to have gone quiet": a per-target heads-up when subs
+  stopped arriving mid-session, so a clear night isn't silently lost to a stalled Seestar.** *(Pillar: get +
+  autonomy — PRIORITY 2–3; size S–M; the whole signal is already on disk — this is a read + a note, never a
+  new watch.)* The owner walks away and lets AstroStack watch `incoming/`; the failure this catches is the one
+  they can't see happening — the Seestar disconnects, its microSD fills, or the app's dew heater trips and the
+  scope parks — and **no new subs arrive for the rest of an otherwise-clear night**. Today nothing notices: the
+  watcher fires only *on* arrival, so a target that stops feeding simply goes still, and the owner finds out in
+  the morning that four of their eight planned hours are missing. **The data already exists:** ingest stamps
+  each frame's arrival time, so "this target's newest accepted sub is N hours old while it was actively
+  accumulating an hour ago" is a pure query. **Shape:** a self-hiding note (the Target page's existing
+  `NoticeBoard`, per the standing IA priority — *not* a new banner) reading e.g. *"No new subs from this target
+  in the last 90 min — capture may have stopped (Seestar disconnected, card full, or you're done for the
+  night)."* Informational only; it must **never** act — no auto-anything, and strictly read-only over
+  `incoming/` (§10). **Sane default and the care that makes it not-annoying:** it may only fire on a target that
+  *was* recently active (had a run of arrivals that then stopped), never on a target the owner deliberately
+  finished or hasn't started, and the threshold wants to be generous (a Seestar's own dithers/refocus gap plus
+  SMB latency, so ~1–2× a typical inter-sub interval, not a fixed clock). **Grep before building:** it overlaps
+  the live device layer — `webapp/seestar/manager.py` already tracks a Seestar's `last_seen_utc` over a
+  telemetry connection — so first decide whether this belongs there (device-connectivity truth, when a scope is
+  paired) or on the incoming-folder side (works for the file-drop-only owner who never pairs). The
+  folder-arrival side is the one that always applies and needs no device link; the manager may already answer
+  the paired case, in which case this is the *unpaired* complement, not a second copy. It is a §9-safe additive
+  read; nothing persisted, no default flipped.
 
 - **NEW IDEA (Builder 2026-09-01, the conclusion the v0.321.1 heal audit forced) — "this picture was made by an
   older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it would
@@ -29685,6 +29731,19 @@ outright bug in existing behaviour, never to add capability.
 ---
 
 ## Needs owner sign-off (do NOT start autonomously)
+- **Satellite/aircraft-trail forecast for the Tonight planner (opt-in; needs a data source).** *(Pillar:
+  plan + understand — would be a genuine beginner feature: "the trails in your subs weren't a mistake — three
+  Starlink passes crossed this field between 21:40–22:10; the stack's rejection removed them." Scout 2026-09-01,
+  verified absent from the backlog and code.)* A beginner shooting near a Starlink train sees streaks and
+  assumes their gear or their stacking is broken; naming the cause turns a worry into a "the app handled it"
+  moment, and (plan side) could steer a session away from the worst pass windows. **Why it's here and not in
+  Ideas:** predicting passes needs current orbital elements (TLEs from CelesTrak/Space-Track), i.e. a
+  **networked dependency and a periodic data refresh** — exactly what §9/§10 say an agent must not add on its
+  own. It also risks staleness/liability if the ephemeris is old. If the owner wants it, the safe shape is: a
+  bundled/opt-in TLE fetch behind an explicit setting (off by default), a cache with an honest "elements are N
+  days old" disclosure, and a plain-language post-hoc note on a finished stack ("N bright passes crossed this
+  field during your session") rather than a real-time overlay. File the network-policy check and refresh cadence
+  before building.
 - AI star removal (StarNet-class ONNX): high wow-factor but adds a heavy ML
   runtime + model download that may hit the network policy. Needs an explicit OK.
 - Anything that exposes the app publicly, changes auth defaults (e.g. turning auth
