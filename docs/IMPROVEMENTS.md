@@ -10291,7 +10291,62 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-08-31, the generalisation of the v0.320.3 coverage heal) — sweep the *other*
+- **✅ AUDITED AND CLOSED (Builder, v0.321.1, branch `claude/wizardly-feynman-be4ubk`) — ~~sweep the *other*
+  later-added run measurements for the ones that are also recoverable from what is already on disk.~~
+  The audit ran over every column; exactly one passed, and it shipped.** *(Read the audit before re-opening
+  this: the remaining columns are not "unchecked", they are checked and refused, each for a stated reason.)*
+
+  **`seam_residual` (schema 15) — the entry's own prediction, and it holds.** A mosaic stacked before v0.233.0
+  never says whether its panels matched, on the "How's my stack?" card, the History chip or the Gallery card
+  alike, because all three read one NULL column. `measure_seam_residual` takes the master and the coverage
+  sibling, both of which survive on disk, so `backfill_seam_residual` re-measures it lazily on the one run the
+  health endpoint is already grading, and writes it back — after which all three surfaces answer.
+
+  **The one thing the shape needed that the coverage heal did not: a size bound.** The seam measure wants the
+  *picture*, not just a map, and a mosaic master is the biggest file the app owns. It is read **strided** off
+  the memory map (never area-averaged: striding samples the same pixels, so the sky step and the grain the
+  ratio divides keep their scale, while an area average would shrink the grain and inflate the ratio), and
+  the stride is capped where the answer starts to drift rather than the canvas being capped. **Measured on
+  the same 4-panel scene the "flat"/"visible" thresholds were themselves set on** — the answer against the
+  full-resolution one at stride 1/2/3/4/6/8: a ~1.0 seam reads 0.997 / 0.987 / 0.961 / 0.966 / 0.942 / 0.879,
+  a ~1.5 seam 1.498 / 1.487 / 1.464 / 1.464 / 1.443 / 1.376, and a gross 23× seam is flat to 0.2 % throughout.
+  Through **stride 4** the drift is under 3.5 %, an order below the 1.0 → 1.5 gap between the bars, so a healed
+  run and a re-stacked one give the same verdict; past it the standard-error deduction starts eating real
+  seam, so a master too big to read within the cap keeps its NULL.
+
+  **Refused, with reasons — this is the audit, and it is the part worth keeping.**
+  - `stack_fwhm_px` (14) — needs a star fit over the master. Real work; belongs behind an explicit action, as
+    the entry itself guessed.
+  - `capture_start_utc` / `capture_end_utc` (18) and `capture_hours_json` (19) — **not recoverable at all**,
+    and this is the most valuable finding here because they are the *newest* columns and therefore the ones
+    the whole library is currently mute on. They are functions of **which frames that run used**, and nothing
+    on disk records that set. Re-deriving them from today's accepted frames would be a guess wearing a fact's
+    clothes, on the one class of statement — "shot on…" — a previous run already had to fix for lying.
+  - `noise_sigma` (6) — recomputable from the master in principle, but it is measured from *adjacent-pixel*
+    differences, so it cannot be taken off a decimated read at all; and the runs affected predate every column
+    above it.
+  - **The tempting shortcut does not exist.** The obvious cheap heal is to read the number off the master's own
+    FITS header instead of re-measuring it — one small read, no arrays. Checked commit by commit, and it fails:
+    `BKGSIGMA`, `STKFWHM`, `SEAMRES` and `CALSTAT` were each added *in the same change as their column*
+    (`NROUGHAL` leads its column by one patch release, `CALSTAT` by fifty minutes, and `BKGSIGMA` actually
+    *trails* its column), so a run old enough to hold a NULL has no card either. **Don't re-derive this;
+    it cost a run to establish and it will not change.**
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change — one new engine function, one
+  additive `Project.set_stack_seam_residual`, and one extra call inside an endpoint that already heals the
+  column beside it. Free on a single-field run (it declines before opening a file) and a no-op on every run
+  stacked since v0.233.0.
+
+  **Tests (+16 in `tests/test_seam_backfill.py`, +3 in `tests/webapp/test_target_stack_health.py`, 2 of which
+  fail before):** the heal end-to-end on a stranded-level mosaic and on a flat one, pinned **against the
+  in-memory full-resolution measurement** rather than a literal (so an old run and a re-stacked one can never
+  give different advice) at both stride 1 and a strided canvas; the write-back; the weighted map alone as the
+  only sibling; and the whole silence contract — a single-field run that never opens its master, a
+  pre-schema-8 run that will not *guess* it was a mosaic, a missing master, a missing coverage sibling, a
+  sibling from a different canvas, a run that already has a verdict (never re-measured), a read-only DB, and
+  the three size-bound cases.
+
+    *(Original entry follows.)* **NEW IDEA (Builder 2026-08-31, the generalisation of the v0.320.3 coverage heal) — sweep the *other*
   later-added run measurements for the ones that are also recoverable from what is already on disk.**
   *(Pillar: friendliness + trust — PRIORITY 3; size S per column, and the *audit* is the task — do it before
   building anything. Confidence: the shape is proven once; the remaining sites are not yet checked.)*
