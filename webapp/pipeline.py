@@ -1202,6 +1202,22 @@ def _nameplate_fields(fits_path: str, entry: Any, run: Any,
         target = str(obj[0]).strip()
     else:
         target = getattr(entry, "name", None)
+    # A beginner who drops loose FITS in gets a target called "Unsorted" or
+    # "MyWorks_2026-08-14", and that is what the caption prints under the picture
+    # they were about to post. When the plate solve lands squarely on a catalog
+    # object *and* the stored name identifies nothing, the catalog's own name is
+    # the honest, useful title. `confident_object_title` keeps the user's words
+    # whenever they mean something, so this can only ever replace a name that
+    # said nothing. Display-time only — nothing is written back to the target,
+    # the library or the FITS.
+    from seestack.objectinfo import confident_object_title
+    try:
+        better = confident_object_title(
+            target, getattr(entry, "ra_deg", None), getattr(entry, "dec_deg", None))
+    except Exception:  # a catalog read is best-effort, like every other field here
+        better = None
+    if better:
+        target = better
 
     n_card = prov.get("NFRAMES")
     try:

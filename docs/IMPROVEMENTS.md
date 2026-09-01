@@ -12755,7 +12755,44 @@ to **Shipped**.)_
   future Pillow that maps unmapped codepoints to a blank would silently turn the check into one that can never
   fail (that trap is already commented in `test_nameplate.py`).
 
-- **NEW IDEA (Builder 2026-08-27, the natural next tap on the v0.283.0 keepsake) — the keepsake titles itself
+- **✅ SHIPPED (Builder, v0.322.7, branch `claude/wizardly-feynman-a8b379`) — ~~the keepsake titles itself from
+  the FITS `OBJECT` card, so an Unsorted or folder-named target gets a keepsake titled with a folder name.~~**
+  Built as filed, and **fixed at `_nameplate_fields` rather than at the keepsake**, so all three baked-caption
+  surfaces get it from one place: the keepsake, the share JPEG, and the print. A beginner who drops loose FITS
+  in no longer posts a picture captioned `MyWorks_2026-08-14`.
+
+  **The whole design is the confidence rule, and it is a new pure helper —
+  `seestack.objectinfo.confident_object_title(name, ra, dec)` — so it is testable on its own.** It returns a
+  catalog title only when **both** halves hold:
+  1. **The stored name identifies nothing.** If `identify_object(name)` matches by designation or common name,
+     the helper returns `None` and the user's own words stand. This is the entry's "keep the fallback chain
+     honest" Care note made mechanical: the caption can only ever replace a name that *said nothing*, and it
+     can never "correct" `M 31` into `Andromeda Galaxy` or overrule a name that disagrees with the sky.
+  2. **The solved centre is within `_TITLE_MATCH_DEG = 0.25°`** — three times tighter than the object card's
+     `_CONE_MATCH_DEG = 0.75°`, and that gap is the point. A wrong "What am I looking at?" card is a guess the
+     reader dismisses in a glance; a wrong object name **baked into pixels the user shares** is a wrong fact
+     that outlives the session. At 0.25° a Seestar field is still centred on the object, while a neighbouring
+     showpiece (Stephan's Quintet beside NGC 7331, ~0.5°) is safely out of reach. A test asserts the two radii
+     stay ordered, with the 0.5°-off case matching the card and *not* the caption.
+
+  **One honest edge, recorded rather than hidden:** the bundled catalog lists `M31`, not its `NGC 224` alias, so
+  a target named `NGC 224` reads as "identifies nothing" and gets captioned `Andromeda Galaxy`. That is still
+  *true*, which is the bar for a baked caption; a test pins it so the behaviour is a decision, not a surprise.
+
+  **The Care note is honoured exactly:** display-time only. Nothing is written back to the target, the library
+  entry or the FITS — a test asserts the entry it was built from is untouched — so the still-open "Rename to
+  {name}?" chip remains the separate, user-tapped half.
+
+  **Upgrade-safe (§9):** additive pure helper plus a caption-time fallback. No config, schema, on-disk, API or
+  default change; a target with no solved centre, or one whose name already identifies it, produces exactly the
+  caption it did before.
+
+  **Tests (+7 endpoint-level in `tests/webapp/test_nameplate_object_title.py`, +4 in `tests/test_objectinfo.py`):**
+  a folder-named and an `Unsorted` target take the catalog name; a meaningful name is never overruled; no solved
+  centre and a 0.5°-off centre are both left alone; the two cone radii stay ordered; NaN/None/non-numeric
+  coordinates say nothing; and the entry is not mutated.
+
+  *(Original spec.)* **NEW IDEA (Builder 2026-08-27, the natural next tap on the v0.283.0 keepsake) — the keepsake titles itself
   from the FITS `OBJECT` card, so an Unsorted or folder-named target gets a keepsake titled with a folder
   name.** *(Pillar: enjoy + share / friendliness — PRIORITY 3. Size: S — both halves already exist.)*
   `_nameplate_fields` takes the title from `OBJECT`, falling back to the library entry's name. For a beginner
