@@ -10313,6 +10313,39 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-09-01, verified by reading while shipping the v0.322.1 Compare dates) — Compare
+  tells you one stack is "the cleaner stack" even when the two are *different objects*.** *(Pillar:
+  understand / trust — PRIORITY 3; size XS–S; traced, not a data bug — advisory copy only.)* The Gallery's
+  multi-select builds `/compare?a=<safe>:<run>&b=<safe>:<run>` from **any** two selected pictures, across
+  targets (`Gallery.tsx` ~690), and `noiseComparison` then prints *"**B** has **12% lower** background noise —
+  it's the cleaner stack"* for, say, M 42 against NGC 7000. Normalised σ is comparable across gain and
+  exposure, which is what the parenthetical claims, but it is **not** comparable across two different fields:
+  the number is then mostly about the sky and the object, not about which stack came out better. **Shape:**
+  the v0.322.1 depth line already gates itself on `a.safe === b.safe` for exactly this reason — either give
+  the noise verdict the same gate, or (better, since comparing two objects is a legitimate thing to do) keep
+  the figure and change the *claim*: name the two targets in the sentence and drop "it's the cleaner stack"
+  when they differ. **Care:** don't gate the panel-flatness line the same way without thinking — "did the
+  panels even out" is a like-for-like verdict about each mosaic on its own, so it survives a cross-target
+  comparison in a way "which is cleaner" does not.
+
+- **NEW IDEA (Builder 2026-09-01, the surface the v0.322.0 quiet-capture note deliberately did not add) — one
+  library-wide "a target went quiet last night" line, for the morning.** *(Pillar: autonomy — PRIORITY 2;
+  size S; **read the "why not simply widen the window" note below before building**.)* v0.322.0 tells a
+  *target's own page* when its subs stopped mid-session, and self-hides once the silence outlasts the 6 h
+  session gap — past that the night is over and a live "capture may have stopped" warning would be nonsense.
+  That is right for the note, and it means **the owner who was asleep never sees it**: by breakfast the note
+  is gone, and the Dashboard — where they actually start — never said anything. **Shape:** a past-tense,
+  library-wide line for the morning, e.g. *"M 42 stopped getting subs at 23:40 last night, about 4 h before
+  you usually stop"*, on the Dashboard's existing *Recent* group (**not** a new always-on banner — the
+  standing IA priority). **Why it is not just a wider window on the existing note:** the tense and the claim
+  both have to change. "Capture may have stopped" is actionable while the scope is out; in the morning the
+  only honest version is "here is what last night cost you", which wants a comparison against how the night
+  *should* have ended — the observing-night length the planner already computes, or simply this target's own
+  usual stop time — and neither is on the live path. **Care:** it must never fire on a night the owner ended
+  deliberately, which across a whole library is a much harder call than on one target; a false "you lost half
+  a night" in the morning is worse than silence. Reuse `livesession.quiet_after_minutes` and the shared
+  session cut rather than inventing a second definition.
+
 - **✅ SHIPPED (Builder, v0.322.0, branch `claude/wizardly-feynman-qw8j45`) — ~~"your capture seems to have
   gone quiet": a per-target heads-up when subs stopped arriving mid-session, so a clear night isn't silently
   lost to a stalled Seestar.~~** Built as the entry asked — a self-hiding note in the Target page's existing
