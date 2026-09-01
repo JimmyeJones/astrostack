@@ -10313,8 +10313,32 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-09-01, verified by reading while shipping the v0.322.1 Compare dates) — Compare
-  tells you one stack is "the cleaner stack" even when the two are *different objects*.** *(Pillar:
+- **✅ SHIPPED (Builder, v0.322.3, branch `claude/wizardly-feynman-yryq05`) — ~~Compare tells you one stack is
+  "the cleaner stack" even when the two are *different objects*.~~** Built as the entry's **second** option, the
+  one it called better: the figure stays, the *claim* goes. `noiseComparison` now returns `sameTarget`
+  (`a.safe === b.safe`) alongside `winner`/`loser`/`pct`, and Compare prints one of two sentences. Same target:
+  the existing "it's the cleaner stack" line, untouched. Different targets: *"**B** (North America) reads **20%
+  lower** background noise than **A** (Orion) — but these are two different objects, so that's mostly about the
+  sky you were pointing at, not about which stack came out better."*
+
+  **Why not gate it to null like the depth line.** Comparing two objects is a legitimate thing to do — the
+  Gallery's multi-select offers it — and the measurement itself is still each picture's own. What doesn't
+  survive the crossing is the *verdict*: normalising for gain and exposure makes σ comparable between two
+  stacks of one field, not between a bright nebula and an empty patch of sky. So the line names both objects
+  and says why the number isn't a scoreboard, rather than vanishing and leaving the reader to wonder.
+
+  **The entry's caution was honoured:** `panelComparison` is deliberately untouched. "Did the panels even out"
+  is a verdict about each mosaic *on its own*, so it stays true across a cross-target comparison in a way "which
+  is cleaner" does not.
+
+  **Upgrade-safe (§9):** frontend copy only — no config, schema, on-disk, API or default change.
+
+  **Tests: +2, both fail before** (`frontend/src/routes/Compare.test.tsx`): the helper's cross-target flag, and
+  a `CompareView` render of M 42 against NGC 7000 asserting the percentage is still printed, "cleaner stack" is
+  not, and both object names appear. The existing same-target render test gained a positive assertion that the
+  "cleaner stack" wording *is* still there, so a future change can't quietly drop it everywhere.
+
+    *(Original spec follows.)* *(Pillar:
   understand / trust — PRIORITY 3; size XS–S; traced, not a data bug — advisory copy only.)* The Gallery's
   multi-select builds `/compare?a=<safe>:<run>&b=<safe>:<run>` from **any** two selected pictures, across
   targets (`Gallery.tsx` ~690), and `noiseComparison` then prints *"**B** has **12% lower** background noise —
