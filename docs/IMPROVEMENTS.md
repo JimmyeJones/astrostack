@@ -19815,7 +19815,59 @@ problems. Dogfood it every big-picture run and fix root causes.
   so the no-data path is safe either way. **Prereq:** the mosaic item's coverage-map interaction is already
   handled by v0.270.4's `{base}_framecov.fits`, so the single-field extension inherits that safety for free.
 
-- **IDEA (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — the 16-bit *linear* export TIFF clips the
+- **✅ SHIPPED (Builder, v0.322.6, branch `claude/wizardly-feynman-a8b379`) — ~~the 16-bit *linear* export TIFF
+  clips the brightest 0.1% (star / galaxy / nebula cores) to pure white, which its own docstring calls "the full
+  data preserved".~~ The 2026-08-16 counter-argument below was the right question and it is now MEASURED — on
+  ADU-scale data, as it demanded — and the answer is that the precision it worried about costs under 1 %.**
+  `_to_uint16_linear` now maps the **full covered range** (`min`→0, `max`→65535) instead of the robust
+  0.5 %–99.9 % window, so nothing is clipped at either end.
+
+  **The measurement that settles the gate.** The counter-argument's objection was specific and correct in shape:
+  the stack is in **ADU**, not [0,1], the sky is zeroed with half its noise negative, and star cores sit near
+  saturation — so widening the white point from p99.9 (~3.3 k ADU) to the true max (~46 k ADU here) makes the
+  16-bit step ~14× coarser (0.050 → 0.71 ADU). What it did not check is where that step *starts*: far below the
+  grain. Round-tripping a synthetic ADU-scale stack (sky zeroed, faint nebulosity, a Pareto star field with
+  saturated cores) through both packings and re-measuring `estimate_noise_sigma`:
+
+  | sky grain | `noise_sigma` | old window: σ after round-trip | full range: σ after round-trip |
+  |---|---|---|---|
+  | 60 ADU | 0.0293 | −0.32 % | **−0.26 %** |
+  | 20 ADU | 0.0110 | −0.55 % | **+0.73 %** |
+  | 6 ADU | 0.0039 | −0.50 % | **+2.52 %** |
+
+  The owner's own deepest real stacks measure **0.015–0.020** (`grainProjection`'s `CLEAN_SIGMA` anchor), i.e.
+  between the first two rows; the third is four times cleaner than anything this app has ever produced, and even
+  there the cost is 2.5 %. Against that: on the same scene the old packing put **720 pixels at pure white and
+  3,607 at pure black** where only **one** of each is at the data's own extremes. A star core read as a
+  *plateau* — measured profile `[65535, 65535, 55474, 42019, …]` against the new `[65535, 61993, 52476,
+  39748, …]`. So the trade is ~0.3–2.5 % of a noise measurement against the object's own brightest structure,
+  and it is not close.
+
+  **The counter-argument's other requirement is met, not dodged:** it insisted the black point stay
+  negative-aware, because `_zero_sky_per_channel` leaves half the sky noise below zero and a Siril-style
+  "write it as-is, clip at 0" would delete that half. The covered **minimum** is negative-aware by
+  construction — strictly more so than the p0.5 it replaces — and a test pins that the packer's black point
+  follows the data below zero.
+
+  **The file is now reversible, which is what "the full data" ought to mean.** `_write_tiff` records the two
+  anchors in the TIFF's description (`black=… white=…; float = black + dn / 65535 * (white - black)`), so a
+  reader can recover the stack's own float levels exactly. `linear_scale_anchors` is the one place they are
+  computed, so the bytes and the description cannot drift.
+
+  **Upgrade-safe (§9):** pure output-formatting change. No config, schema, on-disk-layout, API or default change;
+  TIFFs already written are untouched (only a *new* export differs), the `autostretch` mode and the editor's
+  `already_display` path are byte-for-byte unchanged, and nothing in the app reads these files back.
+  `frontend/src/tiffDownload.ts`'s "opens dark until you stretch it" stays true — more so, since the sky now
+  sits lower in the range.
+
+  **Tests (+9, `tests/test_linear_tiff_no_clip.py`; the clipping ones fail before):** only pixels at the data's
+  true max reach full scale (1, not 130) and only pixels at the true min reach 0 (1, not 651); a star core keeps
+  a strictly monotone profile with no saturated plateau; 16 bits still resolves the sky grain; the precision
+  trade above, pinned across three depths so it cannot silently rot; the black point follows the data below
+  zero; a mosaic's NaN gaps still write black and still don't set the anchors; the description round-trips to
+  the float levels within one 16-bit step; and the editor export's `already_display` TIFF is untouched.
+
+  *(Original spec.)* **IDEA (Scout 2026-08-13, branch `claude/focused-keller-zi700s`) — the 16-bit *linear* export TIFF clips the
   brightest 0.1% (star / galaxy / nebula cores) to pure white, which its own docstring calls "the full data
   preserved".** *(Pillar: image quality / trust — PRIORITY 4; size S; **VERIFY the convention before changing —
   every existing linear TIFF's pixels would move**, so this is filed as an idea, not a bug.)* `output.py`
