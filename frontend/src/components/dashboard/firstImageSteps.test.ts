@@ -55,6 +55,24 @@ describe("firstImageSteps", () => {
     expect(firstImageNextStep(steps)?.key).toBe("solve");
   });
 
+  it("labels the solve step as the setup it actually measures", () => {
+    // The tick reads whether ASTAP is installed, never whether your frames got
+    // solved — and the two come apart on the app's own first-run path: the
+    // bundled sample ships pre-solved, so pressing "Stack it" with no ASTAP
+    // gives a finished picture beside a card reading "3 of 4 done" with this
+    // step unticked. A label promising something about *your frames* made that
+    // read as a contradiction; one naming the setup does not.
+    const steps = firstImageSteps(sys({ found: false }),
+      stats({ n_frames: 6, n_frames_accepted: 6, n_stack_runs: 1 }));
+    const solve = steps.find((s) => s.key === "solve");
+    expect(solve?.done).toBe(false);
+    expect(solve?.label).toBe("Set up plate solving (ASTAP)");
+    // The sample's own journey, exactly as the dogfood run found it: everything
+    // but the setup ticked, and the card leading with the setup.
+    expect(steps.map((s) => s.done)).toEqual([true, false, true, true]);
+    expect(firstImageNextStep(steps)?.key).toBe("solve");
+  });
+
   it("counts solving as not-ready when the star database is missing", () => {
     const steps = firstImageSteps(sys({ star_db_found: false }), stats({ n_frames: 5 }));
     expect(steps.find((s) => s.key === "solve")?.done).toBe(false);

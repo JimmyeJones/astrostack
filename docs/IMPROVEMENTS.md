@@ -10313,8 +10313,32 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-09-01, verified by reading while shipping the v0.322.1 Compare dates) — Compare
-  tells you one stack is "the cleaner stack" even when the two are *different objects*.** *(Pillar:
+- **✅ SHIPPED (Builder, v0.322.3, branch `claude/wizardly-feynman-yryq05`) — ~~Compare tells you one stack is
+  "the cleaner stack" even when the two are *different objects*.~~** Built as the entry's **second** option, the
+  one it called better: the figure stays, the *claim* goes. `noiseComparison` now returns `sameTarget`
+  (`a.safe === b.safe`) alongside `winner`/`loser`/`pct`, and Compare prints one of two sentences. Same target:
+  the existing "it's the cleaner stack" line, untouched. Different targets: *"**B** (North America) reads **20%
+  lower** background noise than **A** (Orion) — but these are two different objects, so that's mostly about the
+  sky you were pointing at, not about which stack came out better."*
+
+  **Why not gate it to null like the depth line.** Comparing two objects is a legitimate thing to do — the
+  Gallery's multi-select offers it — and the measurement itself is still each picture's own. What doesn't
+  survive the crossing is the *verdict*: normalising for gain and exposure makes σ comparable between two
+  stacks of one field, not between a bright nebula and an empty patch of sky. So the line names both objects
+  and says why the number isn't a scoreboard, rather than vanishing and leaving the reader to wonder.
+
+  **The entry's caution was honoured:** `panelComparison` is deliberately untouched. "Did the panels even out"
+  is a verdict about each mosaic *on its own*, so it stays true across a cross-target comparison in a way "which
+  is cleaner" does not.
+
+  **Upgrade-safe (§9):** frontend copy only — no config, schema, on-disk, API or default change.
+
+  **Tests: +2, both fail before** (`frontend/src/routes/Compare.test.tsx`): the helper's cross-target flag, and
+  a `CompareView` render of M 42 against NGC 7000 asserting the percentage is still printed, "cleaner stack" is
+  not, and both object names appear. The existing same-target render test gained a positive assertion that the
+  "cleaner stack" wording *is* still there, so a future change can't quietly drop it everywhere.
+
+    *(Original spec follows.)* *(Pillar:
   understand / trust — PRIORITY 3; size XS–S; traced, not a data bug — advisory copy only.)* The Gallery's
   multi-select builds `/compare?a=<safe>:<run>&b=<safe>:<run>` from **any** two selected pictures, across
   targets (`Gallery.tsx` ~690), and `noiseComparison` then prints *"**B** has **12% lower** background noise —
@@ -16905,6 +16929,100 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **✅ SHIPPED (Builder, v0.322.5, branch `claude/wizardly-feynman-yryq05`) — ~~"Your first image" says *"Let it
+  work out where each frame points"* but ticks on whether **ASTAP is installed**, so the app's own first-run
+  path shows a finished picture beside "3 of 4 done" with that step unticked.~~** *(Second dogfood finding of
+  the same run — visible in the very first Dashboard screenshot; friendliness, PRIORITY 3, size XS.)*
+
+  **The contradiction, on the path the app itself offers.** A fresh install with no ASTAP loads the bundled
+  sample and presses "Stack it". The sample ships **pre-solved**, so it stacks: steps 1, 3 and 4 tick, step 2
+  does not, and the same screen carries a banner reading *"solving … is required before you can stack
+  anything"* directly above a ticked *"Stack them into your first picture"*. The step's `hint` ("Set it up once
+  and forget it") and its `done` (`astap.found && star_db_found !== false`) always agreed it was a **setup**
+  step; the label was the only part claiming something about the user's frames.
+
+  **Fixed by making the label say what is measured** — *"Set up plate solving (ASTAP)"* — rather than by
+  loosening the tick. The tick is right: someone whose ASTAP is missing genuinely cannot solve their *own*
+  subs, and "set up plate solving" is exactly the next thing they should do, which is what the card's "Next:"
+  line already said.
+
+  **Upgrade-safe (§9):** one string in a pure frontend helper. No config, schema, on-disk, API or default change.
+
+  **Tests (+1, fails before):** `firstImageSteps.test.ts` reproduces the sample journey exactly as the dogfood
+  run found it — ASTAP missing, 6 frames, 6 accepted, 1 stack run → `[true, false, true, true]`, the card
+  leading with the setup step — and pins the label. The follow-on (tick on frames that *actually* solved) is
+  filed directly below with its cost.
+
+- **⚠️ PROCESS NOTE (Builder 2026-09-01, after it briefly looked like a 32-error regression) — don't run the
+  Python suite and a `vite build` at the same time.** The webapp serves the SPA out of `webapp/static`, which
+  `npx vite build` **deletes and rewrites**; a pytest run overlapping it reported `3792 passed, 32 errors`
+  where the same tree, run alone, gives the baseline `3824 passed, 2 skipped`. The errors land in
+  `tests/webapp/*` and look like real fixture failures, not like an I/O race, so the temptation is to go
+  hunting. **Both halves of the trap are worth knowing:** `scripts/agent-dogfood.sh` runs a `vite build` of its
+  own (always with `--build`, and automatically when `webapp/static/index.html` is missing), so "just the
+  dogfood pass" counts as a concurrent build. Serialise them, and re-run alone before believing any webapp
+  error you didn't cause.
+
+- **⚪ CLASS SWEPT — two sites, both fixed in v0.322.4; recorded so nobody re-sweeps it (Builder 2026-09-01).**
+  The construct: a card header where a `truncate`d name and a badge group share one `wrap="nowrap"` row and the
+  badge group carries `flexShrink: 0`. The badges then take the width they want and the **name** absorbs every
+  pixel of the squeeze — which is backwards, because the name is the identifier and the badges are the
+  decoration. Grepped `flexShrink: 0` across `frontend/src` and read every hit that sits beside a truncating
+  name. **Every other hit is on the right side of the line:** `Library.tsx`'s target card already puts the name
+  on its own row with the badges below (that is the shape v0.322.4 adopted, so the browse surfaces now agree),
+  and its `flexShrink: 0` is on a **chevron icon**, which is 16 px and must not shrink; the Gallery's
+  video-still card pairs a label with a *single* small badge, which cannot squeeze a name to nothing. **The
+  generative test for new code, since it costs nothing at review time:** if a name and a badge group share a
+  no-wrap row, ask what the row does when the name is long — if the answer is "the name disappears", the badges
+  belong on their own line.
+
+- **NEW IDEA (Builder 2026-09-01, the half the v0.322.5 label fix deliberately did not build) — tick the
+  first-image solve step on frames that **actually got solved**, not only on ASTAP being installed.**
+  *(Pillar: friendliness — PRIORITY 3; size S, but **read the cost note**; the label fix already removed the
+  untruth, so this is polish, not a correction.)* The honest signal for *"your subs have sky coordinates"* is a
+  count of frames with a WCS, and today nothing carries one: `library.campaign_stats` aggregates only the
+  registry columns (`n_frames`, `n_frames_accepted`, `total_exposure_s`), and `wcs_json` lives in each
+  **per-target** `project.sqlite`. **The cost is the reason this is filed rather than built:** `/api/stats` is
+  the Dashboard's hot path, and its existing per-project work (`_rollup_stacks`) opens only targets that *have*
+  stacks — a solved count would open **every** target, on every uncached stats call. **If it is built:** put
+  the count behind the same `stats_cache` signature, and add it as an additive optional field that reads as
+  "unknown" (never as zero) when an older backend omits it — the step must not un-tick itself on an upgrade.
+  **Care:** don't let it *replace* the ASTAP check. Someone with pre-solved frames and no ASTAP still needs the
+  setup before their own subs will solve, so the tick wants to stay the setup's, with the frame count as an
+  extra reassurance line at most.
+
+- **✅ SHIPPED (Builder, v0.322.4, branch `claude/wizardly-feynman-yryq05`) — ~~the Gallery card cut the target
+  name down to "Sample: …", on the page whose entire job is browsing your pictures.~~** *(Dogfood finding —
+  found by **running** the app via `scripts/agent-dogfood.sh`, not by reading it; the code already carried a
+  comment describing the truncation as expected and a test pinning the hover fallback as the fix.)*
+
+  **What was wrong.** The name shared one `wrap="nowrap"` row with a badge group marked `flexShrink: 0`, so the
+  badges took whatever width they wanted and the name absorbed the entire squeeze. Measured on the real app at
+  1440 px: a 280 px card, ~150 px of it spent on the ordinary two badges (`MIN-MAX`, `6 FRAMES`), leaving the
+  name about 95 px — **"Sample: …"**. Not an edge case: that is the *bundled sample*, with the *fewest* badges
+  the card can show; five are possible, and "NGC 7000 (mosaic)" is an ordinary Seestar target name. A phone has
+  no hover, so the `title` fallback the previous run added recovers nothing there.
+
+  **The fix is the shape the Library card already uses** — name on its own line, badges on theirs — so the two
+  browse surfaces now agree instead of one of them being the odd one out. **Nothing removed or hidden** (the
+  owner's standing constraint): every badge still renders, in the same order, one line lower. **Measured
+  before/after with the same probe**: desktop Gallery card 432 px → 455 px tall (one line), full name
+  **"Sample: Orion Nebula (M42)"** readable; the page is not among the app's eight tallest on either viewport,
+  before or after; no overflow, no console errors.
+
+  **Fixed at the second site in the same pass**, because it is the identical construct and leaving one is
+  exactly how a swept class stays half-fixed: Compare's `CardMeta`. It matters *more* there — on a phone the
+  two compare cards stack full-width and that name is the only thing saying which object each side is.
+
+  **Upgrade-safe (§9):** frontend layout only — no config, schema, on-disk, API or default change.
+
+  **Tests (+2, both fail before):** `Gallery.test.tsx` and `Compare.test.tsx`. jsdom cannot measure a layout, so
+  each is pinned structurally — the name's parent now holds the card's *other* lines (the Edit control; the
+  dated provenance line) rather than being a row that held only the name and the badges — plus an assertion
+  that the frame-count badge still renders, so a future "tidy" can't quietly drop a badge to buy width. The
+  existing hover-fallback assertion is kept: the `title` is still there, it is just no longer the only way to
+  read the name.
 
 - **✅ SHIPPED (Builder, v0.320.3, branch `claude/wizardly-feynman-isps6l`) — ~~heal an existing run's coverage
   advice from the coverage map it already wrote, instead of waiting for a re-stack.~~** Built to the filed
