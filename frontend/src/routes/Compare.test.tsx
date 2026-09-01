@@ -196,6 +196,28 @@ describe("CompareView", () => {
     expect(screen.getByText("B")).toBeInTheDocument();
   });
 
+  it("gives each side's target name a line of its own, so the badges can't squeeze it", async () => {
+    // Same squeeze the Gallery card had, and it matters more here: on a phone
+    // the two cards stack full-width and this name is the only thing saying
+    // which object you are looking at. It shared a no-wrap row with a
+    // `flexShrink: 0` badge group, so the name absorbed all of the squeeze.
+    // Pinned structurally (jsdom can't measure): the name's parent now holds the
+    // card's other lines — the dated provenance line — instead of being a row
+    // that held only the name and the badges.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [
+        item(3, "M_42", "Sample: Orion Nebula (M42)"),
+        item(7, "NGC_7000", "North America Nebula"),
+      ],
+    });
+    renderCompare("?a=M_42:3&b=NGC_7000:7");
+
+    const name = await screen.findByText("Sample: Orion Nebula (M42)");
+    expect(name.parentElement).toContainElement(screen.getAllByText(/^Stacked /)[0]);
+    // Nothing removed to make room — the frame-count badge still renders.
+    expect(screen.getAllByText("5 frames")).toHaveLength(2);
+  });
+
   it("shows each mosaic's panel-flatness verdict, the third axis of \"did it get better?\"", async () => {
     // Noise and star size are already comparable here; panel flatness is the one
     // a mosaic shooter can't judge by eye from two thumbnails.
