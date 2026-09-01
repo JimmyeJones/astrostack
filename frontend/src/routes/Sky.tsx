@@ -9,7 +9,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { api } from "../api/client";
 import { describeSkyCoverage } from "../components/skyCoverage";
-import { formatStampDate } from "../format";
+import { pictureDateLabel } from "../format";
 import { AladinSky } from "./AladinSky";
 import {
   angularToWorld,
@@ -26,19 +26,27 @@ const IMAGE_RADIUS = 98; // just inside the stars so images sit in front
 /**
  * The "where and when" line under a selected footprint's name.
  *
- * The date is the app-wide picture stamp (`formatStampDate`, a *named* month) so
- * this footprint is dated exactly as the same run is on the Gallery, History and
- * the Target hero. It used to be a raw `timestamp_utc.slice(0, 10)`, which not
- * only reads back-to-front to half the world but is the **UTC** calendar day —
- * a different day from every other surface for an evening stack west of UTC.
+ * The date goes through `pictureDateLabel`, the same helper the Gallery card,
+ * the Dashboard strip and the Target hero use, so this footprint is dated
+ * exactly as the same run is everywhere else — and, more importantly, it says
+ * *which* date it is. An unlabelled date beside a picture reads as the night it
+ * was shot; `timestamp_utc` is when the stack **ran**, which on a re-stack of a
+ * back catalogue is years out. With a capture window the line reads "Shot 15–18
+ * Nov 2024"; without one (every run from before the app recorded it) it says
+ * "Stacked 17 Aug 2026" rather than passing the one off as the other.
+ * (Before that it was a raw `timestamp_utc.slice(0, 10)`, which also reads
+ * back-to-front to half the world and is the **UTC** calendar day — a different
+ * day from every other surface for an evening stack west of UTC.)
  * A missing or unreadable stamp drops the clause and its separator rather than
  * printing "Invalid Date" or a bare trailing " · ".
  */
 export function skyFootprintLine(
-  image: Pick<SkyImage, "ra_deg" | "dec_deg" | "timestamp_utc">,
+  image: Pick<SkyImage, "ra_deg" | "dec_deg" | "timestamp_utc">
+    & Partial<Pick<SkyImage, "capture_night_start" | "capture_night_end">>,
 ): string {
   const where = `RA ${image.ra_deg.toFixed(3)}° · Dec ${image.dec_deg.toFixed(3)}°`;
-  const when = formatStampDate(image.timestamp_utc);
+  const when = pictureDateLabel(
+    image.capture_night_start, image.capture_night_end, image.timestamp_utc);
   return when ? `${where} · ${when}` : where;
 }
 

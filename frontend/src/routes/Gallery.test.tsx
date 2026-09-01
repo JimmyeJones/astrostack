@@ -1024,3 +1024,43 @@ describe("Gallery — what stacking removed, full screen", () => {
       "src", "/api/targets/M_42/stack-runs/1/preview?north_up=true");
   });
 });
+
+describe("Gallery — the date on a picture says which date it is", () => {
+  function galleryOf(over: Partial<GalleryItem> = {}) {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), ...over }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    renderGallery();
+  }
+
+  it("says when the subs were SHOT, not when the stack ran", async () => {
+    // The failure this replaces: a re-stack of a 2024 back catalogue printed a
+    // bare `2026-05-02 00:00` on the page for browsing your pictures, which
+    // every reader takes for the night they shot it.
+    galleryOf({
+      capture_night_start: "2024-11-15", capture_night_end: "2024-11-18",
+    });
+    expect(await screen.findByText(/Shot 15–18 Nov 2024/)).toBeInTheDocument();
+    expect(screen.queryByText(/2026-05-02/)).not.toBeInTheDocument();
+  });
+
+  it("labels the stack date when the run is too old to know the capture one", async () => {
+    // Every run from before the app recorded a capture window. It must not go
+    // silent (the date is how you tell two pictures apart) and it must not pass
+    // the processing stamp off as a capture date — so it says which it is.
+    galleryOf({ capture_night_start: null, capture_night_end: null });
+    expect(await screen.findByText(/Stacked/)).toBeInTheDocument();
+    expect(screen.queryByText(/Shot/)).not.toBeInTheDocument();
+  });
+
+  it("drops the separator too when there is no readable date at all", async () => {
+    // The date is now an optional segment like every other one on this line, so
+    // an unreadable stamp must not leave " ·  · " behind.
+    galleryOf({ timestamp_utc: "not-a-date" });
+    const line = await screen.findByText(/100×80/);
+    expect(line.textContent).not.toMatch(/·\s*·/);
+    expect(line.textContent).not.toMatch(/Invalid/);
+  });
+});

@@ -20,8 +20,15 @@ function renderMyMap() {
   );
 }
 
-function image(timestamp_utc: string | null) {
-  return { ra_deg: 83.8221, dec_deg: -5.3911, timestamp_utc };
+function image(
+  timestamp_utc: string | null,
+  capture: { start?: string | null; end?: string | null } = {},
+) {
+  return {
+    ra_deg: 83.8221, dec_deg: -5.3911, timestamp_utc,
+    capture_night_start: capture.start ?? null,
+    capture_night_end: capture.end ?? null,
+  };
 }
 
 describe("skyFootprintLine", () => {
@@ -33,8 +40,27 @@ describe("skyFootprintLine", () => {
     // surface. 03:30 UTC is that case.
     const line = skyFootprintLine(image("2026-08-17T03:30:00Z"));
     expect(line).toBe(
-      `RA 83.822° · Dec -5.391° · ${formatStampDate("2026-08-17T03:30:00Z")}`);
+      `RA 83.822° · Dec -5.391° · Stacked ${formatStampDate("2026-08-17T03:30:00Z")}`);
     expect(line).not.toContain("2026-08-17");
+  });
+
+  it("says when the subs were SHOT when the run knows, not when it stacked", () => {
+    // The whole point of the label: an unlabelled date beside a picture reads
+    // as the night it was taken, and on a re-stack of a back catalogue the
+    // stack stamp is years out.
+    const line = skyFootprintLine(
+      image("2026-08-17T03:30:00Z", { start: "2024-11-15", end: "2024-11-18" }));
+    expect(line).toBe("RA 83.822° · Dec -5.391° · Shot 15–18 Nov 2024");
+    expect(line).not.toContain("2026");
+  });
+
+  it("labels the stack date rather than passing it off as a capture one", () => {
+    // Every run recorded before the app knew when its subs were shot — which is
+    // most of an existing library — and the honest answer is to say which date
+    // this is, not to go silent and not to imply the other.
+    const line = skyFootprintLine(image("2026-08-17T03:30:00Z"));
+    expect(line).toContain("Stacked");
+    expect(line).not.toContain("Shot");
   });
 
   it("keeps the coordinates and drops the separator when there is no date", () => {

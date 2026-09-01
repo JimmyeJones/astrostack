@@ -892,7 +892,10 @@ def target_stack_health(
     grades that specific run (the History card for a run you're viewing). Returns
     ``null`` when there's no matching genuine stack. Read-only; never a gate.
     """
-    from seestack.coverage_backfill import backfill_coverage_thin_frac
+    from seestack.coverage_backfill import (
+        backfill_coverage_thin_frac,
+        backfill_seam_residual,
+    )
     from seestack.stackhealth import recommended_dark_spec, stack_health
     from webapp.pipeline import _newest_genuine_stack_run, _stack_options_from_run_json
 
@@ -920,6 +923,12 @@ def target_stack_health(
         # (a no-op for every run that has it). Never a sweep: see
         # `seestack.coverage_backfill`.
         backfill_coverage_thin_frac(proj, run)
+        # Same shape, same reason, for the *mosaic* half of the panel: a run
+        # stacked before schema 15 never says whether its panels matched, on this
+        # card or on the History chip and Gallery card that read the same column.
+        # Free on a single-field run — it never opens a file — and a no-op on
+        # every run stacked since.
+        backfill_seam_residual(proj, run)
         frames = list(proj.iter_frames())
         notes = stack_health(run, frames)
         spec = recommended_dark_spec(frames)

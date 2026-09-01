@@ -256,3 +256,55 @@ def test_sky_places_stacked_image(client, solved_library):
     # Scale = width_deg / preview_w ; |CD| diagonal ≈ that scale.
     scale = img["width_deg"] / 960
     assert abs((wcs["CD1_1"] ** 2 + wcs["CD1_2"] ** 2) ** 0.5 - scale) < 1e-9
+
+
+def _add_run_with_capture_window(data_root, safe: str, start: str | None,
+                                 end: str | None) -> None:
+    """The same placed run, but recording when its subs were shot."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            first = next(proj.iter_frames())
+            proj.update_frame(first.id, pixscale_arcsec=2.5, rotation_deg=12.0)
+            from PIL import Image
+            preview = lib.target_dir(lib.find_target(safe)) / "master_preview.png"
+            Image.new("RGB", (960, 540)).save(preview)
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-08-30T22:14:03Z",
+                output_basename="master", fits_path=None, tiff_path=None,
+                preview_path=str(preview), n_frames_used=3,
+                canvas_h=1080, canvas_w=1920, coverage_min=1, coverage_max=3,
+                options_json="{}",
+                capture_start_utc=start, capture_end_utc=end,
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_a_sky_footprint_carries_when_its_subs_were_shot(client, solved_library):
+    """The footprint's caption is a date beside a picture, so it has to be able
+    to say the night it was *shot* — the run's own stamp is when the stack ran,
+    which on a re-stack of a back catalogue is years out."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_run_with_capture_window(
+        solved_library, safe, "2024-11-15T21:30:00Z", "2024-11-18T02:10:00Z")
+    img = client.get("/api/sky").json()["images"][0]
+    assert img["capture_night_start"] == "2024-11-15"
+    assert img["capture_night_end"] == "2024-11-17"
+    # …without losing the stack stamp, which is what the viewer stacks tiles by.
+    assert img["timestamp_utc"].startswith("2026-08-30")
+
+
+def test_a_run_that_never_recorded_a_capture_window_reports_none(
+        client, solved_library):
+    """Every run from before schema 18. The field must be null rather than
+    borrowing the processing stamp — the caption then says "Stacked …"."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_run_with_capture_window(solved_library, safe, None, None)
+    img = client.get("/api/sky").json()["images"][0]
+    assert img["capture_night_start"] is None
+    assert img["capture_night_end"] is None

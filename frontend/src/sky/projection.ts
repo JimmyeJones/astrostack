@@ -22,7 +22,14 @@ export interface SkyImage {
   height_deg: number;
   rotation_deg: number;
   preview_url: string;
+  /** When the *stack ran* — the key the viewer draws newer tiles on top by, and
+   *  never the date a footprint is captioned with. */
   timestamp_utc: string | null;
+  /** When this picture's subs were **shot**, as observing nights (`YYYY-MM-DD`)
+   *  bucketed server-side. Absent on a run recorded before the app knew, and on
+   *  an older backend; the caption then says "Stacked …" instead. */
+  capture_night_start?: string | null;
+  capture_night_end?: string | null;
   run_id: number;
   /** FITS WCS keywords for the preview PNG grid (used by the Aladin viewer). */
   wcs?: Record<string, number | string> | null;

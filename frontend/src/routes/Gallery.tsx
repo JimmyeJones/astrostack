@@ -15,7 +15,9 @@ import {
   api, type GalleryItem, type StackOptionField, type VideoStill,
 } from "../api/client";
 import { sharePictureText, shareStillText } from "../share";
-import { formatCaptureNights, formatIntegration, formatStampDate } from "../format";
+import {
+  formatCaptureNights, formatIntegration, formatStampDate, pictureDateLabel,
+} from "../format";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
@@ -397,7 +399,20 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
         </Text>
       ) : null}
       <Text size="xs" c="dimmed">
-        {item.output_basename} · {item.timestamp_utc.replace("T", " ").slice(0, 16)}
+        {/* A date on a picture reads as "when I shot this", so it has to say
+            which date it is: `pictureDateLabel` prefers the run's own capture
+            window and falls back to a *labelled* "Stacked …" when the run
+            predates it. The raw `2026-08-30 14:32` this used to print was the
+            moment the stack ran — years out on a re-stack of a back catalogue,
+            on the page for browsing your pictures. The run's identity here is
+            its basename beside it, so the clock time is not needed (History,
+            where two re-stacks can share a name, keeps it). */}
+        {item.output_basename}
+        {/* The label drops itself *and its separator* on an unreadable stamp,
+            rather than leaving " ·  · " behind — the same contract every other
+            optional segment on this line already keeps. */}
+        {((d) => (d ? ` · ${d}` : ""))(pictureDateLabel(
+          item.capture_night_start, item.capture_night_end, item.timestamp_utc))}
         {" · "}{item.canvas_w}×{item.canvas_h}
         {item.total_exposure_s ? ` · ${formatIntegration(item.total_exposure_s)}` : ""}
         {hasNoise(item.noise_sigma) ? <> · <NoiseReadout sigma={item.noise_sigma} /></> : null}
