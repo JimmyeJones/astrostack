@@ -10313,29 +10313,70 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Scout 2026-09-01) — "your capture seems to have gone quiet": a per-target heads-up when subs
-  stopped arriving mid-session, so a clear night isn't silently lost to a stalled Seestar.** *(Pillar: get +
-  autonomy — PRIORITY 2–3; size S–M; the whole signal is already on disk — this is a read + a note, never a
-  new watch.)* The owner walks away and lets AstroStack watch `incoming/`; the failure this catches is the one
-  they can't see happening — the Seestar disconnects, its microSD fills, or the app's dew heater trips and the
-  scope parks — and **no new subs arrive for the rest of an otherwise-clear night**. Today nothing notices: the
-  watcher fires only *on* arrival, so a target that stops feeding simply goes still, and the owner finds out in
-  the morning that four of their eight planned hours are missing. **The data already exists:** ingest stamps
-  each frame's arrival time, so "this target's newest accepted sub is N hours old while it was actively
-  accumulating an hour ago" is a pure query. **Shape:** a self-hiding note (the Target page's existing
-  `NoticeBoard`, per the standing IA priority — *not* a new banner) reading e.g. *"No new subs from this target
-  in the last 90 min — capture may have stopped (Seestar disconnected, card full, or you're done for the
-  night)."* Informational only; it must **never** act — no auto-anything, and strictly read-only over
-  `incoming/` (§10). **Sane default and the care that makes it not-annoying:** it may only fire on a target that
-  *was* recently active (had a run of arrivals that then stopped), never on a target the owner deliberately
-  finished or hasn't started, and the threshold wants to be generous (a Seestar's own dithers/refocus gap plus
-  SMB latency, so ~1–2× a typical inter-sub interval, not a fixed clock). **Grep before building:** it overlaps
-  the live device layer — `webapp/seestar/manager.py` already tracks a Seestar's `last_seen_utc` over a
-  telemetry connection — so first decide whether this belongs there (device-connectivity truth, when a scope is
-  paired) or on the incoming-folder side (works for the file-drop-only owner who never pairs). The
-  folder-arrival side is the one that always applies and needs no device link; the manager may already answer
-  the paired case, in which case this is the *unpaired* complement, not a second copy. It is a §9-safe additive
-  read; nothing persisted, no default flipped.
+- **✅ SHIPPED (Builder, v0.322.0, branch `claude/wizardly-feynman-qw8j45`) — ~~"your capture seems to have
+  gone quiet": a per-target heads-up when subs stopped arriving mid-session, so a clear night isn't silently
+  lost to a stalled Seestar.~~** Built as the entry asked — a self-hiding note in the Target page's existing
+  `NoticeBoard`, informational only, strictly read-only over `incoming/` (§10).
+
+  **The grep the entry asked for changed the shape, and for the better: no new endpoint and no second
+  definition of a session.** `seestack/livesession.py` ("Tonight, live") already cut the trailing session with
+  the shared `_split_sessions` gap walk and already knew the newest sub was stale (`active`). What it could not
+  say is the only thing that matters here: whether the target was **mid-run** when it stopped (worth a
+  heads-up) or simply **finished** (worth nothing at all). So the verdict lives beside `active`, on the
+  `live-session` payload the Live page already fetches, rather than as a fourth surface asking the same
+  question. The `webapp/seestar/manager.py` device layer is untouched — this is the folder-arrival side, which
+  works for the file-drop-only owner who never pairs a scope.
+
+  **The care is all in *not* crying wolf**, and every clause of it is a test:
+  * **The wait scales with the target's own cadence.** "No sub for 45 minutes" means something very different
+    for 10 s subs than for one 5-minute frame at a time, so the wait is `6 ×` the *median* inter-sub gap over
+    the trailing 30 subs — the median precisely because a real night contains dither/refocus/cloud pauses, and
+    one 40-minute hole must not redefine "normal" (a test pins exactly that).
+  * **Floored at `LIVE_STALE_MINUTES`,** so "still going" and "gone quiet" can never both be true of one
+    session, and **capped at 180 min**, so even a very slow cadence gets noticed the same night.
+  * **It needs a run of arrivals to have stopped** — ≥6 datable subs spanning ≥20 minutes, so a couple of test
+    frames going quiet says nothing.
+  * **And it self-hides once the silence outlasts the 6 h session gap:** past that this is *last night*, and
+    the recap is the surface that tells that story. A night the owner deliberately finished never trips it.
+
+  The copy names the cadence, the silence and what the session already got ("This target was getting a sub
+  about every 30 s, then nothing arrived for 1.2 h… If you finished for the night, nothing is wrong and you can
+  ignore this."), with one button through to "Tonight, live". The Live page's own `freshnessLine` gained the
+  same distinction: a stalled session no longer reads "this session looks finished", which was the comfortable
+  wrong answer.
+
+  **Upgrade-safe (§9):** three additive optional fields on one existing response, three new dataclass fields
+  with behaviour-preserving defaults, no config/schema/on-disk/API-shape change and no default flipped. The
+  frontend types them optional, so an older backend renders nothing — exactly as before this existed.
+
+  **Tests: +9 engine (`tests/test_livesession.py`), +2 endpoint
+  (`tests/webapp/test_target_live_session.py`), +5 component (`CaptureQuietNote.test.tsx`), +5 phrasing
+  (`liveSession.test.ts`).** Most of them assert *silence*: a finished night, a handful of subs, a session that
+  never got going, an older backend, a failed fetch.
+
+    *(Original spec follows.)* **"your capture seems to have gone quiet": a per-target heads-up when subs
+    stopped arriving mid-session, so a clear night isn't silently lost to a stalled Seestar.** *(Pillar: get +
+    autonomy — PRIORITY 2–3; size S–M; the whole signal is already on disk — this is a read + a note, never a
+    new watch.)* The owner walks away and lets AstroStack watch `incoming/`; the failure this catches is the one
+    they can't see happening — the Seestar disconnects, its microSD fills, or the app's dew heater trips and the
+    scope parks — and **no new subs arrive for the rest of an otherwise-clear night**. Today nothing notices: the
+    watcher fires only *on* arrival, so a target that stops feeding simply goes still, and the owner finds out in
+    the morning that four of their eight planned hours are missing. **The data already exists:** ingest stamps
+    each frame's arrival time, so "this target's newest accepted sub is N hours old while it was actively
+    accumulating an hour ago" is a pure query. **Shape:** a self-hiding note (the Target page's existing
+    `NoticeBoard`, per the standing IA priority — *not* a new banner) reading e.g. *"No new subs from this target
+    in the last 90 min — capture may have stopped (Seestar disconnected, card full, or you're done for the
+    night)."* Informational only; it must **never** act — no auto-anything, and strictly read-only over
+    `incoming/` (§10). **Sane default and the care that makes it not-annoying:** it may only fire on a target that
+    *was* recently active (had a run of arrivals that then stopped), never on a target the owner deliberately
+    finished or hasn't started, and the threshold wants to be generous (a Seestar's own dithers/refocus gap plus
+    SMB latency, so ~1–2× a typical inter-sub interval, not a fixed clock). **Grep before building:** it overlaps
+    the live device layer — `webapp/seestar/manager.py` already tracks a Seestar's `last_seen_utc` over a
+    telemetry connection — so first decide whether this belongs there (device-connectivity truth, when a scope is
+    paired) or on the incoming-folder side (works for the file-drop-only owner who never pairs). The
+    folder-arrival side is the one that always applies and needs no device link; the manager may already answer
+    the paired case, in which case this is the *unpaired* complement, not a second copy. It is a §9-safe additive
+    read; nothing persisted, no default flipped.
 
 - **NEW IDEA (Builder 2026-09-01, the conclusion the v0.321.1 heal audit forced) — "this picture was made by an
   older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it would

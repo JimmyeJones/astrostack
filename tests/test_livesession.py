@@ -7,6 +7,8 @@ from seestack.livesession import (
     CONDITIONS_MIN_FRAMES,
     CONDITIONS_WINDOW_FRAMES,
     LIVE_STALE_MINUTES,
+    QUIET_CEILING_MINUTES,
+    QUIET_MIN_FRAMES,
     live_session,
 )
 from seestack.session_recap import last_session_frames
@@ -269,5 +271,140 @@ def test_a_naive_capture_stamp_is_read_as_utc(tmp_path):
         live = live_session(proj, now=NOW)
         assert live.active is True
         assert 4.0 < live.minutes_since_latest < 6.0
+    finally:
+        proj.close()
+
+
+# --- "capture seems to have gone quiet" -------------------------------------
+#
+# The walked-away failure: the Seestar stops mid-night and nothing says so. Every
+# test here is about the *narrowing* — a night that simply ended must stay silent.
+
+
+def test_a_session_that_stopped_mid_run_reads_quiet(tmp_path):
+    """30 subs a minute apart, then nothing for 90 minutes: the stall case."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _fill(proj, NOW - timedelta(minutes=119), 30, step_s=60)
+        live = live_session(proj, now=NOW)
+        assert live is not None
+        assert live.active is False
+        assert live.quiet is True
+        # The cadence it is judged against travels with the verdict, so the UI
+        # can say "a sub about every minute, then nothing".
+        assert live.typical_gap_minutes == 1.0
+        # 6 × 1 min is under the live-stale floor, so the floor is what applied.
+        assert live.quiet_after_minutes == LIVE_STALE_MINUTES
+    finally:
+        proj.close()
+
+
+def test_a_night_still_filling_up_is_never_quiet(tmp_path):
+    """`quiet` is strictly narrower than `not active` — both can't be true."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _fill(proj, NOW - timedelta(minutes=40), 30, step_s=60)
+        live = live_session(proj, now=NOW)
+        assert live.active is True
+        assert live.quiet is False
+    finally:
+        proj.close()
+
+
+def test_a_night_that_simply_finished_is_not_quiet(tmp_path):
+    """Past the session gap this is *last night*, and the recap tells that story
+    — a live "capture may have stopped" warning would be nonsense in daylight."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _fill(proj, NOW - timedelta(hours=9), 30, step_s=60)
+        live = live_session(proj, now=NOW)
+        assert live.active is False
+        assert live.quiet is False
+    finally:
+        proj.close()
+
+
+def test_a_handful_of_subs_going_quiet_says_nothing(tmp_path):
+    """Below the frame floor there was no run of arrivals to have stopped."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _fill(proj, NOW - timedelta(minutes=120), QUIET_MIN_FRAMES - 1, step_s=600)
+        live = live_session(proj, now=NOW)
+        assert live.typical_gap_minutes is None
+        assert live.quiet is False
+    finally:
+        proj.close()
+
+
+def test_a_session_that_never_got_going_says_nothing(tmp_path):
+    """Enough subs, but they span under QUIET_MIN_SESSION_MINUTES — a couple of
+    test frames, not a night that was interrupted."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _fill(proj, NOW - timedelta(minutes=60), 10, step_s=10)
+        live = live_session(proj, now=NOW)
+        assert live.typical_gap_minutes is not None
+        assert live.quiet is False
+    finally:
+        proj.close()
+
+
+def test_the_wait_scales_with_the_targets_own_cadence(tmp_path):
+    """One sub every 20 minutes: 45 minutes of silence is an ordinary gap, so the
+    note holds off until six cadences have passed."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _fill(proj, NOW - timedelta(minutes=90 + 20 * 9), 10, step_s=20 * 60)
+        live = live_session(proj, now=NOW)
+        assert live.typical_gap_minutes == 20.0
+        assert live.quiet_after_minutes == 120.0
+        assert live.quiet is False          # 90 min quiet, wait is 120
+        later = live_session(proj, now=NOW + timedelta(minutes=40))
+        assert later.quiet is True          # 130 min quiet
+    finally:
+        proj.close()
+
+
+def test_a_very_slow_cadence_still_gets_noticed_the_same_night(tmp_path):
+    """The ceiling: six × an hour-long cadence would be six hours, by which time
+    the session gap has already closed and nothing would ever be said."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _fill(proj, NOW - timedelta(minutes=200 + 60 * 9), 10, step_s=3600)
+        live = live_session(proj, now=NOW)
+        assert live.typical_gap_minutes == 60.0
+        assert live.quiet_after_minutes == QUIET_CEILING_MINUTES
+        assert live.quiet is True
+    finally:
+        proj.close()
+
+
+def test_one_long_pause_does_not_redefine_the_cadence(tmp_path):
+    """A dither/refocus hole is why the cadence is a median, not a mean: with the
+    mean (≈4.2 min) the wait would stretch past the floor and the stall below
+    would go unmentioned."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        start = NOW - timedelta(minutes=180)
+        _fill(proj, start, 10, step_s=60)
+        # One 40-minute hole mid-session, then the cadence resumes.
+        _fill(proj, start + timedelta(minutes=49), 10, step_s=60)
+        live = live_session(proj, now=NOW)
+        assert live.typical_gap_minutes == 1.0
+        assert live.quiet_after_minutes == LIVE_STALE_MINUTES
+        assert live.quiet is True
+    finally:
+        proj.close()
+
+
+def test_the_quiet_read_survives_an_undatable_sub(tmp_path):
+    """An undatable frame is dropped by the session cut, so the cadence is
+    measured over what is left rather than crashing on a None stamp."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _fill(proj, NOW - timedelta(minutes=119), 30, step_s=60)
+        proj.add_frame(_frame(None))
+        live = live_session(proj, now=NOW)
+        assert live.quiet is True
     finally:
         proj.close()

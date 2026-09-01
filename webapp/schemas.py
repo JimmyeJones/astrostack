@@ -312,6 +312,14 @@ class LiveSessionOut(BaseModel):
     # enough to go inside?". ``None`` when no goal exists, so the page simply says
     # nothing rather than inventing a target to hit.
     goal_exposure_s: float | None = None
+    # "Capture seems to have gone quiet" — this session was mid-run and the subs
+    # stopped, judged against the cadence the target itself had been keeping
+    # (``typical_gap_minutes``) after waiting ``quiet_after_minutes``. Strictly
+    # narrower than ``not active``: a night the owner simply finished, or one that
+    # went quiet so long ago it is history, both read ``false``.
+    quiet: bool = False
+    typical_gap_minutes: float | None = None
+    quiet_after_minutes: float | None = None
 
 
 class NightSummaryOut(BaseModel):

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  SAME_NIGHT_HOURS, alsoActiveTonight, conditionsCause, conditionsLine,
-  freshnessLine, goalLine, mostRecentlyActive, sharpnessLine, tonightHeadline,
+  SAME_NIGHT_HOURS, alsoActiveTonight, cadencePhrase, captureQuietMessage,
+  conditionsCause, conditionsLine, freshnessLine, goalLine, mostRecentlyActive,
+  sharpnessLine, tonightHeadline,
 } from "./liveSession";
 import type { LiveSession, Target } from "../api/client";
 
@@ -171,6 +172,47 @@ describe("freshnessLine", () => {
   it("handles a session with no readable stamp at all", () => {
     expect(freshnessLine(live({ minutes_since_latest: null })))
       .toBe("Waiting for the first sub.");
+  });
+
+  it("says a stalled session stopped, not that it finished", () => {
+    // "Looks finished" is comfortable for a night that ended and exactly wrong
+    // for one that stopped — the backend draws the line, this only phrases it.
+    expect(freshnessLine(live({
+      active: false, quiet: true, minutes_since_latest: 72,
+    }))).toBe("No new subs for 1.2 h — capture may have stopped.");
+  });
+});
+
+describe("captureQuietMessage", () => {
+  const quiet = (over: Partial<LiveSession> = {}) => live({
+    active: false, quiet: true, minutes_since_latest: 72,
+    typical_gap_minutes: 0.5, quiet_after_minutes: 45, ...over,
+  });
+
+  it("names the cadence, the silence, and what the session already got", () => {
+    const msg = captureQuietMessage(quiet());
+    expect(msg).toContain("about every 30 s");
+    expect(msg).toContain("nothing arrived for 1.2 h");
+    expect(msg).toContain("143 subs");
+  });
+
+  it("never scolds someone who just finished for the night", () => {
+    expect(captureQuietMessage(quiet()))
+      .toContain("If you finished for the night, nothing is wrong");
+  });
+
+  it("drops the cadence clause rather than inventing one", () => {
+    expect(cadencePhrase(quiet({ typical_gap_minutes: null }))).toBeNull();
+    expect(captureQuietMessage(quiet({ typical_gap_minutes: null })))
+      .toContain("getting a sub steadily");
+  });
+
+  it("says nothing at all unless the backend called it quiet", () => {
+    expect(captureQuietMessage(live())).toBeNull();
+    expect(captureQuietMessage(live({ active: false }))).toBeNull();
+    // An older backend sends no verdict; that reads as "nothing to say".
+    expect(captureQuietMessage(quiet({ quiet: undefined }))).toBeNull();
+    expect(captureQuietMessage(quiet({ minutes_since_latest: null }))).toBeNull();
   });
 });
 
