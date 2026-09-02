@@ -928,6 +928,23 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     onError: () => notifications.show({ message: "Could not update cover", color: "red" }),
   });
 
+  // The subject of everything that leaves the app from this card — the share
+  // sheet's title and the shared file's name. It is the target's display name,
+  // never `run.output_basename`: the basename is a *filename* ("M_42_stack"),
+  // and sharing under it posted the app's filing convention rather than the
+  // object, with the underscores and the "_stack" suffix intact. Same picture,
+  // same run, shared from Gallery or Best pictures, already went out as "M 42".
+  // `safe` is the last resort (the URL slug), which is still a name someone
+  // typed; `sharePictureText` handles a blank.
+  //
+  // It is also the caption's subject when the catalog can't identify the
+  // target, for the same reason: `postCaption`'s `fallbackName` used to be
+  // `safe`, so a beginner shooting something the catalog doesn't know copied
+  // a caption reading "M_42 — a stack of 240 subs" — the URL slug, complete
+  // with its underscore, pasted under their photo. Declared here, above both
+  // caption builders, rather than beside the share buttons that came later.
+  const shareName = (targetName ?? "").trim() || safe;
+
   // "Copy caption" — one correct, friendly sentence to paste wherever the user
   // is sharing (chat, socials). Built purely from facts the app already knows:
   // the target's catalog identity, this run's frame count / integration / date,
@@ -963,7 +980,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         captureNightEnd: run.capture_night_end,
         captureNights: run.capture_nights,
         scaleBar,
-        fallbackName: safe,
+        fallbackName: shareName,
       });
       try {
         await navigator.clipboard.writeText(text);
@@ -996,18 +1013,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     captureNightEnd: run.capture_night_end,
     captureNights: run.capture_nights,
     scaleBar: storedPreviewScaleBar(annotations.data, run),
-    fallbackName: safe,
+    fallbackName: shareName,
   });
-
-  // The subject of everything that leaves the app from this card — the share
-  // sheet's title and the shared file's name. It is the target's display name,
-  // never `run.output_basename`: the basename is a *filename* ("M_42_stack"),
-  // and sharing under it posted the app's filing convention rather than the
-  // object, with the underscores and the "_stack" suffix intact. Same picture,
-  // same run, shared from Gallery or Best pictures, already went out as "M 42".
-  // `safe` is the last resort (the URL slug), which is still a name someone
-  // typed; `sharePictureText` handles a blank.
-  const shareName = (targetName ?? "").trim() || safe;
 
   const previewSrc = `${api.stackArtifactUrl(safe, run.id, "preview")}${cacheBust ? `?v=${cacheBust}` : ""}`;
   // While the first suggestion fetch is still in flight, keep showing the STF

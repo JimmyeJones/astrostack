@@ -3,12 +3,19 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 
 import { UnsolvedHelp } from "./UnsolvedHelp";
+import type { SolveSetup } from "./solveSetup";
 
-function renderHelp() {
+function renderHelp(setup: SolveSetup | null = null) {
   return render(
     <MantineProvider>
-      <UnsolvedHelp />
+      <UnsolvedHelp setup={setup} />
     </MantineProvider>,
+  );
+}
+
+function open() {
+  fireEvent.click(
+    screen.getByRole("button", { name: /what does .*not located yet.* mean/i }),
   );
 }
 
@@ -36,5 +43,35 @@ describe("UnsolvedHelp", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/usually\s+harmless/)).toBeInTheDocument();
     expect(screen.getByText(/star database is installed/)).toBeInTheDocument();
+  });
+
+  // The contradiction this prop exists to remove: when ASTAP or its star
+  // database is missing, the Target page shows a *blocking* banner saying the
+  // problem "blocks the whole target" — and this popover sat beside it calling
+  // the same subs "usually harmless: the located subs still stack into your
+  // picture". With no solver there are no located subs, so that reassurance was
+  // both contradictory and false.
+  it("does not call the subs harmless when the solver itself is missing", async () => {
+    renderHelp({ kind: "astap", frames: 200 });
+    open();
+
+    expect(await screen.findByText(/ASTAP — the program that does the locating/))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/usually\s+harmless/)).toBeNull();
+    // It still reassures, on the fact that is actually true here: the subs are
+    // all still on disk and one fix brings them in.
+    expect(screen.getByText(/Nothing has been lost/)).toBeInTheDocument();
+  });
+
+  it("names the missing star database when that is the blocker", async () => {
+    renderHelp({ kind: "database", frames: 12 });
+    open();
+
+    expect(await screen.findByText(/no star database to match your subs against/))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/usually\s+harmless/)).toBeNull();
+    // …and it points at the banner rather than repeating its instructions, so a
+    // beginner has one place to act, not two competing ones.
+    expect(screen.getByText(/orange note above/)).toBeInTheDocument();
   });
 });

@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from seestack import nightplan as np_plan
+from seestack.sharecard import format_duration
 from seestack.nightplan import (
     HorizonProfile,
     LibraryTarget,
@@ -1158,6 +1159,26 @@ def test_best_tonight_never_says_you_have_zero_minutes():
                                      [_lib("new", "New", 10.7, 41.3, hours=0.0)])
     assert "haven't captured any of New yet" in fresh.picks[0].reason
     assert "0 min" not in fresh.picks[0].reason
+
+
+def test_the_planner_says_how_much_light_you_have_in_the_apps_own_words():
+    """"You've got 1.3 h on it" — the same wording the Target page's readiness
+    card and the picture's own caption use, not a sixth dialect.
+
+    This clause and the readiness card describe the *identical* number, and the
+    planner used to render it "1 h 20 m" while every other surface said "1.3 h".
+    The remaining-window half of the same sentence is deliberately left alone —
+    "stays shootable for another 2 h 15 m" is a countdown to when to stop, not
+    an integration total, so minutes-precision is the right thing there.
+    """
+    started = _lib("m31", "M 31", 10.7, 41.3, hours=1.3333)
+    reason = np_plan.rank_targets_now(LONDON, JAN_EVENING, [started]).picks[0].reason
+
+    assert f"you've got {format_duration(1.3333 * 3600)} on it" in reason
+    assert "you've got 1.3 h on it" in reason      # …and that is what it reads
+    assert "1 h 20 m on it" not in reason
+    # The window keeps its own, more precise form in the same sentence.
+    assert "stays shootable for another" in reason
 
 
 def test_a_target_with_nothing_captured_is_never_told_an_hour_cuts_100pc_of_its_noise():

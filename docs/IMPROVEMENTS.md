@@ -1364,8 +1364,9 @@ _(nothing else claimed — claim an item here with your branch name)_
   resolves inside the raw tree — *not* the owner's current state, but one settings edit away)~~ *(shipped
   v0.327.8, see above)*; the scanner's
   bare-`<T>/` skip is **silent** even when the folder holds thousands of FITS (the owner's `NGC 6888` 4,815 vs
-  `NGC 6888_SUB` 3,110 is exactly that shape — see open questions); the plate-solve-failed screen shows a
-  blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"; ~~the Stack
+  `NGC 6888_SUB` 3,110 is exactly that shape — see open questions); ~~the plate-solve-failed screen shows a
+  blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"~~ *(shipped
+  v0.328.1, see below)*; ~~the Stack
   page prints the **raw engine error** where every other page uses `friendlyJobError`~~ *(shipped v0.328.0,
   see below)*; the frames table prints raw
   UTC under a hero that says "Shot &lt;local night&gt;"; "nights" means **6-hour sessions** on the Nights card
@@ -1373,6 +1374,76 @@ _(nothing else claimed — claim an item here with your branch name)_
   `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
   *(shipped v0.328.0, see below)*; the "full
   data" TIFF anchors its white point on the single brightest surviving pixel (hypothesis, needs real data).
+
+- **✅ SHIPPED (Builder, v0.328.1, branch `claude/sweet-babbage-swvkoa`) — ~~A-MINOR's contradiction: the
+  plate-solve-failed screen tells the beginner two opposite things at once~~ — plus the two remnants of A10 and
+  A-MINOR that survived the collision below.** Three small things, one theme: a screen saying something that is
+  not true of the state it is in.
+
+  **1. "Usually harmless", printed beside a blocking banner.** When ASTAP or its star database is missing,
+  `routes/Target.tsx` shows a `NOTICE_PRIORITY.blocking` banner: *"…so this blocks the whole target."* A few
+  pixels below, beside the "N not located yet" badge, `UnsolvedHelp`'s "?" popover said *"this is common on
+  faint or few-star fields and usually harmless: the located subs still stack into your picture."* With no
+  solver installed there **are no located subs** — nothing stacks at all — so the popover was contradicting the
+  banner and telling the owner the opposite of what to do about the one thing standing between them and a
+  picture. `UnsolvedHelp` now takes the same `SolveSetup` verdict the banner is built from
+  (`detectSolveSetupProblem`, already computed on the page), names the actual blocker in plain language, points
+  at the banner rather than repeating its instructions, and reassures on what *is* true here: *"Nothing has
+  been lost — your subs are all still here."* With no setup problem the copy is **unchanged, word for word**:
+  the faint-field case really is usually harmless, and it is still the common one.
+
+  **2. The URL slug, pasted under someone's photo.** v0.327.9 stopped Stack history sharing a picture as
+  `M42_stack_01`, but left `postCaption`'s `fallbackName` as `safe` one line below — so a target the *catalog*
+  can't identify (the common case for a faint or oddly-named object) had its "Copy caption" sentence begin
+  "M_42 — a stack of 12 subs", underscore and all. Same leak, same card, one line further down; `shareName`
+  moved above both caption builders and now feeds them too.
+
+  **3. A seventh duration dialect, in the planner.** v0.327.9 unified six, found by grepping for the *format*.
+  Grepping for the **quantity** instead turns up one more: the Tonight card's *"So far you've got **1 h 20 m**
+  on it"* is the same number the Target page's readiness card calls *"1.3 h"*. `_have_phrase` now speaks
+  `format_duration` like everything else. The **other half of the same sentence** — *"stays shootable for
+  another 2 h 15 m"* — deliberately does not: a countdown to when to stop tonight is a different quantity from
+  an integration total, and minutes-precision is right there (same reasoning that leaves the job ETA alone).
+
+  **Upgrade-safe (§9):** frontend copy and one pure string helper. One optional prop with a `null` default, so
+  `UnsolvedHelp` renders exactly as before wherever it is not passed. No API, schema, config, on-disk path or
+  default touched.
+
+  **Tests (+5, all fail before).** Two on `UnsolvedHelp` (each `kind`: the new wording present, "usually
+  harmless" *absent*, the reassurance still there) and one on the **page**, which is where the bug actually
+  lived — the component was fine in isolation; what was missing was the page handing it a verdict it already
+  had. The page test renders the real ASTAP-missing reject tally, waits for the blocking banner, opens the "?",
+  and asserts the two sentences can no longer co-exist. Plus a `History.test.tsx` caption test for the slug
+  (the existing "no capture window" test keeps its `M_42`: there no target has loaded, so the slug genuinely is
+  all there is), and `tests/test_nightplan.py` pinning the planner clause against `format_duration` *and*
+  against the "1 h 20 m" it used to read, while asserting the window half keeps its own form.
+
+  > **⚠️ COLLISION THIRTEEN — two of this run's three tasks were built independently by
+  > `claude/sweet-babbage-hrh7bu` in the same hour, down to the same two version numbers and the same
+  > `shareName` variable. Theirs merged first, so theirs ships; mine are dropped, not re-litigated.** The
+  > standing method from collision ten settled it in ten minutes: `git worktree` of `origin/main`, copy my test
+  > files in, run them against their code.
+  > * **A10 (the caption/duration unification) — fully stood down, and theirs is better in one way worth
+  >   copying.** My whole `DURATION_TABLE`, including the JavaScript half-up rounding at 1.25 h and the
+  >   10-hour decimal boundary, passes on their `format_duration` unchanged; so does the cross-surface check
+  >   that one 11,520-second stack renders `3.2 h` through all five surfaces at once. Where mine duplicated the
+  >   table in two languages, **theirs reads one shared `tests/fixtures/integration_format.json` from both
+  >   `pytest` and `vitest`** — the two implementations cannot drift without reddening each other's suite,
+  >   which a duplicated literal only makes *likely* to happen. Their History fix is the same fix.
+  > * **The JPEG chroma item — fully stood down, including the failure mode.** They found the same 4:2:0
+  >   defect, routed the same seven sites through one helper, *and* hit the same `optimize=True` buffer
+  >   overrun it causes (Pillow sizes libjpeg's one-shot buffer at `w × h` bytes, a guess made against 4:2:0);
+  >   they retry with `optimize=False` where I lifted `ImageFile.MAXBLOCK`. Both work; theirs is simpler and is
+  >   on `main`. My test file passes against their encoder unchanged.
+  > * **What was additive is what nobody's grep covered.** All three items above: two *remnants* of their own
+  >   fixes (the caption fallback one line below the line they changed; the planner clause, because
+  >   `seestack/nightplan.py` was not in either of their diffs) and one item from a different part of A-MINOR.
+  >   **The transferable bit:** when you stand down from a duplicated item, re-run *your* tests against their
+  >   code rather than deleting your branch — the failures are exactly the additive remainder, and here they
+  >   were two one-line fixes that would otherwise have sat in the backlog for another run to re-derive.
+  >   Watch also for the trap in the worktree: with an editable install, `seestack` resolves to the worktree
+  >   but a submodule the worktree lacks silently falls through to *your* tree, so check `__file__` before
+  >   trusting a green run.
 
 - **✅ SHIPPED (Builder, v0.328.0, branch `claude/sweet-babbage-hrh7bu`) — ~~A-MINOR: share and print JPEGs use
   4:2:0 chroma subsampling.~~** Measured first, and it turned out to be **every** JPEG the app writes, not just
