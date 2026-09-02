@@ -791,7 +791,64 @@ _(nothing else claimed — claim an item here with your branch name)_
   > match silently drops real subs from a stack. A second, header-based discriminator (a stacked output's
   > `EXPTIME` is N×10 s, or it carries a stack-count card) would be stronger still if the DB rows carry it.
 
-- **🟠 A6 — WALK-AWAY AUTO-REJECT PICKS ITS METHOD FROM THE *WHOLE TARGET'S* FRAME COUNT, so a mosaic panel
+- **✅ SHIPPED (Builder, v0.326.7, branch `claude/zen-mccarthy-mqfxxg`) — ~~A6: walk-away auto-reject picks its
+  method from the whole target's frame count, so a shallow mosaic panel gets a rejection pass that is
+  mathematically blind and the trails survive.~~** Reproduced first, at the owner's shape, then fixed at the
+  unit that decides it.
+
+  **The root cause, and why the number was wrong rather than the logic.** Every threshold in the auto
+  outlier-rejection picker is a statement about how many samples land **on one pixel**: κ-σ can't pull a lone
+  trail out of statistics that still include it until ~`kappa_min_frames` (11 at κ=3), and the
+  order-statistic min/max drop needs 3 to spare 2. On a single field those samples *are* the whole stack, so
+  the frame count is a sound proxy — but a mosaic's panels are different patches of sky, and a pixel only ever
+  sees its own panel's subs. A 2×2 mosaic three subs deep therefore handed `n = 12` to a test whose real
+  answer is 3. `_resolve_auto_reject` now takes a `depth`, and `auto_reject_depth` derives it from the same
+  `pointing_groups` gate the QC / photometric / weighting paths already share.
+
+  **Measured, before → after** (2×2 mosaic, 3 subs/panel, one streaked sub, residual against an otherwise
+  identical streak-free stack): `auto_reject` dispatched **κ-σ with `REJFRAC 0.0` — it rejected nothing at
+  all** and left the trail at **1,030 ADU**; it now dispatches min/max and leaves **19 ADU**, identical to
+  the same mosaic with min/max chosen by hand. A **12-sub single field is bit-for-bit unchanged** (κ-σ,
+  residual 4.3 ADU): `auto_reject_depth` returns `None` unless the target genuinely splits into ≥2
+  substantial panels, so no single-field stack, unsolved target or tightly-packed mosaic changes at all.
+
+  **The cost, named rather than hidden.** The method is one global choice for the whole canvas, so a
+  mixed-depth mosaic pays for its thinnest panel: a deep panel stacked with min/max loses κ-σ's multi-outlier
+  reach and its quality weighting. That is second-order (min/max drops exactly two samples per pixel — ~1 % of
+  a 200-sub panel) against a first-order defect, a bright satellite trail baked into the finished picture; and
+  it is the same trade `auto_reject` already makes for every small single-field stack, now applied to the
+  depth that actually exists instead of to a count that describes no pixel. The panel floor is
+  `AUTO_REJECT_PANEL_MIN_FRAMES = MIN_MAX_MIN_FRAMES` (3): a group thinner than that can't be helped by
+  *either* method, so it can't change the answer — and one stray mis-solved sub can't pose as a one-frame
+  panel and demote a deep mosaic.
+
+  **The two surfaces that say so moved with it.** `rejection_reach` (the Stack form's pre-run "can this remove
+  a satellite trail?" line) takes the same `depth`, fed from a new additive `StackEstimate.panel_depth`, so
+  the warning can't reassure a user about a stack that will clip nothing. And `stackhealth`'s
+  `rejection_blind` note — silent on every mosaic until now, because 12 ≥ 11 — reads the run's **peak
+  per-pixel coverage**: when even the best-covered pixel is below the threshold, *no* pixel could have been
+  clipped, so the note is provably right rather than merely likely. It names the honest count too ("no more
+  than 3 subs overlapping at any one spot"), since "with only 12 subs" beside a 12-sub badge reads as nonsense.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no API shape change, no default flipped
+  (`auto_reject` is still off by default; only a run that opted in is affected, and only if it is a mosaic).
+  `depth` is a keyword-only argument defaulting to `None` on both public helpers, and `StackEstimate` gains one
+  optional field — every existing caller keeps its exact behaviour.
+
+  **Tests (+10; 4 of them fail before).** A new `tests/test_auto_reject_mosaic_depth.py` (+8): the depth rule
+  across a dither, an unsolved target, a mixed-depth mosaic and a stray pointing; the picker reading depth
+  rather than count; the pre-run warning; and **two end-to-end stacks through the public `run_stack`** — the
+  trail residual on the shallow mosaic (fails before at 1,030 against a 100 threshold) and the single-field
+  no-regression case. `tests/test_stackhealth.py` (+2) pins the note firing on a shallow mosaic that clears
+  the frame count, and staying silent on a mosaic whose overlaps are genuinely deep.
+
+  **Left open deliberately, for the Scout:** one accumulator serves the whole canvas, so a mosaic with a
+  3-sub panel and a 200-sub panel can only have one method. A *per-pixel* choice — dispatching from the
+  coverage plane rather than from one global verdict — would give each region the right one, but it is a real
+  change to the combine path and wants its own run. Filed under "Image quality".
+
+  The original entry, for the record:
+  ~~**A6 — WALK-AWAY AUTO-REJECT PICKS ITS METHOD FROM THE *WHOLE TARGET'S* FRAME COUNT, so a mosaic panel
   under 11 subs gets a rejection pass that is mathematically blind and trails survive.** *(Confidence: verified
   on synthetic data through the public `run_stack`. Owner impact depends on per-panel depth — see open
   questions.)* `_resolve_auto_reject(options, n)` (`seestack/stack/stacker.py`) is called with
@@ -802,7 +859,7 @@ _(nothing else claimed — claim an item here with your branch name)_
   explicit min/max. *(Distinct from the 2026-09-02 entry about a user-saved `sigma_clip` — this is the auto
   path choosing wrong.)* **Fix:** resolve the method from the **minimum substantial per-panel count**
   (`pointing_groups` already exists) or per-pixel from the coverage plane; extend `stackhealth`'s
-  `rejection_blind` note the same way.
+  `rejection_blind` note the same way.~~
 
 - **🟡 A5 — the Target page's "Your picture" ignores the pinned cover that every other surface honours.**
   `frontend/src/routes/Target.tsx` takes `runs.data?.[0]` (newest run) for the hero, its share caption and its
@@ -20422,6 +20479,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **Let a mosaic choose its rejection method *per pixel*, not once for the whole canvas.** *(Pillar: image
+  quality — PRIORITY 4; size L; opened by the A6 fix, v0.326.7.)* A6 fixed `auto_reject` reading the target's
+  frame count where the honest number is a panel's depth, and it now sizes the method from the **thinnest
+  substantial panel**. That is the right global answer, but it is still *one* answer: on a mosaic carrying a
+  3-sub panel beside a 200-sub panel, the deep panel is stacked with min/max and loses κ-σ's multi-outlier
+  reach and its quality weighting, purely because a thin neighbour exists. The coverage plane already knows
+  each pixel's true sample count (`frame_coverage`), and both accumulators already degrade per-pixel, so the
+  shape is "dispatch from the coverage plane" rather than "pick one and hope". **Why it's L and not M:** it
+  touches the combine hot path and its memory bounds (two accumulators live at once, or one that switches
+  rule per pixel), and the provenance card / `REJMODE` / `stackhealth` all currently assume a single method
+  per run. Wants a measurement first: how often does the owner's real library actually have a mosaic whose
+  panel depths straddle `kappa_min_frames`? If the answer is "rarely", the global choice is good enough and
+  this should be closed rather than built.
+
+- **Re-measure the panel floor against real mosaic data once there is any.** *(Pillar: image quality —
+  PRIORITY 4; size S; opened by the A6 fix.)* `AUTO_REJECT_PANEL_MIN_FRAMES` is 3 because that is the smallest
+  population *either* method can act on, which makes it un-arbitrary — but it also decides when a stray
+  mis-solved sub counts as a panel. It has only ever been exercised on synthetic pointings. When a real
+  mosaic's per-panel counts are to hand (the Scout has pulled the owner's folder listing before), check that
+  the clustering separates his panels the way the synthetic fixture does, and that no panel of his lands on
+  the wrong side of the floor.
 
 - **LEAD (Builder 2026-09-02, the half of A1's last line nobody has done — distinct from the sweep idea below,
   and worth keeping separate) — every constant that was *tuned by eye* through the old contrast curve was
