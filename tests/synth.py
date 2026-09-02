@@ -91,6 +91,7 @@ def write_seestar_fits(
     site_lon: float | None = None,
     focal_len_mm: float | None = None,
     pixel_size_um: float | None = None,
+    instrume: str | None = "auto",
     date_obs: str = "2024-09-12T03:14:55.123",
 ) -> Path:
     """Write a synth FITS file with Seestar-like headers. Requires astropy.
@@ -98,6 +99,11 @@ def write_seestar_fits(
     Pass ``focal_len_mm``/``pixel_size_um`` to add the optics keywords a real
     Seestar light carries (``FOCALLEN``/``XPIXSZ``), from which the plate-solve
     FOV is auto-derived (S30: 150 mm; S50: 250 mm; both 2.9 µm pixels).
+
+    ``instrume`` writes the camera name: ``"auto"`` (the default) derives it from
+    ``focal_len_mm`` so the header can't contradict its own optics, ``None`` omits
+    the card entirely (a frame that doesn't say what took it), any other string is
+    written verbatim.
 
     ``date_obs`` overrides ``DATE-OBS`` — the header field that says *which
     capture* this is, so two files of the same size can be told apart as
@@ -115,7 +121,17 @@ def write_seestar_fits(
     hdu.header["GAIN"] = 80.0
     hdu.header["CCD-TEMP"] = -10.0
     hdu.header["DATE-OBS"] = date_obs
-    hdu.header["INSTRUME"] = "Seestar S50"
+    # Keep INSTRUME consistent with the optics: a fixture that says "Seestar S50"
+    # while carrying an S30's 150 mm focal length is a frame no camera produces,
+    # and anything deriving the model from it would be tested against a
+    # contradiction. Unspecified optics keep the historical S50 default so every
+    # existing fixture is byte-identical.
+    if instrume == "auto":
+        instrume = ("Seestar S30"
+                    if focal_len_mm is not None and abs(focal_len_mm - 150.0) <= 20.0
+                    else "Seestar S50")
+    if instrume is not None:
+        hdu.header["INSTRUME"] = instrume
     if focal_len_mm is not None:
         hdu.header["FOCALLEN"] = focal_len_mm
     if pixel_size_um is not None:

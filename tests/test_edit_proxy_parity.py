@@ -57,7 +57,7 @@ def _synth_osc_field(h: int = 1200, w: int = 1800, n_stars: int = 55,
     ys = rng.integers(rad + 2, h - rad - 2, n_stars)
     xs = rng.integers(rad + 2, w - rad - 2, n_stars)
     amps = 10 ** rng.uniform(-1.4, -0.2, n_stars).astype(np.float32)
-    for y, x, a in zip(ys, xs, amps):
+    for y, x, a in zip(ys, xs, amps, strict=True):
         stars[y - rad:y + rad + 1, x - rad:x + rad + 1] += a * kern
 
     rgb = np.empty((h, w, 3), dtype=np.float32)

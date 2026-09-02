@@ -766,13 +766,58 @@ _(nothing else claimed — claim an item here with your branch name)_
   **even when the recipe contains no geometry op**. **Fix:** carry the source header's celestial cards when no
   enabled `geometry.*` op is present; adjust CRPIX for crop/resize; drop only for rotate.
 
-- **🟡 A4 — every baked caption says "ZWO Seestar S50"; the owner has an S30.** `_SEESTAR_CAMERA = "ZWO Seestar
-  S50"` (`webapp/pipeline.py`) is passed unconditionally by `_nameplate_fields` to the nameplate, keepsake and
-  print renders — so a **wrong fact is printed on every shared and printed picture**. The comment above it
-  cites "AGENTS.md §1" as its authority, but that file **never named a model** until 2026-09-02; the backlog
-  records the owner confirming an S30 on 2026-07-24. The model is derivable per-frame from
-  `FOCALLEN`/`XPIXSZ` (`seestack/io/fits_loader.py`): 150 mm = S30, 250 mm = S50. **Fix:** derive it, or read
-  it from the new Owner Facts block in `AGENTS.md` §1 — do not hard-code either model.
+- **✅ SHIPPED (Builder, v0.326.5, branch `claude/zen-mccarthy-xesefm`) — ~~A4: every baked caption says "ZWO
+  Seestar S50"; the owner has an S30.~~** Derived, in the direction the entry named — and pointedly **not**
+  swapped for a hard-coded S30, which would be the same bug with a different wrong answer for the next owner.
+
+  **Two halves, because the fact had nowhere to come from.** `_nameplate_fields` reads the *stack master's*
+  header, and the master carried no camera card at all — so `_build_output_header_meta`
+  (`seestack/stack/stacker.py`) now stamps **`INSTRUME`**, read from the subs' own headers via a new pure
+  `camera_name_from_header` (`seestack/io/fits_loader.py`, beside the `FOCALLEN`/`XPIXSZ` reader the entry
+  pointed at). It prefers `INSTRUME` — the camera's own statement, and the FITS standard's key for it,
+  normalising a bare `Seestar S30` to the full form captions use — and falls back to the focal length
+  (150 ± 20 mm = S30, 250 ± 20 mm = S50; the window is far too narrow for the two to blur, they are 100 mm
+  apart). A **non-Seestar** `INSTRUME` is returned as written, so a beginner who drops DSLR frames in sees
+  *their* gear named rather than ours.
+
+  **The rule that makes this a fix and not a re-guess: it returns `None` rather than assuming.** A focal
+  length matching neither model is somebody else's telescope, and `_nameplate_camera` then leaves the camera
+  clause out entirely. A caption naming the wrong camera is a false statement printed onto a picture the owner
+  *shares*; a caption naming no camera is merely quieter.
+
+  **What the owner sees.** Any target stacked from v0.326.5 captions his actual model. Every master written
+  **before** it carries neither card, so its captions drop the camera clause until that target is next
+  stacked — deliberate, and better than continuing to print a model the app was only ever assuming. The
+  nameplate already omits an absent field cleanly (no blank clause, no stray separator), pinned by a test.
+
+  **Upgrade-safe (§9):** one additive FITS card, one pure engine function, no config, no schema, no on-disk
+  layout change, no API shape change. The stamp is best-effort like every other provenance card — an
+  unreadable or header-less sub yields no card and never breaks a stack — and it is **bounded**
+  (`_CAMERA_HEADER_MAX_READS = 5`): it reads headers only, stops at the first sub that answers, and cannot
+  turn one card into thousands of reads on a 5,477-sub target.
+
+  **A fixture bug fell out and was fixed:** `tests/synth.py` wrote `INSTRUME = "Seestar S50"`
+  *unconditionally*, including on the S30-shaped frames (`focal_len_mm=150`) that `test_fits_loader` and
+  `test_solve_runner` already used — a frame no camera on earth produces, and exactly the sort of
+  self-contradicting fixture anything deriving a model from it would have been "tested" against. It now
+  follows the optics, and takes an `instrume=None` to write a frame that names nothing.
+
+  **Tests (+12, 8 of which fail before):** `tests/test_fits_loader.py` on the helper (INSTRUME wins over
+  optics; the focal-length fallback; a 200 mm or 530 mm scope gets `None`; a DSLR is named verbatim),
+  `tests/test_output_header_meta.py` on the stamp (S30 and S50 masters, a silent set leaving the card out, a
+  missing file not breaking the rest of the provenance, and the read bound), and a new
+  `tests/webapp/test_nameplate_camera.py` on the caption — including that an S50 owner still gets an S50, and
+  that an unnamed master produces a clean line with no camera and no stray separator.
+
+  *(Original audit entry follows.)*
+
+  ~~**🟡 A4 — every baked caption says "ZWO Seestar S50"; the owner has an S30.**~~ `_SEESTAR_CAMERA = "ZWO Seestar
+    S50"` (`webapp/pipeline.py`) is passed unconditionally by `_nameplate_fields` to the nameplate, keepsake and
+    print renders — so a **wrong fact is printed on every shared and printed picture**. The comment above it
+    cites "AGENTS.md §1" as its authority, but that file **never named a model** until 2026-09-02; the backlog
+    records the owner confirming an S30 on 2026-07-24. The model is derivable per-frame from
+    `FOCALLEN`/`XPIXSZ` (`seestack/io/fits_loader.py`): 150 mm = S30, 250 mm = S50. **Fix:** derive it, or read
+    it from the new Owner Facts block in `AGENTS.md` §1 — do not hard-code either model.
 
 - **🟢 A10 — four caption builders and two duration formats for one picture, chosen by which page you share
   from.** Target/lightbox use `share.ts` `sharePictureText` (`M 42 · 15 Nov 2024`); History feeds it
