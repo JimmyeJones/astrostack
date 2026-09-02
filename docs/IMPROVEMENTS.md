@@ -21493,25 +21493,68 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-09-02) — "Plan my week": which of my targets to point at, on which of the
-  next few nights.** *(Pillar: plan + autonomy — PRIORITY 2–3; size M; additive, offline, no new deps.)* Today
-  the night planner answers three narrow questions and misses the one a weekend imager actually asks. `/tonight`
-  ranks everything *for tonight*; `/best-tonight` ranks your own targets *right now*; `/next-session/{safe}` is
-  *one* target's next windows. **There is no cross-target, multi-night view** — nothing that says *"your best
-  shot this week is M31 on Thursday (4.1 h of dark above your horizon, Moon down); M42 is better Saturday."*
-  A beginner who only gets out on clear weekends wants exactly that: point me at the right thing on the right
-  night. **Shape:** a new read-only `GET /api/plan/week` that runs the existing `next_observing_windows` over
-  each **library** target (the ones already started — this is "finish what I've got", not discovery, which
-  `/suggest` covers) for the next ~7 nights, and returns, per night, the best-placed target and its usable
-  window, plus each target's single best night in the range. All the machinery exists (`next_observing_windows`,
-  the observer resolution, the horizon profile, the registry-signature cache the roll-ups already use) — this is
-  composition, not new astronomy. Sane default: 7 nights, the library's own targets, the user's altitude floor.
-  Plain-language card ("This week: Thu is your best M31 night — 4 h dark, Moon down"). **Cautions:** it iterates
-  windows × targets × nights, so cap the target count and reuse the cache (measure before shipping — the
-  per-target scan is the expensive part, already ~5 ms each); and keep it to *started* targets so it stays "my
-  week", not a catalog dump. Frontend: one new card on Dashboard or a `/plan/week` nested route (fits the §1
-  "add pages, keep it organised" allowance). Grep `webapp/routers/plan.py` first — the per-target pieces are all
-  there to reuse.
+- **✅ SHIPPED (Builder, v0.325.0, branch `claude/zen-mccarthy-tl3guh`) — ~~"Plan my week": which of my targets
+  to point at, on which of the next few nights.~~** Built as filed: `GET /api/plan/week` +
+  `seestack.nightplan.plan_week`, and a **Plan my week** card on the Tonight page, above the two ranking tables
+  because it answers the earlier question — *whether tonight is even the right night*.
+
+  **What shipped.** Per night in the range: the best-placed of your own targets, when to shoot it, how long it
+  is up, and a Moon caution. Underneath, each target's *own* best night ("M 42 — Sunday"), which is the half
+  that actually spreads a week across a library rather than naming the same object seven times. A headline
+  sentence says the whole answer in one line: *"Your best night is Saturday — M 31, 4.1 h above 30°."*
+
+  **Composition, as the entry predicted, plus one extraction it didn't.** The night walk in
+  `next_observing_windows` — the local-noon anchor, the pre-dawn shift, the past-window drop and the
+  partially-past clip — is now `upcoming_dark_windows`, shared by both, so the week card and the per-target
+  card can't drift about which night is which. `plan_week` then runs **one vectorised `_observability_batch`
+  per night over all targets at once**, so the cost scales with *nights*, not with library size (the entry's
+  caution was about the per-target scan; batching removes it rather than working around it). Capped at
+  `WEEK_MAX_TARGETS` = 40, with `n_targets_considered`/`n_targets_with_position` on the payload so the card can
+  say "Looked at 40 of your 57" instead of pretending it saw everything.
+
+  **Four honesty rules, each pinned by a test.** A night where nothing clears the floor reports `best=None` —
+  an explicit "skip it", never a promoted target that barely rises. A full Moon that stays *below the horizon*
+  gets no warning (`moon_up_fraction`, not illumination alone), because sending a beginner indoors on a good
+  night is the expensive error. An empty card says **why** in one line and names the fix (no location →
+  Settings; no positions → plate-solve; no darkness → high summer; nothing high enough → lower the floor)
+  rather than rendering a blank table. And a tie between two equally good nights breaks towards the **sooner**
+  one — go out on the first.
+
+  **Upgrade-safe (§9):** one new read-only endpoint, one new engine function, no config key, no schema, no
+  on-disk change, no default flipped, no existing response shape touched. The card self-hides completely
+  against a backend too old to know the route, so a half-upgraded install shows exactly today's page.
+
+  **Tests: +18.** `tests/test_nightplan.py` (8) — the shared night walk's labels, its mid-night clip and its
+  pre-dawn behaviour; a best-per-night *and* best-per-target run; that the nightly pick is the highest-scoring
+  target rather than the first; the position filter and the cap; the silent-night case; and that the horizon
+  profile really shortens a week. `tests/webapp/test_plan.py` (4) — the endpoint end to end, the no-location
+  self-hide, `nights`/`when` validation, and that `min_alt` narrows what qualifies.
+  `frontend/src/planweek.test.ts` (21) + `PlanWeekCard.test.tsx` (6) — the labelling (including "still Tonight
+  at 00:30"), the headline, every empty-state branch, the de-duplication of the headline's target from the
+  follow-up line, and the Moon rules.
+
+  **Deliberately not done:** a `/plan/week` page of its own (the card sits inside the planner it belongs to,
+  per the standing "put a feature inside the grouping, not one more banner" rule), an .ics export of the week,
+  and any catalog/discovery rows — this is "finish what I've got"; `/suggest` covers the rest.
+
+    *(Original spec follows.)* *(Pillar: plan + autonomy — PRIORITY 2–3; size M; additive, offline, no new deps.)* Today
+    the night planner answers three narrow questions and misses the one a weekend imager actually asks. `/tonight`
+    ranks everything *for tonight*; `/best-tonight` ranks your own targets *right now*; `/next-session/{safe}` is
+    *one* target's next windows. **There is no cross-target, multi-night view** — nothing that says *"your best
+    shot this week is M31 on Thursday (4.1 h of dark above your horizon, Moon down); M42 is better Saturday."*
+    A beginner who only gets out on clear weekends wants exactly that: point me at the right thing on the right
+    night. **Shape:** a new read-only `GET /api/plan/week` that runs the existing `next_observing_windows` over
+    each **library** target (the ones already started — this is "finish what I've got", not discovery, which
+    `/suggest` covers) for the next ~7 nights, and returns, per night, the best-placed target and its usable
+    window, plus each target's single best night in the range. All the machinery exists (`next_observing_windows`,
+    the observer resolution, the horizon profile, the registry-signature cache the roll-ups already use) — this is
+    composition, not new astronomy. Sane default: 7 nights, the library's own targets, the user's altitude floor.
+    Plain-language card ("This week: Thu is your best M31 night — 4 h dark, Moon down"). **Cautions:** it iterates
+    windows × targets × nights, so cap the target count and reuse the cache (measure before shipping — the
+    per-target scan is the expensive part, already ~5 ms each); and keep it to *started* targets so it stays "my
+    week", not a catalog dump. Frontend: one new card on Dashboard or a `/plan/week` nested route (fits the §1
+    "add pages, keep it organised" allowance). Grep `webapp/routers/plan.py` first — the per-target pieces are all
+    there to reuse.
 
 - **✅ SHIPPED (Builder, v0.320.0, branch `claude/wizardly-feynman-pp3yz0`) — ~~"Draw your skyline": a visual
   horizon editor for the Tonight planner, replacing the raw numeric (azimuth, altitude) pair list.~~** Built

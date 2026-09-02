@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type PlannedTarget } from "../api/client";
 import { NearlyThereCard } from "../components/NearlyThereCard";
+import { PlanWeekCard } from "../components/tonight/PlanWeekCard";
 import { QueryError } from "../components/QueryError";
 import { WorthMoreTimeList } from "../components/tonight/WorthMoreTimeList";
 import { formatIntegration } from "../format";
@@ -377,6 +378,13 @@ export function TonightView() {
           sees it, and it sits above the tables because it's the one line that
           turns "what's up?" into "point here". */}
       <NearlyThereCard />
+
+      {/* "Which night should I go out, and what at?" — the cross-target,
+          multi-night view the tables below can't give (they are one night, all
+          targets). Sits above them because it answers the earlier question:
+          *whether tonight is even the right night*. Self-hides on an older
+          backend. */}
+      <PlanWeekCard minAlt={minAlt ? Number(minAlt) : undefined} />
 
       <Paper withBorder p="md">
         <Title order={4} mb="xs">Add more to what you're shooting</Title>
