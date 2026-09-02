@@ -1342,6 +1342,47 @@ def test_plan_week_skips_targets_it_cannot_place_and_reports_the_cap():
     assert np_plan.plan_week(LONDON, [], start_utc=JAN_EVENING).nights == []
 
 
+def test_the_cap_keeps_the_targets_youve_actually_shot_not_the_alphabet():
+    """When the cap bites, it must keep the objects the owner has put nights into.
+
+    Regression: ``Library.list_targets`` returns targets ``ORDER BY name COLLATE
+    NOCASE``, so a plain head slice planned a big library's week around the first
+    forty objects *alphabetically* — silently dropping the project the owner has
+    actually spent the most time on, which is the one "finish what I've got" is
+    meant to be about. Here the deepest target is deliberately last in the
+    incoming (name-ordered) list and the shallow ones would otherwise fill the cap.
+    """
+    shallow = [_lib(f"zz-{i:03d}", f"ZZ {i}", 83.8, -5.4 + i * 0.01, hours=0.25)
+               for i in range(np_plan.WEEK_MAX_TARGETS + 5)]
+    deep = _lib("zzz-flagship", "ZZZ Flagship", 83.82, -5.39, hours=40.0)
+    plan = np_plan.plan_week(LONDON, [*shallow, deep], start_utc=JAN_EVENING, nights=2)
+
+    assert plan.n_targets_considered == np_plan.WEEK_MAX_TARGETS
+    planned = {b.safe for b in plan.targets}
+    assert "zzz-flagship" in planned
+    # …and it really was last in the order the library hands over.
+    assert [t.safe for t in [*shallow, deep]][-1] == "zzz-flagship"
+
+
+def test_under_the_cap_every_target_is_planned_whatever_its_depth():
+    """The ordering only decides *which* targets a trimmed library keeps. Under the
+    cap the whole library is planned either way, and the returned lists are ordered
+    by placement, so an ordinary install's answer is unchanged."""
+    targets = [
+        _lib("a-deep", "A Deep", 83.82, -5.39, hours=30.0),
+        _lib("b-thin", "B Thin", 83.9, -5.2, hours=0.1),
+        _lib("c-none", "C None", 84.0, -5.0, hours=0.0),
+    ]
+    forward = np_plan.plan_week(LONDON, targets, start_utc=JAN_EVENING, nights=2)
+    reversed_ = np_plan.plan_week(LONDON, list(reversed(targets)),
+                                  start_utc=JAN_EVENING, nights=2)
+    assert {b.safe for b in forward.targets} == {"a-deep", "b-thin", "c-none"}
+    # Same answer whichever order the library happened to hand them over in.
+    assert [b.safe for b in forward.targets] == [b.safe for b in reversed_.targets]
+    assert [n.best.safe if n.best else None for n in forward.nights] == \
+           [n.best.safe if n.best else None for n in reversed_.nights]
+
+
 def test_plan_week_is_silent_on_a_night_nothing_clears_the_floor():
     """A night with no usable target reports ``best=None`` rather than promoting
     something that never rises — an honest "skip it"."""
