@@ -2047,7 +2047,9 @@ export function EditorView() {
                           ? Math.round(curve.data.target_bg * 100) : null;
                         return (
                           <Tooltip
-                            label="Set a gentle starting curve from this image's histogram — lifts the midtones toward a pleasant grey, keeping the sky and star cores anchored"
+                            label={greyPct != null
+                              ? "Set a gentle starting curve from this image's histogram — lifts the midtones toward a pleasant grey, keeping the sky and star cores anchored"
+                              : "Set a gentle starting curve from this image's histogram. There's nothing above the background's noise to lift here, so it adds contrast to the brighter tones only and leaves your sky exactly where it is"}
                             multiline w={240} withArrow>
                             <Button size="compact-xs" variant="light" color="blue"
                               disabled={applied}

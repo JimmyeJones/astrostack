@@ -12,8 +12,12 @@ solver is slow and rate-limited. ASTAP solves a Seestar frame in roughly a secon
 This module is a thin wrapper that:
 
 1. Locates the ``astap.exe`` binary (PATH, common install dirs, or user-set).
-2. Runs the solver on a FITS file with sensible defaults for Seestar (~1° FOV).
-3. Parses the resulting ``.wcs`` sidecar into an astropy WCS object.
+2. Runs the solver on a **scratch copy** of a FITS file with sensible defaults for
+   Seestar (~1° FOV) — never on the source. ASTAP writes its sidecars beside
+   whatever ``-f`` names, and with ``copy_to_cache`` off that is the owner's raw
+   sub in ``incoming/``, which the app may only read (``AGENTS.md`` §10).
+3. Reads the resulting ``.wcs``/``.ini`` sidecars before the scratch directory is
+   removed, returning their content on the :class:`ASTAPResult`.
 
 Parallel running and progress reporting live in ``solve.runner``.
 """
@@ -24,6 +28,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,6 +44,11 @@ class ASTAPResult:
     """Outcome of a single solve."""
 
     fits_path: Path
+    #: Where the ``.wcs`` sidecar lives, for a caller that solved a file it owns
+    #: and wants to read the sidecar itself. :meth:`ASTAPSolver.solve` no longer
+    #: sets it: it runs ASTAP inside a scratch directory that is gone by the time
+    #: it returns (see :meth:`ASTAPSolver._solve_once`), and hands back the
+    #: sidecar's *content* in :attr:`wcs_sidecar_raw` instead.
     wcs_sidecar_path: Path | None
     ra_center_deg: float | None
     dec_center_deg: float | None
@@ -46,6 +56,10 @@ class ASTAPResult:
     rotation_deg: float | None
     solved: bool
     log_tail: str = ""
+    #: Raw text of the ``.wcs`` sidecar ASTAP wrote, read before its scratch
+    #: directory was removed. ``None`` when the solve failed, or when the result
+    #: was built around an on-disk sidecar path instead.
+    wcs_sidecar_raw: str | None = None
 
 
 # Common ASTAP install locations on Windows.
@@ -261,7 +275,20 @@ class ASTAPSolver:
         dec_hint_deg: float | None = None,
         radius_deg: float | None = None,
     ) -> ASTAPResult:
-        """One ASTAP invocation with a specific detection configuration."""
+        """One ASTAP invocation with a specific detection configuration.
+
+        **ASTAP is never pointed at the source file.** It writes its ``.wcs`` and
+        ``.ini`` sidecars beside whatever ``-f`` names, and with the webapp default
+        ``copy_to_cache = False`` that path *is* the owner's raw sub in
+        ``incoming/`` — a folder the app may only read from and create new files
+        in (``AGENTS.md`` §10; the owner's subs exist there and nowhere else).
+        Solving there created two files per sub and rewrote them on every re-solve.
+        So each invocation copies the frame into a scratch directory, runs there,
+        reads what it needs, and lets the scratch directory take the sidecars with
+        it. The copy costs a few milliseconds against a solve measured in seconds,
+        and — unlike a symlink or a hardlink, which would still lead any write back
+        to the original — it cannot touch the source whatever ASTAP does.
+        """
         # ASTAP CLI flags:
         #   -f <file>       FITS file to solve
         #   -fov <deg>      approximate FOV
@@ -273,9 +300,34 @@ class ASTAPSolver:
         #   -wcs            write a .wcs sidecar
         #   -update         also update FITS header (we DON'T want this — keep raws untouched)
         radius = radius_deg if radius_deg is not None else self.search_radius_deg
+        with tempfile.TemporaryDirectory(prefix="astrostack-solve-") as td:
+            # Same *name* as the source: ASTAP derives the sidecar names from the
+            # file it is given, and the log tail reads better when it names the
+            # frame the user recognises.
+            scratch = Path(td) / fits_path.name
+            shutil.copy2(fits_path, scratch)
+            return self._run_astap(
+                fits_path, scratch, radius=radius, downsample=downsample,
+                max_stars=max_stars, ra_hint_deg=ra_hint_deg, dec_hint_deg=dec_hint_deg,
+            )
+
+    def _run_astap(
+        self,
+        fits_path: Path,
+        scratch: Path,
+        *,
+        radius: float,
+        downsample: int | None,
+        max_stars: int | None,
+        ra_hint_deg: float | None,
+        dec_hint_deg: float | None,
+    ) -> ASTAPResult:
+        """Invoke ASTAP on ``scratch`` (a copy) and read its sidecars before the
+        caller's scratch directory goes away. ``fits_path`` is the *source*, used
+        only for the returned result and for readable log/error text."""
         cmd = [
             str(self.astap_path),
-            "-f", str(fits_path),
+            "-f", str(scratch),
             "-fov", f"{self.fov_deg}",
             "-r", f"{radius}",
             "-wcs",
@@ -305,13 +357,22 @@ class ASTAPSolver:
         except subprocess.TimeoutExpired as exc:
             raise ASTAPError(f"ASTAP timed out after {self.timeout_s}s on {fits_path}") from exc
 
-        log_tail = (proc.stdout + proc.stderr)[-2000:]
-        wcs_sidecar = fits_path.with_suffix(".wcs")
-        ini_sidecar = fits_path.with_suffix(".ini")
+        # ASTAP names its messages after the path we handed it; put the source
+        # path back so a failure a user reads names their frame, not a scratch dir.
+        log_tail = (proc.stdout + proc.stderr).replace(str(scratch), str(fits_path))[-2000:]
+        wcs_sidecar = scratch.with_suffix(".wcs")
+        ini_sidecar = scratch.with_suffix(".ini")
         solved = proc.returncode == 0 and wcs_sidecar.exists()
 
         ra = dec = pix = rot = None
+        wcs_raw = None
         if solved:
+            # Read both sidecars *now*: the scratch directory takes them with it
+            # the moment this returns, which is the whole point.
+            try:
+                wcs_raw = wcs_sidecar.read_text(encoding="ascii", errors="replace")
+            except OSError as exc:
+                log.warning("could not read astap wcs sidecar for %s: %s", fits_path, exc)
             try:
                 ra, dec, pix, rot = _parse_astap_ini(ini_sidecar)
             except Exception as exc:  # noqa: BLE001 — ini format varies
@@ -319,7 +380,8 @@ class ASTAPSolver:
 
         return ASTAPResult(
             fits_path=fits_path,
-            wcs_sidecar_path=wcs_sidecar if solved else None,
+            wcs_sidecar_path=None,
+            wcs_sidecar_raw=wcs_raw,
             ra_center_deg=ra,
             dec_center_deg=dec,
             pixscale_arcsec=pix,

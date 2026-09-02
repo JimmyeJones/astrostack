@@ -128,20 +128,36 @@ def wcs_text_is_usable(text: str | None) -> bool:
     return wcs_center_deg_from_text(text) is not None
 
 
+def wcs_text_from_raw(raw: str | None) -> str | None:
+    """Normalise the raw contents of an ASTAP ``.wcs`` sidecar into header text.
+
+    Split out from :func:`wcs_text_from_sidecar` so a caller that already holds
+    the bytes can normalise them the same way — :meth:`ASTAPSolver.solve` reads
+    its sidecars inside the scratch directory it solved in and hands back their
+    content, because writing them next to the source would mean writing into the
+    owner's read-only ``incoming/`` tree (``AGENTS.md`` §10).
+    """
+    if not raw:
+        return None
+    from astropy.io.fits import Header
+
+    try:
+        # The header is padded to multiples of 2880 bytes by FITS convention,
+        # but astropy's ``Header.fromstring`` handles that gracefully.
+        return str(Header.fromstring(raw))
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def wcs_text_from_sidecar(wcs_path: str | Path) -> str | None:
     """Read an ASTAP ``.wcs`` sidecar file and return its FITS header as text."""
     wcs_path = Path(wcs_path)
     if not wcs_path.exists():
         return None
-    from astropy.io.fits import Header
-
     try:
         # ASTAP writes a tiny FITS header file (no data block).
         with open(wcs_path, "rb") as f:
-            raw = f.read().decode("ascii", errors="replace")
-        # The header is padded to multiples of 2880 bytes by FITS convention,
-        # but astropy's ``Header.fromstring`` handles that gracefully.
-        return str(Header.fromstring(raw))
+            return wcs_text_from_raw(f.read().decode("ascii", errors="replace"))
     except Exception:  # noqa: BLE001
         return None
 
