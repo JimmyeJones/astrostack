@@ -1,10 +1,11 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
-import { MyMap, initialSkyMode, myMapFilename, skyFootprintLine } from "./Sky";
+import { MyMap, SkyView, initialSkyMode, myMapFilename, myMapSaveOffered, skyFootprintLine } from "./Sky";
 import { MantineProvider } from "@mantine/core";
 import { api } from "../api/client";
 import * as client from "../api/client";
+import { MemoryRouter } from "react-router-dom";
 import { formatStampDate } from "../format";
 
 /** MyMap asks the server how much sky its pictures cover, so it needs a query
@@ -145,5 +146,83 @@ describe("initialSkyMode", () => {
     expect(initialSkyMode("universe", "mine")).toBe("mine");
     expect(initialSkyMode("", null)).toBe("online");
     expect(initialSkyMode(null, "nonsense")).toBe("online");
+  });
+});
+
+describe("myMapSaveOffered", () => {
+  it("offers the save when the owner has pictures on the map", () => {
+    expect(myMapSaveOffered([{}], false)).toBe(true);
+    expect(myMapSaveOffered([{}, {}, {}], false)).toBe(true);
+  });
+
+  it("withholds it on a fresh install, where the map is a bare grid", () => {
+    expect(myMapSaveOffered([], false)).toBe(false);
+  });
+
+  it("treats a failed query as unknown, not as empty", () => {
+    // A dead click costs one click; hiding a working feature costs the feature.
+    expect(myMapSaveOffered(undefined, true)).toBe(true);
+    expect(myMapSaveOffered([], true)).toBe(true);
+  });
+
+  it("waits rather than guessing while the answer is still in flight", () => {
+    expect(myMapSaveOffered(undefined, false)).toBe(false);
+    expect(myMapSaveOffered(null, false)).toBe(false);
+  });
+});
+
+describe("MyMap — nothing to save yet", () => {
+  it("drops the save button when the map has no pictures on it", () => {
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        })}>
+          <MyMap savable={false} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    // The map itself still renders — it is the page's whole stage.
+    expect(screen.getByRole("img")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /save this map/i })).toBeNull();
+  });
+});
+
+describe("SkyView — the save button is gated on the map's own pictures", () => {
+  function renderSky() {
+    localStorage.setItem("astrostack.skyMode", "mine");
+    return render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        })}>
+          <MemoryRouter initialEntries={["/sky"]}>
+            <SkyView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+  }
+
+  it("offers no save on a fresh install, beside its own empty state", async () => {
+    vi.spyOn(client.api, "getSky").mockResolvedValue({ stars: [], images: [] });
+    renderSky();
+    expect(await screen.findByText(/No stacked images yet/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /save this map/i })).toBeNull();
+  });
+
+  it("offers it as soon as one picture is on the map", async () => {
+    vi.spyOn(client.api, "getSky").mockResolvedValue({
+      stars: [],
+      images: [{
+        safe_name: "M_42", name: "M42", ra_deg: 83.8, dec_deg: -5.4,
+        width_deg: 1.3, height_deg: 0.7, rotation_deg: 0,
+        preview_url: "/api/targets/M_42/stack-runs/1/preview",
+        timestamp_utc: "2026-01-01T00:00:00", run_id: 1,
+      }] as never,
+    });
+    renderSky();
+    expect(await screen.findByRole("link", { name: /save this map/i }))
+      .toBeInTheDocument();
   });
 });

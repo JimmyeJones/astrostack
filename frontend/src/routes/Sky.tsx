@@ -247,7 +247,31 @@ function OfflineSky({ stars, images, onSelect }: {
  * picture on purpose — "rough", in the owner's words — so this is just an <img>
  * that fills the stage; the interactive views above are what you pan and zoom.
  */
-export function MyMap() {
+/**
+ * Is there anything on "My map" to save?
+ *
+ * The map draws one picture per target that has a plate-solved position and a
+ * finished preview on disk (`_my_map_pictures`, webapp/routers/sky.py) — which
+ * is a **subset** of what `GET /api/sky` returns as `images` (same three
+ * conditions, and the map additionally skips a preview it can't line up with
+ * its canvas). So an empty `images` list proves an empty map, while the map's
+ * own picture count does not: a run with no stored WCS is drawn at a nominal
+ * field size and would still be missed by a coverage-based gate, which counts
+ * only the runs it could measure off their own WCS.
+ *
+ * `failed` keeps the button when the query errored: an unknown answer is not an
+ * empty one, and a graceful dead click costs far less than hiding a working
+ * feature. A *pending* query resolves in a moment, so it simply waits.
+ */
+export function myMapSaveOffered(
+  images: readonly unknown[] | undefined | null, failed: boolean,
+): boolean {
+  if (failed) return true;
+  if (!images) return false;
+  return images.length > 0;
+}
+
+export function MyMap({ savable = true }: { savable?: boolean } = {}) {
   // "How much of the sky is that?" — the question the map itself can't answer,
   // because it's an Aitoff projection drawing every picture larger than life.
   // Measured server-side off each run's own WCS instead, so the stat can't
@@ -281,16 +305,21 @@ export function MyMap() {
           *invites* it and neither gives the file a name worth keeping — this is
           the same bytes the <img> is already showing, under a name that says
           what it is and when it was true. */}
-      <Button
-        size="compact-xs" variant="light"
-        leftSection={<IconDownload size={14} />}
-        component="a"
-        href={api.myMapUrl()}
-        download={myMapFilename()}
-        style={{ position: "absolute", top: 12, right: 12 }}
-      >
-        Save this map
-      </Button>
+      {/* …but only when there is a map to save. On a fresh install this stage is
+          a bare grid — the page's own "No stacked images yet" alert says so —
+          and offering to save it hands the beginner a dated file of nothing. */}
+      {savable ? (
+        <Button
+          size="compact-xs" variant="light"
+          leftSection={<IconDownload size={14} />}
+          component="a"
+          href={api.myMapUrl()}
+          download={myMapFilename()}
+          style={{ position: "absolute", top: 12, right: 12 }}
+        >
+          Save this map
+        </Button>
+      ) : null}
       {coverageLine ? (
         <Text
           size="xs" c="dimmed" ta="center"
@@ -364,7 +393,7 @@ export function SkyView() {
   return (
     <div style={{ position: "relative", height: "calc(100dvh - 110px)", minHeight: 420 }}>
       {mode === "mine" ? (
-        <MyMap />
+        <MyMap savable={myMapSaveOffered(sky.data?.images, sky.isError)} />
       ) : mode === "online" ? (
         <AladinSky images={sky.data?.images ?? []} />
       ) : sky.data ? (
