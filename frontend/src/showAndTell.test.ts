@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { BestPicture, VideoStill } from "./api/client";
 import { formatStampDate } from "./format";
 import {
-  buildSlides, deepSkyFact, deepSkyMeta, nextIndex, runSlideKey, showFromHref,
-  startIndexFor, videoSlideKey,
+  buildSlides, deepSkyFact, deepSkyMeta, hasAnythingToShow, nextIndex, runSlideKey,
+  showFromHref, startIndexFor, videoSlideKey,
 } from "./showAndTell";
 
 function pic(over: Partial<BestPicture>): BestPicture {
@@ -133,6 +133,31 @@ describe("buildSlides", () => {
   it("handles a library with nothing in it, and an older backend's missing videos", () => {
     expect(buildSlides(undefined, undefined)).toEqual([]);
     expect(buildSlides([], undefined)).toEqual([]);
+  });
+});
+
+describe("hasAnythingToShow", () => {
+  it("says no on a genuinely empty library, and on an older backend's missing videos", () => {
+    expect(hasAnythingToShow([], [])).toBe(false);
+    expect(hasAnythingToShow(undefined, undefined)).toBe(false);
+    expect(hasAnythingToShow([], undefined)).toBe(false);
+  });
+
+  it("says yes for a wall with a picture on it", () => {
+    expect(hasAnythingToShow([pic({})], [])).toBe(true);
+  });
+
+  it("says yes for a Moon still on an EMPTY wall — the case `items.length` gets wrong", () => {
+    // "My best pictures" self-hides below its minimum, so this beginner's wall is
+    // empty while their show is not. Gating a Play button on the wall alone would
+    // hide a working slideshow from exactly them.
+    expect(hasAnythingToShow([], [still({})])).toBe(true);
+  });
+
+  it("agrees with the show itself about a wall whose previews are all missing", () => {
+    const best = [pic({ preview_url: "" })];
+    expect(buildSlides(best, [])).toEqual([]);
+    expect(hasAnythingToShow(best, [])).toBe(false);
   });
 });
 

@@ -132,6 +132,25 @@ export function buildSlides(
   return slides;
 }
 
+/** Would the show actually have anything to play?
+ *
+ * The honest gate for a "Play slideshow" entry point. The tempting one — "does
+ * the best-pictures wall have anything on it?" — is wrong in the direction that
+ * hurts most: the show also draws the finished **Moon and Sun stills**, so a
+ * beginner whose first picture was a lunar video has a perfectly good show and
+ * an empty wall. Gating on the wall would hide the slideshow from exactly them.
+ *
+ * Defined *as* `buildSlides` rather than as a second opinion about it, so the
+ * button and the show can never disagree — including about the `preview_url`
+ * skip, which is why a wall of pictures whose previews are all missing counts
+ * as nothing to show. */
+export function hasAnythingToShow(
+  best: BestPicture[] | undefined,
+  videos: VideoStill[] | undefined,
+): boolean {
+  return buildSlides(best, videos).length > 0;
+}
+
 /** The slide key for a finished stack / a Moon-or-Sun still. The show's own
  *  `buildSlides` mints these, and "start the show here" links quote them back —
  *  so both live here rather than being spelled out at each call site, where a

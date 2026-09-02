@@ -17014,9 +17014,24 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via `scripts/agent-dogfood.sh`) — "My best
-  pictures" offers **Play slideshow** on a wall that is empty, and the obvious gate is the wrong one.**
-  *(Pillar: friendliness — PRIORITY 3; size XS; **read the trap before writing the one-line fix**.)* On a fresh
+- **✅ SHIPPED (Builder, v0.322.9, branch `claude/zen-mccarthy-tzxfsc`) — ~~"My best pictures" offers **Play
+  slideshow** on a wall that is empty, and the obvious gate is the wrong one.~~** Fixed with the honest gate
+  the entry named, not the tempting one.
+
+  `showAndTell.ts` gained **`hasAnythingToShow(best, videos)`**, defined *as* `buildSlides(...).length > 0`
+  rather than as a second opinion about it — so the button and the show cannot disagree, including about the
+  `preview_url` skip (a wall whose previews are all missing is correctly "nothing to show", which a count of
+  items would get wrong in the other direction). `BestPictures.tsx` now runs the `gallery` query too, under
+  the **same `["gallery"]` key** the Gallery route and the show itself use, so on any realistic navigation it
+  is a cache hit rather than a second request. While it is in flight a non-empty wall already answers yes, so
+  the button doesn't flicker in for the common case.
+
+  **The trap is pinned, twice.** `showAndTell.test.ts` asserts `hasAnythingToShow([], [moonStill])` is
+  **true**, and `BestPictures.test.tsx` asserts the button renders on an **empty wall** whose library holds
+  one Moon still — the exact beginner an `items.length` gate would have locked out. Plus the two ordinary
+  cases (nothing at all → hidden; one ranked picture → shown) and the agrees-with-`buildSlides` case.
+
+  *(original spec, kept for provenance)* On a fresh
   install the page reads *"Once you've finished stacking a couple of targets, your best pictures will gather
   here automatically"* — the wall self-hides below `BEST_PICTURES_MIN` — and directly above that sentence sits
   a primary-looking **Play slideshow** button. `routes/BestPictures.tsx:100` renders it unconditionally, while

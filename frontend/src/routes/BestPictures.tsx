@@ -13,7 +13,7 @@ import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
 import { bestPictureReason, pinnedNote } from "../components/bestPictures";
-import { runSlideKey, showFromHref } from "../showAndTell";
+import { hasAnythingToShow, runSlideKey, showFromHref } from "../showAndTell";
 
 function BestCard({ pic, rank, onView }: {
   pic: BestPicture;
@@ -73,6 +73,11 @@ function BestCard({ pic, rank, onView }: {
 
 export function BestPicturesView() {
   const best = useQuery({ queryKey: ["galleryBest"], queryFn: () => api.getGalleryBest() });
+  // The slideshow is not built from this wall alone — it also draws the finished
+  // Moon/Sun stills — so "is there a show?" can only be answered with both, and
+  // this page has to ask for the second half. Same query key as the Gallery and
+  // the show itself, so it is usually already cached rather than a fresh request.
+  const gallery = useQuery({ queryKey: ["gallery"], queryFn: api.getGallery });
   const [viewing, setViewing] = useState<BestPicture | null>(null);
 
   if (best.isError && !best.data) {
@@ -83,6 +88,7 @@ export function BestPicturesView() {
   }
 
   const items = best.data?.items ?? [];
+  const canPlayShow = hasAnythingToShow(items, gallery.data?.videos);
 
   return (
     <Stack>
@@ -96,13 +102,21 @@ export function BestPicturesView() {
         ) : null}
         {/* The entry point to the slideshow. It lives here rather than as a
             sixteenth sidebar link: this is the page you're already on when you
-            want to show someone your pictures. */}
-        <Button
-          component={Link} to="/show" size="xs" variant="light" ml="auto"
-          leftSection={<IconPlayerPlay size={14} />}
-        >
-          Play slideshow
-        </Button>
+            want to show someone your pictures.
+
+            Hidden when there is nothing to play, so a fresh install's only call
+            to action doesn't lead to a "Nothing to show yet" screen. The gate is
+            deliberately *not* `items.length` — the show also draws Moon/Sun
+            stills, so someone whose first picture was a lunar video still gets
+            the button on an empty wall (see `hasAnythingToShow`). */}
+        {canPlayShow ? (
+          <Button
+            component={Link} to="/show" size="xs" variant="light" ml="auto"
+            leftSection={<IconPlayerPlay size={14} />}
+          >
+            Play slideshow
+          </Button>
+        ) : null}
       </Group>
 
       {items.length === 0 ? (
