@@ -13,7 +13,7 @@ import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
 import { bestPictureReason, pinnedNote } from "../components/bestPictures";
-import { runSlideKey, showFromHref } from "../showAndTell";
+import { hasAnythingToShow, runSlideKey, showFromHref } from "../showAndTell";
 
 function BestCard({ pic, rank, onView }: {
   pic: BestPicture;
@@ -73,6 +73,11 @@ function BestCard({ pic, rank, onView }: {
 
 export function BestPicturesView() {
   const best = useQuery({ queryKey: ["galleryBest"], queryFn: () => api.getGalleryBest() });
+  // The show also plays Moon/Sun stills, which are not on this wall — so whether
+  // the button leads anywhere needs the same two sources the show itself reads.
+  // Same query key as `ShowAndTellView`, so this shares one cached response
+  // rather than adding a request per page.
+  const gallery = useQuery({ queryKey: ["gallery"], queryFn: api.getGallery });
   const [viewing, setViewing] = useState<BestPicture | null>(null);
 
   if (best.isError && !best.data) {
@@ -96,13 +101,18 @@ export function BestPicturesView() {
         ) : null}
         {/* The entry point to the slideshow. It lives here rather than as a
             sixteenth sidebar link: this is the page you're already on when you
-            want to show someone your pictures. */}
-        <Button
-          component={Link} to="/show" size="xs" variant="light" ml="auto"
-          leftSection={<IconPlayerPlay size={14} />}
-        >
-          Play slideshow
-        </Button>
+            want to show someone your pictures. Withheld only while the show
+            genuinely has nothing to play — which is *not* the same as this wall
+            being empty (see `hasAnythingToShow`), so a first-timer whose only
+            picture is a Moon still still gets the button. */}
+        {hasAnythingToShow(best.data?.items, gallery.data?.videos) ? (
+          <Button
+            component={Link} to="/show" size="xs" variant="light" ml="auto"
+            leftSection={<IconPlayerPlay size={14} />}
+          >
+            Play slideshow
+          </Button>
+        ) : null}
       </Group>
 
       {items.length === 0 ? (

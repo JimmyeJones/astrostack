@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { BestPicture, VideoStill } from "./api/client";
 import { formatStampDate } from "./format";
 import {
-  buildSlides, deepSkyFact, deepSkyMeta, nextIndex, runSlideKey, showFromHref,
+  buildSlides, deepSkyFact, deepSkyMeta, hasAnythingToShow, nextIndex, runSlideKey,
+  showFromHref,
   startIndexFor, videoSlideKey,
 } from "./showAndTell";
 
@@ -133,6 +134,29 @@ describe("buildSlides", () => {
   it("handles a library with nothing in it, and an older backend's missing videos", () => {
     expect(buildSlides(undefined, undefined)).toEqual([]);
     expect(buildSlides([], undefined)).toEqual([]);
+  });
+});
+
+describe("hasAnythingToShow", () => {
+  it("is false only when the show would genuinely play nothing", () => {
+    expect(hasAnythingToShow(undefined, undefined)).toBe(false);
+    expect(hasAnythingToShow([], [])).toBe(false);
+    expect(hasAnythingToShow([], undefined)).toBe(false);
+  });
+
+  it("is true on a Moon still alone — an empty wall is not an empty show", () => {
+    expect(hasAnythingToShow([], [still({ capture_id: "c1", kind: "lunar" })])).toBe(true);
+  });
+
+  it("is true on a ranked picture alone", () => {
+    expect(hasAnythingToShow([pic({ safe: "m31", run_id: 1 })], [])).toBe(true);
+  });
+
+  it("agrees with the show itself about a picture it would skip", () => {
+    // A preview-less picture is dropped by `buildSlides`, so it must not make the
+    // button promise a slide the show won't render.
+    expect(hasAnythingToShow([pic({ preview_url: "" })], [still({ preview_url: "" })]))
+      .toBe(false);
   });
 });
 

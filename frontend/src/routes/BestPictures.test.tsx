@@ -88,6 +88,37 @@ describe("BestPicturesView", () => {
     expect(screen.getByText(/Set as cover/)).toBeInTheDocument();
   });
 
+  it("withholds Play slideshow on a fresh install, where it would go nowhere", async () => {
+    // The wall self-hides below its minimum, so a first-time visitor met a page
+    // whose only call to action led to "Nothing to show yet".
+    vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({ items: [] });
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [], videos: [] });
+    renderWall();
+    await waitFor(() =>
+      expect(screen.getByText(/your best pictures will gather here/i)).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /Play slideshow/ })).not.toBeInTheDocument();
+  });
+
+  it("still offers the slideshow to someone whose only picture is a Moon still", async () => {
+    // The case a naive `items.length > 0` gate breaks: the show plays Moon/Sun
+    // stills too, so an empty *wall* is not an empty show.
+    vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({ items: [] });
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [],
+      videos: [{
+        capture_id: "c1", label: "Moon", kind: "lunar",
+        created_utc: "2026-05-02T00:00:00Z", width: 640, height: 480,
+        n_stacked: 300, source_name: "moon.avi",
+        preview_url: "/api/videos/c1/preview",
+      }],
+    });
+    renderWall();
+    await waitFor(() =>
+      expect(screen.getByText(/your best pictures will gather here/i)).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /Play slideshow/ }))
+      .toHaveAttribute("href", "/show");
+  });
+
   it("shows no pin badge on an ordinary auto-ranked wall", async () => {
     vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
       items: [pic({ safe: "m31", run_id: 1 }), pic({ safe: "m42", target_name: "M42", run_id: 2 })],
