@@ -621,6 +621,37 @@ describe("HistoryView", () => {
     );
   });
 
+  it("names an unidentified target the way the user does, not the way the URL does", async () => {
+    // The same leak the share sheet had, one line further down: when the catalog
+    // can't identify the object, the caption falls back to a name — and that
+    // fallback was `safe`, the URL slug. A beginner shooting something the
+    // catalog doesn't know copied "M 42 dim — …" as "M_42_dim — …" and pasted
+    // the app's own underscore under their photo. (The test above keeps its
+    // slug: there, no target has loaded, so the slug is genuinely all there is.)
+    vi.spyOn(client.api, "getTarget").mockResolvedValue({
+      safe_name: "M_42", name: "M 42 dim",
+      ra_deg: null, dec_deg: null, n_frames: 12, n_frames_accepted: 12,
+      total_exposure_s: 300, last_activity_utc: null, has_preview: true,
+      notes: null, tags: [],
+    } as client.Target);
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, has_fits: false, n_frames_used: 12,
+        total_exposure_s: 5 * 60 }),
+    ]);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    fireEvent.click(await menuItem("Copy caption"));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const caption = writeText.mock.calls[0][0] as string;
+    expect(caption).toContain("M 42 dim — a stack of 12 subs");
+    expect(caption).not.toContain("M_42");
+  });
+
   it("pins a run as the target's cover from a preview run", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
     const setCover = vi.spyOn(client.api, "setTargetCover")

@@ -1184,8 +1184,11 @@ export function TargetView() {
           {/* Visible plain-language explainer beside the "not located yet" count —
               "located"/"plate-solve" is jargon a first-light owner can misread as
               an error, and the breakdown that explains it is otherwise only found
-              by hovering the badge. Shown only when there are unsolved subs. */}
-          {unsolvedCount > 0 ? <UnsolvedHelp /> : null}
+              by hovering the badge. Shown only when there are unsolved subs, and
+              handed the same setup verdict the blocking banner above is built
+              from: without it the explainer calls these subs "usually harmless"
+              on the one screen where they are the thing blocking the target. */}
+          {unsolvedCount > 0 ? <UnsolvedHelp setup={solveSetup} /> : null}
           {lastReject ? (
             <Button
               size="compact-xs"
