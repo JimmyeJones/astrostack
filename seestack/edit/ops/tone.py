@@ -235,13 +235,34 @@ def _scnr(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
 
 def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
-    from seestack.post.color_cal import ColorCalibrationOptions, calibrate_color
+    from seestack.post.color_cal import (
+        DEFAULT_APERTURE_RADIUS_PX,
+        DEFAULT_DETECT_FWHM_PX,
+        MIN_APERTURE_RADIUS_PX,
+        MIN_DETECT_FWHM_PX,
+        MODE_GAIA,
+        MODE_GRAY_STAR,
+        ColorCalibrationOptions,
+        calibrate_color,
+    )
 
     mode = str(params.get("mode", "gray_star"))
     # gaia needs a WCS + network; on the decimated preview proxy fall back to gray_star.
     if mode == "gaia" and (ctx.is_proxy or ctx.wcs is None):
         mode = "gray_star"
-    opts = ColorCalibrationOptions(enabled=True, mode=mode)
+    # The star-detection geometry is in *full-resolution* pixels; on the decimated
+    # preview proxy a 3 px star spans 3/proxy_scale px, so shrink both the finder's
+    # FWHM and the photometry aperture by the same factor. Unscaled, the proxy hunted
+    # for stars several times wider than any it contained, found too few, and fell
+    # back to a *different white balance* than the export — a preview that lies about
+    # the picture's colour, worst on the big mosaic canvases that decimate the most.
+    # On the export (proxy_scale == 1) ``scaled_px`` is the identity, so nothing moves.
+    opts = ColorCalibrationOptions(
+        enabled=True, mode=mode,
+        detect_fwhm_px=max(MIN_DETECT_FWHM_PX, ctx.scaled_px(DEFAULT_DETECT_FWHM_PX)),
+        aperture_radius_px=max(MIN_APERTURE_RADIUS_PX,
+                               ctx.scaled_px(DEFAULT_APERTURE_RADIUS_PX)),
+    )
     calibrated, result = calibrate_color(rgb, ctx.wcs, opts)
     # Record which white-balance path actually ran (star-based, background-neutral
     # fallback, or gave up) so a caller can tell the user whether their image was
@@ -250,6 +271,18 @@ def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndar
         "mode_used": result.mode_used,
         "n_stars_used": int(result.n_stars_used),
         "notes": result.notes,
+        # Scaling the geometry closes most of the gap, but a heavily-decimated proxy
+        # can still hold too few resolvable stars for a star-based solve the export
+        # will manage. When that happens the preview's colour genuinely is not the
+        # export's, so say so (the editor captions it) instead of diverging silently.
+        # ``proxy_scale > 1`` is the real condition, not ``is_proxy``: a small stack's
+        # "proxy" is the full pixels undecimated, so a fallback there is the export's
+        # own answer and there is nothing to warn about.
+        "proxy_fallback": bool(
+            ctx.is_proxy and ctx.proxy_scale > 1.0
+            and mode in (MODE_GRAY_STAR, MODE_GAIA)
+            and result.mode_used not in (MODE_GRAY_STAR, MODE_GAIA)
+        ),
     }
     return calibrated
 

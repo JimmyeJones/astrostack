@@ -39,12 +39,34 @@ MODE_GAIA = "gaia"
 MODE_BACKGROUND_NEUTRAL = "background_neutral"
 
 
+# Star-detection geometry, in the pixels of whatever grid we are handed. A
+# Seestar star is ~3 px FWHM at full resolution, and a 4 px aperture encloses it.
+# **These are not constants of the sky — they are constants of the *grid*.** On
+# the editor's decimated preview proxy the same star spans ``3 / proxy_scale``
+# pixels, so a caller rendering a proxy must scale them down (see
+# ``seestack.edit.ops.tone._color_calibrate``); leaving them at full-res values
+# there made the finder look for stars three times wider than any present, find
+# too few, and silently fall back to a *different white balance from the one the
+# export applies* — worst on the large mosaic canvases that decimate the most.
+DEFAULT_DETECT_FWHM_PX = 3.0
+DEFAULT_APERTURE_RADIUS_PX = 4.0
+# Floors for that scaling. Below ~1 px FWHM a star is a single pixel: DAOStarFinder's
+# matched filter degenerates into a delta and starts ranking noise spikes. Below
+# ~1.5 px the photometry aperture stops enclosing the PSF, so the flux ratios the
+# whole calibration is built on become noise.
+MIN_DETECT_FWHM_PX = 1.0
+MIN_APERTURE_RADIUS_PX = 1.5
+
+
 @dataclass
 class ColorCalibrationOptions:
     enabled: bool = False
     mode: str = MODE_GRAY_STAR  # 'gray_star' | 'gaia'
     detect_threshold_sigma: float = 6.0
-    aperture_radius_px: float = 4.0
+    # Both in the pixels of the array passed to :func:`calibrate_color` — scale
+    # them for a decimated render (see the note above the defaults).
+    detect_fwhm_px: float = DEFAULT_DETECT_FWHM_PX
+    aperture_radius_px: float = DEFAULT_APERTURE_RADIUS_PX
     min_stars: int = 20
     # Gaia-only knobs:
     gaia_max_stars: int = 500
@@ -180,7 +202,7 @@ def _detect_calibration_stars(rgb: np.ndarray, options: ColorCalibrationOptions)
     # edge between covered sky and the zero region can't be flagged as stars).
     luma_clean = np.where(finite_mask, luma, 0.0).astype(np.float32, copy=False)
     finder = DAOStarFinder(
-        fwhm=3.0,
+        fwhm=max(MIN_DETECT_FWHM_PX, float(options.detect_fwhm_px)),
         threshold=options.detect_threshold_sigma * float(std),
         exclude_border=True,
     )
