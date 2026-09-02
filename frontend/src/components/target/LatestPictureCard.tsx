@@ -57,8 +57,13 @@ export function inThisPictureSentence(objects: FieldObject[], limit = 6): string
 }
 
 /**
- * "Your picture" — the target's newest finished stack, shown at the top of the
- * Target page.
+ * "Your picture" — the target's own finished stack, shown at the top of the
+ * Target page: the run the owner **pinned as the cover** when there is one, and
+ * otherwise the newest, exactly as the Library tile and the Best wall resolve it
+ * (see `representativeRun`). `pinned` says which, so the heading can name it;
+ * `newerRunId` is set only when a pinned cover is standing in front of a newer
+ * picture, so the card can say so instead of leaving someone to wonder whether
+ * their restack ran.
  *
  * Why this exists (IA slice (c) of the owner's "the pages are extremely busy"
  * item): the Target page used to show *everything about* a target except the
@@ -72,11 +77,13 @@ export function inThisPictureSentence(objects: FieldObject[], limit = 6): string
  * pre-stack "First look" reassurance covers that case, unchanged.
  */
 export function LatestPictureCard({
-  safe, name, run,
+  safe, name, run, pinned = false, newerRunId = null,
 }: {
   safe: string;
   name?: string;
   run?: StackRun | null;
+  pinned?: boolean;
+  newerRunId?: number | null;
 }) {
   const [light, setLight] = useState(false);
   // "What's in it?" — the same named-object overlay History has always had, on
@@ -193,7 +200,9 @@ export function LatestPictureCard({
   return (
     <Paper withBorder p="sm" radius="md" data-testid="latest-picture">
       <Group justify="space-between" gap="xs" mb={6} wrap="nowrap">
-        <Text size="sm" fw={500}>Your picture</Text>
+        <Text size="sm" fw={500}>
+          {pinned ? "Your picture (cover)" : "Your picture"}
+        </Text>
         <Group gap="sm" wrap="nowrap">
           {/* Only offered when the run still has its FITS: the object positions
               come off its WCS, and a preview-only run has none to read. */}
@@ -230,6 +239,19 @@ export function LatestPictureCard({
       <Text size="xs" c="dimmed" mt={6}>
         {latestPictureCaption(run)} — click to view it big
       </Text>
+      {/* A pinned cover standing in front of a newer stack. Without this the
+          page looks like the restack never happened — the picture is simply the
+          older one, with nothing on screen to say why. Says it plainly and
+          points at where to change it, rather than second-guessing the pin. */}
+      {pinned && newerRunId != null ? (
+        <Text size="xs" c="dimmed" mt={4} data-testid="cover-newer-note">
+          You pinned this one as this target’s cover, so it’s the picture shown
+          everywhere. You have a newer stack —{" "}
+          <Anchor component={Link} to={`/targets/${safe}/history`} size="xs">
+            see all versions
+          </Anchor>.
+        </Text>
+      ) : null}
       {identify ? (
         <Text size="xs" c={cantPlaceMarks ? "dimmed" : "cyan.4"} mt={4}
           data-testid="identify-readout">
