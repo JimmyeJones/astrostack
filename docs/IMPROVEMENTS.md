@@ -907,15 +907,78 @@ _(nothing else claimed — claim an item here with your branch name)_
     Library card while its own notes talk about "the cover". **Fix:** same precedence as `_representative_run`;
     label "Your picture (cover)" vs "Your newest picture".
 
-- **🟡 A8 — a target whose missing files never return is held back from auto-stacking FOREVER, and the owner
-  has no action to take.** `_auto_stack_readability_hold` (`webapp/pipeline.py`) holds while
-  `readable < prior_max`. If the owner deletes a bad session from `incoming/` — his folder, his right — the DB
-  rows persist, `unreadable` never drops, and the target only releases once new subs exceed the best run's
-  `n_frames_used`. Reproduced: best run 10, delete 4, add 3 → **held**; needs 5 new subs to escape. He is told,
-  but is offered nothing to do. **Fix:** a reversible, DB-only "mark N missing subs unavailable" (`accept=0`,
-  auto-restored if the path reappears) — one click, or automatic once the same set has been unreadable across
-  K scans over N days. **Also:** the "healing an already-degraded picture is deliberately left open" note in
-  `AGENTS.md` §1 is **stale** — `_auto_stack_degraded_recheck` shipped.
+- **✅ SHIPPED (Builder, v0.327.4, branch `claude/sweet-babbage-35yfmt`) — ~~A8: a target whose missing files
+  never return is held back from auto-stacking FOREVER, and the owner has no action to take.~~** Shipped in
+  the shape the entry named — a reversible, database-only "those subs are gone", auto-restored when a path
+  reappears — with the automatic-after-K-scans variant deliberately **not** built (see below).
+
+  **What the hold actually costs, measured rather than assumed.** Tracing it before writing anything corrected
+  the entry on one point worth recording: the target does *not* stack the moment the missing subs are set
+  aside, and it **should not**. `_auto_stack_frame_count` still requires more solved+accepted subs than the
+  best run ever covered, and after the set-aside there are fewer — so the 10-frame master rightly stands
+  rather than being replaced by a 9-frame one. What the fix ends is the **dead end**: every scan for the rest
+  of time reporting the same hold over data that cannot improve, on a target the owner may never shoot again,
+  with the accepted count still claiming subs that do not exist. Once set aside the target is back under the
+  ordinary "stack when there is more than last time" rule.
+
+  **Two halves, and the second is what makes the first safe to offer.**
+  `Project.set_missing_frames_aside()` marks every accepted sub with no readable file `accept=0` with a new
+  `REJECT_REASON_FILE_MISSING`; `Project.restore_missing_frames()` puts back any of them whose file is
+  readable again, and the scan calls it **before** deciding whether to stack — in the QC pass (where the
+  project is already open, so it is free) and at the top of the auto-stack per-target body, which covers a
+  target the QC pass never touched. That is exactly the state a target sits in while its drive is away, so
+  covering it is the difference between "self-heals" and "self-heals only if you also shoot it again". The
+  restore queries its candidates by predicate rather than walking the frame table, so a target that never used
+  the button — every healthy install — does **zero** `stat()` calls per scan.
+
+  **§10 is pinned, not just respected.** A "the files are gone" action must never so much as consider removing
+  one: the endpoint is database-only, and `test_it_touches_no_file_on_disk` asserts the `incoming/` listing is
+  byte-identical across it. The tests make frames unreadable by repointing their recorded paths, never by
+  deleting anything.
+
+  **Two rules borrowed from `reject_seestar_output_frames`, which is the same shape of decision.** A frame the
+  user graded by hand (`user_override`) is left alone — their accept is a decision, not an assumption — and an
+  already-rejected frame keeps its own reason, so a cloudy/streak auto-reject is never re-labelled. Calling it
+  twice is a no-op. The undo is the **existing** bulk accept of exactly the ids returned, so there is no second
+  undo path to keep in step with the first.
+
+  **The wording, because this is where a beginner gets frightened.** The `AutoStackHoldNote` (the note on the
+  page they actually look at) keeps its existing "nothing has been lost" paragraph verbatim for the ordinary
+  off-line-drive case, and adds the deliberate one: *"Deleted those subs on purpose? Then they're never coming
+  back… It only changes AstroStack's own records — your files are never touched — and if the missing ones ever
+  turn up again they're put back automatically."* And the rejection breakdown gains its own bucket, **"Their
+  files aren't on your disk any more"**, rather than filing the owner's own action under "Left out for other
+  reasons" — it is the one bucket where "nothing was deleted by the app" is the whole point.
+
+  **Deliberately not built: the "automatic once the same set has been unreadable across K scans over N days"
+  variant.** Setting a user's subs aside without being asked is a different risk class from offering it: the
+  failure mode is a long holiday, a NAS rebuilt over a week, a drive left unplugged — and the app would
+  quietly un-accept a night that was coming back. The manual action costs one click on a note that is already
+  on screen and already explains itself. Filed under "Autonomy & friendliness" if it is ever wanted.
+
+  **Upgrade-safe (§9):** no schema change (the reason is a value in an existing `TEXT` column), no config key,
+  no on-disk change, no default flipped, one *added* endpoint and one *added* summary bucket — both additive,
+  and an older frontend ignores both. A healthy install is bit-for-bit unaffected, pinned by
+  `test_a_healthy_scan_sets_nothing_aside_and_reports_nothing`.
+
+  **Tests (+18).** `tests/test_missing_frames_set_aside.py` (8) on the engine pair, including the cache→source
+  fallback (a sub whose original is gone but whose Stage-1 cache is present is *readable* and must not be set
+  aside). `tests/webapp/test_set_missing_aside.py` (8) on the endpoint, the §10 guarantee, the honest accepted
+  count, the undo and the breakdown bucket. `tests/webapp/test_auto_stack_pipeline.py` (+3) on the scan: the
+  dead end reproduced across repeated scans and then ended, the automatic restore (which **fails** without the
+  new pass), and the healthy-install no-op. `AutoStackHoldNote.test.tsx` (+3) on the copy and the undo.
+
+  *(Original audit entry follows.)*
+
+  ~~**🟡 A8 — a target whose missing files never return is held back from auto-stacking FOREVER, and the owner
+    has no action to take.**~~ `_auto_stack_readability_hold` (`webapp/pipeline.py`) holds while
+    `readable < prior_max`. If the owner deletes a bad session from `incoming/` — his folder, his right — the DB
+    rows persist, `unreadable` never drops, and the target only releases once new subs exceed the best run's
+    `n_frames_used`. Reproduced: best run 10, delete 4, add 3 → **held**; needs 5 new subs to escape. He is told,
+    but is offered nothing to do. **Fix:** a reversible, DB-only "mark N missing subs unavailable" (`accept=0`,
+    auto-restored if the path reappears) — one click, or automatic once the same set has been unreadable across
+    K scans over N days. **Also:** the "healing an already-degraded picture is deliberately left open" note in
+    `AGENTS.md` §1 is **stale** — `_auto_stack_degraded_recheck` shipped.
 
 - **✅ SHIPPED (Builder, v0.327.2, branch `claude/sweet-babbage-35yfmt`) — ~~A9: editor exports drop the
   WCS.~~** Fixed in all three parts the entry named — carry it when nothing moved, *move it* for crop and

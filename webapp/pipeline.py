@@ -148,6 +148,10 @@ def _pipeline_body(
             # scan loop discarded it — so the walk-away path, which is exactly
             # where the rescue happens unattended, had no way to say so.
             rescued: dict[str, int] = {}
+            # Subs put back because their file reappeared, after the owner had
+            # set them aside as missing (see ``Project.restore_missing_frames``).
+            # Reported so a scan that quietly un-does a manual decision says so.
+            missing_restored: dict[str, int] = {}
             for safe in touched_names:
                 if job.cancel_requested():
                     # Surface the cancel at the top level so JobManager._run's
@@ -183,6 +187,13 @@ def _pipeline_body(
                                 graded[safe] = counts.rejected
                             if counts.restored:
                                 regraded_back[safe] = counts.restored
+                        # Subs the owner set aside as "gone" whose files are back.
+                        # Free here (the project is already open) and one indexed
+                        # predicate on a target that never used the button, i.e.
+                        # every healthy install. See ``restore_missing_frames``.
+                        n_back = len(proj.restore_missing_frames())
+                        if n_back:
+                            missing_restored[safe] = n_back
                     finally:
                         proj.close()
                     lib.refresh_target_stats(safe)
@@ -208,6 +219,8 @@ def _pipeline_body(
                 summary["auto_regraded_back"] = regraded_back
             if rescued:
                 summary["bootstrap_rescued"] = rescued
+            if missing_restored:
+                summary["missing_files_restored"] = missing_restored
             if qc_errors:
                 summary["qc_errors"] = qc_errors
 
@@ -255,6 +268,13 @@ def _pipeline_body(
                 try:
                     calib_fp: str | None = None
                     degraded_fp: str | None = None
+                    # Put back any sub the owner set aside as "gone" whose file
+                    # has since reappeared, *before* deciding whether to stack —
+                    # otherwise the target would stack the thin set once more
+                    # before healing on the following scan. Covers targets the
+                    # QC pass above didn't touch (no new subs), which is exactly
+                    # the state a target sits in while its files are away.
+                    _restore_missing_frames(lib, safe)
                     attempt_n = _auto_stack_frame_count(lib, safe)
                     if attempt_n is None:
                         # No *new* frames to stack — but if the target's stack is
@@ -2025,6 +2045,33 @@ def _readability_recovered(proj: Any) -> bool:
     if last_unreadable <= 0:
         return False
     return _solved_accepted_unreadable(proj) < last_unreadable
+
+
+def _restore_missing_frames(lib: Library, safe: str) -> int:
+    """Re-accept ``safe``'s set-aside-as-missing subs whose files are back.
+
+    The automatic half of the "those subs are gone, carry on without them"
+    action (``POST …/frames/set-missing-aside``): the owner never has to undo it
+    themselves. Costs one indexed predicate on a target that never used the
+    button — every healthy install — and refreshes the registry only when
+    something actually changed.
+
+    Best-effort: a locked or read-only project must not sink a scan over a
+    housekeeping step, so a failure is logged and the scan carries on exactly as
+    it would have.
+    """
+    try:
+        proj = lib.open_target(safe)
+        try:
+            back = proj.restore_missing_frames()
+        finally:
+            proj.close()
+        if back:
+            lib.refresh_target_stats(safe)
+        return len(back)
+    except Exception as exc:  # noqa: BLE001 — housekeeping never sinks a scan
+        log.warning("restoring missing-file subs failed for %s: %s", safe, exc)
+        return 0
 
 
 def _auto_stack_readability_hold(
