@@ -37,8 +37,40 @@ def _with_nan_filled(rgb: np.ndarray, fn):
     return result
 
 
+def hot_pixels_skipped_on_proxy(proxy_scale: float) -> bool:
+    """True when hot-pixel removal must be **skipped** on the live-preview proxy.
+
+    Hot-pixel repair is a *full-resolution* operation: every test that separates a
+    genuine stuck sensor pixel from a real star ("is this pixel's 3x3
+    neighbourhood still at sky?", "are the other two channels still at sky?" —
+    see :mod:`seestack.bg.hot_pixels`) assumes the image is sampled on the
+    detector's own grid. The preview proxy is decimated by **striding**
+    (:mod:`seestack.edit.proxy` takes every Nth pixel), so a real 2-3 px-FWHM star
+    lands on a *single* proxy pixel with sky all around it in *every* channel —
+    which is precisely the signature of the defect this op removes. Measured on a
+    synthetic S30-scale star field at ``proxy_scale`` 3: **369 of 483 bright stars
+    lost more than half their amplitude in the preview, while the full-res export
+    dimmed none of them.**
+
+    There is no proxy-scale version of the test to fall back on — the
+    neighbourhood would have to shrink below one pixel — so the preview does the
+    honest thing and skips the op rather than eating the user's stars, and the
+    editor captions that the export still applies it. At ``proxy_scale == 1``
+    (a small stack whose proxy *is* the full image, and every export) the op runs
+    exactly as before. Pure/side-effect free so the backend and tests share the
+    exact rule, like ``deconv_understates_on_proxy``.
+    """
+    return bool(np.isfinite(proxy_scale)) and proxy_scale > 1.0
+
+
 def _hot_pixels(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     from seestack.bg.hot_pixels import suppress_hot_cold_pixels
+
+    # On a decimated preview proxy a star is indistinguishable from a hot pixel,
+    # so the preview shows the image unchanged instead of erasing the stars — see
+    # ``hot_pixels_skipped_on_proxy``. The export (proxy_scale == 1) is unaffected.
+    if hot_pixels_skipped_on_proxy(float(ctx.proxy_scale)):
+        return as_rgb(rgb)
 
     sigma = float(params.get("sigma", 5.0))
     # suppress_hot_cold_pixels derives its threshold from the median of the whole
@@ -118,11 +150,46 @@ def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     return _with_nan_filled(rgb, run)
 
 
+# Below this *proxy-scaled* radius (full-res radius / proxy_scale) an unsharp
+# mask's Gaussian is narrower than the grid it runs on, so the preview shows only
+# a fraction of the local-contrast gain the export applies. Measured on a
+# synthetic 2.5 px-FWHM star field, as the share of the export's contrast gain the
+# preview reproduces: 1.0 px -> 96-100 %, 0.75 px -> 89-97 %, 0.67 px -> 77-89 %,
+# 0.5 px -> 49-73 %, 0.38 px -> 19 %, 0.33 px -> 7-11 %, 0.25 px and below -> 0 %.
+# The ratio depends on the scaled radius alone (it lines up across every
+# radius/scale pair that shares one), so 0.6 is the knee: above it the preview is
+# honest, below it it collapses fast.
+_SHARPEN_RADIUS_ADVISORY_PX = 0.6
+
+
+def sharpen_understates_on_proxy(radius: float, proxy_scale: float) -> bool:
+    """True when a sharpen op's *live preview* will visibly understate the export.
+
+    The radius is a full-resolution pixel measure that ``_sharpen`` correctly
+    shrinks by ``proxy_scale`` on the decimated preview proxy — the right thing to
+    do, because it keeps the preview sharpening the same *physical* detail. But
+    once the shrunken radius drops below ~``_SHARPEN_RADIUS_ADVISORY_PX`` proxy
+    pixels the Gaussian is sub-pixel and the unsharp mask collapses towards the
+    identity, so the preview shows far less sharpening than the full-res export
+    applies — Auto's own 1.5 px radius on a step-4 mosaic proxy shows about a
+    fifth of it. Like ``deconv_understates_on_proxy`` this is a fundamental limit
+    of the decimated grid rather than something to hide, so the editor captions it
+    instead. Pure/side-effect free so the backend and tests share the exact rule.
+    """
+    if not np.isfinite(radius) or not np.isfinite(proxy_scale):
+        return False
+    if proxy_scale <= 1.0 or radius <= 0.0:
+        return False
+    return (radius / proxy_scale) < _SHARPEN_RADIUS_ADVISORY_PX
+
+
 def _sharpen(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     amount = float(params.get("amount", 1.0))
     # The radius is in *full-resolution* pixels; on the decimated live-preview
     # proxy shrink it by proxy_scale so the preview sharpens the same physical
-    # detail as the full-res export (parity), floored just above zero.
+    # detail as the full-res export (parity), floored just above zero. Once the
+    # shrunken radius goes sub-pixel the preview understates the export — see
+    # ``sharpen_understates_on_proxy``, which the editor uses to caption it.
     radius = max(0.05, ctx.scaled_px(float(params.get("radius", 2.0))))
 
     def run(img: np.ndarray) -> np.ndarray:

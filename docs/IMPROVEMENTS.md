@@ -637,9 +637,70 @@ _(nothing else claimed — claim an item here with your branch name)_
     - **Owner check that settles it in one line:** `ls incoming/<any target>_sub | grep -c '\.wcs$'` — non-zero
       confirms it on the live box.
 
-- **🟠 A2 — PREVIEW AND EXPORT DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
+- **✅ SHIPPED, A2's REMAINING TWO INSTANCES (Builder, v0.326.6, branch `claude/zen-mccarthy-mqfxxg`) —
+  ~~`detail.hot_pixels` eats the preview's stars, and `detail.sharpen` diverges from the export with no
+  advisory.~~** Both reproduced first, at the owner's mosaic scale, and both fixed at the root. **With the
+  `tone.color_calibrate` instance shipped by `…-xesefm` as v0.326.3 (entry below), A2's three named instances
+  are now all closed**; the two "also verified, smaller" items at the end of the entry are not.
+
+  **`detail.hot_pixels` — the preview was erasing the user's stars.** Hot-pixel repair is a *full-resolution*
+  operation: every test that separates a stuck sensor pixel from a real star ("is this pixel's 3×3
+  neighbourhood still at sky?", "are the other two channels still at sky?") assumes the image is sampled on
+  the detector's own grid. The editor proxy is decimated by **striding** (`seestack/edit/proxy.py` takes every
+  Nth pixel), so a real 2–3 px-FWHM star lands on one lone proxy pixel with sky all around it *in every
+  channel* — exactly the signature of the defect the op removes. Reproduced on a synthetic S30-scale field at
+  step 3: **369 of 483 bright stars lost more than half their amplitude in the preview, while the full-res
+  export dimmed none of them.** There is no proxy-scale version of the test to fall back on (the
+  neighbourhood would have to shrink below one pixel), so the preview now **skips the op** when
+  `proxy_scale > 1` and the editor says so — the export still cleans the frame. At `proxy_scale == 1` (every
+  export, and any stack small enough that its proxy *is* the full image) the op runs bit-for-bit as before.
+
+  **`detail.sharpen` — right maths, missing advisory.** The radius *is* correctly scaled by `proxy_scale`,
+  which is the right thing to do (it keeps the preview sharpening the same *physical* detail); the defect is
+  that once the scaled radius goes sub-pixel the unsharp mask collapses towards the identity and nothing told
+  the user. Measured as the share of the export's local-contrast gain the preview reproduces, which depends on
+  the **scaled radius alone** (it lines up across every radius/scale pair sharing one): 1.0 px → 96–100 %,
+  0.75 px → 89–97 %, 0.67 px → 77–89 %, 0.5 px → 49–73 %, 0.38 px → **19 %**, 0.33 px → 7–11 %, ≤0.25 px →
+  **0 %**. So 0.6 is the knee, and `sharpen_understates_on_proxy` flags below it — the same shape as
+  `deconv_understates_on_proxy` and `star_reduce_overstates_on_proxy`, which is what the audit asked for
+  ("unlike deconv and star-reduce it shows no advisory"). Auto's own 1.5 px radius on a step-4 mosaic proxy is
+  in the 19 % band. **The render is unchanged** — this half is purely information.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no setting flipped. Two *added*
+  histogram fields (`sharpen_preview_understates`, `hot_pixels_preview_skipped`) alongside the two that
+  already exist, so an older frontend ignores them and an older backend simply doesn't set them (the captions
+  return `null`). Editing stays non-destructive and nothing already exported is touched.
+
+  **Tests (+9; 8 of them fail before).** `tests/test_edit_engine.py` (+4): the two pure rules, a measured
+  preview-vs-export sharpen comparison, and the hot-pixel regression asserted **on behaviour rather than on
+  the new flag** (so it fails on the old code) — every bright star keeps its brightness, the preview is
+  pixel-identical to its input, and the export still repairs a genuine single-pixel defect.
+  `tests/webapp/test_editor.py` (+2) pins both histogram flags across weak/strong/disabled/absent recipes, and
+  the hot-pixel one across a decimated *and* a `proxy_scale == 1` run. Frontend (+3 each in two new files)
+  pins the captions.
+
+- **🟠 A2 — PREVIEW AND EXPORT
+  DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
   PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that
   lies. Confidence: verified on synthetic data. Three instances, **one mechanism**.)*
+  **All three named instances are now shipped** (colour-cal below as v0.326.3; hot-pixels and sharpen as
+  v0.326.6, entry above). Only the two "also verified, smaller" items at the foot of this entry are open.
+
+  > **⚠️ COLLISION ELEVEN — Builder `claude/zen-mccarthy-mqfxxg`, 2026-09-02, one of two tasks stood down,
+  > decided by measurement in a worktree rather than by argument.** This run built `tone.color_calibrate`
+  > independently and finished it (scaled FWHM + aperture, *and* the sky annulus, floors at 1.5 px, tests
+  > green) before a `git fetch origin main` between tasks showed `…-xesefm` had landed the same fix as
+  > v0.326.3 forty minutes earlier. Applying the standing method from collision ten — **run your own fixture
+  > against their shipped code in a `git worktree` of `origin/main`** — settled it in two minutes and against
+  > me: on the same 600×900 field at proxy step 3 theirs finds **188 stars where mine found 50**, and its
+  > white balance sits within **0.2 %** of the export's (mine, 2.2 %). The difference is their
+  > `MIN_DETECT_FWHM_PX = 1.0` against my 1.5 — I had floored the finder above the size of the stars I wanted
+  > it to find. My one genuinely extra piece, scaling the photometry's **sky annulus** (`r_in = r + 2`,
+  > `r_out = r + 5`, both unscaled on theirs), turns out to buy nothing measurable: theirs already agrees
+  > with the export to 0.2–2.1 % across steps 2–5, so shipping it would have been speculative hardening on
+  > the on-by-default path. Dropped, not re-litigated. **The transferable bit is the floor:** a floor on a
+  > detector's matched-filter width is not a safety rail, it is a *lower bound on what you can detect* — set
+  > it by what the grid can still resolve (one pixel), not by what feels conservative.
   - **✅ SHIPPED (Builder, v0.326.3, branch `claude/zen-mccarthy-xesefm`) — ~~`tone.color_calibrate`~~**, the
     instance that changes the picture's **colour**. Reproduced first, then fixed in the direction the entry
     named. `_detect_calibration_stars`'s `fwhm=3.0` was a hard-coded literal and the 4 px aperture came from
@@ -682,12 +743,12 @@ _(nothing else claimed — claim an item here with your branch name)_
     stars and silently falls back to `background_neutral` **while the export runs gray-star** — measured
     preview/export gain ratio **R 1.157, B 1.287** on a 4000×2400 canvas. A 1920×1080 single field matches
     within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.~~
-  - **`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
+  - ~~**`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
     own 1.5 px radius becomes 0.375 px at step 4 — the preview shows **13–46 %** of the export's sharpening,
-    and unlike deconv and star-reduce it shows **no advisory**.
-  - **`detail.hot_pixels`** (`seestack/bg/hot_pixels.py`): a fixed 3×3 isolation test erased or dimmed **259 of
+    and unlike deconv and star-reduce it shows **no advisory**.~~ *(Shipped v0.326.6.)*
+  - ~~**`detail.hot_pixels`** (`seestack/bg/hot_pixels.py`): a fixed 3×3 isolation test erased or dimmed **259 of
     582 bright stars** in a step-3 preview while the export touched none. Not in Auto, but the preview
-    misrepresents what the op does.
+    misrepresents what the op does.~~ *(Shipped v0.326.6.)*
   - Also verified, smaller: SCNR's 3 px noise-protect blur unscaled (cosmetic); `stars.reduce`'s advisory
     points the **wrong way** for 2–3 px stars.
   - **Fix direction:** scale every pixel-unit parameter through `ctx.scaled_px` with a sensible floor, and
