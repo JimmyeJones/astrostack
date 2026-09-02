@@ -440,13 +440,32 @@ def render_preview_png_full_res(
     On that asinh path the curve is **measured on the 1024 px preview grid** and
     then applied to the full-res pixels, because `asinh_stretch` derives its whole
     curve (normalisation *and* black point) from the statistics of whatever array
-    it is handed, and area-averaging moves every one of them. Measured on a
-    1920×1080 master, the same ``black=0.4`` slider put the black point at 0.48 at
-    1024 px and 0.61 at native — an 8-bit mean-abs difference of 12–18 between the
-    download and the preview the user actually tuned. The saved preview bytes are
-    the picture the user approved, so they are what the download is anchored to.
-    A canvas already at or below 1024 px is measured in place (the two grids are
-    the same), so nothing extra is read for an ordinary small stack.
+    it is handed, and area-averaging moves every one of them. The saved preview
+    bytes are the picture the user approved, so they are what the download is
+    anchored to. A canvas already at or below 1024 px is measured in place (the
+    two grids are the same), so nothing extra is read for an ordinary small stack.
+
+    **How big the effect is, measured honestly** — because the two figures the
+    original bug report offered both overstate it, and a later run that chases the
+    remainder is chasing physics:
+
+    * A **black point of "0.48 at 1024 px vs 0.61 at native"** compares two numbers
+      living in *different* normalisations. ``channels`` is measured after
+      ``(img − lo) / (hi − lo)``, so a shifted range drags the median and σ with
+      it and most of that gap cancels. What does *not* cancel is the grain: σ
+      measured on a decimated array is genuinely smaller. The curve-only 8-bit
+      difference on a synthetic 1920×1080 linear master (sky 0.02 ± 0.004, faint
+      glow, small stars) at sliders 0.5/0.35 is **mean 10.1 / max 43** at a native
+      render and **mean 3.0 / max 14** at 1200 px — real, visible, and worth
+      anchoring, but not the figure quoted.
+    * A **preview-vs-download mean-abs of 12–18** is mostly *not* this at all.
+      Decomposed on that master, anchoring the curve moves it **18.6 → 16.0** (and
+      15.5 → 13.2, 13.2 → 9.6 at the other two slider pairs). The residual is the
+      non-linearity of rendering the same data at two sizes — averaging stretched
+      pixels is not stretching averaged ones — and forcing an identical curve on
+      both sides does **not** collapse it to zero, contrary to the report. It is
+      not a bug, it is not fixable by any anchor, and the full-size render is the
+      more faithful of the two. ``tests/test_asinh_curve_residual.py`` pins it.
 
     This is the beginner-friendly answer to "why is my downloaded picture
     low-res?": the FITS/TIFF already hold full-resolution pixels but aren't easily
