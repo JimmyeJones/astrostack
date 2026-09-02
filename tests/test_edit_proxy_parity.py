@@ -165,3 +165,188 @@ def test_the_full_res_render_never_claims_a_proxy_fallback(_osc_field):
     _, note = _run_color_cal(flat, 1.0)
     assert note["mode_used"] != "gray_star"
     assert note["proxy_fallback"] is False
+
+
+def _synth_star_field(h: int = 1200, w: int = 1800, n_stars: int = 600,
+                      n_hot: int = 40, seed: int = 7):
+    """A dense neutral star field plus genuine single-site hot pixels.
+
+    Density matters the same way it did for the colour fixture, in the other
+    direction: this measures how many *real* stars a preview destroys, so the
+    field has to carry enough of them to count. The hot pixels are single-channel
+    single-pixel lifts — what the op exists to repair.
+    """
+    rng = np.random.default_rng(seed)
+    sky = 0.05
+    rad = 6
+    yy, xx = np.mgrid[-rad:rad + 1, -rad:rad + 1]
+    kern = np.exp(-(xx ** 2 + yy ** 2) / (2 * _STAR_SIGMA_PX ** 2)).astype(np.float32)
+    stars = np.zeros((h, w), dtype=np.float32)
+    ys = rng.integers(rad + 2, h - rad - 2, n_stars)
+    xs = rng.integers(rad + 2, w - rad - 2, n_stars)
+    amps = 10 ** rng.uniform(-1.4, -0.2, n_stars).astype(np.float32)
+    for y, x, a in zip(ys, xs, amps, strict=True):
+        stars[y - rad:y + rad + 1, x - rad:x + rad + 1] += a * kern
+
+    rgb = np.empty((h, w, 3), dtype=np.float32)
+    grey = rng.normal(0.0, 0.0015, size=(h, w)).astype(np.float32)
+    for c in range(3):
+        rgb[..., c] = sky + grey + stars
+    hot = list(zip(rng.integers(5, h - 5, n_hot), rng.integers(5, w - 5, n_hot),
+                   strict=True))
+    for y, x in hot:
+        rgb[y, x, 1] += 0.5
+    return np.ascontiguousarray(rgb), (ys, xs, amps), hot
+
+
+def _apply(op_id: str, rgb: np.ndarray, proxy_scale: float, params: dict) -> np.ndarray:
+    op = get_op(op_id)
+    ctx = EditContext(proxy_scale=proxy_scale, is_proxy=proxy_scale > 1.0, use_gpu=False)
+    merged = dict(op.defaults())
+    merged.update(params)
+    return op.apply(rgb.copy(), merged, ctx)
+
+
+@pytest.fixture(scope="module")
+def _star_field():
+    return _synth_star_field()
+
+
+# --------------------------------------------------------------------------- #
+# detail.sharpen and stars.reduce — the ops whose numbers the proxy can't keep
+# --------------------------------------------------------------------------- #
+
+def _added_detail(base: np.ndarray, sharpened: np.ndarray) -> float:
+    """How much contrast the op added, as the sigma of what it changed."""
+    return float(np.nanstd(sharpened - np.clip(base, 0.0, 1.0)))
+
+
+@pytest.mark.parametrize("step,floor", [(4, 0.6), (6, 0.6)])
+def test_the_sharpen_preview_shows_most_of_the_export_s_sharpening(
+        _star_field, step, floor):
+    """Auto's own 1.5 px radius, scaled onto a decimated proxy, used to floor at
+    0.05 px — a Gaussian so narrow it is a near-delta, so the preview sharpened
+    essentially nothing while the export sharpened for real.
+
+    Measured before the fix: **22 %** of the export's added detail at proxy step 4
+    and **0.3 %** at step 6. Some loss is inherent (the fine detail is not in the
+    proxy), but two orders of magnitude is not a preview, it is a blank.
+    """
+    full, _stars, _hot = _star_field
+    proxy = np.ascontiguousarray(full[::step, ::step])
+    params = {"radius": 1.5, "amount": 1.0}
+
+    previewed = _apply("detail.sharpen", proxy, float(step), params)
+    exported = _apply("detail.sharpen", full, 1.0, params)
+    export_seen = np.ascontiguousarray(exported[::step, ::step])
+
+    ratio = _added_detail(proxy, previewed) / _added_detail(proxy, export_seen)
+    assert floor <= ratio <= 1.4, (
+        f"at proxy step {step} the preview shows {ratio:.0%} of the export's "
+        "sharpening — a preview that is not the picture being saved")
+
+
+def test_the_sharpen_export_is_bit_for_bit_unchanged(_star_field):
+    """The proxy floor must never reach the saved picture: at ``proxy_scale`` 1 a
+    radius the user deliberately set — including one below the new floor — has to
+    be used exactly as given."""
+    full = _star_field[0][:200, :200]
+    for radius in (0.2, 1.5, 2.0):
+        out = _apply("detail.sharpen", full, 1.0, {"radius": radius, "amount": 1.0})
+        expected = _sharpen_by_hand(full, radius, 1.0)
+        assert np.allclose(np.nan_to_num(out), np.nan_to_num(expected), atol=0), (
+            f"the full-res render at radius {radius} is no longer the plain "
+            "unsharp mask it has always been")
+
+
+def _sharpen_by_hand(rgb: np.ndarray, radius: float, amount: float) -> np.ndarray:
+    """The op's documented maths, written out — so the parity test above compares
+    against the contract rather than against the implementation."""
+    from scipy.ndimage import gaussian_filter
+
+    src = np.clip(rgb, 0.0, 1.0)
+    out = np.empty_like(src)
+    for c in range(3):
+        blurred = gaussian_filter(src[..., c], sigma=radius, mode="nearest")
+        out[..., c] = src[..., c] + amount * (src[..., c] - blurred)
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
+
+
+def test_the_floor_narrows_the_gap_without_retiring_the_advisory():
+    """The floor recovers most of the missing sharpening, at a slightly coarser
+    physical scale than the export — so the preview is closer but still not the
+    export's picture, and the advisory has to keep firing on the *requested*
+    scaled radius rather than the rendered one."""
+    from seestack.edit.ops.detail import sharpen_understates_on_proxy
+
+    assert sharpen_understates_on_proxy(1.5, 4.0) is True     # 0.38 px requested
+    assert sharpen_understates_on_proxy(1.5, 6.0) is True     # 0.25 px requested
+    assert sharpen_understates_on_proxy(4.0, 3.0) is False    # 1.33 px — honest
+    assert sharpen_understates_on_proxy(1.5, 1.0) is False    # the export
+
+
+# --------------------------------------------------------------------------- #
+# stars.reduce — the advisory that pointed the wrong way
+# --------------------------------------------------------------------------- #
+
+def test_the_star_reduce_advisory_may_not_claim_a_direction_the_pixels_do_not_take(
+        _star_field):
+    """The caption used to claim a *direction*, so measure the direction.
+
+    The old rule fired below ``size / proxy_scale < 1``, reasoning from where the
+    erosion footprint clamps, and told the user the export would keep their stars
+    *larger* than the preview showed. Sweeping the parameters that actually occur
+    — star sizes 1-4 against proxy steps 2-5 — the preview lands anywhere from
+    0.63x to 1.58x the export's removed star flux, and at the **default** size 2
+    it straddles 1.0 with no consistent sign. No threshold in ``size /
+    proxy_scale`` separates the directions either: 0.5 proxy px over-reduces at
+    size 1 and under-reduces at size 2. So the flag must fire on every decimated
+    preview, and the caption must name no direction.
+    """
+    from seestack.edit.ops.stars import star_reduce_differs_on_proxy
+
+    full, _stars, _hot = _star_field
+    exports = {size: _apply("stars.reduce", full, 1.0, {"size": size, "amount": 1.0})
+               for size in (1, 2, 3, 4)}
+
+    ratios: dict[tuple[int, int], float] = {}
+    for step in (2, 3, 4, 5):
+        proxy = np.ascontiguousarray(full[::step, ::step])
+        for size in (1, 2, 3, 4):
+            previewed = _apply("stars.reduce", proxy, float(step),
+                               {"size": size, "amount": 1.0})
+            export_seen = np.ascontiguousarray(exports[size][::step, ::step])
+            removed_export = float(np.nansum(np.clip(proxy - export_seen, 0.0, None)))
+            assert removed_export > 0.0, "the export must reduce stars — fixture drift"
+            ratios[(step, size)] = float(
+                np.nansum(np.clip(proxy - previewed, 0.0, None))) / removed_export
+
+    # The preview goes *both* ways across ordinary settings, which is why no
+    # single-direction caption can be honest.
+    assert max(ratios.values()) > 1.05 and min(ratios.values()) < 0.95, (
+        f"the sweep no longer straddles parity: {ratios}")
+
+    # The old rule's own claim, checked case by case: at least one case where it
+    # said "the preview over-reduces" and the pixels went the other way. (Measured:
+    # sizes 2-3 on steps 3-4 under-reduce by 5-24% while `size / step < 1`.)
+    mispredicted = [
+        (step, size) for (step, size), r in ratios.items()
+        if (size / step < 1.0) and r < 1.0
+    ]
+    assert mispredicted, (
+        "the old size/proxy_scale < 1 rule now predicts every direction "
+        f"correctly, so this test no longer pins anything: {ratios}")
+
+    # The rule that replaced it: every decimated preview is flagged, none of them
+    # is told which way it is wrong.
+    for (step, size) in ratios:
+        assert star_reduce_differs_on_proxy(size, float(step)) is True
+
+
+def test_the_star_reduce_flag_is_quiet_on_the_export_and_with_the_op_off():
+    from seestack.edit.ops.stars import star_reduce_differs_on_proxy
+
+    assert star_reduce_differs_on_proxy(2.0, 1.0) is False
+    assert star_reduce_differs_on_proxy(0.0, 4.0) is False
+    assert star_reduce_differs_on_proxy(float("nan"), 4.0) is False
+    assert star_reduce_differs_on_proxy(2.0, float("inf")) is False

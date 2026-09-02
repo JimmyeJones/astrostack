@@ -2052,3 +2052,69 @@ describe("mosaicGradingNote", () => {
     expect(note).toContain("isn't cloud");
   });
 });
+
+describe("TargetView honours the pinned cover", () => {
+  // Every other surface — the Library tile, the Best wall, the montage,
+  // `gallery._representative_run` — resolves the pinned cover first. This page
+  // took the newest run flat, so pinning run 3 and then stacking run 4 showed a
+  // *different picture* here from the one on the Library card, while this page's
+  // own notes talked about "the cover".
+  const pinned = () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ cover_stack_run_id: 3 }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 4, output_basename: "newest" }),
+      mkRun({ id: 3, output_basename: "pinned" }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+  };
+
+  it("shows, saves and edits the pinned cover rather than the newest run", async () => {
+    pinned();
+    renderTarget();
+
+    const edit = await screen.findByRole("link", { name: "Edit latest stack" });
+    expect(edit).toHaveAttribute("href", "/targets/M_42/edit/3");
+
+    await openSaveShare();
+    const jpeg = await screen.findByText("JPEG (smaller — best for sharing)");
+    expect(jpeg.closest("a")).toHaveAttribute(
+      "href", client.api.stackArtifactUrl("M_42", 3, "jpeg"));
+  });
+
+  it("says so, so a beginner doesn't think their new stack vanished", async () => {
+    pinned();
+    renderTarget();
+
+    expect(await screen.findByTestId("pinned-cover-note")).toHaveTextContent(
+      /pinned as this target/i);
+    expect(await screen.findByText("Your picture (cover)")).toBeInTheDocument();
+  });
+
+  it("falls back to the newest picture when the pinned cover is gone", async () => {
+    // Same degrade as `_representative_run`: a cover that was pruned (or whose
+    // preview file has gone) must not blank the page.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ cover_stack_run_id: 77 }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    const edit = await screen.findByRole("link", { name: "Edit latest stack" });
+    expect(edit).toHaveAttribute("href", "/targets/M_42/edit/9");
+    expect(screen.queryByTestId("pinned-cover-note")).toBeNull();
+  });
+
+  it("says nothing when the pinned cover IS the newest run", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ cover_stack_run_id: 9 }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await screen.findByText("Your picture");
+    expect(screen.queryByTestId("pinned-cover-note")).toBeNull();
+  });
+});
