@@ -14791,23 +14791,52 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
-- **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via `scripts/agent-dogfood.sh`) — the
-  editor's export panel asks the beginner a question whose own help text says the answer doesn't matter.**
-  *(Pillar: friendliness / editor — PRIORITY 1; size XS to decide, S to build whichever way it goes. Traced,
-  high confidence.)* "Export full resolution" carries a **TIFF: Linear / Auto-stretched** `Select`
-  (`routes/Editor.tsx:2306`) whose `HintLabel` reads *"It's already display-ready, so **both options produce
-  that same result**."* That is accurate — `_write_tiff`'s `already_display` branch short-circuits **before**
-  `mode` is read, and `pipeline.py:1432` passes `tiff_mode=…` and `already_display=True` together, so an editor
-  export's TIFF ignores the control entirely — which makes it a decision a beginner has to stop and make, on
-  the priority-1 surface, that changes nothing. **Two honest shapes, and the choice is the work:** (a) make it
-  *mean* something — `autostretch` is already what the mode does on a stacker run, so the branch could honour
-  `mode` for a *linear* re-render of the same edit, which is a real second artefact; or (b) keep one output and
-  fold the sentence into the panel's existing info text, so nothing is asked. **Care:** the owner's standing
-  constraint is that nothing may be *removed* — (b) is a removal of a control, so it needs the setting's
-  meaning to genuinely not exist, which is exactly what the tooltip already asserts; either way say so in the
-  commit rather than deleting it quietly. Grep `tiff_mode` first: `frontend/src/tiffDownload.ts` reads it off
-  `options_json` to choose the History download hint, so whichever way this goes, that copy has to still be
-  true.
+- **✅ SHIPPED (Builder, v0.322.8, branch `claude/zen-mccarthy-2rptmf`) — ~~the editor's export panel asks the
+  beginner a question whose own help text says the answer doesn't matter.~~** **Shape (b), and the reasoning
+  the entry asked for is here rather than only in the commit.** Shape (a) was considered first and is not
+  honest: there *is* no linear version of an edit. The recipe's result **is** the tone mapping — the ops that
+  produced it are not invertible — so a "linear re-render of the same edit" could only be the source stack's
+  own linear data with the edit thrown away, which is a file the run it was edited from already has. Making the
+  control mean something would have meant inventing a second artefact that misrepresents itself.
+
+  So the panel now **states what the export writes instead of asking about it**: the `Select` is gone and a
+  dimmed line under the button reads *"Saves the picture exactly as shown — a 16-bit TIFF and a FITS — as a new
+  image in this target's History. Your original stack keeps its own untouched files."* On the owner's
+  nothing-may-be-removed constraint: **no capability is removed, because the control never had one.**
+  `tiff_mode` is still sent (as `"linear"`, the same value the sibling `exportSavedEdit` has always hardcoded)
+  and still accepted by the endpoint, so the API shape and any older backend are untouched — the beginner just
+  no longer pays a decision for a value the writer discards.
+
+  The old hint also carried a **second** false sentence the entry hadn't caught: *"for the underlying
+  unstretched data, use the separate FITS output."* An editor export's FITS is written with the same
+  `already_display=True` and stamped `SSDISPLY`/`BUNIT = display` — it is display-space too. The replacement
+  line says the original stack keeps its own files, which is where that data actually lives.
+
+  `tiffDownload.ts` is unchanged and still true: an editor export sets `display_space: true`, which is the
+  branch it already reads. **Tests (+4):** a Python one on the bytes
+  (`tests/test_tiff_opens_dark.py` — an editor export's TIFF is `array_equal` under both modes, *and* a plain
+  stack's still differs, so this is a property of a display-space export rather than a dead parameter; if
+  anyone ever makes `mode` matter here, it fails and the copy must be rewritten with it), and three in
+  `frontend/src/api/exportRunTiffMode.test.ts` pinning that the field stays on the wire, defaults to `linear`,
+  agrees with `exportSavedEdit`, and still passes an explicit mode through.
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness / editor — PRIORITY 1; size XS to decide, S to build whichever way it goes. Traced,
+    high confidence.)* "Export full resolution" carries a **TIFF: Linear / Auto-stretched** `Select`
+    (`routes/Editor.tsx:2306`) whose `HintLabel` reads *"It's already display-ready, so **both options produce
+    that same result**."* That is accurate — `_write_tiff`'s `already_display` branch short-circuits **before**
+    `mode` is read, and `pipeline.py:1432` passes `tiff_mode=…` and `already_display=True` together, so an editor
+    export's TIFF ignores the control entirely — which makes it a decision a beginner has to stop and make, on
+    the priority-1 surface, that changes nothing. **Two honest shapes, and the choice is the work:** (a) make it
+    *mean* something — `autostretch` is already what the mode does on a stacker run, so the branch could honour
+    `mode` for a *linear* re-render of the same edit, which is a real second artefact; or (b) keep one output and
+    fold the sentence into the panel's existing info text, so nothing is asked. **Care:** the owner's standing
+    constraint is that nothing may be *removed* — (b) is a removal of a control, so it needs the setting's
+    meaning to genuinely not exist, which is exactly what the tooltip already asserts; either way say so in the
+    commit rather than deleting it quietly. Grep `tiff_mode` first: `frontend/src/tiffDownload.ts` reads it off
+    `options_json` to choose the History download hint, so whichever way this goes, that copy has to still be
+    true.
 - **Background-mesh box floor (`_scaled_box` `minimum=16`) is the one pixel-scale divergence with
   no honest advisory.** *(Traced, Builder editor-parity audit 2026-07-16; low confidence it's a
   visible defect — arguably a defensible tradeoff.)* `seestack/edit/ops/background.py::_scaled_box`
