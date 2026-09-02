@@ -159,7 +159,28 @@ def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 # The ratio depends on the scaled radius alone (it lines up across every
 # radius/scale pair that shares one), so 0.6 is the knee: above it the preview is
 # honest, below it it collapses fast.
+
+
 _SHARPEN_RADIUS_ADVISORY_PX = 0.6
+
+# The narrowest unsharp radius worth *rendering* on the decimated proxy. Below
+# ~0.5 px a Gaussian is a near-delta on a discrete grid, so ``img - blur``
+# collapses and the preview sharpens essentially nothing while the export
+# sharpens for real — the advisory above says so, but a preview that shows a
+# blank is still a preview you cannot judge the amount on. Measured (synthetic
+# Seestar field, Auto's 1.5 px radius, added-detail sigma as a fraction of the
+# export's): the old 0.05 floor gave **22 %** of the export at proxy step 4 and
+# **0.3 %** at step 6; flooring at 0.5 lifts those to **80 %** and **87 %**.
+#
+# 0.5 and not higher, because the error is then one-sided: 0.7 already
+# *over*-sharpens the preview (140-150 %), which is the same lie in the other
+# direction, and a preview that promises more than the export delivers is worse
+# than one that promises less. The floor narrows the gap; it cannot close it —
+# the detail decimation removed is simply not in the proxy — so it does not
+# retire the advisory, it makes what the advisory is about smaller. Applied only
+# when ``proxy_scale > 1``: on the export it would clamp a radius the user
+# deliberately set, and full-res output stays bit-for-bit what it has always been.
+_SHARPEN_PROXY_FLOOR_PX = 0.5
 
 
 def sharpen_understates_on_proxy(radius: float, proxy_scale: float) -> bool:
@@ -171,10 +192,16 @@ def sharpen_understates_on_proxy(radius: float, proxy_scale: float) -> bool:
     once the shrunken radius drops below ~``_SHARPEN_RADIUS_ADVISORY_PX`` proxy
     pixels the Gaussian is sub-pixel and the unsharp mask collapses towards the
     identity, so the preview shows far less sharpening than the full-res export
-    applies — Auto's own 1.5 px radius on a step-4 mosaic proxy shows about a
-    fifth of it. Like ``deconv_understates_on_proxy`` this is a fundamental limit
+    applies. Like ``deconv_understates_on_proxy`` this is a fundamental limit
     of the decimated grid rather than something to hide, so the editor captions it
     instead. Pure/side-effect free so the backend and tests share the exact rule.
+
+    The threshold is measured on the *requested* scaled radius, not the rendered
+    one, and that is deliberate: ``_SHARPEN_PROXY_FLOOR_PX`` stops the render
+    collapsing to nothing (Auto's 1.5 px radius on a step-4 proxy went from 22 %
+    of the export's added detail to 80 %), but it recovers that by sharpening at
+    a slightly coarser physical scale than the export will — still not the
+    export's picture, so the caption stays.
     """
     if not np.isfinite(radius) or not np.isfinite(proxy_scale):
         return False
@@ -187,10 +214,12 @@ def _sharpen(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     amount = float(params.get("amount", 1.0))
     # The radius is in *full-resolution* pixels; on the decimated live-preview
     # proxy shrink it by proxy_scale so the preview sharpens the same physical
-    # detail as the full-res export (parity), floored just above zero. Once the
-    # shrunken radius goes sub-pixel the preview understates the export — see
-    # ``sharpen_understates_on_proxy``, which the editor uses to caption it.
-    radius = max(0.05, ctx.scaled_px(float(params.get("radius", 2.0))))
+    # detail as the full-res export (parity). Once the shrunken radius goes
+    # sub-pixel the preview understates the export — see
+    # ``sharpen_understates_on_proxy``, which the editor uses to caption it, and
+    # ``_SHARPEN_PROXY_FLOOR_PX``, which recovers most of what it can.
+    radius = ctx.scaled_px(float(params.get("radius", 2.0)))
+    radius = max(_SHARPEN_PROXY_FLOOR_PX if ctx.proxy_scale > 1.0 else 0.05, radius)
 
     def run(img: np.ndarray) -> np.ndarray:
         # Unsharp mask in pure numpy/scipy (per-channel Gaussian), NOT skimage's

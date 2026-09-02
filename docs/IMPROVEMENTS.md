@@ -637,6 +637,82 @@ _(nothing else claimed — claim an item here with your branch name)_
     - **Owner check that settles it in one line:** `ls incoming/<any target>_sub | grep -c '\.wcs$'` — non-zero
       confirms it on the live box.
 
+- **✅ SHIPPED, A2's LAST TWO ITEMS — the "also verified, smaller" pair the entry above leaves open
+  (Builder, v0.326.8, branch `claude/zen-mccarthy-2ss60a`).** Written *on top of* `…-mqfxxg`'s v0.326.6 after
+  running this run's own tests against theirs in a worktree of `origin/main` — two of them failed there, which
+  is the only reason either half of this is here (see the collision note at the foot of this entry).
+
+  **`stars.reduce`'s advisory pointed the wrong way, and no threshold could fix it.** The audit filed this as
+  "the advisory points the **wrong way** for 2–3 px stars", and the obvious fix is to move the threshold. The
+  sweep killed the idea of a threshold entirely. Preview ÷ export star flux removed, three synthetic Seestar
+  fields (600 stars, 1.27 px σ) × proxy steps 2–5 × `size` 1–4: the ratio spans **0.63×–1.58×**, only `size` 1
+  over-reduces in every fixture, and at the **default** `size` 2 it straddles 1.0 with no consistent sign
+  (0.81–1.06). No rule in `size / proxy_scale` separates the directions — 0.5 proxy px over-reduces at size 1
+  and *under*-reduces at size 2 — because the footprint rounding and the star mask move together. The
+  direction even flips with the star **profile**: `test_edit_engine`'s older fixture of soft, crowded,
+  overlapping halos genuinely over-reduces where a sparse field of tight Seestar stars under-reduces. Both
+  measurements are real, and both tests now stand and say so. So the caption stopped claiming a direction —
+  it says the strength here isn't the export's, judge it there — and the flag now fires on **every** decimated
+  preview, including the large-`size` cases that were wrong in the *uncaptioned* direction and so said nothing
+  at all. `star_reduce_overstates_on_proxy` → `star_reduce_differs_on_proxy`; the histogram key keeps its
+  original name, so an older frontend reads it unchanged.
+
+  **`detail.sharpen`'s render was left at the old floor, and the advisory alone isn't enough.** v0.326.6
+  measured the collapse and captioned it, deliberately leaving the render alone. But the scaled radius floored
+  at **0.05 px**, and a preview that shows 22 % of the export's added detail at step 4 and **0.3 %** at step 6
+  (this run's own measure; theirs reads the same collapse as 19 % and 0 % of the local-contrast gain) is a
+  preview you cannot judge the *amount* on — the slider does nothing while the export sharpens for real.
+  `_SHARPEN_PROXY_FLOOR_PX = 0.5` lifts those to **80 %** and **87 %**. Not higher, because the error is then
+  one-sided: 0.7 already *over*-sharpens the preview (140–150 %), and a preview promising more than the export
+  delivers is worse than one promising less. It is applied **only** when `proxy_scale > 1`, so the export is
+  bit-for-bit what it has always been — pinned by a test comparing the full-res render against the documented
+  unsharp-mask maths at radii above *and* below the new floor. The advisory stays, and keeps firing on the
+  *requested* scaled radius: the floor buys back magnitude at a slightly coarser physical scale, so the
+  preview is closer to the export but still not it. Their `test_sharpen_understates_flag_matches_the_weak_preview`
+  now pins a **two-sided** band (still under the export at ~71 %, no longer the ~19 % near-blank) rather than
+  the one-sided one it could only assert while the render was collapsed.
+
+  **SCNR's unscaled 3 px noise-protect blur — measured, and deliberately NOT changed.** The last item in the
+  audit's "also verified, smaller" pair. Scaling it looks principled, but the gap it would close is **0–3 %**
+  (preview ÷ export green removed: 0.985 at step 3 and 0.969 at step 4 on 4 px-scale green knots; 0.9995 /
+  0.9989 at 60 px), and scaling the smoothing *down* on the proxy re-admits exactly the per-pixel noise bias
+  that branch exists to suppress — the magenta-sky defect it was written for. Churn on the on-by-default path
+  for a 1 % gain. **Closed as a measured non-finding, not as done**, so the next run doesn't re-derive it.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no API shape change, no default flipped;
+  one histogram key whose *rule* (not shape) changed, and a preview-only render floor.
+
+  **Tests (+6 python, +1 vitest; 4 of them fail on `origin/main`).** `tests/test_edit_proxy_parity.py` gains a
+  16-cell star-reduce sweep on a mosaic-shaped canvas, the two sharpen ratio measurements the floor is about,
+  the bit-for-bit export pin, and the advisory rule; `starReducePreview.test.ts` gains a test that the caption
+  contains **no directional word**, so nobody re-asserts one. Two existing tests were rewritten to the new
+  contract rather than weakened (their sharpen band became two-sided; the webapp flag test now asserts that a
+  large star size on a decimated proxy *is* flagged).
+
+  > **⚠️ COLLISION TWELVE — two Builders, same hour, same two front-of-queue bugs (A2's remainder and A6),
+  > and for once the stand-down was only *partial* because the worktree check said so.** This run
+  > (`…-2ss60a`) independently built A2's hot-pixel and sharpen instances and the whole of A6 while
+  > `…-mqfxxg` was building the same two, down to the same function name (`hot_pixels_skipped_on_proxy`) and
+  > the same new test filename (`tests/test_auto_reject_mosaic_depth.py`). Theirs merged first, so theirs
+  > ships. The method from collision ten decided the rest in ten minutes: copy this run's test files into a
+  > `git worktree` of `origin/main` and run them against their code.
+  > * **A6 — fully stood down, and theirs is better on two counts I had missed.** All four failures of my
+  >   test file against theirs were API shape (their `auto_reject_depth` returns `None` for "no split", their
+  >   `depth` is keyword-only), not behaviour. Theirs judges the health note from the run's recorded
+  >   `coverage_max` — provably right from the finished run — where mine re-derived panel depth from the
+  >   *currently accepted* frames and capped it; and theirs clusters **distinct pointings** rather than every
+  >   sub, which mine did not, so mine would have added ~2.4 s to `estimate_stack` on the owner's 5,477-sub
+  >   target. Nothing of mine was additive; my `per_pixel_frames` estimate field was dropped too rather than
+  >   ship an API field no screen reads.
+  > * **A2 — two of my tests failed on theirs, so those two halves shipped.** The star-reduce direction (they
+  >   never touched `stars.py`) and the sharpen render floor (they left the render at 0.05 on purpose). Both
+  >   are above.
+  > **The lesson worth keeping is about the *ordering* of the check, not the check itself.** Running my tests
+  > against their code took ten minutes and answered "is any of this additive?" exactly. Running it *before*
+  > writing would have been better still — and it is available: the front-of-queue items are known at the
+  > start of a run, so a Builder can `git fetch` and grep `origin/main`'s log for the item's code nouns
+  > **between tasks**, which §11 already asks for and this run did only at the end.
+
 - **✅ SHIPPED, A2's REMAINING TWO INSTANCES (Builder, v0.326.6, branch `claude/zen-mccarthy-mqfxxg`) —
   ~~`detail.hot_pixels` eats the preview's stars, and `detail.sharpen` diverges from the export with no
   advisory.~~** Both reproduced first, at the owner's mosaic scale, and both fixed at the root. **With the

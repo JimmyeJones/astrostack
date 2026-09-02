@@ -975,37 +975,40 @@ def test_deconv_understates_on_proxy_rule():
     assert deconv_understates_on_proxy(1.5, float("inf")) is False
 
 
-def test_star_reduce_overstates_on_proxy_rule():
-    from seestack.edit.ops.stars import star_reduce_overstates_on_proxy
+def test_star_reduce_differs_on_proxy_rule():
+    from seestack.edit.ops.stars import star_reduce_differs_on_proxy
 
-    # Export (scale <= 1) never overstates.
-    assert star_reduce_overstates_on_proxy(2.0, 1.0) is False
-    assert star_reduce_overstates_on_proxy(8.0, 1.0) is False
-    # Default star size on a 3x/4x-decimated proxy collapses below one proxy
-    # pixel (2/3 = 0.67 < 1, 2/4 = 0.5 < 1) → footprint clamps up, preview
-    # over-reduces.
-    assert star_reduce_overstates_on_proxy(2.0, 3.0) is True
-    assert star_reduce_overstates_on_proxy(2.0, 4.0) is True
-    # A mild 2x proxy keeps the default size at exactly one proxy pixel (2/2 = 1),
-    # so the footprint matches the export — no overstatement.
-    assert star_reduce_overstates_on_proxy(2.0, 2.0) is False
-    # A large star survives moderate decimation (8/4 = 2 >= 1).
-    assert star_reduce_overstates_on_proxy(8.0, 4.0) is False
+    # Export (scale <= 1): the preview *is* the picture — nothing to caption.
+    assert star_reduce_differs_on_proxy(2.0, 1.0) is False
+    assert star_reduce_differs_on_proxy(8.0, 1.0) is False
+    # Any decimated proxy: measured preview/export star flux spans 0.63-1.58x
+    # across star sizes 1-4 and steps 2-5, with no threshold in size/proxy_scale
+    # separating the directions (see test_edit_proxy_parity.py) — so the rule is
+    # "decimated at all", and the caption claims no direction.
+    assert star_reduce_differs_on_proxy(2.0, 3.0) is True
+    assert star_reduce_differs_on_proxy(2.0, 4.0) is True
+    assert star_reduce_differs_on_proxy(2.0, 2.0) is True
+    assert star_reduce_differs_on_proxy(8.0, 4.0) is True
     # Degenerate inputs are safe (no false alarms).
-    assert star_reduce_overstates_on_proxy(0.0, 4.0) is False
-    assert star_reduce_overstates_on_proxy(float("nan"), 4.0) is False
-    assert star_reduce_overstates_on_proxy(2.0, float("inf")) is False
+    assert star_reduce_differs_on_proxy(0.0, 4.0) is False
+    assert star_reduce_differs_on_proxy(float("nan"), 4.0) is False
+    assert star_reduce_differs_on_proxy(2.0, float("inf")) is False
 
 
-def test_star_reduce_overstates_flag_matches_the_stronger_preview():
-    """The star-reduction live preview genuinely *over*-reduces on a heavily
-    decimated proxy — the erosion footprint clamps to 1 proxy-pixel (= scale
-    full-res px), physically larger than the export's, so the preview eats into a
-    wider ring of the (extended) star structure than the full-res export does.
-    ``star_reduce_overstates_on_proxy`` must flag exactly that case so the editor
-    can caption it honestly.
+def test_star_reduce_preview_diverges_from_the_export_on_a_decimated_proxy():
+    """The star-reduction live preview does not apply the export's strength on a
+    heavily decimated proxy: the erosion footprint clamps to 1 proxy-pixel (=
+    scale full-res px), physically larger than the export's, so on *these* stars
+    — soft, extended, overlapping halos — the preview eats into a wider ring than
+    the full-res export does. ``star_reduce_differs_on_proxy`` must flag the case
+    so the editor can caption it honestly.
+
+    The *direction* is fixture-dependent and deliberately not claimed anywhere:
+    on a sparse field of tight 1.27 px-sigma Seestar stars the same settings make
+    the preview under-reduce instead (tests/test_edit_proxy_parity.py sweeps it).
+    Both are real; that is exactly why the caption stopped naming a direction.
     """
-    from seestack.edit.ops.stars import star_reduce_overstates_on_proxy
+    from seestack.edit.ops.stars import star_reduce_differs_on_proxy
 
     # A field of *extended* (soft, overlapping-halo) stars: the larger proxy
     # footprint has more surrounding structure to pull down, which is where the
@@ -1038,8 +1041,8 @@ def test_star_reduce_overstates_flag_matches_the_stronger_preview():
     # The preview reduces materially *more* than the export (measured ~1.2×).
     assert preview_energy > export_energy * 1.05
     # ...and the helper flags exactly this misleading case, but not the export.
-    assert star_reduce_overstates_on_proxy(2.0, 4.0) is True
-    assert star_reduce_overstates_on_proxy(2.0, 1.0) is False
+    assert star_reduce_differs_on_proxy(2.0, 4.0) is True
+    assert star_reduce_differs_on_proxy(2.0, 1.0) is False
 
 
 def test_sharpen_understates_on_proxy_rule():
@@ -1070,8 +1073,12 @@ def test_sharpen_understates_flag_matches_the_weak_preview():
 
     Regression for audit finding A2: unlike deconvolution and star reduction,
     sharpening diverged between preview and export with **no advisory at all** —
-    Auto's own 1.5 px radius shows about a fifth of the export's effect on a
-    step-4 mosaic proxy.
+    Auto's own 1.5 px radius showed about a fifth of the export's effect on a
+    step-4 mosaic proxy. ``_SHARPEN_PROXY_FLOOR_PX`` has since stopped the render
+    collapsing that far (~71 % here), which is why the band below is two-sided:
+    the preview must still *understate* — that is what the advisory says, and it
+    cannot be fixed, since the detail decimation removed is not in the proxy —
+    but it must no longer be a blank, which is what the floor fixed.
     """
     from scipy.ndimage import uniform_filter
 
@@ -1107,8 +1114,11 @@ def test_sharpen_understates_flag_matches_the_weak_preview():
     preview_gain = local_contrast(previewed) - base
 
     assert export_gain > 0.0                            # the export clearly sharpens
-    # The preview shows well under half of it (measured ~19 %).
-    assert preview_gain < export_gain * 0.5
+    # Still short of the export — the advisory's whole claim (measured ~71 %)...
+    assert preview_gain < export_gain * 0.95
+    # ...but no longer the near-blank it was before the proxy floor (~19 %), which
+    # is a preview you cannot judge the amount on at all.
+    assert preview_gain > export_gain * 0.35
     # ...and the helper flags exactly this misleading case, but not the export.
     assert sharpen_understates_on_proxy(1.5, 4.0) is True
     assert sharpen_understates_on_proxy(1.5, 1.0) is False
