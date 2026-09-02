@@ -12,9 +12,16 @@ import numpy as np
 from seestack.edit.registry import EditContext, EditParam, OpSpec, as_rgb, register
 
 
-def _crop(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
-    img = as_rgb(rgb)
-    h, w = img.shape[:2]
+def crop_bounds(h: int, w: int, params: dict,
+                proxy_scale: float = 1.0) -> tuple[int, int, int, int] | None:
+    """The pixel rectangle ``(x0, x1, y0, y1)`` a crop op takes out of an
+    ``h × w`` image, or ``None`` when the crop is degenerate and the op is a no-op.
+
+    Split out of :func:`_crop` so anything that has to *replay* the crop in pixel
+    space — the WCS carried onto an editor export, say — derives the same numbers
+    from the same code rather than from a second copy of this arithmetic that can
+    drift away from it.
+    """
     x0f, x1f = sorted((min(max(float(params.get("x0", 0.0)), 0.0), 1.0),
                        min(max(float(params.get("x1", 1.0)), 0.0), 1.0)))
     y0f, y1f = sorted((min(max(float(params.get("y0", 0.0)), 0.0), 1.0),
@@ -25,9 +32,9 @@ def _crop(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     # module documents. Evaluating ``< 2 px`` in *this render's* pixels let a tiny
     # fractional crop no-op on the small proxy while it still applied on the export
     # (or vice-versa), so the preview didn't match what was exported.
-    scale = max(1.0, float(ctx.proxy_scale))
+    scale = max(1.0, float(proxy_scale))
     if (x1f - x0f) * w * scale < 2.0 or (y1f - y0f) * h * scale < 2.0:
-        return img  # degenerate crop — ignore (consistently on proxy and export)
+        return None  # degenerate crop — ignore (consistently on proxy and export)
     x0, x1 = int(round(x0f * w)), int(round(x1f * w))
     y0, y1 = int(round(y0f * h)), int(round(y1f * h))
     # A non-degenerate full-res crop can still round to < 1 px on a heavily
@@ -38,6 +45,16 @@ def _crop(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     y0 = min(y0, h - 1)
     x1 = max(x1, x0 + 1)
     y1 = max(y1, y0 + 1)
+    return x0, x1, y0, y1
+
+
+def _crop(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
+    img = as_rgb(rgb)
+    h, w = img.shape[:2]
+    box = crop_bounds(h, w, params, ctx.proxy_scale)
+    if box is None:
+        return img
+    x0, x1, y0, y1 = box
     return img[y0:y1, x0:x1].copy()
 
 
@@ -61,14 +78,14 @@ def _rotate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
                   order=1, mode="constant", cval=np.nan).astype(np.float32)
 
 
-def _resize(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
-    from scipy.ndimage import zoom
-
+def resize_shape(h: int, w: int, params: dict) -> tuple[int, int] | None:
+    """The ``(out_h, out_w)`` a resize op produces from an ``h × w`` image, or
+    ``None`` when the op is a no-op. Split out of :func:`_resize` for the same
+    reason as :func:`crop_bounds` — one copy of the arithmetic, no drift.
+    """
     scale = float(params.get("scale", 1.0))
     if abs(scale - 1.0) < 1e-3 or scale <= 0:
-        return rgb
-    img = as_rgb(rgb)
-    h, w = img.shape[:2]
+        return None
     # Keep each axis ≥ 1 px. A downscale of a thin frame (e.g. a sliver crop on
     # the proxy, or a small proxy) can drive round(dim·scale) to 0, which yields
     # an empty image that then crashes the PNG/export render ("cannot write empty
@@ -77,7 +94,19 @@ def _resize(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     out_h = max(1, int(round(h * scale)))
     out_w = max(1, int(round(w * scale)))
     if out_h == h and out_w == w:
+        return None
+    return out_h, out_w
+
+
+def _resize(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
+    from scipy.ndimage import zoom
+
+    img = as_rgb(rgb)
+    h, w = img.shape[:2]
+    shape = resize_shape(h, w, params)
+    if shape is None:
         return rgb
+    out_h, out_w = shape
     return zoom(img, (out_h / h, out_w / w, 1.0), order=1).astype(np.float32)
 
 
@@ -85,6 +114,50 @@ def _resize(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 # only ops that move the coverage map (crop/rotate/resize); tone ops leave the
 # geometry alone. Kept as a module constant so overlays can filter for them.
 GEOMETRY_OP_IDS = ("geometry.crop", "geometry.rotate", "geometry.resize")
+
+
+def geometry_pixel_steps(recipe, shape: tuple[int, int],
+                         proxy_scale: float = 1.0) -> list[tuple] | None:
+    """Replay a recipe's *enabled geometry ops* as pixel-space steps, so a caller
+    holding the source image's WCS can move it onto the edited canvas.
+
+    Returns a list of steps — ``("crop", x0, y0)`` and
+    ``("resize", in_w, in_h, out_w, out_h)`` — in recipe order, using the very
+    same :func:`crop_bounds` / :func:`resize_shape` the ops themselves use; an op
+    that is a no-op on this image contributes no step. Returns ``None`` when a
+    step **cannot** be expressed this way, which today means an active rotate:
+    it resamples the picture onto a grid the source solution no longer describes,
+    and a plausible-looking wrong WCS is worse than none (every consumer —
+    North-up, the scale bar, the compass, object labels — would then be quietly
+    off). ``shape`` is the ``(h, w)`` the recipe starts from.
+    """
+    h, w = int(shape[0]), int(shape[1])
+    steps: list[tuple] = []
+    for op in recipe.ops:
+        if not op.enabled or op.id not in GEOMETRY_OP_IDS:
+            continue
+        if op.id == "geometry.rotate":
+            # Mirror _rotate's own no-op guards: an angle below its threshold, or
+            # a sliver too small to rotate, leaves the pixels (and so the WCS)
+            # exactly as they were.
+            if abs(float(op.params.get("angle", 0.0))) < 1e-3 or h < 3 or w < 3:
+                continue
+            return None
+        if op.id == "geometry.crop":
+            box = crop_bounds(h, w, op.params, proxy_scale)
+            if box is None:
+                continue
+            x0, x1, y0, y1 = box
+            steps.append(("crop", x0, y0))
+            h, w = y1 - y0, x1 - x0
+        else:  # geometry.resize
+            out = resize_shape(h, w, op.params)
+            if out is None:
+                continue
+            out_h, out_w = out
+            steps.append(("resize", w, h, out_w, out_h))
+            h, w = out_h, out_w
+    return steps
 
 
 def apply_geometry_to_map(m: np.ndarray, recipe, ctx: EditContext) -> np.ndarray:
