@@ -477,22 +477,35 @@ _(nothing else claimed — claim an item here with your branch name)_
     a same-day Moon still (`Moon_2026-05-02` → 2nd becomes `Moon_2026-05-02-2`) plus a third source that
     sanitises to that string. Confidence: reproduced.)*
 
-- **🟢 LOW / METADATA (Scout QA audit 2026-09-02, `seestack/solve/bootstrap.py` — reproduced) — every sub
-  rescued by `bootstrap_solve` stores the **reference** sub's centre as its own `ra_center_deg`/`dec_center_deg`,
-  off by the registration shift.** *(Severity: low — metadata only; the authoritative `wcs_json` written per
-  frame is geometrically correct, so reprojection/stacking place pixels correctly. Confidence: reproduced.)*
-  `bootstrap.py:419` derives the stored centre with `wcs_center_deg_from_text(wtext)`, which returns `CRVAL`.
-  `propagate_wcs` (`bootstrap.py:216-248`) correctly builds each member's WCS by keeping the reference's
-  `CRVAL`/`CD` and offsetting only `CRPIX` — so `CRVAL` is deliberately no longer the member's *frame centre*,
-  and `wcs_center_deg_from_text` (whose docstring assumes "CRPIX at the image centre") returns the reference
-  centre for every propagated member. The true centre is `wcs.pixel_to_world(image_centre_pixel)`. **Reproduced:**
-  Seestar-scale WCS (2.6″/px), stored-vs-true centre error ~15″ at a 6 px shift, ~190″ at ~70 px, ~630″ (>10′)
-  near the 200 px `max_shift_px` cap. Only feeds `ra_center_deg`/`dec_center_deg` consumers (reference-frame
-  selection, span diagnostics, mosaic centring, sibling-hint seeding); since all rescued members share one
-  pointing they clump at the reference centre instead of scattering by dither, so practical impact is small.
-  **Fix (small):** in the apply loop, derive each member's stored centre from its own WCS via
-  `wcs.pixel_to_world` (or `all_pix2world` at the image centre) rather than `CRVAL`. One file + a repro test.
-  Filed, not rushed.
+- **✅ SHIPPED (Builder, v0.324.1, branch `claude/zen-mccarthy-tl3guh`) — ~~every sub rescued by
+  `bootstrap_solve` stores the **reference** sub's centre as its own `ra_center_deg`/`dec_center_deg`, off by
+  the registration shift.~~** Fixed as the entry proposed: a new
+  `seestack.io.wcs_io.wcs_image_center_deg_from_text(text, *, width, height)` evaluates the frame's **own** WCS
+  at its **own** centre pixel (`all_pix2world` at the 0-based `((w−1)/2, (h−1)/2)`, so any SIP is honoured), and
+  the apply loop uses it with the member's gray-image shape. `wcs_center_deg_from_text` is untouched and still
+  the right reading for an ASTAP-native solution (`solve/runner.py`), where CRPIX *is* at the image centre — a
+  test pins that the two agree to <0.01″ there and diverge by exactly the offset when CRPIX has been moved.
+  Tests in `tests/test_bootstrap_solve.py`:
+  `test_rescued_subs_store_their_own_centre_not_the_references` (each rescued sub's stored centre sits
+  `pixscale·hypot(dx, dy)` from the reference's pointing, and the set genuinely scatters — before the fix every
+  separation was exactly **0.0**, confirmed by running the test against the old code), plus the helper's own
+  agree/diverge and unusable-input cases. Upgrade-safe: one pure helper and one call site, no config/schema/
+  on-disk/API change, and nothing rewrites centres already stored — an install self-corrects the next time
+  bootstrap rescues those subs.
+    *(Original finding: severity low — metadata only; the authoritative `wcs_json` written per frame was always
+    geometrically correct, so reprojection/stacking placed pixels correctly. Confidence: reproduced.
+    `bootstrap.py:419` derived the stored centre with `wcs_center_deg_from_text(wtext)`, which returns `CRVAL`.
+    `propagate_wcs` (`bootstrap.py:216-248`) correctly builds each member's WCS by keeping the reference's
+    `CRVAL`/`CD` and offsetting only `CRPIX` — so `CRVAL` is deliberately no longer the member's *frame centre*,
+    and `wcs_center_deg_from_text` (whose docstring assumes "CRPIX at the image centre") returns the reference
+    centre for every propagated member. The true centre is `wcs.pixel_to_world(image_centre_pixel)`. **Reproduced:**
+    Seestar-scale WCS (2.6″/px), stored-vs-true centre error ~15″ at a 6 px shift, ~190″ at ~70 px, ~630″ (>10′)
+    near the 200 px `max_shift_px` cap. Only feeds `ra_center_deg`/`dec_center_deg` consumers (reference-frame
+    selection, span diagnostics, mosaic centring, sibling-hint seeding); since all rescued members share one
+    pointing they clump at the reference centre instead of scattering by dither, so practical impact is small.
+    **Fix (small):** in the apply loop, derive each member's stored centre from its own WCS via
+    `wcs.pixel_to_world` (or `all_pix2world` at the image centre) rather than `CRVAL`. One file + a repro test.
+    Filed, not rushed.)*
 
 - **⚪ SCOUT QA RE-AUDIT (2026-09-02, webapp routers / ingest / plate-solve / render — swept, mostly CLEAN;
   three verified findings filed above, the rest clean.** This run rotated off the (drained, re-confirmed-clean)
