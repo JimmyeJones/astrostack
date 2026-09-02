@@ -410,7 +410,14 @@ def get_plan_week(
         bucket.isoformat(), int(nights), min_altitude,
         observer.lat_deg, observer.lon_deg, observer.elevation_m,
         tuple(tuple(p) for p in (settings.horizon_profile or [])),
-        tuple((t.safe, t.ra_deg, t.dec_deg) for t in targets),
+        # Depth is in the signature because the ``WEEK_MAX_TARGETS`` cap selects
+        # *by* it (``plan_week`` keeps the most-shot targets): a night's capture
+        # can change which forty targets get planned without adding a target or
+        # moving one, and a signature blind to that would keep serving the old
+        # selection. Free on a library under the cap, where the set is everything
+        # either way.
+        tuple((t.safe, t.ra_deg, t.dec_deg, t.total_exposure_s, t.frames_accepted)
+              for t in targets),
     )
     plan = cached_for_registry(
         request.app, "plan_week", sig,
