@@ -4,7 +4,7 @@ import { IconArrowsHorizontal, IconDownload, IconPhoto } from "@tabler/icons-rea
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { splitClipLeft, splitFraction, splitLeftPct } from "./editor/splitCompare";
-import { noiseReductionBadge, oneFrameCaption } from "./oneFrameVsStack";
+import { noiseReductionBadge, noiseVsExpectedNote, oneFrameCaption } from "./oneFrameVsStack";
 
 /**
  * "One frame vs your stack" — a read-only reveal that puts a single noisy raw
@@ -52,6 +52,10 @@ export function OneFrameVsStackCard({
   const caption = oneFrameCaption(
     info.data.sub_exposure_s, info.data.n_frames, info.data.matched_by);
   const noiseBadge = noiseReductionBadge(noise.data?.ratio, info.data.n_frames);
+  // "…and is that any good?" — the √N yardstick beside the measured number, so
+  // a beginner can tell a healthy stack from an underperforming one instead of
+  // reading a factor with nothing to compare it to.
+  const expected = noiseVsExpectedNote(noise.data?.ratio, info.data.n_frames);
 
   const moveTo = (clientX: number) => {
     const rect = boxRef.current?.getBoundingClientRect();
@@ -116,6 +120,15 @@ export function OneFrameVsStackCard({
             {noiseBadge && (
               <Text size="xs" fw={600} c="teal.6" data-testid="noise-badge">
                 {noiseBadge}
+              </Text>
+            )}
+            {expected && (
+              // Rendered on its own gate, not the badge's: a stack far enough
+              // below √N can measure under the badge's 1.5× floor, and that is
+              // exactly the run worth saying something to.
+              <Text size="xs" c={expected.concern ? "orange.4" : "dimmed"}
+                data-testid="noise-expected">
+                {expected.text}
               </Text>
             )}
             {/* The portable version of what they're looking at. The reveal is

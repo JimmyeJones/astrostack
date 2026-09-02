@@ -502,6 +502,42 @@ export function roughlyAlignedNote(
   return { text, concern, guidance };
 }
 
+/** Which stack an editor export was made from, ready to print on its card. */
+export interface DerivedFromNote {
+  /** The whole sentence, source name included. */
+  text: string;
+  /** The source run to jump to, or null when its row is no longer here — a
+   *  deleted source must degrade to plain text, never a dead link. */
+  runId: number | null;
+}
+
+// An editor export records the run it was rendered from (`derived_from` in its
+// stored options), and until now nothing read it: History showed two rows with
+// the same target, adjacent stamps and near-identical names, and a beginner had
+// no way to tell which one holds the raw stacked data. This is that one line.
+//
+// Returns null for every ordinary run — only the *export* path writes
+// `derived_from`, so an "Apply & save" run (which records its own row) says
+// nothing rather than claiming an ancestor it doesn't have.
+export function derivedFromNote(
+  run: StackRun, runs: StackRun[],
+): DerivedFromNote | null {
+  const raw = run.options?.derived_from;
+  // `options` is whatever JSON the run stored, so anything could be in there.
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+  const sourceId = Math.trunc(raw);
+  // A row pointing at itself is nonsense; say nothing rather than link a loop.
+  if (sourceId === run.id) return null;
+  const source = runs.find((r) => r.id === sourceId);
+  if (!source) {
+    // The source was deleted (or re-exported under a name that replaced it).
+    // Still worth saying this row is an edit of something, but there is
+    // nowhere to send the reader.
+    return { text: "Edited from a stack that's no longer here", runId: null };
+  }
+  return { text: `Edited from ${source.output_basename}`, runId: source.id };
+}
+
 // Compact seconds label for exposures — "30s", "2.5s" — trimming a trailing ".0".
 function formatExposure(s: number): string {
   const r = Math.round(s * 10) / 10;
@@ -745,10 +781,11 @@ function NotesEditor({ safe, run }: { safe: string; run: StackRun }) {
 const DEFAULT_STRETCH = 0.5;
 const DEFAULT_BLACK = 0.35;
 
-function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compareToId, identity, focus }: {
+function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compareToId, identity, focus, derivedFrom }: {
   safe: string; run: StackRun; onDelete: () => void; deleting?: boolean;
   isCleanest?: boolean; noiseDelta?: number; compareToId?: number | null;
   identity?: ObjectInfo | null; focus?: FocusVerdict;
+  derivedFrom?: DerivedFromNote | null;
 }) {
   const qc = useQueryClient();
   const [adjust, setAdjust] = useState(false);
@@ -1013,7 +1050,10 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const overlayPlaceable = showingStored;
 
   return (
-    <Card withBorder padding="md" radius="md">
+    // Identified so the "Edited from …" line on an export's card can bring the
+    // stack it was made from into view — the two rows sit in one grid, so the
+    // link is a scroll, not a navigation.
+    <Card withBorder padding="md" radius="md" id={`stack-run-${run.id}`}>
       <Card.Section>
         {run.has_preview || (adjust && run.has_fits) ? (
           <AnnotatedImage
@@ -1148,6 +1188,28 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
       </Text>
       {typeof noiseDelta === "number" ? (
         <Text size="xs"><NoiseDelta delta={noiseDelta} /></Text>
+      ) : null}
+      {/* Which row holds the raw stacked data? An export and the stack it came
+          from look alike here — same target, adjacent stamps, near-identical
+          names — so the export says where it came from, and offers to show it. */}
+      {derivedFrom ? (
+        <Text size="xs" c="dimmed">
+          {derivedFrom.runId === null ? derivedFrom.text : (
+            <Tooltip label="Show that stack">
+              <Text component="a" href={`#stack-run-${derivedFrom.runId}`} size="xs"
+                c="dimmed" td="underline"
+                onClick={(e) => {
+                  // Scroll rather than navigate: both cards are on this page, and
+                  // a bare hash href would otherwise push a history entry.
+                  e.preventDefault();
+                  document.getElementById(`stack-run-${derivedFrom.runId}`)
+                    ?.scrollIntoView({ block: "center" });
+                }}>
+                {derivedFrom.text}
+              </Text>
+            </Tooltip>
+          )}
+        </Text>
       ) : null}
       <NotesEditor safe={safe} run={run} />
 
@@ -1712,6 +1774,7 @@ export function HistoryView() {
               noiseDelta={deltas.get(r.id)}
               identity={identity.data ?? null}
               focus={focus.get(r.id)}
+              derivedFrom={derivedFromNote(r, list)}
               compareToId={previousRunId(list, r.id)} />
           ))}
         </SimpleGrid>

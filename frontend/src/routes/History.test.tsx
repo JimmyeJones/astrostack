@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote, removedOverlayCaption } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote, removedOverlayCaption, derivedFromNote } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import { FULL_RES_PNG_MAX_LONG_EDGE } from "../fullres";
@@ -2146,5 +2146,85 @@ describe("HistoryView — the run's two dates, each labelled", () => {
     expect(line.textContent).not.toMatch(/Stacked/);
     expect(line.textContent).not.toMatch(/Invalid/);
     expect(line.textContent?.trimStart()).toMatch(/^100×100/);
+  });
+});
+
+describe("derivedFromNote", () => {
+  const source = mkRun({ id: 3, output_basename: "M42_master" });
+  const exported = mkRun({
+    id: 4, output_basename: "M42_master_edit", notes: "edited",
+    options: { editor_recipe: {}, derived_from: 3, display_space: true },
+  });
+
+  it("names the stack an editor export was rendered from", () => {
+    expect(derivedFromNote(exported, [source, exported]))
+      .toEqual({ text: "Edited from M42_master", runId: 3 });
+  });
+
+  it("says nothing on an ordinary run", () => {
+    // Only the *export* path writes `derived_from`; an "Apply & save" run
+    // records its own row and must not claim an ancestor it doesn't have.
+    expect(derivedFromNote(source, [source, exported])).toBeNull();
+    expect(derivedFromNote(mkRun({ options: {} }), [])).toBeNull();
+  });
+
+  it("degrades to plain text when the source run is gone", () => {
+    // Deleting the linear stack must never leave a dead link behind.
+    expect(derivedFromNote(exported, [exported]))
+      .toEqual({ text: "Edited from a stack that's no longer here", runId: null });
+  });
+
+  it("ignores a derived_from that isn't a usable run id", () => {
+    // `options` is whatever JSON the run stored, so anything can be in there.
+    for (const bad of ["3", null, undefined, NaN, {}, [3]]) {
+      expect(derivedFromNote(
+        mkRun({ id: 4, options: { derived_from: bad } }), [source],
+      )).toBeNull();
+    }
+    // …and a row pointing at itself is a loop, not an ancestor.
+    expect(derivedFromNote(
+      mkRun({ id: 3, options: { derived_from: 3 } }), [source],
+    )).toBeNull();
+  });
+});
+
+describe("HistoryView — which row is the original?", () => {
+  it("says which stack an export was edited from, and jumps to it", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 3, output_basename: "M42_master" }),
+      mkRun({
+        id: 4, output_basename: "M42_master_edit", notes: "edited",
+        options: { derived_from: 3 },
+      }),
+    ]);
+    renderHistory();
+    const link = await screen.findByText("Edited from M42_master");
+    expect(link).toHaveAttribute("href", "#stack-run-3");
+
+    const scrollIntoView = vi.fn();
+    const sourceCard = document.getElementById("stack-run-3");
+    expect(sourceCard).not.toBeNull();
+    sourceCard!.scrollIntoView = scrollIntoView;
+    fireEvent.click(link);
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("shows no such line on a target whose runs are all plain stacks", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(screen.queryByText(/Edited from/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the sentence but drops the link when the source was deleted", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({
+        id: 4, output_basename: "M42_master_edit", notes: "edited",
+        options: { derived_from: 3 },
+      }),
+    ]);
+    renderHistory();
+    const line = await screen.findByText("Edited from a stack that's no longer here");
+    expect(line).not.toHaveAttribute("href");
   });
 });
