@@ -2,10 +2,10 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BestPicturesView } from "./BestPictures";
 import * as client from "../api/client";
-import type { BestPicture } from "../api/client";
+import type { BestPicture, VideoStill } from "../api/client";
 
 function pic(over: Partial<BestPicture>): BestPicture {
   return {
@@ -15,6 +15,22 @@ function pic(over: Partial<BestPicture>): BestPicture {
     has_preview: true, has_fits: false, has_tiff: false,
     preview_url: "/api/targets/m31/stack-runs/1/preview", score: 1, ...over,
   };
+}
+
+function still(over: Partial<VideoStill>): VideoStill {
+  return {
+    capture_id: "cap1", label: "Moon", kind: "lunar",
+    created_utc: "2026-05-03T00:00:00Z", width: 800, height: 600,
+    n_stacked: 400, source_name: "moon.avi",
+    preview_url: "/api/videos/cap1/preview", ...over,
+  };
+}
+
+/** The wall now also reads the gallery, because the slideshow it links to draws
+ *  Moon/Sun stills too. Default it to an empty library; the tests that care
+ *  re-spy it. */
+function mockGallery(videos: VideoStill[] = []) {
+  return vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [], videos });
 }
 
 function renderWall() {
@@ -31,6 +47,8 @@ function renderWall() {
 afterEach(() => vi.restoreAllMocks());
 
 describe("BestPicturesView", () => {
+  beforeEach(() => { mockGallery(); });
+
   it("renders the ranked wall with target names and reason lines", async () => {
     vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
       items: [
@@ -66,12 +84,47 @@ describe("BestPicturesView", () => {
       .toHaveAttribute("href", "/show?from=run%3Am42%3A2");
   });
 
-  it("shows a friendly empty state when the wall self-hides", async () => {
+  it("shows a friendly empty state when the wall self-hides, and does not offer "
+    + "a slideshow of nothing", async () => {
     vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({ items: [] });
     renderWall();
     await waitFor(() =>
       expect(screen.getByText(/your best pictures will gather here/i)).toBeInTheDocument());
+    // The button used to render unconditionally, so a fresh install's only call
+    // to action led to an empty show.
+    await waitFor(() =>
+      expect(screen.queryByRole("link", { name: /play slideshow/i })).not.toBeInTheDocument());
   });
+
+  it("still offers the slideshow when the only finished picture is a Moon still",
+    async () => {
+      // The trap in the obvious fix: this library's ranked wall is empty, but the
+      // show draws video stills too, so there is a perfectly good slideshow here.
+      vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({ items: [] });
+      mockGallery([still({ capture_id: "c1" })]);
+      renderWall();
+      await waitFor(() =>
+        expect(screen.getByRole("link", { name: /play slideshow/i }))
+          .toHaveAttribute("href", "/show"));
+    });
+
+  it("offers the slideshow on a wall that has pictures", async () => {
+    vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({ items: [pic({})] });
+    renderWall();
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /play slideshow/i })).toBeInTheDocument());
+  });
+
+  it("keeps the button when the gallery can't be read — unknown is not empty",
+    async () => {
+      vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({ items: [] });
+      vi.spyOn(client.api, "getGallery").mockRejectedValue(new Error("offline"));
+      renderWall();
+      // /show has its own graceful "nothing to show yet" state, so erring towards
+      // offering it costs a dead click; erring the other way hides a working show.
+      await waitFor(() =>
+        expect(screen.getByRole("link", { name: /play slideshow/i })).toBeInTheDocument());
+    });
 
   it("marks a pinned favourite so its place on the wall is explained", async () => {
     vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
