@@ -17014,24 +17014,48 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via `scripts/agent-dogfood.sh`) — "My best
-  pictures" offers **Play slideshow** on a wall that is empty, and the obvious gate is the wrong one.**
-  *(Pillar: friendliness — PRIORITY 3; size XS; **read the trap before writing the one-line fix**.)* On a fresh
-  install the page reads *"Once you've finished stacking a couple of targets, your best pictures will gather
-  here automatically"* — the wall self-hides below `BEST_PICTURES_MIN` — and directly above that sentence sits
-  a primary-looking **Play slideshow** button. `routes/BestPictures.tsx:100` renders it unconditionally, while
-  the count badge three lines above it *is* gated on `items.length > 0`, so this is an oversight rather than a
-  decision. It is not a crash: `/show` has a graceful "Nothing to show yet" state. It is a beginner's first
-  visit to a page whose only call to action goes nowhere.
-  **⚠ The trap, and why this is filed rather than fixed in passing:** the slideshow is **not** built from the
-  best-pictures wall alone — `ShowAndTellView` calls `buildSlides(best.items, gallery.videos)`, so someone with
-  no ranked stacks but a finished **Moon or Sun still** has a perfectly good show. Gating the button on
-  `items.length > 0` would hide a working slideshow from exactly the beginner whose first picture was a lunar
-  video, which is a worse bug than the one being fixed. The honest gate is "would `buildSlides` produce
-  anything", which this page cannot answer today because it never runs the `gallery` query. So the shapes are:
-  add that query here (one extra request on a page that already makes one), or export a tiny shared
-  `hasAnythingToShow` the two pages agree on. Either way, pin it with a test for the Moon-still-only library —
-  that is the case a naive fix breaks.
+- **✅ SHIPPED (Builder, v0.322.9, branch `claude/zen-mccarthy-2rptmf`) — ~~"My best pictures" offers **Play
+  slideshow** on a wall that is empty, and the obvious gate is the wrong one.~~** **Both filed shapes, because
+  they were not alternatives:** the page now runs the `gallery` query (same `["gallery"]` key the show itself
+  uses, so the two share one cached response and a visit that goes on to press the button pays nothing), *and*
+  `showAndTell.ts` exports the shared `hasAnythingToShow(best, videos)` the two pages agree on. It asks
+  `buildSlides` rather than counting anything, so it inherits the builder's own skip of an entry with no
+  `preview_url` for free — a picture the show could not draw either.
+
+  **The Moon-still trap is pinned, twice:** a unit test that `hasAnythingToShow([], [moonStill])` is `true`,
+  and a `BestPictures.test.tsx` render of exactly that library asserting the button is still there. A naive
+  `items.length > 0` fails both.
+
+  **One judgement the entry didn't specify: a *failed* gallery query is "unknown", not "empty", so the button
+  stays.** The asymmetry is the whole point of the filed trap — `/show` has a graceful "nothing to show yet"
+  state, so erring towards offering it costs a dead click, while erring the other way hides a working
+  slideshow. Pinned by its own test. (Pending is different from failed and is left to resolve: `best` is
+  already awaited by the view's own loader, so a wall with pictures shows the button immediately and only a
+  library whose *only* content is video stills sees it arrive with the gallery.)
+
+  **Tests (+8):** 4 for `hasAnythingToShow` in `showAndTell.test.ts` (empty/undefined, the Moon-still-only
+  library, a wall with no videos, and everything-undrawable), and 4 in `BestPictures.test.tsx` (the empty
+  install has no button beside its empty-state sentence, the Moon-still-only library does have one pointing at
+  `/show`, an ordinary wall has one, and a rejected gallery query keeps it).
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness — PRIORITY 3; size XS; **read the trap before writing the one-line fix**.)* On a fresh
+    install the page reads *"Once you've finished stacking a couple of targets, your best pictures will gather
+    here automatically"* — the wall self-hides below `BEST_PICTURES_MIN` — and directly above that sentence sits
+    a primary-looking **Play slideshow** button. `routes/BestPictures.tsx:100` renders it unconditionally, while
+    the count badge three lines above it *is* gated on `items.length > 0`, so this is an oversight rather than a
+    decision. It is not a crash: `/show` has a graceful "Nothing to show yet" state. It is a beginner's first
+    visit to a page whose only call to action goes nowhere.
+    **⚠ The trap, and why this is filed rather than fixed in passing:** the slideshow is **not** built from the
+    best-pictures wall alone — `ShowAndTellView` calls `buildSlides(best.items, gallery.videos)`, so someone with
+    no ranked stacks but a finished **Moon or Sun still** has a perfectly good show. Gating the button on
+    `items.length > 0` would hide a working slideshow from exactly the beginner whose first picture was a lunar
+    video, which is a worse bug than the one being fixed. The honest gate is "would `buildSlides` produce
+    anything", which this page cannot answer today because it never runs the `gallery` query. So the shapes are:
+    add that query here (one extra request on a page that already makes one), or export a tiny shared
+    `hasAnythingToShow` the two pages agree on. Either way, pin it with a test for the Moon-still-only library —
+    that is the case a naive fix breaks.
 
 - **DOGFOOD FINDING, LOW VALUE — recorded so it is not re-found, not because it should be fixed (Builder
   2026-09-01).** The **Library**'s target card truncates a long name (*"Sample: Orion Nebula (…"*) where the

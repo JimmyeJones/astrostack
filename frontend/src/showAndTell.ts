@@ -144,6 +144,27 @@ export function videoSlideKey(captureId: string): string {
   return `video:${captureId}`;
 }
 
+/** Would the show have anything to play?
+ *
+ *  The one honest answer to "should the *Play slideshow* entry point be
+ *  offered", and it deliberately asks `buildSlides` rather than counting the
+ *  ranked wall. The obvious gate — "are there best pictures?" — is wrong in a
+ *  way that matters: a beginner whose first finished picture is a **Moon or Sun
+ *  still** has no ranked deep-sky stack at all and a perfectly good show, so
+ *  gating on the wall would hide the slideshow from exactly the person most
+ *  likely to want it. It also inherits `buildSlides`'s own skip of an entry with
+ *  no `preview_url`, which is a picture the show could not draw either.
+ *
+ *  Both arguments are `undefined` while their queries are in flight, which reads
+ *  as "nothing known yet" — a caller that must not flicker should say what it
+ *  does about a pending or failed query itself. */
+export function hasAnythingToShow(
+  best: BestPicture[] | undefined,
+  videos: VideoStill[] | undefined,
+): boolean {
+  return buildSlides(best, videos).length > 0;
+}
+
 /** A link that opens the slideshow *on* a given picture (and keeps looping
  *  through everything after it). Encoded, because a target's safe name is
  *  free-form enough to carry a character that would end the query string. */
