@@ -132,25 +132,6 @@ export function buildSlides(
   return slides;
 }
 
-/**
- * Would the show have anything to play?
- *
- * Its own answer, not a proxy for one. The deep-sky wall self-hides below
- * `BEST_PICTURES_MIN`, so "the wall is empty" is *not* the same question — a
- * beginner whose first finished picture is a Moon or Sun still has an empty wall
- * and a perfectly good slideshow, and gating the entry point on the wall alone
- * would hide a working show from exactly them. Defined against `buildSlides`
- * itself (a picture with no preview URL is skipped there, so it must not count
- * here) so the button and the show can never disagree about whether there is
- * anything to see.
- */
-export function hasAnythingToShow(
-  best: BestPicture[] | undefined,
-  videos: VideoStill[] | undefined,
-): boolean {
-  return buildSlides(best, videos).length > 0;
-}
-
 /** The slide key for a finished stack / a Moon-or-Sun still. The show's own
  *  `buildSlides` mints these, and "start the show here" links quote them back —
  *  so both live here rather than being spelled out at each call site, where a
@@ -161,6 +142,27 @@ export function runSlideKey(safe: string, runId: number): string {
 
 export function videoSlideKey(captureId: string): string {
   return `video:${captureId}`;
+}
+
+/** Would the show have anything to play?
+ *
+ *  The one honest answer to "should the *Play slideshow* entry point be
+ *  offered", and it deliberately asks `buildSlides` rather than counting the
+ *  ranked wall. The obvious gate — "are there best pictures?" — is wrong in a
+ *  way that matters: a beginner whose first finished picture is a **Moon or Sun
+ *  still** has no ranked deep-sky stack at all and a perfectly good show, so
+ *  gating on the wall would hide the slideshow from exactly the person most
+ *  likely to want it. It also inherits `buildSlides`'s own skip of an entry with
+ *  no `preview_url`, which is a picture the show could not draw either.
+ *
+ *  Both arguments are `undefined` while their queries are in flight, which reads
+ *  as "nothing known yet" — a caller that must not flicker should say what it
+ *  does about a pending or failed query itself. */
+export function hasAnythingToShow(
+  best: BestPicture[] | undefined,
+  videos: VideoStill[] | undefined,
+): boolean {
+  return buildSlides(best, videos).length > 0;
 }
 
 /** A link that opens the slideshow *on* a given picture (and keeps looping
