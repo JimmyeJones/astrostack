@@ -418,9 +418,33 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟢 LOW / HONESTY (Builder 2026-09-02, tripped over while testing `plan_week` — reproduced and measured) —
-  the planner can tell you to shoot up to two minutes *after* astronomical dark ends, and can credit a window
-  with darkness that doesn't exist.** *(Severity: low — it is at most ~2.5 min, but it is a plainly false
+- **✅ SHIPPED (Builder, v0.325.3, branch `claude/zen-mccarthy-t59xya`) — ~~the planner can tell you to shoot
+  up to two minutes *after* astronomical dark ends, and can credit a window with darkness that doesn't
+  exist.~~** Fixed in the direction the entry called the honest one: `_times_grid` now rounds the step count
+  **up** and **clips the last stamp to `window.end`**, so the grid keeps its final sample (a target usable only
+  in the closing minutes is still seen) while never sampling past the end of darkness.
+
+  **The second half the entry asked for, and the constraint that shaped it.** `minutes_above_min_alt` was a
+  flat `count × step`, which would now credit a clipped tail with a whole step it doesn't cover. A new
+  `_sample_minutes` gives each sample the minutes it actually stands for — a full step for every sample except
+  the last, which gets the remainder. On a window that *is* an exact multiple of the step the remainder **is**
+  a full step, so the weights are uniform and every existing number is bit-for-bit unchanged; that is what lets
+  the fix touch a shared hot function (`plan_tonight`, `rank_targets_now`, `next_observing_windows`,
+  `plan_week` and `moon_window` all sample through it) without moving the ordinary case. The two 24-hour
+  callers (`_dark_window_after_noon` at a 4-minute step, the solar-noon search at 15) are exact multiples by
+  construction and are untouched.
+
+  **Measured, before → after.** The worst overhang over a 14-night January scan from London was **120 s** past
+  `dark_end` (night of 2026-01-17: darkness ends 05:55:31, last stamp 05:57:31) → **0 s**. End to end, M 31
+  from a London site on 2026-10-18/-19 was reporting `usable_end` **60 s after** `dark_end`; it no longer can.
+
+  **Upgrade-safe (§9):** one pure engine function; no config, schema, on-disk, API-shape or default change.
+  **Tests (+4 in `tests/test_nightplan.py`, the end-to-end one fails before):** the grid never steps past the
+  end and stays strictly increasing; an exact-multiple window samples *identically* to before (the
+  no-regression half); a clipped tail is credited only the 3 minutes it covers; and, parametrised over a
+  January and an October scan, no reported `usable_start`/`usable_end` ever escapes its own dark window.
+
+  *(Original entry follows.)* *(Severity: low — it is at most ~2.5 min, but it is a plainly false
   statement on a "shoot between X and Y" line, and it now appears on three surfaces: `/tonight`,
   `/next-session/{safe}` and the new `/plan/week`. §1 priority 3. Confidence: reproduced.)*
 
