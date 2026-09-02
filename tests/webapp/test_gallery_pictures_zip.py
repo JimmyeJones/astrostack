@@ -357,3 +357,32 @@ def test_library_summary_counts_finished_stills(client, solved_library):
     _register_still(solved_library, "Lunar_video", label="Moon")
     _register_still(solved_library, "Solar_video", label="Sun", kind="sun")
     assert client.get("/api/library/summary").json()["n_finished_stills"] == 2
+
+
+def test_unique_entry_name_reserves_generated_names_not_just_bases():
+    """A generated ``-N`` name must itself be reserved, or a later real stem that
+    equals it collides and silently overwrites it in the archive.
+
+    Regression for the Scout 2026-09-02 finding: ``used`` recorded only the base
+    name, so a stem that happened to equal an earlier generated name was emitted
+    unchanged — ``["pic","pic","pic-2"]`` produced ``pic-2.png`` twice, and
+    ``zipfile`` accepts the duplicate while every unzip tool overwrites, dropping
+    one picture from a "download all" backup.
+    """
+    from webapp.routers.gallery import _unique_entry_name
+
+    used: dict[str, int] = {}
+    got = [_unique_entry_name(stem, ".png", used)
+           for stem in ("pic", "pic", "pic-2")]
+    assert got == ["pic.png", "pic-2.png", "pic-2-2.png"]
+    assert len(got) == len(set(got)), "a generated name was reused"
+
+    # Plain repeats are unchanged: pic, pic-2, pic-3 (no regression).
+    used = {}
+    plain = [_unique_entry_name("frame", ".jpg", used) for _ in range(3)]
+    assert plain == ["frame.jpg", "frame-2.jpg", "frame-3.jpg"]
+
+    # Still de-duplicated case-insensitively (a Mac/Windows unzip safety).
+    used = {}
+    ci = [_unique_entry_name(s, ".png", used) for s in ("Pic", "pic")]
+    assert len({n.lower() for n in ci}) == 2, "case-only variants collided"

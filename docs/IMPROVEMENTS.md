@@ -379,6 +379,106 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🟠 WRONG-RESULT / EDITOR-PARITY (Scout QA audit 2026-09-02, render/export parity — reproduced, measured) —
+  the "Download full-res PNG" of an **Adjusted** (asinh) run does NOT match the saved 1024 px preview the user
+  tuned and sees everywhere else, because `asinh_stretch` recomputes its whole tone curve from the resolution
+  of the array it is handed.** *(Severity: wrong-result — the downloaded/shared full-size picture is a
+  materially different image from the one the user tuned and from the gallery/History thumbnail, share-JPEG and
+  wallpaper. §1 priority 1/4. Confidence: reproduced + measured.)*
+
+  **This is a distinct, second-order break left open by the v0.287.4 fix, not that fix reopened.** v0.287.4
+  correctly made the full-res download use the **asinh** curve (with the run's saved `preview_stretch`/
+  `preview_black`) instead of the STF — so both paths now call `asinh_stretch`. But `asinh_stretch`
+  (`seestack/render/thumbnail.py:874-899`) derives its *entire* curve from per-array statistics:
+  `lo = np.nanmin(img)`, `hi = np.nanpercentile(img, 99.5)` (the normalisation), and per channel
+  `med, sigma = _robust_median_sigma(chan[finite])` (the black point `shadows = med + (black·6−2)·sigma`).
+  The **saved preview** is rendered by `render_stack_png(..., max_width=1024)` (`save_stack_preview`,
+  `webapp/routers/stack.py:~1991`) — asinh over a 1024 px area-averaged array. The **download** is rendered by
+  `render_preview_png_full_res(..., max_long_edge=8000)` (`download_full_res_png`, `stack.py:~859`) — asinh over
+  a near-native array. Area-averaging changes every one of those statistics (it lifts the min, lowers the
+  99.5th-pct peak, and shrinks σ), so the same slider values produce a different normalisation *and* a different
+  black point at the two resolutions.
+
+  **Measured (agent repro, synthetic linear 1920×1080 master, channel 0, black=0.4):** `lo/hi/σ/shadows` =
+  `0.0068 / 0.0520 / 0.150 / 0.483` at 1024 px vs `−0.0099 / 0.0566 / 0.140 / 0.610` at native — a black point
+  of **0.48 vs 0.61 for the same slider**. End-to-end (downscaling the export back onto the preview grid), the
+  8-bit mean-abs difference was **12–18 (p95 up to 77/255)** across `(stretch,black)` = `(0.5,0.35)`,
+  `(0.7,0.5)`, `(0.3,0.2)`. A control that forces shared (native) statistics collapses the difference to ~0,
+  confirming the driver is the resolution-dependent stats, not stretch/downsample ordering. The effect grows
+  with canvas width: every run wider than 1024 px is affected, worst on the wide mosaics the app is built for.
+  The STF/unadjusted path does **not** have this bug — `_write_preview_png` stretches the full-res canvas and
+  *then* downsizes, so both its preview and its full-res download stretch at native res and match.
+
+  **Why the v0.287.4 tests didn't catch it:** `tests/webapp/test_full_res_png.py` asserts the download equals
+  `render_stack_png(stretch, black)` **at full res** — i.e. it compares two full-res renders (which of course
+  agree) and never compares against the actual saved **1024 px** preview bytes the user tuned. The missing
+  assertion is preview(1024)↔download parity, not download↔full-res-render parity.
+
+  **Proposed fix (for the Builder — a shared hot function's contract, so filed not rushed).** The download must
+  apply the curve derived at the **same resolution the saved preview used**, because the saved bytes are what
+  the user tuned and what every other surface shows. Cleanest shape: let `asinh_stretch` accept optional
+  precomputed stats (`lo`, `hi`, and per-channel `(med, sigma)`) — when omitted it behaves exactly as today (so
+  every existing caller is byte-for-byte unchanged) — and have `render_preview_png_full_res`, on the asinh
+  (`stretch`/`black` supplied) path, compute those stats from a **1024 px** `load_stack_rgb` of the same FITS
+  and pass them in while stretching the full-res array. Anchor to 1024 px (the preview's cap), not to native, so
+  the download matches the picture the user actually approved. Test: a run saved via `render_stack_png(...,
+  max_width=1024)` and downloaded via `render_preview_png_full_res(..., 8000)` with the same sliders must agree
+  to within nearest-neighbour rounding when the export is resampled onto the preview grid (fails before / passes
+  after); an unadjusted run and a display-space run stay byte-for-byte unchanged (no-regression). Two files
+  (`thumbnail.py`, maybe `stack.py`) + tests. **Weigh the alternative** — recomputing the *saved preview*
+  itself at full res and downsizing (STF-style) — but that changes what the stored preview bytes are and is a
+  bigger blast radius; the stats-injection shape keeps the stored bytes untouched.
+
+- **✅ SHIPPED (Scout, v0.322.8, this run, branch `claude/admiring-brahmagupta-wa0rxc`) — ~~`_unique_entry_name`
+  can emit two identical zip member names, so "Download all pictures" can silently drop a picture when a name
+  coincidence hits its generated `-N` form.~~** Fixed as the direction below said: the helper now reserves the
+  **generated** `-N` name in `used` too and advances past any generated name that is itself taken, so a later
+  real stem equal to an earlier generated one collides (gets its own `-N`) instead of duplicating. Plain repeats
+  (`pic, pic, pic` → `pic, pic-2, pic-3`) and case-insensitive dedup are byte-for-byte unchanged (pinned).
+  Upgrade-safe: one pure helper, no config/schema/on-disk/API change. Test: `tests/webapp/test_gallery_pictures_zip.py::test_unique_entry_name_reserves_generated_names_not_just_bases`
+  — `["pic","pic","pic-2"]` → `["pic.png","pic-2.png","pic-2-2.png"]` (all unique; the old code produced
+  `pic-2.png` twice, confirmed), plus the plain-repeat and case-only no-regression cases.
+    *(Original finding: `webapp/routers/gallery.py:896` — on a collision the helper returned
+    `f"{stem}-{seen+1}{suffix}"` but recorded only the original `stem{suffix}` in `used`, never the generated
+    name; `zipfile` accepts the duplicate (a `UserWarning`) and every unzip tool overwrites. Severity: low — a
+    silent omission from a backup, but only under a naming coincidence, not on ordinary repeats (plain
+    `pic, pic, pic` dedup correctly). In practice needs two targets whose `safe_name`s are `pic` and `pic-2`, or
+    a same-day Moon still (`Moon_2026-05-02` → 2nd becomes `Moon_2026-05-02-2`) plus a third source that
+    sanitises to that string. Confidence: reproduced.)*
+
+- **🟢 LOW / METADATA (Scout QA audit 2026-09-02, `seestack/solve/bootstrap.py` — reproduced) — every sub
+  rescued by `bootstrap_solve` stores the **reference** sub's centre as its own `ra_center_deg`/`dec_center_deg`,
+  off by the registration shift.** *(Severity: low — metadata only; the authoritative `wcs_json` written per
+  frame is geometrically correct, so reprojection/stacking place pixels correctly. Confidence: reproduced.)*
+  `bootstrap.py:419` derives the stored centre with `wcs_center_deg_from_text(wtext)`, which returns `CRVAL`.
+  `propagate_wcs` (`bootstrap.py:216-248`) correctly builds each member's WCS by keeping the reference's
+  `CRVAL`/`CD` and offsetting only `CRPIX` — so `CRVAL` is deliberately no longer the member's *frame centre*,
+  and `wcs_center_deg_from_text` (whose docstring assumes "CRPIX at the image centre") returns the reference
+  centre for every propagated member. The true centre is `wcs.pixel_to_world(image_centre_pixel)`. **Reproduced:**
+  Seestar-scale WCS (2.6″/px), stored-vs-true centre error ~15″ at a 6 px shift, ~190″ at ~70 px, ~630″ (>10′)
+  near the 200 px `max_shift_px` cap. Only feeds `ra_center_deg`/`dec_center_deg` consumers (reference-frame
+  selection, span diagnostics, mosaic centring, sibling-hint seeding); since all rescued members share one
+  pointing they clump at the reference centre instead of scattering by dither, so practical impact is small.
+  **Fix (small):** in the apply loop, derive each member's stored centre from its own WCS via
+  `wcs.pixel_to_world` (or `all_pix2world` at the image centre) rather than `CRVAL`. One file + a repro test.
+  Filed, not rushed.
+
+- **⚪ SCOUT QA RE-AUDIT (2026-09-02, webapp routers / ingest / plate-solve / render — swept, mostly CLEAN;
+  three verified findings filed above, the rest clean.** This run rotated off the (drained, re-confirmed-clean)
+  stacking engine core onto the areas the 2026-09-01 note flagged as higher-marginal. Traced adversarially and
+  found **clean**: `seestack/io/ingest.py` (dedup by realpath, the in-place-swap / same-capture / incomplete-
+  rewrite recovery, fingerprint backfill), `webapp/watcher.py` (`StabilityTracker` re-arm on in-place rewrite,
+  stranded-batch re-offer), `seestack/solve/astap.py` (the 3-rung ladder, timeout-token classification,
+  `.ini`/`.wcs` parsing), `seestack/solve/runner.py` (no cross-frame WCS leakage, serial DB apply, RA hours-vs-
+  degrees end-to-end), `seestack/qc/noise_ratio.py` + `grading.py` + `metrics.py` (robust z-score / per-panel
+  split / caps; the green-channel Bayer layouts; NaN-safe medians), `seestack/render/orient.py` (north-up
+  rotation transforms, snap↔PIL split), `webapp/routers/plan.py` (the whole night-planner surface),
+  `webapp/routers/gallery.py`/`stats.py` best-picture ranking + night accounting (one low-sev zip-dedup bug
+  filed), and `seestack/render/thumbnail.py`/`deepening.py`/`zoomclip.py` (the one asinh full-res parity bug
+  filed above; the STF path, NaN-aware downscale, deepening's frozen-STF replay and zoomclip's frame maths all
+  clean). Baseline suite green this run (**3844 passed, 2 skipped**). Next Scout: rotate onto the webapp
+  **stack.py**/**editor.py** routers, **upload.py**/**scanner.py** ingest, and **video.py** — not swept this run.
+
 - **⚪ SCOUT QA RE-AUDIT (2026-09-01, stacking engine core) — swept and CLEAN; no new verified bug.
   Recorded so the next Scout can rotate away from this ground rather than re-tread it.** Read
   adversarially this run, end to end, hunting NaN/coverage semantics, rejection/weighting math,
@@ -10837,7 +10937,7 @@ to **Shipped**.)_
   former**, since a second derivation of the same statistic is exactly what the v0.317.1 process note warns
   about. **Care:** it is a tooltip, not a fourth column — the Target page is the "extremely busy" one.
 
-- **✅ SHIPPED (Builder, v0.323.0, branch `claude/zen-mccarthy-2rptmf`) — ~~make the print nudge a *button*,
+- **✅ SHIPPED (Builder, v0.323.1, branch `claude/zen-mccarthy-2rptmf`) — ~~make the print nudge a *button*,
   not only a sentence.~~** Built as filed, with the entry's two cautions answered rather than assumed.
   `frontend/src/stackPrintBigger.ts` — `printBiggerAction(plan, current)` — is the deliberate sibling of
   `stackMemoryFix.ts`: a pure helper holding the label and the "is there anything to offer?" rule, so both are
@@ -14820,7 +14920,7 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
-- **✅ SHIPPED (Builder, v0.322.8, branch `claude/zen-mccarthy-2rptmf`) — ~~the editor's export panel asks the
+- **✅ SHIPPED (Builder, v0.322.9, branch `claude/zen-mccarthy-2rptmf`) — ~~the editor's export panel asks the
   beginner a question whose own help text says the answer doesn't matter.~~** **Shape (b), and the reasoning
   the entry asked for is here rather than only in the commit.** Shape (a) was considered first and is not
   honest: there *is* no linear version of an edit. The recipe's result **is** the tone mapping — the ops that
@@ -17043,7 +17143,7 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **✅ SHIPPED (Builder, v0.322.9, branch `claude/zen-mccarthy-2rptmf`) — ~~"My best pictures" offers **Play
+- **✅ SHIPPED (Builder, v0.323.0, branch `claude/zen-mccarthy-2rptmf`) — ~~"My best pictures" offers **Play
   slideshow** on a wall that is empty, and the obvious gate is the wrong one.~~** **Both filed shapes, because
   they were not alternatives:** the page now runs the `gallery` query (same `["gallery"]` key the show itself
   uses, so the two share one cached response and a visit that goes on to press the button pays nothing), *and*
@@ -19439,6 +19539,22 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **NEW IDEA (Scout 2026-09-02, spotted auditing `noise_ratio.py`) — say what stacking *should* have bought,
+  next to what it did, so a beginner can tell a healthy stack from an underperforming one.** *(Pillar: trust +
+  understand — PRIORITY 4/3; size S; additive, engine number already exists.)* The "stacking cut your noise
+  ~N×" badge (`seestack/qc/noise_ratio.py`) is a real, shareable number, but on its own a beginner can't tell
+  whether it's *good*. A weighted-mean stack of `k` frames should cut background noise by ~√k, so the honest
+  context is one clause: *"cut your noise 18× — about what 380 subs should give (√380 ≈ 19.5)."* When the
+  measured ratio lands well **below** √k (say < ~0.7·√k), that is the single most useful early-warning a
+  beginner never gets: it usually means alignment is soft, rejection is dropping a lot of frames, or the subs
+  are correlated — a "your stack is noisier than these subs should be; check focus/alignment" nudge. **Keep it
+  gentle and honest, not an alarm:** weighting and legitimate rejection lower the *effective* frame count, so
+  the √k yardstick must use frames actually **used** (`n_frames_used`), and the "below expected" copy should
+  suggest, never assert a fault. It also needs a floor on `k` (√k is meaningless at 5 subs). All the inputs are
+  already on the run (frames-used, the measured ratio); this is a copy/threshold shaping task with a test that
+  a healthy stack reads "as expected" and a deliberately mis-aligned one reads "lower than expected". Measure
+  the 0.7 factor against a couple of real stacks before pinning it.
+
 - **NEW IDEA (Builder 2026-08-31, the anchoring question the v0.320.1 per-panel patches deliberately left
   measured-but-unaddressed) — chain each mosaic panel's refine reference to a neighbour it overlaps, so the
   whole mosaic keys off *one* plate solve instead of one per panel.** *(Pillar: image quality — PRIORITY 4;
@@ -21277,6 +21393,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-09-02) — "Plan my week": which of my targets to point at, on which of the
+  next few nights.** *(Pillar: plan + autonomy — PRIORITY 2–3; size M; additive, offline, no new deps.)* Today
+  the night planner answers three narrow questions and misses the one a weekend imager actually asks. `/tonight`
+  ranks everything *for tonight*; `/best-tonight` ranks your own targets *right now*; `/next-session/{safe}` is
+  *one* target's next windows. **There is no cross-target, multi-night view** — nothing that says *"your best
+  shot this week is M31 on Thursday (4.1 h of dark above your horizon, Moon down); M42 is better Saturday."*
+  A beginner who only gets out on clear weekends wants exactly that: point me at the right thing on the right
+  night. **Shape:** a new read-only `GET /api/plan/week` that runs the existing `next_observing_windows` over
+  each **library** target (the ones already started — this is "finish what I've got", not discovery, which
+  `/suggest` covers) for the next ~7 nights, and returns, per night, the best-placed target and its usable
+  window, plus each target's single best night in the range. All the machinery exists (`next_observing_windows`,
+  the observer resolution, the horizon profile, the registry-signature cache the roll-ups already use) — this is
+  composition, not new astronomy. Sane default: 7 nights, the library's own targets, the user's altitude floor.
+  Plain-language card ("This week: Thu is your best M31 night — 4 h dark, Moon down"). **Cautions:** it iterates
+  windows × targets × nights, so cap the target count and reuse the cache (measure before shipping — the
+  per-target scan is the expensive part, already ~5 ms each); and keep it to *started* targets so it stays "my
+  week", not a catalog dump. Frontend: one new card on Dashboard or a `/plan/week` nested route (fits the §1
+  "add pages, keep it organised" allowance). Grep `webapp/routers/plan.py` first — the per-target pieces are all
+  there to reuse.
 
 - **✅ SHIPPED (Builder, v0.320.0, branch `claude/wizardly-feynman-pp3yz0`) — ~~"Draw your skyline": a visual
   horizon editor for the Tonight planner, replacing the raw numeric (azimuth, altitude) pair list.~~** Built
