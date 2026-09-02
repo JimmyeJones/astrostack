@@ -124,7 +124,7 @@ def solve_one(
     so we read those after the solve completes and serialize the WCS as text
     for storage in the project DB.
     """
-    from seestack.io.wcs_io import wcs_text_from_sidecar
+    from seestack.io.wcs_io import wcs_text_from_raw, wcs_text_from_sidecar
 
     # Derive the true FOV from this frame's header when possible (S30 ≈ 2.1°,
     # S50 ≈ 1.27°), falling back to the passed-through Settings/default FOV.
@@ -151,7 +151,13 @@ def solve_one(
             error=f"{type(exc).__name__}: {exc}",
         )
 
-    wcs_text = wcs_text_from_sidecar(r.wcs_sidecar_path) if r.wcs_sidecar_path else None
+    # The solver runs ASTAP inside a scratch directory (so nothing is written
+    # beside the owner's raw sub — AGENTS.md §10) and hands the sidecar's content
+    # back rather than its path. The path branch stays for any caller that solved
+    # a file it owns and left the sidecar on disk.
+    wcs_text = wcs_text_from_raw(getattr(r, "wcs_sidecar_raw", None))
+    if wcs_text is None and r.wcs_sidecar_path:
+        wcs_text = wcs_text_from_sidecar(r.wcs_sidecar_path)
     ra_center = r.ra_center_deg
     dec_center = r.dec_center_deg
     # ASTAP can solve (returncode 0 + a valid ``.wcs`` sidecar) yet leave the centre

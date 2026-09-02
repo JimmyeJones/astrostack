@@ -43,6 +43,46 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **⚠️ PROCESS NOTE + Builder 2026-09-02, branch `claude/zen-mccarthy-olkjpm` — collision TEN, two of three
+> tasks duplicated by one other Builder inside the same hour, and the first where the *stand-down decision was
+> settled by measurement instead of argument*. Run finished; claims released.**
+> The `…-t59xya` Builder's PR **#682** landed **A1** as v0.326.1 and the planner's `_times_grid` overhang as
+> v0.325.3 — both of which this run had independently built. **Theirs are on `main` and ship; mine are dropped,
+> not re-litigated.** What is new is *how* that was decided, and it is cheap enough to be the standing method:
+> **run your own test file against their shipped code in a `git worktree` of `origin/main`.** That took two
+> minutes and answered the only question that matters — does mine catch anything theirs doesn't?
+> * **A1 — 22 of my 23 tests passed on theirs.** The single failure was a *design* difference, not a defect
+>   (on a bright image with no headroom mine returns the identity where theirs still pins the sky and scales
+>   the shoulder — theirs keeps doing something useful, and is shipped). Decisive for the one place I thought I
+>   was ahead: I had added a **noise-aware lift anchor** (`max(p50, sky + 3σ)`) after measuring the mode still
+>   reading **0.1357 for a 0.1738 sky** post-spike-fix. Their code passes every sky-movement test I wrote,
+>   which means my 0.1357 came from an **unrealistic fixture** — a star-poor scene whose 99.5th percentile is
+>   the sky itself, so `autostretch` normalises against the background and spreads it unnaturally wide. **A
+>   fixture that isn't shaped like the owner's data manufactures bugs as readily as it hides them**, which is
+>   the same lesson A1 itself taught from the other end. The extra layer was therefore speculative hardening,
+>   not a fix, and shipping it would have been churn on the on-by-default path. Dropped.
+> * **`_times_grid` — theirs is better.** Near-identical clipping, but their `minutes_above_min_alt` sums a
+>   per-sample interval array where mine capped `count × step` at the window length. Theirs is the honest
+>   quantity; mine was a bound on a wrong one.
+>
+> **Two genuinely additive pieces were re-applied on top of theirs, in their names, each verified to fail on
+> pre-fix code first** (the test for "is this additive?" is not "did I write it" but "does it catch something"):
+> the two **sweeps** in `tests/test_edit_curve.py` — across the five stretch targets Auto and the presets
+> actually use, and across four stack depths — which pin the audit's own quantified claims (the two branches
+> were wrong in *opposite directions*, so a single-point test can sit on one branch and pass while the other
+> rots; **9 of the 9 sweep cases fail on pre-fix code**); and the **XS friendliness item their own run filed**
+> as the gap it opened (the ghost curve's unexplained fallback branch), built and tested here rather than left
+> for another run. Both fold into their fixture rather than standing up a parallel one.
+>
+> **The one thing that did not collide is the one worth noting for the rotation:** **A3** (plate-solving
+> writing `.wcs`/`.ini` sidecars into `incoming/`) — nobody has touched `seestack/solve/` in 25 commits. It was
+> filed "verified by code reading, **not reproduced** — no ASTAP binary", and both overlapping runs went
+> to the top of the *editor* queue instead. The audit's R5 finding predicted exactly this: sweeps land where
+> the code is easy to read, and the findings that survive are the ones needing an **external process, a
+> mosaic-shaped canvas, or a proxy scale** to exhibit. If two Builders are running, the cheapest
+> de-confliction available is for the second to take the item whose repro needs a *stub binary or a fixture*
+> rather than the one whose repro is a function call.
+
 > **⚠️ PROCESS NOTE + Builder 2026-09-02, branch `claude/zen-mccarthy-46ejou` — collision NINE, and the first
 > where an entire run was duplicated: all three tasks, by one other Builder, inside the same hour. Run finished,
 > everything stood down bar one additive fix.**
@@ -505,27 +545,68 @@ _(nothing else claimed — claim an item here with your branch name)_
     regression test that feeds real `autostretch` output**, not a synthesised approximation of it. Re-check the
     "did Auto improve this?" claims elsewhere in the backlog that were measured through this same curve.
 
-- **🔴 A3 — PLATE-SOLVING WRITES FILES INTO `incoming/`, AND THE CI GUARD STRUCTURALLY CANNOT SEE IT.**
-  *(Severity: **broken guarantee** — §10's read-only rule. **No data loss**: the owner's FITS are not modified.
-  Confidence: verified by code reading; **not** reproduced — no ASTAP binary in the audit container.)*
+- **✅ SHIPPED (Builder, v0.326.2, branch `claude/zen-mccarthy-olkjpm`) — ~~A3: plate-solving writes files into
+  `incoming/`, and the CI guard structurally cannot see it.~~** Fixed, and **reproduced first** — the audit
+  filed this "verified by code reading, not reproduced (no ASTAP binary)", and reproducing it turned out to be
+  the whole trick: a **stub `astap` executable** that writes its sidecars beside whatever `-f` names, which is
+  all the real binary does that matters here. With it, the old code leaves
+  `Light_M 31_10.0s_IRCUT_0001.wcs` and `.ini` sitting in the raw folder; the new code leaves the directory
+  listing byte-identical, three re-solves included.
 
-  With the webapp default `copy_to_cache = False` (`webapp/config.py`, confirmed in `docs/webapp.md`),
-  `cached_path` is NULL, so `readable_frame_path` (`seestack/io/project.py`) returns **the source path**, and
-  `ASTAPSolver._run` (`seestack/solve/astap.py`) invokes ASTAP as `-f <source> -wcs`, then reads
-  `fits_path.with_suffix(".wcs")` and `.ini`. **ASTAP therefore creates — and on every re-solve overwrites —
-  two sidecar files beside each raw sub in `incoming/<T>_sub/`.** The FITS themselves are untouched (`-update`
-  is deliberately not passed), so this is not corruption; but §10 permits only *read* and *create-new*, this is
-  create-then-**overwrite**, and it accumulates thousands of non-FITS files in the owner's raw tree.
-  - **Why the guard misses it:** both layers of `tests/webapp/test_incoming_readonly_guard.py` are blind here —
-    the stdlib sentinel cannot see **subprocess** writes, and the snapshot layer never runs a solve because CI
-    installs ffmpeg but **no ASTAP**. The 2026-09-02 Scout sweep marked `astap.py` and `runner.py` "traced,
-    clean" for exactly this reason: reading the code cannot reveal what another process does to the filesystem.
-  - **Fix direction:** solve a **temp copy** the way `seestack/solve/bootstrap.py` already does
-    (`TemporaryDirectory`), or redirect the sidecars into the target's cache via ASTAP's output-basename
-    option. **Add a CI test with a stub `astap` executable** that writes sidecars next to `-f` and asserts the
-    `incoming/` listing is byte-identical afterwards — that closes the whole class, not just this instance.
-  - **Owner check that settles it in one line:** `ls incoming/<any target>_sub | grep -c '\.wcs$'` — non-zero
-    confirms it on the live box.
+  **The fix is a scratch copy, not `-o`.** ASTAP does have an output-basename option, but a §10 guarantee on
+  data with no backup should not rest on a CLI flag whose support varies by version and whose failure mode is
+  silent. `ASTAPSolver._solve_once` now copies the frame into a `TemporaryDirectory` and runs there, so the
+  guarantee holds *whatever* ASTAP does with the path it is given. A symlink or a hardlink would have been
+  cheaper and was rejected for the same reason: both lead any write straight back to the original. The copy is
+  a few milliseconds against a solve measured in seconds, and it happens once per `solve()`, not once per
+  ladder rung.
+
+  **The consequence worth knowing:** the sidecars now die with the scratch directory, so the solver reads them
+  before returning. `ASTAPResult` gained `wcs_sidecar_raw` (additive; `wcs_sidecar_path` stays for a caller that
+  solved a file it owns), `wcs_io` grew a pure `wcs_text_from_raw` split out of `wcs_text_from_sidecar` so both
+  paths normalise identically, and `solve_one` prefers the content and falls back to the path. The ASTAP log
+  tail has the scratch path substituted back to the source path, so a failure a user reads still names their
+  frame.
+
+  **The guard file gained a fourth layer, and that is the durable half.** Layers 1–3 are all structurally blind
+  to a subprocess — the stdlib sentinel wraps only Python's own calls, and CI installs ffmpeg but no ASTAP, so
+  no solve had ever run in it. `test_plate_solving_writes_no_sidecars_into_incoming` and
+  `test_a_re_solve_of_the_same_frame_still_leaves_incoming_alone` close the class, not the instance: any future
+  code that hands an external process a path inside `incoming/` fails them.
+
+  **Three fixtures in `tests/test_astap.py` were rewired, not weakened.** Their fake `subprocess.run` wrote
+  sidecars beside the *original* frame — i.e. modelled a binary that does not exist, and would have gone on
+  passing if the solver started handing over the source path again. They now derive the sidecar paths from the
+  command's own `-f` argument (a shared `_sidecar_paths`/`_write_solved_sidecars`), which is what the real
+  binary does; every assertion is unchanged.
+
+  **The owner check from the entry still stands** and is worth running once on the live box:
+  `ls incoming/<any target>_sub | grep -c '\.wcs$'`. A non-zero count is the litter this fix stops *adding to*
+  — v0.326.2 does not remove what is already there, and must not: §10 permits no deletion inside `incoming/`,
+  and the app has no business deciding those files are unwanted. If the owner wants them gone it is his own
+  `find … -delete`, not ours.
+
+  - **~~🔴 A3 — PLATE-SOLVING WRITES FILES INTO `incoming/`, AND THE CI GUARD STRUCTURALLY CANNOT SEE IT.~~**
+    *(Severity: **broken guarantee** — §10's read-only rule. **No data loss**: the owner's FITS are not modified.
+    Confidence: verified by code reading; **not** reproduced — no ASTAP binary in the audit container.)*
+
+    With the webapp default `copy_to_cache = False` (`webapp/config.py`, confirmed in `docs/webapp.md`),
+    `cached_path` is NULL, so `readable_frame_path` (`seestack/io/project.py`) returns **the source path**, and
+    `ASTAPSolver._run` (`seestack/solve/astap.py`) invokes ASTAP as `-f <source> -wcs`, then reads
+    `fits_path.with_suffix(".wcs")` and `.ini`. **ASTAP therefore creates — and on every re-solve overwrites —
+    two sidecar files beside each raw sub in `incoming/<T>_sub/`.** The FITS themselves are untouched (`-update`
+    is deliberately not passed), so this is not corruption; but §10 permits only *read* and *create-new*, this is
+    create-then-**overwrite**, and it accumulates thousands of non-FITS files in the owner's raw tree.
+    - **Why the guard misses it:** both layers of `tests/webapp/test_incoming_readonly_guard.py` are blind here —
+      the stdlib sentinel cannot see **subprocess** writes, and the snapshot layer never runs a solve because CI
+      installs ffmpeg but **no ASTAP**. The 2026-09-02 Scout sweep marked `astap.py` and `runner.py` "traced,
+      clean" for exactly this reason: reading the code cannot reveal what another process does to the filesystem.
+    - **Fix direction:** solve a **temp copy** the way `seestack/solve/bootstrap.py` already does
+      (`TemporaryDirectory`), or redirect the sidecars into the target's cache via ASTAP's output-basename
+      option. **Add a CI test with a stub `astap` executable** that writes sidecars next to `-f` and asserts the
+      `incoming/` listing is byte-identical afterwards — that closes the whole class, not just this instance.
+    - **Owner check that settles it in one line:** `ls incoming/<any target>_sub | grep -c '\.wcs$'` — non-zero
+      confirms it on the live box.
 
 - **🟠 A2 — PREVIEW AND EXPORT DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
   PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that
@@ -560,6 +641,28 @@ _(nothing else claimed — claim an item here with your branch name)_
   **Fix:** when the scan has *positive evidence* a folder is output (a same-parent `_sub` sibling exists on disk
   in this scan), **lift the cap for that folder**; keep the cap for the no-sibling case. Reversible, never a
   delete.
+
+  > **⚠️ READ BEFORE STARTING — the filed fix collides head-on with an existing regression test, and whoever
+  > takes this has to resolve that first** *(Builder 2026-09-02, found while sizing this after shipping A3;
+  > not started, deliberately — it needs a decision, not a patch.)* The proposed evidence — "a same-parent
+  > `_sub` sibling exists on disk" — is **exactly the scenario**
+  > `test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_name`
+  > (`tests/test_scanner.py`) exists to protect: 8 of a user's *own* raw subs in a plain folder named
+  > `Andromeda/`, sitting beside a Seestar `Andromeda_sub/`. Lift the cap on sibling evidence and that test's
+  > 8 real subs are mass-rejected. (It passes today only because its frames are DB rows with nothing on disk,
+  > so a disk-based sibling check finds no sibling — i.e. it would go green for the wrong reason, which is
+  > worse than failing.) **The discriminator that actually separates the two cases is the filename, not the
+  > folder or the count:** the Seestar's per-session output is `Stacked*.fit`, real subs are
+  > `Light_<T>_<exp>_<filter>_*.fit`. The repo *knows* this convention — every scanner fixture uses it
+  > (`tests/test_scanner.py` writes `Stacked.fit`, `Stacked_60s.fit`, `Stacked_{i:02d}.fit`) — but **no
+  > production module matches on it**: `grep -rn "Stacked" --include=*.py seestack/ webapp/` returns nothing.
+  > So the shape to consider is "reject a bare `<T>/` frame whose *filename* is on-device output, at any
+  > count; keep the ≤2 cap for everything else", which rejects the owner's 22 and keeps the mixed-source test's
+  > 8 without either heuristic having to guess. **Confirm the naming against the owner's real folder listing
+  > before building it** — the listing is already in this file, buried in the `⚪ CLOSED AS A NON-BUG` mosaic
+  > entry (search `"skips a bare"`) — and note this is the **on-by-default ingest path**, so an over-broad
+  > match silently drops real subs from a stack. A second, header-based discriminator (a stacked output's
+  > `EXPTIME` is N×10 s, or it carries a stack-count card) would be stronger still if the DB rows carry it.
 
 - **🟠 A6 — WALK-AWAY AUTO-REJECT PICKS ITS METHOD FROM THE *WHOLE TARGET'S* FRAME COUNT, so a mosaic panel
   under 11 subs gets a rejection pass that is mathematically blind and trails survive.** *(Confidence: verified
@@ -10850,16 +10953,29 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-09-02, a gap the v0.326.1 fix opened rather than closed) — the editor's ghost curve
-  now has two possible shapes and only explains one of them.** *(Pillar: friendliness — PRIORITY 3; size XS.)*
-  `/editor/curve-suggestion` returns `target_bg` on the data-driven branch, and the UI uses it to name the goal
-  ("aims your typical tone toward a pleasant grey"). On the **sky-anchored fallback** — which is now the common
-  branch on a sky-dominated stack, i.e. most Seestar stacks — `target_bg` is `None` by design (there is no
-  midtone target; it pins the background and lifts a shoulder above it), so the ghost appears with **no
-  explanation at all** beside it. One plain-language line for that branch would close it: *"keeps your
-  background exactly where the stretch put it, and adds a little contrast above it."* **Grep first:** the copy
-  lives with the Curves widget's auto-contrast ghost in `Editor.tsx`/`CurvesWidget.tsx`; this is a sentence,
-  not a control, and it must not become another always-on banner.
+- **✅ SHIPPED (Builder, v0.326.2, branch `claude/zen-mccarthy-olkjpm`) — ~~the editor's ghost curve now has two
+  possible shapes and only explains one of them.~~** Filed by the `…-t59xya` Builder as the gap its A1 fix
+  opened; taken here in the same hour by the run that had independently built the same fix and stood it down
+  (see the collision note under "In progress"), so the sentence lands with its own frontend test rather than
+  waiting for another run. The entry's **"grep first"** was worth doing: the copy is *not* in `CurvesWidget.tsx`
+  — the only place the goal is named is the header "Auto curve" button's Mantine `Tooltip` in `Editor.tsx`,
+  whose label was unconditional and asserted a midtone lift on both branches, while the button's *own* text
+  already degraded correctly (`greyPct` is null on the fallback). So the fix is one conditional label, not a new
+  element: **"There's nothing above the background's noise to lift here, so it adds contrast to the brighter
+  tones only and leaves your sky exactly where it is."** No always-on banner, as the entry required. Pinned by
+  `Editor.test.tsx` → *"drops the '~25% grey' claim when the curve is the sky-anchored fallback"*, which also
+  covers the failure mode nothing else did: a `target_bg` of `null` must never reach the button's label.
+
+  - **~~NEW IDEA (Builder 2026-09-02, a gap the v0.326.1 fix opened rather than closed) — the editor's ghost curve
+    now has two possible shapes and only explains one of them.~~** *(Pillar: friendliness — PRIORITY 3; size XS.)*
+    `/editor/curve-suggestion` returns `target_bg` on the data-driven branch, and the UI uses it to name the goal
+    ("aims your typical tone toward a pleasant grey"). On the **sky-anchored fallback** — which is now the common
+    branch on a sky-dominated stack, i.e. most Seestar stacks — `target_bg` is `None` by design (there is no
+    midtone target; it pins the background and lifts a shoulder above it), so the ghost appears with **no
+    explanation at all** beside it. One plain-language line for that branch would close it: *"keeps your
+    background exactly where the stretch put it, and adds a little contrast above it."* **Grep first:** the copy
+    lives with the Curves widget's auto-contrast ghost in `Editor.tsx`/`CurvesWidget.tsx`; this is a sentence,
+    not a control, and it must not become another always-on banner.
 
 - **NEW IDEA (Builder 2026-09-02, the half the v0.323.1 rejection-reach fix could not reach) — the same blind
   κ-σ runs on the *walk-away* path, where there is no form to warn on.** *(Pillar: autonomy + image quality —
@@ -20134,6 +20250,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **LEAD (Builder 2026-09-02, the half of A1's last line nobody has done — distinct from the sweep idea below,
+  and worth keeping separate) — every constant that was *tuned by eye* through the old contrast curve was
+  tuned through a curve that moved the sky, so re-measure the ones that decided a default.** *(Pillar: trust +
+  image quality — PRIORITY 4; size M; pure measurement, no behaviour change unless a number turns out wrong.)*
+  The ⭐ entry below asks "which other *statistics* share A1's clipped-shadow blindness?"; this asks the
+  narrower, more concrete question **"which shipped *constants* were chosen by looking at a picture the bug had
+  already altered?"** Until v0.326.1 Auto ended with a curve that brightened a sky-dominated stack's background
+  by **6–33 %** at `target_bg` 0.15–0.22 and *darkened* it ~20 % at 0.25, so any past A/B judged on a finished
+  Auto picture was reading a background Auto had moved. **Where to look, in the order they matter:** the
+  `target_bg` choices themselves (`tone.stretch` 0.18 in `auto_recipe` vs 0.18/0.22/0.25 in the built-in
+  presets — picked to look right *through* the old curve, and the most likely real finding, since the
+  0.15–0.22 band and the 0.25 preset were being pushed in **opposite** directions); then the SCNR amount and
+  the saturation scaling in `auto_recipe` (both chosen relative to measured sky/noise and both applied *before*
+  the curve, so probably safe — confirm rather than assume); then any Shipped entry whose evidence is a
+  before/after sky or brightness number measured on a finished Auto picture. **Method:** re-run the comparison
+  on v0.326.1+ and report the delta; change a constant only if the old choice is *measurably* worse now, and
+  say so with the numbers. **Caution:** these are on-by-default constants on a live install — a change alters
+  every future picture, so it wants its own commit and a stated before/after, never a fold-in.
 
 - **⭐ NEW IDEA (Builder 2026-09-02, generalised from the A1 fix this run — the strongest follow-on it
   exposed) — sweep every display-space measurement for the *same* clipped-shadow blindness A1 turned out to
