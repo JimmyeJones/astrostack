@@ -417,3 +417,81 @@ def test_coverage_sidecar_says_what_its_numbers_actually_are(tmp_path):
     # Label-only: the pixels are untouched, because the sky-leveling pass and the
     # editor's EditContext.coverage both read them.
     assert np.allclose(data, 3.25)
+
+
+# --------------------------------------------------------------------------- #
+# INSTRUME — the camera, carried from the subs rather than assumed
+# --------------------------------------------------------------------------- #
+
+def _frames_for_camera(tmp_path, n=3, **synth_kwargs):
+    """Frame rows pointing at real synthetic subs, so the stamp reads a header."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/ for synth
+    from synth import write_seestar_fits
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for i in range(n):
+        p = tmp_path / f"sub_{i}.fit"
+        write_seestar_fits(p, width=32, height=24, n_stars=4, seed=i, **synth_kwargs)
+        rows.append(SimpleNamespace(exposure_s=10.0, cached_path=None,
+                                    source_path=str(p), timestamp_utc=None))
+    return rows
+
+
+def _camera_meta(tmp_path, **synth_kwargs):
+    proj = SimpleNamespace(get_meta=lambda k: "M42" if k == "name" else None)
+    frames = _frames_for_camera(tmp_path, **synth_kwargs)
+    return _build_output_header_meta(proj, frames, StackOptions(), len(frames))
+
+
+def test_the_master_records_the_camera_its_subs_were_taken_with(tmp_path):
+    """The acquisition nameplate baked onto every shared and printed picture used
+    to *assert* "ZWO Seestar S50" with no header behind it, and the owner has an
+    S30. The master now carries what the subs actually say."""
+    meta = _camera_meta(tmp_path / "s30", focal_len_mm=150.0, pixel_size_um=2.9)
+    assert meta["INSTRUME"][0] == "ZWO Seestar S30"
+
+    meta = _camera_meta(tmp_path / "s50", focal_len_mm=250.0, pixel_size_um=2.9)
+    assert meta["INSTRUME"][0] == "ZWO Seestar S50"
+
+
+def test_subs_that_name_no_camera_leave_the_card_out(tmp_path):
+    """No card beats a wrong one: the caption then simply omits the camera."""
+    meta = _camera_meta(tmp_path / "quiet", instrume=None)
+    assert "INSTRUME" not in meta
+
+
+def test_the_camera_stamp_never_breaks_a_stack(tmp_path):
+    """Provenance is best-effort — unreadable or missing subs must not raise."""
+    proj = SimpleNamespace(get_meta=lambda k: "M42" if k == "name" else None)
+    gone = [SimpleNamespace(exposure_s=10.0, cached_path=None,
+                            source_path=str(tmp_path / "nope.fit"), timestamp_utc=None)]
+    meta = _build_output_header_meta(proj, gone, StackOptions(), 1)
+    assert "INSTRUME" not in meta
+    assert meta["OBJECT"][0] == "M42"  # the rest of the provenance still lands
+
+
+def test_the_camera_stamp_reads_only_a_bounded_number_of_subs(tmp_path, monkeypatch):
+    """One provenance card must not become thousands of file reads on the owner's
+    5,000-sub target when nothing in the set names a camera."""
+    from astropy.io import fits as _fits
+
+    from seestack.stack.stacker import _CAMERA_HEADER_MAX_READS
+
+    frames = _frames_for_camera(tmp_path / "anon", n=40, instrume=None)
+    reads: list[str] = []
+    real = _fits.getheader
+
+    def counting_getheader(path, *a, **kw):
+        reads.append(str(path))
+        return real(path, *a, **kw)
+
+    monkeypatch.setattr(_fits, "getheader", counting_getheader)
+    proj = SimpleNamespace(get_meta=lambda k: None)
+    meta = _build_output_header_meta(proj, frames, StackOptions(), len(frames))
+
+    assert "INSTRUME" not in meta
+    assert 0 < len(reads) <= _CAMERA_HEADER_MAX_READS

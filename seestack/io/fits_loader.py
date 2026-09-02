@@ -126,6 +126,48 @@ def fov_deg_from_header(info: FitsHeaderInfo) -> float | None:
     return fov
 
 
+# The two Seestar models by focal length (mm), for a frame whose header names no
+# instrument. **Never assume one of them** — the app has been wrong about this
+# before, printing "ZWO Seestar S50" onto every shared and printed picture of an
+# owner who has an S30 (AGENTS.md §1 "Owner facts"). A focal length that matches
+# neither is somebody else's telescope, and the honest answer there is silence.
+_SEESTAR_FOCAL_MM = ((150.0, "ZWO Seestar S30"), (250.0, "ZWO Seestar S50"))
+# Half-width of the match window, mm. Generous enough for a header that rounds or
+# records the objective's real measured focal length, far too narrow to let the
+# two models blur into each other (they are 100 mm apart).
+_SEESTAR_FOCAL_TOL_MM = 20.0
+
+
+def camera_name_from_header(header: Any) -> str | None:
+    """Name the camera a frame came from, or ``None`` when it doesn't say.
+
+    Prefers ``INSTRUME`` — the camera's own statement about itself, and the FITS
+    standard's key for it — normalising a bare ``"Seestar S30"`` to the full
+    ``"ZWO Seestar S30"`` the app's captions use. A non-Seestar instrument is
+    returned as written: a beginner who drops a DSLR frame in should see their own
+    gear named, not ours.
+
+    Falls back to the focal length (``FOCALLEN``, mm) for a frame that carries the
+    optics but no instrument name — the same two numbers ``fov_deg_from_header``
+    already relies on. **Returns ``None`` rather than guessing**: a caption that
+    names the wrong camera is a false statement printed onto a picture the owner
+    shares, which is worse than one that names no camera at all.
+    """
+    name = _get_str(header, ("INSTRUME", "INSTRUMENT"))
+    if name:
+        low = name.lower().replace("-", " ")
+        for _mm, full in _SEESTAR_FOCAL_MM:
+            if full.split()[-1].lower() in low.split():  # "s30" / "s50"
+                return full
+        return name
+    focal_mm = _get_float(header, ("FOCALLEN", "FOCALLENGTH"))
+    if focal_mm:
+        for mm, full in _SEESTAR_FOCAL_MM:
+            if abs(float(focal_mm) - mm) <= _SEESTAR_FOCAL_TOL_MM:
+                return full
+    return None
+
+
 def load_seestar_raw(
     path: str | Path,
     *,
