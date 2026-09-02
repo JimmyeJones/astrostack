@@ -418,6 +418,229 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+> **📌 EXTERNAL AUDIT 2026-09-02 — the ten app findings below (A1–A10) come from an independent read-only audit
+> commissioned by the owner, baselined at `4c2dac4` (v0.322.7) and re-verified at `87987cd5` (v0.325.2, 24
+> commits later). All ten still reproduced after re-verification. Full suite green at baseline (3,837 passed /
+> 2 skipped). They are ordered by effect on the owner's pictures — A1 first. The audit's process findings
+> (backlog bloat, collisions, QA-rotation aim) are filed as the R-items further below; `AGENTS.md` §1 and §11
+> have already been updated for the highest-value ones.**
+
+- **🔴🔴 A1 — AUTO'S CONTRAST CURVE BRIGHTENS THE SKY BY ~36% ON EVERY AUTO PICTURE, AND THE REGRESSION TEST
+  THAT SHOULD CATCH IT PASSES ON A FIXTURE THAT CANNOT EXHIBIT THE BUG.** *(Severity: **wrong picture, on the
+  on-by-default path, at every stack depth**. Confidence: **verified by reproduction**. This is the single
+  highest-value item in this file — it silently degrades every one-click result the owner has ever made.)*
+
+  `_sky_mode` (`seestack/edit/curve.py`) finds the sky as the histogram mode over `[p0.5, median]` in 128 bins.
+  The STF stretch that runs immediately before it (`tone.stretch`, `mode: stf`) **clips 1–2 % of pixels to
+  exactly 0**. That zero spike is always the tallest bin, so `suggest_tone_curve` reads the sky as **0.0008**,
+  its "the median *is* the sky, so decline" gate never fires, and it lifts the median — which *is* the sky —
+  halfway toward `CURVE_TARGET_BG` 0.25.
+  - **Measured** on a synthetic linear stack through the *full* Auto recipe: sky patch **0.130 → 0.178
+    (+36 %)**, with the curve point `[0.14, 0.195]` appearing identically at **every** depth from 4 to 1,000
+    subs. The opposite branch is wrong too: on a bright-nebula frame the suggestion declines and
+    `_AUTO_CONTRAST_FALLBACK` **darkens** the sky by 20 %.
+  - **Why it was never caught:** `test_sky_dominated_frame_does_not_lift_the_sky` (`tests/test_edit_curve.py`)
+    builds its fixture as `clip(sky + normal)` — **no zero spike** — so it never sees real STF output. This is
+    the bug the v0.210.6 fix ("auto-contrast curve lifting the whole sky") claims to have closed; **it is
+    closed only for the fixture.** Treat this as the canonical example of the wider risk that a fix's own test,
+    written by the agent that wrote the fix, confirms the fix's *model* of the bug rather than the bug.
+  - **Fix direction:** compute the mode over **strictly positive** values, or over a luminance sky population
+    at/below the median; make `_AUTO_CONTRAST_FALLBACK` pin `(sky, sky)` rather than move it; and **add a
+    regression test that feeds real `autostretch` output**, not a synthesised approximation of it. Re-check the
+    "did Auto improve this?" claims elsewhere in the backlog that were measured through this same curve.
+
+- **🔴 A3 — PLATE-SOLVING WRITES FILES INTO `incoming/`, AND THE CI GUARD STRUCTURALLY CANNOT SEE IT.**
+  *(Severity: **broken guarantee** — §10's read-only rule. **No data loss**: the owner's FITS are not modified.
+  Confidence: verified by code reading; **not** reproduced — no ASTAP binary in the audit container.)*
+
+  With the webapp default `copy_to_cache = False` (`webapp/config.py`, confirmed in `docs/webapp.md`),
+  `cached_path` is NULL, so `readable_frame_path` (`seestack/io/project.py`) returns **the source path**, and
+  `ASTAPSolver._run` (`seestack/solve/astap.py`) invokes ASTAP as `-f <source> -wcs`, then reads
+  `fits_path.with_suffix(".wcs")` and `.ini`. **ASTAP therefore creates — and on every re-solve overwrites —
+  two sidecar files beside each raw sub in `incoming/<T>_sub/`.** The FITS themselves are untouched (`-update`
+  is deliberately not passed), so this is not corruption; but §10 permits only *read* and *create-new*, this is
+  create-then-**overwrite**, and it accumulates thousands of non-FITS files in the owner's raw tree.
+  - **Why the guard misses it:** both layers of `tests/webapp/test_incoming_readonly_guard.py` are blind here —
+    the stdlib sentinel cannot see **subprocess** writes, and the snapshot layer never runs a solve because CI
+    installs ffmpeg but **no ASTAP**. The 2026-09-02 Scout sweep marked `astap.py` and `runner.py` "traced,
+    clean" for exactly this reason: reading the code cannot reveal what another process does to the filesystem.
+  - **Fix direction:** solve a **temp copy** the way `seestack/solve/bootstrap.py` already does
+    (`TemporaryDirectory`), or redirect the sidecars into the target's cache via ASTAP's output-basename
+    option. **Add a CI test with a stub `astap` executable** that writes sidecars next to `-f` and asserts the
+    `incoming/` listing is byte-identical afterwards — that closes the whole class, not just this instance.
+  - **Owner check that settles it in one line:** `ls incoming/<any target>_sub | grep -c '\.wcs$'` — non-zero
+    confirms it on the live box.
+
+- **🟠 A2 — PREVIEW AND EXPORT DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
+  PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that
+  lies. Confidence: verified on synthetic data. Three instances, **one mechanism**.)*
+  - **`tone.color_calibrate`** (`seestack/post/color_cal.py`): `DAOStarFinder(fwhm=3.0)`, aperture 4 px and
+    `min_stars=20` are **none of them scaled**. On a mosaic canvas at proxy step 3 the proxy finds too few
+    stars and silently falls back to `background_neutral` **while the export runs gray-star** — measured
+    preview/export gain ratio **R 1.157, B 1.287** on a 4000×2400 canvas. A 1920×1080 single field matches
+    within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.
+  - **`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
+    own 1.5 px radius becomes 0.375 px at step 4 — the preview shows **13–46 %** of the export's sharpening,
+    and unlike deconv and star-reduce it shows **no advisory**.
+  - **`detail.hot_pixels`** (`seestack/bg/hot_pixels.py`): a fixed 3×3 isolation test erased or dimmed **259 of
+    582 bright stars** in a step-3 preview while the export touched none. Not in Auto, but the preview
+    misrepresents what the op does.
+  - Also verified, smaller: SCNR's 3 px noise-protect blur unscaled (cosmetic); `stars.reduce`'s advisory
+    points the **wrong way** for 2–3 px stars.
+  - **Fix direction:** scale every pixel-unit parameter through `ctx.scaled_px` with a sensible floor, and
+    **when a proxy op falls back to a different mode than the export will use, say so in the UI** rather than
+    silently diverging. Note the backlog's existing parity claims ("sharpen bit-exact", "RMSE ≈0 for sharpen")
+    are **disproved** by this on any scene with sub-proxy-pixel stars.
+
+- **🟠 A7 — PRE-v0.184.9 SEESTAR ON-DEVICE OUTPUTS STAY ACCEPTED *INSIDE* THE OWNER'S REAL TARGETS, AND CAN BE
+  PICKED AS THE ALIGNMENT REFERENCE.** *(Severity: wrong reference frame / mild contamination on his biggest
+  targets. Confidence: guard behaviour verified by reproduction; downstream reference-pick effect likely.)*
+  `Project.reject_seestar_output_frames` (`seestack/io/project.py`) only rejects a bare `<T>/` folder's frames
+  when it holds **at most `_MAX_SEESTAR_OUTPUT_FRAMES = 2`** — but the owner's real library has one stacked
+  FITS *per session*: bare `M 3` carries **+22** frames over `M 3_SUB`, `M 13` **+9**, `M 101` **+11**,
+  `NGC 281W` **+10`. Those never get rejected on re-scan, stay in the stack **and in the reference pool**, and
+  `pick_central_frame` scores by distance-to-median-pointing then FWHM — which is exactly where a device-stacked
+  output sits (dither centre, high SNR). Reproduced: 5 outputs beside a `_SUB` sibling → **0 rejected**.
+  **Fix:** when the scan has *positive evidence* a folder is output (a same-parent `_sub` sibling exists on disk
+  in this scan), **lift the cap for that folder**; keep the cap for the no-sibling case. Reversible, never a
+  delete.
+
+- **🟠 A6 — WALK-AWAY AUTO-REJECT PICKS ITS METHOD FROM THE *WHOLE TARGET'S* FRAME COUNT, so a mosaic panel
+  under 11 subs gets a rejection pass that is mathematically blind and trails survive.** *(Confidence: verified
+  on synthetic data through the public `run_stack`. Owner impact depends on per-panel depth — see open
+  questions.)* `_resolve_auto_reject(options, n)` (`seestack/stack/stacker.py`) is called with
+  `n = len(frames)` — the count **across all panels**. A 2×2 mosaic with 3 subs/panel gives n = 12 ≥
+  `kappa_min_frames(3.0) = 11`, so it dispatches κ-σ, which **by the module's own docstring cannot reject a
+  lone trail below 11 samples**. Measured: streak residual **p99.9 = 1,282 ADU** on the mosaic (REJFRAC 1e-6)
+  vs **2.8 ADU** on a 12-sub single field with identical options, and **21.9 ADU** on the same mosaic with
+  explicit min/max. *(Distinct from the 2026-09-02 entry about a user-saved `sigma_clip` — this is the auto
+  path choosing wrong.)* **Fix:** resolve the method from the **minimum substantial per-panel count**
+  (`pointing_groups` already exists) or per-pixel from the coverage plane; extend `stackhealth`'s
+  `rejection_blind` note the same way.
+
+- **🟡 A5 — the Target page's "Your picture" ignores the pinned cover that every other surface honours.**
+  `frontend/src/routes/Target.tsx` takes `runs.data?.[0]` (newest run) for the hero, its share caption and its
+  Edit button, while the Library tile, Best wall, montage and `grainier-newest` all resolve **pinned cover
+  first** (`webapp/routers/gallery.py` `_representative_run`, `webapp/routers/targets.py`
+  `current_picture_path`). Pin run 3, re-stack to run 4 → the Target page shows a *different picture* from the
+  Library card while its own notes talk about "the cover". **Fix:** same precedence as `_representative_run`;
+  label "Your picture (cover)" vs "Your newest picture".
+
+- **🟡 A8 — a target whose missing files never return is held back from auto-stacking FOREVER, and the owner
+  has no action to take.** `_auto_stack_readability_hold` (`webapp/pipeline.py`) holds while
+  `readable < prior_max`. If the owner deletes a bad session from `incoming/` — his folder, his right — the DB
+  rows persist, `unreadable` never drops, and the target only releases once new subs exceed the best run's
+  `n_frames_used`. Reproduced: best run 10, delete 4, add 3 → **held**; needs 5 new subs to escape. He is told,
+  but is offered nothing to do. **Fix:** a reversible, DB-only "mark N missing subs unavailable" (`accept=0`,
+  auto-restored if the path reappears) — one click, or automatic once the same set has been unreadable across
+  K scans over N days. **Also:** the "healing an already-degraded picture is deliberately left open" note in
+  `AGENTS.md` §1 is **stale** — `_auto_stack_degraded_recheck` shipped.
+
+- **🟡 A9 — editor exports drop the WCS**, so any edited picture loses North-up, scale bar, compass and object
+  labels. `_apply_editor_to_run` (`webapp/pipeline.py`) passes `wcs_text=None` to `write_stack_outputs`
+  **even when the recipe contains no geometry op**. **Fix:** carry the source header's celestial cards when no
+  enabled `geometry.*` op is present; adjust CRPIX for crop/resize; drop only for rotate.
+
+- **🟡 A4 — every baked caption says "ZWO Seestar S50"; the owner has an S30.** `_SEESTAR_CAMERA = "ZWO Seestar
+  S50"` (`webapp/pipeline.py`) is passed unconditionally by `_nameplate_fields` to the nameplate, keepsake and
+  print renders — so a **wrong fact is printed on every shared and printed picture**. The comment above it
+  cites "AGENTS.md §1" as its authority, but that file **never named a model** until 2026-09-02; the backlog
+  records the owner confirming an S30 on 2026-07-24. The model is derivable per-frame from
+  `FOCALLEN`/`XPIXSZ` (`seestack/io/fits_loader.py`): 150 mm = S30, 250 mm = S50. **Fix:** derive it, or read
+  it from the new Owner Facts block in `AGENTS.md` §1 — do not hard-code either model.
+
+- **🟢 A10 — four caption builders and two duration formats for one picture, chosen by which page you share
+  from.** Target/lightbox use `share.ts` `sharePictureText` (`M 42 · 15 Nov 2024`); History feeds it
+  `output_basename` and overrides with `postCaption.ts` (`M_42_stack · 15 Nov 2024`); Editor share/print uses
+  `seestack/sharecard.py` `share_blurb` (`M 42 · 3h 12m · 152 subs`, no date, and `3h 12m` where the SPA prints
+  `3.2 h` — a form a comment in `Library.tsx` **explicitly forbids**); the baked nameplate is a fourth.
+  **Fix:** one caption model served by the backend; History passes the **display name**, not the basename.
+
+- **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** No validator
+  stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
+  resolves inside the raw tree — *not* the owner's current state, but one settings edit away); the scanner's
+  bare-`<T>/` skip is **silent** even when the folder holds thousands of FITS (the owner's `NGC 6888` 4,815 vs
+  `NGC 6888_SUB` 3,110 is exactly that shape — see open questions); the plate-solve-failed screen shows a
+  blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"; the Stack page
+  prints the **raw engine error** where every other page uses `friendlyJobError`; the frames table prints raw
+  UTC under a hero that says "Shot &lt;local night&gt;"; "nights" means **6-hour sessions** on the Nights card
+  but **calendar nights** in captions; three hand-mirrored "is this a genuine run" predicates;
+  `POST /api/targets` has **no frontend caller**; share and print JPEGs use 4:2:0 chroma subsampling; the "full
+  data" TIFF anchors its white point on the single brightest surviving pixel (hypothesis, needs real data).
+
+- **🟠 R2 — SPLIT THE BACKLOG INTO A WORKING LIST AND A RECORD (one mechanical Scout run, then a standing
+  rule).** *(The audit's highest-value process finding: this file is **3.4 MB / ~840k tokens**, so no agent can
+  read it in a run — every agent is necessarily skimming, which is the common cause behind stale entries
+  surviving, ideas being re-derived, and collisions.)* Growth is ~100 lines per merged PR: 18,757 lines on
+  08-01 → 23,591 on 08-22 → 29,000 on 08-29 → **34,934 on 09-02**. Measured causes, each traceable to a
+  convention: this file's own "Conventions" block says a shipped item **keeps its full spec indented in place**
+  (while `AGENTS.md` §2/§5/§11 say "move it to Shipped") — so "Shipped"'s newest entry is **v0.288.0** while the
+  app is at v0.325.2, with **65** top-level "✅ SHIPPED" entries sitting inside Ideas and **185** struck entries
+  inside "Bugs"; **"Bugs" now holds 222 top-level entries of which ~212 are resolved and ~10 open**; collision
+  diaries (~20 lines each, ten of them) and clean-sweep records are written **into the priority sections** (the
+  top entry of "Bugs (fix these first)" has been a clean-sweep record, not a bug); and **"In progress" is 336
+  lines with zero live claims** — all 20 headers say "claim released", defeating its only purpose.
+  **The standing rule to adopt** (add to `AGENTS.md` §2 "End of run" and to this file's Conventions block):
+  > `docs/IMPROVEMENTS.md` is the **working list only**. "Bugs (fix these first)" contains open bugs and
+  > nothing else. When an item ships or is closed, **cut** the whole entry and append it as one block to
+  > `docs/SHIPPED.md` (newest first, headed by version + date); leave a one-line `✅ v0.xxx.y <what>` under
+  > "Shipped" here. Process notes and audit records go to `docs/PROCESS-NOTES.md`, one dated block each —
+  > **never** into a priority section. Delete an "In progress" claim when you release it. **A run must leave
+  > `docs/IMPROVEMENTS.md` no longer than it found it** unless it is filing a verified bug; the Scout's first
+  > job each run is to move whatever the last Builders left behind.
+  **The one-off cleanup (a single Scout run, mechanical, high leverage):** move the ~212 resolved "Bugs"
+  entries, the 336-line "In progress" diary and the inline "✅ SHIPPED" entries out; and **strike these three
+  stale entries**, located by quoting their text rather than line number (the file shifts constantly):
+  `"auto-stacked FINAL results come out as single-frame colour-speckle"` and
+  `"the final stacked output resolution"` — both v0.158-era, both long fixed, **still unstruck**, and both
+  concluding in their own text that the engine is clean; and `"skips a bare"` — the mosaic bare-output entry,
+  still saying the device naming "could not be confirmed" when the owner's real folder listing settled it
+  (that listing is currently buried inside a `⚪ CLOSED AS A NON-BUG` entry a triaging agent skips by shape).
+
+- **🟡 R3/R5 — STOP MANDATING IDEA GENERATION, AND RE-AIM THE QA ROTATION.** *(Two `AGENTS.md` prose changes
+  the audit specified; §1 and §11 were already updated on 2026-09-02, these two were left for a run that can
+  also update §12's checklist.)*
+  - **R3 — supply is not the constraint.** §4 ("every run … at least a couple of ideas") and §12's checklist
+    ("added ≥1–2 new ideas") apply to **both** roles, directly contradicting the Builder role text ("does not
+    spend a run inventing features"). **26 NEW IDEA entries were added on 08-27 alone**; 162 exist, 49 still
+    open, against 193 open priority items and 413 infra items. Change §4 to: *"Only the Scout adds ideas, and
+    only after verifying the idea is not already filed or shipped (grep the backlog and `docs/SHIPPED.md`). A
+    Builder files only bugs it verified and leads it could not finish."* Delete the checklist line from §12.
+  - **R5 — the rotation is sweeping clean where the bugs aren't.** Since 08-26: **14 Scout subjects reported
+    "clean" vs 5 that found a bug**, with 21 audits landing on 08-26/27 alone; Builders recorded **73**
+    "found while / dogfood / incidentally" discoveries against **21** Scout-credited ones. Every one of A1, A2
+    and A6 lives in a path the sweeps list as already covered ("preview↔export parity", "rejection math",
+    "mosaic") — because a sweep is *code reading*, and these are **scale-dependent**, **per-panel**, or
+    **external-process** behaviours that reading cannot reveal. Replace the Scout's "lead your rotation with
+    the stacking engine" with: *"The single-field engine core has been swept clean fifteen times; do not
+    re-sweep it until a new bug is found there. Rotate through, in order: (1) scale-dependent preview↔export
+    parity — every editor op with a pixel-unit parameter, measured on a **mosaic-size canvas at proxy step 3
+    and 4**, never on a 1080p field; (2) mosaic and walk-away divergence — every place the mosaic or auto path
+    chooses a method or threshold from a whole-target number that is really a per-panel or per-pixel quantity;
+    (3) filesystem side effects of external processes (ASTAP, ffmpeg) **with a stub binary that writes where
+    the real one writes**; (4) the webapp routers. **A sweep counts as done only if it ran the code on data
+    shaped like the owner's, not only read it.** Record the sweep in `docs/PROCESS-NOTES.md`, never in
+    "Bugs"."*
+  - **Also from the same finding, for whoever takes this:** commit subjects are failing the agents' own "grep
+    the log for the item's nouns" advice — **only 4 of 250 commit subjects contain a code identifier**. Add to
+    §8 step 2: *"The commit subject must name the backlog item's key nouns **and at least one code identifier**
+    (function, module or setting), so the next agent's grep finds it. A headline alone is not a subject."*
+
+- **⚪ R6 — CLEAN THE STALE BANNERS IN `AGENTS.md` §1** *(verified line by line by the audit; §1 got the Owner
+  Facts block and the editor re-opening on 2026-09-02, but these remain)*: **two** banners both claim to be
+  "front of the bug queue" (the 08-17 one names findings that **shipped** v0.271.0/v0.276.0 on 08-26; the 07-30
+  one claims every open bug is gated on data an agent cannot supply); "Full write-up at the top of
+  `docs/IMPROVEMENTS.md` → Bugs" points at a clean-sweep record while the real write-up is ~1,800 lines down,
+  and "Friendliness (PRIORITY 3), top item" is ~1,300 lines down — **replace every "top item" pointer with the
+  entry's headline text as the locator**; the busy-UI banner still quotes **pre-fix** measurements ("frames
+  table starts at line ~1339 of 1481", "~15 alert blocks", "9 stacked cards") when slices a–e shipped 08-13→16
+  and `Target.tsx` now has one `NoticeBoard` (two inline notes) and **zero** cards before the frames table, and
+  "the sidebar is 15 flat links" is now **18 links in 5 groups** — state the remaining work instead (the header
+  row and the ten-item share menu); the "healing … deliberately left open" note is stale (see A8); §12 says the
+  collision "has now happened seven times" when the merge commits show **at least ten**; §2 says 3–6 tasks per
+  run while the Builder prompt says 2–4. Also **§7 spends 25 lines on Qt/libEGL** for three GUI tests of a
+  desktop app the owner never runs — move it to a footnote and make the Qt-skip command the default.
+
 - **✅ SHIPPED (Builder, v0.325.3, branch `claude/zen-mccarthy-t59xya`) — ~~the planner can tell you to shoot
   up to two minutes *after* astronomical dark ends, and can credit a window with darkness that doesn't
   exist.~~** Fixed in the direction the entry called the honest one: `_times_grid` now rounds the step count
