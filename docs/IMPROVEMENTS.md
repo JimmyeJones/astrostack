@@ -832,6 +832,49 @@ _(nothing else claimed — claim an item here with your branch name)_
     silently diverging. Note the backlog's existing parity claims ("sharpen bit-exact", "RMSE ≈0 for sharpen")
     are **disproved** by this on any scene with sub-proxy-pixel stars.
 
+- **✅ SHIPPED (Builder, v0.327.7, branch `claude/sweet-babbage-xgi198`) — ~~A7: pre-v0.184.9 Seestar on-device
+  outputs stay accepted *inside* the owner's real targets, and can be picked as the alignment reference.~~**
+  Fixed the way the entry's own ⚠️ note said it had to be — **by filename, not by folder or by count** — so the
+  regression test it collides with passes untouched rather than being rewritten.
+
+  **The count guard was answering a question the data doesn't ask.** `_MAX_SEESTAR_OUTPUT_FRAMES = 2` encodes
+  "the device's output folder holds a single stacked image", which is true *per session* and false *per
+  folder*: the owner's bare `M 3/` holds 22 of them, `M 13` 9, `M 101` 11 — every one sailing past the cap,
+  averaging into the stack and sitting in the reference pool where `pick_central_frame` (dither centre, high
+  SNR) prefers it. But the cap cannot simply be raised: the folder it exists to protect — a user's own raw subs
+  in a plainly-named `<T>/` beside a Seestar `<T>_sub/` — is *also* a big folder, and the owner has one
+  (`NGC 6888` 4,815 beside `NGC 6888_SUB` 3,110, holding genuinely different frames). Count cannot separate
+  them. The **filename** can, and the convention was already all over the repo's fixtures while **no production
+  module matched on it** (`grep -rn "Stacked" --include=*.py seestack/ webapp/` returned nothing): the device
+  writes `Stacked*.fit`, its raw subs `Light_<T>_<exp>_<filter>_….fit`.
+
+  **The change is one extra way in, not a looser gate.** `reject_seestar_output_frames` now rejects a bare
+  `<T>/` frame whose *name* is on-device output at **any** count, and every other frame in that folder still
+  answers to the count guard on the folder's **whole** population, exactly as before — so a `Light_*` sub is
+  never newly rejected, however many `Stacked` images sit next to it. `_is_seestar_output_filename` is
+  deliberately strict about what may follow the prefix (`Stacked.fit`, `Stacked_60s.fit`, `Stacked-01.fit`
+  match; `StackedRegion.fit` does not), because this is the on-by-default ingest path where an over-broad
+  match silently drops real subs from a stack.
+
+  **Upgrade-safe (§9):** nothing is deleted (§10 untouched — this is a DB `accept` flag), a `user_override`
+  accept is still honoured, a re-scan is still idempotent, no schema/config/API/on-disk change, and the frames
+  are re-acceptable in the UI like any other auto-reject.
+
+  **Tests (+4 in `tests/test_scanner.py`, 3 of which fail before).** The owner's shape at unit level (22
+  outputs beside 30 subs → 22 rejected, subs untouched, still idempotent); the **mixed** folder both guards
+  must survive at once (8 `Light_*` + 22 `Stacked_*` in one folder → only the 22 go, which fails just as
+  loudly if a future fix rejects by folder again); an end-to-end re-scan healing nine sessions' outputs and
+  asserting the accepted pool is the three raw subs; and a positive control that a user's own
+  `StackedRegion*.fit` in an over-cap folder is left alone. The colliding
+  `test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_name` is **unchanged and still
+  green** — its 8 subs are `Light_*`, which is exactly the discriminator.
+
+  **Deliberately not done:** the header-based second discriminator the entry floats (`EXPTIME` = N×10 s, or a
+  stack-count card). The filename settles every case in the owner's library and a header rule would need real
+  data to calibrate; filed as a follow-on only if a naming variant ever turns up.
+
+  *(Original entry follows.)*
+
 - **🟠 A7 — PRE-v0.184.9 SEESTAR ON-DEVICE OUTPUTS STAY ACCEPTED *INSIDE* THE OWNER'S REAL TARGETS, AND CAN BE
   PICKED AS THE ALIGNMENT REFERENCE.** *(Severity: wrong reference frame / mild contamination on his biggest
   targets. Confidence: guard behaviour verified by reproduction; downstream reference-pick effect likely.)*
