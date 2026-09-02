@@ -1042,6 +1042,138 @@ def test_star_reduce_overstates_flag_matches_the_stronger_preview():
     assert star_reduce_overstates_on_proxy(2.0, 1.0) is False
 
 
+def test_sharpen_understates_on_proxy_rule():
+    from seestack.edit.ops.detail import sharpen_understates_on_proxy
+
+    # Export (scale <= 1) never understates — it runs the radius as given.
+    assert sharpen_understates_on_proxy(1.5, 1.0) is False
+    assert sharpen_understates_on_proxy(0.5, 1.0) is False
+    # Auto's own 1.5 px radius on a 3x/4x-decimated proxy goes sub-pixel
+    # (1.5/3 = 0.5, 1.5/4 = 0.375 — both under the 0.6 knee), and the measured
+    # share of the export's contrast gain there is 65 % and 19 % respectively.
+    assert sharpen_understates_on_proxy(1.5, 3.0) is True
+    assert sharpen_understates_on_proxy(1.5, 4.0) is True
+    # A mild 2x proxy keeps it honest (1.5/2 = 0.75 -> ~97 % shown).
+    assert sharpen_understates_on_proxy(1.5, 2.0) is False
+    # A broad radius survives heavy decimation (4/4 = 1.0 -> ~96 % shown).
+    assert sharpen_understates_on_proxy(4.0, 4.0) is False
+    # Degenerate inputs are safe (no false alarms).
+    assert sharpen_understates_on_proxy(0.0, 4.0) is False
+    assert sharpen_understates_on_proxy(float("nan"), 4.0) is False
+    assert sharpen_understates_on_proxy(1.5, float("inf")) is False
+
+
+def test_sharpen_understates_flag_matches_the_weak_preview():
+    """The sharpen live preview genuinely understates the full-res export once the
+    proxy-scaled radius goes sub-pixel, and ``sharpen_understates_on_proxy`` must
+    flag exactly that case.
+
+    Regression for audit finding A2: unlike deconvolution and star reduction,
+    sharpening diverged between preview and export with **no advisory at all** —
+    Auto's own 1.5 px radius shows about a fifth of the export's effect on a
+    step-4 mosaic proxy.
+    """
+    from scipy.ndimage import uniform_filter
+
+    from seestack.edit.ops.detail import sharpen_understates_on_proxy
+
+    # A star field: real fine structure for an unsharp mask to act on.
+    rng = np.random.default_rng(3)
+    full = np.full((240, 240, 3), 0.10, np.float32)
+    full += rng.normal(0, 0.002, full.shape).astype(np.float32)
+    yy, xx = np.mgrid[-8:9, -8:9]
+    kern = np.exp(-(xx ** 2 + yy ** 2) / (2 * (2.5 / 2.355) ** 2)).astype(np.float32)
+    for _ in range(60):
+        y, x = rng.integers(12, 228, size=2)
+        full[y - 8:y + 9, x - 8:x + 9, :] += (
+            float(rng.uniform(0.05, 0.5)) * kern)[..., None]
+    full = np.clip(full, 0.0, 1.0)
+    spec = get_op("detail.sharpen")
+    params = {"amount": 1.0, "radius": 1.5}  # what the one-click Auto uses
+
+    def local_contrast(a: np.ndarray) -> float:
+        g = a[..., 1]
+        return float(np.std(g - uniform_filter(g, 5)))
+
+    # Export (proxy_scale=1), then sampled on the proxy grid: what the user will
+    # actually get, seen at preview scale.
+    exported = spec.apply(full.copy(), params, EditContext(proxy_scale=1.0))
+    proxy = np.ascontiguousarray(full[::4, ::4])
+    previewed = spec.apply(
+        proxy.copy(), params, EditContext(proxy_scale=4.0, is_proxy=True))
+
+    base = local_contrast(proxy)
+    export_gain = local_contrast(np.ascontiguousarray(exported[::4, ::4])) - base
+    preview_gain = local_contrast(previewed) - base
+
+    assert export_gain > 0.0                            # the export clearly sharpens
+    # The preview shows well under half of it (measured ~19 %).
+    assert preview_gain < export_gain * 0.5
+    # ...and the helper flags exactly this misleading case, but not the export.
+    assert sharpen_understates_on_proxy(1.5, 4.0) is True
+    assert sharpen_understates_on_proxy(1.5, 1.0) is False
+
+
+def test_hot_pixels_skipped_on_proxy_rule():
+    from seestack.edit.ops.detail import hot_pixels_skipped_on_proxy
+
+    # The export, and any stack small enough that its proxy is the full image.
+    assert hot_pixels_skipped_on_proxy(1.0) is False
+    # Every decimated preview proxy, however mild.
+    assert hot_pixels_skipped_on_proxy(2.0) is True
+    assert hot_pixels_skipped_on_proxy(4.0) is True
+    # Degenerate inputs are safe (never skip on a nonsense scale).
+    assert hot_pixels_skipped_on_proxy(0.0) is False
+    assert hot_pixels_skipped_on_proxy(float("nan")) is False
+
+
+def test_hot_pixels_preview_leaves_the_proxys_stars_alone():
+    """Hot-pixel removal must not run on a decimated preview proxy.
+
+    Regression for audit finding A2: the proxy is decimated by *striding*, so a
+    real 2-3 px-FWHM star lands on one lone proxy pixel with sky around it in
+    every channel — the exact signature :mod:`seestack.bg.hot_pixels` treats as a
+    defect. Before the fix the live preview erased the majority of the user's
+    stars while the full-res export touched none of them; measured on this
+    fixture's scale, 369 of 483 bright stars lost more than half their amplitude.
+
+    Asserted on behaviour, not on the flag helper, so it fails on the old code.
+    """
+    rng = np.random.default_rng(7)
+    sky = 0.02
+    full = np.full((300, 360, 3), sky, np.float32)
+    full += rng.normal(0, 0.0015, full.shape).astype(np.float32)
+    yy, xx = np.mgrid[-6:7, -6:7]
+    kern = np.exp(-(xx ** 2 + yy ** 2) / (2 * (2.5 / 2.355) ** 2)).astype(np.float32)
+    ys = rng.integers(12, 288, 80)
+    xs = rng.integers(12, 348, 80)
+    for y, x in zip(ys, xs):
+        full[y - 6:y + 7, x - 6:x + 7, :] += (
+            float(rng.uniform(0.10, 0.6)) * kern)[..., None]
+    spec = get_op("detail.hot_pixels")
+    params = {"sigma": 5.0}
+
+    step = 3
+    proxy = np.ascontiguousarray(full[::step, ::step])
+    previewed = spec.apply(proxy.copy(), params, EditContext(
+        proxy_scale=float(step), is_proxy=True))
+
+    # Every star the proxy samples keeps its brightness in the preview.
+    before = np.array([proxy[y // step, x // step].mean() for y, x in zip(ys, xs)])
+    after = np.array([previewed[y // step, x // step].mean() for y, x in zip(ys, xs)])
+    bright = (before - sky) > 0.02
+    assert bright.sum() > 40                            # the fixture really has stars
+    halved = after[bright] < sky + 0.5 * (before[bright] - sky)
+    assert not halved.any()                             # none of them was eaten
+    assert np.allclose(previewed, proxy, equal_nan=True)  # the preview is untouched
+
+    # ...while the export still repairs a genuine single-pixel defect.
+    with_defect = full.copy()
+    with_defect[150, 200, 0] = 5.0
+    exported = spec.apply(with_defect, params, EditContext(proxy_scale=1.0))
+    assert exported[150, 200, 0] < 1.0
+
+
 def test_hot_pixels_works_on_mosaic_nan_image():
     """The hot-pixel editor op must remove hot pixels even on a partial-coverage
     (NaN) mosaic — and preserve NaN. Regression: it used to derive its threshold

@@ -21,7 +21,11 @@ from pydantic import BaseModel
 
 from seestack.edit.coverage_trim import coverage_is_mosaic, largest_covered_rect
 from seestack.edit.histogram import compute_histogram, measure_sky_cast
-from seestack.edit.ops.detail import deconv_understates_on_proxy
+from seestack.edit.ops.detail import (
+    deconv_understates_on_proxy,
+    hot_pixels_skipped_on_proxy,
+    sharpen_understates_on_proxy,
+)
 from seestack.edit.ops.stars import star_reduce_overstates_on_proxy
 from seestack.edit.pipeline import apply_recipe
 from seestack.edit.proxy import (
@@ -1327,6 +1331,30 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
             op.enabled and op.id == "detail.deconvolve"
             and deconv_understates_on_proxy(
                 float(op.params.get("psf_sigma", 1.5)), float(scale))
+            for op in rec.ops
+        )
+        # A sharpen op's live preview understates the full-res export for the same
+        # reason as deconvolution: its radius is a full-res pixel measure, and once
+        # proxy_scale shrinks it below ~0.6 proxy pixels the unsharp mask's
+        # Gaussian goes sub-pixel and collapses towards the identity. Auto's own
+        # 1.5 px radius on a step-4 mosaic proxy shows about a fifth of what the
+        # export applies, with no advisory until now. Only enabled sharpen ops
+        # count.
+        hist["sharpen_preview_understates"] = any(
+            op.enabled and op.id == "detail.sharpen"
+            and sharpen_understates_on_proxy(
+                float(op.params.get("radius", 2.0)), float(scale))
+            for op in rec.ops
+        )
+        # Hot-pixel removal is skipped entirely on a decimated preview proxy: a
+        # strided proxy turns a real star into a single isolated pixel, which is
+        # exactly the signature of the defect the op removes, so running it on the
+        # preview ate the user's stars while the export touched none. The preview
+        # now leaves the image alone and says so; the export still cleans it.
+        # Only enabled hot-pixel ops count.
+        hist["hot_pixels_preview_skipped"] = any(
+            op.enabled and op.id == "detail.hot_pixels"
+            and hot_pixels_skipped_on_proxy(float(scale))
             for op in rec.ops
         )
         # A star-reduction op's live preview *overstates* the full-res export when

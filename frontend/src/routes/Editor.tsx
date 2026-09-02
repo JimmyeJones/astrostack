@@ -33,6 +33,8 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { starReduceOverstatesCaption } from "../components/editor/starReducePreview";
+import { sharpenUnderstatesCaption } from "../components/editor/sharpenPreview";
+import { hotPixelsSkippedCaption } from "../components/editor/hotPixelsPreview";
 import { canNeutraliseSkyCast, neutraliseBackgroundOps, skyCastCaption }
   from "../components/editor/skyCast";
 import { autoColorCalCaption, colorCalProxyFallbackCaption } from "../components/editor/colorCal";
@@ -1686,6 +1688,27 @@ export function EditorView() {
                 <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
                 <Text size="xs" c="dimmed">{starReduceOverstatesCaption(hist.data)}</Text>
+              </Group>
+            ) : null}
+            {/* Sharpen's radius is a full-res measure; once proxy_scale shrinks
+                it below about half a proxy pixel the unsharp mask goes sub-pixel
+                and the preview shows a fraction of the export's local contrast.
+                Same limit as deconvolution, same honest caption. Advisory only. */}
+            {sharpenUnderstatesCaption(hist.data) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">{sharpenUnderstatesCaption(hist.data)}</Text>
+              </Group>
+            ) : null}
+            {/* Hot-pixel removal can't run on a strided proxy without mistaking
+                real stars for defects, so the preview skips it. Say so, or the
+                user judges a starless preview the export will never produce. */}
+            {hotPixelsSkippedCaption(hist.data) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">{hotPixelsSkippedCaption(hist.data)}</Text>
               </Group>
             ) : null}
             {/* Which white-balance path the recipe's colour-calibration op ran on

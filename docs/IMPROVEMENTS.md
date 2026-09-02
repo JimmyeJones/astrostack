@@ -637,9 +637,70 @@ _(nothing else claimed — claim an item here with your branch name)_
     - **Owner check that settles it in one line:** `ls incoming/<any target>_sub | grep -c '\.wcs$'` — non-zero
       confirms it on the live box.
 
-- **🟠 A2 — PREVIEW AND EXPORT DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
+- **✅ SHIPPED, A2's REMAINING TWO INSTANCES (Builder, v0.326.6, branch `claude/zen-mccarthy-mqfxxg`) —
+  ~~`detail.hot_pixels` eats the preview's stars, and `detail.sharpen` diverges from the export with no
+  advisory.~~** Both reproduced first, at the owner's mosaic scale, and both fixed at the root. **With the
+  `tone.color_calibrate` instance shipped by `…-xesefm` as v0.326.3 (entry below), A2's three named instances
+  are now all closed**; the two "also verified, smaller" items at the end of the entry are not.
+
+  **`detail.hot_pixels` — the preview was erasing the user's stars.** Hot-pixel repair is a *full-resolution*
+  operation: every test that separates a stuck sensor pixel from a real star ("is this pixel's 3×3
+  neighbourhood still at sky?", "are the other two channels still at sky?") assumes the image is sampled on
+  the detector's own grid. The editor proxy is decimated by **striding** (`seestack/edit/proxy.py` takes every
+  Nth pixel), so a real 2–3 px-FWHM star lands on one lone proxy pixel with sky all around it *in every
+  channel* — exactly the signature of the defect the op removes. Reproduced on a synthetic S30-scale field at
+  step 3: **369 of 483 bright stars lost more than half their amplitude in the preview, while the full-res
+  export dimmed none of them.** There is no proxy-scale version of the test to fall back on (the
+  neighbourhood would have to shrink below one pixel), so the preview now **skips the op** when
+  `proxy_scale > 1` and the editor says so — the export still cleans the frame. At `proxy_scale == 1` (every
+  export, and any stack small enough that its proxy *is* the full image) the op runs bit-for-bit as before.
+
+  **`detail.sharpen` — right maths, missing advisory.** The radius *is* correctly scaled by `proxy_scale`,
+  which is the right thing to do (it keeps the preview sharpening the same *physical* detail); the defect is
+  that once the scaled radius goes sub-pixel the unsharp mask collapses towards the identity and nothing told
+  the user. Measured as the share of the export's local-contrast gain the preview reproduces, which depends on
+  the **scaled radius alone** (it lines up across every radius/scale pair sharing one): 1.0 px → 96–100 %,
+  0.75 px → 89–97 %, 0.67 px → 77–89 %, 0.5 px → 49–73 %, 0.38 px → **19 %**, 0.33 px → 7–11 %, ≤0.25 px →
+  **0 %**. So 0.6 is the knee, and `sharpen_understates_on_proxy` flags below it — the same shape as
+  `deconv_understates_on_proxy` and `star_reduce_overstates_on_proxy`, which is what the audit asked for
+  ("unlike deconv and star-reduce it shows no advisory"). Auto's own 1.5 px radius on a step-4 mosaic proxy is
+  in the 19 % band. **The render is unchanged** — this half is purely information.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no setting flipped. Two *added*
+  histogram fields (`sharpen_preview_understates`, `hot_pixels_preview_skipped`) alongside the two that
+  already exist, so an older frontend ignores them and an older backend simply doesn't set them (the captions
+  return `null`). Editing stays non-destructive and nothing already exported is touched.
+
+  **Tests (+9; 8 of them fail before).** `tests/test_edit_engine.py` (+4): the two pure rules, a measured
+  preview-vs-export sharpen comparison, and the hot-pixel regression asserted **on behaviour rather than on
+  the new flag** (so it fails on the old code) — every bright star keeps its brightness, the preview is
+  pixel-identical to its input, and the export still repairs a genuine single-pixel defect.
+  `tests/webapp/test_editor.py` (+2) pins both histogram flags across weak/strong/disabled/absent recipes, and
+  the hot-pixel one across a decimated *and* a `proxy_scale == 1` run. Frontend (+3 each in two new files)
+  pins the captions.
+
+- **🟠 A2 — PREVIEW AND EXPORT
+  DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
   PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that
   lies. Confidence: verified on synthetic data. Three instances, **one mechanism**.)*
+  **All three named instances are now shipped** (colour-cal below as v0.326.3; hot-pixels and sharpen as
+  v0.326.6, entry above). Only the two "also verified, smaller" items at the foot of this entry are open.
+
+  > **⚠️ COLLISION ELEVEN — Builder `claude/zen-mccarthy-mqfxxg`, 2026-09-02, one of two tasks stood down,
+  > decided by measurement in a worktree rather than by argument.** This run built `tone.color_calibrate`
+  > independently and finished it (scaled FWHM + aperture, *and* the sky annulus, floors at 1.5 px, tests
+  > green) before a `git fetch origin main` between tasks showed `…-xesefm` had landed the same fix as
+  > v0.326.3 forty minutes earlier. Applying the standing method from collision ten — **run your own fixture
+  > against their shipped code in a `git worktree` of `origin/main`** — settled it in two minutes and against
+  > me: on the same 600×900 field at proxy step 3 theirs finds **188 stars where mine found 50**, and its
+  > white balance sits within **0.2 %** of the export's (mine, 2.2 %). The difference is their
+  > `MIN_DETECT_FWHM_PX = 1.0` against my 1.5 — I had floored the finder above the size of the stars I wanted
+  > it to find. My one genuinely extra piece, scaling the photometry's **sky annulus** (`r_in = r + 2`,
+  > `r_out = r + 5`, both unscaled on theirs), turns out to buy nothing measurable: theirs already agrees
+  > with the export to 0.2–2.1 % across steps 2–5, so shipping it would have been speculative hardening on
+  > the on-by-default path. Dropped, not re-litigated. **The transferable bit is the floor:** a floor on a
+  > detector's matched-filter width is not a safety rail, it is a *lower bound on what you can detect* — set
+  > it by what the grid can still resolve (one pixel), not by what feels conservative.
   - **✅ SHIPPED (Builder, v0.326.3, branch `claude/zen-mccarthy-xesefm`) — ~~`tone.color_calibrate`~~**, the
     instance that changes the picture's **colour**. Reproduced first, then fixed in the direction the entry
     named. `_detect_calibration_stars`'s `fwhm=3.0` was a hard-coded literal and the 4 px aperture came from
@@ -682,12 +743,12 @@ _(nothing else claimed — claim an item here with your branch name)_
     stars and silently falls back to `background_neutral` **while the export runs gray-star** — measured
     preview/export gain ratio **R 1.157, B 1.287** on a 4000×2400 canvas. A 1920×1080 single field matches
     within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.~~
-  - **`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
+  - ~~**`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
     own 1.5 px radius becomes 0.375 px at step 4 — the preview shows **13–46 %** of the export's sharpening,
-    and unlike deconv and star-reduce it shows **no advisory**.
-  - **`detail.hot_pixels`** (`seestack/bg/hot_pixels.py`): a fixed 3×3 isolation test erased or dimmed **259 of
+    and unlike deconv and star-reduce it shows **no advisory**.~~ *(Shipped v0.326.6.)*
+  - ~~**`detail.hot_pixels`** (`seestack/bg/hot_pixels.py`): a fixed 3×3 isolation test erased or dimmed **259 of
     582 bright stars** in a step-3 preview while the export touched none. Not in Auto, but the preview
-    misrepresents what the op does.
+    misrepresents what the op does.~~ *(Shipped v0.326.6.)*
   - Also verified, smaller: SCNR's 3 px noise-protect blur unscaled (cosmetic); `stars.reduce`'s advisory
     points the **wrong way** for 2–3 px stars.
   - **Fix direction:** scale every pixel-unit parameter through `ctx.scaled_px` with a sensible floor, and
@@ -730,7 +791,64 @@ _(nothing else claimed — claim an item here with your branch name)_
   > match silently drops real subs from a stack. A second, header-based discriminator (a stacked output's
   > `EXPTIME` is N×10 s, or it carries a stack-count card) would be stronger still if the DB rows carry it.
 
-- **🟠 A6 — WALK-AWAY AUTO-REJECT PICKS ITS METHOD FROM THE *WHOLE TARGET'S* FRAME COUNT, so a mosaic panel
+- **✅ SHIPPED (Builder, v0.326.7, branch `claude/zen-mccarthy-mqfxxg`) — ~~A6: walk-away auto-reject picks its
+  method from the whole target's frame count, so a shallow mosaic panel gets a rejection pass that is
+  mathematically blind and the trails survive.~~** Reproduced first, at the owner's shape, then fixed at the
+  unit that decides it.
+
+  **The root cause, and why the number was wrong rather than the logic.** Every threshold in the auto
+  outlier-rejection picker is a statement about how many samples land **on one pixel**: κ-σ can't pull a lone
+  trail out of statistics that still include it until ~`kappa_min_frames` (11 at κ=3), and the
+  order-statistic min/max drop needs 3 to spare 2. On a single field those samples *are* the whole stack, so
+  the frame count is a sound proxy — but a mosaic's panels are different patches of sky, and a pixel only ever
+  sees its own panel's subs. A 2×2 mosaic three subs deep therefore handed `n = 12` to a test whose real
+  answer is 3. `_resolve_auto_reject` now takes a `depth`, and `auto_reject_depth` derives it from the same
+  `pointing_groups` gate the QC / photometric / weighting paths already share.
+
+  **Measured, before → after** (2×2 mosaic, 3 subs/panel, one streaked sub, residual against an otherwise
+  identical streak-free stack): `auto_reject` dispatched **κ-σ with `REJFRAC 0.0` — it rejected nothing at
+  all** and left the trail at **1,030 ADU**; it now dispatches min/max and leaves **19 ADU**, identical to
+  the same mosaic with min/max chosen by hand. A **12-sub single field is bit-for-bit unchanged** (κ-σ,
+  residual 4.3 ADU): `auto_reject_depth` returns `None` unless the target genuinely splits into ≥2
+  substantial panels, so no single-field stack, unsolved target or tightly-packed mosaic changes at all.
+
+  **The cost, named rather than hidden.** The method is one global choice for the whole canvas, so a
+  mixed-depth mosaic pays for its thinnest panel: a deep panel stacked with min/max loses κ-σ's multi-outlier
+  reach and its quality weighting. That is second-order (min/max drops exactly two samples per pixel — ~1 % of
+  a 200-sub panel) against a first-order defect, a bright satellite trail baked into the finished picture; and
+  it is the same trade `auto_reject` already makes for every small single-field stack, now applied to the
+  depth that actually exists instead of to a count that describes no pixel. The panel floor is
+  `AUTO_REJECT_PANEL_MIN_FRAMES = MIN_MAX_MIN_FRAMES` (3): a group thinner than that can't be helped by
+  *either* method, so it can't change the answer — and one stray mis-solved sub can't pose as a one-frame
+  panel and demote a deep mosaic.
+
+  **The two surfaces that say so moved with it.** `rejection_reach` (the Stack form's pre-run "can this remove
+  a satellite trail?" line) takes the same `depth`, fed from a new additive `StackEstimate.panel_depth`, so
+  the warning can't reassure a user about a stack that will clip nothing. And `stackhealth`'s
+  `rejection_blind` note — silent on every mosaic until now, because 12 ≥ 11 — reads the run's **peak
+  per-pixel coverage**: when even the best-covered pixel is below the threshold, *no* pixel could have been
+  clipped, so the note is provably right rather than merely likely. It names the honest count too ("no more
+  than 3 subs overlapping at any one spot"), since "with only 12 subs" beside a 12-sub badge reads as nonsense.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no API shape change, no default flipped
+  (`auto_reject` is still off by default; only a run that opted in is affected, and only if it is a mosaic).
+  `depth` is a keyword-only argument defaulting to `None` on both public helpers, and `StackEstimate` gains one
+  optional field — every existing caller keeps its exact behaviour.
+
+  **Tests (+10; 4 of them fail before).** A new `tests/test_auto_reject_mosaic_depth.py` (+8): the depth rule
+  across a dither, an unsolved target, a mixed-depth mosaic and a stray pointing; the picker reading depth
+  rather than count; the pre-run warning; and **two end-to-end stacks through the public `run_stack`** — the
+  trail residual on the shallow mosaic (fails before at 1,030 against a 100 threshold) and the single-field
+  no-regression case. `tests/test_stackhealth.py` (+2) pins the note firing on a shallow mosaic that clears
+  the frame count, and staying silent on a mosaic whose overlaps are genuinely deep.
+
+  **Left open deliberately, for the Scout:** one accumulator serves the whole canvas, so a mosaic with a
+  3-sub panel and a 200-sub panel can only have one method. A *per-pixel* choice — dispatching from the
+  coverage plane rather than from one global verdict — would give each region the right one, but it is a real
+  change to the combine path and wants its own run. Filed under "Image quality".
+
+  The original entry, for the record:
+  ~~**A6 — WALK-AWAY AUTO-REJECT PICKS ITS METHOD FROM THE *WHOLE TARGET'S* FRAME COUNT, so a mosaic panel
   under 11 subs gets a rejection pass that is mathematically blind and trails survive.** *(Confidence: verified
   on synthetic data through the public `run_stack`. Owner impact depends on per-panel depth — see open
   questions.)* `_resolve_auto_reject(options, n)` (`seestack/stack/stacker.py`) is called with
@@ -741,7 +859,7 @@ _(nothing else claimed — claim an item here with your branch name)_
   explicit min/max. *(Distinct from the 2026-09-02 entry about a user-saved `sigma_clip` — this is the auto
   path choosing wrong.)* **Fix:** resolve the method from the **minimum substantial per-panel count**
   (`pointing_groups` already exists) or per-pixel from the coverage plane; extend `stackhealth`'s
-  `rejection_blind` note the same way.
+  `rejection_blind` note the same way.~~
 
 - **🟡 A5 — the Target page's "Your picture" ignores the pinned cover that every other surface honours.**
   `frontend/src/routes/Target.tsx` takes `runs.data?.[0]` (newest run) for the hero, its share caption and its
@@ -20361,6 +20479,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **Let a mosaic choose its rejection method *per pixel*, not once for the whole canvas.** *(Pillar: image
+  quality — PRIORITY 4; size L; opened by the A6 fix, v0.326.7.)* A6 fixed `auto_reject` reading the target's
+  frame count where the honest number is a panel's depth, and it now sizes the method from the **thinnest
+  substantial panel**. That is the right global answer, but it is still *one* answer: on a mosaic carrying a
+  3-sub panel beside a 200-sub panel, the deep panel is stacked with min/max and loses κ-σ's multi-outlier
+  reach and its quality weighting, purely because a thin neighbour exists. The coverage plane already knows
+  each pixel's true sample count (`frame_coverage`), and both accumulators already degrade per-pixel, so the
+  shape is "dispatch from the coverage plane" rather than "pick one and hope". **Why it's L and not M:** it
+  touches the combine hot path and its memory bounds (two accumulators live at once, or one that switches
+  rule per pixel), and the provenance card / `REJMODE` / `stackhealth` all currently assume a single method
+  per run. Wants a measurement first: how often does the owner's real library actually have a mosaic whose
+  panel depths straddle `kappa_min_frames`? If the answer is "rarely", the global choice is good enough and
+  this should be closed rather than built.
+
+- **Re-measure the panel floor against real mosaic data once there is any.** *(Pillar: image quality —
+  PRIORITY 4; size S; opened by the A6 fix.)* `AUTO_REJECT_PANEL_MIN_FRAMES` is 3 because that is the smallest
+  population *either* method can act on, which makes it un-arbitrary — but it also decides when a stray
+  mis-solved sub counts as a panel. It has only ever been exercised on synthetic pointings. When a real
+  mosaic's per-panel counts are to hand (the Scout has pulled the owner's folder listing before), check that
+  the clustering separates his panels the way the synthetic fixture does, and that no panel of his lands on
+  the wrong side of the floor.
 
 - **LEAD (Builder 2026-09-02, the half of A1's last line nobody has done — distinct from the sweep idea below,
   and worth keeping separate) — every constant that was *tuned by eye* through the old contrast curve was

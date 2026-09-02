@@ -324,17 +324,40 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
     # Keyed off the *recorded* rejection mode, the authoritative account of what
     # actually ran: an auto-picked small stack records "min-max-reject" and a
     # drizzle run "drizzle-reject", so neither can trip this.
+    #
+    # On a **mosaic** the frame count is the wrong number: a pixel only ever sees
+    # its own panel's subs, so a 2x2 mosaic three subs deep presents 12 frames to
+    # a test whose real answer is 3, and the note stayed silent on a stack whose
+    # κ-σ pass recorded ``REJFRAC 0.0``. ``coverage_max`` — the *deepest* pixel on
+    # the canvas — is the safe way to say that from a finished run: when even the
+    # best-covered pixel is below ``need``, no pixel anywhere could be clipped, so
+    # the note is provably right rather than merely likely. It can only ever make
+    # the note fire in *more* cases; a single field's peak coverage is its frame
+    # count, so nothing there changes. (Runs predating the honest per-pixel frame
+    # count fall back to a weighted coverage, which understates — the direction
+    # that offers an info note, never one that hides a real problem.)
     n_combined = run.n_frames_used
+    peak_depth = (min(n_combined, run.coverage_max)
+                  if run.coverage_max and run.coverage_max > 0 else n_combined)
     if (run.rejection_mode or "").strip() == "sigma-clip" and n_combined >= 1:
         from seestack.stack.stacker import kappa_min_frames
 
         need = kappa_min_frames(_run_sigma_kappa(run.options_json))
-        if n_combined < need:
+        if peak_depth < need:
+            # Name the count the user can actually act on. On a mosaic that is
+            # not the target's frame count — saying "with only 12 subs" about a
+            # 12-frame mosaic reads as nonsense next to a 12-sub badge — so say
+            # how deep any one spot is instead, which is the number that has to
+            # grow before κ-σ can bite.
+            deep = (f"With only {n_combined} sub{'s' if n_combined != 1 else ''}"
+                    if peak_depth >= n_combined else
+                    f"With no more than {peak_depth} sub"
+                    f"{'s' if peak_depth != 1 else ''} overlapping at any one "
+                    "spot in this picture")
             scored.append((25, HealthNote(
                 kind="rejection_blind",
                 severity="info",
-                message=(f"With only {n_combined} sub"
-                         f"{'s' if n_combined != 1 else ''}, "
+                message=(f"{deep}, "
                          "sigma-clip outlier removal couldn't drop anything — it "
                          f"needs about {need} frames before a passing satellite or "
                          "cosmic-ray hit stands out enough to clip. Re-stack with "
