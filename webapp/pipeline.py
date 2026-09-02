@@ -1151,7 +1151,11 @@ def _carry_provenance(fits_path: str) -> dict[str, Any]:
         with _fits.open(fits_path) as hdul:
             header = hdul[0].header
             for key in ("OBJECT", "NFRAMES", "EXPOSURE", "EXPTOTAL",
-                        "COLORTYP", "DATE-OBS", "DATE-END"):
+                        "COLORTYP", "DATE-OBS", "DATE-END",
+                        # The camera the subs were taken with, and the optics it
+                        # can be derived from — so a baked caption names the
+                        # owner's actual gear instead of asserting a model.
+                        "INSTRUME", "FOCALLEN"):
                 if key in header:
                     carry[key] = (header[key], header.comments[key])
     except Exception:  # noqa: BLE001 — provenance is non-critical
@@ -1159,9 +1163,24 @@ def _carry_provenance(fits_path: str) -> dict[str, Any]:
     return carry
 
 
-# The Seestar S50 is the one camera this app is built for (AGENTS.md §1), so the
-# acquisition nameplate can name the gear without a header field for it.
-_SEESTAR_CAMERA = "ZWO Seestar S50"
+def _nameplate_camera(prov: dict) -> str | None:
+    """The camera to print on a baked caption, from the stack's own header.
+
+    This used to be the constant ``"ZWO Seestar S50"``, applied unconditionally to
+    the nameplate, the keepsake and every print — a **wrong fact printed onto every
+    shared picture** of an owner who has an S30, justified by a comment citing an
+    `AGENTS.md` §1 that had never named a model. It now reads what the stack says
+    (``INSTRUME``, stamped from the subs' own headers since v0.326.5, else the
+    optics), and returns ``None`` when it says nothing — a caption with no camera
+    is honest; a caption naming the wrong one is not.
+
+    A master stacked before v0.326.5 carries neither card, so its captions simply
+    drop the camera until the target is next stacked. That is the intended
+    behaviour, not a gap to paper over with a default.
+    """
+    from seestack.io.fits_loader import camera_name_from_header
+
+    return camera_name_from_header({k: v[0] for k, v in prov.items()})
 
 
 def _nameplate_fields(fits_path: str, entry: Any, run: Any,
@@ -1252,7 +1271,7 @@ def _nameplate_fields(fits_path: str, entry: Any, run: Any,
         date_iso=date_iso,
         date_end_iso=date_end_iso,
         nights=nights,
-        camera=_SEESTAR_CAMERA,
+        camera=_nameplate_camera(prov),
     )
 
 

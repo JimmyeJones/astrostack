@@ -412,3 +412,96 @@ def test_is_solve_timeout_error_ignores_unrelated_text():
     assert not is_solve_timeout_error("")
     assert not is_solve_timeout_error("no solution found")
     assert not is_solve_timeout_error("no star database")
+
+
+# --------------------------------------------------------------------------- #
+# 🔒 The scratch-copy guarantee, at unit level (AGENTS.md §10)
+#
+# ``tests/webapp/test_incoming_readonly_guard.py`` proves the *outcome* end to
+# end with a stub binary. These pin the two properties that outcome rests on, so
+# a regression names its own cause instead of surfacing as "a folder changed".
+# --------------------------------------------------------------------------- #
+
+def test_astap_is_never_pointed_at_the_callers_own_frame(tmp_path, monkeypatch):
+    # The single fact the whole guarantee reduces to: ASTAP derives its sidecar
+    # names from ``-f``, so ``-f`` must never be a path in the caller's tree.
+    frames = tmp_path / "incoming" / "M_42_sub"
+    frames.mkdir(parents=True)
+    frame = frames / "Light_M42_10.0s_0001.fit"
+    frame.write_bytes(b"the owner's only copy")
+    solver = _make_solver(tmp_path)
+    seen: list[tuple[Path, bytes]] = []
+
+    def fake_run(cmd, **kwargs):
+        given = Path(cmd[cmd.index("-f") + 1])
+        # Record what ASTAP was handed, and *what it holds*, while it still exists.
+        seen.append((given, given.read_bytes()))
+        _write_solved_sidecars(cmd)
+
+        class _P:
+            stdout = ""
+            stderr = ""
+            returncode = 0
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    solver.solve(frame)
+
+    assert seen, "ASTAP was never invoked"
+    given, given_bytes = seen[0]
+    assert given != frame
+    assert frames not in given.parents, (
+        f"ASTAP was pointed inside the frame's own folder: {given}")
+    # Same *name*, so ASTAP's own log tail still names the frame the user knows…
+    assert given.name == frame.name
+    # …and the same bytes, so it is solving the owner's actual pixels.
+    assert given_bytes == frame.read_bytes()
+
+
+def test_the_result_names_the_callers_frame_not_the_scratch_copy(tmp_path, monkeypatch):
+    # Staging is an implementation detail; callers store and display this path,
+    # and a scratch path leaking into the project DB would be a dangling record.
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    solver = _make_solver(tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        _write_solved_sidecars(cmd)
+
+        class _P:
+            stdout = ""
+            stderr = ""
+            returncode = 0
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    result = solver.solve(frame)
+    assert result.solved
+    assert result.fits_path == frame
+
+
+def test_a_stale_sidecar_beside_the_frame_cannot_fake_a_solve(tmp_path, monkeypatch):
+    """A solve is "solved" only if *this* run wrote the sidecar.
+
+    ``solved`` is ``returncode == 0 and sidecar.exists()`` — existence, not
+    authorship. A ``.wcs`` left beside a frame by an older build of this app, or
+    by the owner running ASTAP himself, used to sit exactly where the wrapper
+    looked, so a run that found nothing could inherit somebody else's answer and
+    persist it as this frame's WCS. Solving in a scratch directory that starts
+    empty closes that by construction; this pins it, because nothing else does.
+    """
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    frame.with_suffix(".wcs").write_text("CRVAL1=999\n")   # someone else's answer
+    frame.with_suffix(".ini").write_text("CRVAL1=999\nCRVAL2=99\nCDELT2=0.1\nCROTA2=0\n")
+    solver = _make_solver(tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        class _P:  # ASTAP ran, matched nothing, wrote nothing
+            stdout = ""
+            stderr = "no solution found"
+            returncode = 0
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    assert not solver.solve(frame).solved

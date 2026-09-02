@@ -35,7 +35,7 @@ import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { starReduceOverstatesCaption } from "../components/editor/starReducePreview";
 import { canNeutraliseSkyCast, neutraliseBackgroundOps, skyCastCaption }
   from "../components/editor/skyCast";
-import { autoColorCalCaption } from "../components/editor/colorCal";
+import { autoColorCalCaption, colorCalProxyFallbackCaption } from "../components/editor/colorCal";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { recentreCropRect, recentreKeptLabel } from "../components/editor/recentreCrop";
@@ -1706,6 +1706,20 @@ export function EditorView() {
                 </Group>
               );
             })()}
+            {/* …and when that balance is the *proxy's* fallback rather than the one
+                the export will apply, the preview's colour genuinely isn't the
+                saved picture's. Scaling the detection geometry to the proxy grid
+                closes this most of the time; when it can't, say so rather than
+                diverge silently. Advisory only. */}
+            {colorCalProxyFallbackCaption(hist.data?.color_cal) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">
+                  {colorCalProxyFallbackCaption(hist.data?.color_cal)}
+                </Text>
+              </Group>
+            ) : null}
             {/* Robust read-out of the *finished* sky background's colour balance,
                 measured over the sky population of the post-recipe display image.
                 Beginners have no other way to see whether their background ended
@@ -2047,9 +2061,7 @@ export function EditorView() {
                           ? Math.round(curve.data.target_bg * 100) : null;
                         return (
                           <Tooltip
-                            label={greyPct != null
-                              ? "Set a gentle starting curve from this image's histogram — lifts the midtones toward a pleasant grey, keeping the sky and star cores anchored"
-                              : "Set a gentle starting curve from this image's histogram. There's nothing above the background's noise to lift here, so it adds contrast to the brighter tones only and leaves your sky exactly where it is"}
+                            label="Set a gentle starting curve from this image's histogram — lifts the midtones toward a pleasant grey, keeping the sky and star cores anchored"
                             multiline w={240} withArrow>
                             <Button size="compact-xs" variant="light" color="blue"
                               disabled={applied}

@@ -580,6 +580,35 @@ _(nothing else claimed — claim an item here with your branch name)_
   command's own `-f` argument (a shared `_sidecar_paths`/`_write_solved_sidecars`), which is what the real
   binary does; every assertion is unchanged.
 
+  **Hardened on top, v0.326.4 (Builder, branch `claude/zen-mccarthy-xesefm`) — collision eleven, stood down
+  and re-applied additively.** That run built the same fix independently and inside the same hour (a scratch
+  copy, the same stub-binary approach, an all-but-identically-named guard test); **this entry's version is on
+  `main` and ships, and the duplicate was dropped rather than re-litigated** — it is equal or better at every
+  point, and its log-tail path substitution is a nicety the duplicate lacked. Three pieces are genuinely
+  additive and were re-applied in this entry's own names:
+  - **`test_the_stub_astap_really_would_litter`** — a **positive control for layer 4**. Both layer-4 tests
+    assert that a folder did *not* change, which is trivially true if the stub quietly stops writing (a
+    typo'd flag, a changed argv shape, a `-f` the solver no longer passes) — the whole layer would sit
+    permanently green while checking nothing. It now points the stub at an unprotected folder and asserts it
+    litters, and that the `.wcs` it writes is really readable as a WCS. This is the A1 failure mode
+    (a test that passes on a fixture which cannot exhibit the bug) applied to a *guard*, and layer 2 already
+    carries the same control in `test_the_sentinel_actually_fires`.
+  - **`test_a_stale_sidecar_beside_the_frame_cannot_fake_a_solve`** — a second bug this fix closed for free
+    and nothing pinned. `solved` is `returncode == 0 and sidecar.exists()`: **existence, not authorship.** A
+    `.wcs` left beside a frame by an older build or by the owner's own ASTAP run sat exactly where the wrapper
+    looked, so a run that matched nothing could inherit someone else's answer and persist it as this frame's
+    WCS. A scratch directory that starts empty closes it by construction.
+  - Two unit-level pins for the mechanism the end-to-end tests rest on: `-f` is never a path in the caller's
+    folder (and the copy carries the same *bytes*, so it solves the owner's actual pixels), and the returned
+    `fits_path` is the caller's frame rather than a scratch path that would land in the project DB dangling.
+
+  **The one thing deliberately NOT changed:** this entry says the copy "happens once per `solve()`, not once
+  per ladder rung", but `_solve_once` holds the `TemporaryDirectory`, so a frame that walks all three rungs
+  copies three times. **Leave it.** Hoisting the staging into `solve()` would let a `.wcs` written by one rung
+  survive into the next, where `returncode == 0` alone would then read as solved — the very
+  existence-not-authorship hole above. A fresh directory per rung is the safer structure and the extra copies
+  are unmeasured; per this file's Performance rule, do not trade that for an unmeasured win.
+
   **The owner check from the entry still stands** and is worth running once on the live box:
   `ls incoming/<any target>_sub | grep -c '\.wcs$'`. A non-zero count is the litter this fix stops *adding to*
   — v0.326.2 does not remove what is already there, and must not: §10 permits no deletion inside `incoming/`,
@@ -611,11 +640,48 @@ _(nothing else claimed — claim an item here with your branch name)_
 - **🟠 A2 — PREVIEW AND EXPORT DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
   PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that
   lies. Confidence: verified on synthetic data. Three instances, **one mechanism**.)*
-  - **`tone.color_calibrate`** (`seestack/post/color_cal.py`): `DAOStarFinder(fwhm=3.0)`, aperture 4 px and
+  - **✅ SHIPPED (Builder, v0.326.3, branch `claude/zen-mccarthy-xesefm`) — ~~`tone.color_calibrate`~~**, the
+    instance that changes the picture's **colour**. Reproduced first, then fixed in the direction the entry
+    named. `_detect_calibration_stars`'s `fwhm=3.0` was a hard-coded literal and the 4 px aperture came from
+    a dataclass default, so both described a *full-resolution* star on whatever grid they were handed. They
+    are now `ColorCalibrationOptions.detect_fwhm_px` / `.aperture_radius_px`, and
+    `seestack.edit.ops.tone._color_calibrate` scales both through `ctx.scaled_px` with floors
+    (`MIN_DETECT_FWHM_PX` 1.0, `MIN_APERTURE_RADIUS_PX` 1.5 — below those a star is one pixel and
+    DAOStarFinder's matched filter starts ranking noise). **`min_stars` is deliberately NOT scaled**: it is a
+    count of stars, and the star count does not change with resolution — what changed was detection
+    *efficiency*, and that is what the geometry fixes.
+    **Measured, before → after** on a synthetic OSC field (tinted sky, neutral stars, sensor cast) at proxy
+    step 3: preview detections **35 % of the export's → 100 %**; the preview's white balance
+    `background_neutral` (gains R 1.056, B 0.912) **→ `gray_star`, R 1.250, B 0.800, matching the export
+    exactly**. The old preview was **15.5 % out in red and 14.0 % in blue** — a picture whose colour the
+    export never applies. On the export (`proxy_scale == 1`) the scaling is the identity, pinned by a test
+    that the full-res path is bit-for-bit what the engine defaults produce.
+    **The entry's second half shipped too**, because scaling closes most of the gap but not all of it: a
+    proxy decimated far enough still holds too few resolvable stars for a solve the export will manage. The
+    op now records **`proxy_fallback`** (true only when the render is a *decimated* preview and its
+    star-based request really did land on a different path), the histogram endpoint carries it in the existing
+    `color_cal` object, and the editor captions it in plain language beside the deconv/star-reduce advisories
+    — *"the saved picture's colour will differ a little from this preview"*. `proxy_scale > 1` is the
+    condition, not `is_proxy`: a small stack's "proxy" is the undecimated pixels, where a fallback is the
+    export's own answer and there is nothing to warn about.
+    **Upgrade-safe (§9):** two additive dataclass fields with their existing values as defaults, one additive
+    key inside an existing JSON blob, no schema, no on-disk change, no default flipped. The stacker's own
+    post-stack colour calibration is full-res and untouched.
+    **Tests (+7, 4 of which fail before).** A new `tests/test_edit_proxy_parity.py` measures preview↔export on
+    a **mosaic-shaped canvas at a real proxy step**, which is the only place any of this is visible. Its
+    fixture is built to be *able* to exhibit the bug and says so: the sky carries its own tint (otherwise
+    gray-star and background-neutral give the same answer and the divergence is invisible), and the star
+    density is of a Seestar's order (a field dense enough to clear the 20-star floor at 35 % efficiency cannot
+    show the bug at all — the first fixture this run wrote was exactly that, and passed on the *broken* code).
+    Plus the flag's two directions, the full-res no-flag case, `tests/webapp/test_editor.py` on the endpoint
+    contract, and `colorCal.test.ts` on the caption.
+    **Still open below: the other two instances and the two smaller ones** — they are a different mechanism
+    each (a floor that bites, a fixed 3×3 window) and want a run each.
+  - ~~**`tone.color_calibrate`** (`seestack/post/color_cal.py`): `DAOStarFinder(fwhm=3.0)`, aperture 4 px and
     `min_stars=20` are **none of them scaled**. On a mosaic canvas at proxy step 3 the proxy finds too few
     stars and silently falls back to `background_neutral` **while the export runs gray-star** — measured
     preview/export gain ratio **R 1.157, B 1.287** on a 4000×2400 canvas. A 1920×1080 single field matches
-    within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.
+    within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.~~
   - **`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
     own 1.5 px radius becomes 0.375 px at step 4 — the preview shows **13–46 %** of the export's sharpening,
     and unlike deconv and star-reduce it shows **no advisory**.
@@ -700,13 +766,58 @@ _(nothing else claimed — claim an item here with your branch name)_
   **even when the recipe contains no geometry op**. **Fix:** carry the source header's celestial cards when no
   enabled `geometry.*` op is present; adjust CRPIX for crop/resize; drop only for rotate.
 
-- **🟡 A4 — every baked caption says "ZWO Seestar S50"; the owner has an S30.** `_SEESTAR_CAMERA = "ZWO Seestar
-  S50"` (`webapp/pipeline.py`) is passed unconditionally by `_nameplate_fields` to the nameplate, keepsake and
-  print renders — so a **wrong fact is printed on every shared and printed picture**. The comment above it
-  cites "AGENTS.md §1" as its authority, but that file **never named a model** until 2026-09-02; the backlog
-  records the owner confirming an S30 on 2026-07-24. The model is derivable per-frame from
-  `FOCALLEN`/`XPIXSZ` (`seestack/io/fits_loader.py`): 150 mm = S30, 250 mm = S50. **Fix:** derive it, or read
-  it from the new Owner Facts block in `AGENTS.md` §1 — do not hard-code either model.
+- **✅ SHIPPED (Builder, v0.326.5, branch `claude/zen-mccarthy-xesefm`) — ~~A4: every baked caption says "ZWO
+  Seestar S50"; the owner has an S30.~~** Derived, in the direction the entry named — and pointedly **not**
+  swapped for a hard-coded S30, which would be the same bug with a different wrong answer for the next owner.
+
+  **Two halves, because the fact had nowhere to come from.** `_nameplate_fields` reads the *stack master's*
+  header, and the master carried no camera card at all — so `_build_output_header_meta`
+  (`seestack/stack/stacker.py`) now stamps **`INSTRUME`**, read from the subs' own headers via a new pure
+  `camera_name_from_header` (`seestack/io/fits_loader.py`, beside the `FOCALLEN`/`XPIXSZ` reader the entry
+  pointed at). It prefers `INSTRUME` — the camera's own statement, and the FITS standard's key for it,
+  normalising a bare `Seestar S30` to the full form captions use — and falls back to the focal length
+  (150 ± 20 mm = S30, 250 ± 20 mm = S50; the window is far too narrow for the two to blur, they are 100 mm
+  apart). A **non-Seestar** `INSTRUME` is returned as written, so a beginner who drops DSLR frames in sees
+  *their* gear named rather than ours.
+
+  **The rule that makes this a fix and not a re-guess: it returns `None` rather than assuming.** A focal
+  length matching neither model is somebody else's telescope, and `_nameplate_camera` then leaves the camera
+  clause out entirely. A caption naming the wrong camera is a false statement printed onto a picture the owner
+  *shares*; a caption naming no camera is merely quieter.
+
+  **What the owner sees.** Any target stacked from v0.326.5 captions his actual model. Every master written
+  **before** it carries neither card, so its captions drop the camera clause until that target is next
+  stacked — deliberate, and better than continuing to print a model the app was only ever assuming. The
+  nameplate already omits an absent field cleanly (no blank clause, no stray separator), pinned by a test.
+
+  **Upgrade-safe (§9):** one additive FITS card, one pure engine function, no config, no schema, no on-disk
+  layout change, no API shape change. The stamp is best-effort like every other provenance card — an
+  unreadable or header-less sub yields no card and never breaks a stack — and it is **bounded**
+  (`_CAMERA_HEADER_MAX_READS = 5`): it reads headers only, stops at the first sub that answers, and cannot
+  turn one card into thousands of reads on a 5,477-sub target.
+
+  **A fixture bug fell out and was fixed:** `tests/synth.py` wrote `INSTRUME = "Seestar S50"`
+  *unconditionally*, including on the S30-shaped frames (`focal_len_mm=150`) that `test_fits_loader` and
+  `test_solve_runner` already used — a frame no camera on earth produces, and exactly the sort of
+  self-contradicting fixture anything deriving a model from it would have been "tested" against. It now
+  follows the optics, and takes an `instrume=None` to write a frame that names nothing.
+
+  **Tests (+12, 8 of which fail before):** `tests/test_fits_loader.py` on the helper (INSTRUME wins over
+  optics; the focal-length fallback; a 200 mm or 530 mm scope gets `None`; a DSLR is named verbatim),
+  `tests/test_output_header_meta.py` on the stamp (S30 and S50 masters, a silent set leaving the card out, a
+  missing file not breaking the rest of the provenance, and the read bound), and a new
+  `tests/webapp/test_nameplate_camera.py` on the caption — including that an S50 owner still gets an S50, and
+  that an unnamed master produces a clean line with no camera and no stray separator.
+
+  *(Original audit entry follows.)*
+
+  ~~**🟡 A4 — every baked caption says "ZWO Seestar S50"; the owner has an S30.**~~ `_SEESTAR_CAMERA = "ZWO Seestar
+    S50"` (`webapp/pipeline.py`) is passed unconditionally by `_nameplate_fields` to the nameplate, keepsake and
+    print renders — so a **wrong fact is printed on every shared and printed picture**. The comment above it
+    cites "AGENTS.md §1" as its authority, but that file **never named a model** until 2026-09-02; the backlog
+    records the owner confirming an S30 on 2026-07-24. The model is derivable per-frame from
+    `FOCALLEN`/`XPIXSZ` (`seestack/io/fits_loader.py`): 150 mm = S30, 250 mm = S50. **Fix:** derive it, or read
+    it from the new Owner Facts block in `AGENTS.md` §1 — do not hard-code either model.
 
 - **🟢 A10 — four caption builders and two duration formats for one picture, chosen by which page you share
   from.** Target/lightbox use `share.ts` `sharePictureText` (`M 42 · 15 Nov 2024`); History feeds it
