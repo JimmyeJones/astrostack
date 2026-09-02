@@ -133,11 +133,16 @@ def test_saturated_highlight_p99_5_rounding_does_not_drop_the_curve():
     whole suggestion. Before the fix the rounded anchor collided with the endpoint
     and the strict-monotone guard bailed to None."""
     rng = np.random.default_rng(4)
-    # Dark sky floor + a broad object with a bright, near-saturated highlight tail
-    # so p99.5 lands at ~0.9998 (rounds to 1.0) while the median stays below target.
+    # Dark sky floor + an object with a bright, near-saturated highlight tail so
+    # p99.5 lands at ~0.9998 (rounds to 1.0) while the lift anchor stays below
+    # target. The object is deliberately compact (~12 % of the frame): the sky must
+    # stay the histogram's dominant peak, or the sky anchor drifts up into the
+    # object and the noise-aware lift anchor (v0.326.0, sky + 3σ) runs past the
+    # target grey — which declines for a *different*, legitimate reason and would
+    # stop this test exercising the rounding path it was written for.
     yy, xx = np.mgrid[0:120, 0:160]
-    img = 0.08 + rng.normal(0.0, 0.015, (120, 160))
-    img += 0.30 * np.exp(-(((xx - 80) / 60.0) ** 2 + ((yy - 60) / 50.0) ** 2))
+    img = 0.05 + rng.normal(0.0, 0.008, (120, 160))
+    img += 0.25 * np.exp(-(((xx - 40) / 30.0) ** 2 + ((yy - 30) / 25.0) ** 2))
     img[50:70, 70:90] = 0.9998                  # a bright saturated patch (>0.5% of px)
     img = np.clip(np.repeat(img[..., None], 3, axis=2), 0.0, 1.0).astype("float32")
     high = float(np.percentile(img[np.isfinite(img)], 99.5))

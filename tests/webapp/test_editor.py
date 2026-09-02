@@ -416,9 +416,48 @@ def test_curve_suggestion_from_image(client, solved_library):
     ys = [p[1] for p in pts]
     assert all(b > a for a, b in zip(xs, xs[1:]))
     assert all(b > a for a, b in zip(ys, ys[1:]))
-    # target_bg names the goal the lift solves for; it's the engine's target grey.
+    # target_bg names the goal a *midtone lift* solves for — the engine's target
+    # grey — and is null exactly when these points are the sky-anchored fallback
+    # instead (v0.326.0), which is the flag the button uses to word itself. Which
+    # branch this fixture lands on is a property of the fixture, so assert the
+    # contract rather than the branch.
     from seestack.edit.curve import CURVE_TARGET_BG
-    assert body["target_bg"] == CURVE_TARGET_BG
+
+    if body["target_bg"] is not None:
+        assert body["target_bg"] == CURVE_TARGET_BG
+        assert any(p[1] > p[0] for p in pts), "a midtone lift lifts something"
+    else:
+        # The fallback: the background anchor sits on the identity, and the shape
+        # above it is the shoulder lift.
+        assert pts[1][0] == pts[1][1]
+        assert any(p[1] > p[0] for p in pts[2:])
+
+
+def test_curve_suggestion_matches_what_auto_contrast_actually_applies(
+        client, solved_library, monkeypatch):
+    """The Editor draws this response as the read-only *ghost* over an engaged
+    Auto-contrast curve, so it has to be the curve the op will really apply — the
+    fallback included. Before v0.326.0 the endpoint answered ``None`` on every
+    frame that took the fallback, drawing a flat line beside a preview that had
+    plainly been shaped."""
+    import seestack.edit.curve as curve_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="curve_ghost")
+    recipe = {"ops": [
+        {"id": "tone.stretch", "uid": "s1", "params": {"stretch": 0.7, "black": 0.3}},
+        {"id": "tone.curves", "uid": "cv1", "params": {"auto": True}},
+    ]}
+    q = _enc(recipe)
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/curve-suggestion?recipe={q}&uid=cv1"
+
+    # Force the declining branch so the fallback is the answer under test.
+    monkeypatch.setattr(curve_mod, "suggest_tone_curve", lambda *a, **k: None)
+    body = client.get(url).json()
+    assert body["points"] is not None, "the fallback must reach the ghost"
+    assert body["target_bg"] is None, "and be flagged as a fallback, not a midtone lift"
+    assert body["points"][0] == [0.0, 0.0] and body["points"][-1] == [1.0, 1.0]
+    assert len(body["points"]) > 2, "a shaped curve, not the identity"
 
 
 def test_curve_suggestion_unknown_uid_falls_back(client, solved_library):
