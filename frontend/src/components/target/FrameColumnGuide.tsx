@@ -56,6 +56,18 @@ export function FrameColumnGuide() {
             Tap a heading to sort by it. A dimmed row is a frame that was left
             out; the tick on the right is the ones being kept.
           </Text>
+          {/* The keyboard shortcuts, folded in here rather than printed above
+              the table at every width. On a phone — the device the owner reads
+              this page on — a permanent line of key presses is an instruction
+              for hardware that isn't there, taking height on the page whose
+              standing complaint is height. Nothing is removed: this is the
+              disclosure that already ends with "tap a heading to sort by it",
+              so "and here is how to do it from a keyboard" is the same
+              sentence for the other kind of device. */}
+          <Text size="xs" c="dimmed">
+            With a keyboard: <b>j</b>/<b>k</b> move between frames, <b>a</b>{" "}
+            accepts the selected one, <b>r</b> rejects it.
+          </Text>
         </Stack>
         ) : null}
       </Collapse>
