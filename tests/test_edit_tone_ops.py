@@ -261,17 +261,48 @@ def test_curves_auto_lifts_midtones_from_identity():
     assert float(auto.max()) <= 1.0 + 1e-6               # highlights not blown out of range
 
 
-def test_curves_auto_falls_back_to_fixed_scurve_when_no_suggestion():
-    """On an already-bright image suggest_tone_curve declines (nothing to lift), so
-    auto must fall back to the fixed gentle S-curve, not silently no-op."""
-    from seestack.edit.ops.tone import _AUTO_CONTRAST_FALLBACK
+def test_curves_auto_falls_back_to_a_sky_anchored_curve_when_no_suggestion():
+    """On an image where suggest_tone_curve declines (nothing above the sky to
+    lift), auto falls back to a gentle curve that still shapes the tones *above*
+    the background — and leaves the background itself exactly where the stretch
+    put it.
 
-    rgb = _rgb(0.6, 0.6, 0.6)
+    The fallback used to be a fixed S-curve whose lower control point (0.25 → 0.20)
+    sits below a typical stretched sky, so it moved the background on every frame
+    that took this branch: a flat 0.6 came out at 0.634, and a 0.19 sky came out a
+    fifth darker. Which branch runs is not the user's choice, so both have to obey
+    the same rule.
+    """
+    from seestack.edit.curve import fallback_tone_curve, suggest_tone_curve
+
+    rng = np.random.default_rng(9)
+    # A bright, sky-dominated frame: the median *is* the sky, so the data-driven
+    # suggestion has nothing above it to lift and declines.
+    rgb = np.clip(0.6 + rng.normal(0.0, 0.01, (80, 100, 3)), 0.0, 1.0).astype("float32")
+    rgb[30:34, 40:44] = 0.95                      # a little structure to shape
+    assert suggest_tone_curve(rgb) is None, "this fixture must take the fallback"
+
     op = get_op("tone.curves")
     auto = op.apply(rgb, {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
-    fixed = op.apply(rgb, {"points": _AUTO_CONTRAST_FALLBACK, "auto": False}, EditContext())
-    assert np.allclose(auto, fixed, atol=1e-4)
-    assert not np.allclose(auto, rgb, atol=1e-3)          # the fallback actually shaped it
+    expected = op.apply(rgb, {"points": fallback_tone_curve(rgb), "auto": False},
+                        EditContext())
+    assert np.allclose(auto, expected, atol=1e-4)
+
+    # The sky stays put…
+    sky_in = float(np.median(rgb[:, :, 1]))
+    sky_out = float(np.median(auto[:, :, 1]))
+    assert abs(sky_out - sky_in) / sky_in < 0.01
+    # …and the bright patch above it is still shaped, so this is not a no-op.
+    assert float(np.median(auto[30:34, 40:44])) > float(np.median(rgb[30:34, 40:44])) + 1e-3
+
+
+def test_curves_auto_fallback_leaves_a_featureless_frame_alone():
+    """A uniform frame is nothing *but* sky, so the only honest fallback is the
+    identity. The old fixed S-curve brightened a flat 0.6 to 0.634."""
+    rgb = _rgb(0.6, 0.6, 0.6)
+    auto = get_op("tone.curves").apply(
+        rgb, {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
+    assert np.allclose(auto, rgb, atol=1e-4)
 
 
 def test_curves_auto_ignored_when_points_manually_set():

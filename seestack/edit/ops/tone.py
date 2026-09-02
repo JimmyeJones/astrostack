@@ -44,11 +44,12 @@ def _stretch(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
 # --- nonlinear tone shapers (operate in display space [0,1]) ----------------
 
-# A gentle fixed S-curve (the same one the built-in galaxy/nebula presets ship)
-# used as the auto-contrast fallback when the data-driven suggestion declines — a
-# stack already bright enough to have nothing to lift, or too degenerate to
-# measure. It slightly steepens the midtones (0.25→0.20, 0.75→0.82) for a pleasant
-# contrast start; strictly monotone, so it can't invert or posterise.
+# The gentle fixed S-curve the auto-contrast fallback used to be, kept as the
+# reference shape ``seestack.edit.curve.fallback_tone_curve`` reproduces at a sky
+# of zero. It is no longer applied as-is: its lower point (0.25→0.20) sits *below*
+# the sky of a typical stretched stack, so using it darkened the background by
+# about a fifth whenever the data-driven suggestion declined. The fallback now
+# anchors the same shoulder on the image's own measured sky instead.
 _AUTO_CONTRAST_FALLBACK = [[0.0, 0.0], [0.25, 0.2], [0.75, 0.82], [1.0, 1.0]]
 
 
@@ -77,9 +78,12 @@ def _curves(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     # gentle S-curve when the data offers no useful suggestion. A hand-edited curve
     # (non-identity points) always wins, so toggling auto never discards manual work.
     if params.get("auto") and _points_are_identity(pts):
-        from seestack.edit.curve import suggest_tone_curve
-        suggested = suggest_tone_curve(as_rgb(rgb))
-        pts = suggested if suggested is not None else _AUTO_CONTRAST_FALLBACK
+        from seestack.edit.curve import fallback_tone_curve, suggest_tone_curve
+        src = as_rgb(rgb)
+        suggested = suggest_tone_curve(src)
+        # Both branches obey the same rule — never move the sky — so which side of
+        # the suggestion's gate a stack falls on can't change its background.
+        pts = suggested if suggested is not None else fallback_tone_curve(src)
     xs = np.array([p[0] for p in pts], dtype=np.float64)
     ys = np.array([p[1] for p in pts], dtype=np.float64)
     # A tone curve needs at least two control points spanning a range of x. A
