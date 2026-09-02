@@ -299,3 +299,92 @@ def test_bootstrap_does_not_propagate_a_celestialless_deep_solve(tmp_path):
         assert all(f.wcs_json is None for f in proj.iter_frames())
     finally:
         proj.close()
+
+
+def _sep_arcsec(ra1, dec1, ra2, dec2) -> float:
+    import astropy.units as u
+    from astropy.coordinates import SkyCoord
+
+    a = SkyCoord(ra=ra1 * u.deg, dec=dec1 * u.deg)
+    b = SkyCoord(ra=ra2 * u.deg, dec=dec2 * u.deg)
+    return float(a.separation(b).arcsec)
+
+
+def test_rescued_subs_store_their_own_centre_not_the_references(tmp_path):
+    """Each rescued sub's stored ``ra_center_deg``/``dec_center_deg`` is the centre
+    of *its own* frame, offset from the reference by its registration shift.
+
+    Regression (Scout QA audit 2026-09-02): the apply loop derived the stored
+    centre with ``wcs_center_deg_from_text``, which returns **CRVAL** — and
+    ``propagate_wcs`` deliberately keeps the *reference's* CRVAL and offsets only
+    CRPIX. So every rescued member was stamped with the reference sub's pointing
+    and they all clumped at one coordinate instead of scattering by their dither.
+    The authoritative ``wcs_json`` was always right; only the centre columns (which
+    feed reference-frame selection, span diagnostics, mosaic centring and sibling
+    solve hints) were wrong.
+    """
+    proj, truth = _make_project_with_faint_subs(tmp_path, n=8)
+    try:
+        res = bootstrap_solve(proj, min_frames=4, deep_solver=_ref_wcs_solver)
+        assert res.deep_solved and res.n_propagated >= 6
+
+        centres = []
+        for f in proj.iter_frames():
+            if f.wcs_json is None:
+                continue
+            assert f.ra_center_deg is not None and f.dec_center_deg is not None
+            dx, dy = truth[f.id]
+            # A member dithered by (dx, dy) px has its centre pixel that far from
+            # the reference pixel, i.e. `pixscale * hypot(dx, dy)` off the
+            # reference's pointing on the sky. Registration is integer-pixel, so
+            # allow ~1.5 px of slack.
+            want = PIXSCALE * float(np.hypot(dx, dy))
+            got = _sep_arcsec(f.ra_center_deg, f.dec_center_deg, RA0, DEC0)
+            assert got == pytest.approx(want, abs=1.5 * PIXSCALE)
+            centres.append((f.ra_center_deg, f.dec_center_deg))
+
+        # …and they genuinely scatter: before the fix every one of these was
+        # exactly (RA0, DEC0), so the spread was zero.
+        assert len({(round(ra, 6), round(dec, 6)) for ra, dec in centres}) > 1
+        spread = max(_sep_arcsec(ra, dec, RA0, DEC0) for ra, dec in centres)
+        assert spread > PIXSCALE  # more than one pixel of real scatter
+    finally:
+        proj.close()
+
+
+def test_wcs_image_center_differs_from_crval_on_a_crpix_offset_solution(tmp_path):
+    """The helper, isolated: on a WCS whose CRPIX was *moved* (what
+    ``propagate_wcs`` builds), CRVAL is no longer the image centre."""
+    from seestack.io.wcs_io import (
+        wcs_center_deg_from_text,
+        wcs_image_center_deg_from_text,
+    )
+
+    unshifted = make_synth_wcs_text(
+        width=W, height=H, ra_center_deg=RA0, dec_center_deg=DEC0,
+        pixscale_arcsec=PIXSCALE, crpix_shift=(0.0, 0.0))
+    # CRPIX at the image centre → the two agree, which is why the CRVAL reading
+    # is still right for an ASTAP-native solution (`solve/runner.py`).
+    a = wcs_center_deg_from_text(unshifted)
+    b = wcs_image_center_deg_from_text(unshifted, width=W, height=H)
+    assert _sep_arcsec(*a, *b) < 0.01
+
+    shifted = make_synth_wcs_text(
+        width=W, height=H, ra_center_deg=RA0, dec_center_deg=DEC0,
+        pixscale_arcsec=PIXSCALE, crpix_shift=(40.0, -30.0))
+    assert wcs_center_deg_from_text(shifted) == pytest.approx((RA0, DEC0))
+    centre = wcs_image_center_deg_from_text(shifted, width=W, height=H)
+    assert centre is not None
+    assert _sep_arcsec(*centre, RA0, DEC0) == pytest.approx(
+        PIXSCALE * float(np.hypot(40.0, 30.0)), rel=0.02)
+
+
+def test_wcs_image_center_is_none_for_unusable_input():
+    from seestack.io.wcs_io import wcs_image_center_deg_from_text
+
+    assert wcs_image_center_deg_from_text(None, width=W, height=H) is None
+    assert wcs_image_center_deg_from_text("END", width=W, height=H) is None
+    good = make_synth_wcs_text(width=W, height=H, ra_center_deg=RA0,
+                               dec_center_deg=DEC0, pixscale_arcsec=PIXSCALE)
+    assert wcs_image_center_deg_from_text(good, width=0, height=H) is None
+    assert wcs_image_center_deg_from_text(good, width=W, height=-1) is None

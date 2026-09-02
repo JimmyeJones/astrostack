@@ -1099,6 +1099,55 @@ class NextObservingWindow:
     score: float
 
 
+def upcoming_dark_windows(
+    observer: Observer, start_utc: datetime, nights: int,
+) -> list[tuple[str, DarkWindow]]:
+    """The next ``nights`` astronomical-dark windows, each labelled with the local
+    calendar date of the **evening** it belongs to (``"2026-09-04"``).
+
+    Extracted from :func:`next_observing_windows` so anything that walks the nights
+    ahead — one target's next sessions, or the whole library's week — anchors,
+    clips and labels them identically. A night with no darkness at all (high summer
+    at latitude) is simply absent from the list; the labels are therefore *not*
+    guaranteed contiguous, which is the honest answer.
+
+    The scan is anchored at local solar noon on ``start_utc``'s date, so
+    :func:`_find_dark_window` (which takes the darkness *following* its reference)
+    lands on that calendar night regardless of the observer's longitude — local
+    noon in UTC is 12:00 − lon/15 h, east of Greenwich being earlier in UTC. A
+    caller in the small hours is *inside* the night that began the previous
+    evening, so the anchor moves back a day and one extra night is scanned to keep
+    the same forward horizon. A window already entirely past is dropped; one
+    partially past is clipped to ``start_utc``, so "tonight" only ever promises
+    time still to come.
+    """
+    _configure_iers_offline()
+    start_utc = start_utc.astimezone(timezone.utc)
+    d = start_utc.date()
+    anchor = datetime(d.year, d.month, d.day, 12, 0, 0, tzinfo=timezone.utc) - timedelta(
+        hours=observer.lon_deg / 15.0)
+    shift = 1 if start_utc < anchor else 0
+    anchor -= timedelta(days=shift)
+
+    out: list[tuple[str, DarkWindow]] = []
+    for offset in range(max(0, nights) + shift):
+        # The anchor *is* local noon of that evening, so its own date is the local
+        # calendar date the night is named after ("Thursday night" = Thu evening).
+        evening = anchor + timedelta(days=offset)
+        window = _find_dark_window(observer, evening)
+        if window is None:
+            continue  # Sun never sets that night (high summer) — nothing to plan.
+        if window.end <= start_utc:
+            continue
+        if window.start < start_utc:
+            window = DarkWindow(start=start_utc, end=window.end,
+                                sun_alt_threshold_deg=window.sun_alt_threshold_deg)
+            if window.duration_minutes <= 0:
+                continue
+        out.append((evening.date().isoformat(), window))
+    return out
+
+
 def next_observing_windows(
     observer: Observer,
     ra_deg: float,
@@ -1126,37 +1175,8 @@ def next_observing_windows(
     reported as a fresh opportunity; if a whole night's darkness is already past,
     or the target never rises high enough, that night is simply skipped.
     """
-    _configure_iers_offline()
-    start_utc = start_utc.astimezone(timezone.utc)
-    # Anchor the per-night scan at local solar noon on the start date, so
-    # ``_find_dark_window`` (which takes the darkness *following* its reference)
-    # lands on that calendar night regardless of the observer's longitude. Local
-    # noon in UTC is 12:00 − lon/15 h (east of Greenwich is earlier in UTC).
-    d = start_utc.date()
-    anchor = datetime(d.year, d.month, d.day, 12, 0, 0, tzinfo=timezone.utc) - timedelta(
-        hours=observer.lon_deg / 15.0)
-    # If the caller is before that date's local noon (small hours / pre-dawn), the
-    # night they're currently inside began the *previous* evening — anchor one day
-    # earlier so offset 0 lands on that ongoing window, and scan one extra night to
-    # keep the same forward horizon. The past-window/clip guards below drop or trim
-    # it as needed, so a pre-dawn user still sees the darkness they can use tonight.
-    shift = 1 if start_utc < anchor else 0
-    anchor -= timedelta(days=shift)
-
     out: list[NextObservingWindow] = []
-    for offset in range(max(0, nights) + shift):
-        window = _find_dark_window(observer, anchor + timedelta(days=offset))
-        if window is None:
-            continue  # Sun never sets that night (high summer) — nothing to plan.
-        # Skip a window whose darkness is entirely behind us; clip the first
-        # partially-past window so "tonight" reflects only the time still to come.
-        if window.end <= start_utc:
-            continue
-        if window.start < start_utc:
-            window = DarkWindow(start=start_utc, end=window.end,
-                                sun_alt_threshold_deg=window.sun_alt_threshold_deg)
-            if window.duration_minutes <= 0:
-                continue
+    for _label, window in upcoming_dark_windows(observer, start_utc, nights):
         illum = moon_illumination(window.start + (window.end - window.start) / 2)
         o = _observability_batch([ra_deg], [dec_deg], observer, window,
                                  min_altitude_deg, illum, horizon=horizon)[0]
@@ -1176,6 +1196,181 @@ def next_observing_windows(
         if len(out) >= max(1, want):
             break
     return out
+
+
+#: How many of the library's targets :func:`plan_week` will scan. The per-night
+#: work is one vectorised batch over all of them, so the cost is dominated by the
+#: number of *nights*, not targets — but the cap keeps a library of hundreds from
+#: turning a planning card into a slow request.
+WEEK_MAX_TARGETS = 40
+
+#: Nights ahead :func:`plan_week` looks by default — "this week", the horizon a
+#: weekend imager actually plans over.
+WEEK_NIGHTS = 7
+
+
+@dataclass
+class WeekTargetPick:
+    """One target's showing on one night of the week ahead."""
+
+    safe: str
+    name: str
+    # When it clears the altitude floor within that night's darkness.
+    usable_start_utc: str | None
+    usable_end_utc: str | None
+    minutes_above_min_alt: float
+    max_altitude_deg: float
+    #: Share (0..1) of the usable window the Moon is up, or ``None`` when unknown.
+    moon_up_fraction: float | None
+    score: float
+
+
+@dataclass
+class WeekNight:
+    """One night of the week ahead: its darkness, its Moon, and what to point at."""
+
+    #: Local calendar date of the **evening** the night belongs to (``2026-09-04``).
+    date: str
+    dark_start_utc: str
+    dark_end_utc: str
+    dark_minutes: float
+    moon_illumination: float
+    #: How many of the scanned targets are usable at all that night — so the UI can
+    #: say "3 other options" without carrying every one of them.
+    n_usable: int
+    #: The best-placed target, or ``None`` when nothing clears the floor for long
+    #: enough (a night worth telling the user to skip).
+    best: WeekTargetPick | None
+
+
+@dataclass
+class TargetBestNight:
+    """A target's single best night in the range — "M31: Thursday"."""
+
+    safe: str
+    name: str
+    date: str
+    minutes_above_min_alt: float
+    score: float
+
+
+@dataclass
+class WeekPlan:
+    """The output of :func:`plan_week` — the whole library, over the nights ahead."""
+
+    generated_utc: str
+    observer: dict
+    min_altitude_deg: float
+    horizon_active: bool
+    nights_scanned: int
+    #: Nights that actually have darkness, chronologically. Not necessarily
+    #: contiguous or ``nights_scanned`` long (high-summer nights have none).
+    nights: list[WeekNight] = field(default_factory=list)
+    #: Every scanned target that is usable on at least one of those nights, best
+    #: night first — "your M31 night is Thursday, your M42 night is Saturday".
+    targets: list[TargetBestNight] = field(default_factory=list)
+    #: Targets considered (after the position filter and the cap), so the UI can
+    #: say honestly that it looked at some but not all of a big library.
+    n_targets_considered: int = 0
+    n_targets_with_position: int = 0
+
+
+def plan_week(
+    observer: Observer,
+    library_targets: list[LibraryTarget],
+    *,
+    start_utc: datetime,
+    nights: int = WEEK_NIGHTS,
+    min_altitude_deg: float = 30.0,
+    horizon: HorizonProfile | None = None,
+    min_usable_minutes: float = 45.0,
+    max_targets: int = WEEK_MAX_TARGETS,
+) -> WeekPlan:
+    """Which of *your own* targets to point at, on which of the next few nights.
+
+    The cross-target, multi-night view the other planners don't give:
+    :func:`plan_tonight` ranks everything for tonight, and
+    :func:`next_observing_windows` plans one target forward. This walks the same
+    nights once and asks, for each, *which of the targets you've already started
+    is best placed* — the question a beginner who only gets out on clear weekends
+    actually has ("your best shot this week is M31 on Thursday").
+
+    Deliberately the **library only**, never the catalog: this is "finish what
+    I've got", and :func:`suggest_targets` already covers discovery. Targets with
+    no known position are skipped (they can't be planned), and at most
+    ``max_targets`` are scanned — :data:`WEEK_MAX_TARGETS`, reported back on the
+    result so the UI can be honest about it.
+
+    One vectorised observability batch per night over all targets at once, so the
+    cost scales with ``nights``, not with the size of the library. Purely offline
+    and read-only, like the rest of the planner.
+    """
+    positioned = [t for t in library_targets
+                  if t.ra_deg is not None and t.dec_deg is not None]
+    considered = positioned[:max(0, max_targets)]
+    plan = WeekPlan(
+        generated_utc=start_utc.astimezone(timezone.utc).isoformat(),
+        observer=asdict(observer),
+        min_altitude_deg=min_altitude_deg,
+        horizon_active=horizon is not None and not horizon.is_empty(),
+        nights_scanned=max(0, nights),
+        n_targets_considered=len(considered),
+        n_targets_with_position=len(positioned),
+    )
+    if not considered:
+        return plan
+
+    ras = [float(t.ra_deg) for t in considered]
+    decs = [float(t.dec_deg) for t in considered]
+    # safe → its best showing so far, as (score, minutes, date, name).
+    best_by_target: dict[str, TargetBestNight] = {}
+
+    for label, window in upcoming_dark_windows(observer, start_utc, nights):
+        illum = moon_illumination(window.start + (window.end - window.start) / 2)
+        obs = _observability_batch(ras, decs, observer, window, min_altitude_deg,
+                                   illum, horizon=horizon)
+        usable = [(t, o) for t, o in zip(considered, obs, strict=True)
+                  if o.minutes_above_min_alt >= min_usable_minutes]
+        # Best-first by score, then by how long it's up; ``safe`` last so two
+        # equally-placed targets order deterministically rather than by dict order.
+        usable.sort(key=lambda p: (-p[1].score, -p[1].minutes_above_min_alt, p[0].safe))
+
+        for t, o in usable:
+            prev = best_by_target.get(t.safe)
+            if prev is None or (o.score, o.minutes_above_min_alt) > (
+                    prev.score, prev.minutes_above_min_alt):
+                best_by_target[t.safe] = TargetBestNight(
+                    safe=t.safe, name=t.name, date=label,
+                    minutes_above_min_alt=o.minutes_above_min_alt,
+                    score=o.score,
+                )
+
+        pick = None
+        if usable:
+            t, o = usable[0]
+            pick = WeekTargetPick(
+                safe=t.safe, name=t.name,
+                usable_start_utc=o.usable_start_utc.isoformat() if o.usable_start_utc else None,
+                usable_end_utc=o.usable_end_utc.isoformat() if o.usable_end_utc else None,
+                minutes_above_min_alt=o.minutes_above_min_alt,
+                max_altitude_deg=o.max_altitude_deg,
+                moon_up_fraction=o.moon_up_fraction,
+                score=o.score,
+            )
+        plan.nights.append(WeekNight(
+            date=label,
+            dark_start_utc=window.start.isoformat(),
+            dark_end_utc=window.end.isoformat(),
+            dark_minutes=round(window.duration_minutes, 1),
+            moon_illumination=round(illum, 3),
+            n_usable=len(usable),
+            best=pick,
+        ))
+
+    plan.targets = sorted(
+        best_by_target.values(),
+        key=lambda b: (b.date, -b.score, -b.minutes_above_min_alt, b.safe))
+    return plan
 
 
 @dataclass
