@@ -22,6 +22,7 @@ import {
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
 import { memoryFixAction } from "../stackMemoryFix";
+import { printBiggerAction } from "../stackPrintBigger";
 import { minMaxIgnoresWeightingHint as minMaxIgnoresWeighting } from "../weightingHint";
 
 // Linear-interpolated percentile of an unsorted numeric sample (p in [0, 100]).
@@ -792,6 +793,16 @@ export function StackView() {
     printPlan?.bigger_text && est && est.n_frames >= DRIZZLE_TOO_FEW_FRAMES
       ? printPlan.bigger_text
       : null;
+  // …and the button that actually sets it. The scale the sentence names is
+  // machine-actionable — already verified to reach that paper and to fit the
+  // memory budget — but both knobs it names live inside the collapsed advanced
+  // disclosure, so reading the sentence still left a beginner hunting. Gated on
+  // `printBigger`, so it inherits every condition that sentence is held to and
+  // can never appear on its own; that is also why it isn't an always-on control
+  // on a dense form.
+  const printBiggerFix = printBigger
+    ? printBiggerAction(printPlan, { drizzle: drizzleOn, scale: drizzleScale })
+    : null;
 
   return (
     <Stack maw={720}>
@@ -1293,6 +1304,21 @@ export function StackView() {
                 <Text size="xs" c="dimmed">
                   {printPlan.text}{printBigger ? ` ${printBigger}` : ""}
                 </Text>
+              ) : null}
+              {printBiggerFix ? (
+                <Button
+                  mt={4}
+                  size="xs"
+                  variant="subtle"
+                  w="fit-content"
+                  // One update, not two `set()` calls: the estimate query is
+                  // keyed on `drizzle` *and* `drizzle_scale`, so setting them
+                  // separately would re-query twice and flicker the verdict
+                  // through an intermediate state (drizzle on at the old scale).
+                  onClick={() => setValues((p) => ({ ...p, ...printBiggerFix.values }))}
+                >
+                  {printBiggerFix.label}
+                </Button>
               ) : null}
             </Stack>
           ) : null}

@@ -10837,21 +10837,50 @@ to **Shipped**.)_
   former**, since a second derivation of the same statistic is exactly what the v0.317.1 process note warns
   about. **Care:** it is a tooltip, not a fourth column — the Target page is the "extremely busy" one.
 
-- **NEW IDEA (Builder 2026-08-30, the half deliberately left out of the Stack-form print line v0.318.0) — make
-  the print nudge a *button*, not only a sentence.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size XS;
-  frontend-only, no new data.)* The estimate panel now says *"Turning Drizzle on at ×1.3 would print it at A3
-  instead"*, and the scale it names is already **machine-actionable** — `print_plan.bigger_drizzle_scale` is a
-  number the form could just set, and it is already verified to fit the memory budget and to actually reach that
-  paper. But the two knobs it names (`drizzle`, `drizzle_scale`) live inside the collapsed **advanced**
-  disclosure, so a beginner who reads the sentence still has to go find them. The panel two lines up already has
-  exactly this pattern — the one-click `memoryFix` button — so the shape is settled and copyable.
-  **Why it was left out rather than done:** the filed spec said *keep it to one line*, against the owner's
-  standing "extremely busy" priority, and a button is a second element on a dense form. **What would settle it:**
-  it appears only when there is something to reach for *and* the stack has enough frames for drizzle to pay off,
-  which on a beginner's first stacks is rarely — so it is not an always-on control. **Care:** it must set *both*
-  keys (`drizzle: true` and the scale), and the existing `set()` helper takes one key at a time; check whether a
-  two-key set re-queries the estimate once or twice before wiring it, or the panel will flicker between two
-  verdicts.
+- **✅ SHIPPED (Builder, v0.323.0, branch `claude/zen-mccarthy-2rptmf`) — ~~make the print nudge a *button*,
+  not only a sentence.~~** Built as filed, with the entry's two cautions answered rather than assumed.
+  `frontend/src/stackPrintBigger.ts` — `printBiggerAction(plan, current)` — is the deliberate sibling of
+  `stackMemoryFix.ts`: a pure helper holding the label and the "is there anything to offer?" rule, so both are
+  unit-testable without rendering the form. The button reads **"Use drizzle ×1.4 — prints at A3"**, the same
+  action-plus-payoff shape the `memoryFix` button two lines up already uses.
+
+  **The `set()` caution was real, and the answer is to not use `set()`.** The estimate query is keyed on
+  `drizzle` **and** `drizzle_scale`, so two one-key `set()` calls would re-query twice and flicker the verdict
+  through an intermediate state (drizzle on at the *old* scale — a canvas neither the before nor the after).
+  The action therefore hands back a `values` object and the click does one `setValues` spread: one render, one
+  key change, one refetch. A route test asserts every `stackEstimate` call after the click carries **both**.
+
+  **The always-on caution is answered by construction, not by a second rule:** the button is gated on
+  `printBigger`, the sentence's own visibility, so it inherits every condition that sentence is held to (a
+  bigger paper is reachable, the scale fits the memory budget, and the stack has at least
+  `DRIZZLE_TOO_FEW_FRAMES` frames) and can never appear where the sentence doesn't. It also refuses to render a
+  no-op — a scale equal to what the form already has — which the engine's step-up should make impossible, but a
+  control that appears to do something and does nothing is exactly the defect this button was added to fix.
+
+  **Upgrade-safe (§9):** frontend-only, read-only, no engine/API/schema/config/default change; it sets two
+  existing form fields the user could already set by hand.
+
+  **Tests (+9):** 7 in `stackPrintBigger.test.ts` (the label and the paired values, a whole scale written
+  `×2` the way the engine's own sentence does, a raise from an already-on lower scale, the no-op refusal, three
+  half-filled plans, and four unusable scales), and 2 in `Stack.test.tsx` — the click sets both knobs in one
+  update, and the button is absent wherever the sentence is.
+
+  Original spec, for the record:
+
+    *(Pillar: autonomy + friendliness — PRIORITY 2–3; size XS;
+    frontend-only, no new data.)* The estimate panel now says *"Turning Drizzle on at ×1.3 would print it at A3
+    instead"*, and the scale it names is already **machine-actionable** — `print_plan.bigger_drizzle_scale` is a
+    number the form could just set, and it is already verified to fit the memory budget and to actually reach that
+    paper. But the two knobs it names (`drizzle`, `drizzle_scale`) live inside the collapsed **advanced**
+    disclosure, so a beginner who reads the sentence still has to go find them. The panel two lines up already has
+    exactly this pattern — the one-click `memoryFix` button — so the shape is settled and copyable.
+    **Why it was left out rather than done:** the filed spec said *keep it to one line*, against the owner's
+    standing "extremely busy" priority, and a button is a second element on a dense form. **What would settle it:**
+    it appears only when there is something to reach for *and* the stack has enough frames for drizzle to pay off,
+    which on a beginner's first stacks is rarely — so it is not an always-on control. **Care:** it must set *both*
+    keys (`drizzle: true` and the scale), and the existing `set()` helper takes one key at a time; check whether a
+    two-key set re-queries the estimate once or twice before wiring it, or the panel will flicker between two
+    verdicts.
 
 - ~~**NEW IDEA (Builder 2026-08-30, the obvious next tap on the per-run night count v0.317.0) — say "over 4
   nights" where a person is *looking at* the picture, not only where they copy a caption.**~~ —
