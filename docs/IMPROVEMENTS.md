@@ -21738,6 +21738,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   well placed" is worse than no event. Grep `webapp/ics.py` and `get_next_session_ics` first; composition, not
   new code.
 
+- **✅ SHIPPED (Builder, v0.325.2, branch `claude/zen-mccarthy-46ejou`) — the week cache's signature was blind
+  to the input the entry above just made the cap depend on.** Caught at merge time, not designed in: PR #680
+  landed the `/week` registry-signature cache while this branch was building the most-shot cap, and its
+  signature carries `(safe, ra_deg, dec_deg)` per target. Once the cap selects *by depth*, a night's capture
+  can change **which** forty targets get planned without adding a target or moving one — and a signature blind
+  to that goes on serving the previous selection for the bucket's life. `total_exposure_s` and
+  `frames_accepted` are now in it. Free on a library under the cap (the set is everything either way), and the
+  bucket/TTL machinery is untouched. Test:
+  `tests/webapp/test_plan.py::test_the_week_cache_notices_a_target_getting_deeper` — a target gains subs and
+  integration, nothing else moves, and the plan is recomputed (it was served from cache before).
+  **Worth carrying forward:** the inner `_library_targets` cache keys on `registry_signature`, which carries
+  `n_frames_accepted` and `last_activity_utc` but *not* exposure — so the two layers only agree because
+  exposure never moves without one of those. If a future change lets it, both signatures need looking at
+  together.
+
 - **✅ SHIPPED (Builder, v0.325.1, branch `claude/zen-mccarthy-46ejou`) — "Plan my week" planned a big library
   around whatever sorts first alphabetically.** Found within the hour, on top of the v0.325.0 entry below, by
   the Builder whose own duplicate of that feature was stood down (see the collision-nine note under "In
