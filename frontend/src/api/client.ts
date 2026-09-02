@@ -1392,6 +1392,21 @@ export interface StackEstimate {
     // The accepted+solved frames this answer was computed for.
     n_frames: number;
   } | null;
+  // Whether the rejection this stack is configured for can actually drop a lone
+  // satellite/plane/cosmic-ray hit at this frame count. Sigma clipping runs from
+  // 4 frames but is mathematically blind to a single outlier until
+  // `lone_outlier_min_frames` (11 at the default κ=3), so in between it runs and
+  // clips nothing — which is the opposite of what a beginner assumes. Optional so
+  // an older backend simply says nothing.
+  rejection_reach?: {
+    // The combine that will actually run, on the resolved options.
+    method: "drizzle" | "min-max-reject" | "sigma-clip" | "mean";
+    n_frames: number;
+    // Smallest frame count at which `method` could drop a lone extreme; null
+    // when no rejection pass runs at any count.
+    lone_outlier_min_frames: number | null;
+    reaches: boolean;
+  } | null;
 }
 
 export interface GalleryItem {
@@ -2346,7 +2361,7 @@ export const api = {
     opts: {
       drizzle?: boolean; drizzle_scale?: number; drizzle_reject?: boolean;
       mosaic_canvas?: string; min_max_reject?: boolean; min_max_reject_count?: number;
-      auto_reject?: boolean; sigma_kappa?: number;
+      auto_reject?: boolean; sigma_kappa?: number; sigma_clip?: boolean;
     },
   ) => {
     const p = new URLSearchParams();
@@ -2360,6 +2375,11 @@ export const api = {
     if (opts.min_max_reject_count != null) p.set("min_max_reject_count", String(opts.min_max_reject_count));
     if (opts.auto_reject) p.set("auto_reject", "true");
     if (opts.sigma_kappa != null) p.set("sigma_kappa", String(opts.sigma_kappa));
+    // Not a sizing knob — the backend defaults it to true (StackOptions' own
+    // default) and reads it only for `rejection_reach`, so an unticked sigma
+    // clip has to be said explicitly or the reach answer describes a stack the
+    // user isn't running.
+    if (opts.sigma_clip != null) p.set("sigma_clip", opts.sigma_clip ? "true" : "false");
     return req<StackEstimate>(`/api/targets/${safe}/stack-estimate?${p.toString()}`);
   },
   stackArtifactUrl: (

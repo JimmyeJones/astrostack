@@ -21,6 +21,7 @@ import {
 } from "../calibrationFit";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
+import { rejectionReachNudge } from "../rejectionReachNudge";
 import { memoryFixAction } from "../stackMemoryFix";
 import { minMaxIgnoresWeightingHint as minMaxIgnoresWeighting } from "../weightingHint";
 
@@ -107,14 +108,20 @@ export function StackView() {
   const minMaxRejectCount = Number(values.min_max_reject_count ?? 1);
   const autoReject = !!values.auto_reject;
   const sigmaKappa = Number(values.sigma_kappa ?? 3.0);
+  // Not a sizing knob, but the estimate is also where `rejection_reach` is
+  // answered, and that answer is wrong if it assumes a sigma clip the user turned
+  // off. `values.sigma_clip` is undefined only before the form's defaults land,
+  // where the engine default (true) is the right assumption.
+  const sigmaClipOn = values.sigma_clip == null ? true : !!values.sigma_clip;
   const estimate = useQuery({
     queryKey: ["stack-estimate", safe, drizzleOn, drizzleScale, drizzleReject,
-      mosaicCanvas, minMaxReject, minMaxRejectCount, autoReject, sigmaKappa],
+      mosaicCanvas, minMaxReject, minMaxRejectCount, autoReject, sigmaKappa,
+      sigmaClipOn],
     queryFn: () => api.stackEstimate(safe, {
       drizzle: drizzleOn, drizzle_scale: drizzleScale,
       drizzle_reject: drizzleReject, mosaic_canvas: mosaicCanvas,
       min_max_reject: minMaxReject, min_max_reject_count: minMaxRejectCount,
-      auto_reject: autoReject, sigma_kappa: sigmaKappa,
+      auto_reject: autoReject, sigma_kappa: sigmaKappa, sigma_clip: sigmaClipOn,
     }),
     enabled: Object.keys(values).length > 0,
     retry: false,
@@ -592,14 +599,33 @@ export function StackView() {
         : `Auto outlier removal is on, so it picks the method from your frame count: with ${autoResolved.n_frames} accepted, solved subs it will use sigma clipping, which rejects pixels that sit far from the average. Below about ${autoResolved.switch_at_frames} subs it uses min/max rejection instead.`)
       : null;
 
-  // Sigma-clip rejection estimates each pixel's spread across the stack, so it
-  // needs a handful of frames to be meaningful. With only a few it can throw
-  // away real signal as if it were an outlier — a knob a beginner can't reason
-  // about, so surface a plain-language "why". Advisory only; the pick stands.
+  // Will the rejection this stack is set up for actually remove a lone satellite
+  // trail? Answered by the engine (`rejection_reach`), which reads the same
+  // `kappa_min_frames` that `seestack.stackhealth` uses to say so *after* a
+  // stack — so the caution here and the note on the finished picture can never
+  // disagree. Advisory; nothing changes until the button is pressed.
+  // Suppressed while `minMaxRejectHint` is up: that one says the same thing about
+  // the same stack but names the streaks QC actually found, and already offers
+  // min/max. This one exists for everything QC *can't* flag — an undetected
+  // trail, a cosmic-ray hit — so it must not stack a second yellow alert beside it.
+  const rejectionReach = estimate.data?.rejection_reach;
+  const rejectionBlindNudge = frames.isLoading || minMaxRejectHint
+    ? null
+    : rejectionReachNudge(rejectionReach, values);
+
+  // The flip side, for the counts where sigma clipping *can* bite: it estimates
+  // each pixel's spread across the stack, so on a handful of frames that spread
+  // is poorly measured and real signal can be clipped as an outlier. Gated on
+  // the reach answer, because below it the clip removes nothing at all and
+  // "consider turning it off" would be advice to swap no rejection for no
+  // rejection — the blindness nudge above is the honest note there. At the
+  // default κ=3 the reach threshold (11 frames) is above this ceiling, so this
+  // only fires for a user who deliberately loosened κ. Advisory; the pick stands.
   const SIGMA_CLIP_MIN_FRAMES = 5;
   const sigmaClipWarning =
     sigmaClipEffective && !frames.isLoading && solvedAccepted > 0
     && solvedAccepted < SIGMA_CLIP_MIN_FRAMES
+    && rejectionReach?.method === "sigma-clip" && rejectionReach.reaches
       ? `Sigma-clip rejection estimates each pixel's spread across frames, but you only have ${solvedAccepted} accepted, solved frame${solvedAccepted === 1 ? "" : "s"}. With fewer than ~${SIGMA_CLIP_MIN_FRAMES} it can reject real signal as an outlier — consider turning it off for this stack.`
       : null;
 
@@ -1059,6 +1085,18 @@ export function StackView() {
                 on — turn it off to pick the method yourself. Your κ and k
                 settings are still used either way.
               </Text>
+            </Alert>
+          ) : null}
+
+          {rejectionBlindNudge ? (
+            <Alert color="yellow" variant="light" py={6} px="sm">
+              <Text size="xs">{rejectionBlindNudge.text}</Text>
+              {rejectionBlindNudge.fix ? (
+                <Button size="compact-xs" variant="light" color="yellow" mt={6}
+                  onClick={() => set(rejectionBlindNudge.fix!.key, true)}>
+                  {rejectionBlindNudge.fix.label}
+                </Button>
+              ) : null}
             </Alert>
           ) : null}
 

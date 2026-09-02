@@ -795,6 +795,84 @@ def auto_reject_switch_frames(kappa: float) -> int:
     return max(4, kappa_min_frames(kappa))
 
 
+def combine_method(options: "StackOptions", n: int) -> str:
+    """Which combine ``run_stack``'s dispatcher will actually run for ``n``
+    candidate frames: ``"drizzle"``, ``"min-max-reject"``, ``"sigma-clip"`` or
+    ``"mean"``.
+
+    The gates are the dispatcher's own (``min_max_reject and n >= 3``,
+    ``sigma_clip and n >= 4``): below those counts it silently falls through to a
+    plain mean with **no rejection pass at all**, so a 3-frame stack with
+    sigma-clip ticked combines as ``"mean"``.
+
+    Pass the *effective* options (post :func:`_resolve_auto_reject`) — the label
+    describes what runs, not what was asked for. Public because the header
+    provenance (``STACKER``) and the Stack form both have to name it, and a form
+    that names a different method than the FITS card records is the shape of
+    mistake this project keeps finding."""
+    if options.drizzle:
+        return "drizzle"
+    if options.min_max_reject and n >= 3:
+        return "min-max-reject"
+    if options.sigma_clip and n >= 4:
+        return "sigma-clip"
+    return "mean"
+
+
+#: Smallest stack a per-pixel *order-statistic* rejection can run on — min/max
+#: has to spare a sample at each end and still have one left to average.
+MIN_MAX_MIN_FRAMES = 3
+
+
+@dataclass(frozen=True)
+class RejectionReach:
+    """Can this stack's outlier rejection actually drop a lone satellite trail?
+
+    The honest pre-run answer to the question ``seestack.stackhealth`` answers
+    *after* a stack has run (its ``rejection_blind`` note). Both read
+    :func:`kappa_min_frames`, so the warning the Stack form can still act on and
+    the note on the finished picture can never disagree.
+    """
+
+    #: What :func:`combine_method` says will run, on the effective options.
+    method: str
+    #: Candidate frames the dispatcher will gate on.
+    n_frames: int
+    #: Smallest ``n`` at which ``method`` could drop a lone extreme — ``None``
+    #: for ``"mean"`` (no rejection pass runs at any count) and for ``"drizzle"``
+    #: (its two-pass rejection is also gated on the memory budget, which this
+    #: pure helper does not know).
+    lone_outlier_min_frames: int | None
+    #: Whether a lone satellite/plane/cosmic-ray hit in one sub can be removed.
+    reaches: bool
+
+
+def rejection_reach(options: "StackOptions", n: int) -> RejectionReach:
+    """Resolve ``options`` for an ``n``-frame stack and say whether the rejection
+    it lands on can remove a *lone* outlier.
+
+    ``sigma_clip`` is the case that matters: it dispatches from 4 frames but is
+    mathematically blind to a single trail until :func:`kappa_min_frames` (11 at
+    the default κ=3), so at every count between the two it runs, records
+    ``REJMODE = sigma-clip``, and clips nothing. Min/max removes an extreme from
+    3 frames up, which is why ``auto_reject`` picks it down there."""
+    eff = _resolve_auto_reject(options, n)
+    method = combine_method(eff, n)
+    if method == "min-max-reject":
+        return RejectionReach(method, n, MIN_MAX_MIN_FRAMES, True)
+    if method == "sigma-clip":
+        need = kappa_min_frames(eff.sigma_kappa)
+        return RejectionReach(method, n, need, n >= need)
+    if method == "drizzle":
+        # Two-pass drizzle rejection needs ≥4 frames *and* the memory to hold the
+        # extra planes (:func:`_afford_drizzle_reject`); report the frame-count
+        # half only, and say nothing when it was never asked for.
+        if not eff.drizzle_reject:
+            return RejectionReach(method, n, None, False)
+        return RejectionReach(method, n, 4, n >= 4)
+    return RejectionReach(method, n, None, False)
+
+
 def _resolve_auto_reject(options: StackOptions, n: int) -> StackOptions:
     """Resolve ``auto_reject`` into concrete ``sigma_clip``/``min_max_reject``.
 
@@ -1425,15 +1503,9 @@ def _build_output_header_meta(
     # pass runs — REJMODE is correctly absent), so a 3-frame default stack or a
     # 2-frame min-max stack must record STACKER="mean", not the rejection method.
     # `len(frames)` here is the candidate count `n` the dispatcher gated on.
-    n = len(frames)
-    if options.drizzle:
-        method = "drizzle"
-    elif options.min_max_reject and n >= 3:
-        method = "min-max-reject"
-    elif options.sigma_clip and n >= 4:
-        method = "sigma-clip"
-    else:
-        method = "mean"
+    # `combine_method` *is* those gates — shared with the Stack form's pre-run
+    # warning so the card and the warning can never name different methods.
+    method = combine_method(options, len(frames))
     meta["STACKER"] = (method, "stacking method")
     meta["COLORTYP"] = ("mono" if options.mono else "OSC", "sensor/stack colour mode")
     # Calibration provenance: which masters were actually applied to the lights

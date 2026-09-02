@@ -20441,6 +20441,53 @@ problems. Dogfood it every big-picture run and fix root causes.
   as filed.** If anything is worth building here it is *advisory* — say on the Stack form that κ-σ can't remove a
   lone trail at this sub count and offer the one-click switch, the same shape as the shipped photometric-
   normalization nudge — not a silent change to their combine.
+
+  **✅ THE ADVISORY HALF SHIPPED (Builder, v0.322.8, branch `claude/zen-mccarthy-v56oj1`) — and building it found
+  that the form was giving the *opposite* advice, not merely no advice.** Nothing about anyone's combine changed;
+  no threshold moved; no default flipped.
+
+  **What was actually wrong.** The Stack form's low-frame caution fired below a hard-coded `SIGMA_CLIP_MIN_FRAMES
+  = 5`, said sigma clipping *"can reject real signal as an outlier"*, and offered one button: **"Turn off sigma
+  clipping."** At the default κ=3 every count it fired at (1–4) is a count at which κ-σ **cannot clip anything at
+  all** — a lone point's z-score against statistics that still include it maxes out at `(n−1)/√n`, which does not
+  reach κ=3 until `kappa_min_frames(3.0)` = **11 frames**, and below 4 the dispatcher does not even run the pass.
+  So the app was telling a beginner with a 3-sub first light that their rejection was too aggressive, and offering
+  to swap no rejection for no rejection — while `seestack.stackhealth` told the *same user* on the *finished
+  picture* that sigma clipping "couldn't drop anything" and to re-stack with Auto outlier removal on. Two shipped
+  surfaces, one fact, opposite answers.
+
+  **The fix is a shared answer, not a second opinion** — the shape this project keeps converging on.
+  `rejection_reach(options, n)` (`seestack/stack/stacker.py`) resolves `auto_reject`, asks the new public
+  `combine_method` which combine the dispatcher will *actually* run, and reads the same `kappa_min_frames`
+  `stackhealth` reads. A test asserts the two agree at every frame count: the form's pre-run warning and the note
+  on the finished picture are now mathematically incapable of disagreeing. `combine_method` also replaced the
+  fourth copy of the dispatcher's gates, in `_build_output_header_meta` — so the `STACKER` card and the form's
+  warning can't name different methods either.
+
+  **The copy now says what will happen and points at what helps**, in three shapes decided by the engine, not by
+  the browser: κ-σ on but blind (*"…can't actually drop a passing satellite… a lone outlier only stands out far
+  enough from the average to be clipped from about 11 frames up"*), the sub-4-frame fall-through (*"will combine
+  as a plain average"*), and below min/max's own 3-frame floor, where the honest answer is that **no setting can
+  help** and the button is withheld. The action is **"Turn on Auto outlier removal"** — `stackhealth`'s own
+  advice, verified by a test to actually reach a lone outlier at every count from 3 up. It fires only when the
+  user *asked* for rejection, so it is never a nag at someone who opted out, and it stands down while the
+  streak-specific `minMaxRejectHint` is up rather than stacking a second yellow alert.
+
+  **The old caution is kept, not deleted** — narrowed to the counts where its sentence is true (the clip really
+  will bite), which at the default κ is the empty set and at a user-loosened κ=1 is frames 4. Its "Turn off sigma
+  clipping" button is untouched there.
+
+  **Upgrade-safe (§9):** one additive query param on `stack-estimate` defaulting to `StackOptions`' own
+  `sigma_clip=True` (so an older frontend sees byte-identical answers), one additive response field, and the
+  param provably cannot move `peak_bytes` — the only plane it gates needs `record_rejection_map`, which this dry
+  run never sets, and a test pins the three peaks equal. No config, schema, on-disk, default or engine-behaviour
+  change.
+
+  **Tests: +17 engine (`tests/test_rejection_reach.py`), +2 endpoint (`tests/webapp/test_stack_estimate.py`),
+  +10 unit and +4 rendered frontend.** The two existing tests that pinned the *wrong* advice were rewritten to
+  pin the corrected advice on the same paths. One unrelated print-plan test was matching "2 accepted, solved
+  frames" from the sigma-clip caution rather than the sizing line it was written for; it now asserts the sizing
+  line's own text.
 - **VALIDATION FOLLOW-UP (Scout 2026-07-23) — confirm on real nebula data that the now-live SExtractor skew
   guard (`abs(mean − median) > 0.3·σ → revert to median`) doesn't over-revert on heavy diffuse nebulosity.**
   *(Image-quality / correctness; PRIORITY 4; size S — one real-data check, no blind code change.)* The
