@@ -43,6 +43,45 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **⚠️ PROCESS NOTE + Builder 2026-09-02, branch `claude/zen-mccarthy-46ejou` — collision NINE, and the first
+> where an entire run was duplicated: all three tasks, by one other Builder, inside the same hour. Run finished,
+> everything stood down bar one additive fix.**
+> The other Builder's PR **#678** landed **v0.325.0** carrying *the same three items* this run built: the asinh
+> full-res parity bug, the `bootstrap_solve` rescued-sub centre bug, and "Plan my week". Not merely the same
+> items — the same *shape*, down to an identically-named test
+> (`test_rescued_subs_store_their_own_centre_not_the_references` in both). **Theirs is on `main` and ships;
+> mine is dropped, not re-litigated**, and PR #679 was rewritten rather than merged. Their versions are equal
+> or better at every point, checked rather than assumed:
+> * **asinh parity** — theirs is a strict superset. It anchors `render_stack_png` *as well as*
+>   `render_preview_png_full_res`, which closes the History-lightbox site at a non-1024 `size` that mine only
+>   *filed* as a follow-on idea. (That idea is therefore **not** filed — it would have been open work that was
+>   already done.)
+> * **rescued-sub centre** — near-identical, and theirs uses `all_pix2world`, so a SIP/distortion term in the
+>   solution is honoured. Mine used `wcs_pix2world`.
+> * **Plan my week** — theirs extracts the night walk as a shared `upcoming_dark_windows`, so the week view and
+>   `next_observing_windows` *cannot structurally* drift about which night is which; mine re-implemented the
+>   anchor and pinned the agreement with a test instead. Theirs is the better answer. Placement differs (their
+>   card on the Tonight page vs. my nested `/tonight/week` route) and **that is not worth re-opening** — the
+>   card is shipped, works, and the "put a feature inside the grouping, not one more banner" rule they cite is
+>   the standing one. Filed as an idea under "Friendliness" only if the Tonight page later measures as
+>   overlong; it is not a defect today.
+>
+> **What this run actually shipped, and why it is not churn:** one genuinely additive finding, on top of their
+> work — `plan_week`'s 40-target cap kept the first forty targets **alphabetically**
+> (`Library.list_targets` is `ORDER BY name COLLATE NOCASE`), so a big library's week was planned around
+> whatever sorts first and the owner's deepest project could be silently dropped. That is "finish what I've
+> got" answered with the wrong "got". It now keeps the most-shot targets. See the Shipped entry.
+>
+> **The process lesson, and it is a new one.** The claim-by-site discipline from collisions six–eight cannot
+> help here: **both runs started within minutes of each other, from the same front-of-queue backlog, and each
+> claimed only in its own first commit — which the other could not see because neither had pushed yet.** The
+> backlog is a blackboard read at the *start* of a run; two runs that start together read the same board. The
+> only mitigations that would actually have worked are outside a single run's control: (a) stagger the Builder
+> schedule so two never start inside the same few minutes, or (b) **push the claim commit before writing any
+> code, and re-`git fetch origin main` again immediately before the *first* implementation edit, not only
+> between tasks** — the second is cheap and this run did not do it. Recommended for the next Builder: after
+> claiming, fetch once more before the first line of code; if `main` has moved, re-read it before starting.
+
 > **Builder 2026-08-31, branch `claude/wizardly-feynman-0lyyjh` — second claim, by site.** The top open item
 > under "Friendliness": **"How's my stack?" tells every deep stack its edges are ragged**. Sites:
 > `seestack/stack/stacker.py` (`coverage_thin_fraction` + the `add_stack_run` call),
@@ -21632,6 +21671,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW IDEA (Builder 2026-09-02, the piece v0.325.0 deliberately left out — promoted from its
+  "deliberately not done" line so it is findable as work) — put the planned week in the user's calendar.**
+  *(Pillar: plan + autonomy — PRIORITY 2–3; size S; additive, offline, no new deps.)* The card now says
+  "Saturday is your best M 31 night, 21:40 → 01:46" — and then the owner has to remember it. The *per-target*
+  answer already ships as a one-tap `.ics` (`GET /api/plan/next-session/{safe}/calendar.ics`, built from
+  `webapp/ics.py`'s `IcsEvent` + `to_ics` and `_window_ics_event`), so the week is the same machinery over a
+  different list: one event per night that has a pick, titled with that night's target, described with the
+  usable window and the Moon note. **Shape:** `GET /api/plan/week/calendar.ics` taking the same
+  `nights`/`min_alt`/`when`, plus an "Add this week to your calendar" anchor on the card (copy the
+  `NextSessionCard` download pattern — a plain `href`/`download`, not a fetch). **Cautions:** reuse
+  `_window_ics_event`'s UID scheme rather than inventing one, or a re-download duplicates every event in the
+  owner's calendar instead of updating it; and emit only nights that have a pick — an event saying "nothing is
+  well placed" is worse than no event. Grep `webapp/ics.py` and `get_next_session_ics` first; composition, not
+  new code.
+
+- **✅ SHIPPED (Builder, v0.325.1, branch `claude/zen-mccarthy-46ejou`) — "Plan my week" planned a big library
+  around whatever sorts first alphabetically.** Found within the hour, on top of the v0.325.0 entry below, by
+  the Builder whose own duplicate of that feature was stood down (see the collision-nine note under "In
+  progress" — this is the one genuinely additive thing that run had). `plan_week` capped at
+  `WEEK_MAX_TARGETS = 40` with a plain head slice of the incoming list, and `Library.list_targets` is
+  `ORDER BY name COLLATE NOCASE` — so an owner with more than forty started targets got a week planned around
+  the first forty **by name**, with the project they have actually spent the most nights on silently absent.
+  "Finish what I've got", answered with the wrong "got". The cap now keeps the targets with the most
+  integration on them (total exposure, then accepted frames, then `safe` for determinism).
+  **Scoped so it can only ever change the trimmed case:** under the cap the set is the whole library either
+  way, and `plan.nights`/`plan.targets` are sorted by placement regardless — pinned by a test that plans the
+  same three targets in both orders and gets byte-identical answers. Upgrade-safe: one `sorted()` inside a pure
+  engine function; no config, schema, on-disk, API-shape or default change, and the card's own
+  "Looked at 40 of your 57" copy is untouched and still accurate.
+  Tests: `tests/test_nightplan.py::test_the_cap_keeps_the_targets_youve_actually_shot_not_the_alphabet` (the
+  deepest target placed *last* in the name-ordered list still gets planned — it did not before) and
+  `::test_under_the_cap_every_target_is_planned_whatever_its_depth` (the no-regression half).
 
 - **✅ SHIPPED (Builder, v0.325.0, branch `claude/zen-mccarthy-tl3guh`) — ~~"Plan my week": which of my targets
   to point at, on which of the next few nights.~~** Built as filed: `GET /api/plan/week` +
