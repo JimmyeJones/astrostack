@@ -26,7 +26,7 @@ from seestack.edit.ops.detail import (
     hot_pixels_skipped_on_proxy,
     sharpen_understates_on_proxy,
 )
-from seestack.edit.ops.stars import star_reduce_overstates_on_proxy
+from seestack.edit.ops.stars import star_reduce_differs_on_proxy
 from seestack.edit.pipeline import apply_recipe
 from seestack.edit.proxy import (
     coverage_path_for,
@@ -1357,16 +1357,17 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
             and hot_pixels_skipped_on_proxy(float(scale))
             for op in rec.ops
         )
-        # A star-reduction op's live preview *overstates* the full-res export when
-        # the proxy is decimated enough that the star size collapses below one
-        # proxy pixel: the erosion footprint clamps up to 1 px (= scale full-res
-        # px), physically larger than the export's, so the preview over-reduces
-        # the stars. Flag it so the editor can honestly caption that the export
-        # will apply *less* star reduction than the preview shows (the opposite
-        # direction of deconv). Only enabled star-reduce ops count.
+        # A star-reduction op's live preview doesn't apply the export's strength on
+        # a decimated proxy: the erosion footprint rounds and clamps to whole proxy
+        # pixels, and decimation eats the stars themselves. Measured across star
+        # sizes and proxy steps the preview lands anywhere from 0.63x to 1.58x the
+        # export, with no rule separating the directions — so this flags the fact,
+        # and the caption names no direction (it used to, and was wrong on the
+        # default size). Only enabled star-reduce ops count. The JSON key keeps its
+        # original name so an older frontend keeps reading it.
         hist["star_reduce_preview_overstates"] = any(
             op.enabled and op.id == "stars.reduce"
-            and star_reduce_overstates_on_proxy(
+            and star_reduce_differs_on_proxy(
                 float(op.params.get("size", 2)), float(scale))
             for op in rec.ops
         )
