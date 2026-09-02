@@ -17305,6 +17305,20 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-09-02, the other direction of the v0.325.1 "Edited from …" line) — the *original*
+  stack says nothing about the edit made from it, so the pointer only works if you happen to look at the right
+  row.** *(Pillar: understand — PRIORITY 3; size XS; **check the overlap with `unexported_edit` first, it may
+  already be enough**.)* An export's card now names the run it came from and jumps to it. The source run's own
+  card says nothing back — no "an edited version of this exists" — so a beginner scrolling History still meets
+  the linear stack first and has no reason to think there is a finished picture two cards along. **The datum is
+  already there:** `derived_from` is on every export's `options`, so the reverse index is one pass over the
+  same list the page already holds (`derivedFromNote`'s neighbour, not a new query). **Why it is filed rather
+  than built:** the source card is already the busiest one in the app (badges, two dates, notes, the noise
+  delta), and `unexported_edit` already occupies exactly this slot for the *unfinished* case — so the honest
+  question is whether a second edit-related label earns its place, or whether the right shape is to extend the
+  existing badge's vocabulary rather than add a line. Decide that before writing code; if in doubt, leave it —
+  one direction of a link is often enough.
+
 > **⚠️ COLLISION — this was built twice in the same hour, and the version below (v0.323.0, branch
 > `claude/zen-mccarthy-2rptmf`) is the one that ships.** *(Builder 2026-09-02, branch
 > `claude/zen-mccarthy-v56oj1` — mine is dropped rather than re-litigated; theirs landed on `main` first.)*
@@ -19783,6 +19797,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **NEW IDEA (Builder 2026-09-02, the reach the v0.326.0 √N verdict deliberately did not buy) — the
+  "your stack came in well under what its subs should give" nudge lives inside a collapsed reveal, so the one
+  person who needs it never opens it.** *(Pillar: trust + autonomy — PRIORITY 4/2; size S–M; **read the cache
+  note before sizing, it is what makes this cheap**.)* v0.326.0 added an honest early warning — a stack
+  measuring below 0.7·√(frames used) usually means soft alignment, a drifting gradient, or a lot of frames
+  dropped — but it renders on the "One frame vs your stack" card, behind a *See the difference* button on the
+  History page. A beginner whose stacks are quietly underperforming is exactly the person who never clicks it.
+  **The right home for a warning is "How's my stack?"** (`seestack/stackhealth.py`), which the Target page
+  already shows unprompted and which already ranks notes of precisely this shape (`rejection_blind`,
+  the coverage and seam notes). **Why this is S–M and not L:** the measurement is *already cached
+  server-side per run* — `NOISE_RATIO_META_PREFIX` (`webapp/routers/stack.py`), fingerprinted on the master and
+  the reference sub — and `StackNoiseBadge` fetches it eagerly on the Target result headline and the Jobs
+  completion summary, so by the time anyone reads the health notes the number is usually already sitting in the
+  project's meta table. **So the shape is: read the cache, never measure.** A health note that fired a master
+  reload + debayer on every Target page view would be a real regression on a page that must stay cheap; one
+  that says nothing when the stamp is absent costs nothing and self-heals the moment the headline badge
+  measures. **Care:** (1) keep *one* definition of the threshold — 0.7 and the 10-frame floor are currently in
+  `frontend/src/components/oneFrameVsStack.ts` with the measurement behind them in
+  `tests/test_noise_ratio_expectation.py`; moving the verdict engine-side means the card should read the
+  engine's answer rather than a second copy, exactly as `seam_verdict` and `rejection_reach` already do.
+  (2) The fingerprint must be honoured — a stale stamp from before a re-stack must not raise a note about a
+  picture that no longer exists. (3) Stay gentle: legitimate rejection and quality weighting lower the
+  effective frame count, and the copy already says "usually means", not "is".
 
 - **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-gmo0to`) — ~~say what stacking *should* have
   bought, next to what it did, so a beginner can tell a healthy stack from an underperforming one.~~** Built as
