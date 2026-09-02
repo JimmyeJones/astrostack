@@ -19750,21 +19750,56 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Scout 2026-09-02, spotted auditing `noise_ratio.py`) — say what stacking *should* have bought,
-  next to what it did, so a beginner can tell a healthy stack from an underperforming one.** *(Pillar: trust +
-  understand — PRIORITY 4/3; size S; additive, engine number already exists.)* The "stacking cut your noise
-  ~N×" badge (`seestack/qc/noise_ratio.py`) is a real, shareable number, but on its own a beginner can't tell
-  whether it's *good*. A weighted-mean stack of `k` frames should cut background noise by ~√k, so the honest
-  context is one clause: *"cut your noise 18× — about what 380 subs should give (√380 ≈ 19.5)."* When the
-  measured ratio lands well **below** √k (say < ~0.7·√k), that is the single most useful early-warning a
-  beginner never gets: it usually means alignment is soft, rejection is dropping a lot of frames, or the subs
-  are correlated — a "your stack is noisier than these subs should be; check focus/alignment" nudge. **Keep it
-  gentle and honest, not an alarm:** weighting and legitimate rejection lower the *effective* frame count, so
-  the √k yardstick must use frames actually **used** (`n_frames_used`), and the "below expected" copy should
-  suggest, never assert a fault. It also needs a floor on `k` (√k is meaningless at 5 subs). All the inputs are
-  already on the run (frames-used, the measured ratio); this is a copy/threshold shaping task with a test that
-  a healthy stack reads "as expected" and a deliberately mis-aligned one reads "lower than expected". Measure
-  the 0.7 factor against a couple of real stacks before pinning it.
+- **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-gmo0to`) — ~~say what stacking *should* have
+  bought, next to what it did, so a beginner can tell a healthy stack from an underperforming one.~~** Built as
+  filed: a pure `noiseVsExpectedNote(ratio, nFrames)` beside the existing `noiseReductionBadge`
+  (`components/oneFrameVsStack.ts`), rendered as one line under the badge on the "One frame vs your stack"
+  reveal — the one surface where the number is explained rather than celebrated. Frontend-only; the yardstick
+  is √(`n_frames_used`), which the reveal endpoint already carries, so no engine, API or schema change.
+
+  **The 0.7 factor is MEASURED, not guessed** — the entry asked for that and it is the part worth keeping.
+  Against the real `seestack.qc.noise_ratio` estimator on a synthetic sky + stars + extended object:
+  an **ideal** mean stack of independent-noise subs measures `ratio/√N` = **0.996–1.012** across N = 12…400
+  (the estimator is unbiased at every count the app sees); a **weighted** mean with weights as spread as
+  U(0.1, 1) still measures **0.93**, and its theoretical effective-N prediction agrees to 0.006 — so the
+  yardstick is honest about weighting rather than being fooled by it; and stacks whose subs share correlated
+  noise — the shape soft alignment, a drifting gradient or a duplicated sub produces — fall to **0.58 at 2 %
+  shared variance, 0.45 at 1 % over 400 subs, and 0.30 at 10 %**. 0.7 therefore sits in a wide empty gap: it
+  cannot fire on a healthy or heavily-weighted stack, and it catches correlated ones early. Those numbers are
+  written into the constant's docstring and pinned by a test that sweeps 0.93…1.2 × √N at N = 12/25/100/400
+  and asserts *none* of them reads as a concern.
+
+  **Two judgement calls the entry didn't specify.** (1) The **healthy** sentence assumes the badge is beside it
+  and doesn't repeat the measured number (*"That's about what 505 subs should give (√505 ≈ 22×)"*), which is
+  safe by arithmetic: anything at or above 0.7·√10 also clears the badge's own 1.5× floor. (2) The **concern**
+  sentence stands alone and carries the measured number itself, because it is rendered on its own gate rather
+  than inside the badge's — a stack far enough below √N can measure *under* 1.5×, and a 100-sub stack reading
+  1.3× is precisely the run worth saying something to. It suggests and never asserts (*"usually means the subs
+  didn't line up tightly, or a lot of them were dropped"*), and stays silent below 10 frames, where a single
+  unlucky reference sub swings the ratio more than the physics does.
+
+  **Tests (+16):** 6 unit in `oneFrameVsStack.test.ts` (the healthy sentence, small-stack rounding, the gentle
+  nudge, the below-the-badge-floor case, the no-false-alarm sweep above, and the silence/boundary cases), 4
+  render in `OneFrameVsStackCard.test.tsx` (healthy, concern, unmeasurable, and a 6-frame stack that gets a
+  badge but no verdict), and 6 in a new `tests/test_noise_ratio_expectation.py` that pins the *claim* rather
+  than the copy — running the real averaging over a scene with gradient, stars and a bright extended object,
+  it asserts an ideal stack reads 1.00·√N (±0.05) at N = 12/25/100, that a U(0.1,1)-weighted mean tracks its
+  own theoretical effective-N and stays well clear of the threshold, and that 2 %/10 % shared noise falls
+  under it. Without that file the 0.7 would be a number in a comment.
+
+    *(Original spec, for the record — pillar: trust + understand, PRIORITY 4/3; size S.)* The "stacking cut your noise
+    ~N×" badge (`seestack/qc/noise_ratio.py`) is a real, shareable number, but on its own a beginner can't tell
+    whether it's *good*. A weighted-mean stack of `k` frames should cut background noise by ~√k, so the honest
+    context is one clause: *"cut your noise 18× — about what 380 subs should give (√380 ≈ 19.5)."* When the
+    measured ratio lands well **below** √k (say < ~0.7·√k), that is the single most useful early-warning a
+    beginner never gets: it usually means alignment is soft, rejection is dropping a lot of frames, or the subs
+    are correlated — a "your stack is noisier than these subs should be; check focus/alignment" nudge. **Keep it
+    gentle and honest, not an alarm:** weighting and legitimate rejection lower the *effective* frame count, so
+    the √k yardstick must use frames actually **used** (`n_frames_used`), and the "below expected" copy should
+    suggest, never assert a fault. It also needs a floor on `k` (√k is meaningless at 5 subs). All the inputs are
+    already on the run (frames-used, the measured ratio); this is a copy/threshold shaping task with a test that
+    a healthy stack reads "as expected" and a deliberately mis-aligned one reads "lower than expected". Measure
+    the 0.7 factor against a couple of real stacks before pinning it.
 
 - **NEW IDEA (Builder 2026-08-31, the anchoring question the v0.320.1 per-panel patches deliberately left
   measured-but-unaddressed) — chain each mosaic panel's refine reference to a neighbour it overlaps, so the
