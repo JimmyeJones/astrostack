@@ -400,12 +400,34 @@ def load_catalog() -> tuple[CatalogObject, ...]:
 
 
 def _times_grid(start: datetime, end: datetime, step_minutes: float):  # noqa: ANN202
-    """A UTC ``Time`` array from ``start`` to ``end`` inclusive at a fixed step."""
+    """A UTC ``Time`` array from ``start`` to ``end`` inclusive at a fixed step,
+    **never sampling past ``end``**.
+
+    The step count is rounded *up* and the final stamp is clipped to ``end``, so
+    the grid covers the whole window without leaving it. Rounding to the nearest
+    whole step instead — as this did until v0.326.2 — could put the last stamp up
+    to half a step *beyond* ``end``, and every planner number is derived from
+    these stamps: ``usable_end_utc`` is literally the last usable one. On a
+    14-night January scan from London the worst overhang was 120 s, and it
+    surfaced as M 31 being told to keep shooting for a minute *after*
+    astronomical dark had ended — a plainly false line on a "shoot between X and
+    Y" card, on `/tonight`, `/next-session/{safe}` and `/plan/week` alike.
+
+    Clipping rather than flooring is deliberate: it keeps the final sample, so a
+    target usable only in the last few minutes of a window is still seen, while
+    making the reported time truthful. A window that is an exact multiple of the
+    step is unchanged, stamp for stamp."""
     from astropy.time import Time
 
     total_min = max((end - start).total_seconds() / 60.0, step_minutes)
-    n = int(round(total_min / step_minutes)) + 1
+    n = int(math.ceil(total_min / step_minutes - 1e-9)) + 1
     stamps = [start + timedelta(minutes=step_minutes * i) for i in range(n)]
+    if len(stamps) > 1 and stamps[-1] > end:
+        # A degenerate (zero-length) window would clip the last stamp onto the
+        # first; drop the duplicate rather than sample the same instant twice.
+        stamps[-1] = end
+        if stamps[-1] <= stamps[-2]:
+            stamps.pop()
     return stamps, Time([s.astimezone(timezone.utc).replace(tzinfo=None) for s in stamps],
                         scale="utc")
 
@@ -880,7 +902,13 @@ def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWind
         floor = np.maximum(min_alt_deg, horizon.altitude_at(az[i])) if use_horizon else min_alt_deg
         usable = row >= floor
         n_usable = int(np.count_nonzero(usable))
-        minutes_above = float(n_usable * step_min)
+        # Each usable sample credits one step, capped at the window itself: the
+        # grid is inclusive of both ends, so a target usable for the *whole*
+        # window has one more sample than it has steps and would otherwise be
+        # credited with darkness that does not exist (measured 590 min of a
+        # 584-min October night for M 31 from London). The cap only ever bites at
+        # that boundary, so a partially-usable target's number is unchanged.
+        minutes_above = min(float(n_usable * step_min), dark_minutes)
         transit = stamps[imax].astimezone(timezone.utc) if minutes_above > 0 else None
         # Enclosing clock bounds of the usable window (first→last sample above the
         # floor) — "when tonight can I shoot this?". None when never usable.

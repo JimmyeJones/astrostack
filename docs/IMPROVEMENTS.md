@@ -634,6 +634,28 @@ _(nothing else claimed — claim an item here with your branch name)_
   in this scan), **lift the cap for that folder**; keep the cap for the no-sibling case. Reversible, never a
   delete.
 
+  > **⚠️ READ BEFORE STARTING — the filed fix collides head-on with an existing regression test, and whoever
+  > takes this has to resolve that first** *(Builder 2026-09-02, found while sizing this after shipping A1/A3;
+  > not started, deliberately — it needs a decision, not a patch.)* The proposed evidence — "a same-parent
+  > `_sub` sibling exists on disk" — is **exactly the scenario**
+  > `test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_name`
+  > (`tests/test_scanner.py`) exists to protect: 8 of a user's *own* raw subs in a plain folder named
+  > `Andromeda/`, sitting beside a Seestar `Andromeda_sub/`. Lift the cap on sibling evidence and that test's
+  > 8 real subs are mass-rejected. (It passes today only because its frames are DB rows with nothing on disk,
+  > so a disk-based sibling check finds no sibling — i.e. it would go green for the wrong reason, which is
+  > worse than failing.) **The discriminator that actually separates the two cases is the filename, not the
+  > folder or the count:** the Seestar's per-session output is `Stacked*.fit`, real subs are
+  > `Light_<T>_<exp>_<filter>_*.fit`. The repo *knows* this convention — every scanner fixture uses it
+  > (`tests/test_scanner.py` writes `Stacked.fit`, `Stacked_60s.fit`, `Stacked_{i:02d}.fit`) — but **no
+  > production module matches on it**: `grep -rn "Stacked" --include=*.py seestack/ webapp/` returns nothing.
+  > So the shape to consider is "reject a bare `<T>/` frame whose *filename* is on-device output, at any
+  > count; keep the ≤2 cap for everything else", which rejects the owner's 22 and keeps the mixed-source test's
+  > 8 without either heuristic having to guess. **Confirm the naming against the owner's real folder listing
+  > before building it** — the listing is already in this file, buried in the `⚪ CLOSED AS A NON-BUG` mosaic
+  > entry (search `"skips a bare"`) — and note this is the **on-by-default ingest path**, so an over-broad
+  > match silently drops real subs from a stack. A second, header-based discriminator (a stacked output's
+  > `EXPTIME` is N×10 s, or it carries a stack-count card) would be stronger still if the DB rows carry it.
+
 - **🟠 A6 — WALK-AWAY AUTO-REJECT PICKS ITS METHOD FROM THE *WHOLE TARGET'S* FRAME COUNT, so a mosaic panel
   under 11 subs gets a rejection pass that is mathematically blind and trails survive.** *(Confidence: verified
   on synthetic data through the public `run_stack`. Owner impact depends on per-panel depth — see open
@@ -770,35 +792,60 @@ _(nothing else claimed — claim an item here with your branch name)_
   run while the Builder prompt says 2–4. Also **§7 spends 25 lines on Qt/libEGL** for three GUI tests of a
   desktop app the owner never runs — move it to a footnote and make the Qt-skip command the default.
 
-- **🟢 LOW / HONESTY (Builder 2026-09-02, tripped over while testing `plan_week` — reproduced and measured) —
-  the planner can tell you to shoot up to two minutes *after* astronomical dark ends, and can credit a window
-  with darkness that doesn't exist.** *(Severity: low — it is at most ~2.5 min, but it is a plainly false
-  statement on a "shoot between X and Y" line, and it now appears on three surfaces: `/tonight`,
-  `/next-session/{safe}` and the new `/plan/week`. §1 priority 3. Confidence: reproduced.)*
+- **✅ SHIPPED (Builder, v0.326.2, branch `claude/zen-mccarthy-olkjpm`) — ~~the planner can tell you to shoot up
+  to two minutes *after* astronomical dark ends, and can credit a window with darkness that doesn't exist.~~**
+  Fixed in the direction the entry recommended, and its cautions were right on both counts.
 
-  `_times_grid` (`seestack/nightplan.py:402-410`) builds the observability sampling stamps as
-  `n = int(round(total_min / step_minutes)) + 1` from `window.start`, i.e. it **rounds the step count to the
-  nearest whole step**, so the last stamp can sit up to *half a step* (2.5 min at the 5-minute step) **past
-  `window.end`**. Every downstream number is derived from those stamps: `usable_end_utc` is
-  `stamps[usable_idx[-1]]`, and `minutes_above_min_alt` is `count × 5.0`.
+  **The grid** (`_times_grid`) now takes `ceil` of the step count and **clips the last stamp to `window.end`**.
+  Clipping rather than flooring keeps the final sample, so a target usable only in the last few minutes is
+  still seen while the reported time stops being false. Re-measured on the entry's own case: M 31 from London,
+  `usable_end` **04:38 → 04:37** against a 04:37 `dark_end` on 2026-10-18, and 04:43 → 04:41 on 10-19; the
+  overhang is 0 s on every window length tried (2, 7, 57, 60, 62, 63, 122.5, 580, 584 minutes).
 
-  **Reproduced.** Over a 14-night January scan from London the worst overhang is **120 s** past `dark_end`
-  (night of 2026-01-17: darkness ends 05:55:31, last stamp 05:57:31). End to end it surfaces as a reported
-  window past the end of the night — M 31 from a London site on 2026-10-18 and -19 gets
-  `dark_end 04:37:28` and `usable_end 04:38:28`, i.e. **60 s of "keep shooting" after astronomical dark is
-  over** — which is exactly the kind of thing a beginner following the card to the minute would notice. Any
-  target still above the floor at the end of a night is affected; one that sets earlier is not.
+  **The minutes** are capped at the window itself. The entry asked for the clipped span to be credited; the
+  measurement showed the flat `count × step` was over-crediting for a **second, simpler reason** worth
+  recording — the grid is inclusive of *both* ends, so a target usable for the whole night has one more sample
+  than it has steps and was credited **590 minutes of a 584-minute night** before a single stamp ever left the
+  window. `min(n_usable × step, dark_minutes)` fixes exactly that boundary and leaves every partially-usable
+  target's number untouched, which is why nothing else moved.
 
-  **Fix (small, and pick the honest direction).** Either build the grid with `ceil` and **clip the last stamp
-  to `window.end`**, or use `floor` so the grid never leaves the window. Clipping is the better answer: it
-  keeps the last sample (so a target usable only in the final minutes isn't dropped) while making
-  `usable_end` truthful, and `minutes_above_min_alt` should then credit the *clipped* span rather than a flat
-  `count × step`. **Cautions:** this is a shared hot function — `plan_tonight`, `rank_targets_now`,
-  `next_observing_windows`, `plan_week` and `moon_window` all sample through it — so the change moves numbers
-  on every planner surface by up to ~2.5 min; keep it to that and add a test that no reported
-  `usable_end_utc`/`transit_utc` ever exceeds its window's `end`, plus a no-regression check that a window
-  which is an exact multiple of the step is unchanged. Worth doing as one small commit, not folded into
-  something else.
+  **The "shared hot function" caution was the load-bearing one and it held:** all 336 planner-related tests
+  pass unchanged. Two things made that survivable — the exact-multiple case is bit-for-bit identical (pinned by
+  its own no-regression test), and the pre-existing
+  `test_usable_window_lands_inside_the_dark_window_and_matches_minutes` already asserted
+  `dw_start <= start <= transit <= end <= dw_end`; it simply never saw the bug, because its January fixture
+  sets before the end of the night. The new test picks a target that is *still up at the last sample* — which
+  is the only shape that exhibits it.
+
+  - **~~🟢 LOW / HONESTY (Builder 2026-09-02, tripped over while testing `plan_week` — reproduced and measured) —
+    the planner can tell you to shoot up to two minutes *after* astronomical dark ends, and can credit a window
+    with darkness that doesn't exist.~~** *(Severity: low — it is at most ~2.5 min, but it is a plainly false
+    statement on a "shoot between X and Y" line, and it now appears on three surfaces: `/tonight`,
+    `/next-session/{safe}` and the new `/plan/week`. §1 priority 3. Confidence: reproduced.)*
+
+    `_times_grid` (`seestack/nightplan.py:402-410`) builds the observability sampling stamps as
+    `n = int(round(total_min / step_minutes)) + 1` from `window.start`, i.e. it **rounds the step count to the
+    nearest whole step**, so the last stamp can sit up to *half a step* (2.5 min at the 5-minute step) **past
+    `window.end`**. Every downstream number is derived from those stamps: `usable_end_utc` is
+    `stamps[usable_idx[-1]]`, and `minutes_above_min_alt` is `count × 5.0`.
+
+    **Reproduced.** Over a 14-night January scan from London the worst overhang is **120 s** past `dark_end`
+    (night of 2026-01-17: darkness ends 05:55:31, last stamp 05:57:31). End to end it surfaces as a reported
+    window past the end of the night — M 31 from a London site on 2026-10-18 and -19 gets
+    `dark_end 04:37:28` and `usable_end 04:38:28`, i.e. **60 s of "keep shooting" after astronomical dark is
+    over** — which is exactly the kind of thing a beginner following the card to the minute would notice. Any
+    target still above the floor at the end of a night is affected; one that sets earlier is not.
+
+    **Fix (small, and pick the honest direction).** Either build the grid with `ceil` and **clip the last stamp
+    to `window.end`**, or use `floor` so the grid never leaves the window. Clipping is the better answer: it
+    keeps the last sample (so a target usable only in the final minutes isn't dropped) while making
+    `usable_end` truthful, and `minutes_above_min_alt` should then credit the *clipped* span rather than a flat
+    `count × step`. **Cautions:** this is a shared hot function — `plan_tonight`, `rank_targets_now`,
+    `next_observing_windows`, `plan_week` and `moon_window` all sample through it — so the change moves numbers
+    on every planner surface by up to ~2.5 min; keep it to that and add a test that no reported
+    `usable_end_utc`/`transit_utc` ever exceeds its window's `end`, plus a no-regression check that a window
+    which is an exact multiple of the step is unchanged. Worth doing as one small commit, not folded into
+    something else.
 
 - **✅ SHIPPED (Builder, v0.324.0, branch `claude/zen-mccarthy-tl3guh`) — ~~the "Download full-res PNG" of an
   **Adjusted** (asinh) run does NOT match the saved 1024 px preview the user tuned, because `asinh_stretch`
