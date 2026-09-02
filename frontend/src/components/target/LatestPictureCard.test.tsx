@@ -36,22 +36,17 @@ function renderCardWithClient(run: StackRun | null) {
   return qc;
 }
 
-function renderCard(run: StackRun | null, cover?: {
-  pinned?: boolean; newerRunId?: number | null;
-}) {
+function renderCard(run: StackRun | null) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWith(qc, run, cover);
+  return renderWith(qc, run);
 }
 
-function renderWith(qc: QueryClient, run: StackRun | null, cover?: {
-  pinned?: boolean; newerRunId?: number | null;
-}) {
+function renderWith(qc: QueryClient, run: StackRun | null) {
   return render(
     <MantineProvider>
       <QueryClientProvider client={qc}>
         <MemoryRouter>
-          <LatestPictureCard safe="M_42" name="M42" run={run}
-            pinned={cover?.pinned} newerRunId={cover?.newerRunId} />
+          <LatestPictureCard safe="M_42" name="M42" run={run} />
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
@@ -502,30 +497,5 @@ describe("LatestPictureCard — a saved edit that was never exported", () => {
     await waitFor(() => expect(getJob).toHaveBeenCalledWith("job-9"));
     await waitFor(() =>
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["runs", "M_42"] }));
-  });
-});
-
-describe("LatestPictureCard — a pinned cover", () => {
-  it("says nothing extra when the picture is simply the newest", () => {
-    renderCard(mkRun());
-    expect(screen.getByText("Your picture")).toBeInTheDocument();
-    expect(screen.queryByTestId("cover-newer-note")).toBeNull();
-  });
-
-  it("names the picture as the cover when one is pinned", () => {
-    renderCard(mkRun(), { pinned: true });
-    expect(screen.getByText("Your picture (cover)")).toBeInTheDocument();
-    // Pinned *and* newest: nothing to explain.
-    expect(screen.queryByTestId("cover-newer-note")).toBeNull();
-  });
-
-  it("says so when the pinned cover stands in front of a newer stack", () => {
-    // Otherwise the page looks like the restack never happened: the picture is
-    // simply the older one, with nothing on screen saying why.
-    renderCard(mkRun(), { pinned: true, newerRunId: 9 });
-    const note = screen.getByTestId("cover-newer-note");
-    expect(note.textContent).toContain("You have a newer stack");
-    expect(screen.getByRole("link", { name: "see all versions" }))
-      .toHaveAttribute("href", "/targets/M_42/history");
   });
 });

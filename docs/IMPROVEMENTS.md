@@ -861,51 +861,13 @@ _(nothing else claimed — claim an item here with your branch name)_
   (`pointing_groups` already exists) or per-pixel from the coverage plane; extend `stackhealth`'s
   `rejection_blind` note the same way.~~
 
-- **✅ SHIPPED (Builder, v0.327.3, branch `claude/sweet-babbage-35yfmt`) — ~~A5: the Target page's "Your
-  picture" ignores the pinned cover that every other surface honours.~~** Fixed with the precedence the entry
-  named, expressed **once**: a new pure `frontend/src/representative.ts` states the backend's rule
-  (`_representative_run` / `current_picture_path`) in the frontend's own terms — pinned cover first when it
-  still has a preview, else the newest run that has one — and the page reads it. A second hand-written copy of
-  a precedence that already exists in two backend modules is how this drifted in the first place.
-
-  **The line drawn, and it is the reason this isn't a one-word change.** `latestRun` is used in **47** places
-  on that page, and most of them are *right*: the noise badge, "sharpest yet", the integration trend, the
-  next-best-move coach and the thin-stack warning are all statements about the **newest stack**, and they say
-  so. What was wrong was everything you do *to the picture*: the hero card, its capture-date caption, the Edit
-  button, the whole Save/share menu (every download, the keepsake, the print, the zoom clip, the wallpaper
-  items, Scan to phone) and the wallpaper's North-up availability. Those now take `heroRun`; the notes keep
-  `latestRun`. So the page no longer offers to edit, download or share a *different* picture from the one it
-  is showing you — which it did on every target with a pinned cover.
-
-  **One thing added rather than merely re-pointed**, because the fix creates the question it answers: with a
-  cover pinned in front of a newer stack, the page shows the older picture and nothing said why — it looks
-  like the restack never ran. The card heading now reads **"Your picture (cover)"**, and one dimmed line under
-  the caption says there is a newer stack and links to History. It appears *only* in that case (pinned **and**
-  a newer run exists), so an ordinary target gains no clutter — the standing "this page is extremely busy"
-  constraint. The existing `CleanestShotNote` still offers the swap; this only stops the silence.
-
-  **Upgrade-safe (§9):** frontend only. No endpoint, no schema, no config, no on-disk change.
-  `cover_stack_run_id` was already on `TargetOut` and had **no frontend caller** — this is its first — so the
-  API shape is untouched. A target with nothing pinned behaves exactly as before, pinned by a test.
-
-  **Tests (+11).** `frontend/src/representative.test.ts` (8) pins the precedence including both silent
-  degradations the backend also makes (a cover whose preview is gone, a cover that no longer exists) and the
-  no-preview-anywhere case the action row depends on. `LatestPictureCard.test.tsx` (+3) pins the heading and
-  the newer-stack line. `Target.test.tsx` (+2) is the regression proper, and **fails before**: with run 3
-  pinned and run 4 newer, the hero `<img>`, the row's Edit button and the card's Edit link must all be run 3.
-  Two existing assertions changed with the copy — the Edit button's aria-label is now "Edit your picture",
-  since it no longer necessarily edits the latest stack (and "Edit this picture" was already taken by the
-  card's own link).
-
-  *(Original audit entry follows.)*
-
-  ~~**🟡 A5 — the Target page's "Your picture" ignores the pinned cover that every other surface honours.**~~
-    `frontend/src/routes/Target.tsx` takes `runs.data?.[0]` (newest run) for the hero, its share caption and its
-    Edit button, while the Library tile, Best wall, montage and `grainier-newest` all resolve **pinned cover
-    first** (`webapp/routers/gallery.py` `_representative_run`, `webapp/routers/targets.py`
-    `current_picture_path`). Pin run 3, re-stack to run 4 → the Target page shows a *different picture* from the
-    Library card while its own notes talk about "the cover". **Fix:** same precedence as `_representative_run`;
-    label "Your picture (cover)" vs "Your newest picture".
+- **🟡 A5 — the Target page's "Your picture" ignores the pinned cover that every other surface honours.**
+  `frontend/src/routes/Target.tsx` takes `runs.data?.[0]` (newest run) for the hero, its share caption and its
+  Edit button, while the Library tile, Best wall, montage and `grainier-newest` all resolve **pinned cover
+  first** (`webapp/routers/gallery.py` `_representative_run`, `webapp/routers/targets.py`
+  `current_picture_path`). Pin run 3, re-stack to run 4 → the Target page shows a *different picture* from the
+  Library card while its own notes talk about "the cover". **Fix:** same precedence as `_representative_run`;
+  label "Your picture (cover)" vs "Your newest picture".
 
 - **✅ SHIPPED (Builder, v0.327.4, branch `claude/sweet-babbage-35yfmt`) — ~~A8: a target whose missing files
   never return is held back from auto-stacking FOREVER, and the owner has no action to take.~~** Shipped in
