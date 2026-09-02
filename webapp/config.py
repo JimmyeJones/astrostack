@@ -31,6 +31,50 @@ log = logging.getLogger(__name__)
 CONFIG_FILENAME = "config.json"
 
 
+def _abs(p: Path) -> Path:
+    """Absolute, symlink-resolved form of a path that need not exist yet."""
+    try:
+        return Path(p).resolve()
+    except OSError:  # a broken mount or a path loop — abspath still tells us enough
+        return Path(os.path.abspath(str(p)))
+
+
+def _is_within(child: Path, parent: Path) -> bool:
+    """True when *child* is *parent* itself or sits anywhere beneath it."""
+    child, parent = _abs(child), _abs(parent)
+    return child == parent or parent in child.parents
+
+
+def nested_incoming_conflict(incoming: Path, library: Path, data_root: Path) -> str | None:
+    """The one folder layout the app must never be pointed at, in plain language.
+
+    ``incoming/`` holds the owner's **only** copy of every raw sub and is
+    strictly read-only (``AGENTS.md`` §10). The library tree and the state
+    folder are the opposite: the app prunes caches, thumbnails and stack outputs
+    inside the library, and rewrites ``config.json`` in the state folder. Every
+    one of those deletes is correctly scoped *to its own tree today* — which is
+    exactly why nesting one tree inside the other is the whole risk: point the
+    library (or the data root, which carries ``state/``) at somewhere under
+    ``incoming/`` and a perfectly correctly-scoped ``rmtree`` resolves inside the
+    raw folder, with no backup behind it.
+
+    Returns a message to show the user, or ``None`` when the layout is safe.
+    Deliberately one-directional: ``incoming/`` living inside the library root is
+    the app's *own default* shape one level up (both are children of the data
+    root) and nothing deletes outside ``targets/``, so it is not flagged.
+    """
+    for label, path in (("library folder", library), ("data folder", data_root)):
+        if _is_within(path, incoming):
+            return (
+                f"Your {label} would sit inside the incoming folder "
+                f"({_abs(incoming)}). Those two have to stay separate: the app "
+                f"tidies up old files inside the {label}, and your incoming "
+                f"folder holds the only copy of your raw frames — it must never "
+                f"be written to or cleaned up. Pick a folder outside it."
+            )
+    return None
+
+
 def default_data_root() -> str:
     return os.environ.get("ASTROSTACK_DATA", "/data")
 
@@ -342,6 +386,16 @@ class SettingsStore:
             self._settings = Settings(data_root=root)
         # Honor an explicit data_root override from env on every boot.
         self._settings.data_root = root
+        # An install that reached the unsafe layout before the save-time guard
+        # existed still boots — refusing to start would be far worse than the
+        # risk — but it says so loudly once per boot so it can be corrected.
+        conflict = nested_incoming_conflict(
+            self._settings.resolved_incoming_dir,
+            self._settings.resolved_library_root,
+            Path(self._settings.data_root),
+        )
+        if conflict is not None:
+            log.warning("unsafe folder layout in config.json: %s", conflict)
         self._settings.ensure_dirs()
         self.save()
 
@@ -353,7 +407,22 @@ class SettingsStore:
         with self._lock:
             merged = self._settings.model_dump()
             merged.update({k: v for k, v in patch.items() if k in Settings.model_fields})
-            self._settings = Settings.model_validate(merged)
+            candidate = Settings.model_validate(merged)
+            # Refuse to *enter* the one unsafe layout (see
+            # ``nested_incoming_conflict``) — before ``ensure_dirs`` creates a
+            # folder inside ``incoming/`` and before anything is persisted, so a
+            # rejected save leaves the running config untouched. Deliberately not
+            # a model validator: an install already in this state must still load
+            # its config (``_load_resilient`` would drop the fields, or reset the
+            # whole file, on a model-level error — §9).
+            conflict = nested_incoming_conflict(
+                candidate.resolved_incoming_dir,
+                candidate.resolved_library_root,
+                Path(candidate.data_root),
+            )
+            if conflict is not None:
+                raise ValueError(conflict)
+            self._settings = candidate
             self._settings.ensure_dirs()
             self.save()
             return self._settings.model_copy(deep=True)
