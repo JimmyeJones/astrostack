@@ -24,6 +24,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from seestack.nightplan import (
+    WEEK_NIGHTS,
     HorizonProfile,
     LibraryTarget,
     Observer,
@@ -32,6 +33,7 @@ from seestack.nightplan import (
     moon_interference,
     next_observing_windows,
     plan_tonight,
+    plan_week,
     rank_targets_now,
     suggest_targets,
 )
@@ -314,6 +316,70 @@ def get_best_tonight(
         min_altitude_deg=float(min_altitude),
         horizon=HorizonProfile.from_pairs(settings.horizon_profile),
         limit=limit,
+    )
+    payload = asdict(plan)
+    payload["location_source"] = location_source
+    return payload
+
+
+@router.get("/week")
+def get_plan_week(
+    request: Request,
+    when: str | None = Query(default=None,
+                             description="ISO-8601 UTC reference to plan from; defaults to now"),
+    min_alt: int | None = Query(default=None, ge=0, le=80),
+    nights: int = Query(default=WEEK_NIGHTS, ge=1, le=14,
+                        description="How many nights ahead to look"),
+) -> dict[str, Any]:
+    """"Plan my week" — which of *your own* targets to point at, on which night.
+
+    The cross-target, multi-night view none of the other planners give:
+    ``/tonight`` ranks everything for tonight, ``/best-tonight`` ranks your own
+    targets right now, and ``/next-session/{safe}`` plans *one* target forward.
+    This is the question a beginner who only gets out on a clear weekend actually
+    has — *"your best shot this week is M31 on Thursday; M42 is better Saturday"*.
+
+    Library targets only (this is "finish what I've got"; ``/suggest`` covers
+    discovery), capped at :data:`~seestack.nightplan.WEEK_MAX_TARGETS`, and the
+    counts come back on the payload so the UI can be honest when a big library was
+    trimmed. Read-only and offline. With no location resolved, ``nights`` is empty
+    and ``location_source`` tells the UI which prompt to show — the card
+    self-hides rather than guessing.
+    """
+    settings = deps.get_settings(request)
+
+    start = datetime.now(timezone.utc)
+    if when:
+        try:
+            start = datetime.fromisoformat(when)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+    observer, location_source = _resolve_observer(request, settings)
+    min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
+
+    if observer is None:
+        return {
+            "location_source": location_source,
+            "observer": None,
+            "min_altitude_deg": min_altitude,
+            "horizon_active": False,
+            "nights_scanned": int(nights),
+            "generated_utc": start.astimezone(timezone.utc).isoformat(),
+            "nights": [],
+            "targets": [],
+            "n_targets_considered": 0,
+            "n_targets_with_position": 0,
+        }
+
+    plan = plan_week(
+        observer, _library_targets(request),
+        start_utc=start,
+        nights=int(nights),
+        min_altitude_deg=float(min_altitude),
+        horizon=HorizonProfile.from_pairs(settings.horizon_profile),
     )
     payload = asdict(plan)
     payload["location_source"] = location_source

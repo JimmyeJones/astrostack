@@ -1242,3 +1242,125 @@ def test_best_tonight_honours_the_limit_and_sorts_best_first():
     plan = np_plan.rank_targets_now(LONDON, JAN_EVENING, targets, limit=2)
     assert len(plan.picks) == 2
     assert plan.picks[0].score >= plan.picks[1].score
+
+
+# ---------------------------------------------------------------------------
+# "Plan my week" — plan_week / upcoming_dark_windows
+# ---------------------------------------------------------------------------
+
+def test_upcoming_dark_windows_labels_each_night_by_its_own_evening():
+    """The shared night walk: chronological, one entry per evening, each labelled
+    with the local calendar date of the evening it belongs to."""
+    got = np_plan.upcoming_dark_windows(LONDON, JAN_EVENING, 5)
+    assert [lbl for lbl, _w in got] == [
+        "2026-01-15", "2026-01-16", "2026-01-17", "2026-01-18", "2026-01-19"]
+    for lbl, w in got:
+        assert w.start < w.end
+        assert w.duration_minutes > 0
+        # The darkness of "the 15th" starts on the evening of the 15th and ends
+        # in the small hours of the 16th — never before the request.
+        assert w.start >= JAN_EVENING
+        assert w.start.date().isoformat() == lbl
+
+
+def test_upcoming_dark_windows_clips_a_night_already_under_way():
+    """Asked mid-night, the first window is clipped to now — the planner never
+    promises darkness that has already gone."""
+    full = np_plan.upcoming_dark_windows(LONDON, JAN_EVENING, 1)[0][1]
+    late = datetime(2026, 1, 15, 23, 30, tzinfo=timezone.utc)
+    clipped_label, clipped = np_plan.upcoming_dark_windows(LONDON, late, 1)[0]
+    assert clipped_label == "2026-01-15"        # still the 15th's night
+    assert clipped.start == late
+    assert clipped.end == full.end
+    assert clipped.duration_minutes < full.duration_minutes
+
+
+def test_upcoming_dark_windows_pre_dawn_still_offers_tonight():
+    """In the small hours the user is *inside* the night that began yesterday
+    evening, so that ongoing window is offered rather than skipped."""
+    small_hours = datetime(2026, 1, 16, 2, 0, tzinfo=timezone.utc)
+    got = np_plan.upcoming_dark_windows(LONDON, small_hours, 3)
+    assert got[0][0] == "2026-01-15"            # last night's evening, still dark
+    assert got[0][1].start == small_hours
+    # The ongoing night is *extra*: the caller still gets its full forward horizon
+    # of whole nights on top of the remainder of the one it is inside.
+    assert [lbl for lbl, _w in got] == [
+        "2026-01-15", "2026-01-16", "2026-01-17", "2026-01-18"]
+
+
+def test_plan_week_picks_a_best_target_per_night_and_a_best_night_per_target():
+    """The whole point: "your best shot this week is X on Thursday; Y is better
+    Saturday" — one nightly pick, plus each target's own best night."""
+    orion = _lib("m42", "M 42", 83.8, -5.4, hours=1.0)     # evening object in Jan
+    andromeda = _lib("m31", "M 31", 10.7, 41.3, hours=1.0)  # setting in the west
+    plan = np_plan.plan_week(LONDON, [orion, andromeda], start_utc=JAN_EVENING)
+
+    assert plan.nights_scanned == 7
+    assert plan.n_targets_with_position == 2
+    assert plan.n_targets_considered == 2
+    assert len(plan.nights) == 7
+    dates = [n.date for n in plan.nights]
+    assert dates == sorted(dates) == list(dict.fromkeys(dates))
+
+    for n in plan.nights:
+        assert n.best is not None, f"both targets are up on {n.date}"
+        assert n.n_usable == 2
+        assert n.best.minutes_above_min_alt >= 45.0
+        assert n.best.max_altitude_deg > 30.0
+        assert n.best.usable_start_utc < n.best.usable_end_utc
+
+    # Every target that qualified anywhere gets exactly one best night, and it is
+    # one of the nights actually scanned.
+    assert {t.safe for t in plan.targets} == {"m42", "m31"}
+    for t in plan.targets:
+        assert t.date in dates
+    # Sorted by night, so the UI can read it as a diary.
+    assert [t.date for t in plan.targets] == sorted(t.date for t in plan.targets)
+
+
+def test_plan_week_nightly_pick_is_the_best_scoring_target_that_night():
+    """The pick is not "the first target" — it is the one that scores highest."""
+    high = _lib("high", "High", 83.8, 51.0, hours=1.0)   # near the zenith from London
+    low = _lib("low", "Low", 83.8, -20.0, hours=1.0)     # skims the southern horizon
+    plan = np_plan.plan_week(LONDON, [low, high], start_utc=JAN_EVENING, nights=3)
+    assert plan.nights
+    for n in plan.nights:
+        assert n.best is not None
+        assert n.best.safe == "high"
+
+
+def test_plan_week_skips_targets_it_cannot_place_and_reports_the_cap():
+    """A target with no position can't be planned; a library bigger than the cap is
+    trimmed, and the counts say so rather than pretending it looked at everything."""
+    placed = [_lib(f"t{i}", f"T{i}", 83.8, -5.4 + i * 0.01, hours=1.0)
+              for i in range(np_plan.WEEK_MAX_TARGETS + 5)]
+    plan = np_plan.plan_week(LONDON, placed, start_utc=JAN_EVENING, nights=2)
+    assert plan.n_targets_with_position == np_plan.WEEK_MAX_TARGETS + 5
+    assert plan.n_targets_considered == np_plan.WEEK_MAX_TARGETS
+    assert all(n.n_usable <= np_plan.WEEK_MAX_TARGETS for n in plan.nights)
+
+    assert np_plan.plan_week(LONDON, [], start_utc=JAN_EVENING).nights == []
+
+
+def test_plan_week_is_silent_on_a_night_nothing_clears_the_floor():
+    """A night with no usable target reports ``best=None`` rather than promoting
+    something that never rises — an honest "skip it"."""
+    never_up = _lib("south", "Deep south", 83.8, -80.0, hours=1.0)
+    plan = np_plan.plan_week(LONDON, [never_up], start_utc=JAN_EVENING, nights=3)
+    assert plan.nights, "the nights still exist, they just have nothing in them"
+    assert all(n.best is None and n.n_usable == 0 for n in plan.nights)
+    assert plan.targets == []
+
+
+def test_plan_week_honours_the_horizon_profile():
+    """A tree line that blocks the southern sky shortens (or removes) an object
+    that only ever appears there — the same horizon the other planners honour."""
+    orion = _lib("m42", "M 42", 83.8, -5.4, hours=1.0)
+    open_sky = np_plan.plan_week(LONDON, [orion], start_utc=JAN_EVENING, nights=3)
+    blocked = np_plan.plan_week(
+        LONDON, [orion], start_utc=JAN_EVENING, nights=3,
+        horizon=HorizonProfile.from_pairs([[az, 60.0] for az in range(0, 360, 30)]))
+    assert open_sky.horizon_active is False
+    assert blocked.horizon_active is True
+    assert any(n.best is not None for n in open_sky.nights)
+    assert all(n.best is None for n in blocked.nights)
