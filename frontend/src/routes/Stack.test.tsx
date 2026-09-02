@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StackView } from "./Stack";
@@ -1932,5 +1932,123 @@ describe("StackView", () => {
 
     await waitFor(() =>
       expect(screen.getByText("Stack — M_42")).toBeInTheDocument());
+  });
+});
+
+// A stack that fails is the one moment on this page where a beginner most needs
+// a sentence they can act on, and it was the one place in the app that printed
+// the engine's raw exception instead — `Error: MemoryError: stack output canvas
+// needs ~9.4 GB of working memory, over the ~6.0 GB budget`. Every other surface
+// that shows a failed job (the Jobs page, `StackFailedAlert`) runs it through
+// `friendlyJobError` first.
+describe("StackView — a stack that fails says so in plain language", () => {
+  /** Minimal EventSource stand-in, so a test can push a job snapshot at the
+   *  page the way the server's SSE stream does. Mirrors the one in
+   *  `hooks/useJobEvents.test.ts`. */
+  class MockEventSource {
+    static instances: MockEventSource[] = [];
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSED = 2;
+    url: string;
+    readyState = MockEventSource.CONNECTING;
+    listeners: Record<string, ((e: MessageEvent) => void)[]> = {};
+    onerror: (() => void) | null = null;
+    constructor(url: string) {
+      this.url = url;
+      MockEventSource.instances.push(this);
+    }
+    addEventListener(type: string, cb: (e: MessageEvent) => void) {
+      (this.listeners[type] ??= []).push(cb);
+    }
+    emit(type: string, data: unknown) {
+      (this.listeners[type] ?? []).forEach(
+        (cb) => cb({ data: JSON.stringify(data) } as MessageEvent));
+    }
+    close() { this.readyState = MockEventSource.CLOSED; }
+  }
+
+  afterEach(() => {
+    MockEventSource.instances = [];
+    vi.unstubAllGlobals();
+  });
+
+  /** One accepted, plate-solved sub — without it "Start stacking" is disabled. */
+  function solvedFrame(): client.Frame {
+    return {
+      id: 1, name: "f1.fits", timestamp_utc: null, exposure_s: 30, gain: 80,
+      width_px: 480, height_px: 320, bayer_pattern: "RGGB", solved: true,
+      ra_center_deg: null, dec_center_deg: null, ra_hint_deg: null,
+      dec_hint_deg: null, fwhm_px: null, star_count: null, sky_adu_median: null,
+      eccentricity_median: null, transparency_score: null,
+      streak_detected: false, accept: true, reject_reason: null,
+      user_override: false,
+    };
+  }
+
+  function mockStartableForm() {
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([solvedFrame()]);
+    vi.spyOn(client.api, "triggerStack").mockResolvedValue({ job_id: "j1" });
+    vi.stubGlobal("EventSource", MockEventSource);
+  }
+
+  /** Start a stack on a rendered page and push one failed-job snapshot. */
+  async function failWith(error: string, kind?: string | null) {
+    mockStartableForm();
+
+    renderStack();
+    fireEvent.click(await screen.findByRole("button", { name: "Start stacking" }));
+    await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
+    act(() => {
+      MockEventSource.instances[0].emit("progress", {
+        id: "j1", kind: "stack", state: "error", phase: "", done: 0, total: 1,
+        detail: "", created_utc: null, started_utc: null, finished_utc: null,
+        error, error_kind: kind ?? null, result: null,
+      });
+    });
+    return screen.findByTestId("stack-job-error");
+  }
+
+  it("translates the failure and keeps the engine's numbers underneath", async () => {
+    const alert = await failWith(
+      "MemoryError: stack output canvas needs ~9.4 GB of working memory, "
+      + "over the ~6.0 GB budget", "memory_budget");
+
+    // The plain-language sentence the Jobs page already writes for this kind…
+    expect(alert.textContent).toMatch(/memory/i);
+    expect(alert.textContent).not.toMatch(/^Error: /);
+    // …the engine's own line, kept because only it carries the numbers…
+    expect(alert.textContent).toContain("~9.4 GB");
+    // …and the raw exception is no longer the *status* line.
+    expect(screen.queryByText(/^Error: MemoryError/)).not.toBeInTheDocument();
+    expect(screen.getByText("Stack didn't finish")).toBeInTheDocument();
+  });
+
+  it("does not print an unrecognised error twice", async () => {
+    // `friendlyJobError` returns an unrecognised error *as* its own message, so
+    // the raw line underneath would be the same sentence over again.
+    const alert = await failWith("OSError: disk is full");
+    const hits = alert.textContent?.match(/disk is full/g) ?? [];
+    expect(hits.length).toBe(1);
+  });
+
+  it("shows nothing extra while a stack is merely running", async () => {
+    mockStartableForm();
+
+    renderStack();
+    fireEvent.click(await screen.findByRole("button", { name: "Start stacking" }));
+    await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
+    act(() => {
+      MockEventSource.instances[0].emit("progress", {
+        id: "j1", kind: "stack", state: "running", phase: "aligning", done: 3,
+        total: 10, detail: "", created_utc: null, started_utc: null,
+        finished_utc: null, error: null, error_kind: null, result: null,
+      });
+    });
+
+    await screen.findByText("aligning 3/10");
+    expect(screen.queryByTestId("stack-job-error")).not.toBeInTheDocument();
   });
 });

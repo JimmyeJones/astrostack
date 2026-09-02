@@ -878,13 +878,36 @@ function JobResultActions({ job }: { job: Job }) {
   return action ? <Group mt="xs">{action}</Group> : null;
 }
 
-/** A failed job's error, translated to plain language where we recognise it. */
-function JobError({ raw, kind }: { raw: string; kind?: string | null }) {
+/** A failed job's error, translated to plain language where we recognise it.
+ *
+ * Exported so the pages that *start* jobs show the same sentence the Jobs page
+ * does. The Stack page used to print `Error: {job.error}` — the raw engine
+ * exception, `MemoryError:` prefix and all — which is the one moment a beginner
+ * most needs plain language and the only page in the app that didn't give it.
+ */
+export function JobError(
+  { raw, kind, showRaw = false }: {
+    raw: string;
+    kind?: string | null;
+    /** Also show the engine's own line, dimmed, beneath the translation.
+     *
+     *  Off here (the Jobs page is a list; a raw traceback line per row is
+     *  noise), on where the failure is the whole screen — the translation says
+     *  *what* happened, but only the raw line carries the numbers ("~9.4 GB,
+     *  over the ~6.0 GB budget") that say how far off you are. Same reasoning,
+     *  and same treatment, as `StackFailedAlert`. */
+    showRaw?: boolean;
+  },
+) {
   const { message, next, action } = friendlyJobError(raw, kind);
   return (
     <>
       <Text c="red" size="sm" mt="xs">{message}</Text>
       {next ? <Text c="dimmed" size="xs" mt={2}>{next}</Text> : null}
+      {/* Never twice: an unrecognised error comes back *as* the raw line. */}
+      {showRaw && raw && raw !== message ? (
+        <Text size="xs" c="dimmed" mt={4} style={{ wordBreak: "break-word" }}>{raw}</Text>
+      ) : null}
       {action ? (
         <Anchor component={Link} to={action.href} size="xs" fw={500}>{action.label}</Anchor>
       ) : null}

@@ -25,6 +25,7 @@ import { rejectionReachNudge } from "../rejectionReachNudge";
 import { memoryFixAction } from "../stackMemoryFix";
 import { printBiggerAction } from "../stackPrintBigger";
 import { minMaxIgnoresWeightingHint as minMaxIgnoresWeighting } from "../weightingHint";
+import { JobError } from "./Jobs";
 
 // Linear-interpolated percentile of an unsorted numeric sample (p in [0, 100]).
 function pctile(values: number[], p: number): number {
@@ -1368,7 +1369,12 @@ export function StackView() {
                   {job.state === "done"
                     ? "Done"
                     : job.state === "error"
-                      ? `Error: ${job.error}`
+                      // The status line stays a status line; the failure itself
+                      // gets the Alert below, in the app's own words. It used to
+                      // print `Error: {job.error}` — the raw engine exception,
+                      // `MemoryError:` prefix and all — on the one screen where
+                      // a beginner most needs a sentence they can act on.
+                      ? "Stack didn't finish"
                       : `${job.phase || "working"} ${job.done}/${job.total}`}
                 </Text>
                 <Text size="sm" c="dimmed">{pct}%</Text>
@@ -1378,6 +1384,13 @@ export function StackView() {
                 color={job.state === "error" ? "red" : job.state === "done" ? "teal" : "violet"}
                 animated={Boolean(running)}
               />
+              {job.state === "error" ? (
+                <Alert color="red" variant="light" mt="xs" p="xs"
+                  icon={<IconAlertTriangle size={18} />}
+                  data-testid="stack-job-error">
+                  <JobError raw={job.error ?? ""} kind={job.error_kind} showRaw />
+                </Alert>
+              ) : null}
               {job.state === "done" && excludedFrames.length > 0 ? (
                 <Alert color="orange" mt="xs" p="xs">
                   <Text size="xs">

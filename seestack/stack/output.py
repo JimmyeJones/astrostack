@@ -451,6 +451,62 @@ def write_full_res_png(path: Path, rgb: np.ndarray) -> Path:
     return Path(path)
 
 
+# Chroma sampling for every JPEG the user keeps, shares or prints. Pillow
+# defaults to 4:2:0 at *every* quality setting (measured — even ``quality=100``
+# encodes chroma at half resolution in both axes), which is a sensible default
+# for a photograph of a face and a poor one for an astrophoto: a Seestar star is
+# 2–3 px across, so halving the colour resolution smears each star's colour into
+# the sky around it and pulls the sky's colour into the star.
+#
+# Measured on a synthetic 256 px field of 300 tight (σ 1.1 px) coloured stars at
+# ``quality=90``: RMS R−B error on the stars **12.4 → 5.0 ADU** (−59 %), worst
+# pixel 67 → 26 ADU, for **+22 %** file size. That trade is worth taking on a
+# finished picture, which is the only thing this app writes as a JPEG — the
+# thumbnails and inline previews are PNGs.
+#
+# 0 is Pillow's spelling of 4:4:4 (no chroma subsampling at all). Save through
+# :func:`save_display_jpeg` rather than passing this by hand.
+JPEG_SUBSAMPLING = 0
+
+
+def save_display_jpeg(img: Any, target: Any, *, quality: int = 90,
+                      optimize: bool = True, **params: Any) -> None:
+    """Write a finished picture as a full-chroma JPEG (see :data:`JPEG_SUBSAMPLING`).
+
+    ``target`` is anything Pillow's ``Image.save`` accepts — a path or a file
+    object. Extra ``params`` (``dpi=…``) pass straight through.
+
+    **Why this is a function and not a keyword.** ``optimize=True`` makes libjpeg
+    emit the whole scan in one go, and Pillow sizes that buffer by *guessing*
+    ``width × height`` bytes — a guess made against 4:2:0. Full-resolution chroma
+    can overrun it on high-entropy pixels, and libjpeg then fails the whole save
+    with ``OSError: broken data stream when writing image file`` (reproduced on a
+    480×320 noise frame the moment 4:4:4 was switched on; it is why the editor's
+    share and print exports went red). A picture the user asked to keep must
+    never fail to write over a compression setting, so the retry drops
+    ``optimize`` — which changes the file's size by a few per cent and nothing
+    else — rather than dropping the colour resolution this exists for.
+
+    A real astrophoto never gets near the limit (a 2048 px sky compresses to a
+    fraction of ``w × h``), so the ordinary path is the optimised one.
+    """
+    kwargs = dict(params)
+    kwargs.update(quality=quality, subsampling=JPEG_SUBSAMPLING)
+    try:
+        img.save(target, format="JPEG", optimize=optimize, **kwargs)
+    except OSError:
+        if not optimize:
+            raise
+        # Rewind: the failed attempt may have written a partial stream.
+        seek = getattr(target, "seek", None)
+        if seek is not None:
+            seek(0)
+            truncate = getattr(target, "truncate", None)
+            if truncate is not None:
+                truncate()
+        img.save(target, format="JPEG", optimize=False, **kwargs)
+
+
 def write_share_jpeg(path: Path, rgb: np.ndarray, *, max_long_edge: int = 2048,
                      quality: int = 90, nameplate: "Any | None" = None) -> Path:
     """Write a social-ready JPEG of an already display-stretched image (values in
@@ -482,7 +538,7 @@ def write_share_jpeg(path: Path, rgb: np.ndarray, *, max_long_edge: int = 2048,
         from seestack.nameplate import draw_nameplate
         img = draw_nameplate(img, nameplate)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    img.save(path, format="JPEG", quality=quality, optimize=True)
+    save_display_jpeg(img, path, quality=quality)
     return Path(path)
 
 
@@ -557,7 +613,7 @@ def png_bytes_to_jpeg(png_data: bytes, *, quality: int = 90,
             from seestack.nameplate import draw_nameplate
             img = draw_nameplate(img, nameplate)
         buf = BytesIO()
-        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        save_display_jpeg(img, buf, quality=quality)
     return buf.getvalue()
 
 

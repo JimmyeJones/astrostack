@@ -28,6 +28,8 @@ def _row(**kw) -> ImagingLogRow:
         is_mosaic=False,
         noise_sigma=0.0123,
         app_version="0.192.0",
+        capture_night_start="2026-07-19",
+        capture_night_end="2026-07-19",
     )
     base.update(kw)
     return ImagingLogRow(**base)
@@ -52,8 +54,10 @@ def test_one_row_per_run_with_expected_columns():
 
 def test_row_values_are_beginner_legible():
     vals = imaging_log_row_values(_row())
-    # Date is the calendar day (UTC), not the full ISO timestamp.
-    assert vals[0] == "2026-07-24"
+    # The leading column is the night the subs were SHOT, not the day the stack
+    # ran — a log of "every night you've imaged" that led with the processing
+    # stamp dated a re-stack of a back catalogue to the afternoon it was made.
+    assert vals[0] == "2026-07-19"
     assert vals[1] == "M 31"
     assert vals[2] == "120"
     # Integration is a plain duration, never raw seconds.
@@ -63,6 +67,45 @@ def test_row_values_are_beginner_legible():
     assert vals[6] == "no"
     assert vals[7] == "0.0123"
     assert vals[8] == "0.192.0"
+    # …and the processing stamp is still here, at the end, under its real name.
+    assert vals[9] == "2026-07-24"
+
+
+def test_the_two_dates_are_labelled_and_neither_moved_the_other_s_columns():
+    """`Shot` leads, `Stacked` is appended — an existing spreadsheet keeps every
+    column it had, and nothing is lost."""
+    assert IMAGING_LOG_COLUMNS[0] == "Shot"
+    assert IMAGING_LOG_COLUMNS[-1] == "Stacked"
+    assert IMAGING_LOG_COLUMNS[1:-1] == [
+        "Target", "Subs used", "Integration", "Typical star size (px)",
+        "Calibration", "Mosaic", "Noise (lower is cleaner)", "App version",
+    ]
+    assert len(imaging_log_row_values(_row())) == len(IMAGING_LOG_COLUMNS)
+
+
+def test_a_multi_night_stack_names_the_span():
+    vals = imaging_log_row_values(
+        _row(capture_night_start="2024-11-15", capture_night_end="2024-11-18"))
+    # "to", not an en dash: this is a spreadsheet cell, where a dash reads as
+    # arithmetic.
+    assert vals[0] == "2024-11-15 to 2024-11-18"
+    # A window recorded end-first still reads in the order a person expects.
+    assert imaging_log_row_values(
+        _row(capture_night_start="2024-11-18",
+             capture_night_end="2024-11-15"))[0] == "2024-11-15 to 2024-11-18"
+    # One end alone is one honest night, not half a range.
+    assert imaging_log_row_values(
+        _row(capture_night_start=None, capture_night_end="2024-11-18"))[0] == "2024-11-18"
+
+
+def test_a_run_from_before_the_app_tracked_nights_says_nothing_rather_than_guessing():
+    """The date-honesty rule: never reach for the stamp that is to hand. A
+    pre-schema-18 run has no window, so the column is blank — the stack date is
+    still there in `Stacked`, where it is true."""
+    vals = imaging_log_row_values(
+        _row(capture_night_start=None, capture_night_end=None))
+    assert vals[0] == ""
+    assert vals[9] == "2026-07-24"
 
 
 def test_integration_formats():
@@ -81,9 +124,11 @@ def test_missing_optionals_render_blank_not_error():
     vals = imaging_log_row_values(_row(
         date=None, n_subs=None, integration_s=None, median_fwhm_px=None,
         calibration=None, is_mosaic=None, noise_sigma=None, app_version=None,
+        capture_night_start=None, capture_night_end=None,
     ))
-    # Calibration reads plainly as "none"; everything else blanks out.
-    assert vals == ["", "M 31", "", "", "", "none", "", "", ""]
+    # Calibration reads plainly as "none"; everything else blanks out — both
+    # date columns included.
+    assert vals == ["", "M 31", "", "", "", "none", "", "", "", ""]
 
 
 def test_mosaic_flag_wording():
