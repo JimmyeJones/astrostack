@@ -1078,6 +1078,55 @@ def test_plan_week_is_cached_but_only_for_the_same_question(client, solved_libra
         plan_router.plan_week = original
 
 
+def test_the_week_cache_notices_a_target_getting_deeper(client, solved_library):
+    """A night's capture changes *which* targets a big library gets planned for,
+    without adding a target or moving one — because the ``WEEK_MAX_TARGETS`` cap
+    selects the most-shot ones. A signature carrying only names and positions
+    would go on serving the old selection, so depth is part of it too.
+    """
+    from seestack import nightplan as np_plan
+    from seestack.io.library import Library
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    params = {"when": JAN_EVENING}
+    assert client.get("/api/plan/week", params=params).status_code == 200
+
+    calls = {"n": 0}
+    real = np_plan.plan_week
+
+    def _counted(*a, **kw):
+        calls["n"] += 1
+        return real(*a, **kw)
+
+    import webapp.routers.plan as plan_router
+    original = plan_router.plan_week
+    plan_router.plan_week = _counted
+    try:
+        assert client.get("/api/plan/week", params=params).status_code == 200
+        assert calls["n"] == 0                       # still the same question
+
+        # A night's capture on one target: more accepted subs, so more integration
+        # — but no new target and no new position. The accepted count moves the
+        # *inner* `_library_targets` cache (it is in `registry_signature`); the
+        # week's own signature only notices because depth is in it too, which is
+        # what this pins.
+        lib = Library.open_or_create(solved_library / "library")
+        try:
+            safe = lib.list_targets()[0].safe_name
+            lib._conn.execute(
+                "UPDATE targets SET total_exposure_s = COALESCE(total_exposure_s, 0) + 3600,"
+                " n_frames_accepted = COALESCE(n_frames_accepted, 0) + 120"
+                " WHERE safe_name = ?", (safe,))
+            lib._conn.commit()
+        finally:
+            lib.close()
+
+        assert client.get("/api/plan/week", params=params).status_code == 200
+        assert calls["n"] == 1
+    finally:
+        plan_router.plan_week = original
+
+
 def test_plan_week_min_alt_narrows_what_qualifies(client, solved_library):
     """A high altitude floor is honoured, exactly as the other planners honour it
     — a beginner with trees isn't told to shoot something at 20°."""
