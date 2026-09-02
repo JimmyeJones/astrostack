@@ -418,6 +418,36 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🟢 LOW / HONESTY (Builder 2026-09-02, tripped over while testing `plan_week` — reproduced and measured) —
+  the planner can tell you to shoot up to two minutes *after* astronomical dark ends, and can credit a window
+  with darkness that doesn't exist.** *(Severity: low — it is at most ~2.5 min, but it is a plainly false
+  statement on a "shoot between X and Y" line, and it now appears on three surfaces: `/tonight`,
+  `/next-session/{safe}` and the new `/plan/week`. §1 priority 3. Confidence: reproduced.)*
+
+  `_times_grid` (`seestack/nightplan.py:402-410`) builds the observability sampling stamps as
+  `n = int(round(total_min / step_minutes)) + 1` from `window.start`, i.e. it **rounds the step count to the
+  nearest whole step**, so the last stamp can sit up to *half a step* (2.5 min at the 5-minute step) **past
+  `window.end`**. Every downstream number is derived from those stamps: `usable_end_utc` is
+  `stamps[usable_idx[-1]]`, and `minutes_above_min_alt` is `count × 5.0`.
+
+  **Reproduced.** Over a 14-night January scan from London the worst overhang is **120 s** past `dark_end`
+  (night of 2026-01-17: darkness ends 05:55:31, last stamp 05:57:31). End to end it surfaces as a reported
+  window past the end of the night — M 31 from a London site on 2026-10-18 and -19 gets
+  `dark_end 04:37:28` and `usable_end 04:38:28`, i.e. **60 s of "keep shooting" after astronomical dark is
+  over** — which is exactly the kind of thing a beginner following the card to the minute would notice. Any
+  target still above the floor at the end of a night is affected; one that sets earlier is not.
+
+  **Fix (small, and pick the honest direction).** Either build the grid with `ceil` and **clip the last stamp
+  to `window.end`**, or use `floor` so the grid never leaves the window. Clipping is the better answer: it
+  keeps the last sample (so a target usable only in the final minutes isn't dropped) while making
+  `usable_end` truthful, and `minutes_above_min_alt` should then credit the *clipped* span rather than a flat
+  `count × step`. **Cautions:** this is a shared hot function — `plan_tonight`, `rank_targets_now`,
+  `next_observing_windows`, `plan_week` and `moon_window` all sample through it — so the change moves numbers
+  on every planner surface by up to ~2.5 min; keep it to that and add a test that no reported
+  `usable_end_utc`/`transit_utc` ever exceeds its window's `end`, plus a no-regression check that a window
+  which is an exact multiple of the step is unchanged. Worth doing as one small commit, not folded into
+  something else.
+
 - **✅ SHIPPED (Builder, v0.324.0, branch `claude/zen-mccarthy-tl3guh`) — ~~the "Download full-res PNG" of an
   **Adjusted** (asinh) run does NOT match the saved 1024 px preview the user tuned, because `asinh_stretch`
   recomputes its whole tone curve from the resolution of the array it is handed.~~** Fixed in the shape the
@@ -451,6 +481,27 @@ _(nothing else claimed — claim an item here with your branch name)_
   grids then measure almost identically, since it is precisely the pixel noise and the barely-sampled star
   peaks that make the statistics resolution-dependent. Both are written into the test file's docstrings so the
   next agent doesn't re-derive them.
+
+  **Follow-up (Builder, v0.325.1, branch `claude/zen-mccarthy-nemj8o`) — the two numbers the original finding
+  quotes are both wrong, and are now corrected in the code and pinned by tests, so nobody re-opens this.** The
+  shipping run's note above spotted the *shape* of the problem (a resampled per-pixel comparison is the wrong
+  metric); these are the measurements. Both taken on a synthetic 1920×1080 linear master (sky 0.02 ± 0.004,
+  faint glow, small stars), sliders 0.5/0.35:
+  1. **"A black point of 0.48 vs 0.61 for the same slider" overstates it, because those two numbers live in
+     *different* normalisations and can't be compared directly.** `channels` is measured *after*
+     `(img − lo)/(hi − lo)`, so a shifted range drags the median and σ with it and most of the gap cancels;
+     what does *not* cancel is the grain (σ on a decimated array is genuinely smaller). The curve-only 8-bit
+     difference is **mean 10.1 / max 43** at a native render and **mean 3.0 / max 14** at 1200 px — real,
+     visible, worth the fix, but about a third of the implied figure.
+  2. **"A control that forces shared (native) statistics collapses the difference to ~0" does not reproduce.**
+     Run as described, it leaves essentially the whole residual. Decomposed: anchoring the curve moves
+     preview-vs-resampled-download from **18.6 → 16.0** mean-abs (15.5 → 13.2 and 13.2 → 9.6 at the other two
+     slider pairs). The remainder is the stretch being non-linear — averaging stretched pixels is not
+     stretching averaged ones — which **no anchor can remove**, and the full-size render is the more faithful
+     side of it. `tests/test_asinh_curve_residual.py` runs the report's own control, pins that it doesn't
+     collapse, and isolates the mechanism (asinh is concave, so the small render is systematically *brighter*;
+     an affine map over the identical path commutes exactly). `render_preview_png_full_res`'s docstring carries
+     the corrected figures. **Do not chase the residual — it is physics, not a bug.**
 
     *(Original finding, kept for the reasoning: severity wrong-result — the downloaded/shared full-size picture
     is a materially different image from the one the user tuned and from the gallery/History thumbnail,
@@ -21749,6 +21800,32 @@ problems. Dogfood it every big-picture run and fix root causes.
   per the standing "put a feature inside the grouping, not one more banner" rule), an .ics export of the week,
   and any catalog/discovery rows — this is "finish what I've got"; `/suggest` covers the rest.
 
+  **⚠️ Follow-up (Builder, v0.325.1, branch `claude/zen-mccarthy-nemj8o`) — collision TEN: this was built twice
+  in the same hour, and the version above is the one that ships.** Mine was indistinguishable in shape (same
+  extraction of the night walk, same one-batch-per-night, same 40-target cap, same earlier-night tie-break);
+  theirs landed on `main` first, so mine is dropped rather than re-litigated — including its placement (a "This
+  week" group on the Dashboard's `InsightTabs` rather than the Tonight page; theirs is the better call, since
+  the card answers "is tonight even the right night?" and belongs beside the answer it qualifies). **Two pieces
+  neither their commit nor the entry covers are re-applied on top of theirs:**
+  1. **The entry's "reuse the cache" caution, which the shipped version doesn't act on.** The endpoint
+     recomputed the whole week on every render. `cached_for_registry` now serves it, keyed on every input plus
+     "now" bucketed to **5 minutes** — the planner's own `_observability_batch` sampling step, so a cached
+     answer can never be staler than the resolution of the times it reports, and only the first night is
+     time-dependent at all (it is the one clipped to "now"). Test: a repeat request is served, and a changed
+     floor or night count recomputes (fails without the cache).
+  2. **A test that the two planners agree on the *numbers*, not just the nights.** `upcoming_dark_windows`
+     pins which nights they discuss, but each then scores independently — and a target's week row sits on the
+     same screen as the Target page's "your next good window". Two tests assert `plan_week` and
+     `next_observing_windows` report identical usable windows, altitudes, minutes, Moon fractions and scores
+     for the same target, including from the small hours where the shared anchor earns its keep.
+
+  **Measurement worth keeping, since neither run recorded one for the design decision it turns on.** London
+  site, 7 nights, warm astropy: `plan_week` is **0.96 s for 1 target, 1.02 s for 10, 1.02 s for 40, 1.07 s for
+  80** — genuinely flat in library size — against **9.7 s for the naive `next_observing_windows`-per-target
+  loop at just 10 targets**, because that shape re-searches every night's darkness once per target. So the
+  batching is what makes it affordable and the 40-target cap is about keeping the answer a *plan* rather than
+  a library dump; it is not a performance guard.
+
     *(Original spec follows.)* *(Pillar: plan + autonomy — PRIORITY 2–3; size M; additive, offline, no new deps.)* Today
     the night planner answers three narrow questions and misses the one a weekend imager actually asks. `/tonight`
     ranks everything *for tonight*; `/best-tonight` ranks your own targets *right now*; `/next-session/{safe}` is
@@ -22263,6 +22340,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   fix: group placed objects by `object_id` in the viewer, draw one node, and let the card list the targets
   behind it ("2 of your targets are this object"). **Don't** fix it by nudging one aside — a fake offset on a
   map whose whole promise is "placed where they really are" is exactly the wrong trade.
+
+- **⚠️ PROCESS NOTE + PROPOSAL (Builder 2026-09-02) — collision TEN, and it was a *clean sweep*: two Builders
+  in one hour independently built the **same three items**, and every one of them was the top open entry of
+  its section.** Not one item overlapped by chance — the asinh preview-parity bug (top of "Bugs"), the
+  bootstrap centre bug (second in "Bugs"), and "Plan my week" (top of "Features that serve real workflows").
+  Both runs converged so hard that we independently chose the same helper *names* (`AsinhStats`,
+  `_preview_grid_asinh_stats`, `wcs_image_center_deg_from_text`) and the same extraction
+  (`_iter_night_dark_windows` / `upcoming_dark_windows`). The other run landed first; mine was dropped.
+
+  **The claim-by-site discipline cannot fix this, and notes six through nine have now established that
+  empirically.** Claiming is a *publication*, and both agents publish after they have already chosen — the
+  choice happens in the first thirty seconds of a run, from a file that tells both of them the same thing.
+  Fetching again between tasks catches a collision only when the other agent finished a task first; it never
+  catches two agents starting together, which is the common case when runs are scheduled on the same hour.
+
+  **The proposal, and it needs no coordination mechanism at all: stop making every Builder pick the top
+  item.** Have each run pick **uniformly at random from the top ~4 open, unclaimed entries** of the
+  highest-priority section that has any (still never below a section that has open work — the priority bands
+  are unchanged, only the tie-break within one). Two independent runs then collide with probability ~1/4
+  instead of ~1, the expected wait for the true top item goes from "always first" to "within a couple of
+  runs", and *nothing* is lost: every one of those four is work the backlog already says is worth doing next.
+  A cheap refinement if the top item is genuinely urgent — mark it `⭐` and make ⭐ items always-first, which
+  the file's own convention already supports and which the current queue happens not to use.
+
+  This belongs in **AGENTS.md §3** (the decision rule), not just here, since it changes how every run chooses;
+  filed rather than edited because §3 is the owner's manual and this is a real behaviour change to every
+  agent. **Cost of not doing it:** this hour, two of two Builder runs produced almost entirely duplicate work.
 
 - **⚠️ PROCESS NOTE (Builder 2026-08-30) — collision EIGHT, and this one is the control experiment for note
   seven: its prescribed fix would have prevented it, and I did not do it.** Note seven, filed hours earlier,

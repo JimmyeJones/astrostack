@@ -322,6 +322,16 @@ def get_best_tonight(
     return payload
 
 
+#: How long a computed week plan may be served from cache. Matched to the bucket
+#: below, so one bucket's answer is reused for exactly the span it describes.
+_WEEK_CACHE_TTL_S = 300.0
+#: "Now" is rounded down to this many minutes for the cache signature. It is the
+#: planner's own observability sampling step (``_observability_batch`` walks the
+#: darkness at 5-minute stamps), so a cached plan is never staler than the
+#: resolution of the times it reports.
+_WEEK_CACHE_BUCKET_MINUTES = 5
+
+
 @router.get("/week")
 def get_plan_week(
     request: Request,
@@ -374,12 +384,44 @@ def get_plan_week(
             "n_targets_with_position": 0,
         }
 
-    plan = plan_week(
-        observer, _library_targets(request),
-        start_utc=start,
-        nights=int(nights),
-        min_altitude_deg=float(min_altitude),
-        horizon=HorizonProfile.from_pairs(settings.horizon_profile),
+    targets = _library_targets(request)
+    horizon = HorizonProfile.from_pairs(settings.horizon_profile)
+    # A week costs ``nights`` dark-window searches, and that search — not the
+    # per-target work — is the whole bill: measured on a London site over 7
+    # nights, **0.96 s for one target and 1.07 s for eighty**, because
+    # ``plan_week`` runs one vectorised observability batch per night over the
+    # whole library. (The shape it replaced — ``next_observing_windows`` per
+    # target — was **9.7 s at ten targets**, since it re-searched every night's
+    # darkness once per target.) Flat in the library size is the right cost, but
+    # a second of ephemeris on every card render is still a second, so the answer
+    # is cached behind the same registry-signature cache the Dashboard roll-ups
+    # use.
+    #
+    # The signature carries every input, plus "now" bucketed to
+    # ``_WEEK_CACHE_BUCKET_MINUTES`` — the planner's own sampling step, so a
+    # cached answer can never be staler than the resolution of the numbers it
+    # reports. (Only the first night is time-dependent at all: it is the one
+    # clipped to "now".) A changed location, altitude floor, horizon, night count
+    # or library rebuilds rather than serves.
+    bucket = start.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    bucket = bucket.replace(minute=(bucket.minute // _WEEK_CACHE_BUCKET_MINUTES)
+                            * _WEEK_CACHE_BUCKET_MINUTES)
+    sig = (
+        bucket.isoformat(), int(nights), min_altitude,
+        observer.lat_deg, observer.lon_deg, observer.elevation_m,
+        tuple(tuple(p) for p in (settings.horizon_profile or [])),
+        tuple((t.safe, t.ra_deg, t.dec_deg) for t in targets),
+    )
+    plan = cached_for_registry(
+        request.app, "plan_week", sig,
+        lambda: plan_week(
+            observer, targets,
+            start_utc=start,
+            nights=int(nights),
+            min_altitude_deg=float(min_altitude),
+            horizon=horizon,
+        ),
+        ttl_s=_WEEK_CACHE_TTL_S,
     )
     payload = asdict(plan)
     payload["location_source"] = location_source

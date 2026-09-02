@@ -1405,3 +1405,48 @@ def test_plan_week_honours_the_horizon_profile():
     assert blocked.horizon_active is True
     assert any(n.best is not None for n in open_sky.nights)
     assert all(n.best is None for n in blocked.nights)
+
+
+def test_plan_week_and_next_session_report_the_same_numbers_for_one_target():
+    """The two forward-looking planners must agree, not merely share a night walk.
+
+    ``upcoming_dark_windows`` pins which *nights* they talk about, but each then
+    scores independently, and a target's week row sits on the same screen as the
+    Target page's "your next good window". A week plan that named a different
+    usable window, altitude or score for the same object on the same night would
+    be worse than no week plan — so this pins the numbers, not just the dates.
+    """
+    orion = _lib("m42", "M 42", 83.8, -5.4, hours=1.0)
+    plan = np_plan.plan_week(LONDON, [orion], start_utc=JAN_EVENING, nights=7)
+    wins = np_plan.next_observing_windows(
+        LONDON, orion.ra_deg, orion.dec_deg, start_utc=JAN_EVENING,
+        nights=7, want=8)
+
+    mine = [(n.dark_start_utc, n.best) for n in plan.nights if n.best is not None]
+    assert mine, "Orion is up on a January night from London"
+    assert len(mine) == len(wins)
+
+    for (dark_start_utc, pick), w in zip(mine, wins, strict=True):
+        assert dark_start_utc == w.dark_start.isoformat()
+        assert pick.usable_start_utc == (
+            w.usable_start.isoformat() if w.usable_start else None)
+        assert pick.usable_end_utc == (
+            w.usable_end.isoformat() if w.usable_end else None)
+        assert pick.max_altitude_deg == pytest.approx(w.max_altitude_deg)
+        assert pick.minutes_above_min_alt == pytest.approx(w.minutes_above_min_alt)
+        assert pick.moon_up_fraction == w.moon_up_fraction
+        assert pick.score == pytest.approx(w.score)
+
+
+def test_plan_week_agrees_with_next_session_from_the_small_hours_too():
+    """The pre-dawn case is where the shared anchor earns its keep: the ongoing
+    night is offered as an extra, so an off-by-one there would make the two
+    planners disagree about which night is which, not just about a number."""
+    small_hours = datetime(2026, 1, 16, 2, 0, tzinfo=timezone.utc)
+    orion = _lib("m42", "M 42", 83.8, -5.4, hours=1.0)
+    plan = np_plan.plan_week(LONDON, [orion], start_utc=small_hours, nights=5)
+    wins = np_plan.next_observing_windows(
+        LONDON, orion.ra_deg, orion.dec_deg, start_utc=small_hours,
+        nights=5, want=8)
+    assert [n.dark_start_utc for n in plan.nights if n.best is not None] \
+        == [w.dark_start.isoformat() for w in wins]
