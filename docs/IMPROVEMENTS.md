@@ -465,6 +465,42 @@ _(nothing else claimed — claim an item here with your branch name)_
 > (backlog bloat, collisions, QA-rotation aim) are filed as the R-items further below; `AGENTS.md` §1 and §11
 > have already been updated for the highest-value ones.**
 
+- **✅ SHIPPED (Builder, v0.328.0, branch `claude/sweet-babbage-hrh7bu`) — ~~your imaging log dates every night
+  you shot by the day you *processed* it.~~** *(Found while unifying the caption vocabulary for A10; verified
+  by reading and then by reproduction. Severity: **a wrong fact on a record the owner downloads and pastes into
+  a forum post** — the same class as the v0.311.3 "First light", v0.313.0 share caption and v0.314.0 nameplate
+  bugs, at the one surface that sweep missed.)*
+
+  **What was wrong.** `seestack/imaging_log.py`'s own docstring calls the CSV "a plain, downloadable record of
+  every **night you've imaged**", and its first column was headed **"Date"** — but
+  `webapp/routers/stats.py::_collect_imaging_log` filled it with `run.timestamp_utc`, the moment the *stack
+  ran*. Those are the same day only if you stack the night you shoot; re-stack a back catalogue — exactly what
+  a Seestar owner arriving with thousands of subs does — and every row of your imaging journal is dated the
+  afternoon you pressed the button. The capture window has been on the run since schema 18 and every *other*
+  surface already reads it.
+
+  **The fix keeps both facts and labels each honestly.** The first column is now **"Shot"** and carries the
+  observing-night window (`capture_night_range`, the same noon-to-noon bucket the Nights card uses, resolved
+  through the owner's own longitude), and a **"Stacked"** column is *appended* at the end carrying the value
+  the first column used to hold. Appending rather than inserting is deliberate: no existing column changes
+  position, so a spreadsheet a user has already built keeps working, and nothing is lost — the processing date
+  is still there, under its real name. Per the date-honesty rule the earlier fixes established, an unknown
+  window prints **blank** rather than reaching for the stamp it has to hand, which is every run recorded
+  before schema 18.
+
+  A single night reads `2024-11-15`; a stack built from several reads `2024-11-15 to 2024-11-18` (spelled out
+  rather than en-dashed, because this is a spreadsheet cell and a dash reads as arithmetic).
+
+  **Upgrade-safe (§9):** two dataclass fields with `None` defaults, so every existing `ImagingLogRow(...)` call
+  still constructs; one appended CSV column; no schema, no on-disk change, no API shape change, no setting
+  flipped. The endpoint's path, filename and media type are untouched.
+
+  **Tests (+7; 3 fail before).** `tests/test_imaging_log.py` pins the range formatter's three shapes, the
+  column contract (Shot first, Stacked last, everything else in place), and the blank-not-guessed degradation
+  for a pre-schema-18 run. `tests/webapp/test_imaging_log.py` pins it end to end on a run whose capture window
+  and stack stamp are **deliberately years apart** — the fixture that makes the bug visible at all, and the
+  reason a same-day fixture would have gone on passing.
+
 - **✅ SHIPPED (Builder, v0.326.1, branch `claude/zen-mccarthy-t59xya`) — ~~A1: Auto's contrast curve
   brightens the sky on every Auto picture, and the regression test that should catch it passes on a fixture
   that cannot exhibit the bug.~~** Fixed in all three parts the audit named, and reproduced first.
@@ -1329,12 +1365,91 @@ _(nothing else claimed — claim an item here with your branch name)_
   v0.327.8, see above)*; the scanner's
   bare-`<T>/` skip is **silent** even when the folder holds thousands of FITS (the owner's `NGC 6888` 4,815 vs
   `NGC 6888_SUB` 3,110 is exactly that shape — see open questions); the plate-solve-failed screen shows a
-  blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"; the Stack page
-  prints the **raw engine error** where every other page uses `friendlyJobError`; the frames table prints raw
+  blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"; ~~the Stack
+  page prints the **raw engine error** where every other page uses `friendlyJobError`~~ *(shipped v0.328.0,
+  see below)*; the frames table prints raw
   UTC under a hero that says "Shot &lt;local night&gt;"; "nights" means **6-hour sessions** on the Nights card
   but **calendar nights** in captions; three hand-mirrored "is this a genuine run" predicates;
-  `POST /api/targets` has **no frontend caller**; share and print JPEGs use 4:2:0 chroma subsampling; the "full
+  `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
+  *(shipped v0.328.0, see below)*; the "full
   data" TIFF anchors its white point on the single brightest surviving pixel (hypothesis, needs real data).
+
+- **✅ SHIPPED (Builder, v0.328.0, branch `claude/sweet-babbage-hrh7bu`) — ~~A-MINOR: share and print JPEGs use
+  4:2:0 chroma subsampling.~~** Measured first, and it turned out to be **every** JPEG the app writes, not just
+  the two the audit named.
+
+  **What was actually wrong.** Pillow encodes JPEG chroma at 4:2:0 by default — verified at every quality the
+  app uses and at `quality=100` too, so the `quality=95` print export was no exception. That halves the colour
+  resolution in both axes, which is right for a photograph of a face and wrong for an astrophoto: a Seestar
+  star is 2–3 px across, so a 2×2 chroma block straddles the star and the sky, smearing the star's colour
+  outward and pulling the sky's colour in. **Measured** on a synthetic 256 px field of 300 tight (σ 1.1 px)
+  coloured stars at `quality=90`: RMS R−B error on the stars **12.4 → 5.0 ADU (−59 %)**, worst pixel **67 → 26
+  ADU**, for **+22 %** file size. R−B rather than a per-channel mean because that is precisely what
+  subsampling discards — luminance survives at full resolution either way.
+
+  **Seven write sites, one shared writer.** `seestack/stack/output.py` gained `JPEG_SUBSAMPLING = 0` carrying
+  the measurement and the reasoning, plus a `save_display_jpeg` every site now goes through: the
+  share export and the JPEG/keepsake/nameplate download (`output.py`), the print export
+  (`webapp/pipeline.py`), the wallpaper (`seestack/wallpaper.py`), the recap poster
+  (`webapp/routers/stats.py`), "My deep-sky wall" (`webapp/routers/gallery.py`) and the before/after
+  (`webapp/routers/stack.py`). The audit named two; the others are the same picture leaving by a different
+  door. Nothing else in the app writes a JPEG — thumbnails and inline previews are PNGs, so there is no
+  bandwidth-sensitive path paying the 22 %.
+
+  **Why it is a writer and not a keyword, which is the part worth carrying forward.** The first cut passed
+  `subsampling=0` at each site and the full suite caught it: four editor export tests went red with
+  `OSError: broken data stream when writing image file`. `optimize=True` makes libjpeg emit the whole scan in
+  one go, and **Pillow sizes that buffer by guessing `width × height` bytes — a guess made against 4:2:0.**
+  Full-resolution chroma overruns it on high-entropy pixels (reproduced on a 480×320 noise frame), and
+  libjpeg then fails the entire save. A picture the user asked to keep must never fail to write over a
+  compression setting, so `save_display_jpeg` retries **without `optimize`** — a few per cent of file size,
+  not the colour resolution the change exists for — rewinding the target first so a partial stream can't
+  corrupt the retry. A real astrophoto never approaches the limit (a 2048 px sky compresses to a fraction of
+  `w × h`), so the ordinary path stays the optimised one. **The lesson is the old one about fixtures, from
+  the other end:** the synthetic star field this task was measured on is *smooth enough to compress*, so it
+  could not have found this — only the webapp's own noise-based export fixtures did, and only in the full
+  suite. Targeted test files are not a substitute for it.
+
+  **Upgrade-safe (§9):** an encoder flag on newly-written bytes. No config key, no schema, no on-disk layout
+  change, no API shape change, no default flipped, and nothing already on disk is touched or re-encoded.
+
+  **Tests (+15; a new `tests/test_jpeg_chroma.py` plus three webapp endpoint pins).** The fixture is built to
+  be *able* to exhibit the defect and says why: Seestar-sized stars (blur them and the difference vanishes)
+  that differ in colour from each other and the sky (subsampling only loses what varies *within* a block — a
+  monochrome field encodes identically either way and would pass on the broken code). Alongside the pins there
+  is a **positive control** — `test_pillow_still_defaults_to_half_resolution_colour` — because every other
+  assertion here would sit permanently green if Pillow ever changed its default and the arguments became
+  no-ops; that is the A1 failure mode applied to a guard. Plus the measured before/after, a loose pin on the
+  file-size price so the day it stops being modest someone has to look, a sweep over four qualities (the
+  quality knob and the chroma choice must stay independent — Pillow's own presets would quietly hand
+  half-resolution colour back), and the buffer-overrun case above with its own positive control (the naive
+  save is asserted to *raise* on that frame, so the retry is not quietly asserting nothing).
+
+- **✅ SHIPPED (Builder, v0.328.0, branch `claude/sweet-babbage-hrh7bu`) — ~~A-MINOR: the Stack page prints the
+  raw engine error where every other page uses `friendlyJobError`.~~** It was the *only* place in the app that
+  did, and it is the moment a beginner most needs a sentence they can act on: a failed stack rendered
+  `Error: MemoryError: stack output canvas needs ~9.4 GB of working memory, over the ~6.0 GB budget` as its
+  status line, where the Jobs page and `StackFailedAlert` both run the same string through `friendlyJobError`
+  first (which names the lever and links to the control that changes it).
+
+  **The fix reuses the existing translator rather than adding a fourth.** `JobError` (in `routes/Jobs.tsx`) is
+  now exported and mounted on the Stack page's job panel, with the status line reduced to `Stack didn't
+  finish` and the failure itself given an Alert underneath. `JobError` gained one optional
+  `showRaw` — **off** by default, so the Jobs page renders byte-identically: a list wants one line per row,
+  but where the failure *is* the screen the engine's own words carry the numbers ("~9.4 GB, over the ~6.0 GB
+  budget") that say how far off you are, which is exactly the reasoning `StackFailedAlert` already documents
+  for showing them. The raw line is suppressed when it would be printed twice — `friendlyJobError` returns an
+  unrecognised error *as* its own message.
+
+  **Upgrade-safe (§9):** frontend rendering only. No API call, no response shape, no config, no default.
+  `job.error_kind` was already on the job payload (`webapp/jobs.py::to_dict`, additive since v0.84.4) and is
+  optional, so an older backend that omits it simply falls back to matching on the raw string as before.
+
+  **Tests (+3 in `Stack.test.tsx`; 2 fail before, verified by reverting the render).** Driven through the real
+  path — a mocked `EventSource` pushes one failed-job snapshot at a started stack — so they pin the wiring,
+  not a helper: the translated sentence appears with the engine's numbers kept beneath it and the raw
+  exception gone from the status line; an unrecognised error is not printed twice; and a merely-running job
+  shows no alert at all.
 
 - **🟠 R2 — SPLIT THE BACKLOG INTO A WORKING LIST AND A RECORD (one mechanical Scout run, then a standing
   rule).** *(The audit's highest-value process finding: this file is **3.4 MB / ~840k tokens**, so no agent can
@@ -18496,6 +18611,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEW IDEA (Builder 2026-09-02, the same defect as A10's duration half, one field over) — a capture window
+  is spelled three different ways, and the fix now has a worked template.** *(Pillar: approachable / trust —
+  PRIORITY 3. Size: S.)* v0.327.9 gave the app one vocabulary for *how much light*; **when it was shot** is
+  still three: `frontend/src/format.ts::formatCaptureNights` says `15–18 Nov 2024` (en dash, spaced only when
+  both sides are multi-word), `seestack/nameplate.py::format_acq_range` says `15-18 Nov 2024` (ASCII), and
+  `seestack/imaging_log.py::_format_night_range` (v0.328.0) says `2024-11-15 to 2024-11-18`. All three read
+  the *same two ISO dates off the same run*, and a beginner comparing the picture on screen with the caption
+  they copied and the log row they exported sees three renderings of one night.
+  **Two of the three divergences are justified and must survive any unification:** the nameplate is ASCII
+  because the bundled Pillow face has no en dash (`nameplate.py`'s header pins this with a glyph test), and
+  the log is ISO because it is a spreadsheet cell that should stay sortable and parseable. So this is **not**
+  "make them identical" — it is *one* function with an explicit style argument (`display` / `ascii` / `iso`),
+  so the three renderings are three deliberate outputs of one rule rather than three implementations of three
+  slightly different rules. Today only one of them knows that "15–18 Nov" and "28 Oct – 3 Nov" space the dash
+  differently, and only one knows that a reversed window should be printed in reader order.
+  **The template already exists:** `tests/fixtures/integration_format.json` — one table of cases read by both
+  `pytest` and `vitest`, which is what turned "one vocabulary" from a comment into a gate. Do the same with a
+  window table (start, end, style) → expected. **Grep before building:** `pictureDateLabel`,
+  `captureNightsClause` and `capture_night_range` are all in this neighbourhood and at least one of them is
+  about the *night count*, not the window — don't fold them in by accident.
 
 - **NEW IDEA (Builder 2026-09-02, the slice A10's duration half deliberately left) — the Editor's copyable
   caption is the only one of the four with *no date at all*.** *(Pillar: approachable / trust — PRIORITY 3.

@@ -990,12 +990,13 @@ def get_recap_poster(request: Request, months: int = 12) -> Response:
     import io
 
     from seestack.recap import draw_recap_poster
+    from seestack.stack.output import save_display_jpeg
 
     months = max(1, min(24, months))
     summary, facts = _recap_facts(request, months)
     poster = draw_recap_poster(facts, hero=_recap_hero(request, summary))
     buf = io.BytesIO()
-    poster.save(buf, format="JPEG", quality=92)
+    save_display_jpeg(poster, buf, quality=92)
     return Response(
         content=buf.getvalue(),
         media_type="image/jpeg",
@@ -1003,12 +1004,17 @@ def get_recap_poster(request: Request, months: int = 12) -> Response:
     )
 
 
-def _collect_imaging_log(lib, targets) -> list:
+def _collect_imaging_log(lib, targets, lon_deg: float | None = None) -> list:
     """Walk the library and build one imaging-log row per finished stack run.
 
     Expensive (opens every project + reads each frame's stored FWHM), but this is
     a deliberate one-tap download, not a page render, so it isn't cached. A broken
     project is skipped, never 500s the download.
+
+    ``lon_deg`` is the observer's longitude, used to bucket each run's capture
+    window into observing nights the same way every other night surface does; a
+    ``None`` falls back to UTC noon-to-noon exactly as `capture_night_range`
+    documents.
     """
     from statistics import median
 
@@ -1037,8 +1043,15 @@ def _collect_imaging_log(lib, targets) -> list:
                     if run.stack_fwhm_px is not None and run.stack_fwhm_px > 0
                     else median_fwhm
                 )
+                # When the subs were *shot*, which is what a log of "every night
+                # you've imaged" is about; `date` below stays the stack's own
+                # stamp, now labelled as such.
+                night_start, night_end = capture_night_range(
+                    run.capture_start_utc, run.capture_end_utc, lon_deg)
                 rows.append(ImagingLogRow(
                     date=run.timestamp_utc,
+                    capture_night_start=night_start,
+                    capture_night_end=night_end,
                     target_name=t.name,
                     n_subs=run.n_frames_used,
                     integration_s=run.total_exposure_s,
@@ -1061,14 +1074,18 @@ def _collect_imaging_log(lib, targets) -> list:
 @router.get("/api/imaging-log.csv")
 def get_imaging_log(request: Request) -> Response:
     """Download a plain-CSV record of every finished stack — the beginner's
-    imaging journal. One row per stack run (date, target, subs, integration,
-    typical star size, calibration, mosaic, noise, app version), newest first.
-    An empty library yields a header-only file, never an error."""
+    imaging journal. One row per stack run (the nights it was shot, target, subs,
+    integration, typical star size, calibration, mosaic, noise, app version, and
+    the day it was stacked), newest first. An empty library yields a header-only
+    file, never an error."""
     from seestack.imaging_log import build_imaging_log_csv
 
+    settings = deps.get_settings(request)
     lib = deps.open_library(request)
     try:
-        rows = _collect_imaging_log(lib, lib.list_targets())
+        rows = _collect_imaging_log(
+            lib, lib.list_targets(),
+            resolve_site_lon(request, lib, settings.site_lon))
     finally:
         lib.close()
     csv_text = build_imaging_log_csv(rows)
