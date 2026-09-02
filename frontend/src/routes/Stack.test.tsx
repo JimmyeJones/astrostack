@@ -484,53 +484,88 @@ describe("StackView", () => {
     };
   }
 
-  it("cautions when sigma-clip is on but too few frames are accepted", async () => {
+  /** The Stack form with sigma clipping ticked, `n` accepted+solved subs, and the
+   * engine's own `rejection_reach` answer for that stack — mocked per-request, so
+   * clicking "Turn on Auto outlier removal" gets the answer the backend would
+   * really give once the option is on (auto resolves to min/max down here). */
+  function mockRejectionForm(n: number, reach: NonNullable<client.StackEstimate["rejection_reach"]>) {
     mockSchema([
       { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
         default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
     ]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
-    // Only 3 accepted, solved frames — below the ~5 sigma-clip needs.
-    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2), mkFrame(3)]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: n }, (_, i) => mkFrame(i + 1)));
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockImplementation(async (_safe, opts) => ({
+      n_frames: n, canvas_w: 480, canvas_h: 320, output_w: 480, output_h: 320,
+      is_mosaic: false, peak_bytes: 7e6, peak_gb: 0.01,
+      budget_bytes: 8e9, budget_gb: 8, would_exceed: false,
+      suggested_drizzle_scale: null, suggested_reference_canvas: false, memory_fix: null,
+      auto_reject_resolved: null,
+      rejection_reach: opts.auto_reject && n >= 3
+        ? { method: "min-max-reject" as const, n_frames: n,
+            lone_outlier_min_frames: 3, reaches: true }
+        : reach,
+    }));
+  }
+
+  it("says a small default stack will combine as a plain average, with no rejection", async () => {
+    // Three subs and sigma clipping ticked: the engine's dispatcher needs 4
+    // frames, so nothing is rejected at all. The form used to call this
+    // over-rejection and offer to turn the clip off — swapping no rejection for
+    // no rejection — while `stackhealth` said the opposite on the finished picture.
+    mockRejectionForm(3, {
+      method: "mean", n_frames: 3, lone_outlier_min_frames: null, reaches: false,
+    });
 
     renderStack();
 
     await waitFor(() =>
-      expect(screen.getByText(/only have 3 accepted, solved frames/)).toBeInTheDocument());
+      expect(screen.getByText(/will combine as a plain average/)).toBeInTheDocument());
+    expect(screen.queryByText(/it can reject real signal as an outlier/))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Turn off sigma clipping" }))
+      .not.toBeInTheDocument();
   });
 
-  it("turns off sigma-clip in one click from the low-frame caution, then hides it", async () => {
-    mockSchema([
-      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
-        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
-    ]);
-    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
-    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2), mkFrame(3)]);
-    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+  it("warns that sigma clipping is blind to a lone trail below the κ threshold", async () => {
+    mockRejectionForm(6, {
+      method: "sigma-clip", n_frames: 6, lone_outlier_min_frames: 11, reaches: false,
+    });
 
     renderStack();
 
-    const btn = await screen.findByRole("button", { name: "Turn off sigma clipping" });
+    await waitFor(() =>
+      expect(screen.getByText(/can't actually drop a passing/)).toBeInTheDocument());
+    expect(screen.getByText(/about 11 frames up/)).toBeInTheDocument();
+  });
+
+  it("turns on Auto outlier removal in one click from the caution, then hides it", async () => {
+    mockRejectionForm(6, {
+      method: "sigma-clip", n_frames: 6, lone_outlier_min_frames: 11, reaches: false,
+    });
+
+    renderStack();
+
+    const btn = await screen.findByRole("button", { name: "Turn on Auto outlier removal" });
     fireEvent.click(btn);
     await waitFor(() =>
-      expect(screen.queryByText(/only have 3 accepted, solved frames/)).not.toBeInTheDocument());
+      expect(screen.queryByText(/can't actually drop a passing/)).not.toBeInTheDocument());
   });
 
-  it("does not caution when enough frames are accepted for sigma-clip", async () => {
-    mockSchema([
-      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
-        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
-    ]);
-    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
-    const frames = Array.from({ length: 8 }, (_, i) => mkFrame(i + 1));
-    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
-    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+  it("says nothing once the rejection can actually reach a lone outlier", async () => {
+    mockRejectionForm(20, {
+      method: "sigma-clip", n_frames: 20, lone_outlier_min_frames: 11, reaches: true,
+    });
 
     renderStack();
 
     await waitFor(() => expect(screen.getByText("Sigma clipping")).toBeInTheDocument());
-    expect(screen.queryByText(/it can reject real signal as an outlier/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/can't actually drop a passing/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/will combine as a plain average/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/it can reject real signal as an outlier/))
+      .not.toBeInTheDocument();
   });
 
   it("warns when the accepted+solved subs look like two different targets", async () => {
@@ -1382,8 +1417,12 @@ describe("StackView", () => {
   it("degrades quietly when the backend sends no print plan", async () => {
     mockPrintForm(printEstimate(false, 250, null));
     renderStack();
+    // The sizing line itself — `est.n_frames`, i.e. the 250 this estimate is for.
+    // (It used to match "2 accepted, solved frames", which was the *sigma-clip*
+    // caution counting the two mocked frames, not the sizing line at all.)
     await waitFor(() =>
-      expect(screen.getByText(/2 accepted, solved frames/)).toBeInTheDocument());
+      expect(screen.getByText(/250 accepted, solved frames · output 3000×2000/))
+        .toBeInTheDocument());
     expect(screen.queryByText(/print sharply/)).not.toBeInTheDocument();
   });
 
