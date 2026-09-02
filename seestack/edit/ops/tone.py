@@ -44,11 +44,14 @@ def _stretch(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
 # --- nonlinear tone shapers (operate in display space [0,1]) ----------------
 
-# A gentle fixed S-curve (the same one the built-in galaxy/nebula presets ship)
-# used as the auto-contrast fallback when the data-driven suggestion declines — a
-# stack already bright enough to have nothing to lift, or too degenerate to
-# measure. It slightly steepens the midtones (0.25→0.20, 0.75→0.82) for a pleasant
-# contrast start; strictly monotone, so it can't invert or posterise.
+# The gentle fixed S-curve (the same one the built-in galaxy/nebula presets ship)
+# that USED to be the auto-contrast fallback. Auto now derives a *sky-anchored*
+# fallback instead (``curve.fallback_tone_curve``): this constant's lower knee
+# maps 0.25→0.20, i.e. it darkens everything below 0.25 — and the frames that
+# reach the fallback are precisely the sky-dominated ones whose sky the stretch
+# has just placed at 0.18–0.25, so it was dimming the background ~20 % on the
+# pictures it ran on most. Kept as the named preset shape (and as the shoulder the
+# sky-anchored curve reuses); no longer applied to a picture unmeasured.
 _AUTO_CONTRAST_FALLBACK = [[0.0, 0.0], [0.25, 0.2], [0.75, 0.82], [1.0, 1.0]]
 
 
@@ -77,9 +80,14 @@ def _curves(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     # gentle S-curve when the data offers no useful suggestion. A hand-edited curve
     # (non-identity points) always wins, so toggling auto never discards manual work.
     if params.get("auto") and _points_are_identity(pts):
-        from seestack.edit.curve import suggest_tone_curve
-        suggested = suggest_tone_curve(as_rgb(rgb))
-        pts = suggested if suggested is not None else _AUTO_CONTRAST_FALLBACK
+        from seestack.edit.curve import fallback_tone_curve, suggest_tone_curve
+        src = as_rgb(rgb)
+        suggested = suggest_tone_curve(src)
+        # Both branches leave the *sky* exactly where the stretch put it: the
+        # suggestion anchors it on the identity, and the fallback is measured from
+        # this image rather than being a fixed table that happens to darken the
+        # tones a sky-dominated stack actually occupies.
+        pts = suggested if suggested is not None else fallback_tone_curve(src)
     xs = np.array([p[0] for p in pts], dtype=np.float64)
     ys = np.array([p[1] for p in pts], dtype=np.float64)
     # A tone curve needs at least two control points spanning a range of x. A

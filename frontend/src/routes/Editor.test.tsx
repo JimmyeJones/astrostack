@@ -2005,6 +2005,36 @@ describe("EditorView", () => {
     });
   });
 
+  it("drops the '~25% grey' claim when the curve is the sky-anchored fallback", async () => {
+    // `target_bg` is null exactly when the backend answered with the fallback
+    // rather than a data-driven midtone lift (v0.326.0). The fallback does not aim
+    // the midtones at a grey — it pins the background and shapes above it — so the
+    // button must not say it does.
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+        { uid: "cv1", id: "tone.curves", enabled: true,
+          params: { points: [[0, 0], [1, 1]] } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.spyOn(client.api, "curveSuggestion").mockResolvedValue(
+      { points: [[0, 0], [0.18, 0.18], [0.75, 0.82], [1, 1]], target_bg: null });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Curves"));
+    await screen.findByRole("button", { name: "Auto curve" });
+    expect(screen.queryByRole("button", { name: /grey/ })).toBeNull();
+  });
+
   it("shows the auto-contrast ghost curve + Bake, hides the header 'Auto curve', and bakes on click", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({

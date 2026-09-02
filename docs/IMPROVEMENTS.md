@@ -43,13 +43,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-> **Builder 2026-09-02, branch `claude/zen-mccarthy-olkjpm` — claiming **A1** (the audit's highest-value
-> finding: Auto's contrast curve brightens the sky). Claimed **by site**, in the run's first commit, pushed
-> before a line of code was written, per the collision-NINE process note below. Sites I am editing:
-> `seestack/edit/curve.py` (`_sky_mode`, and a new sky-anchored fallback beside `suggest_tone_curve`),
-> `seestack/edit/ops/tone.py` (`_curves`'s auto branch and `_AUTO_CONTRAST_FALLBACK`),
-> `tests/test_edit_curve.py` and a new `tests/test_auto_curve_sky_parity.py` that feeds **real
-> `autostretch` output** rather than a synthesised approximation of it.
+> **Builder 2026-09-02, branch `claude/zen-mccarthy-olkjpm` — claim released, shipped as v0.326.0.** **A1**,
+> the audit's highest-value finding. Claimed **by site**, in the run's first commit, pushed before a line of
+> code was written, per the collision-NINE process note below — and the extra fetch that note recommends was
+> done before the first implementation edit. Sites touched: `seestack/edit/curve.py` (`_unclipped`,
+> `_sky_spread`, `_SKY_MARGIN_SIGMA`, `fallback_tone_curve`), `seestack/edit/ops/tone.py` (`_curves`'s auto
+> branch), `webapp/routers/editor.py` (`curve_suggestion`, so the Editor's ghost curve stops disagreeing with
+> the preview), `frontend/src/routes/Editor.tsx`, and a new `tests/test_auto_curve_sky_parity.py` that feeds
+> **real `autostretch` output**. The filed one-line fix was not enough on its own — see the Shipped entry for
+> the two further layers and the numbers.
 
 > **⚠️ PROCESS NOTE + Builder 2026-09-02, branch `claude/zen-mccarthy-46ejou` — collision NINE, and the first
 > where an entire run was duplicated: all three tasks, by one other Builder, inside the same hour. Run finished,
@@ -433,29 +435,100 @@ _(nothing else claimed — claim an item here with your branch name)_
 > (backlog bloat, collisions, QA-rotation aim) are filed as the R-items further below; `AGENTS.md` §1 and §11
 > have already been updated for the highest-value ones.**
 
-- **🔴🔴 A1 — AUTO'S CONTRAST CURVE BRIGHTENS THE SKY BY ~36% ON EVERY AUTO PICTURE, AND THE REGRESSION TEST
-  THAT SHOULD CATCH IT PASSES ON A FIXTURE THAT CANNOT EXHIBIT THE BUG.** *(Severity: **wrong picture, on the
-  on-by-default path, at every stack depth**. Confidence: **verified by reproduction**. This is the single
-  highest-value item in this file — it silently degrades every one-click result the owner has ever made.)*
+- **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-olkjpm`) — ~~A1: Auto's contrast curve brightens
+  the sky by ~36 % on every Auto picture, and the regression test that should catch it passes on a fixture that
+  cannot exhibit the bug.~~** Fixed, and it took **three** changes, not the one the entry proposed — the audit's
+  diagnosis was right about the mechanism and short by one layer about the cure.
 
-  `_sky_mode` (`seestack/edit/curve.py`) finds the sky as the histogram mode over `[p0.5, median]` in 128 bins.
-  The STF stretch that runs immediately before it (`tone.stretch`, `mode: stf`) **clips 1–2 % of pixels to
-  exactly 0**. That zero spike is always the tallest bin, so `suggest_tone_curve` reads the sky as **0.0008**,
-  its "the median *is* the sky, so decline" gate never fires, and it lifts the median — which *is* the sky —
-  halfway toward `CURVE_TARGET_BG` 0.25.
-  - **Measured** on a synthetic linear stack through the *full* Auto recipe: sky patch **0.130 → 0.178
-    (+36 %)**, with the curve point `[0.14, 0.195]` appearing identically at **every** depth from 4 to 1,000
-    subs. The opposite branch is wrong too: on a bright-nebula frame the suggestion declines and
-    `_AUTO_CONTRAST_FALLBACK` **darkens** the sky by 20 %.
-  - **Why it was never caught:** `test_sky_dominated_frame_does_not_lift_the_sky` (`tests/test_edit_curve.py`)
-    builds its fixture as `clip(sky + normal)` — **no zero spike** — so it never sees real STF output. This is
-    the bug the v0.210.6 fix ("auto-contrast curve lifting the whole sky") claims to have closed; **it is
-    closed only for the fixture.** Treat this as the canonical example of the wider risk that a fix's own test,
-    written by the agent that wrote the fix, confirms the fix's *model* of the bug rather than the bug.
-  - **Fix direction:** compute the mode over **strictly positive** values, or over a luminance sky population
-    at/below the median; make `_AUTO_CONTRAST_FALLBACK` pin `(sky, sky)` rather than move it; and **add a
-    regression test that feeds real `autostretch` output**, not a synthesised approximation of it. Re-check the
-    "did Auto improve this?" claims elsewhere in the backlog that were measured through this same curve.
+  **1. The mode must ignore the stretch's hard-clip spike** (the filed fix). `_unclipped` drops the pixels
+  sitting exactly on the array's floor before any histogram is drawn. Done by *floor*, not by "> 0", so it
+  catches a clip at any level and removes a single pixel from an unclipped image.
+
+  **2. But fixing the mode alone was not enough, and this is the part worth reading.** With the spike gone, the
+  mode is measured on a *stretched sky*, whose histogram over `[p0.5, median]` is nearly **flat** — the top five
+  bins came within 1.5 % of each other on real `autostretch` output. So the mode is a jittery estimator there:
+  measured **0.1357 for a 0.1738 sky** on one scene, which is four times the `_MIN_GAP` 0.02 the "the median IS
+  the sky, so decline" gate had to work with. The gate re-opened and the sky rode the lift again, **+19 %**.
+  The cure is to stop asking the estimator to be accurate: the lifted point is now
+  `max(p50, sky + 3σ)`, with σ a robust spread measured from the background's **lower tail only** (the one half
+  no star, object or gradient can contaminate). At 3σ the anchor is out of the grain by construction — and the
+  error is self-correcting, because a mode that reads low measures its tail against a wrong centre and returns a
+  *larger* σ, pushing the anchor further clear.
+
+  **3. `_AUTO_CONTRAST_FALLBACK` was the other half of the same bug, and firing far more often after the fix.**
+  Its lower knee maps 0.25 → 0.20, i.e. it **darkens everything below 0.25** — and the frames that reach the
+  fallback are precisely the sky-dominated ones whose sky the stretch just placed at 0.18–0.25. Measured
+  **−19.9 %** at `target_bg` 0.25 on *every* scene shape. Replaced by `fallback_tone_curve`, which anchors the
+  identity at the higher of the measured sky and the frame's **median** (a frame only reaches the fallback
+  because its median is background, so the median is a sound floor — and on the one scene where the mode read
+  0.12 for a 0.18 sky, anchoring on the mode alone still lifted the background 3.6 %; the median floor takes
+  that to nil) and keeps the same 0.75 → 0.82 shoulder above it.
+
+  **Measured, old code vs new, through the real `autostretch` → `tone.curves(auto)` path** (`tests/
+  test_auto_curve_sky_parity.py`, background-corner median):
+
+  | scene | `target_bg` | before | after |
+  |---|---|---|---|
+  | sky-dominated | 0.15 | **+33.3 %** | +0.0 % |
+  | sky-dominated | 0.18 | **+19.4 %** | +0.0 % |
+  | sky-dominated | 0.22 | +6.8 % | +0.0 % |
+  | any of the three shapes | 0.25 | **−19.9 %** | +0.0 % |
+  | sky-dominated, 4 / 40 / 400 subs | 0.18 | **+19.4 %** at all three | +0.0 % |
+
+  The depth row reproduces the audit's own finding that the identical bad control point appeared at every depth.
+
+  **Two things the entry's proposed test would have missed, and both are now pinned.** (a) The clip spike
+  appears on **sky-dominated** frames only — `shadows = median − 2σ` lands inside the background exactly when the
+  median *is* the background, so a fixture with a big bright object barely clips at all and would have "passed"
+  a spike-based test for the wrong reason; `test_the_fixture_really_does_carry_a_hard_clip_spike` asserts the
+  precondition. (b) The fixture's **dynamic range** decides the answer: a star-poor synthetic normalises
+  `autostretch` against its own sky and produces an unrealistically wide display-space background, which changes
+  which branch every later assertion takes. The fixture's starfield is dense enough that p99.5 lands on stars.
+
+  **One parity bug found on the way, and fixed with it.** The Editor draws `…/editor/curve-suggestion` as the
+  read-only **ghost** over an engaged Auto-contrast curve — and the endpoint returned `None` on every frame that
+  took the fallback, so the widget drew a **straight line beside a preview that had plainly been shaped**. The
+  endpoint now answers with whatever the op will really apply, and `target_bg` is null exactly when those points
+  are the fallback, which is the flag the button uses to drop its "lifts to ~25 % grey" claim rather than assert
+  something the fallback doesn't do.
+
+  **Two existing tests were rewritten, not weakened, and why:**
+  `test_curves_auto_falls_back_to_fixed_scurve_when_no_suggestion` asserted that auto on a **flat grey** equals
+  the fixed table and "actually shaped it" — it was pinning the defect, since moving a flat image at all *is*
+  the defect. It now asserts the flat image is left alone, that the old table really did darken it by a fifth,
+  and that the shoulder still shapes tones above the background.
+  `test_saturated_highlight_p99_5_rounding_does_not_drop_the_curve` kept every assertion; only its scene changed
+  (a compact object instead of a frame-filling one) so the sky stays the dominant peak and the test still
+  reaches the rounding path it was written for instead of declining for an unrelated, legitimate reason.
+
+  **Still open from this entry, deliberately:** its last line — *"re-check the 'did Auto improve this?' claims
+  elsewhere in the backlog that were measured through this same curve"*. Every such measurement predates
+  v0.326.0 and was taken through a curve that moved the sky, so the numbers are suspect rather than wrong. Filed
+  as a lead under "Image quality" rather than done blind here.
+
+  - **~~🔴🔴 A1 — AUTO'S CONTRAST CURVE BRIGHTENS THE SKY BY ~36% ON EVERY AUTO PICTURE, AND THE REGRESSION TEST
+    THAT SHOULD CATCH IT PASSES ON A FIXTURE THAT CANNOT EXHIBIT THE BUG.~~** *(Severity: **wrong picture, on the
+    on-by-default path, at every stack depth**. Confidence: **verified by reproduction**. This is the single
+    highest-value item in this file — it silently degrades every one-click result the owner has ever made.)*
+
+    `_sky_mode` (`seestack/edit/curve.py`) finds the sky as the histogram mode over `[p0.5, median]` in 128 bins.
+    The STF stretch that runs immediately before it (`tone.stretch`, `mode: stf`) **clips 1–2 % of pixels to
+    exactly 0**. That zero spike is always the tallest bin, so `suggest_tone_curve` reads the sky as **0.0008**,
+    its "the median *is* the sky, so decline" gate never fires, and it lifts the median — which *is* the sky —
+    halfway toward `CURVE_TARGET_BG` 0.25.
+    - **Measured** on a synthetic linear stack through the *full* Auto recipe: sky patch **0.130 → 0.178
+      (+36 %)**, with the curve point `[0.14, 0.195]` appearing identically at **every** depth from 4 to 1,000
+      subs. The opposite branch is wrong too: on a bright-nebula frame the suggestion declines and
+      `_AUTO_CONTRAST_FALLBACK` **darkens** the sky by 20 %.
+    - **Why it was never caught:** `test_sky_dominated_frame_does_not_lift_the_sky` (`tests/test_edit_curve.py`)
+      builds its fixture as `clip(sky + normal)` — **no zero spike** — so it never sees real STF output. This is
+      the bug the v0.210.6 fix ("auto-contrast curve lifting the whole sky") claims to have closed; **it is
+      closed only for the fixture.** Treat this as the canonical example of the wider risk that a fix's own test,
+      written by the agent that wrote the fix, confirms the fix's *model* of the bug rather than the bug.
+    - **Fix direction:** compute the mode over **strictly positive** values, or over a luminance sky population
+      at/below the median; make `_AUTO_CONTRAST_FALLBACK` pin `(sky, sky)` rather than move it; and **add a
+      regression test that feeds real `autostretch` output**, not a synthesised approximation of it. Re-check the
+      "did Auto improve this?" claims elsewhere in the backlog that were measured through this same curve.
 
 - **🔴 A3 — PLATE-SOLVING WRITES FILES INTO `incoming/`, AND THE CI GUARD STRUCTURALLY CANNOT SEE IT.**
   *(Severity: **broken guarantee** — §10's read-only rule. **No data loss**: the owner's FITS are not modified.
@@ -20051,6 +20124,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **LEAD (Builder 2026-09-02, left open by the A1 fix in v0.326.0 — verified cause, unquantified effect) —
+  every "Auto improved this" measurement in this backlog was taken through a curve that moved the sky, so
+  re-measure the ones that decided a default.** *(Pillar: trust + image quality — PRIORITY 4; size M; pure
+  measurement, no behaviour change unless a number turns out to be wrong.)* A1's last line asked for this and
+  the fix run deliberately did not do it blind. Until v0.326.0 the on-by-default Auto recipe ended with a
+  contrast curve that **brightened a sky-dominated stack's background by 6–33 %** (or darkened it 20 %, at
+  `target_bg` 0.25), so any past A/B that compared "Auto on" against something else, or that tuned a downstream
+  constant by eye or by a sky-referenced statistic, was reading a background that Auto had already moved.
+  **Where to look**, in the order they matter: the SCNR amount and the saturation scaling in
+  `seestack/edit/presets.py::auto_recipe` (both are chosen relative to measured sky/noise and both run *before*
+  the curve, so they are probably safe — confirm rather than assume); the `target_bg` choices themselves
+  (`tone.stretch` 0.18 in Auto vs 0.18/0.22/0.25 in the built-in presets, which were picked to look right
+  *through* the old curve — this is the most likely real finding); and any Shipped entry whose evidence is a
+  before/after sky or brightness number measured on a finished Auto picture. **Method:** re-run the comparison
+  on v0.326.0 and report the delta; only change a constant if the old choice is *measurably* worse now, and say
+  so with the numbers. **Caution:** these are on-by-default constants on a live install — a change here alters
+  every future picture, so it wants its own commit and a stated before/after, never a fold-in.
 
 - **NEW IDEA (Scout 2026-09-02, spotted auditing `noise_ratio.py`) — say what stacking *should* have bought,
   next to what it did, so a beginner can tell a healthy stack from an underperforming one.** *(Pillar: trust +

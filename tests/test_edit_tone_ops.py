@@ -261,17 +261,39 @@ def test_curves_auto_lifts_midtones_from_identity():
     assert float(auto.max()) <= 1.0 + 1e-6               # highlights not blown out of range
 
 
-def test_curves_auto_falls_back_to_fixed_scurve_when_no_suggestion():
-    """On an already-bright image suggest_tone_curve declines (nothing to lift), so
-    auto must fall back to the fixed gentle S-curve, not silently no-op."""
+def test_curves_auto_falls_back_to_a_sky_anchored_scurve_when_no_suggestion():
+    """On an image where suggest_tone_curve declines (nothing above the background's
+    noise to lift), auto must still fall back to a gentle S-curve — but one anchored
+    on *this image's* background rather than the fixed table.
+
+    Rewritten in v0.326.0 with the A1 fix. The old assertion — that the fallback
+    equals the fixed ``[[0,0],[0.25,0.2],[0.75,0.82],[1,1]]`` and visibly "shapes"
+    a flat grey — was pinning the bug: that lower knee darkens everything below
+    0.25, and the frames that reach the fallback are precisely the sky-dominated
+    ones whose sky the stretch has just placed at 0.18–0.25, so the safe default
+    was dimming the background ~20 %. Moving a *flat* image at all is the defect,
+    not the feature; what the fallback must still do is shape the tones **above**
+    the background."""
     from seestack.edit.ops.tone import _AUTO_CONTRAST_FALLBACK
 
-    rgb = _rgb(0.6, 0.6, 0.6)
     op = get_op("tone.curves")
-    auto = op.apply(rgb, {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
-    fixed = op.apply(rgb, {"points": _AUTO_CONTRAST_FALLBACK, "auto": False}, EditContext())
-    assert np.allclose(auto, fixed, atol=1e-4)
-    assert not np.allclose(auto, rgb, atol=1e-3)          # the fallback actually shaped it
+    ident = {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}
+
+    # A flat grey is all background: the fallback leaves it exactly alone, where
+    # the old fixed curve pushed it down by a fifth.
+    flat = _rgb(0.2, 0.2, 0.2)
+    assert np.allclose(op.apply(flat, ident, EditContext()), flat, atol=1e-4)
+    old = op.apply(flat, {"points": _AUTO_CONTRAST_FALLBACK, "auto": False}, EditContext())
+    assert float(old.mean()) < 0.2 * 0.9          # the old fallback really did darken it
+
+    # It is still an S-curve, not the identity: the background sits on the identity
+    # and the same gentle shoulder lift as before runs above it.
+    from seestack.edit.curve import fallback_tone_curve
+
+    pts = fallback_tone_curve(flat)
+    assert pts == [[0.0, 0.0], [0.2, 0.2], [0.75, 0.82], [1.0, 1.0]]
+    shaped = op.apply(_rgb(0.5, 0.5, 0.5), {"points": pts, "auto": False}, EditContext())
+    assert float(shaped.mean()) > 0.5 + 1e-3
 
 
 def test_curves_auto_ignored_when_points_manually_set():

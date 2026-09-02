@@ -1124,11 +1124,12 @@ class CurveSuggestionOut(BaseModel):
     """Data-driven starting tone curve for the ``tone.curves`` op — a gentle,
     strictly-monotone midtone-lift curve derived from the display-space histogram
     of the image entering the op. ``points`` is an ordered list of ``[x, y]``
-    control points (endpoints pinned at 0/1), or ``None`` when there's no useful
-    suggestion (too few finite pixels, a degenerate range, or a typical tone
-    already at/above the target). ``target_bg`` is the display-space grey the
-    midtone lift aims for, so the UI can name the goal; ``None`` when there's no
-    suggestion."""
+    control points (endpoints pinned at 0/1), or ``None`` when even the fallback
+    has nothing to offer (too few finite pixels, or a background already at/above
+    the shoulder). ``target_bg`` is the display-space grey the midtone lift aims
+    for, so the UI can name the goal — and it is **``None`` exactly when these
+    points are the sky-anchored fallback rather than a data-driven midtone lift**,
+    which is the flag the UI uses to word itself honestly."""
 
     points: list[list[float]] | None
     target_bg: float | None = None
@@ -1142,8 +1143,13 @@ async def curve_suggestion(safe: str, run_id: int, request: Request,
     """Suggest a gentle starting tone curve for the Curves op from the histogram of
     the display-space image *entering* that op (all ops before it applied), so a
     beginner gets a pleasant contrast start to nudge instead of a flat identity
-    line. Mirrors the other data-driven "From your image" buttons."""
-    from seestack.edit.curve import CURVE_TARGET_BG, suggest_tone_curve
+    line. Mirrors the other data-driven "From your image" buttons.
+
+    It must answer with *whatever the op would actually apply*, fallback included:
+    the Editor draws this as the read-only ghost over an engaged Auto-contrast
+    curve, so a bare ``None`` here would draw a straight line while the preview
+    beside it applied a shaped one."""
+    from seestack.edit.curve import CURVE_TARGET_BG, fallback_tone_curve, suggest_tone_curve
 
     project_dir, run = _run_info(request, safe, run_id)
     rec = _decode_recipe_query(request, safe, run_id, recipe)
@@ -1157,9 +1163,14 @@ async def curve_suggestion(safe: str, run_id: int, request: Request,
                           already_display=_run_display_space(run))
         out = apply_recipe(rgb, sub, ctx, for_preview=True)
         pts = suggest_tone_curve(out)
-        if pts is None:
+        if pts is not None:
+            return CurveSuggestionOut(points=pts, target_bg=CURVE_TARGET_BG)
+        # Same fallback the op takes, and the same identity check it means: an
+        # identity "curve" is no suggestion at all, so report it as none.
+        fb = fallback_tone_curve(out)
+        if len(fb) <= 2:
             return CurveSuggestionOut(points=None)
-        return CurveSuggestionOut(points=pts, target_bg=CURVE_TARGET_BG)
+        return CurveSuggestionOut(points=fb)
 
     return await run_in_threadpool(work)
 
