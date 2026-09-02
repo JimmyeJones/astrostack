@@ -73,6 +73,45 @@ def wcs_center_deg_from_text(text: str | None) -> tuple[float, float] | None:
         return None
 
 
+def wcs_image_center_deg_from_text(
+    text: str | None, *, width: int, height: int,
+) -> tuple[float, float] | None:
+    """The RA/Dec (deg) of a ``width``×``height`` image's **centre pixel**, from
+    its own WCS — the honest centre when CRPIX is *not* at the image centre.
+
+    :func:`wcs_center_deg_from_text` reads CRVAL, which is the frame centre only
+    under ASTAP's own convention of putting CRPIX there. A WCS built by *offsetting
+    CRPIX* — which is exactly what :func:`seestack.solve.bootstrap.propagate_wcs`
+    does to give each rescued sub its own solution — deliberately keeps the
+    reference frame's CRVAL, so CRVAL is then the *reference* sub's centre, not
+    this one's. Reading it back as this frame's centre puts every rescued member's
+    stored ``ra_center_deg``/``dec_center_deg`` at the reference's pointing, off by
+    the registration shift (measured at Seestar scale: ~15″ at a 6 px shift, >10′
+    near the 200 px registration cap).
+
+    Uses ``all_pix2world`` so any SIP/distortion in the solution is honoured, and
+    the 0-based array-centre convention ``((w−1)/2, (h−1)/2)``. Returns ``None``
+    when the text carries no usable celestial solution or the projection can't be
+    evaluated there.
+    """
+    wcs = wcs_from_text(text)
+    if wcs is None or width <= 0 or height <= 0:
+        return None
+    try:
+        cel = wcs.celestial
+        if not cel.has_celestial:
+            return None
+        x = (float(width) - 1.0) / 2.0
+        y = (float(height) - 1.0) / 2.0
+        ra, dec = (float(v) for v in cel.all_pix2world([[x, y]], 0)[0])
+        if not (math.isfinite(ra) and math.isfinite(dec)):
+            return None
+        return ra % 360.0, dec
+    except Exception as exc:  # noqa: BLE001 — a malformed WCS just means "no centre"
+        log.warning("WCS image-centre extraction failed: %s", exc)
+        return None
+
+
 def wcs_text_is_usable(text: str | None) -> bool:
     """True when a WCS text blob carries a usable celestial (RA/Dec) solution.
 

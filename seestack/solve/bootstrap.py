@@ -327,7 +327,7 @@ def bootstrap_solve(
     ``deep_solver`` is injectable for testing; production uses ASTAP on a temp
     FITS of the deep image.
     """
-    from seestack.io.wcs_io import wcs_center_deg_from_text, wcs_text_is_usable
+    from seestack.io.wcs_io import wcs_image_center_deg_from_text, wcs_text_is_usable
     from seestack.solve.astap import classify_solve_setup_error
     from seestack.solve.runner import _fov_deg_for_frame
 
@@ -416,7 +416,14 @@ def bootstrap_solve(
         if wtext is None or grays[i] is None:
             continue
         frame = members[i]
-        centre = wcs_center_deg_from_text(wtext)
+        # This member's centre must come from *its own* WCS evaluated at its own
+        # centre pixel — not from CRVAL. ``propagate_wcs`` builds each member's
+        # solution by keeping the reference's CRVAL/CD and offsetting only CRPIX,
+        # so CRVAL is deliberately the *reference* sub's pointing; reading it back
+        # as this sub's centre clumped every rescued member at one coordinate,
+        # off by its registration shift.
+        gh, gw = grays[i].shape[:2]
+        centre = wcs_image_center_deg_from_text(wtext, width=gw, height=gh)
         ra_c, dec_c = centre if centre is not None else (None, None)
         fields: dict = dict(
             wcs_json=wtext,

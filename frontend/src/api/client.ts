@@ -114,6 +114,57 @@ export interface BestTonight {
   note?: string | null;
 }
 
+/** One target's showing on one night — `GET /api/plan/week`. */
+export interface WeekTargetPick {
+  safe: string;
+  name: string;
+  usable_start_utc: string | null;
+  usable_end_utc: string | null;
+  minutes_above_min_alt: number;
+  max_altitude_deg: number;
+  moon_up_fraction: number | null;
+  score: number;
+}
+
+/** One night of the week ahead, with the best-placed target on it. */
+export interface WeekNight {
+  // Local calendar date of the *evening* the night belongs to (YYYY-MM-DD).
+  date: string;
+  dark_start_utc: string;
+  dark_end_utc: string;
+  dark_minutes: number;
+  moon_illumination: number;
+  n_usable: number;
+  // null when nothing of yours clears the altitude floor for long enough —
+  // an honest "skip this one", not a promoted target that never rises.
+  best: WeekTargetPick | null;
+}
+
+/** A target's single best night in the range — "M 31: Thursday". */
+export interface TargetBestNight {
+  safe: string;
+  name: string;
+  date: string;
+  minutes_above_min_alt: number;
+  score: number;
+}
+
+/** `GET /api/plan/week` — "which of my targets, on which night". */
+export interface PlanWeek {
+  location_source: "settings" | "fits" | "none";
+  observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
+  generated_utc: string;
+  min_altitude_deg: number;
+  horizon_active: boolean;
+  nights_scanned: number;
+  nights: WeekNight[];
+  targets: TargetBestNight[];
+  // How many library targets were actually scanned vs how many could have been
+  // (the scan is capped), so the card can be honest about a big library.
+  n_targets_considered: number;
+  n_targets_with_position: number;
+}
+
 export interface NightPlan {
   location_source: "settings" | "fits" | "none";
   observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
@@ -2657,6 +2708,18 @@ export const api = {
     req<BestTonight>(
       `/api/plan/best-tonight${limit != null ? `?limit=${limit}` : ""}`,
     ),
+
+  // "Plan my week": which of your own targets to point at, on which of the next
+  // few nights — the cross-target, multi-night view `getTonight` (one night, all
+  // targets) and `nextSession` (one target, many nights) don't give. Read-only;
+  // an empty `nights` means the card self-hides.
+  getPlanWeek: (opts?: { nights?: number; minAlt?: number }) => {
+    const qs = new URLSearchParams();
+    if (opts?.nights != null) qs.set("nights", String(opts.nights));
+    if (opts?.minAlt != null) qs.set("min_alt", String(opts.minAlt));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return req<PlanWeek>(`/api/plan/week${suffix}`);
+  },
 
   // life list
   // The famous objects you've captured and the ones still to get. Read-only and

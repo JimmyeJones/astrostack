@@ -949,3 +949,99 @@ def test_tonight_row_follows_a_new_picture_even_within_one_second(
         lib.close()
 
     assert _tonight_rows(client)["M_42"]["recentre_nudge"] is None
+
+
+# ---------------------------------------------------------------------------
+# "Plan my week" — /api/plan/week
+# ---------------------------------------------------------------------------
+
+def test_plan_week_says_which_of_my_targets_on_which_night(client, solved_library):
+    """The cross-target, multi-night answer none of the other planners give.
+
+    /tonight ranks everything for tonight, /best-tonight ranks your own targets
+    right now, /next-session plans one target forward. This says "of the targets
+    you've already started, here's the best one for each of the next few nights,
+    and here's each one's own best night".
+    """
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/week", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body["location_source"] == "settings"
+    assert body["observer"] is not None
+    assert body["nights_scanned"] == 7
+    assert body["n_targets_with_position"] >= 1
+    assert body["n_targets_considered"] >= 1
+
+    nights = body["nights"]
+    assert nights, "January from London always has darkness"
+    assert len(nights) <= 7
+    dates = [n["date"] for n in nights]
+    assert dates == sorted(dates)                 # chronological
+    assert len(dates) == len(set(dates))          # one entry per night
+
+    placed = [n for n in nights if n["best"] is not None]
+    assert placed, "Orion is well up on January nights from London"
+    for n in placed:
+        assert n["dark_start_utc"] < n["dark_end_utc"]
+        assert n["dark_minutes"] > 0
+        assert 0.0 <= n["moon_illumination"] <= 1.0
+        assert n["n_usable"] >= 1
+        best = n["best"]
+        assert best["safe"] and best["name"]
+        assert best["max_altitude_deg"] > 30.0
+        assert best["minutes_above_min_alt"] >= 45.0
+        assert best["usable_start_utc"] < best["usable_end_utc"]
+        # The nightly pick really is the best-scoring one that night.
+        assert best["score"] > 0.0
+
+    # …and every target that showed up at all has a single named best night,
+    # which is one of the nights actually returned.
+    assert body["targets"]
+    for t in body["targets"]:
+        assert t["date"] in dates
+        assert t["minutes_above_min_alt"] >= 45.0
+    per_target_dates = [t["date"] for t in body["targets"]]
+    assert per_target_dates == sorted(per_target_dates)
+
+
+def test_plan_week_without_location_self_hides(client, solved_library):
+    """No site configured and no SITELAT in the frames → a clean, empty 200 so
+    the card hides itself and the UI can explain why."""
+    r = client.get("/api/plan/week", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "none"
+    assert body["observer"] is None
+    assert body["nights"] == []
+    assert body["targets"] == []
+
+
+def test_plan_week_honours_nights_and_rejects_bad_input(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/week", params={"when": JAN_EVENING, "nights": 3})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["nights_scanned"] == 3
+    assert len(body["nights"]) <= 3
+
+    assert client.get("/api/plan/week", params={"nights": 0}).status_code == 422
+    assert client.get("/api/plan/week", params={"nights": 99}).status_code == 422
+    assert client.get("/api/plan/week", params={"when": "not-a-time"}).status_code == 422
+
+
+def test_plan_week_min_alt_narrows_what_qualifies(client, solved_library):
+    """A high altitude floor is honoured, exactly as the other planners honour it
+    — a beginner with trees isn't told to shoot something at 20°."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    low = client.get("/api/plan/week",
+                     params={"when": JAN_EVENING, "min_alt": 10}).json()
+    high = client.get("/api/plan/week",
+                      params={"when": JAN_EVENING, "min_alt": 80}).json()
+    assert low["min_altitude_deg"] == 10
+    assert high["min_altitude_deg"] == 80
+    # Nothing from London clears 80° except targets near the zenith.
+    assert sum(n["n_usable"] for n in high["nights"]) <= \
+        sum(n["n_usable"] for n in low["nights"])
+    assert all(n["best"] is None for n in high["nights"])

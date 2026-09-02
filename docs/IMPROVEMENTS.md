@@ -379,14 +379,45 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟠 WRONG-RESULT / EDITOR-PARITY (Scout QA audit 2026-09-02, render/export parity — reproduced, measured) —
-  the "Download full-res PNG" of an **Adjusted** (asinh) run does NOT match the saved 1024 px preview the user
-  tuned and sees everywhere else, because `asinh_stretch` recomputes its whole tone curve from the resolution
-  of the array it is handed.** *(Severity: wrong-result — the downloaded/shared full-size picture is a
-  materially different image from the one the user tuned and from the gallery/History thumbnail, share-JPEG and
-  wallpaper. §1 priority 1/4. Confidence: reproduced + measured.)*
+- **✅ SHIPPED (Builder, v0.324.0, branch `claude/zen-mccarthy-tl3guh`) — ~~the "Download full-res PNG" of an
+  **Adjusted** (asinh) run does NOT match the saved 1024 px preview the user tuned, because `asinh_stretch`
+  recomputes its whole tone curve from the resolution of the array it is handed.~~** Fixed in the shape the
+  entry proposed — `asinh_stretch` gained an optional `stats=` (a new `AsinhStats`: `lo`, `hi`, and the
+  per-channel `(median, sigma)` measured on the **normalised** array), and the renderers measure it on the
+  **1024 px preview grid** and apply it to whatever pixels they are stretching. Omitted, the function measures
+  itself exactly as before, so every existing caller is byte-for-byte unaffected — pinned by a test that
+  `asinh_stretch(x, stats=measure_asinh_stats(x))` *is* `asinh_stretch(x)` across all four flag combinations,
+  which is also what stops the two measurement sites drifting apart.
 
-  **This is a distinct, second-order break left open by the v0.287.4 fix, not that fix reopened.** v0.287.4
+  **The fix went one site wider than filed, because the same defect had a second instance.** History's lightbox
+  re-renders an Adjusted run at `size=2048` (`History.tsx:1546`) while the Adjust sliders' own preview renders
+  at the endpoint's 1024 px default — so *clicking to enlarge the thing you just tuned* changed the tone curve
+  under you, on-screen, before any download was involved. So `render_stack_png` is anchored too, not just
+  `render_preview_png_full_res`, and the contract is now the simple one: **one pair of slider values means one
+  picture at every size the app renders at.** The `max_width=PREVIEW_MAX_WIDTH` render — the one that bakes the
+  *stored* preview PNG, i.e. the anchor itself — short-circuits to "measure yourself", so it is bit-for-bit
+  unchanged and costs no extra read; a live install's existing pictures are untouched.
+
+  **Measured (agent repro, synthetic 1600×1000 linear master, `tests/test_full_res_asinh_parity.py`).** The
+  download's per-channel **sky level** sat **11–13 of 255 brighter** than the preview it was tuned against
+  across `(stretch, black)` = `(0.3,0.2)`, `(0.4,0.15)`, `(0.5,0.1)`; anchoring roughly halves that to 5–7.
+  Pinned-vs-unpinned full-res renders differ by a mean-abs 3.7–10 of 255 (p95 up to 70). **Two things the
+  entry's proposed test would have got wrong, worth recording:** (1) a *per-pixel* comparison of the export
+  resampled back onto the preview grid is the wrong metric — the download genuinely holds different data
+  (native pixels, not area-averaged ones) and asinh is steep near the black point, so ~0.8 % between the two
+  arrays' own medians is several 8-bit levels *whatever* curve is used, and the noise/nonlinearity commutation
+  error rides on top of it; on a noisy scene that residual swamps the signal and can even flip sign. The
+  **sky median** is the honest figure, because a median commutes exactly with a monotonic tone curve, so it
+  isolates the curve from the noise. (2) A *smooth* synthetic scene makes the whole thing vacuous — the two
+  grids then measure almost identically, since it is precisely the pixel noise and the barely-sampled star
+  peaks that make the statistics resolution-dependent. Both are written into the test file's docstrings so the
+  next agent doesn't re-derive them.
+
+    *(Original finding, kept for the reasoning: severity wrong-result — the downloaded/shared full-size picture
+    is a materially different image from the one the user tuned and from the gallery/History thumbnail,
+    share-JPEG and wallpaper. §1 priority 1/4. Confidence: reproduced + measured.)*
+
+  **This was a distinct, second-order break left open by the v0.287.4 fix, not that fix reopened.** v0.287.4
   correctly made the full-res download use the **asinh** curve (with the run's saved `preview_stretch`/
   `preview_black`) instead of the STF — so both paths now call `asinh_stretch`. But `asinh_stretch`
   (`seestack/render/thumbnail.py:874-899`) derives its *entire* curve from per-array statistics:
@@ -446,22 +477,35 @@ _(nothing else claimed — claim an item here with your branch name)_
     a same-day Moon still (`Moon_2026-05-02` → 2nd becomes `Moon_2026-05-02-2`) plus a third source that
     sanitises to that string. Confidence: reproduced.)*
 
-- **🟢 LOW / METADATA (Scout QA audit 2026-09-02, `seestack/solve/bootstrap.py` — reproduced) — every sub
-  rescued by `bootstrap_solve` stores the **reference** sub's centre as its own `ra_center_deg`/`dec_center_deg`,
-  off by the registration shift.** *(Severity: low — metadata only; the authoritative `wcs_json` written per
-  frame is geometrically correct, so reprojection/stacking place pixels correctly. Confidence: reproduced.)*
-  `bootstrap.py:419` derives the stored centre with `wcs_center_deg_from_text(wtext)`, which returns `CRVAL`.
-  `propagate_wcs` (`bootstrap.py:216-248`) correctly builds each member's WCS by keeping the reference's
-  `CRVAL`/`CD` and offsetting only `CRPIX` — so `CRVAL` is deliberately no longer the member's *frame centre*,
-  and `wcs_center_deg_from_text` (whose docstring assumes "CRPIX at the image centre") returns the reference
-  centre for every propagated member. The true centre is `wcs.pixel_to_world(image_centre_pixel)`. **Reproduced:**
-  Seestar-scale WCS (2.6″/px), stored-vs-true centre error ~15″ at a 6 px shift, ~190″ at ~70 px, ~630″ (>10′)
-  near the 200 px `max_shift_px` cap. Only feeds `ra_center_deg`/`dec_center_deg` consumers (reference-frame
-  selection, span diagnostics, mosaic centring, sibling-hint seeding); since all rescued members share one
-  pointing they clump at the reference centre instead of scattering by dither, so practical impact is small.
-  **Fix (small):** in the apply loop, derive each member's stored centre from its own WCS via
-  `wcs.pixel_to_world` (or `all_pix2world` at the image centre) rather than `CRVAL`. One file + a repro test.
-  Filed, not rushed.
+- **✅ SHIPPED (Builder, v0.324.1, branch `claude/zen-mccarthy-tl3guh`) — ~~every sub rescued by
+  `bootstrap_solve` stores the **reference** sub's centre as its own `ra_center_deg`/`dec_center_deg`, off by
+  the registration shift.~~** Fixed as the entry proposed: a new
+  `seestack.io.wcs_io.wcs_image_center_deg_from_text(text, *, width, height)` evaluates the frame's **own** WCS
+  at its **own** centre pixel (`all_pix2world` at the 0-based `((w−1)/2, (h−1)/2)`, so any SIP is honoured), and
+  the apply loop uses it with the member's gray-image shape. `wcs_center_deg_from_text` is untouched and still
+  the right reading for an ASTAP-native solution (`solve/runner.py`), where CRPIX *is* at the image centre — a
+  test pins that the two agree to <0.01″ there and diverge by exactly the offset when CRPIX has been moved.
+  Tests in `tests/test_bootstrap_solve.py`:
+  `test_rescued_subs_store_their_own_centre_not_the_references` (each rescued sub's stored centre sits
+  `pixscale·hypot(dx, dy)` from the reference's pointing, and the set genuinely scatters — before the fix every
+  separation was exactly **0.0**, confirmed by running the test against the old code), plus the helper's own
+  agree/diverge and unusable-input cases. Upgrade-safe: one pure helper and one call site, no config/schema/
+  on-disk/API change, and nothing rewrites centres already stored — an install self-corrects the next time
+  bootstrap rescues those subs.
+    *(Original finding: severity low — metadata only; the authoritative `wcs_json` written per frame was always
+    geometrically correct, so reprojection/stacking placed pixels correctly. Confidence: reproduced.
+    `bootstrap.py:419` derived the stored centre with `wcs_center_deg_from_text(wtext)`, which returns `CRVAL`.
+    `propagate_wcs` (`bootstrap.py:216-248`) correctly builds each member's WCS by keeping the reference's
+    `CRVAL`/`CD` and offsetting only `CRPIX` — so `CRVAL` is deliberately no longer the member's *frame centre*,
+    and `wcs_center_deg_from_text` (whose docstring assumes "CRPIX at the image centre") returns the reference
+    centre for every propagated member. The true centre is `wcs.pixel_to_world(image_centre_pixel)`. **Reproduced:**
+    Seestar-scale WCS (2.6″/px), stored-vs-true centre error ~15″ at a 6 px shift, ~190″ at ~70 px, ~630″ (>10′)
+    near the 200 px `max_shift_px` cap. Only feeds `ra_center_deg`/`dec_center_deg` consumers (reference-frame
+    selection, span diagnostics, mosaic centring, sibling-hint seeding); since all rescued members share one
+    pointing they clump at the reference centre instead of scattering by dither, so practical impact is small.
+    **Fix (small):** in the apply loop, derive each member's stored centre from its own WCS via
+    `wcs.pixel_to_world` (or `all_pix2world` at the image centre) rather than `CRVAL`. One file + a repro test.
+    Filed, not rushed.)*
 
 - **⚪ SCOUT QA RE-AUDIT (2026-09-02, webapp routers / ingest / plate-solve / render — swept, mostly CLEAN;
   three verified findings filed above, the rest clean.** This run rotated off the (drained, re-confirmed-clean)
@@ -21589,25 +21633,68 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-09-02) — "Plan my week": which of my targets to point at, on which of the
-  next few nights.** *(Pillar: plan + autonomy — PRIORITY 2–3; size M; additive, offline, no new deps.)* Today
-  the night planner answers three narrow questions and misses the one a weekend imager actually asks. `/tonight`
-  ranks everything *for tonight*; `/best-tonight` ranks your own targets *right now*; `/next-session/{safe}` is
-  *one* target's next windows. **There is no cross-target, multi-night view** — nothing that says *"your best
-  shot this week is M31 on Thursday (4.1 h of dark above your horizon, Moon down); M42 is better Saturday."*
-  A beginner who only gets out on clear weekends wants exactly that: point me at the right thing on the right
-  night. **Shape:** a new read-only `GET /api/plan/week` that runs the existing `next_observing_windows` over
-  each **library** target (the ones already started — this is "finish what I've got", not discovery, which
-  `/suggest` covers) for the next ~7 nights, and returns, per night, the best-placed target and its usable
-  window, plus each target's single best night in the range. All the machinery exists (`next_observing_windows`,
-  the observer resolution, the horizon profile, the registry-signature cache the roll-ups already use) — this is
-  composition, not new astronomy. Sane default: 7 nights, the library's own targets, the user's altitude floor.
-  Plain-language card ("This week: Thu is your best M31 night — 4 h dark, Moon down"). **Cautions:** it iterates
-  windows × targets × nights, so cap the target count and reuse the cache (measure before shipping — the
-  per-target scan is the expensive part, already ~5 ms each); and keep it to *started* targets so it stays "my
-  week", not a catalog dump. Frontend: one new card on Dashboard or a `/plan/week` nested route (fits the §1
-  "add pages, keep it organised" allowance). Grep `webapp/routers/plan.py` first — the per-target pieces are all
-  there to reuse.
+- **✅ SHIPPED (Builder, v0.325.0, branch `claude/zen-mccarthy-tl3guh`) — ~~"Plan my week": which of my targets
+  to point at, on which of the next few nights.~~** Built as filed: `GET /api/plan/week` +
+  `seestack.nightplan.plan_week`, and a **Plan my week** card on the Tonight page, above the two ranking tables
+  because it answers the earlier question — *whether tonight is even the right night*.
+
+  **What shipped.** Per night in the range: the best-placed of your own targets, when to shoot it, how long it
+  is up, and a Moon caution. Underneath, each target's *own* best night ("M 42 — Sunday"), which is the half
+  that actually spreads a week across a library rather than naming the same object seven times. A headline
+  sentence says the whole answer in one line: *"Your best night is Saturday — M 31, 4.1 h above 30°."*
+
+  **Composition, as the entry predicted, plus one extraction it didn't.** The night walk in
+  `next_observing_windows` — the local-noon anchor, the pre-dawn shift, the past-window drop and the
+  partially-past clip — is now `upcoming_dark_windows`, shared by both, so the week card and the per-target
+  card can't drift about which night is which. `plan_week` then runs **one vectorised `_observability_batch`
+  per night over all targets at once**, so the cost scales with *nights*, not with library size (the entry's
+  caution was about the per-target scan; batching removes it rather than working around it). Capped at
+  `WEEK_MAX_TARGETS` = 40, with `n_targets_considered`/`n_targets_with_position` on the payload so the card can
+  say "Looked at 40 of your 57" instead of pretending it saw everything.
+
+  **Four honesty rules, each pinned by a test.** A night where nothing clears the floor reports `best=None` —
+  an explicit "skip it", never a promoted target that barely rises. A full Moon that stays *below the horizon*
+  gets no warning (`moon_up_fraction`, not illumination alone), because sending a beginner indoors on a good
+  night is the expensive error. An empty card says **why** in one line and names the fix (no location →
+  Settings; no positions → plate-solve; no darkness → high summer; nothing high enough → lower the floor)
+  rather than rendering a blank table. And a tie between two equally good nights breaks towards the **sooner**
+  one — go out on the first.
+
+  **Upgrade-safe (§9):** one new read-only endpoint, one new engine function, no config key, no schema, no
+  on-disk change, no default flipped, no existing response shape touched. The card self-hides completely
+  against a backend too old to know the route, so a half-upgraded install shows exactly today's page.
+
+  **Tests: +18.** `tests/test_nightplan.py` (8) — the shared night walk's labels, its mid-night clip and its
+  pre-dawn behaviour; a best-per-night *and* best-per-target run; that the nightly pick is the highest-scoring
+  target rather than the first; the position filter and the cap; the silent-night case; and that the horizon
+  profile really shortens a week. `tests/webapp/test_plan.py` (4) — the endpoint end to end, the no-location
+  self-hide, `nights`/`when` validation, and that `min_alt` narrows what qualifies.
+  `frontend/src/planweek.test.ts` (21) + `PlanWeekCard.test.tsx` (6) — the labelling (including "still Tonight
+  at 00:30"), the headline, every empty-state branch, the de-duplication of the headline's target from the
+  follow-up line, and the Moon rules.
+
+  **Deliberately not done:** a `/plan/week` page of its own (the card sits inside the planner it belongs to,
+  per the standing "put a feature inside the grouping, not one more banner" rule), an .ics export of the week,
+  and any catalog/discovery rows — this is "finish what I've got"; `/suggest` covers the rest.
+
+    *(Original spec follows.)* *(Pillar: plan + autonomy — PRIORITY 2–3; size M; additive, offline, no new deps.)* Today
+    the night planner answers three narrow questions and misses the one a weekend imager actually asks. `/tonight`
+    ranks everything *for tonight*; `/best-tonight` ranks your own targets *right now*; `/next-session/{safe}` is
+    *one* target's next windows. **There is no cross-target, multi-night view** — nothing that says *"your best
+    shot this week is M31 on Thursday (4.1 h of dark above your horizon, Moon down); M42 is better Saturday."*
+    A beginner who only gets out on clear weekends wants exactly that: point me at the right thing on the right
+    night. **Shape:** a new read-only `GET /api/plan/week` that runs the existing `next_observing_windows` over
+    each **library** target (the ones already started — this is "finish what I've got", not discovery, which
+    `/suggest` covers) for the next ~7 nights, and returns, per night, the best-placed target and its usable
+    window, plus each target's single best night in the range. All the machinery exists (`next_observing_windows`,
+    the observer resolution, the horizon profile, the registry-signature cache the roll-ups already use) — this is
+    composition, not new astronomy. Sane default: 7 nights, the library's own targets, the user's altitude floor.
+    Plain-language card ("This week: Thu is your best M31 night — 4 h dark, Moon down"). **Cautions:** it iterates
+    windows × targets × nights, so cap the target count and reuse the cache (measure before shipping — the
+    per-target scan is the expensive part, already ~5 ms each); and keep it to *started* targets so it stays "my
+    week", not a catalog dump. Frontend: one new card on Dashboard or a `/plan/week` nested route (fits the §1
+    "add pages, keep it organised" allowance). Grep `webapp/routers/plan.py` first — the per-target pieces are all
+    there to reuse.
 
 - **✅ SHIPPED (Builder, v0.320.0, branch `claude/wizardly-feynman-pp3yz0`) — ~~"Draw your skyline": a visual
   horizon editor for the Tonight planner, replacing the raw numeric (azimuth, altitude) pair list.~~** Built
