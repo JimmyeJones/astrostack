@@ -2842,7 +2842,15 @@ export const api = {
     }),
   editPrintUrl: (safe: string, runId: number, jobId: string) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/print/${jobId}`,
-  exportRun: (safe: string, runId: number, recipe: Recipe, outputName: string, tiffMode: string) =>
+  /** Export the edited picture as a new image.
+   *
+   *  `tiffMode` is still sent — the endpoint has always taken it and a run's
+   *  `options_json` may record it — but an editor export writes its TIFF with
+   *  `already_display=True`, which returns before `mode` is read, so the value
+   *  cannot change the file. It defaults to the same `"linear"` the sibling
+   *  `exportSavedEdit` has always hardcoded, and the editor no longer asks. */
+  exportRun: (safe: string, runId: number, recipe: Recipe, outputName: string,
+              tiffMode = "linear") =>
     req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/export`, {
       method: "POST",
       body: JSON.stringify({ recipe, output_name: outputName, tiff_mode: tiffMode }),
