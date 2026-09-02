@@ -169,6 +169,51 @@ describe("EditorView", () => {
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
   });
 
+  // --- the export panel asks nothing it can't answer -------------------------
+  // "Export full resolution" used to carry a TIFF: Linear / Auto-stretched select
+  // whose own hint said both options produce the same result. It did — an editor
+  // export is written from the recipe's already tone-mapped image, so _write_tiff
+  // short-circuits on `already_display` before `mode` is read — which made it a
+  // decision a beginner had to stop and make, on the priority-1 surface, that
+  // changed nothing. (tests/test_editor_export_tiff_mode.py pins the engine half.)
+
+  it("asks no TIFF question in the export panel, and says what the export is instead", async () => {
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    await screen.findByText("Export full resolution");
+    expect(screen.queryByDisplayValue("Linear")).toBeNull();
+    expect(screen.queryByDisplayValue("Auto-stretched")).toBeNull();
+    // The question is replaced by the answer — including where the unstretched
+    // data actually lives, which the old hint got wrong (an export's FITS is
+    // display-space too).
+    expect(screen.getByText(/16-bit TIFF and a FITS, exactly as shown here/))
+      .toBeInTheDocument();
+    expect(screen.getByText(/original stack keeps its own unstretched files/))
+      .toBeInTheDocument();
+  });
+
+  it("exports with the request shape the endpoint has always been sent", async () => {
+    // The control is gone, not the field: `tiff_mode` is still sent (and still
+    // accepted), so an export request is byte-for-byte what it was.
+    mockEditorQueries();
+    const exp = vi.spyOn(client.api, "exportRun").mockResolvedValue({ job_id: "j1" });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Export as new image"));
+    await waitFor(() => expect(exp).toHaveBeenCalled());
+    expect(exp.mock.calls[0].slice(0, 2)).toEqual(["M_42", 3]);
+    expect(exp.mock.calls[0][3]).toBe("M_42_edit");
+  });
+
   it("offers a print size the picture can actually fill, and hides the offer when it can't", async () => {
     // "Print it" is a promise: only sizes this picture has the detail to fill
     // sharply are listed, biggest first, so the default is the best real print.

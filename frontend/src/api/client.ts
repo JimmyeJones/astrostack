@@ -2842,10 +2842,16 @@ export const api = {
     }),
   editPrintUrl: (safe: string, runId: number, jobId: string) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/print/${jobId}`,
-  exportRun: (safe: string, runId: number, recipe: Recipe, outputName: string, tiffMode: string) =>
+  /** `tiff_mode` is still sent — the endpoint has always accepted it and older
+   *  clients still pass it — but an editor export is written from the recipe's
+   *  already tone-mapped result (`already_display=True`), and `_write_tiff`
+   *  short-circuits on that *before* the mode is read. So the two modes produce
+   *  byte-identical files here and the editor no longer asks which. The default
+   *  is spelled out rather than omitted so the request shape is unchanged. */
+  exportRun: (safe: string, runId: number, recipe: Recipe, outputName: string) =>
     req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/export`, {
       method: "POST",
-      body: JSON.stringify({ recipe, output_name: outputName, tiff_mode: tiffMode }),
+      body: JSON.stringify({ recipe, output_name: outputName, tiff_mode: "linear" }),
     }),
   /** Export the run's own *saved* recipe — "finish the edit I already saved",
    *  for someone who pressed Save in the editor and closed it. Omitting `recipe`

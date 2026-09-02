@@ -14791,10 +14791,39 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
-- **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via `scripts/agent-dogfood.sh`) — the
-  editor's export panel asks the beginner a question whose own help text says the answer doesn't matter.**
-  *(Pillar: friendliness / editor — PRIORITY 1; size XS to decide, S to build whichever way it goes. Traced,
-  high confidence.)* "Export full resolution" carries a **TIFF: Linear / Auto-stretched** `Select`
+- **✅ SHIPPED — SHAPE (b), AND THE HINT'S *OTHER* HALF WAS WRONG TOO (Builder, v0.322.8, branch
+  `claude/zen-mccarthy-tzxfsc`) — ~~the editor's export panel asks the beginner a question whose own help
+  text says the answer doesn't matter.~~** Taken as filed, with the choice made and stated rather than
+  deleted quietly.
+
+  **Why (b) and not (a).** (a) — "honour `mode` for a *linear* re-render of the same edit" — has no honest
+  output behind it. By the time the exporter runs, the recipe **is** the tone map: `_render_recipe_fullres`
+  returns a display-space `[0,1]` picture, and `_to_uint16_linear` applied to *that* is not the linear data,
+  it is a second contrast rescale of an already-stretched image wearing the word "linear". Shipping it would
+  have made the control mean something *false*, which is worse than meaning nothing. The linear data has not
+  gone anywhere — it is in the **source stack's own** `master.fits` / `master.tif`, which is what the panel
+  now says.
+
+  **Nothing was removed but the question.** The files an export writes are byte-for-byte what they always
+  were, the endpoint still accepts `tiff_mode`, and the request still sends it (`"linear"`, spelled out in
+  `client.ts` so the wire shape is unchanged) — only the two-option `Select` that could not change any of
+  that is gone, replaced by a plain sentence saying what you get.
+
+  **The second defect, which the entry didn't have:** the same hint ended *"for the underlying unstretched
+  data, use the separate FITS output"* — **false**. An editor export's FITS is display-space as well, stamped
+  `SSDISPLY` and `BUNIT='display'` precisely so nothing re-stretches it. So the control wasn't merely inert;
+  the only actionable sentence attached to it sent a beginner to a file that isn't what it promised.
+
+  **Tests:** `tests/test_editor_export_tiff_mode.py` (4) pins the engine facts the new copy asserts — the two
+  modes write byte-identical TIFFs on the `already_display` path, that TIFF *is* the edit as shown, the FITS
+  is display-space, **and** (the guard) `tiff_mode` still genuinely differs on the stacker's own linear path,
+  so this never becomes an argument for weakening the real control in Stack settings. Two more in
+  `Editor.test.tsx`: the panel asks nothing and states the answer, and the export request shape is unchanged.
+  `tiffDownload.ts` was grepped as the entry asked — it keys off `display_space: true`, which the export
+  writes, so its History copy stays true and is untouched.
+
+  *(original spec, kept for provenance)* "Export full resolution" carries a **TIFF: Linear /
+  Auto-stretched** `Select`
   (`routes/Editor.tsx:2306`) whose `HintLabel` reads *"It's already display-ready, so **both options produce
   that same result**."* That is accurate — `_write_tiff`'s `already_display` branch short-circuits **before**
   `mode` is read, and `pipeline.py:1432` passes `tiff_mode=…` and `already_display=True` together, so an editor
