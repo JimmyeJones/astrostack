@@ -379,14 +379,45 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟠 WRONG-RESULT / EDITOR-PARITY (Scout QA audit 2026-09-02, render/export parity — reproduced, measured) —
-  the "Download full-res PNG" of an **Adjusted** (asinh) run does NOT match the saved 1024 px preview the user
-  tuned and sees everywhere else, because `asinh_stretch` recomputes its whole tone curve from the resolution
-  of the array it is handed.** *(Severity: wrong-result — the downloaded/shared full-size picture is a
-  materially different image from the one the user tuned and from the gallery/History thumbnail, share-JPEG and
-  wallpaper. §1 priority 1/4. Confidence: reproduced + measured.)*
+- **✅ SHIPPED (Builder, v0.324.0, branch `claude/zen-mccarthy-tl3guh`) — ~~the "Download full-res PNG" of an
+  **Adjusted** (asinh) run does NOT match the saved 1024 px preview the user tuned, because `asinh_stretch`
+  recomputes its whole tone curve from the resolution of the array it is handed.~~** Fixed in the shape the
+  entry proposed — `asinh_stretch` gained an optional `stats=` (a new `AsinhStats`: `lo`, `hi`, and the
+  per-channel `(median, sigma)` measured on the **normalised** array), and the renderers measure it on the
+  **1024 px preview grid** and apply it to whatever pixels they are stretching. Omitted, the function measures
+  itself exactly as before, so every existing caller is byte-for-byte unaffected — pinned by a test that
+  `asinh_stretch(x, stats=measure_asinh_stats(x))` *is* `asinh_stretch(x)` across all four flag combinations,
+  which is also what stops the two measurement sites drifting apart.
 
-  **This is a distinct, second-order break left open by the v0.287.4 fix, not that fix reopened.** v0.287.4
+  **The fix went one site wider than filed, because the same defect had a second instance.** History's lightbox
+  re-renders an Adjusted run at `size=2048` (`History.tsx:1546`) while the Adjust sliders' own preview renders
+  at the endpoint's 1024 px default — so *clicking to enlarge the thing you just tuned* changed the tone curve
+  under you, on-screen, before any download was involved. So `render_stack_png` is anchored too, not just
+  `render_preview_png_full_res`, and the contract is now the simple one: **one pair of slider values means one
+  picture at every size the app renders at.** The `max_width=PREVIEW_MAX_WIDTH` render — the one that bakes the
+  *stored* preview PNG, i.e. the anchor itself — short-circuits to "measure yourself", so it is bit-for-bit
+  unchanged and costs no extra read; a live install's existing pictures are untouched.
+
+  **Measured (agent repro, synthetic 1600×1000 linear master, `tests/test_full_res_asinh_parity.py`).** The
+  download's per-channel **sky level** sat **11–13 of 255 brighter** than the preview it was tuned against
+  across `(stretch, black)` = `(0.3,0.2)`, `(0.4,0.15)`, `(0.5,0.1)`; anchoring roughly halves that to 5–7.
+  Pinned-vs-unpinned full-res renders differ by a mean-abs 3.7–10 of 255 (p95 up to 70). **Two things the
+  entry's proposed test would have got wrong, worth recording:** (1) a *per-pixel* comparison of the export
+  resampled back onto the preview grid is the wrong metric — the download genuinely holds different data
+  (native pixels, not area-averaged ones) and asinh is steep near the black point, so ~0.8 % between the two
+  arrays' own medians is several 8-bit levels *whatever* curve is used, and the noise/nonlinearity commutation
+  error rides on top of it; on a noisy scene that residual swamps the signal and can even flip sign. The
+  **sky median** is the honest figure, because a median commutes exactly with a monotonic tone curve, so it
+  isolates the curve from the noise. (2) A *smooth* synthetic scene makes the whole thing vacuous — the two
+  grids then measure almost identically, since it is precisely the pixel noise and the barely-sampled star
+  peaks that make the statistics resolution-dependent. Both are written into the test file's docstrings so the
+  next agent doesn't re-derive them.
+
+    *(Original finding, kept for the reasoning: severity wrong-result — the downloaded/shared full-size picture
+    is a materially different image from the one the user tuned and from the gallery/History thumbnail,
+    share-JPEG and wallpaper. §1 priority 1/4. Confidence: reproduced + measured.)*
+
+  **This was a distinct, second-order break left open by the v0.287.4 fix, not that fix reopened.** v0.287.4
   correctly made the full-res download use the **asinh** curve (with the run's saved `preview_stretch`/
   `preview_black`) instead of the STF — so both paths now call `asinh_stretch`. But `asinh_stretch`
   (`seestack/render/thumbnail.py:874-899`) derives its *entire* curve from per-array statistics:

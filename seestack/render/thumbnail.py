@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 
@@ -388,6 +389,13 @@ def render_stack_png(
     (marked with :data:`~seestack.stack.output.DISPLAY_SPACE_CARD`), so it is
     rendered *verbatim* — a second asinh stretch would double-process it, and the
     ``stretch``/``black`` sliders simply don't apply to such a run.
+
+    At any ``max_width`` other than :data:`PREVIEW_MAX_WIDTH` the tone curve is
+    **measured on the preview grid** and applied to these pixels (see
+    :func:`_preview_grid_asinh_stats`), so one pair of slider values means one
+    picture at every size the app renders at — the sliders' own preview, the
+    2048 px lightbox behind it, and the full-res download. The preview-cap render
+    that bakes the stored PNG is unchanged, bit for bit.
     """
     import io
 
@@ -398,7 +406,10 @@ def render_stack_png(
     # A display-space export is shown as written (matches its stored preview PNG);
     # a linear stack gets the adjustable asinh stretch. A second stretch on an
     # already tone-mapped image would double-process it.
-    stretched = rgb if display_space else asinh_stretch(rgb, stretch=stretch, black=black)
+    stretched = rgb if display_space else asinh_stretch(
+        rgb, stretch=stretch, black=black,
+        stats=_preview_grid_asinh_stats(
+            fits_path, rgb, rendered_max_width=max_width))
     disp = np.clip(np.nan_to_num(stretched), 0.0, 1.0)
     if north_up:
         disp = _apply_north_up(disp, fits_path)
@@ -426,6 +437,17 @@ def render_preview_png_full_res(
     download keeps matching the thumbnail. Omit them (the default) and the STF is
     used exactly as before — an unadjusted run is byte-for-byte unchanged.
 
+    On that asinh path the curve is **measured on the 1024 px preview grid** and
+    then applied to the full-res pixels, because `asinh_stretch` derives its whole
+    curve (normalisation *and* black point) from the statistics of whatever array
+    it is handed, and area-averaging moves every one of them. Measured on a
+    1920×1080 master, the same ``black=0.4`` slider put the black point at 0.48 at
+    1024 px and 0.61 at native — an 8-bit mean-abs difference of 12–18 between the
+    download and the preview the user actually tuned. The saved preview bytes are
+    the picture the user approved, so they are what the download is anchored to.
+    A canvas already at or below 1024 px is measured in place (the two grids are
+    the same), so nothing extra is read for an ordinary small stack.
+
     This is the beginner-friendly answer to "why is my downloaded picture
     low-res?": the FITS/TIFF already hold full-resolution pixels but aren't easily
     viewable, and the quick PNG button serves the 1024 px preview. This serves the
@@ -452,7 +474,10 @@ def render_preview_png_full_res(
         # Already tone-mapped: written verbatim, and the sliders don't apply.
         stretched = np.nan_to_num(rgb, nan=0.0)
     elif stretch is not None and black is not None:
-        stretched = asinh_stretch(rgb, stretch=float(stretch), black=float(black))
+        stretched = asinh_stretch(
+            rgb, stretch=float(stretch), black=float(black),
+            stats=_preview_grid_asinh_stats(
+                fits_path, rgb, rendered_max_width=max_long_edge))
     else:
         stretched = _autostretch_for_export(rgb)
     disp = np.clip(np.nan_to_num(stretched), 0.0, 1.0)
@@ -469,6 +494,47 @@ def render_preview_png_full_res(
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def _preview_grid_asinh_stats(
+    fits_path: str | Path, rendered: np.ndarray, *, rendered_max_width: int,
+) -> AsinhStats | None:
+    """The :class:`AsinhStats` a run's **1024 px preview grid** yields — what pins
+    every other rendering of the same run and sliders to one tone curve.
+
+    ``asinh_stretch`` derives its whole curve from the array it is handed, and
+    those statistics move with resolution, so without an anchor the *same* sliders
+    give a different picture at every size the app renders at: the 1024 px preview
+    the user tunes and saves, the 2048 px lightbox, and the near-native full-res
+    download. :data:`PREVIEW_MAX_WIDTH` is the right anchor because the saved
+    preview is the picture the user actually approved and the one every other
+    surface (gallery, History, share-JPEG, wallpaper) shows.
+
+    Returns ``None`` — meaning "let the stretch measure itself", which is
+    byte-for-byte the historical behaviour — when the render is already on the
+    preview grid, and when the picture is degenerate or the extra read fails. The
+    ``max_width=PREVIEW_MAX_WIDTH`` render (the saved preview itself) therefore
+    costs nothing and is bit-for-bit unchanged.
+
+    ``rendered`` is the already-loaded array, used only to skip the second read
+    when the canvas is narrower than the cap and both grids are the canvas itself.
+    Otherwise the preview grid is loaded afresh — a cheap decimating memmap read
+    that materialises a 1024 px array, not a second full canvas.
+    """
+    if rendered_max_width == PREVIEW_MAX_WIDTH:
+        return None
+    try:
+        if (rendered.shape[1] < rendered_max_width
+                and rendered.shape[1] <= PREVIEW_MAX_WIDTH):
+            # Not decimated on the way in, and inside the cap: the canvas *is*
+            # the preview grid, so this array is exactly what would be re-read.
+            return measure_asinh_stats(rendered)
+        preview_rgb, _display_space = load_stack_rgb(
+            fits_path, max_width=PREVIEW_MAX_WIDTH)
+        return measure_asinh_stats(preview_rgb)
+    except Exception:                       # pragma: no cover - defensive
+        log.warning("preview-grid asinh stats failed for %s", fits_path, exc_info=True)
+        return None
 
 
 def stack_north_up_deg(fits_path: str | Path) -> float | None:
@@ -820,6 +886,79 @@ def rejection_overlay_png(rejection_map: np.ndarray,
     return buf.getvalue()
 
 
+class AsinhStats(NamedTuple):
+    """The image statistics :func:`asinh_stretch` derives its whole curve from.
+
+    ``lo``/``hi`` are the normalisation bounds (min and 99.5th percentile over
+    covered pixels); ``channels`` holds each channel's robust ``(median, sigma)``
+    measured on the **normalised** array, which is what anchors the black point.
+
+    Every one of those numbers depends on the *resolution* of the array they were
+    measured on — area-averaging lifts the min, lowers the 99.5th-percentile peak
+    and shrinks σ — so the same sliders produce a visibly different picture at
+    1024 px and at native size. Passing a measured ``AsinhStats`` to
+    :func:`asinh_stretch` is how a caller pins the curve to one resolution while
+    stretching an array of another (see :func:`render_preview_png_full_res`).
+    """
+
+    lo: float
+    hi: float
+    #: Per-channel ``(median, sigma)``; ``None`` for a channel with no covered pixels.
+    channels: tuple[tuple[float, float] | None, ...]
+
+
+def _asinh_norm_bounds(img: np.ndarray) -> tuple[float, float] | None:
+    """The ``(lo, hi)`` normalisation bounds :func:`asinh_stretch` uses, or
+    ``None`` for a degenerate/near-flat image the stretch can't do anything with.
+
+    A robust high percentile rather than the raw max sets the top of the range: a
+    single surviving hot/warm pixel, bloom, or bright column that sigma-clip
+    didn't reject would otherwise inflate ``hi``, divide the whole image down,
+    and — with the asinh gain fixed by the slider, not adaptive — crush faint
+    nebulosity to near-black. The bright stars still saturate to white via the
+    final clip. This mirrors the 0.5–99.5th percentile scaling in
+    ``edit/ops/detail.py``, added for the same reason.
+    """
+    lo = float(np.nanmin(img))
+    hi = float(np.nanpercentile(img, 99.5))
+    if not np.isfinite(hi) or hi <= lo:
+        hi = float(np.nanmax(img))          # degenerate/near-flat image
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        return None
+    return lo, hi
+
+
+def measure_asinh_stats(rgb: np.ndarray) -> AsinhStats | None:
+    """Measure the :class:`AsinhStats` an :func:`asinh_stretch` of ``rgb`` would
+    derive for itself — so another call can be pinned to *these* numbers while
+    stretching a different-resolution array of the same picture.
+
+    Returns ``None`` when the image is empty or degenerate (all-NaN, flat), i.e.
+    exactly when ``asinh_stretch`` would give up and return black; a caller
+    should then simply not pass ``stats`` and let the stretch decide as before.
+
+    ``asinh_stretch(x, stats=measure_asinh_stats(x))`` is byte-for-byte
+    ``asinh_stretch(x)`` — pinned by a test, so the two measurement sites can't
+    drift apart.
+    """
+    img = np.asarray(rgb, dtype=np.float32)
+    if img.ndim == 2:
+        img = np.stack([img, img, img], axis=-1)
+    if not np.isfinite(img).any():
+        return None
+    bounds = _asinh_norm_bounds(img)
+    if bounds is None:
+        return None
+    lo, hi = bounds
+    norm = (img - lo) / (hi - lo)
+    chans: list[tuple[float, float] | None] = []
+    for c in range(3):
+        chan = norm[..., c]
+        finite = np.isfinite(chan)
+        chans.append(_robust_median_sigma(chan[finite]) if finite.any() else None)
+    return AsinhStats(lo, hi, tuple(chans))
+
+
 def asinh_stretch(
     rgb: np.ndarray,
     *,
@@ -827,6 +966,7 @@ def asinh_stretch(
     black: float = 0.35,
     protect_highlights: bool = True,
     highlight_protect: float = 0.0,
+    stats: AsinhStats | None = None,
 ) -> np.ndarray:
     """Asinh (inverse-hyperbolic-sine) stretch — the astrophotographer's stretch.
 
@@ -852,6 +992,10 @@ def asinh_stretch(
     ``highlight_protect`` (0..1, default 0) walks the highlight shoulder's knee
     down (:func:`highlight_knee_for`) so a bright core is compressed harder and
     keeps its detail. 0 is byte-for-byte the historical behaviour.
+
+    ``stats`` pins the curve to statistics measured elsewhere — see
+    :class:`AsinhStats`. Omitted (the default), the curve is derived from ``rgb``
+    itself, exactly as it always has been.
     """
     knee = highlight_knee_for(highlight_protect)
     img = rgb.astype(np.float32, copy=True)
@@ -863,20 +1007,11 @@ def asinh_stretch(
         return np.zeros_like(np.nan_to_num(img))
 
     # Normalize over covered pixels only; keeps per-channel scales intact.
-    # Use a robust high percentile rather than the raw max for the top of the
-    # range: a single surviving hot/warm pixel, bloom, or bright column that
-    # sigma-clip didn't reject would otherwise inflate `hi`, divide the whole
-    # image down, and — with the asinh gain fixed by the slider, not adaptive —
-    # crush faint nebulosity to near-black. The bright stars still saturate to
-    # white via the final `np.clip(..., 0, 1)`. This mirrors the 0.5–99.5th
-    # percentile scaling in edit/ops/detail.py, added for the same reason
-    # ("a single hot star sets max(), crushing the sky noise").
-    lo = float(np.nanmin(img))
-    hi = float(np.nanpercentile(img, 99.5))
-    if not np.isfinite(hi) or hi <= lo:
-        hi = float(np.nanmax(img))          # degenerate/near-flat image
-    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+    # `_asinh_norm_bounds` explains the robust-percentile ceiling.
+    bounds = (stats.lo, stats.hi) if stats is not None else _asinh_norm_bounds(img)
+    if bounds is None:
         return np.zeros_like(np.nan_to_num(img))
+    lo, hi = bounds
     img = (img - lo) / (hi - lo)
 
     # asinh softening `a`: geometric sweep from 1.0 (≈linear) at stretch=0 down
@@ -892,7 +1027,11 @@ def asinh_stretch(
         finite = np.isfinite(chan)
         if not finite.any():
             continue
-        med, sigma = _robust_median_sigma(chan[finite])
+        # Measured here, on this array, unless the caller pinned them (the
+        # measurement `measure_asinh_stats` performs is deliberately the same
+        # two lines, over the same normalised array).
+        supplied = stats.channels[c] if stats is not None and c < len(stats.channels) else None
+        med, sigma = supplied if supplied is not None else _robust_median_sigma(chan[finite])
         # Black point anchored to the sky median: black=0 keeps almost
         # everything (median − 2σ), black≈0.33 sits at the sky median, black=1
         # cuts well into the signal (median + 4σ).
