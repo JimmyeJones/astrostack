@@ -72,11 +72,16 @@ export function inThisPictureSentence(objects: FieldObject[], limit = 6): string
  * pre-stack "First look" reassurance covers that case, unchanged.
  */
 export function LatestPictureCard({
-  safe, name, run,
+  safe, name, run, pinnedCover = false,
 }: {
   safe: string;
   name?: string;
   run?: StackRun | null;
+  // True when `run` is the cover the user pinned *and* a newer stack exists.
+  // Without this the page silently shows an older picture than the one just
+  // made, which reads as "my new stack didn't work" — so say which it is, and
+  // where the newer one lives. Nothing is hidden: "All versions" is beside it.
+  pinnedCover?: boolean;
 }) {
   const [light, setLight] = useState(false);
   // "What's in it?" — the same named-object overlay History has always had, on
@@ -193,7 +198,9 @@ export function LatestPictureCard({
   return (
     <Paper withBorder p="sm" radius="md" data-testid="latest-picture">
       <Group justify="space-between" gap="xs" mb={6} wrap="nowrap">
-        <Text size="sm" fw={500}>Your picture</Text>
+        <Text size="sm" fw={500}>
+          {pinnedCover ? "Your picture (cover)" : "Your picture"}
+        </Text>
         <Group gap="sm" wrap="nowrap">
           {/* Only offered when the run still has its FITS: the object positions
               come off its WCS, and a preview-only run has none to read. */}
@@ -230,6 +237,18 @@ export function LatestPictureCard({
       <Text size="xs" c="dimmed" mt={6}>
         {latestPictureCaption(run)} — click to view it big
       </Text>
+      {/* The one thing a beginner could misread here: this is the picture they
+          pinned as this target's cover, and a newer stack exists. Say so plainly
+          rather than let them wonder where their new stack went. */}
+      {pinnedCover ? (
+        <Text size="xs" c="dimmed" mt={4} data-testid="pinned-cover-note">
+          This is the version you pinned as this target&rsquo;s cover, so it&rsquo;s
+          the one shown everywhere. You have a newer stack too —{" "}
+          <Anchor component={Link} to={`/targets/${safe}/history`} size="xs">
+            see all versions
+          </Anchor>.
+        </Text>
+      ) : null}
       {identify ? (
         <Text size="xs" c={cantPlaceMarks ? "dimmed" : "cyan.4"} mt={4}
           data-testid="identify-readout">
