@@ -258,6 +258,16 @@ _INSERT_COLS = [
 # the folder convention shipped). Additive + reversible — never a delete.
 REJECT_REASON_SEESTAR_OUTPUT = "auto:seestar_output"
 
+# Reject reason stamped on a sub whose **file is not on disk any more** and whose
+# owner has said so — the deliberate "these are gone, carry on without them"
+# answer to a walk-away readability hold that would otherwise never lift (a
+# session deleted from ``incoming/`` leaves its DB rows behind forever). Purely a
+# database flag: nothing is deleted, ``AGENTS.md`` §10 is untouched, and
+# :meth:`Project.restore_missing_frames` puts a frame straight back the moment
+# its file reappears — which is why this reason is stamped rather than plain
+# ``"user"``, whose choice must never be undone by the app.
+REJECT_REASON_FILE_MISSING = "auto:file_missing"
+
 # The Seestar's on-device output folder holds a *single* stacked image (allow a
 # tiny margin for an occasional two-file output). A bare ``<T>/`` folder that
 # holds more than this is a user's real subs, not the on-device output, so its
@@ -849,6 +859,84 @@ class Project:
                     reject_reason=REJECT_REASON_SEESTAR_OUTPUT,
                 )
         return to_reject
+
+    def set_missing_frames_aside(self) -> list[int]:
+        """Set aside every **accepted** sub whose file is no longer on disk.
+
+        The answer to a walk-away readability hold that can never lift by itself.
+        The hold (``webapp.pipeline._auto_stack_readability_hold``) refuses to
+        publish a picture made thin by subs it cannot read — right, while they
+        are coming back. But a session the owner *deleted* from ``incoming/`` is
+        never coming back: the rows stay, ``unreadable`` never drops, and the
+        target is held until brand-new subs outnumber the best run it ever made.
+        This is the owner saying "those are gone, use what's left".
+
+        Additive and reversible, exactly like
+        :meth:`reject_seestar_output_frames`: the frames are marked ``accept=0``
+        with ``reject_reason=`` :data:`REJECT_REASON_FILE_MISSING`, **nothing on
+        disk is touched** (``AGENTS.md`` §10), and
+        :meth:`restore_missing_frames` puts any of them straight back the moment
+        its file reappears.
+
+        A frame the user graded by hand (``user_override``) is left alone — their
+        accept is a decision, not an assumption — and a frame already rejected is
+        not re-stamped, so calling this twice is a no-op. Returns the ids newly
+        set aside. One ``stat()`` per accepted frame, like every other readability
+        check.
+        """
+        assert self._conn is not None
+        gone = [
+            f.id for f in self.iter_frames(accepted_only=True)
+            if f.id is not None and not f.user_override
+            and readable_frame_path(f) is None
+        ]
+        if not gone:
+            return []
+        with self.transaction():
+            for fid in gone:
+                self.update_frame(fid, accept=False,
+                                  reject_reason=REJECT_REASON_FILE_MISSING)
+        return gone
+
+    def restore_missing_frames(self) -> list[int]:
+        """Re-accept every sub set aside as missing whose file is readable again.
+
+        The other half of :meth:`set_missing_frames_aside`, and the reason that
+        one is safe to offer: plugging the drive back in, or restoring the
+        folder, undoes it with no action from the owner at all. Only frames
+        carrying :data:`REJECT_REASON_FILE_MISSING` are considered, so a manual
+        rejection and every QC verdict are untouched.
+
+        Returns the ids newly restored; a no-op (and one ``stat()`` per set-aside
+        frame) when there are none, which is every healthy install.
+        """
+        assert self._conn is not None
+        # Query the candidates rather than walking every frame: this runs once
+        # per target per scan, and the owner's deepest target holds ~5 500 rows
+        # that are almost never candidates. No candidates ⇒ no ``stat()`` at all.
+        rows = self._conn.execute(
+            "SELECT * FROM frames WHERE accept = 0 AND reject_reason = ?",
+            (REJECT_REASON_FILE_MISSING,),
+        ).fetchall()
+        back = [
+            f.id for f in (_row_to_frame(r) for r in rows)
+            if f.id is not None and readable_frame_path(f) is not None
+        ]
+        if not back:
+            return []
+        with self.transaction():
+            for fid in back:
+                self.update_frame(fid, accept=True, reject_reason=None)
+        return back
+
+    def count_frames_set_aside_as_missing(self) -> int:
+        """How many of this target's subs are currently set aside as missing."""
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM frames WHERE accept = 0 AND reject_reason = ?",
+            (REJECT_REASON_FILE_MISSING,),
+        ).fetchone()
+        return int(row[0]) if row else 0
 
     def iter_frames(self, accepted_only: bool = False) -> Iterator[FrameRow]:
         assert self._conn is not None

@@ -148,6 +148,10 @@ def _pipeline_body(
             # scan loop discarded it — so the walk-away path, which is exactly
             # where the rescue happens unattended, had no way to say so.
             rescued: dict[str, int] = {}
+            # Subs put back because their file reappeared, after the owner had
+            # set them aside as missing (see ``Project.restore_missing_frames``).
+            # Reported so a scan that quietly un-does a manual decision says so.
+            missing_restored: dict[str, int] = {}
             for safe in touched_names:
                 if job.cancel_requested():
                     # Surface the cancel at the top level so JobManager._run's
@@ -183,6 +187,13 @@ def _pipeline_body(
                                 graded[safe] = counts.rejected
                             if counts.restored:
                                 regraded_back[safe] = counts.restored
+                        # Subs the owner set aside as "gone" whose files are back.
+                        # Free here (the project is already open) and one indexed
+                        # predicate on a target that never used the button, i.e.
+                        # every healthy install. See ``restore_missing_frames``.
+                        n_back = len(proj.restore_missing_frames())
+                        if n_back:
+                            missing_restored[safe] = n_back
                     finally:
                         proj.close()
                     lib.refresh_target_stats(safe)
@@ -208,6 +219,8 @@ def _pipeline_body(
                 summary["auto_regraded_back"] = regraded_back
             if rescued:
                 summary["bootstrap_rescued"] = rescued
+            if missing_restored:
+                summary["missing_files_restored"] = missing_restored
             if qc_errors:
                 summary["qc_errors"] = qc_errors
 
@@ -255,6 +268,13 @@ def _pipeline_body(
                 try:
                     calib_fp: str | None = None
                     degraded_fp: str | None = None
+                    # Put back any sub the owner set aside as "gone" whose file
+                    # has since reappeared, *before* deciding whether to stack —
+                    # otherwise the target would stack the thin set once more
+                    # before healing on the following scan. Covers targets the
+                    # QC pass above didn't touch (no new subs), which is exactly
+                    # the state a target sits in while its files are away.
+                    _restore_missing_frames(lib, safe)
                     attempt_n = _auto_stack_frame_count(lib, safe)
                     if attempt_n is None:
                         # No *new* frames to stack — but if the target's stack is
@@ -1347,6 +1367,38 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
     return out, recipe
 
 
+def _edit_export_wcs_text(fits_path: str, recipe) -> str | None:  # noqa: ANN001
+    """The celestial WCS to write onto an editor export of ``fits_path``.
+
+    An editor export used to be written with ``wcs_text=None`` unconditionally, so
+    **every** edited picture lost its sky solution — and with it North-up, the
+    scale bar, the compass and object labels, all of which read the run's own FITS
+    (:func:`seestack.io.wcs_io.celestial_wcs_from_fits`). Tone edits don't move a
+    single pixel, so there was nothing to lose in the first place; crop and resize
+    move pixels in a way the solution can follow exactly.
+
+    Returns ``None`` — no WCS, rather than a wrong one — when the source has no
+    solution, or when the recipe rotates (see
+    :func:`~seestack.edit.ops.geometry.geometry_pixel_steps`). Best-effort: any
+    failure here yields ``None`` and the export is written exactly as it was
+    before, so this can never cost a user their edit.
+    """
+    from seestack.edit.ops.geometry import geometry_pixel_steps
+    from seestack.io.wcs_io import celestial_wcs_from_fits, wcs_text_after_pixel_steps, wcs_to_text
+
+    try:
+        wcs, width, height = celestial_wcs_from_fits(fits_path)
+        if wcs is None or width <= 0 or height <= 0:
+            return None
+        steps = geometry_pixel_steps(recipe, (height, width))
+        if steps is None:
+            return None
+        return wcs_text_after_pixel_steps(wcs_to_text(wcs), steps)
+    except Exception:  # noqa: BLE001 — provenance, never worth failing an export over
+        log.warning("editor export WCS carry-over failed", exc_info=True)
+        return None
+
+
 def render_run_recipe_fullres_png(
     fits_path: str, recipe_dict: dict, *,
     max_long_edge: int = 8000, north_up: bool = False,
@@ -1448,7 +1500,8 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int,
         # the TIFF/preview must be written as-is, not re-stretched/linear-rescaled.
         paths = write_stack_outputs(
             project_dir=proj.project_dir, rgb=out, coverage=coverage,
-            wcs_text=None, out_basename=base, tiff_mode=tiff_mode,
+            wcs_text=_edit_export_wcs_text(run.fits_path, recipe),
+            out_basename=base, tiff_mode=tiff_mode,
             header_meta=edit_meta, already_display=True,
         )
         # Re-exporting under an existing basename archives the prior export's
@@ -1992,6 +2045,33 @@ def _readability_recovered(proj: Any) -> bool:
     if last_unreadable <= 0:
         return False
     return _solved_accepted_unreadable(proj) < last_unreadable
+
+
+def _restore_missing_frames(lib: Library, safe: str) -> int:
+    """Re-accept ``safe``'s set-aside-as-missing subs whose files are back.
+
+    The automatic half of the "those subs are gone, carry on without them"
+    action (``POST …/frames/set-missing-aside``): the owner never has to undo it
+    themselves. Costs one indexed predicate on a target that never used the
+    button — every healthy install — and refreshes the registry only when
+    something actually changed.
+
+    Best-effort: a locked or read-only project must not sink a scan over a
+    housekeeping step, so a failure is logged and the scan carries on exactly as
+    it would have.
+    """
+    try:
+        proj = lib.open_target(safe)
+        try:
+            back = proj.restore_missing_frames()
+        finally:
+            proj.close()
+        if back:
+            lib.refresh_target_stats(safe)
+        return len(back)
+    except Exception as exc:  # noqa: BLE001 — housekeeping never sinks a scan
+        log.warning("restoring missing-file subs failed for %s: %s", safe, exc)
+        return 0
 
 
 def _auto_stack_readability_hold(

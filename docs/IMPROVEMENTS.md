@@ -937,6 +937,34 @@ _(nothing else claimed — claim an item here with your branch name)_
   (`pointing_groups` already exists) or per-pixel from the coverage plane; extend `stackhealth`'s
   `rejection_blind` note the same way.~~
 
+- **✅ HARDENED ON TOP (Builder, v0.327.6, branch `claude/sweet-babbage-35yfmt`) — collision twelve, stood
+  down and re-applied additively.** This run built A5 independently and inside the same hour; **the
+  `…-2ss60a` version below is on `main` and ships, and mine was dropped rather than re-litigated** — it is
+  equal or better at nearly every point, down to the same design calls (the analysis notes deliberately
+  staying on the newest run, the "Your picture (cover)" heading, the dimmed line linking to History).
+
+  The stand-down was **decided by measurement**, per the standing method from collision ten: run your own
+  fixture against their shipped code in a `git worktree` of `origin/main`. That took two minutes and found
+  exactly one thing mine caught that theirs did not, which is now re-applied in their names.
+
+  **`pictureRun`'s fallback was the newest *run*, not the newest run with a *picture*** — the second half of
+  `_representative_run`'s precedence, and the same divergence A5 is about one step along. A newest run with
+  no preview (a channel-combine, or one whose preview file has gone) left the Target page showing **nothing**
+  while the Library tile went on showing the run before it. Verified by writing the probe against `origin/main`
+  in a worktree first: it fails there. `showingOlderCover` moved with it — it now compares against the newest
+  run *with a picture*, so falling back past a preview-less newest run cannot announce a cover nobody pinned —
+  and a target with no picture anywhere still falls all the way back to `latestRun`, because the action row
+  (Edit, Stack) works on a run that has yet to render one. Two tests in `Target.test.tsx`.
+
+  **Not re-applied, and the reasoning recorded so it isn't re-picked:** my version expressed the precedence in
+  a separate pure module with its own unit tests, and added card-level tests for the heading and the note.
+  Theirs inlines the precedence and pins it end-to-end through the page instead. Run against their code, none
+  of those tests catches anything the page-level ones miss — so they would have been parallel fixtures, not
+  cover. **One real nit is left rather than churned:** the row's Edit button keeps `aria-label="Edit latest
+  stack"` while it now edits the *cover*. Filed under "Friendliness" as a copy fix rather than fixed here,
+  because renaming it also collides with the card's own "Edit this picture" link and is worth doing once,
+  deliberately.
+
 - **✅ SHIPPED (Builder, v0.327.3, branch `claude/zen-mccarthy-2ss60a`) — ~~A5: the Target page's "Your
   picture" ignores the pinned cover that every other surface honours.~~** Fixed with the same precedence
   `_representative_run` uses, *including its degrade*: a cover whose preview has gone falls back to the newest
@@ -972,20 +1000,130 @@ _(nothing else claimed — claim an item here with your branch name)_
   Library card while its own notes talk about "the cover". **Fix:** same precedence as `_representative_run`;
   label "Your picture (cover)" vs "Your newest picture".
 
-- **🟡 A8 — a target whose missing files never return is held back from auto-stacking FOREVER, and the owner
-  has no action to take.** `_auto_stack_readability_hold` (`webapp/pipeline.py`) holds while
-  `readable < prior_max`. If the owner deletes a bad session from `incoming/` — his folder, his right — the DB
-  rows persist, `unreadable` never drops, and the target only releases once new subs exceed the best run's
-  `n_frames_used`. Reproduced: best run 10, delete 4, add 3 → **held**; needs 5 new subs to escape. He is told,
-  but is offered nothing to do. **Fix:** a reversible, DB-only "mark N missing subs unavailable" (`accept=0`,
-  auto-restored if the path reappears) — one click, or automatic once the same set has been unreadable across
-  K scans over N days. **Also:** the "healing an already-degraded picture is deliberately left open" note in
-  `AGENTS.md` §1 is **stale** — `_auto_stack_degraded_recheck` shipped.
+- **✅ SHIPPED (Builder, v0.327.5, branch `claude/sweet-babbage-35yfmt`) — ~~A8: a target whose missing files
+  never return is held back from auto-stacking FOREVER, and the owner has no action to take.~~** Shipped in
+  the shape the entry named — a reversible, database-only "those subs are gone", auto-restored when a path
+  reappears — with the automatic-after-K-scans variant deliberately **not** built (see below).
 
-- **🟡 A9 — editor exports drop the WCS**, so any edited picture loses North-up, scale bar, compass and object
-  labels. `_apply_editor_to_run` (`webapp/pipeline.py`) passes `wcs_text=None` to `write_stack_outputs`
-  **even when the recipe contains no geometry op**. **Fix:** carry the source header's celestial cards when no
-  enabled `geometry.*` op is present; adjust CRPIX for crop/resize; drop only for rotate.
+  **What the hold actually costs, measured rather than assumed.** Tracing it before writing anything corrected
+  the entry on one point worth recording: the target does *not* stack the moment the missing subs are set
+  aside, and it **should not**. `_auto_stack_frame_count` still requires more solved+accepted subs than the
+  best run ever covered, and after the set-aside there are fewer — so the 10-frame master rightly stands
+  rather than being replaced by a 9-frame one. What the fix ends is the **dead end**: every scan for the rest
+  of time reporting the same hold over data that cannot improve, on a target the owner may never shoot again,
+  with the accepted count still claiming subs that do not exist. Once set aside the target is back under the
+  ordinary "stack when there is more than last time" rule.
+
+  **Two halves, and the second is what makes the first safe to offer.**
+  `Project.set_missing_frames_aside()` marks every accepted sub with no readable file `accept=0` with a new
+  `REJECT_REASON_FILE_MISSING`; `Project.restore_missing_frames()` puts back any of them whose file is
+  readable again, and the scan calls it **before** deciding whether to stack — in the QC pass (where the
+  project is already open, so it is free) and at the top of the auto-stack per-target body, which covers a
+  target the QC pass never touched. That is exactly the state a target sits in while its drive is away, so
+  covering it is the difference between "self-heals" and "self-heals only if you also shoot it again". The
+  restore queries its candidates by predicate rather than walking the frame table, so a target that never used
+  the button — every healthy install — does **zero** `stat()` calls per scan.
+
+  **§10 is pinned, not just respected.** A "the files are gone" action must never so much as consider removing
+  one: the endpoint is database-only, and `test_it_touches_no_file_on_disk` asserts the `incoming/` listing is
+  byte-identical across it. The tests make frames unreadable by repointing their recorded paths, never by
+  deleting anything.
+
+  **Two rules borrowed from `reject_seestar_output_frames`, which is the same shape of decision.** A frame the
+  user graded by hand (`user_override`) is left alone — their accept is a decision, not an assumption — and an
+  already-rejected frame keeps its own reason, so a cloudy/streak auto-reject is never re-labelled. Calling it
+  twice is a no-op. The undo is the **existing** bulk accept of exactly the ids returned, so there is no second
+  undo path to keep in step with the first.
+
+  **The wording, because this is where a beginner gets frightened.** The `AutoStackHoldNote` (the note on the
+  page they actually look at) keeps its existing "nothing has been lost" paragraph verbatim for the ordinary
+  off-line-drive case, and adds the deliberate one: *"Deleted those subs on purpose? Then they're never coming
+  back… It only changes AstroStack's own records — your files are never touched — and if the missing ones ever
+  turn up again they're put back automatically."* And the rejection breakdown gains its own bucket, **"Their
+  files aren't on your disk any more"**, rather than filing the owner's own action under "Left out for other
+  reasons" — it is the one bucket where "nothing was deleted by the app" is the whole point.
+
+  **Deliberately not built: the "automatic once the same set has been unreadable across K scans over N days"
+  variant.** Setting a user's subs aside without being asked is a different risk class from offering it: the
+  failure mode is a long holiday, a NAS rebuilt over a week, a drive left unplugged — and the app would
+  quietly un-accept a night that was coming back. The manual action costs one click on a note that is already
+  on screen and already explains itself. Filed under "Autonomy & friendliness" if it is ever wanted.
+
+  **Upgrade-safe (§9):** no schema change (the reason is a value in an existing `TEXT` column), no config key,
+  no on-disk change, no default flipped, one *added* endpoint and one *added* summary bucket — both additive,
+  and an older frontend ignores both. A healthy install is bit-for-bit unaffected, pinned by
+  `test_a_healthy_scan_sets_nothing_aside_and_reports_nothing`.
+
+  **Tests (+18).** `tests/test_missing_frames_set_aside.py` (8) on the engine pair, including the cache→source
+  fallback (a sub whose original is gone but whose Stage-1 cache is present is *readable* and must not be set
+  aside). `tests/webapp/test_set_missing_aside.py` (8) on the endpoint, the §10 guarantee, the honest accepted
+  count, the undo and the breakdown bucket. `tests/webapp/test_auto_stack_pipeline.py` (+3) on the scan: the
+  dead end reproduced across repeated scans and then ended, the automatic restore (which **fails** without the
+  new pass), and the healthy-install no-op. `AutoStackHoldNote.test.tsx` (+3) on the copy and the undo.
+
+  *(Original audit entry follows.)*
+
+  ~~**🟡 A8 — a target whose missing files never return is held back from auto-stacking FOREVER, and the owner
+    has no action to take.**~~ `_auto_stack_readability_hold` (`webapp/pipeline.py`) holds while
+    `readable < prior_max`. If the owner deletes a bad session from `incoming/` — his folder, his right — the DB
+    rows persist, `unreadable` never drops, and the target only releases once new subs exceed the best run's
+    `n_frames_used`. Reproduced: best run 10, delete 4, add 3 → **held**; needs 5 new subs to escape. He is told,
+    but is offered nothing to do. **Fix:** a reversible, DB-only "mark N missing subs unavailable" (`accept=0`,
+    auto-restored if the path reappears) — one click, or automatic once the same set has been unreadable across
+    K scans over N days. **Also:** the "healing an already-degraded picture is deliberately left open" note in
+    `AGENTS.md` §1 is **stale** — `_auto_stack_degraded_recheck` shipped.
+
+- **✅ SHIPPED (Builder, v0.327.4, branch `claude/sweet-babbage-35yfmt`) — ~~A9: editor exports drop the
+  WCS.~~** Fixed in all three parts the entry named — carry it when nothing moved, *move it* for crop and
+  resize, drop it only for rotate — and reproduced first through the real export job.
+
+  **Why this was worse than "an overlay is missing".** The edited picture is the one the owner shares; the
+  linear master is a working file. So the run that had lost North-up, the scale bar, the compass and its
+  object labels was precisely the run every one of those was for. And the recipe that lost them most often is
+  the one that moves **no pixels at all**: a tone-only edit exports onto the identical grid, so the source
+  solution was already exactly right and was thrown away anyway.
+
+  **The pixel replay is derived from the ops, not re-implemented beside them.** `crop_bounds` and
+  `resize_shape` are now split out of `_crop`/`_resize` (`seestack/edit/ops/geometry.py`) and a new
+  `geometry_pixel_steps` walks a recipe's *enabled* geometry ops through them, so the WCS moves by the very
+  numbers the image moved by — including every no-op guard the ops already carry (a degenerate crop, a unit
+  resize, a sub-threshold rotate) which must **not** move the WCS either. A second copy of that arithmetic
+  would have drifted the first time one of those guards was tuned.
+
+  **The one call worth knowing: resize follows `scipy.ndimage.zoom`'s corner-aligned sampling**
+  (`x_in = x_out · (n_in − 1)/(n_out − 1)`), not the intuitive `x_in = x_out / scale`. The tests pin a real
+  star's sky position through the **real op** rather than the keywords: measured **0.0004–0.28″** (< 0.06 px)
+  across scales 0.37/0.5/2.0, where the intuitive convention lands **1.6–5.5″** out — so the bound is tight
+  enough that the wrong convention fails. Crop is a pure integer translation and lands exactly (0.0″). The
+  scale factors multiply the transform's **columns** (pixel axes), not its rows, which is only the same thing
+  on a diagonal matrix — a test with a 23° field rotation pins that.
+
+  **It returns `None` rather than a guess**, in four places: no solution on the source; an active rotate
+  (it resamples onto a grid the source solution no longer describes, and a plausible-looking wrong WCS is
+  worse than none — every overlay would then be quietly off); a resize under **SIP** distortion (the
+  coefficients are polynomials in *source* pixels — a crop only shifts the origin they are already relative
+  to, a rescale invalidates them); and a legacy `CROTA` header. The whole carry-over is best-effort inside a
+  `try`, so it can never cost a user their export.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk layout change, no API shape change, no setting
+  flipped, and nothing already exported is touched. Runs exported before this keep behaving exactly as they
+  do today (no WCS); an unsolved source still exports without one, pinned by a test. The sky-coverage stat
+  unions rather than sums, so an edited run now contributing its footprint cannot double-count the patch its
+  own master already covers.
+
+  **Tests (+21; the 3 webapp ones fail before, and the 18 engine ones cover code that did not exist).**
+  `tests/test_edit_geometry_wcs.py` (18) pins the replay against what the ops actually did to the image and
+  the rewritten WCS against a centroided star. `tests/webapp/test_editor_export_wcs.py` (3 of 5 failing
+  before) goes through the real export job and reads the result back the way the app's own overlays do —
+  including that `…/annotations` now returns the same compass, scale bar and North-up turn for the edited run
+  as for the master it came from.
+
+  *(Original audit entry follows.)*
+
+  ~~**🟡 A9 — editor exports drop the WCS**~~, so any edited picture loses North-up, scale bar, compass and object
+    labels. `_apply_editor_to_run` (`webapp/pipeline.py`) passes `wcs_text=None` to `write_stack_outputs`
+    **even when the recipe contains no geometry op**. **Fix:** carry the source header's celestial cards when no
+    enabled `geometry.*` op is present; adjust CRPIX for crop/resize; drop only for rotate.
 
 - **✅ SHIPPED (Builder, v0.326.5, branch `claude/zen-mccarthy-xesefm`) — ~~A4: every baked caption says "ZWO
   Seestar S50"; the owner has an S30.~~** Derived, in the direction the entry named — and pointedly **not**
@@ -18176,6 +18314,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEW IDEA (Builder 2026-09-02, left rather than churned while standing down the A5 collision) — the
+  Target page's Edit button is still labelled "Edit latest stack" while it now edits the *cover*.**
+  *(Pillar: approachable — PRIORITY 3; size XS.)* Since v0.327.3 the row's Edit button, the Save/share menu and
+  the hero card all follow the **pinned cover**, but the button's `aria-label` in `frontend/src/routes/Target.tsx`
+  still says `"Edit latest stack"` — a screen-reader user is told it does something it does not. Worth one
+  deliberate pass rather than a drive-by rename, because the obvious replacement ("Edit this picture") is
+  already the accessible name of `LatestPictureCard`'s own Edit link on the same screen, so the two would
+  collide and make both ambiguous (this also breaks `Target.test.tsx`'s `getByRole("link", …)` lookups). Pick
+  two distinct names — e.g. the row's button "Edit your picture", the card's link unchanged — and update the
+  two assertions that quote the old label.
 
 - **NEW IDEA (Builder 2026-09-02, the other direction of the v0.326.8 "Edited from …" line) — the *original*
   stack says nothing about the edit made from it, so the pointer only works if you happen to look at the right
