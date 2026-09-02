@@ -937,6 +937,34 @@ _(nothing else claimed — claim an item here with your branch name)_
   (`pointing_groups` already exists) or per-pixel from the coverage plane; extend `stackhealth`'s
   `rejection_blind` note the same way.~~
 
+- **✅ HARDENED ON TOP (Builder, v0.327.6, branch `claude/sweet-babbage-35yfmt`) — collision twelve, stood
+  down and re-applied additively.** This run built A5 independently and inside the same hour; **the
+  `…-2ss60a` version below is on `main` and ships, and mine was dropped rather than re-litigated** — it is
+  equal or better at nearly every point, down to the same design calls (the analysis notes deliberately
+  staying on the newest run, the "Your picture (cover)" heading, the dimmed line linking to History).
+
+  The stand-down was **decided by measurement**, per the standing method from collision ten: run your own
+  fixture against their shipped code in a `git worktree` of `origin/main`. That took two minutes and found
+  exactly one thing mine caught that theirs did not, which is now re-applied in their names.
+
+  **`pictureRun`'s fallback was the newest *run*, not the newest run with a *picture*** — the second half of
+  `_representative_run`'s precedence, and the same divergence A5 is about one step along. A newest run with
+  no preview (a channel-combine, or one whose preview file has gone) left the Target page showing **nothing**
+  while the Library tile went on showing the run before it. Verified by writing the probe against `origin/main`
+  in a worktree first: it fails there. `showingOlderCover` moved with it — it now compares against the newest
+  run *with a picture*, so falling back past a preview-less newest run cannot announce a cover nobody pinned —
+  and a target with no picture anywhere still falls all the way back to `latestRun`, because the action row
+  (Edit, Stack) works on a run that has yet to render one. Two tests in `Target.test.tsx`.
+
+  **Not re-applied, and the reasoning recorded so it isn't re-picked:** my version expressed the precedence in
+  a separate pure module with its own unit tests, and added card-level tests for the heading and the note.
+  Theirs inlines the precedence and pins it end-to-end through the page instead. Run against their code, none
+  of those tests catches anything the page-level ones miss — so they would have been parallel fixtures, not
+  cover. **One real nit is left rather than churned:** the row's Edit button keeps `aria-label="Edit latest
+  stack"` while it now edits the *cover*. Filed under "Friendliness" as a copy fix rather than fixed here,
+  because renaming it also collides with the card's own "Edit this picture" link and is worth doing once,
+  deliberately.
+
 - **✅ SHIPPED (Builder, v0.327.3, branch `claude/zen-mccarthy-2ss60a`) — ~~A5: the Target page's "Your
   picture" ignores the pinned cover that every other surface honours.~~** Fixed with the same precedence
   `_representative_run` uses, *including its degrade*: a cover whose preview has gone falls back to the newest
@@ -18286,6 +18314,17 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEW IDEA (Builder 2026-09-02, left rather than churned while standing down the A5 collision) — the
+  Target page's Edit button is still labelled "Edit latest stack" while it now edits the *cover*.**
+  *(Pillar: approachable — PRIORITY 3; size XS.)* Since v0.327.3 the row's Edit button, the Save/share menu and
+  the hero card all follow the **pinned cover**, but the button's `aria-label` in `frontend/src/routes/Target.tsx`
+  still says `"Edit latest stack"` — a screen-reader user is told it does something it does not. Worth one
+  deliberate pass rather than a drive-by rename, because the obvious replacement ("Edit this picture") is
+  already the accessible name of `LatestPictureCard`'s own Edit link on the same screen, so the two would
+  collide and make both ambiguous (this also breaks `Target.test.tsx`'s `getByRole("link", …)` lookups). Pick
+  two distinct names — e.g. the row's button "Edit your picture", the card's link unchanged — and update the
+  two assertions that quote the old label.
 
 - **NEW IDEA (Builder 2026-09-02, the other direction of the v0.326.8 "Edited from …" line) — the *original*
   stack says nothing about the edit made from it, so the pointer only works if you happen to look at the right
