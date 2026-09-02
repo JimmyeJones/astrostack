@@ -45,6 +45,7 @@ from seestack.framing import (
     framing_hint,
     mosaic_plan,
 )
+from seestack.sharecard import format_duration
 from seestack.target_difficulty import DifficultyHint, target_difficulty
 
 log = logging.getLogger(__name__)
@@ -1957,7 +1958,14 @@ def _have_phrase(hours: float, subject: str, *, capitalise: bool = True) -> str:
     elif hours * 60.0 < 1.0:
         text = f"you've barely started on {subject}"
     else:
-        text = f"you've got {_hours_phrase(hours)} on {subject}"
+        # The app's one integration-time vocabulary (`sharecard.format_duration`,
+        # which is what `formatIntegration` says in the browser), not the window
+        # countdown's `_hours_phrase` above it. This clause and the Target page's
+        # readiness card describe the *same* number — how much light this target
+        # has — and used to disagree on how to say it ("1 h 20 m" here against
+        # "1.3 h" there). The window really is a different quantity (when to stop
+        # tonight), so it keeps its own minutes-precise wording.
+        text = f"you've got {format_duration(hours * 3600.0)} on {subject}"
     return text[0].upper() + text[1:] if capitalise else text
 
 

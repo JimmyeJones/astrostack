@@ -1543,6 +1543,49 @@ describe("TargetView reject breakdown + undo", () => {
     ).toBeInTheDocument();
   });
 
+  it("stops the explainer calling the subs harmless while the setup banner blocks the target", async () => {
+    // Both were on screen at once: the blocking banner saying ASTAP is missing
+    // and "this blocks the whole target", and this popover a few pixels away
+    // saying the same subs are "usually harmless — the located subs still stack
+    // into your picture". With no solver there are no located subs. This pins
+    // the wiring (the page hands the popover the banner's own verdict), which
+    // the component's own tests can't see.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 5, n_frames_accepted: 5 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: {
+        "solve_failed:astap.exe not found. Install ASTAP from https://www.hnsky.org/astap.htm":
+          5,
+      },
+      total: 5,
+      summary: {
+        used: 0,
+        dropped: 5,
+        dropped_fraction: 1,
+        verdict: { tone: "warn", text: "Run Plate Solve so the rest can be added." },
+        buckets: [
+          { key: "unsolved", label: "Not located in the sky yet", count: 5, note: "Run Plate Solve." },
+        ],
+      },
+    });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Plate-solving isn't set up — ASTAP wasn't found"),
+      ).toBeInTheDocument());
+    fireEvent.click(
+      screen.getByRole("button", { name: /what does .*not located yet.* mean/i }),
+    );
+    expect(await screen.findByText(/ASTAP — the program that does the locating/))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/usually\s+harmless/)).toBeNull();
+  });
+
   it("omits the plate-solve explainer when frames were only rejected, not unsolved", async () => {
     // Everything that was left out was a hand/QC reject — there's no "not located"
     // jargon to explain, so the "?" affordance must not appear.
