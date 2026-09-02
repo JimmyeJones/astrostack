@@ -638,7 +638,7 @@ _(nothing else claimed — claim an item here with your branch name)_
       confirms it on the live box.
 
 - **✅ SHIPPED, A2's LAST TWO ITEMS — the "also verified, smaller" pair the entry above leaves open
-  (Builder, v0.326.8, branch `claude/zen-mccarthy-2ss60a`).** Written *on top of* `…-mqfxxg`'s v0.326.6 after
+  (Builder, v0.327.2, branch `claude/zen-mccarthy-2ss60a`).** Written *on top of* `…-mqfxxg`'s v0.326.6 after
   running this run's own tests against theirs in a worktree of `origin/main` — two of them failed there, which
   is the only reason either half of this is here (see the collision note at the foot of this entry).
 
@@ -937,7 +937,7 @@ _(nothing else claimed — claim an item here with your branch name)_
   (`pointing_groups` already exists) or per-pixel from the coverage plane; extend `stackhealth`'s
   `rejection_blind` note the same way.~~
 
-- **✅ SHIPPED (Builder, v0.326.9, branch `claude/zen-mccarthy-2ss60a`) — ~~A5: the Target page's "Your
+- **✅ SHIPPED (Builder, v0.327.3, branch `claude/zen-mccarthy-2ss60a`) — ~~A5: the Target page's "Your
   picture" ignores the pinned cover that every other surface honours.~~** Fixed with the same precedence
   `_representative_run` uses, *including its degrade*: a cover whose preview has gone falls back to the newest
   picture rather than blanking the page.
@@ -11357,23 +11357,57 @@ to **Shipped**.)_
   user is told the right thing by a different note, and swapping the definition changes which of two correct
   alerts they see. Worth doing as *one definition* rather than as a bug fix, and only with a test that pins
   which note appears in the overlap.
-- **⭐ QA LEAD (Builder 2026-09-02, generalised from the v0.323.0 empty-slideshow fix) — sweep every *primary
-  call to action* that renders on a surface which can legitimately be empty, and ask whether it leads anywhere
-  on a fresh install.** *(Pillar: friendliness — PRIORITY 3; size S per candidate, and the *identifying* test
-  costs nothing. Confidence: the shape is proven — one live instance found and fixed this run.)* The confirmed
-  instance: "My best pictures" rendered **Play slideshow** unconditionally beside its own "your pictures will
-  gather here later" empty state, while the count badge three lines up *was* gated. The generative test, which
-  needs no measurement: **is this control gated on the same data as the emptiness it sits beside — and is that
-  data actually the data the destination reads?** The second half is the interesting one and is where the trap
-  lives: the slideshow's content is `buildSlides(best, videos)`, a *superset* of the wall, so the obvious gate
-  (`items.length > 0`) would have hidden a working show from a beginner whose first picture was a Moon still.
-  So a candidate is only settled by naming the destination's own emptiness predicate, not the host page's.
-  **Where to look:** any page with an empty state and a button in its header — the Gallery, the Life list,
-  Compare (which needs *two* runs), Tonight, Calibration, Moon & Sun — plus the sidebar links, which are always
-  present by design and are *not* candidates (a nav link to an empty page is a page, not a dead action).
-  **Care:** a *failed* query is "unknown", not "empty" — the v0.323.0 fix keeps its button when the gallery
-  errors, because a graceful empty destination costs a dead click while a wrong hide costs the whole feature.
-  Any candidate fixed here should make the same call the same way.
+- **✅ SWEPT AND CLOSED — one second instance found and fixed (Builder, v0.327.1, branch
+  `claude/zen-mccarthy-gmo0to`). Don't re-sweep this list; read the result before adding to it.**
+  Every candidate the lead named was walked: **Gallery** (header is icon + title + count badge, no action; the
+  search/facet row is gated on `allItems.length + allStills.length > 0` and the batch Compare link on a
+  selection), **Life list** (header has no action; the catalog is bundled so the page is never empty),
+  **Compare** (its only header button is *Back to Gallery* — a back affordance beside an alert that explicitly
+  sends you there to pick two images; correct destination, not a candidate), **Tonight** (header holds a date
+  input and an altitude select; both degraded states render an explanatory alert, and the one link goes to
+  Settings, which is actionable when empty), **Calibration** (no navigation CTA — its one button is *Build*,
+  disabled until a source dir is typed, acting on the page the empty state points at), **Moon & Sun** (header
+  is title + prose; every button lives inside a per-capture card), **Sky so far** and **Universe** (the only
+  link on the empty branch sits *inside* the empty state and points at the Library, where you'd add data),
+  and **Library** (search/sort/upload/suggestions all gated on `targets.length > 0`).
+
+  **The one live instance: the Sky page's "My map" mode rendered *Save this map* unconditionally** — over the
+  bare Aitoff grid a fresh install draws, directly opposite the page's own "No stacked images yet" alert. It
+  is a `download` link, so the dead click doesn't merely go nowhere: it hands a beginner
+  `astrostack-my-map-2026-09-02.png`, a dated keepsake of nothing.
+
+  **And it reproduced the lead's own trap exactly, which is the part worth carrying forward.** The obvious
+  gate is the coverage query `MyMap` already runs (`n_pictures`, and its read-out beside the button *is*
+  correctly gated on it) — and it is the **wrong** data: coverage counts only runs it could measure off their
+  own WCS, while `_my_map_pictures` deliberately *draws* a run with no stored WCS at a nominal 1.3° field. A
+  library of older/edited runs would have had a perfectly good map and no button. The honest gate is
+  `GET /api/sky`'s `images`, whose three conditions (target has a solved position, newest run has a preview on
+  disk, canvas dims recorded) are exactly the map's own first filters — the map additionally skips a preview
+  it can't line up, so **map pictures ⊆ sky images**, and an empty list *proves* an empty map. Same discipline
+  as v0.323.0's `hasAnythingToShow`: name the destination's predicate, don't count the host's rows.
+
+  **Failure is unknown, not empty** — a failed `/api/sky` keeps the button (a graceful dead click costs one
+  click; a wrong hide costs the feature), while a *pending* query simply waits, since it resolves in a moment.
+  Pinned both ways. **Tests (+7):** 4 unit for the pure `myMapSaveOffered` (pictures / fresh install / failed
+  query / in flight), 1 that `MyMap` drops the button but still renders the map, and 2 page-level in
+  `Sky.test.tsx` that `SkyView` in "My map" mode offers no save beside its own empty-state alert and does
+  offer one as soon as a single picture is on the map. Both of the last three fail against the old code
+  (confirmed by running them against it).
+
+    *(Original lead, for the record — pillar: friendliness, PRIORITY 3.)* The confirmed
+    instance: "My best pictures" rendered **Play slideshow** unconditionally beside its own "your pictures will
+    gather here later" empty state, while the count badge three lines up *was* gated. The generative test, which
+    needs no measurement: **is this control gated on the same data as the emptiness it sits beside — and is that
+    data actually the data the destination reads?** The second half is the interesting one and is where the trap
+    lives: the slideshow's content is `buildSlides(best, videos)`, a *superset* of the wall, so the obvious gate
+    (`items.length > 0`) would have hidden a working show from a beginner whose first picture was a Moon still.
+    So a candidate is only settled by naming the destination's own emptiness predicate, not the host page's.
+    **Where to look:** any page with an empty state and a button in its header — the Gallery, the Life list,
+    Compare (which needs *two* runs), Tonight, Calibration, Moon & Sun — plus the sidebar links, which are always
+    present by design and are *not* candidates (a nav link to an empty page is a page, not a dead action).
+    **Care:** a *failed* query is "unknown", not "empty" — the v0.323.0 fix keeps its button when the gallery
+    errors, because a graceful empty destination costs a dead click while a wrong hide costs the whole feature.
+    Any candidate fixed here should make the same call the same way.
 
 - **NEW IDEA (Builder 2026-09-02, spotted while building the v0.323.1 print button) — sweep the app for
   sentences that *name* a number the form could just set, and give each one the button.** *(Pillar: autonomy —
@@ -18143,6 +18177,20 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **NEW IDEA (Builder 2026-09-02, the other direction of the v0.326.8 "Edited from …" line) — the *original*
+  stack says nothing about the edit made from it, so the pointer only works if you happen to look at the right
+  row.** *(Pillar: understand — PRIORITY 3; size XS; **check the overlap with `unexported_edit` first, it may
+  already be enough**.)* An export's card now names the run it came from and jumps to it. The source run's own
+  card says nothing back — no "an edited version of this exists" — so a beginner scrolling History still meets
+  the linear stack first and has no reason to think there is a finished picture two cards along. **The datum is
+  already there:** `derived_from` is on every export's `options`, so the reverse index is one pass over the
+  same list the page already holds (`derivedFromNote`'s neighbour, not a new query). **Why it is filed rather
+  than built:** the source card is already the busiest one in the app (badges, two dates, notes, the noise
+  delta), and `unexported_edit` already occupies exactly this slot for the *unfinished* case — so the honest
+  question is whether a second edit-related label earns its place, or whether the right shape is to extend the
+  existing badge's vocabulary rather than add a line. Decide that before writing code; if in doubt, leave it —
+  one direction of a link is often enough.
+
 > **⚠️ COLLISION — this was built twice in the same hour, and the version below (v0.323.0, branch
 > `claude/zen-mccarthy-2rptmf`) is the one that ships.** *(Builder 2026-09-02, branch
 > `claude/zen-mccarthy-v56oj1` — mine is dropped rather than re-litigated; theirs landed on `main` first.)*
@@ -18159,24 +18207,51 @@ problems. Dogfood it every big-picture run and fix root causes.
 > could have seen, and this is now the **tenth** such collision. Claim even the XS ones, in the run's first
 > commit, and push it immediately.
 
-- **NEW IDEA (Builder 2026-09-02, spotted while tracing the editor export path for v0.322.9) — an edited export
-  records which run it came from and *nobody ever reads it*, so History gives a beginner two near-identical
-  rows and no way to tell which is the original.** *(Pillar: understand + trust — PRIORITY 3; size XS–S.
-  Traced, high confidence — the datum is verified present and verified unused.)* `webapp/pipeline.py:1450`
-  writes `"derived_from": run_id` into the export's `options_json`, and the FITS carries the same fact as
-  `EDITFROM`. **A grep for `derived_from` across `frontend/src` and `webapp/` returns exactly that one write
-  site** — nothing reads it, on any surface. Meanwhile the two rows an export produces on the History page look
-  alike: same target, adjacent timestamps, one of them `notes="edited"`. A beginner who exports an edit and
-  later wants "the original data" has to *know* that the linear FITS lives on a different row. **Shape:** one
-  line on the edited run's History card — *"Edited from `M_31_master`"* — linking to that run, read straight
-  off `options_json` (already on the run payload, so no new API field and no schema change). **Care, and why
-  this is XS–S rather than XS:** a re-export under the same basename **archives** the previous outputs and
-  `repoint_stack_runs` moves the old row's paths, so the source run *can* have been repointed or, if the user
-  deleted it, be gone entirely — the line must degrade to plain text (or nothing) when the id no longer
-  resolves, never a dead link. Also note `derived_from` is only written by the *export* path; an "Apply &
-  save" run records its own row and does not carry it, so the line must self-hide rather than claim an unknown
-  ancestor. **Beginner bar ✔** — one plain sentence, no knob, and it answers the exact question ("which of
-  these is my raw stack?") the v0.322.9 export-panel copy now points at.
+- **✅ SHIPPED (Builder, v0.326.8, branch `claude/zen-mccarthy-gmo0to`) — ~~an edited export records which run
+  it came from and *nobody ever reads it*, so History gives a beginner two near-identical rows and no way to
+  tell which is the original.~~** Built as filed, frontend-only: `derived_from` is already inside the run
+  payload's `options` blob (`_parse_options` hands the whole stored JSON through), so no API, schema or
+  response-shape change was needed — a pure `derivedFromNote(run, runs)` in `routes/History.tsx` and one line
+  on the export's card.
+
+  **Both degraded shapes the entry warned about are handled, and pinned.** A deleted source run resolves to
+  nothing, so the line becomes plain text (*"Edited from a stack that's no longer here"*) with **no href** —
+  never a dead link; and an "Apply & save" run, which records its own row and carries no `derived_from`, says
+  nothing rather than claiming an ancestor. `options` is whatever JSON the run stored, so the helper refuses
+  anything that isn't a finite number (`"3"`, `NaN`, `{}`, `[3]`) and refuses a row that points at itself.
+
+  **The link is a scroll, not a navigation:** both rows sit in one grid on this page, so each card now carries
+  `id="stack-run-<id>"` and the line's click brings the source card into view (`scrollIntoView`), with the
+  bare-hash `href` kept for middle-click/copy but its default prevented so it doesn't push a history entry.
+
+  *(Renumbered three times at merge time, ending at v0.326.8: other Builders landed v0.325.1 through
+  **v0.326.7** on `main` while this run was building, twice taking a number this branch had already claimed —
+  §11's "set the number from the latest main", re-applied on every sync. The commits that made these changes
+  still say 0.325.1 / 0.326.0 / 0.326.1 in their messages; the sequence that actually ships is
+  **0.326.8** (this entry), **0.327.0** (the √N verdict) and **0.327.1** (the sky-map save gate). The lesson,
+  for the next Builder: on a branch that will sync more than once, expect to renumber at *every* sync, and
+  keep the doc entries as the record rather than the commit subjects.)*
+
+  **Tests (+7):** 4 unit (`derivedFromNote` — the named source, the ordinary run, the deleted source, and the
+  junk/`derived_from`-is-this-row refusals) and 3 render in `History.test.tsx` (the line with its `#stack-run-3`
+  href and a click that scrolls the source card, a plain-stack target with no such line, and the
+  deleted-source line rendering without an href).
+
+    *(Original spec, for the record — pillar: understand + trust, PRIORITY 3; size XS–S.)* `webapp/pipeline.py:1450`
+    writes `"derived_from": run_id` into the export's `options_json`, and the FITS carries the same fact as
+    `EDITFROM`. **A grep for `derived_from` across `frontend/src` and `webapp/` returns exactly that one write
+    site** — nothing reads it, on any surface. Meanwhile the two rows an export produces on the History page look
+    alike: same target, adjacent timestamps, one of them `notes="edited"`. A beginner who exports an edit and
+    later wants "the original data" has to *know* that the linear FITS lives on a different row. **Shape:** one
+    line on the edited run's History card — *"Edited from `M_31_master`"* — linking to that run, read straight
+    off `options_json` (already on the run payload, so no new API field and no schema change). **Care, and why
+    this is XS–S rather than XS:** a re-export under the same basename **archives** the previous outputs and
+    `repoint_stack_runs` moves the old row's paths, so the source run *can* have been repointed or, if the user
+    deleted it, be gone entirely — the line must degrade to plain text (or nothing) when the id no longer
+    resolves, never a dead link. Also note `derived_from` is only written by the *export* path; an "Apply &
+    save" run records its own row and does not carry it, so the line must self-hide rather than claim an unknown
+    ancestor. **Beginner bar ✔** — one plain sentence, no knob, and it answers the exact question ("which of
+    these is my raw stack?") the v0.322.9 export-panel copy now points at.
 
 - **✅ SHIPPED (Builder, v0.323.0, branch `claude/zen-mccarthy-2rptmf`) — ~~"My best pictures" offers **Play
   slideshow** on a wall that is empty, and the obvious gate is the wrong one.~~** **Both filed shapes, because
@@ -20617,6 +20692,80 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Shape:** feed `auto_reject_depth` (or, better, the coverage plane the pass already computes) into the
   `DRZREJ*` provenance and into `stackhealth`'s `rejection_blind` note, so a drizzled shallow mosaic gets the
   same honest line as a non-drizzled one. No change to any pixel — this is the "say what it did" half.
+- **NEW IDEA (Builder 2026-09-02, the reach the v0.327.0 √N verdict deliberately did not buy) — the
+  "your stack came in well under what its subs should give" nudge lives inside a collapsed reveal, so the one
+  person who needs it never opens it.** *(Pillar: trust + autonomy — PRIORITY 4/2; size S–M; **read the cache
+  note before sizing, it is what makes this cheap**.)* v0.327.0 added an honest early warning — a stack
+  measuring below 0.7·√(frames used) usually means soft alignment, a drifting gradient, or a lot of frames
+  dropped — but it renders on the "One frame vs your stack" card, behind a *See the difference* button on the
+  History page. A beginner whose stacks are quietly underperforming is exactly the person who never clicks it.
+  **The right home for a warning is "How's my stack?"** (`seestack/stackhealth.py`), which the Target page
+  already shows unprompted and which already ranks notes of precisely this shape (`rejection_blind`,
+  the coverage and seam notes). **Why this is S–M and not L:** the measurement is *already cached
+  server-side per run* — `NOISE_RATIO_META_PREFIX` (`webapp/routers/stack.py`), fingerprinted on the master and
+  the reference sub — and `StackNoiseBadge` fetches it eagerly on the Target result headline and the Jobs
+  completion summary, so by the time anyone reads the health notes the number is usually already sitting in the
+  project's meta table. **So the shape is: read the cache, never measure.** A health note that fired a master
+  reload + debayer on every Target page view would be a real regression on a page that must stay cheap; one
+  that says nothing when the stamp is absent costs nothing and self-heals the moment the headline badge
+  measures. **Care:** (1) keep *one* definition of the threshold — 0.7 and the 10-frame floor are currently in
+  `frontend/src/components/oneFrameVsStack.ts` with the measurement behind them in
+  `tests/test_noise_ratio_expectation.py`; moving the verdict engine-side means the card should read the
+  engine's answer rather than a second copy, exactly as `seam_verdict` and `rejection_reach` already do.
+  (2) The fingerprint must be honoured — a stale stamp from before a re-stack must not raise a note about a
+  picture that no longer exists. (3) Stay gentle: legitimate rejection and quality weighting lower the
+  effective frame count, and the copy already says "usually means", not "is".
+
+- **✅ SHIPPED (Builder, v0.327.0, branch `claude/zen-mccarthy-gmo0to`) — ~~say what stacking *should* have
+  bought, next to what it did, so a beginner can tell a healthy stack from an underperforming one.~~** Built as
+  filed: a pure `noiseVsExpectedNote(ratio, nFrames)` beside the existing `noiseReductionBadge`
+  (`components/oneFrameVsStack.ts`), rendered as one line under the badge on the "One frame vs your stack"
+  reveal — the one surface where the number is explained rather than celebrated. Frontend-only; the yardstick
+  is √(`n_frames_used`), which the reveal endpoint already carries, so no engine, API or schema change.
+
+  **The 0.7 factor is MEASURED, not guessed** — the entry asked for that and it is the part worth keeping.
+  Against the real `seestack.qc.noise_ratio` estimator on a synthetic sky + stars + extended object:
+  an **ideal** mean stack of independent-noise subs measures `ratio/√N` = **0.996–1.012** across N = 12…400
+  (the estimator is unbiased at every count the app sees); a **weighted** mean with weights as spread as
+  U(0.1, 1) still measures **0.93**, and its theoretical effective-N prediction agrees to 0.006 — so the
+  yardstick is honest about weighting rather than being fooled by it; and stacks whose subs share correlated
+  noise — the shape soft alignment, a drifting gradient or a duplicated sub produces — fall to **0.58 at 2 %
+  shared variance, 0.45 at 1 % over 400 subs, and 0.30 at 10 %**. 0.7 therefore sits in a wide empty gap: it
+  cannot fire on a healthy or heavily-weighted stack, and it catches correlated ones early. Those numbers are
+  written into the constant's docstring and pinned by a test that sweeps 0.93…1.2 × √N at N = 12/25/100/400
+  and asserts *none* of them reads as a concern.
+
+  **Two judgement calls the entry didn't specify.** (1) The **healthy** sentence assumes the badge is beside it
+  and doesn't repeat the measured number (*"That's about what 505 subs should give (√505 ≈ 22×)"*), which is
+  safe by arithmetic: anything at or above 0.7·√10 also clears the badge's own 1.5× floor. (2) The **concern**
+  sentence stands alone and carries the measured number itself, because it is rendered on its own gate rather
+  than inside the badge's — a stack far enough below √N can measure *under* 1.5×, and a 100-sub stack reading
+  1.3× is precisely the run worth saying something to. It suggests and never asserts (*"usually means the subs
+  didn't line up tightly, or a lot of them were dropped"*), and stays silent below 10 frames, where a single
+  unlucky reference sub swings the ratio more than the physics does.
+
+  **Tests (+16):** 6 unit in `oneFrameVsStack.test.ts` (the healthy sentence, small-stack rounding, the gentle
+  nudge, the below-the-badge-floor case, the no-false-alarm sweep above, and the silence/boundary cases), 4
+  render in `OneFrameVsStackCard.test.tsx` (healthy, concern, unmeasurable, and a 6-frame stack that gets a
+  badge but no verdict), and 6 in a new `tests/test_noise_ratio_expectation.py` that pins the *claim* rather
+  than the copy — running the real averaging over a scene with gradient, stars and a bright extended object,
+  it asserts an ideal stack reads 1.00·√N (±0.05) at N = 12/25/100, that a U(0.1,1)-weighted mean tracks its
+  own theoretical effective-N and stays well clear of the threshold, and that 2 %/10 % shared noise falls
+  under it. Without that file the 0.7 would be a number in a comment.
+
+    *(Original spec, for the record — pillar: trust + understand, PRIORITY 4/3; size S.)* The "stacking cut your noise
+    ~N×" badge (`seestack/qc/noise_ratio.py`) is a real, shareable number, but on its own a beginner can't tell
+    whether it's *good*. A weighted-mean stack of `k` frames should cut background noise by ~√k, so the honest
+    context is one clause: *"cut your noise 18× — about what 380 subs should give (√380 ≈ 19.5)."* When the
+    measured ratio lands well **below** √k (say < ~0.7·√k), that is the single most useful early-warning a
+    beginner never gets: it usually means alignment is soft, rejection is dropping a lot of frames, or the subs
+    are correlated — a "your stack is noisier than these subs should be; check focus/alignment" nudge. **Keep it
+    gentle and honest, not an alarm:** weighting and legitimate rejection lower the *effective* frame count, so
+    the √k yardstick must use frames actually **used** (`n_frames_used`), and the "below expected" copy should
+    suggest, never assert a fault. It also needs a floor on `k` (√k is meaningless at 5 subs). All the inputs are
+    already on the run (frames-used, the measured ratio); this is a copy/threshold shaping task with a test that
+    a healthy stack reads "as expected" and a deliberately mis-aligned one reads "lower than expected". Measure
+    the 0.7 factor against a couple of real stacks before pinning it.
 
 - **Let a mosaic choose its rejection method *per pixel*, not once for the whole canvas.** *(Pillar: image
   quality — PRIORITY 4; size L; opened by the A6 fix, v0.326.7.)* A6 fixed `auto_reject` reading the target's
@@ -20677,22 +20826,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   report clipping must keep counting them. The rule is that a statistic estimating a *property of the sky*
   excludes them, and one estimating *how much was clipped* does not. State which kind each site is in the
   commit.
-
-- **NEW IDEA (Scout 2026-09-02, spotted auditing `noise_ratio.py`) — say what stacking *should* have bought,
-  next to what it did, so a beginner can tell a healthy stack from an underperforming one.** *(Pillar: trust +
-  understand — PRIORITY 4/3; size S; additive, engine number already exists.)* The "stacking cut your noise
-  ~N×" badge (`seestack/qc/noise_ratio.py`) is a real, shareable number, but on its own a beginner can't tell
-  whether it's *good*. A weighted-mean stack of `k` frames should cut background noise by ~√k, so the honest
-  context is one clause: *"cut your noise 18× — about what 380 subs should give (√380 ≈ 19.5)."* When the
-  measured ratio lands well **below** √k (say < ~0.7·√k), that is the single most useful early-warning a
-  beginner never gets: it usually means alignment is soft, rejection is dropping a lot of frames, or the subs
-  are correlated — a "your stack is noisier than these subs should be; check focus/alignment" nudge. **Keep it
-  gentle and honest, not an alarm:** weighting and legitimate rejection lower the *effective* frame count, so
-  the √k yardstick must use frames actually **used** (`n_frames_used`), and the "below expected" copy should
-  suggest, never assert a fault. It also needs a floor on `k` (√k is meaningless at 5 subs). All the inputs are
-  already on the run (frames-used, the measured ratio); this is a copy/threshold shaping task with a test that
-  a healthy stack reads "as expected" and a deliberately mis-aligned one reads "lower than expected". Measure
-  the 0.7 factor against a couple of real stacks before pinning it.
 
 - **NEW IDEA (Builder 2026-08-31, the anchoring question the v0.320.1 per-panel patches deliberately left
   measured-but-unaddressed) — chain each mosaic panel's refine reference to a neighbour it overlaps, so the
@@ -30823,6 +30956,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **⚠️ PROCESS NOTE (Builder 2026-09-02, measured after it cost the end of a run) — a full `pytest` run leaves
+  ~9 GB behind in `/tmp/pytest-of-root`, and three runs fill the container's whole disk allowance.** Measured,
+  not guessed: after a baseline run plus two post-sync re-runs, `du -sh /tmp/pytest-of-root` read **28 GB** and
+  `df` reported 0 bytes free — at which point pytest itself starts erroring (a wall of `E`s from ~80 % onward,
+  as `tmp_path` factories fail with ENOSPC) and the shell can no longer write its own output. It looks exactly
+  like a catastrophic regression and is nothing of the kind; the fix is one command:
+  **`rm -rf /tmp/pytest-of-root`**, which is safe (pytest keeps only the last few runs' fixture dirs for
+  post-mortem) and instantly returns the space. **What to do:** if you expect to run the suite more than twice
+  in a run — which any Builder that syncs with `main` and re-verifies will — clear it *between* runs rather
+  than after the failure, and treat "errors that begin partway through a suite that was green an hour ago" as
+  a disk symptom until `df` says otherwise. Deletes still succeed when writes don't, so recovery is always
+  available; a fresh session is never needed for this.
 
 - **⭐ NEW IDEA (Builder 2026-09-02, the audit's own lesson from A1, made mechanical) — give the display-space
   tests one shared fixture that is *real* stretch output, and use it wherever a regression test reasons about
