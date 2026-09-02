@@ -10505,23 +10505,57 @@ to **Shipped**.)_
   user is told the right thing by a different note, and swapping the definition changes which of two correct
   alerts they see. Worth doing as *one definition* rather than as a bug fix, and only with a test that pins
   which note appears in the overlap.
-- **⭐ QA LEAD (Builder 2026-09-02, generalised from the v0.323.0 empty-slideshow fix) — sweep every *primary
-  call to action* that renders on a surface which can legitimately be empty, and ask whether it leads anywhere
-  on a fresh install.** *(Pillar: friendliness — PRIORITY 3; size S per candidate, and the *identifying* test
-  costs nothing. Confidence: the shape is proven — one live instance found and fixed this run.)* The confirmed
-  instance: "My best pictures" rendered **Play slideshow** unconditionally beside its own "your pictures will
-  gather here later" empty state, while the count badge three lines up *was* gated. The generative test, which
-  needs no measurement: **is this control gated on the same data as the emptiness it sits beside — and is that
-  data actually the data the destination reads?** The second half is the interesting one and is where the trap
-  lives: the slideshow's content is `buildSlides(best, videos)`, a *superset* of the wall, so the obvious gate
-  (`items.length > 0`) would have hidden a working show from a beginner whose first picture was a Moon still.
-  So a candidate is only settled by naming the destination's own emptiness predicate, not the host page's.
-  **Where to look:** any page with an empty state and a button in its header — the Gallery, the Life list,
-  Compare (which needs *two* runs), Tonight, Calibration, Moon & Sun — plus the sidebar links, which are always
-  present by design and are *not* candidates (a nav link to an empty page is a page, not a dead action).
-  **Care:** a *failed* query is "unknown", not "empty" — the v0.323.0 fix keeps its button when the gallery
-  errors, because a graceful empty destination costs a dead click while a wrong hide costs the whole feature.
-  Any candidate fixed here should make the same call the same way.
+- **✅ SWEPT AND CLOSED — one second instance found and fixed (Builder, v0.326.1, branch
+  `claude/zen-mccarthy-gmo0to`). Don't re-sweep this list; read the result before adding to it.**
+  Every candidate the lead named was walked: **Gallery** (header is icon + title + count badge, no action; the
+  search/facet row is gated on `allItems.length + allStills.length > 0` and the batch Compare link on a
+  selection), **Life list** (header has no action; the catalog is bundled so the page is never empty),
+  **Compare** (its only header button is *Back to Gallery* — a back affordance beside an alert that explicitly
+  sends you there to pick two images; correct destination, not a candidate), **Tonight** (header holds a date
+  input and an altitude select; both degraded states render an explanatory alert, and the one link goes to
+  Settings, which is actionable when empty), **Calibration** (no navigation CTA — its one button is *Build*,
+  disabled until a source dir is typed, acting on the page the empty state points at), **Moon & Sun** (header
+  is title + prose; every button lives inside a per-capture card), **Sky so far** and **Universe** (the only
+  link on the empty branch sits *inside* the empty state and points at the Library, where you'd add data),
+  and **Library** (search/sort/upload/suggestions all gated on `targets.length > 0`).
+
+  **The one live instance: the Sky page's "My map" mode rendered *Save this map* unconditionally** — over the
+  bare Aitoff grid a fresh install draws, directly opposite the page's own "No stacked images yet" alert. It
+  is a `download` link, so the dead click doesn't merely go nowhere: it hands a beginner
+  `astrostack-my-map-2026-09-02.png`, a dated keepsake of nothing.
+
+  **And it reproduced the lead's own trap exactly, which is the part worth carrying forward.** The obvious
+  gate is the coverage query `MyMap` already runs (`n_pictures`, and its read-out beside the button *is*
+  correctly gated on it) — and it is the **wrong** data: coverage counts only runs it could measure off their
+  own WCS, while `_my_map_pictures` deliberately *draws* a run with no stored WCS at a nominal 1.3° field. A
+  library of older/edited runs would have had a perfectly good map and no button. The honest gate is
+  `GET /api/sky`'s `images`, whose three conditions (target has a solved position, newest run has a preview on
+  disk, canvas dims recorded) are exactly the map's own first filters — the map additionally skips a preview
+  it can't line up, so **map pictures ⊆ sky images**, and an empty list *proves* an empty map. Same discipline
+  as v0.323.0's `hasAnythingToShow`: name the destination's predicate, don't count the host's rows.
+
+  **Failure is unknown, not empty** — a failed `/api/sky` keeps the button (a graceful dead click costs one
+  click; a wrong hide costs the feature), while a *pending* query simply waits, since it resolves in a moment.
+  Pinned both ways. **Tests (+7):** 4 unit for the pure `myMapSaveOffered` (pictures / fresh install / failed
+  query / in flight), 1 that `MyMap` drops the button but still renders the map, and 2 page-level in
+  `Sky.test.tsx` that `SkyView` in "My map" mode offers no save beside its own empty-state alert and does
+  offer one as soon as a single picture is on the map. Both of the last three fail against the old code
+  (confirmed by running them against it).
+
+    *(Original lead, for the record — pillar: friendliness, PRIORITY 3.)* The confirmed
+    instance: "My best pictures" rendered **Play slideshow** unconditionally beside its own "your pictures will
+    gather here later" empty state, while the count badge three lines up *was* gated. The generative test, which
+    needs no measurement: **is this control gated on the same data as the emptiness it sits beside — and is that
+    data actually the data the destination reads?** The second half is the interesting one and is where the trap
+    lives: the slideshow's content is `buildSlides(best, videos)`, a *superset* of the wall, so the obvious gate
+    (`items.length > 0`) would have hidden a working show from a beginner whose first picture was a Moon still.
+    So a candidate is only settled by naming the destination's own emptiness predicate, not the host page's.
+    **Where to look:** any page with an empty state and a button in its header — the Gallery, the Life list,
+    Compare (which needs *two* runs), Tonight, Calibration, Moon & Sun — plus the sidebar links, which are always
+    present by design and are *not* candidates (a nav link to an empty page is a page, not a dead action).
+    **Care:** a *failed* query is "unknown", not "empty" — the v0.323.0 fix keeps its button when the gallery
+    errors, because a graceful empty destination costs a dead click while a wrong hide costs the whole feature.
+    Any candidate fixed here should make the same call the same way.
 
 - **NEW IDEA (Builder 2026-09-02, spotted while building the v0.323.1 print button) — sweep the app for
   sentences that *name* a number the form could just set, and give each one the button.** *(Pillar: autonomy —
