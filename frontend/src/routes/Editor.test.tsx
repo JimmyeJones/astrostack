@@ -169,6 +169,26 @@ describe("EditorView", () => {
     expect(screen.getByText("Download full-res PNG")).toBeInTheDocument();
   });
 
+  it("states what the export writes instead of asking a TIFF question that "
+    + "changes nothing", async () => {
+    // The panel used to carry a "TIFF: Linear / Auto-stretched" Select whose own
+    // tooltip said both options produce the same file — true, because an editor
+    // export is written with `already_display=True` and `_write_tiff` returns
+    // before `mode` is read (pinned on the bytes in tests/test_tiff_opens_dark.py).
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    expect(await screen.findByText("Export as new image")).toBeInTheDocument();
+    expect(screen.getByText(/Saves the picture exactly as shown/)).toBeInTheDocument();
+    // No Linear/Auto-stretched choice anywhere on the panel.
+    expect(screen.queryByDisplayValue("Linear")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Auto-stretched")).not.toBeInTheDocument();
+  });
+
   it("offers a print size the picture can actually fill, and hides the offer when it can't", async () => {
     // "Print it" is a promise: only sizes this picture has the detail to fill
     // sharply are listed, biggest first, so the default is the best real print.

@@ -245,7 +245,6 @@ export function EditorView() {
   const [selected, setSelected] = useState<string | null>(null);
   const [showAllOps, setShowAllOps] = useState(false);
   const [outputName, setOutputName] = useState("");
-  const [tiffMode, setTiffMode] = useState("linear");
   const [lightbox, setLightbox] = useState(false);
   // Plain-language summary of what the last Auto-process run did, shown as a
   // dismissible note so the one-click result isn't a black box (null = hidden).
@@ -710,7 +709,7 @@ export function EditorView() {
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
   const exportRun = useMutation({
-    mutationFn: () => api.exportRun(safe, rid, recipe, outputName.trim() || `${safe}_edit`, tiffMode),
+    mutationFn: () => api.exportRun(safe, rid, recipe, outputName.trim() || `${safe}_edit`),
     onSuccess: ({ job_id }) => {
       // Stay in the editor (don't bounce to Jobs); the navbar job badge tracks it.
       notifications.show({
@@ -2300,23 +2299,24 @@ export function EditorView() {
 
             <Paper withBorder p="sm">
               <Text fw={600} size="sm" mb={6}>Export full resolution</Text>
-              <Group align="flex-end" gap="xs">
-                <TextInput label="Output name" placeholder={`${safe}_edit`} value={outputName}
-                  onChange={(e) => setOutputName(e.currentTarget.value)} style={{ flex: 1 }} />
-                <Select w={150} value={tiffMode} allowDeselect={false}
-                  label={<HintLabel label="TIFF"
-                    hint="The exported .tiff (and its History thumbnail) saves the
-                      edited image exactly as shown here. It's already display-ready,
-                      so both options produce that same result; for the underlying
-                      unstretched data, use the separate FITS output." />}
-                  data={[{ value: "linear", label: "Linear" },
-                         { value: "autostretch", label: "Auto-stretched" }]}
-                  onChange={(v) => setTiffMode(v ?? "linear")} />
-              </Group>
+              <TextInput label="Output name" placeholder={`${safe}_edit`} value={outputName}
+                onChange={(e) => setOutputName(e.currentTarget.value)} />
               <Button mt="sm" fullWidth leftSection={<IconDownload size={16} />}
                 loading={exportRun.isPending} onClick={() => exportRun.mutate()}>
                 Export as new image
               </Button>
+              {/* Says what the export writes instead of asking a question about it.
+                  The panel used to carry a "TIFF: Linear / Auto-stretched" Select whose
+                  own tooltip admitted both options produce the same file — true, because
+                  an editor export is written with `already_display=True`, which returns
+                  from `_write_tiff` before `mode` is read. Nothing is lost by stating it:
+                  the mode is still sent (as "linear") and still accepted by the endpoint,
+                  it simply no longer costs a beginner a decision that changes nothing. */}
+              <Text size="xs" c="dimmed" mt={4}>
+                Saves the picture exactly as shown — a 16-bit TIFF and a FITS — as a new
+                image in this target's History. Your original stack keeps its own
+                untouched files.
+              </Text>
               <Button mt="xs" fullWidth variant="light" leftSection={<IconPhotoDown size={16} />}
                 loading={downloadPng.isPending} onClick={() => downloadPng.mutate()}>
                 Download full-res PNG
