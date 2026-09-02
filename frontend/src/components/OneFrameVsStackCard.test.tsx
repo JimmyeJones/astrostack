@@ -94,3 +94,51 @@ describe("OneFrameVsStackCard", () => {
       expect(screen.getByText(/One frame vs your stack —/)).toBeInTheDocument());
   });
 });
+
+describe("OneFrameVsStackCard — is that number any good?", () => {
+  it("puts the √N yardstick beside a healthy stack's measured reduction", async () => {
+    vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
+      available: true, n_frames: 505, sub_exposure_s: 30, integration_s: 15150,
+    });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: 21 });
+    renderCard("M_42", 7);
+    fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
+    expect(await screen.findByTestId("noise-expected")).toHaveTextContent(
+      "That's about what 505 subs should give (√505 ≈ 22×).");
+  });
+
+  it("says so when a stack came in well under what its subs should give", async () => {
+    vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
+      available: true, n_frames: 400, sub_exposure_s: 30, integration_s: 12000,
+    });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: 8 });
+    renderCard("M_42", 7);
+    fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
+    const note = await screen.findByTestId("noise-expected");
+    expect(note).toHaveTextContent(/400 subs should cut the noise about 20×/);
+    expect(note).toHaveTextContent(/checking focus and alignment/);
+  });
+
+  it("says nothing about expectations when there's nothing to measure", async () => {
+    vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
+      available: true, n_frames: 505, sub_exposure_s: 30, integration_s: 15150,
+    });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: null });
+    renderCard("M_42", 7);
+    fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
+    await screen.findByAltText("A single raw sub");
+    await waitFor(() => expect(client.api.oneSubVsStackNoise).toHaveBeenCalled());
+    expect(screen.queryByTestId("noise-expected")).toBeNull();
+  });
+
+  it("doesn't judge a stack too thin for √N to mean anything", async () => {
+    vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
+      available: true, n_frames: 6, sub_exposure_s: 30, integration_s: 180,
+    });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: 1.6 });
+    renderCard("M_42", 7);
+    fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
+    expect(await screen.findByTestId("noise-badge")).toBeInTheDocument();
+    expect(screen.queryByTestId("noise-expected")).toBeNull();
+  });
+});
