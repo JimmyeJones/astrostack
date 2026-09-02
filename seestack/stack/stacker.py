@@ -53,7 +53,11 @@ from seestack.stack.align import (
     REF_PATCH_MIN_COVERAGE, align_one, extract_reference_patch,
 )
 from seestack.stack.output import _sanitize_basename
-from seestack.stack.pointings import pointing_groups
+from seestack.stack.pointings import (
+    PANEL_LINK_DIST_DEG,
+    cluster_pointings,
+    pointing_groups,
+)
 from seestack.stack.reference import (
     ReferenceChoice, pick_central_frame, pick_reference_frame,
 )
@@ -750,6 +754,13 @@ class StackEstimate:
     # said at the one moment the lever is still on screen. Never contradicts the
     # memory verdict (see :class:`PrintPlan`).
     print_plan: PrintPlan | None = None
+    # On a mosaic, how many subs land on a pixel of its **thinnest substantial
+    # panel** (:func:`auto_reject_depth`) — the count every outlier-rejection
+    # threshold is really about, and the one the Stack form's "can this remove a
+    # satellite trail?" warning has to answer for. None on a single field, where
+    # it is simply ``n_frames``. Additive with a default, so an older caller that
+    # never sets or reads it is unaffected.
+    panel_depth: int | None = None
 
 
 def kappa_min_frames(kappa: float) -> int:
@@ -824,6 +835,101 @@ def combine_method(options: "StackOptions", n: int) -> str:
 MIN_MAX_MIN_FRAMES = 3
 
 
+# The smallest population that counts as a real mosaic panel when auto-reject
+# sizes its method. Set to ``MIN_MAX_MIN_FRAMES`` on purpose: a group thinner
+# than that cannot be helped by *either* method (neither can spare two samples),
+# so it cannot change the answer — and using the same floor stops one stray
+# mis-solved sub from posing as a one-frame "panel" and demoting a deep mosaic.
+AUTO_REJECT_PANEL_MIN_FRAMES = MIN_MAX_MIN_FRAMES
+
+# Grid the pointings are snapped to before clustering, in degrees — see the
+# "Cost" note in :func:`auto_reject_depth`. An order of magnitude below
+# ``PANEL_LINK_DIST_DEG`` (0.25°) and well below a Seestar dither, so it collapses
+# thousands of subs to a handful of distinct pointings without moving any
+# clustering decision that wasn't already a coin flip.
+_POINTING_GRID_DEG = 0.02
+
+
+def auto_reject_depth(
+    radecs: list[tuple[float | None, float | None]],
+) -> int | None:
+    """The per-pixel sample depth ``auto_reject`` must size its method from, or
+    ``None`` when the target is a single field (use the frame count, as before).
+
+    **Why the frame count is the wrong number on a mosaic.** Every threshold in
+    :func:`auto_reject_method` is about how many samples land *on one pixel*:
+    κ-σ cannot pull a lone trail out of statistics that include it until about
+    :func:`kappa_min_frames` samples, and min/max needs three to spare two. On a
+    single field those samples are the whole stack, so the frame count is the
+    right proxy. On a mosaic the panels are different patches of sky, so a pixel
+    only ever sees *its own panel's* subs — and a 2x2 mosaic three subs deep
+    presents ``n = 12`` to a test whose real answer is 3. Measured on exactly
+    that stack: ``auto_reject`` dispatched κ-σ, which recorded ``REJFRAC 0.0``
+    (it rejected nothing at all) and left a satellite trail at **1,030 ADU**
+    above a clean reference, where the same mosaic with min/max leaves **19**.
+
+    So the depth is the **thinnest substantial panel**: it is the panel whose
+    trails would otherwise survive, and the method is one global choice for the
+    whole canvas. The cost on a mixed-depth mosaic is real and worth naming — a
+    deep panel stacked with min/max loses κ-σ's multi-outlier reach and its
+    quality weighting — but it is second-order (min/max drops exactly two
+    samples per pixel, ~1 % of a 200-sub panel) against a first-order defect: a
+    bright trail baked into the finished picture. This is the same trade
+    ``auto_reject`` already makes for every small single-field stack; it is
+    applied here to the depth that actually exists rather than to a count that
+    describes no pixel.
+
+    ``None`` (a single field, an unsolved target, or a mosaic too tightly packed
+    for :func:`~seestack.stack.pointings.pointing_groups` to separate) means
+    "nothing changes" — those stacks keep the frame count they have always used.
+
+    **Cost.** ``cluster_pointings`` is O(n²) in pure Python — 2.4 s on the
+    owner's largest target (5,477 subs). That is nothing beside a stack, but far
+    too much for ``estimate_stack``, which the Stack form calls on every option
+    change. So the clustering runs on the *distinct* pointings, snapped to
+    ``_POINTING_GRID_DEG``, and each cluster's real frame count is summed back
+    afterwards: a mosaic has thousands of subs but only a handful of places it
+    points, so the quadratic term collapses from the sub count to the panel
+    count (5,477 subs: 2.4 s -> under a millisecond). Duplicates link trivially
+    under single linkage, so the only approximation is the snap itself — an order
+    of magnitude below ``PANEL_LINK_DIST_DEG``, and it could only move an answer
+    for two panels sitting within a rounding error of the link threshold, a pair
+    no clustering was going to separate meaningfully anyway. The
+    ">=2 substantial groups or no split at all" gate is
+    :func:`~seestack.stack.pointings.pointing_groups`' own, applied here to the
+    summed counts so the two cannot drift apart.
+    """
+    grid: dict[tuple[int, int], int] = {}      # snapped pointing -> frame count
+    for ra, dec in radecs:
+        if (ra is None or dec is None
+                or not math.isfinite(ra) or not math.isfinite(dec)):
+            continue                            # an unsolved sub has no pointing
+        key = (round(float(ra) / _POINTING_GRID_DEG),
+               round(float(dec) / _POINTING_GRID_DEG))
+        grid[key] = grid.get(key, 0) + 1
+    if not grid:
+        return None
+    keys = list(grid)
+    labels = cluster_pointings(
+        [(kx * _POINTING_GRID_DEG, ky * _POINTING_GRID_DEG) for kx, ky in keys],
+        link_dist_deg=PANEL_LINK_DIST_DEG,
+    )
+    counts: dict[int, int] = {}
+    for key, label in zip(keys, labels, strict=True):
+        if label >= 0:
+            counts[label] = counts.get(label, 0) + grid[key]
+    substantial = [c for c in counts.values() if c >= AUTO_REJECT_PANEL_MIN_FRAMES]
+    if len(substantial) < 2:
+        return None                             # no sound split; use the frame count
+    return min(substantial)
+
+
+def _frame_radecs(frames) -> list[tuple[float | None, float | None]]:
+    """``(ra, dec)`` per frame in ``frames`` order, for :func:`auto_reject_depth`."""
+    return [(getattr(f, "ra_center_deg", None), getattr(f, "dec_center_deg", None))
+            for f in frames]
+
+
 @dataclass(frozen=True)
 class RejectionReach:
     """Can this stack's outlier rejection actually drop a lone satellite trail?
@@ -847,7 +953,8 @@ class RejectionReach:
     reaches: bool
 
 
-def rejection_reach(options: "StackOptions", n: int) -> RejectionReach:
+def rejection_reach(options: "StackOptions", n: int,
+                    *, depth: int | None = None) -> RejectionReach:
     """Resolve ``options`` for an ``n``-frame stack and say whether the rejection
     it lands on can remove a *lone* outlier.
 
@@ -855,14 +962,24 @@ def rejection_reach(options: "StackOptions", n: int) -> RejectionReach:
     mathematically blind to a single trail until :func:`kappa_min_frames` (11 at
     the default κ=3), so at every count between the two it runs, records
     ``REJMODE = sigma-clip``, and clips nothing. Min/max removes an extreme from
-    3 frames up, which is why ``auto_reject`` picks it down there."""
-    eff = _resolve_auto_reject(options, n)
+    3 frames up, which is why ``auto_reject`` picks it down there.
+
+    ``depth`` is the mosaic's per-pixel sample depth (:func:`auto_reject_depth`);
+    pass it so the Stack form's pre-run warning answers for the pixels a mosaic
+    actually has rather than for its target-wide frame count. ``None`` — a single
+    field, or a caller with no pointings to hand — is the frame count, exactly as
+    before."""
+    eff = _resolve_auto_reject(options, n, depth=depth)
     method = combine_method(eff, n)
+    # The reach question is per-pixel too: a mosaic panel three subs deep is
+    # blind to a lone trail however many frames the target holds in total.
+    reach_n = n if depth is None else min(n, max(0, int(depth)))
     if method == "min-max-reject":
-        return RejectionReach(method, n, MIN_MAX_MIN_FRAMES, True)
+        return RejectionReach(method, n, MIN_MAX_MIN_FRAMES,
+                              reach_n >= MIN_MAX_MIN_FRAMES)
     if method == "sigma-clip":
         need = kappa_min_frames(eff.sigma_kappa)
-        return RejectionReach(method, n, need, n >= need)
+        return RejectionReach(method, n, need, reach_n >= need)
     if method == "drizzle":
         # Two-pass drizzle rejection needs ≥4 frames *and* the memory to hold the
         # extra planes (:func:`_afford_drizzle_reject`); report the frame-count
@@ -873,7 +990,8 @@ def rejection_reach(options: "StackOptions", n: int) -> RejectionReach:
     return RejectionReach(method, n, None, False)
 
 
-def _resolve_auto_reject(options: StackOptions, n: int) -> StackOptions:
+def _resolve_auto_reject(options: StackOptions, n: int,
+                         *, depth: int | None = None) -> StackOptions:
     """Resolve ``auto_reject`` into concrete ``sigma_clip``/``min_max_reject``.
 
     When ``auto_reject`` is on (and not drizzling), pick order-statistic min/max
@@ -881,9 +999,17 @@ def _resolve_auto_reject(options: StackOptions, n: int) -> StackOptions:
     :func:`kappa_min_frames` — and weight-respecting κ-σ once the stack is
     large enough for κ-σ to bite. Returns ``options`` unchanged when
     ``auto_reject`` is off or drizzle is on (drizzle has its own two-pass
-    rejection), so a run that doesn't opt in is byte-for-byte identical."""
+    rejection), so a run that doesn't opt in is byte-for-byte identical.
+
+    ``depth`` is the per-pixel sample count the method must actually be sized
+    from — :func:`auto_reject_depth` on a mosaic, ``None`` on a single field
+    (where it *is* ``n``). Every threshold here is a statement about how many
+    samples land on one pixel, and on a mosaic that is a panel's depth, not the
+    target's frame count; see :func:`auto_reject_depth` for the measurement."""
     if not options.auto_reject or options.drizzle:
         return options
+    if depth is not None:
+        n = min(n, max(0, int(depth)))
     # The ≥4-frame floor inside :func:`auto_reject_method` is κ-σ's own dispatch
     # requirement (its pass-2 clip branch gates on ``n >= 4``);
     # ``kappa_min_frames`` floors at 3 for the min/max side, so at a small κ
@@ -1044,8 +1170,11 @@ def estimate_stack(project: Project, options: StackOptions,
     # ``run_stack`` will actually use (min/max costs extra canvas planes), and the
     # drizzle half of the same question — an auto-enabled two-pass rejection is
     # only taken when it fits, so the estimate must not warn about planes the run
-    # would decline to allocate.
-    options = _resolve_auto_reject(options, n)
+    # would decline to allocate. The depth is read from the same pointings
+    # ``run_stack`` reads, so the estimate cannot name a different method (and
+    # therefore a different peak) from the run it is estimating.
+    panel_depth = auto_reject_depth(_frame_radecs(frames))
+    options = _resolve_auto_reject(options, n, depth=panel_depth)
     options = replace(options, drizzle_reject=_afford_drizzle_reject(
         options, n, dst_shape, memory_budget_gb))
     peak, (out_h, out_w) = _estimate_peak_bytes(
@@ -1110,6 +1239,7 @@ def estimate_stack(project: Project, options: StackOptions,
             drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
             drizzle_reject=options.drizzle_reject,
             rejection_map=_records_rejection_map(options, n), budget=budget),
+        panel_depth=panel_depth,
     )
 
 
@@ -1173,6 +1303,49 @@ def _capture_window(frames: list) -> tuple[str | None, str | None]:
     if not dated:
         return None, None
     return min(dated)[1], max(dated)[1]
+
+
+def _stack_camera_name(frames: list) -> str | None:
+    """The camera this stack's subs were taken with, or ``None`` if they don't say.
+
+    Read from a sub's own header (``INSTRUME``, else the focal length) rather than
+    assumed — see :func:`seestack.io.fits_loader.camera_name_from_header` for why
+    guessing is not an option here. Only a header is authoritative, so this reads
+    one: the frames' rows carry no camera field.
+
+    Cheap and best-effort by design. It reads *headers only* (no pixel data) and
+    stops at the first frame that answers, so an ordinary stack pays one header
+    read; a set whose first few frames are unreadable is bounded rather than
+    walking thousands of files, and a mixed-gear set is named by its first sub,
+    which is the same convention every other card here uses. Any failure yields
+    ``None`` and the caption simply omits the camera.
+    """
+    from seestack.io.fits_loader import camera_name_from_header
+    from seestack.io.project import readable_frame_path
+
+    tried = 0
+    for f in frames:
+        if tried >= _CAMERA_HEADER_MAX_READS:
+            break
+        try:
+            path = readable_frame_path(f)
+            if not path:
+                continue
+            tried += 1
+            from astropy.io import fits as _fits
+
+            name = camera_name_from_header(_fits.getheader(path))
+        except Exception:  # noqa: BLE001 — provenance is non-critical
+            continue
+        if name:
+            return name
+    return None
+
+
+#: How many frames :func:`_stack_camera_name` will open before giving up. The
+#: first readable sub normally answers; the cap keeps a library of unreadable or
+#: header-less files from turning one provenance card into thousands of reads.
+_CAMERA_HEADER_MAX_READS = 5
 
 
 def _capture_hours(frames: list) -> list[str]:
@@ -1497,6 +1670,14 @@ def _build_output_header_meta(
         meta["DATE-OBS"] = (capture_start, "start of the first sub combined")
     if capture_end and capture_end != capture_start:
         meta["DATE-END"] = (capture_end, "start of the last sub combined")
+    # Which camera took the light. Carried from the subs' own headers rather than
+    # assumed: the acquisition nameplate baked into every shared and printed
+    # picture used to *assert* "ZWO Seestar S50" with no header field behind it,
+    # and the owner has an S30 (AGENTS.md §1 "Owner facts"). Absent when the subs
+    # don't say — a caption with no camera beats a caption naming the wrong one.
+    camera = _stack_camera_name(frames)
+    if camera:
+        meta["INSTRUME"] = (camera, "camera the subs were taken with")
     # Label the method the dispatcher actually ran, applying the *same* frame-count
     # gates it uses (`min_max_reject and n >= 3`, `sigma_clip and n >= 4`): below
     # those counts the dispatcher silently falls through to plain mean (no rejection
@@ -2166,10 +2347,14 @@ def run_stack(
 
     n = len(frames)
     # Effective options with ``auto_reject`` resolved to a concrete method from the
-    # frame count. The original ``options`` (with the user's choice intact) is what
-    # gets persisted in the run record; ``eff`` drives the method dispatch, the
-    # memory guard, and the STACKER provenance card so all three agree.
-    eff = _resolve_auto_reject(options, n)
+    # sample count that actually lands on a pixel — the frame count on a single
+    # field, the thinnest substantial panel's depth on a mosaic (a 2x2 mosaic three
+    # subs deep is a 3-sample problem wearing a 12-frame label; see
+    # :func:`auto_reject_depth`). The original ``options`` (with the user's choice
+    # intact) is what gets persisted in the run record; ``eff`` drives the method
+    # dispatch, the memory guard, and the STACKER provenance card so all three agree.
+    eff = _resolve_auto_reject(
+        options, n, depth=auto_reject_depth(_frame_radecs(frames)))
     # …and the drizzle half of the same question, which can only be answered here:
     # pricing the two-pass rejection needs the real output canvas, and for a
     # mosaic that union canvas was only just computed. ``eff.drizzle_reject`` then

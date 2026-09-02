@@ -400,14 +400,41 @@ def load_catalog() -> tuple[CatalogObject, ...]:
 
 
 def _times_grid(start: datetime, end: datetime, step_minutes: float):  # noqa: ANN202
-    """A UTC ``Time`` array from ``start`` to ``end`` inclusive at a fixed step."""
+    """A UTC ``Time`` array from ``start`` to ``end`` inclusive at a fixed step.
+
+    The grid never leaves ``[start, end]``: the step count rounds *up* and the
+    final stamp is clipped to ``end``, so a window whose length isn't a whole
+    number of steps still gets a sample at its very end without sampling past it.
+    (Rounding to the nearest step used to put the last stamp up to half a step
+    *after* ``end`` — which surfaced as a planner telling you to keep shooting a
+    couple of minutes after astronomical dark was over.) A window that *is* an
+    exact multiple of the step is unchanged, sample for sample.
+    """
     from astropy.time import Time
 
     total_min = max((end - start).total_seconds() / 60.0, step_minutes)
-    n = int(round(total_min / step_minutes)) + 1
+    # -1e-9: an exact multiple mustn't gain a spurious step to floating-point dust.
+    n = int(math.ceil(total_min / step_minutes - 1e-9)) + 1
     stamps = [start + timedelta(minutes=step_minutes * i) for i in range(n)]
+    if stamps[-1] > end > stamps[-2]:
+        stamps[-1] = end
     return stamps, Time([s.astimezone(timezone.utc).replace(tzinfo=None) for s in stamps],
                         scale="utc")
+
+
+def _sample_minutes(stamps: list[datetime], step_minutes: float) -> np.ndarray:
+    """Minutes of the window each :func:`_times_grid` sample stands for.
+
+    Every sample is worth one whole step except the last, which :func:`_times_grid`
+    clips to the window end and which therefore stands for only what is left of a
+    step. On a window that is an exact multiple of the step that remainder *is* a
+    full step, so the weights are uniform and every total is unchanged.
+    """
+    weights = np.full(len(stamps), float(step_minutes), dtype=float)
+    if len(stamps) >= 2:
+        weights[-1] = min((stamps[-1] - stamps[-2]).total_seconds() / 60.0,
+                          float(step_minutes))
+    return weights
 
 
 def _sun_altitudes(stamps_time, location):  # noqa: ANN001, ANN202
@@ -842,7 +869,10 @@ def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWind
 
     location = observer.earth_location()
     stamps, times = _times_grid(window.start, window.end, 5.0)
-    step_min = 5.0
+    # Minutes each sample stands for — a whole step except the last, which the
+    # grid clips to the window end, so "how long is it usable?" can't credit time
+    # past the end of darkness.
+    sample_min = _sample_minutes(stamps, 5.0)
     altaz_frame = AltAz(obstime=times, location=location)
 
     coords = SkyCoord(ra=np.asarray(ras_deg) * u.deg,
@@ -880,7 +910,7 @@ def _observability_batch(ras_deg, decs_deg, observer: Observer, window: DarkWind
         floor = np.maximum(min_alt_deg, horizon.altitude_at(az[i])) if use_horizon else min_alt_deg
         usable = row >= floor
         n_usable = int(np.count_nonzero(usable))
-        minutes_above = float(n_usable * step_min)
+        minutes_above = float(sample_min[usable].sum())
         transit = stamps[imax].astimezone(timezone.utc) if minutes_above > 0 else None
         # Enclosing clock bounds of the usable window (first→last sample above the
         # floor) — "when tonight can I shoot this?". None when never usable.

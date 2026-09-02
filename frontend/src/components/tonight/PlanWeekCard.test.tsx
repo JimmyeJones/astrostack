@@ -159,4 +159,42 @@ describe("PlanWeekCard", () => {
     renderCard();
     await waitFor(() => expect(spy).toHaveBeenCalledWith(undefined));
   });
+  it("offers the week as a calendar file, matching the plan it shows", async () => {
+    vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+      nights: [night("2026-09-04")],
+    }));
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-week")).toBeInTheDocument());
+    const link = screen.getByRole("link", { name: /Add this week to your calendar/ });
+    expect(link).toHaveAttribute("href", "/api/plan/week/calendar.ics");
+    expect(link).toHaveAttribute("download");
+  });
+
+  it("carries the altitude floor into the calendar link, so the file matches", async () => {
+    vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+      nights: [night("2026-09-04")],
+    }));
+    renderCard({ minAlt: 45 });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-week")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /Add this week to your calendar/ }))
+      .toHaveAttribute("href", "/api/plan/week/calendar.ics?min_alt=45");
+  });
+
+  it("hides the calendar link when there is no night to add", async () => {
+    // The endpoint 404s on an empty week, so a download that can only fail is
+    // worse than no button.
+    vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+      nights: [night("2026-09-04", { best: null, n_usable: 0 })],
+    }));
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-week")).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /Add this week to your calendar/ }))
+      .not.toBeInTheDocument();
+  });
 });

@@ -43,6 +43,46 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **⚠️ PROCESS NOTE + Builder 2026-09-02, branch `claude/zen-mccarthy-olkjpm` — collision TEN, two of three
+> tasks duplicated by one other Builder inside the same hour, and the first where the *stand-down decision was
+> settled by measurement instead of argument*. Run finished; claims released.**
+> The `…-t59xya` Builder's PR **#682** landed **A1** as v0.326.1 and the planner's `_times_grid` overhang as
+> v0.325.3 — both of which this run had independently built. **Theirs are on `main` and ship; mine are dropped,
+> not re-litigated.** What is new is *how* that was decided, and it is cheap enough to be the standing method:
+> **run your own test file against their shipped code in a `git worktree` of `origin/main`.** That took two
+> minutes and answered the only question that matters — does mine catch anything theirs doesn't?
+> * **A1 — 22 of my 23 tests passed on theirs.** The single failure was a *design* difference, not a defect
+>   (on a bright image with no headroom mine returns the identity where theirs still pins the sky and scales
+>   the shoulder — theirs keeps doing something useful, and is shipped). Decisive for the one place I thought I
+>   was ahead: I had added a **noise-aware lift anchor** (`max(p50, sky + 3σ)`) after measuring the mode still
+>   reading **0.1357 for a 0.1738 sky** post-spike-fix. Their code passes every sky-movement test I wrote,
+>   which means my 0.1357 came from an **unrealistic fixture** — a star-poor scene whose 99.5th percentile is
+>   the sky itself, so `autostretch` normalises against the background and spreads it unnaturally wide. **A
+>   fixture that isn't shaped like the owner's data manufactures bugs as readily as it hides them**, which is
+>   the same lesson A1 itself taught from the other end. The extra layer was therefore speculative hardening,
+>   not a fix, and shipping it would have been churn on the on-by-default path. Dropped.
+> * **`_times_grid` — theirs is better.** Near-identical clipping, but their `minutes_above_min_alt` sums a
+>   per-sample interval array where mine capped `count × step` at the window length. Theirs is the honest
+>   quantity; mine was a bound on a wrong one.
+>
+> **Two genuinely additive pieces were re-applied on top of theirs, in their names, each verified to fail on
+> pre-fix code first** (the test for "is this additive?" is not "did I write it" but "does it catch something"):
+> the two **sweeps** in `tests/test_edit_curve.py` — across the five stretch targets Auto and the presets
+> actually use, and across four stack depths — which pin the audit's own quantified claims (the two branches
+> were wrong in *opposite directions*, so a single-point test can sit on one branch and pass while the other
+> rots; **9 of the 9 sweep cases fail on pre-fix code**); and the **XS friendliness item their own run filed**
+> as the gap it opened (the ghost curve's unexplained fallback branch), built and tested here rather than left
+> for another run. Both fold into their fixture rather than standing up a parallel one.
+>
+> **The one thing that did not collide is the one worth noting for the rotation:** **A3** (plate-solving
+> writing `.wcs`/`.ini` sidecars into `incoming/`) — nobody has touched `seestack/solve/` in 25 commits. It was
+> filed "verified by code reading, **not reproduced** — no ASTAP binary", and both overlapping runs went
+> to the top of the *editor* queue instead. The audit's R5 finding predicted exactly this: sweeps land where
+> the code is easy to read, and the findings that survive are the ones needing an **external process, a
+> mosaic-shaped canvas, or a proxy scale** to exhibit. If two Builders are running, the cheapest
+> de-confliction available is for the second to take the item whose repro needs a *stub binary or a fixture*
+> rather than the one whose repro is a function call.
+
 > **⚠️ PROCESS NOTE + Builder 2026-09-02, branch `claude/zen-mccarthy-46ejou` — collision NINE, and the first
 > where an entire run was duplicated: all three tasks, by one other Builder, inside the same hour. Run finished,
 > everything stood down bar one additive fix.**
@@ -418,9 +458,604 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
-- **🟢 LOW / HONESTY (Builder 2026-09-02, tripped over while testing `plan_week` — reproduced and measured) —
-  the planner can tell you to shoot up to two minutes *after* astronomical dark ends, and can credit a window
-  with darkness that doesn't exist.** *(Severity: low — it is at most ~2.5 min, but it is a plainly false
+> **📌 EXTERNAL AUDIT 2026-09-02 — the ten app findings below (A1–A10) come from an independent read-only audit
+> commissioned by the owner, baselined at `4c2dac4` (v0.322.7) and re-verified at `87987cd5` (v0.325.2, 24
+> commits later). All ten still reproduced after re-verification. Full suite green at baseline (3,837 passed /
+> 2 skipped). They are ordered by effect on the owner's pictures — A1 first. The audit's process findings
+> (backlog bloat, collisions, QA-rotation aim) are filed as the R-items further below; `AGENTS.md` §1 and §11
+> have already been updated for the highest-value ones.**
+
+- **✅ SHIPPED (Builder, v0.326.1, branch `claude/zen-mccarthy-t59xya`) — ~~A1: Auto's contrast curve
+  brightens the sky on every Auto picture, and the regression test that should catch it passes on a fixture
+  that cannot exhibit the bug.~~** Fixed in all three parts the audit named, and reproduced first.
+
+  **The root cause, confirmed.** `autostretch` hard-clips the darkest **1.5 %** of pixels to *exactly* zero.
+  `_sky_mode` histogrammed the whole finite population over `[p0.5, median]`, and with p0.5 sitting at 0.0 the
+  zero spike — one value, so always the tallest bin there is — *was* the mode: the sky read **0.00078**
+  instead of the **0.185** it actually sat at. With the sky reported near black, the "the median *is* the sky,
+  so decline" gate never fired and the lift landed on the background itself.
+  `_sky_mode` now measures over the **strictly positive** pixels. Clipped shadows are not sky; an image with
+  no clipped shadows has no zeros to drop, so its measurement is unchanged pixel for pixel (pinned by a test
+  that recomputes the old histogram by hand on an unclipped fixture and gets the same number).
+
+  **The other branch had to move with it, and that is not scope creep — it is the same defect.** Fixing the
+  measurement makes the *decline* branch fire on exactly the sky-dominated stacks that used to be lifted, and
+  the old fixed fallback `[[0,0],[0.25,0.2],[0.75,0.82],[1,1]]` has its lower control point **below** a
+  typical stretched sky: it pulls a 0.19 background down to ~0.15, and it brightened a flat 0.6 to 0.634.
+  Shipping only half would have swapped a +12 % brightening for a −20 % darkening. So `fallback_tone_curve`
+  re-expresses the same shape relative to the measured sky — sky and both endpoints on the identity, one
+  shoulder above the sky lifted a touch — reducing to the old curve's shoulder *exactly* (`0.75 → 0.82`) at a
+  sky of zero. The point that moved the sky is simply gone, because moving the sky **is** the bug. Which
+  branch runs was never the user's choice, so both now obey one rule: **never move the background.**
+
+  **Measured, before → after** (synthetic OSC stack through the real `autostretch`, then `tone.curves`
+  `auto=True`): background **+12.49 % → +0.00 %**, and the object's core **+0.00 % → +3.08 %**. The old
+  behaviour was precisely backwards — it brightened the sky and added no contrast to the object.
+
+  **One site wider than filed, because the fix changed which branch is common.** The editor's ghost curve
+  (`/editor/curve-suggestion`) returned `null` whenever the data-driven lift declined, while the render went on
+  applying the fallback — so the widget drew a straight line contradicting the preview beside it, and "Bake to
+  edit" had nothing to bake. It now returns **the curve auto-contrast will actually apply**, on both branches;
+  `target_bg` stays `None` on the fallback (which has no midtone target to name), so the response shape is
+  unchanged and an older frontend reads it exactly as before.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no API shape change, no setting flipped.
+  Editing is non-destructive, so nothing already exported is touched and a **hand-edited curve is still never
+  overridden** (auto only engages on the untouched identity) — what changes is the picture Auto *renders* from
+  now on, which is the point of the fix.
+
+  **Tests (+10; 7 of them fail before).** `tests/test_edit_curve.py` (+8) builds its fixture from **real
+  `autostretch` output** rather than a synthesised approximation — the audit's central criticism — and leads
+  with a guard that the fixture really does clip shadows to zero, *so that the tests below cannot silently stop
+  testing anything the way the previous one did*. Then: the sky reads the background patch within 5 %; an
+  unclipped frame measures identically to before; end-to-end the sky moves < 1 % while the object gains; the
+  fallback pins the sky as a control point on the identity; the fallback keeps the old shoulder at a black sky;
+  and it degrades to the identity with no headroom. `tests/test_edit_tone_ops.py` (+1, 1 rewritten) pins the
+  corrected fallback contract on both a structured and a featureless frame. `tests/webapp/test_editor.py` (+1)
+  pins the ghost against the applied curve on the fallback branch.
+
+  **Worth carrying forward, and the audit is right about it:** the previous fix for this same defect
+  (v0.210.6) shipped with a test written by the agent that wrote the fix, and that test encoded the fix's
+  *model* of the bug — `clip(sky + normal)`, which has no zero spike — rather than the bug. A regression test
+  for anything in the display-space chain should be fed the **real** upstream transform's output.
+
+  *(Original audit entry follows.)*
+
+- **🔴🔴 A1 — AUTO'S CONTRAST CURVE BRIGHTENS THE SKY BY ~36% ON EVERY AUTO PICTURE, AND THE REGRESSION TEST
+  THAT SHOULD CATCH IT PASSES ON A FIXTURE THAT CANNOT EXHIBIT THE BUG.** *(Severity: **wrong picture, on the
+  on-by-default path, at every stack depth**. Confidence: **verified by reproduction**. This is the single
+  highest-value item in this file — it silently degrades every one-click result the owner has ever made.)*
+
+  `_sky_mode` (`seestack/edit/curve.py`) finds the sky as the histogram mode over `[p0.5, median]` in 128 bins.
+  The STF stretch that runs immediately before it (`tone.stretch`, `mode: stf`) **clips 1–2 % of pixels to
+  exactly 0**. That zero spike is always the tallest bin, so `suggest_tone_curve` reads the sky as **0.0008**,
+  its "the median *is* the sky, so decline" gate never fires, and it lifts the median — which *is* the sky —
+  halfway toward `CURVE_TARGET_BG` 0.25.
+  - **Measured** on a synthetic linear stack through the *full* Auto recipe: sky patch **0.130 → 0.178
+    (+36 %)**, with the curve point `[0.14, 0.195]` appearing identically at **every** depth from 4 to 1,000
+    subs. The opposite branch is wrong too: on a bright-nebula frame the suggestion declines and
+    `_AUTO_CONTRAST_FALLBACK` **darkens** the sky by 20 %.
+  - **Why it was never caught:** `test_sky_dominated_frame_does_not_lift_the_sky` (`tests/test_edit_curve.py`)
+    builds its fixture as `clip(sky + normal)` — **no zero spike** — so it never sees real STF output. This is
+    the bug the v0.210.6 fix ("auto-contrast curve lifting the whole sky") claims to have closed; **it is
+    closed only for the fixture.** Treat this as the canonical example of the wider risk that a fix's own test,
+    written by the agent that wrote the fix, confirms the fix's *model* of the bug rather than the bug.
+  - **Fix direction:** compute the mode over **strictly positive** values, or over a luminance sky population
+    at/below the median; make `_AUTO_CONTRAST_FALLBACK` pin `(sky, sky)` rather than move it; and **add a
+    regression test that feeds real `autostretch` output**, not a synthesised approximation of it. Re-check the
+    "did Auto improve this?" claims elsewhere in the backlog that were measured through this same curve.
+
+- **✅ SHIPPED (Builder, v0.326.2, branch `claude/zen-mccarthy-olkjpm`) — ~~A3: plate-solving writes files into
+  `incoming/`, and the CI guard structurally cannot see it.~~** Fixed, and **reproduced first** — the audit
+  filed this "verified by code reading, not reproduced (no ASTAP binary)", and reproducing it turned out to be
+  the whole trick: a **stub `astap` executable** that writes its sidecars beside whatever `-f` names, which is
+  all the real binary does that matters here. With it, the old code leaves
+  `Light_M 31_10.0s_IRCUT_0001.wcs` and `.ini` sitting in the raw folder; the new code leaves the directory
+  listing byte-identical, three re-solves included.
+
+  **The fix is a scratch copy, not `-o`.** ASTAP does have an output-basename option, but a §10 guarantee on
+  data with no backup should not rest on a CLI flag whose support varies by version and whose failure mode is
+  silent. `ASTAPSolver._solve_once` now copies the frame into a `TemporaryDirectory` and runs there, so the
+  guarantee holds *whatever* ASTAP does with the path it is given. A symlink or a hardlink would have been
+  cheaper and was rejected for the same reason: both lead any write straight back to the original. The copy is
+  a few milliseconds against a solve measured in seconds, and it happens once per `solve()`, not once per
+  ladder rung.
+
+  **The consequence worth knowing:** the sidecars now die with the scratch directory, so the solver reads them
+  before returning. `ASTAPResult` gained `wcs_sidecar_raw` (additive; `wcs_sidecar_path` stays for a caller that
+  solved a file it owns), `wcs_io` grew a pure `wcs_text_from_raw` split out of `wcs_text_from_sidecar` so both
+  paths normalise identically, and `solve_one` prefers the content and falls back to the path. The ASTAP log
+  tail has the scratch path substituted back to the source path, so a failure a user reads still names their
+  frame.
+
+  **The guard file gained a fourth layer, and that is the durable half.** Layers 1–3 are all structurally blind
+  to a subprocess — the stdlib sentinel wraps only Python's own calls, and CI installs ffmpeg but no ASTAP, so
+  no solve had ever run in it. `test_plate_solving_writes_no_sidecars_into_incoming` and
+  `test_a_re_solve_of_the_same_frame_still_leaves_incoming_alone` close the class, not the instance: any future
+  code that hands an external process a path inside `incoming/` fails them.
+
+  **Three fixtures in `tests/test_astap.py` were rewired, not weakened.** Their fake `subprocess.run` wrote
+  sidecars beside the *original* frame — i.e. modelled a binary that does not exist, and would have gone on
+  passing if the solver started handing over the source path again. They now derive the sidecar paths from the
+  command's own `-f` argument (a shared `_sidecar_paths`/`_write_solved_sidecars`), which is what the real
+  binary does; every assertion is unchanged.
+
+  **Hardened on top, v0.326.4 (Builder, branch `claude/zen-mccarthy-xesefm`) — collision eleven, stood down
+  and re-applied additively.** That run built the same fix independently and inside the same hour (a scratch
+  copy, the same stub-binary approach, an all-but-identically-named guard test); **this entry's version is on
+  `main` and ships, and the duplicate was dropped rather than re-litigated** — it is equal or better at every
+  point, and its log-tail path substitution is a nicety the duplicate lacked. Three pieces are genuinely
+  additive and were re-applied in this entry's own names:
+  - **`test_the_stub_astap_really_would_litter`** — a **positive control for layer 4**. Both layer-4 tests
+    assert that a folder did *not* change, which is trivially true if the stub quietly stops writing (a
+    typo'd flag, a changed argv shape, a `-f` the solver no longer passes) — the whole layer would sit
+    permanently green while checking nothing. It now points the stub at an unprotected folder and asserts it
+    litters, and that the `.wcs` it writes is really readable as a WCS. This is the A1 failure mode
+    (a test that passes on a fixture which cannot exhibit the bug) applied to a *guard*, and layer 2 already
+    carries the same control in `test_the_sentinel_actually_fires`.
+  - **`test_a_stale_sidecar_beside_the_frame_cannot_fake_a_solve`** — a second bug this fix closed for free
+    and nothing pinned. `solved` is `returncode == 0 and sidecar.exists()`: **existence, not authorship.** A
+    `.wcs` left beside a frame by an older build or by the owner's own ASTAP run sat exactly where the wrapper
+    looked, so a run that matched nothing could inherit someone else's answer and persist it as this frame's
+    WCS. A scratch directory that starts empty closes it by construction.
+  - Two unit-level pins for the mechanism the end-to-end tests rest on: `-f` is never a path in the caller's
+    folder (and the copy carries the same *bytes*, so it solves the owner's actual pixels), and the returned
+    `fits_path` is the caller's frame rather than a scratch path that would land in the project DB dangling.
+
+  **The one thing deliberately NOT changed:** this entry says the copy "happens once per `solve()`, not once
+  per ladder rung", but `_solve_once` holds the `TemporaryDirectory`, so a frame that walks all three rungs
+  copies three times. **Leave it.** Hoisting the staging into `solve()` would let a `.wcs` written by one rung
+  survive into the next, where `returncode == 0` alone would then read as solved — the very
+  existence-not-authorship hole above. A fresh directory per rung is the safer structure and the extra copies
+  are unmeasured; per this file's Performance rule, do not trade that for an unmeasured win.
+
+  **The owner check from the entry still stands** and is worth running once on the live box:
+  `ls incoming/<any target>_sub | grep -c '\.wcs$'`. A non-zero count is the litter this fix stops *adding to*
+  — v0.326.2 does not remove what is already there, and must not: §10 permits no deletion inside `incoming/`,
+  and the app has no business deciding those files are unwanted. If the owner wants them gone it is his own
+  `find … -delete`, not ours.
+
+  - **~~🔴 A3 — PLATE-SOLVING WRITES FILES INTO `incoming/`, AND THE CI GUARD STRUCTURALLY CANNOT SEE IT.~~**
+    *(Severity: **broken guarantee** — §10's read-only rule. **No data loss**: the owner's FITS are not modified.
+    Confidence: verified by code reading; **not** reproduced — no ASTAP binary in the audit container.)*
+
+    With the webapp default `copy_to_cache = False` (`webapp/config.py`, confirmed in `docs/webapp.md`),
+    `cached_path` is NULL, so `readable_frame_path` (`seestack/io/project.py`) returns **the source path**, and
+    `ASTAPSolver._run` (`seestack/solve/astap.py`) invokes ASTAP as `-f <source> -wcs`, then reads
+    `fits_path.with_suffix(".wcs")` and `.ini`. **ASTAP therefore creates — and on every re-solve overwrites —
+    two sidecar files beside each raw sub in `incoming/<T>_sub/`.** The FITS themselves are untouched (`-update`
+    is deliberately not passed), so this is not corruption; but §10 permits only *read* and *create-new*, this is
+    create-then-**overwrite**, and it accumulates thousands of non-FITS files in the owner's raw tree.
+    - **Why the guard misses it:** both layers of `tests/webapp/test_incoming_readonly_guard.py` are blind here —
+      the stdlib sentinel cannot see **subprocess** writes, and the snapshot layer never runs a solve because CI
+      installs ffmpeg but **no ASTAP**. The 2026-09-02 Scout sweep marked `astap.py` and `runner.py` "traced,
+      clean" for exactly this reason: reading the code cannot reveal what another process does to the filesystem.
+    - **Fix direction:** solve a **temp copy** the way `seestack/solve/bootstrap.py` already does
+      (`TemporaryDirectory`), or redirect the sidecars into the target's cache via ASTAP's output-basename
+      option. **Add a CI test with a stub `astap` executable** that writes sidecars next to `-f` and asserts the
+      `incoming/` listing is byte-identical afterwards — that closes the whole class, not just this instance.
+    - **Owner check that settles it in one line:** `ls incoming/<any target>_sub | grep -c '\.wcs$'` — non-zero
+      confirms it on the live box.
+
+- **✅ SHIPPED, A2's REMAINING TWO INSTANCES (Builder, v0.326.6, branch `claude/zen-mccarthy-mqfxxg`) —
+  ~~`detail.hot_pixels` eats the preview's stars, and `detail.sharpen` diverges from the export with no
+  advisory.~~** Both reproduced first, at the owner's mosaic scale, and both fixed at the root. **With the
+  `tone.color_calibrate` instance shipped by `…-xesefm` as v0.326.3 (entry below), A2's three named instances
+  are now all closed**; the two "also verified, smaller" items at the end of the entry are not.
+
+  **`detail.hot_pixels` — the preview was erasing the user's stars.** Hot-pixel repair is a *full-resolution*
+  operation: every test that separates a stuck sensor pixel from a real star ("is this pixel's 3×3
+  neighbourhood still at sky?", "are the other two channels still at sky?") assumes the image is sampled on
+  the detector's own grid. The editor proxy is decimated by **striding** (`seestack/edit/proxy.py` takes every
+  Nth pixel), so a real 2–3 px-FWHM star lands on one lone proxy pixel with sky all around it *in every
+  channel* — exactly the signature of the defect the op removes. Reproduced on a synthetic S30-scale field at
+  step 3: **369 of 483 bright stars lost more than half their amplitude in the preview, while the full-res
+  export dimmed none of them.** There is no proxy-scale version of the test to fall back on (the
+  neighbourhood would have to shrink below one pixel), so the preview now **skips the op** when
+  `proxy_scale > 1` and the editor says so — the export still cleans the frame. At `proxy_scale == 1` (every
+  export, and any stack small enough that its proxy *is* the full image) the op runs bit-for-bit as before.
+
+  **`detail.sharpen` — right maths, missing advisory.** The radius *is* correctly scaled by `proxy_scale`,
+  which is the right thing to do (it keeps the preview sharpening the same *physical* detail); the defect is
+  that once the scaled radius goes sub-pixel the unsharp mask collapses towards the identity and nothing told
+  the user. Measured as the share of the export's local-contrast gain the preview reproduces, which depends on
+  the **scaled radius alone** (it lines up across every radius/scale pair sharing one): 1.0 px → 96–100 %,
+  0.75 px → 89–97 %, 0.67 px → 77–89 %, 0.5 px → 49–73 %, 0.38 px → **19 %**, 0.33 px → 7–11 %, ≤0.25 px →
+  **0 %**. So 0.6 is the knee, and `sharpen_understates_on_proxy` flags below it — the same shape as
+  `deconv_understates_on_proxy` and `star_reduce_overstates_on_proxy`, which is what the audit asked for
+  ("unlike deconv and star-reduce it shows no advisory"). Auto's own 1.5 px radius on a step-4 mosaic proxy is
+  in the 19 % band. **The render is unchanged** — this half is purely information.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no setting flipped. Two *added*
+  histogram fields (`sharpen_preview_understates`, `hot_pixels_preview_skipped`) alongside the two that
+  already exist, so an older frontend ignores them and an older backend simply doesn't set them (the captions
+  return `null`). Editing stays non-destructive and nothing already exported is touched.
+
+  **Tests (+9; 8 of them fail before).** `tests/test_edit_engine.py` (+4): the two pure rules, a measured
+  preview-vs-export sharpen comparison, and the hot-pixel regression asserted **on behaviour rather than on
+  the new flag** (so it fails on the old code) — every bright star keeps its brightness, the preview is
+  pixel-identical to its input, and the export still repairs a genuine single-pixel defect.
+  `tests/webapp/test_editor.py` (+2) pins both histogram flags across weak/strong/disabled/absent recipes, and
+  the hot-pixel one across a decimated *and* a `proxy_scale == 1` run. Frontend (+3 each in two new files)
+  pins the captions.
+
+- **🟠 A2 — PREVIEW AND EXPORT
+  DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
+  PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that
+  lies. Confidence: verified on synthetic data. Three instances, **one mechanism**.)*
+  **All three named instances are now shipped** (colour-cal below as v0.326.3; hot-pixels and sharpen as
+  v0.326.6, entry above). Only the two "also verified, smaller" items at the foot of this entry are open.
+
+  > **⚠️ COLLISION ELEVEN — Builder `claude/zen-mccarthy-mqfxxg`, 2026-09-02, one of two tasks stood down,
+  > decided by measurement in a worktree rather than by argument.** This run built `tone.color_calibrate`
+  > independently and finished it (scaled FWHM + aperture, *and* the sky annulus, floors at 1.5 px, tests
+  > green) before a `git fetch origin main` between tasks showed `…-xesefm` had landed the same fix as
+  > v0.326.3 forty minutes earlier. Applying the standing method from collision ten — **run your own fixture
+  > against their shipped code in a `git worktree` of `origin/main`** — settled it in two minutes and against
+  > me: on the same 600×900 field at proxy step 3 theirs finds **188 stars where mine found 50**, and its
+  > white balance sits within **0.2 %** of the export's (mine, 2.2 %). The difference is their
+  > `MIN_DETECT_FWHM_PX = 1.0` against my 1.5 — I had floored the finder above the size of the stars I wanted
+  > it to find. My one genuinely extra piece, scaling the photometry's **sky annulus** (`r_in = r + 2`,
+  > `r_out = r + 5`, both unscaled on theirs), turns out to buy nothing measurable: theirs already agrees
+  > with the export to 0.2–2.1 % across steps 2–5, so shipping it would have been speculative hardening on
+  > the on-by-default path. Dropped, not re-litigated. **The transferable bit is the floor:** a floor on a
+  > detector's matched-filter width is not a safety rail, it is a *lower bound on what you can detect* — set
+  > it by what the grid can still resolve (one pixel), not by what feels conservative.
+  - **✅ SHIPPED (Builder, v0.326.3, branch `claude/zen-mccarthy-xesefm`) — ~~`tone.color_calibrate`~~**, the
+    instance that changes the picture's **colour**. Reproduced first, then fixed in the direction the entry
+    named. `_detect_calibration_stars`'s `fwhm=3.0` was a hard-coded literal and the 4 px aperture came from
+    a dataclass default, so both described a *full-resolution* star on whatever grid they were handed. They
+    are now `ColorCalibrationOptions.detect_fwhm_px` / `.aperture_radius_px`, and
+    `seestack.edit.ops.tone._color_calibrate` scales both through `ctx.scaled_px` with floors
+    (`MIN_DETECT_FWHM_PX` 1.0, `MIN_APERTURE_RADIUS_PX` 1.5 — below those a star is one pixel and
+    DAOStarFinder's matched filter starts ranking noise). **`min_stars` is deliberately NOT scaled**: it is a
+    count of stars, and the star count does not change with resolution — what changed was detection
+    *efficiency*, and that is what the geometry fixes.
+    **Measured, before → after** on a synthetic OSC field (tinted sky, neutral stars, sensor cast) at proxy
+    step 3: preview detections **35 % of the export's → 100 %**; the preview's white balance
+    `background_neutral` (gains R 1.056, B 0.912) **→ `gray_star`, R 1.250, B 0.800, matching the export
+    exactly**. The old preview was **15.5 % out in red and 14.0 % in blue** — a picture whose colour the
+    export never applies. On the export (`proxy_scale == 1`) the scaling is the identity, pinned by a test
+    that the full-res path is bit-for-bit what the engine defaults produce.
+    **The entry's second half shipped too**, because scaling closes most of the gap but not all of it: a
+    proxy decimated far enough still holds too few resolvable stars for a solve the export will manage. The
+    op now records **`proxy_fallback`** (true only when the render is a *decimated* preview and its
+    star-based request really did land on a different path), the histogram endpoint carries it in the existing
+    `color_cal` object, and the editor captions it in plain language beside the deconv/star-reduce advisories
+    — *"the saved picture's colour will differ a little from this preview"*. `proxy_scale > 1` is the
+    condition, not `is_proxy`: a small stack's "proxy" is the undecimated pixels, where a fallback is the
+    export's own answer and there is nothing to warn about.
+    **Upgrade-safe (§9):** two additive dataclass fields with their existing values as defaults, one additive
+    key inside an existing JSON blob, no schema, no on-disk change, no default flipped. The stacker's own
+    post-stack colour calibration is full-res and untouched.
+    **Tests (+7, 4 of which fail before).** A new `tests/test_edit_proxy_parity.py` measures preview↔export on
+    a **mosaic-shaped canvas at a real proxy step**, which is the only place any of this is visible. Its
+    fixture is built to be *able* to exhibit the bug and says so: the sky carries its own tint (otherwise
+    gray-star and background-neutral give the same answer and the divergence is invisible), and the star
+    density is of a Seestar's order (a field dense enough to clear the 20-star floor at 35 % efficiency cannot
+    show the bug at all — the first fixture this run wrote was exactly that, and passed on the *broken* code).
+    Plus the flag's two directions, the full-res no-flag case, `tests/webapp/test_editor.py` on the endpoint
+    contract, and `colorCal.test.ts` on the caption.
+    **Still open below: the other two instances and the two smaller ones** — they are a different mechanism
+    each (a floor that bites, a fixed 3×3 window) and want a run each.
+  - ~~**`tone.color_calibrate`** (`seestack/post/color_cal.py`): `DAOStarFinder(fwhm=3.0)`, aperture 4 px and
+    `min_stars=20` are **none of them scaled**. On a mosaic canvas at proxy step 3 the proxy finds too few
+    stars and silently falls back to `background_neutral` **while the export runs gray-star** — measured
+    preview/export gain ratio **R 1.157, B 1.287** on a 4000×2400 canvas. A 1920×1080 single field matches
+    within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.~~
+  - ~~**`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
+    own 1.5 px radius becomes 0.375 px at step 4 — the preview shows **13–46 %** of the export's sharpening,
+    and unlike deconv and star-reduce it shows **no advisory**.~~ *(Shipped v0.326.6.)*
+  - ~~**`detail.hot_pixels`** (`seestack/bg/hot_pixels.py`): a fixed 3×3 isolation test erased or dimmed **259 of
+    582 bright stars** in a step-3 preview while the export touched none. Not in Auto, but the preview
+    misrepresents what the op does.~~ *(Shipped v0.326.6.)*
+  - Also verified, smaller: SCNR's 3 px noise-protect blur unscaled (cosmetic); `stars.reduce`'s advisory
+    points the **wrong way** for 2–3 px stars.
+  - **Fix direction:** scale every pixel-unit parameter through `ctx.scaled_px` with a sensible floor, and
+    **when a proxy op falls back to a different mode than the export will use, say so in the UI** rather than
+    silently diverging. Note the backlog's existing parity claims ("sharpen bit-exact", "RMSE ≈0 for sharpen")
+    are **disproved** by this on any scene with sub-proxy-pixel stars.
+
+- **🟠 A7 — PRE-v0.184.9 SEESTAR ON-DEVICE OUTPUTS STAY ACCEPTED *INSIDE* THE OWNER'S REAL TARGETS, AND CAN BE
+  PICKED AS THE ALIGNMENT REFERENCE.** *(Severity: wrong reference frame / mild contamination on his biggest
+  targets. Confidence: guard behaviour verified by reproduction; downstream reference-pick effect likely.)*
+  `Project.reject_seestar_output_frames` (`seestack/io/project.py`) only rejects a bare `<T>/` folder's frames
+  when it holds **at most `_MAX_SEESTAR_OUTPUT_FRAMES = 2`** — but the owner's real library has one stacked
+  FITS *per session*: bare `M 3` carries **+22** frames over `M 3_SUB`, `M 13` **+9**, `M 101` **+11**,
+  `NGC 281W` **+10`. Those never get rejected on re-scan, stay in the stack **and in the reference pool**, and
+  `pick_central_frame` scores by distance-to-median-pointing then FWHM — which is exactly where a device-stacked
+  output sits (dither centre, high SNR). Reproduced: 5 outputs beside a `_SUB` sibling → **0 rejected**.
+  **Fix:** when the scan has *positive evidence* a folder is output (a same-parent `_sub` sibling exists on disk
+  in this scan), **lift the cap for that folder**; keep the cap for the no-sibling case. Reversible, never a
+  delete.
+
+  > **⚠️ READ BEFORE STARTING — the filed fix collides head-on with an existing regression test, and whoever
+  > takes this has to resolve that first** *(Builder 2026-09-02, found while sizing this after shipping A3;
+  > not started, deliberately — it needs a decision, not a patch.)* The proposed evidence — "a same-parent
+  > `_sub` sibling exists on disk" — is **exactly the scenario**
+  > `test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_name`
+  > (`tests/test_scanner.py`) exists to protect: 8 of a user's *own* raw subs in a plain folder named
+  > `Andromeda/`, sitting beside a Seestar `Andromeda_sub/`. Lift the cap on sibling evidence and that test's
+  > 8 real subs are mass-rejected. (It passes today only because its frames are DB rows with nothing on disk,
+  > so a disk-based sibling check finds no sibling — i.e. it would go green for the wrong reason, which is
+  > worse than failing.) **The discriminator that actually separates the two cases is the filename, not the
+  > folder or the count:** the Seestar's per-session output is `Stacked*.fit`, real subs are
+  > `Light_<T>_<exp>_<filter>_*.fit`. The repo *knows* this convention — every scanner fixture uses it
+  > (`tests/test_scanner.py` writes `Stacked.fit`, `Stacked_60s.fit`, `Stacked_{i:02d}.fit`) — but **no
+  > production module matches on it**: `grep -rn "Stacked" --include=*.py seestack/ webapp/` returns nothing.
+  > So the shape to consider is "reject a bare `<T>/` frame whose *filename* is on-device output, at any
+  > count; keep the ≤2 cap for everything else", which rejects the owner's 22 and keeps the mixed-source test's
+  > 8 without either heuristic having to guess. **Confirm the naming against the owner's real folder listing
+  > before building it** — the listing is already in this file, buried in the `⚪ CLOSED AS A NON-BUG` mosaic
+  > entry (search `"skips a bare"`) — and note this is the **on-by-default ingest path**, so an over-broad
+  > match silently drops real subs from a stack. A second, header-based discriminator (a stacked output's
+  > `EXPTIME` is N×10 s, or it carries a stack-count card) would be stronger still if the DB rows carry it.
+
+- **✅ SHIPPED (Builder, v0.326.7, branch `claude/zen-mccarthy-mqfxxg`) — ~~A6: walk-away auto-reject picks its
+  method from the whole target's frame count, so a shallow mosaic panel gets a rejection pass that is
+  mathematically blind and the trails survive.~~** Reproduced first, at the owner's shape, then fixed at the
+  unit that decides it.
+
+  **The root cause, and why the number was wrong rather than the logic.** Every threshold in the auto
+  outlier-rejection picker is a statement about how many samples land **on one pixel**: κ-σ can't pull a lone
+  trail out of statistics that still include it until ~`kappa_min_frames` (11 at κ=3), and the
+  order-statistic min/max drop needs 3 to spare 2. On a single field those samples *are* the whole stack, so
+  the frame count is a sound proxy — but a mosaic's panels are different patches of sky, and a pixel only ever
+  sees its own panel's subs. A 2×2 mosaic three subs deep therefore handed `n = 12` to a test whose real
+  answer is 3. `_resolve_auto_reject` now takes a `depth`, and `auto_reject_depth` derives it from the same
+  `pointing_groups` gate the QC / photometric / weighting paths already share.
+
+  **Measured, before → after** (2×2 mosaic, 3 subs/panel, one streaked sub, residual against an otherwise
+  identical streak-free stack): `auto_reject` dispatched **κ-σ with `REJFRAC 0.0` — it rejected nothing at
+  all** and left the trail at **1,030 ADU**; it now dispatches min/max and leaves **19 ADU**, identical to
+  the same mosaic with min/max chosen by hand. A **12-sub single field is bit-for-bit unchanged** (κ-σ,
+  residual 4.3 ADU): `auto_reject_depth` returns `None` unless the target genuinely splits into ≥2
+  substantial panels, so no single-field stack, unsolved target or tightly-packed mosaic changes at all.
+
+  **The cost, named rather than hidden.** The method is one global choice for the whole canvas, so a
+  mixed-depth mosaic pays for its thinnest panel: a deep panel stacked with min/max loses κ-σ's multi-outlier
+  reach and its quality weighting. That is second-order (min/max drops exactly two samples per pixel — ~1 % of
+  a 200-sub panel) against a first-order defect, a bright satellite trail baked into the finished picture; and
+  it is the same trade `auto_reject` already makes for every small single-field stack, now applied to the
+  depth that actually exists instead of to a count that describes no pixel. The panel floor is
+  `AUTO_REJECT_PANEL_MIN_FRAMES = MIN_MAX_MIN_FRAMES` (3): a group thinner than that can't be helped by
+  *either* method, so it can't change the answer — and one stray mis-solved sub can't pose as a one-frame
+  panel and demote a deep mosaic.
+
+  **The two surfaces that say so moved with it.** `rejection_reach` (the Stack form's pre-run "can this remove
+  a satellite trail?" line) takes the same `depth`, fed from a new additive `StackEstimate.panel_depth`, so
+  the warning can't reassure a user about a stack that will clip nothing. And `stackhealth`'s
+  `rejection_blind` note — silent on every mosaic until now, because 12 ≥ 11 — reads the run's **peak
+  per-pixel coverage**: when even the best-covered pixel is below the threshold, *no* pixel could have been
+  clipped, so the note is provably right rather than merely likely. It names the honest count too ("no more
+  than 3 subs overlapping at any one spot"), since "with only 12 subs" beside a 12-sub badge reads as nonsense.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no API shape change, no default flipped
+  (`auto_reject` is still off by default; only a run that opted in is affected, and only if it is a mosaic).
+  `depth` is a keyword-only argument defaulting to `None` on both public helpers, and `StackEstimate` gains one
+  optional field — every existing caller keeps its exact behaviour.
+
+  **Tests (+10; 4 of them fail before).** A new `tests/test_auto_reject_mosaic_depth.py` (+8): the depth rule
+  across a dither, an unsolved target, a mixed-depth mosaic and a stray pointing; the picker reading depth
+  rather than count; the pre-run warning; and **two end-to-end stacks through the public `run_stack`** — the
+  trail residual on the shallow mosaic (fails before at 1,030 against a 100 threshold) and the single-field
+  no-regression case. `tests/test_stackhealth.py` (+2) pins the note firing on a shallow mosaic that clears
+  the frame count, and staying silent on a mosaic whose overlaps are genuinely deep.
+
+  **Left open deliberately, for the Scout:** one accumulator serves the whole canvas, so a mosaic with a
+  3-sub panel and a 200-sub panel can only have one method. A *per-pixel* choice — dispatching from the
+  coverage plane rather than from one global verdict — would give each region the right one, but it is a real
+  change to the combine path and wants its own run. Filed under "Image quality".
+
+  The original entry, for the record:
+  ~~**A6 — WALK-AWAY AUTO-REJECT PICKS ITS METHOD FROM THE *WHOLE TARGET'S* FRAME COUNT, so a mosaic panel
+  under 11 subs gets a rejection pass that is mathematically blind and trails survive.** *(Confidence: verified
+  on synthetic data through the public `run_stack`. Owner impact depends on per-panel depth — see open
+  questions.)* `_resolve_auto_reject(options, n)` (`seestack/stack/stacker.py`) is called with
+  `n = len(frames)` — the count **across all panels**. A 2×2 mosaic with 3 subs/panel gives n = 12 ≥
+  `kappa_min_frames(3.0) = 11`, so it dispatches κ-σ, which **by the module's own docstring cannot reject a
+  lone trail below 11 samples**. Measured: streak residual **p99.9 = 1,282 ADU** on the mosaic (REJFRAC 1e-6)
+  vs **2.8 ADU** on a 12-sub single field with identical options, and **21.9 ADU** on the same mosaic with
+  explicit min/max. *(Distinct from the 2026-09-02 entry about a user-saved `sigma_clip` — this is the auto
+  path choosing wrong.)* **Fix:** resolve the method from the **minimum substantial per-panel count**
+  (`pointing_groups` already exists) or per-pixel from the coverage plane; extend `stackhealth`'s
+  `rejection_blind` note the same way.~~
+
+- **🟡 A5 — the Target page's "Your picture" ignores the pinned cover that every other surface honours.**
+  `frontend/src/routes/Target.tsx` takes `runs.data?.[0]` (newest run) for the hero, its share caption and its
+  Edit button, while the Library tile, Best wall, montage and `grainier-newest` all resolve **pinned cover
+  first** (`webapp/routers/gallery.py` `_representative_run`, `webapp/routers/targets.py`
+  `current_picture_path`). Pin run 3, re-stack to run 4 → the Target page shows a *different picture* from the
+  Library card while its own notes talk about "the cover". **Fix:** same precedence as `_representative_run`;
+  label "Your picture (cover)" vs "Your newest picture".
+
+- **🟡 A8 — a target whose missing files never return is held back from auto-stacking FOREVER, and the owner
+  has no action to take.** `_auto_stack_readability_hold` (`webapp/pipeline.py`) holds while
+  `readable < prior_max`. If the owner deletes a bad session from `incoming/` — his folder, his right — the DB
+  rows persist, `unreadable` never drops, and the target only releases once new subs exceed the best run's
+  `n_frames_used`. Reproduced: best run 10, delete 4, add 3 → **held**; needs 5 new subs to escape. He is told,
+  but is offered nothing to do. **Fix:** a reversible, DB-only "mark N missing subs unavailable" (`accept=0`,
+  auto-restored if the path reappears) — one click, or automatic once the same set has been unreadable across
+  K scans over N days. **Also:** the "healing an already-degraded picture is deliberately left open" note in
+  `AGENTS.md` §1 is **stale** — `_auto_stack_degraded_recheck` shipped.
+
+- **🟡 A9 — editor exports drop the WCS**, so any edited picture loses North-up, scale bar, compass and object
+  labels. `_apply_editor_to_run` (`webapp/pipeline.py`) passes `wcs_text=None` to `write_stack_outputs`
+  **even when the recipe contains no geometry op**. **Fix:** carry the source header's celestial cards when no
+  enabled `geometry.*` op is present; adjust CRPIX for crop/resize; drop only for rotate.
+
+- **✅ SHIPPED (Builder, v0.326.5, branch `claude/zen-mccarthy-xesefm`) — ~~A4: every baked caption says "ZWO
+  Seestar S50"; the owner has an S30.~~** Derived, in the direction the entry named — and pointedly **not**
+  swapped for a hard-coded S30, which would be the same bug with a different wrong answer for the next owner.
+
+  **Two halves, because the fact had nowhere to come from.** `_nameplate_fields` reads the *stack master's*
+  header, and the master carried no camera card at all — so `_build_output_header_meta`
+  (`seestack/stack/stacker.py`) now stamps **`INSTRUME`**, read from the subs' own headers via a new pure
+  `camera_name_from_header` (`seestack/io/fits_loader.py`, beside the `FOCALLEN`/`XPIXSZ` reader the entry
+  pointed at). It prefers `INSTRUME` — the camera's own statement, and the FITS standard's key for it,
+  normalising a bare `Seestar S30` to the full form captions use — and falls back to the focal length
+  (150 ± 20 mm = S30, 250 ± 20 mm = S50; the window is far too narrow for the two to blur, they are 100 mm
+  apart). A **non-Seestar** `INSTRUME` is returned as written, so a beginner who drops DSLR frames in sees
+  *their* gear named rather than ours.
+
+  **The rule that makes this a fix and not a re-guess: it returns `None` rather than assuming.** A focal
+  length matching neither model is somebody else's telescope, and `_nameplate_camera` then leaves the camera
+  clause out entirely. A caption naming the wrong camera is a false statement printed onto a picture the owner
+  *shares*; a caption naming no camera is merely quieter.
+
+  **What the owner sees.** Any target stacked from v0.326.5 captions his actual model. Every master written
+  **before** it carries neither card, so its captions drop the camera clause until that target is next
+  stacked — deliberate, and better than continuing to print a model the app was only ever assuming. The
+  nameplate already omits an absent field cleanly (no blank clause, no stray separator), pinned by a test.
+
+  **Upgrade-safe (§9):** one additive FITS card, one pure engine function, no config, no schema, no on-disk
+  layout change, no API shape change. The stamp is best-effort like every other provenance card — an
+  unreadable or header-less sub yields no card and never breaks a stack — and it is **bounded**
+  (`_CAMERA_HEADER_MAX_READS = 5`): it reads headers only, stops at the first sub that answers, and cannot
+  turn one card into thousands of reads on a 5,477-sub target.
+
+  **A fixture bug fell out and was fixed:** `tests/synth.py` wrote `INSTRUME = "Seestar S50"`
+  *unconditionally*, including on the S30-shaped frames (`focal_len_mm=150`) that `test_fits_loader` and
+  `test_solve_runner` already used — a frame no camera on earth produces, and exactly the sort of
+  self-contradicting fixture anything deriving a model from it would have been "tested" against. It now
+  follows the optics, and takes an `instrume=None` to write a frame that names nothing.
+
+  **Tests (+12, 8 of which fail before):** `tests/test_fits_loader.py` on the helper (INSTRUME wins over
+  optics; the focal-length fallback; a 200 mm or 530 mm scope gets `None`; a DSLR is named verbatim),
+  `tests/test_output_header_meta.py` on the stamp (S30 and S50 masters, a silent set leaving the card out, a
+  missing file not breaking the rest of the provenance, and the read bound), and a new
+  `tests/webapp/test_nameplate_camera.py` on the caption — including that an S50 owner still gets an S50, and
+  that an unnamed master produces a clean line with no camera and no stray separator.
+
+  *(Original audit entry follows.)*
+
+  ~~**🟡 A4 — every baked caption says "ZWO Seestar S50"; the owner has an S30.**~~ `_SEESTAR_CAMERA = "ZWO Seestar
+    S50"` (`webapp/pipeline.py`) is passed unconditionally by `_nameplate_fields` to the nameplate, keepsake and
+    print renders — so a **wrong fact is printed on every shared and printed picture**. The comment above it
+    cites "AGENTS.md §1" as its authority, but that file **never named a model** until 2026-09-02; the backlog
+    records the owner confirming an S30 on 2026-07-24. The model is derivable per-frame from
+    `FOCALLEN`/`XPIXSZ` (`seestack/io/fits_loader.py`): 150 mm = S30, 250 mm = S50. **Fix:** derive it, or read
+    it from the new Owner Facts block in `AGENTS.md` §1 — do not hard-code either model.
+
+- **🟢 A10 — four caption builders and two duration formats for one picture, chosen by which page you share
+  from.** Target/lightbox use `share.ts` `sharePictureText` (`M 42 · 15 Nov 2024`); History feeds it
+  `output_basename` and overrides with `postCaption.ts` (`M_42_stack · 15 Nov 2024`); Editor share/print uses
+  `seestack/sharecard.py` `share_blurb` (`M 42 · 3h 12m · 152 subs`, no date, and `3h 12m` where the SPA prints
+  `3.2 h` — a form a comment in `Library.tsx` **explicitly forbids**); the baked nameplate is a fourth.
+  **Fix:** one caption model served by the backend; History passes the **display name**, not the basename.
+
+- **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** No validator
+  stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
+  resolves inside the raw tree — *not* the owner's current state, but one settings edit away); the scanner's
+  bare-`<T>/` skip is **silent** even when the folder holds thousands of FITS (the owner's `NGC 6888` 4,815 vs
+  `NGC 6888_SUB` 3,110 is exactly that shape — see open questions); the plate-solve-failed screen shows a
+  blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"; the Stack page
+  prints the **raw engine error** where every other page uses `friendlyJobError`; the frames table prints raw
+  UTC under a hero that says "Shot &lt;local night&gt;"; "nights" means **6-hour sessions** on the Nights card
+  but **calendar nights** in captions; three hand-mirrored "is this a genuine run" predicates;
+  `POST /api/targets` has **no frontend caller**; share and print JPEGs use 4:2:0 chroma subsampling; the "full
+  data" TIFF anchors its white point on the single brightest surviving pixel (hypothesis, needs real data).
+
+- **🟠 R2 — SPLIT THE BACKLOG INTO A WORKING LIST AND A RECORD (one mechanical Scout run, then a standing
+  rule).** *(The audit's highest-value process finding: this file is **3.4 MB / ~840k tokens**, so no agent can
+  read it in a run — every agent is necessarily skimming, which is the common cause behind stale entries
+  surviving, ideas being re-derived, and collisions.)* Growth is ~100 lines per merged PR: 18,757 lines on
+  08-01 → 23,591 on 08-22 → 29,000 on 08-29 → **34,934 on 09-02**. Measured causes, each traceable to a
+  convention: this file's own "Conventions" block says a shipped item **keeps its full spec indented in place**
+  (while `AGENTS.md` §2/§5/§11 say "move it to Shipped") — so "Shipped"'s newest entry is **v0.288.0** while the
+  app is at v0.325.2, with **65** top-level "✅ SHIPPED" entries sitting inside Ideas and **185** struck entries
+  inside "Bugs"; **"Bugs" now holds 222 top-level entries of which ~212 are resolved and ~10 open**; collision
+  diaries (~20 lines each, ten of them) and clean-sweep records are written **into the priority sections** (the
+  top entry of "Bugs (fix these first)" has been a clean-sweep record, not a bug); and **"In progress" is 336
+  lines with zero live claims** — all 20 headers say "claim released", defeating its only purpose.
+  **The standing rule to adopt** (add to `AGENTS.md` §2 "End of run" and to this file's Conventions block):
+  > `docs/IMPROVEMENTS.md` is the **working list only**. "Bugs (fix these first)" contains open bugs and
+  > nothing else. When an item ships or is closed, **cut** the whole entry and append it as one block to
+  > `docs/SHIPPED.md` (newest first, headed by version + date); leave a one-line `✅ v0.xxx.y <what>` under
+  > "Shipped" here. Process notes and audit records go to `docs/PROCESS-NOTES.md`, one dated block each —
+  > **never** into a priority section. Delete an "In progress" claim when you release it. **A run must leave
+  > `docs/IMPROVEMENTS.md` no longer than it found it** unless it is filing a verified bug; the Scout's first
+  > job each run is to move whatever the last Builders left behind.
+  **The one-off cleanup (a single Scout run, mechanical, high leverage):** move the ~212 resolved "Bugs"
+  entries, the 336-line "In progress" diary and the inline "✅ SHIPPED" entries out; and **strike these three
+  stale entries**, located by quoting their text rather than line number (the file shifts constantly):
+  `"auto-stacked FINAL results come out as single-frame colour-speckle"` and
+  `"the final stacked output resolution"` — both v0.158-era, both long fixed, **still unstruck**, and both
+  concluding in their own text that the engine is clean; and `"skips a bare"` — the mosaic bare-output entry,
+  still saying the device naming "could not be confirmed" when the owner's real folder listing settled it
+  (that listing is currently buried inside a `⚪ CLOSED AS A NON-BUG` entry a triaging agent skips by shape).
+
+- **🟡 R3/R5 — STOP MANDATING IDEA GENERATION, AND RE-AIM THE QA ROTATION.** *(Two `AGENTS.md` prose changes
+  the audit specified; §1 and §11 were already updated on 2026-09-02, these two were left for a run that can
+  also update §12's checklist.)*
+  - **R3 — supply is not the constraint.** §4 ("every run … at least a couple of ideas") and §12's checklist
+    ("added ≥1–2 new ideas") apply to **both** roles, directly contradicting the Builder role text ("does not
+    spend a run inventing features"). **26 NEW IDEA entries were added on 08-27 alone**; 162 exist, 49 still
+    open, against 193 open priority items and 413 infra items. Change §4 to: *"Only the Scout adds ideas, and
+    only after verifying the idea is not already filed or shipped (grep the backlog and `docs/SHIPPED.md`). A
+    Builder files only bugs it verified and leads it could not finish."* Delete the checklist line from §12.
+  - **R5 — the rotation is sweeping clean where the bugs aren't.** Since 08-26: **14 Scout subjects reported
+    "clean" vs 5 that found a bug**, with 21 audits landing on 08-26/27 alone; Builders recorded **73**
+    "found while / dogfood / incidentally" discoveries against **21** Scout-credited ones. Every one of A1, A2
+    and A6 lives in a path the sweeps list as already covered ("preview↔export parity", "rejection math",
+    "mosaic") — because a sweep is *code reading*, and these are **scale-dependent**, **per-panel**, or
+    **external-process** behaviours that reading cannot reveal. Replace the Scout's "lead your rotation with
+    the stacking engine" with: *"The single-field engine core has been swept clean fifteen times; do not
+    re-sweep it until a new bug is found there. Rotate through, in order: (1) scale-dependent preview↔export
+    parity — every editor op with a pixel-unit parameter, measured on a **mosaic-size canvas at proxy step 3
+    and 4**, never on a 1080p field; (2) mosaic and walk-away divergence — every place the mosaic or auto path
+    chooses a method or threshold from a whole-target number that is really a per-panel or per-pixel quantity;
+    (3) filesystem side effects of external processes (ASTAP, ffmpeg) **with a stub binary that writes where
+    the real one writes**; (4) the webapp routers. **A sweep counts as done only if it ran the code on data
+    shaped like the owner's, not only read it.** Record the sweep in `docs/PROCESS-NOTES.md`, never in
+    "Bugs"."*
+  - **Also from the same finding, for whoever takes this:** commit subjects are failing the agents' own "grep
+    the log for the item's nouns" advice — **only 4 of 250 commit subjects contain a code identifier**. Add to
+    §8 step 2: *"The commit subject must name the backlog item's key nouns **and at least one code identifier**
+    (function, module or setting), so the next agent's grep finds it. A headline alone is not a subject."*
+
+- **⚪ R6 — CLEAN THE STALE BANNERS IN `AGENTS.md` §1** *(verified line by line by the audit; §1 got the Owner
+  Facts block and the editor re-opening on 2026-09-02, but these remain)*: **two** banners both claim to be
+  "front of the bug queue" (the 08-17 one names findings that **shipped** v0.271.0/v0.276.0 on 08-26; the 07-30
+  one claims every open bug is gated on data an agent cannot supply); "Full write-up at the top of
+  `docs/IMPROVEMENTS.md` → Bugs" points at a clean-sweep record while the real write-up is ~1,800 lines down,
+  and "Friendliness (PRIORITY 3), top item" is ~1,300 lines down — **replace every "top item" pointer with the
+  entry's headline text as the locator**; the busy-UI banner still quotes **pre-fix** measurements ("frames
+  table starts at line ~1339 of 1481", "~15 alert blocks", "9 stacked cards") when slices a–e shipped 08-13→16
+  and `Target.tsx` now has one `NoticeBoard` (two inline notes) and **zero** cards before the frames table, and
+  "the sidebar is 15 flat links" is now **18 links in 5 groups** — state the remaining work instead (the header
+  row and the ten-item share menu); the "healing … deliberately left open" note is stale (see A8); §12 says the
+  collision "has now happened seven times" when the merge commits show **at least ten**; §2 says 3–6 tasks per
+  run while the Builder prompt says 2–4. Also **§7 spends 25 lines on Qt/libEGL** for three GUI tests of a
+  desktop app the owner never runs — move it to a footnote and make the Qt-skip command the default.
+
+- **✅ SHIPPED (Builder, v0.325.3, branch `claude/zen-mccarthy-t59xya`) — ~~the planner can tell you to shoot
+  up to two minutes *after* astronomical dark ends, and can credit a window with darkness that doesn't
+  exist.~~** Fixed in the direction the entry called the honest one: `_times_grid` now rounds the step count
+  **up** and **clips the last stamp to `window.end`**, so the grid keeps its final sample (a target usable only
+  in the closing minutes is still seen) while never sampling past the end of darkness.
+
+  **The second half the entry asked for, and the constraint that shaped it.** `minutes_above_min_alt` was a
+  flat `count × step`, which would now credit a clipped tail with a whole step it doesn't cover. A new
+  `_sample_minutes` gives each sample the minutes it actually stands for — a full step for every sample except
+  the last, which gets the remainder. On a window that *is* an exact multiple of the step the remainder **is**
+  a full step, so the weights are uniform and every existing number is bit-for-bit unchanged; that is what lets
+  the fix touch a shared hot function (`plan_tonight`, `rank_targets_now`, `next_observing_windows`,
+  `plan_week` and `moon_window` all sample through it) without moving the ordinary case. The two 24-hour
+  callers (`_dark_window_after_noon` at a 4-minute step, the solar-noon search at 15) are exact multiples by
+  construction and are untouched.
+
+  **Measured, before → after.** The worst overhang over a 14-night January scan from London was **120 s** past
+  `dark_end` (night of 2026-01-17: darkness ends 05:55:31, last stamp 05:57:31) → **0 s**. End to end, M 31
+  from a London site on 2026-10-18/-19 was reporting `usable_end` **60 s after** `dark_end`; it no longer can.
+
+  **Upgrade-safe (§9):** one pure engine function; no config, schema, on-disk, API-shape or default change.
+  **Tests (+4 in `tests/test_nightplan.py`, the end-to-end one fails before):** the grid never steps past the
+  end and stays strictly increasing; an exact-multiple window samples *identically* to before (the
+  no-regression half); a clipped tail is credited only the 3 minutes it covers; and, parametrised over a
+  January and an October scan, no reported `usable_start`/`usable_end` ever escapes its own dark window.
+
+  *(Original entry follows.)* *(Severity: low — it is at most ~2.5 min, but it is a plainly false
   statement on a "shoot between X and Y" line, and it now appears on three surfaces: `/tonight`,
   `/next-session/{safe}` and the new `/plan/week`. §1 priority 3. Confidence: reproduced.)*
 
@@ -10547,6 +11182,30 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **✅ SHIPPED (Builder, v0.326.2, branch `claude/zen-mccarthy-olkjpm`) — ~~the editor's ghost curve now has two
+  possible shapes and only explains one of them.~~** Filed by the `…-t59xya` Builder as the gap its A1 fix
+  opened; taken here in the same hour by the run that had independently built the same fix and stood it down
+  (see the collision note under "In progress"), so the sentence lands with its own frontend test rather than
+  waiting for another run. The entry's **"grep first"** was worth doing: the copy is *not* in `CurvesWidget.tsx`
+  — the only place the goal is named is the header "Auto curve" button's Mantine `Tooltip` in `Editor.tsx`,
+  whose label was unconditional and asserted a midtone lift on both branches, while the button's *own* text
+  already degraded correctly (`greyPct` is null on the fallback). So the fix is one conditional label, not a new
+  element: **"There's nothing above the background's noise to lift here, so it adds contrast to the brighter
+  tones only and leaves your sky exactly where it is."** No always-on banner, as the entry required. Pinned by
+  `Editor.test.tsx` → *"drops the '~25% grey' claim when the curve is the sky-anchored fallback"*, which also
+  covers the failure mode nothing else did: a `target_bg` of `null` must never reach the button's label.
+
+  - **~~NEW IDEA (Builder 2026-09-02, a gap the v0.326.1 fix opened rather than closed) — the editor's ghost curve
+    now has two possible shapes and only explains one of them.~~** *(Pillar: friendliness — PRIORITY 3; size XS.)*
+    `/editor/curve-suggestion` returns `target_bg` on the data-driven branch, and the UI uses it to name the goal
+    ("aims your typical tone toward a pleasant grey"). On the **sky-anchored fallback** — which is now the common
+    branch on a sky-dominated stack, i.e. most Seestar stacks — `target_bg` is `None` by design (there is no
+    midtone target; it pins the background and lifts a shoulder above it), so the ghost appears with **no
+    explanation at all** beside it. One plain-language line for that branch would close it: *"keeps your
+    background exactly where the stretch put it, and adds a little contrast above it."* **Grep first:** the copy
+    lives with the Curves widget's auto-contrast ghost in `Editor.tsx`/`CurvesWidget.tsx`; this is a sentence,
+    not a control, and it must not become another always-on banner.
+
 - **NEW IDEA (Builder 2026-09-02, the half the v0.323.1 rejection-reach fix could not reach) — the same blind
   κ-σ runs on the *walk-away* path, where there is no form to warn on.** *(Pillar: autonomy + image quality —
   PRIORITY 2/4; size S for the advisory, **do NOT blind-flip the default**; confidence: traced, mechanism the
@@ -10595,7 +11254,7 @@ to **Shipped**.)_
   user is told the right thing by a different note, and swapping the definition changes which of two correct
   alerts they see. Worth doing as *one definition* rather than as a bug fix, and only with a test that pins
   which note appears in the overlap.
-- **✅ SWEPT AND CLOSED — one second instance found and fixed (Builder, v0.326.1, branch
+- **✅ SWEPT AND CLOSED — one second instance found and fixed (Builder, v0.327.1, branch
   `claude/zen-mccarthy-gmo0to`). Don't re-sweep this list; read the result before adding to it.**
   Every candidate the lead named was walked: **Gallery** (header is icon + title + count badge, no action; the
   search/facet row is gated on `allItems.length + allStills.length > 0` and the batch Compare link on a
@@ -17395,7 +18054,7 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-09-02, the other direction of the v0.325.1 "Edited from …" line) — the *original*
+- **NEW IDEA (Builder 2026-09-02, the other direction of the v0.326.8 "Edited from …" line) — the *original*
   stack says nothing about the edit made from it, so the pointer only works if you happen to look at the right
   row.** *(Pillar: understand — PRIORITY 3; size XS; **check the overlap with `unexported_edit` first, it may
   already be enough**.)* An export's card now names the run it came from and jumps to it. The source run's own
@@ -17425,7 +18084,7 @@ problems. Dogfood it every big-picture run and fix root causes.
 > could have seen, and this is now the **tenth** such collision. Claim even the XS ones, in the run's first
 > commit, and push it immediately.
 
-- **✅ SHIPPED (Builder, v0.325.3, branch `claude/zen-mccarthy-gmo0to`) — ~~an edited export records which run
+- **✅ SHIPPED (Builder, v0.326.8, branch `claude/zen-mccarthy-gmo0to`) — ~~an edited export records which run
   it came from and *nobody ever reads it*, so History gives a beginner two near-identical rows and no way to
   tell which is the original.~~** Built as filed, frontend-only: `derived_from` is already inside the run
   payload's `options` blob (`_parse_options` hands the whole stored JSON through), so no API, schema or
@@ -17442,10 +18101,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   `id="stack-run-<id>"` and the line's click brings the source card into view (`scrollIntoView`), with the
   bare-hash `href` kept for middle-click/copy but its default prevented so it doesn't push a history entry.
 
-  *(Renumbered twice at merge time, from v0.325.1 → v0.325.3: another Builder landed **both** its own v0.325.1
-  and v0.325.2 on `main` while this run was building — §11's "set the number from the latest main", applied
-  again on the second sync. The commit that made this change still says 0.325.1 in its message; the sequence
-  that shipped is theirs (0.325.1, 0.325.2), then 0.325.3 / 0.326.0 / 0.326.1 as this branch's merge.)*
+  *(Renumbered three times at merge time, ending at v0.326.8: other Builders landed v0.325.1 through
+  **v0.326.7** on `main` while this run was building, twice taking a number this branch had already claimed —
+  §11's "set the number from the latest main", re-applied on every sync. The commits that made these changes
+  still say 0.325.1 / 0.326.0 / 0.326.1 in their messages; the sequence that actually ships is
+  **0.326.8** (this entry), **0.327.0** (the √N verdict) and **0.327.1** (the sky-map save gate). The lesson,
+  for the next Builder: on a branch that will sync more than once, expect to renumber at *every* sync, and
+  keep the doc entries as the record rather than the commit subjects.)*
 
   **Tests (+7):** 4 unit (`derivedFromNote` — the named source, the ordinary run, the deleted source, and the
   junk/`derived_from`-is-this-row refusals) and 3 render in `History.test.tsx` (the line with its `#stack-run-3`
@@ -19893,10 +20555,10 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Builder 2026-09-02, the reach the v0.326.0 √N verdict deliberately did not buy) — the
+- **NEW IDEA (Builder 2026-09-02, the reach the v0.327.0 √N verdict deliberately did not buy) — the
   "your stack came in well under what its subs should give" nudge lives inside a collapsed reveal, so the one
   person who needs it never opens it.** *(Pillar: trust + autonomy — PRIORITY 4/2; size S–M; **read the cache
-  note before sizing, it is what makes this cheap**.)* v0.326.0 added an honest early warning — a stack
+  note before sizing, it is what makes this cheap**.)* v0.327.0 added an honest early warning — a stack
   measuring below 0.7·√(frames used) usually means soft alignment, a drifting gradient, or a lot of frames
   dropped — but it renders on the "One frame vs your stack" card, behind a *See the difference* button on the
   History page. A beginner whose stacks are quietly underperforming is exactly the person who never clicks it.
@@ -19917,7 +20579,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   picture that no longer exists. (3) Stay gentle: legitimate rejection and quality weighting lower the
   effective frame count, and the copy already says "usually means", not "is".
 
-- **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-gmo0to`) — ~~say what stacking *should* have
+- **✅ SHIPPED (Builder, v0.327.0, branch `claude/zen-mccarthy-gmo0to`) — ~~say what stacking *should* have
   bought, next to what it did, so a beginner can tell a healthy stack from an underperforming one.~~** Built as
   filed: a pure `noiseVsExpectedNote(ratio, nFrames)` beside the existing `noiseReductionBadge`
   (`components/oneFrameVsStack.ts`), rendered as one line under the badge on the "One frame vs your stack"
@@ -19967,6 +20629,66 @@ problems. Dogfood it every big-picture run and fix root causes.
     already on the run (frames-used, the measured ratio); this is a copy/threshold shaping task with a test that
     a healthy stack reads "as expected" and a deliberately mis-aligned one reads "lower than expected". Measure
     the 0.7 factor against a couple of real stacks before pinning it.
+
+- **Let a mosaic choose its rejection method *per pixel*, not once for the whole canvas.** *(Pillar: image
+  quality — PRIORITY 4; size L; opened by the A6 fix, v0.326.7.)* A6 fixed `auto_reject` reading the target's
+  frame count where the honest number is a panel's depth, and it now sizes the method from the **thinnest
+  substantial panel**. That is the right global answer, but it is still *one* answer: on a mosaic carrying a
+  3-sub panel beside a 200-sub panel, the deep panel is stacked with min/max and loses κ-σ's multi-outlier
+  reach and its quality weighting, purely because a thin neighbour exists. The coverage plane already knows
+  each pixel's true sample count (`frame_coverage`), and both accumulators already degrade per-pixel, so the
+  shape is "dispatch from the coverage plane" rather than "pick one and hope". **Why it's L and not M:** it
+  touches the combine hot path and its memory bounds (two accumulators live at once, or one that switches
+  rule per pixel), and the provenance card / `REJMODE` / `stackhealth` all currently assume a single method
+  per run. Wants a measurement first: how often does the owner's real library actually have a mosaic whose
+  panel depths straddle `kappa_min_frames`? If the answer is "rarely", the global choice is good enough and
+  this should be closed rather than built.
+
+- **Re-measure the panel floor against real mosaic data once there is any.** *(Pillar: image quality —
+  PRIORITY 4; size S; opened by the A6 fix.)* `AUTO_REJECT_PANEL_MIN_FRAMES` is 3 because that is the smallest
+  population *either* method can act on, which makes it un-arbitrary — but it also decides when a stray
+  mis-solved sub counts as a panel. It has only ever been exercised on synthetic pointings. When a real
+  mosaic's per-panel counts are to hand (the Scout has pulled the owner's folder listing before), check that
+  the clustering separates his panels the way the synthetic fixture does, and that no panel of his lands on
+  the wrong side of the floor.
+
+- **LEAD (Builder 2026-09-02, the half of A1's last line nobody has done — distinct from the sweep idea below,
+  and worth keeping separate) — every constant that was *tuned by eye* through the old contrast curve was
+  tuned through a curve that moved the sky, so re-measure the ones that decided a default.** *(Pillar: trust +
+  image quality — PRIORITY 4; size M; pure measurement, no behaviour change unless a number turns out wrong.)*
+  The ⭐ entry below asks "which other *statistics* share A1's clipped-shadow blindness?"; this asks the
+  narrower, more concrete question **"which shipped *constants* were chosen by looking at a picture the bug had
+  already altered?"** Until v0.326.1 Auto ended with a curve that brightened a sky-dominated stack's background
+  by **6–33 %** at `target_bg` 0.15–0.22 and *darkened* it ~20 % at 0.25, so any past A/B judged on a finished
+  Auto picture was reading a background Auto had moved. **Where to look, in the order they matter:** the
+  `target_bg` choices themselves (`tone.stretch` 0.18 in `auto_recipe` vs 0.18/0.22/0.25 in the built-in
+  presets — picked to look right *through* the old curve, and the most likely real finding, since the
+  0.15–0.22 band and the 0.25 preset were being pushed in **opposite** directions); then the SCNR amount and
+  the saturation scaling in `auto_recipe` (both chosen relative to measured sky/noise and both applied *before*
+  the curve, so probably safe — confirm rather than assume); then any Shipped entry whose evidence is a
+  before/after sky or brightness number measured on a finished Auto picture. **Method:** re-run the comparison
+  on v0.326.1+ and report the delta; change a constant only if the old choice is *measurably* worse now, and
+  say so with the numbers. **Caution:** these are on-by-default constants on a live install — a change alters
+  every future picture, so it wants its own commit and a stated before/after, never a fold-in.
+
+- **⭐ NEW IDEA (Builder 2026-09-02, generalised from the A1 fix this run — the strongest follow-on it
+  exposed) — sweep every display-space measurement for the *same* clipped-shadow blindness A1 turned out to
+  be.** *(Pillar: image quality + trust — PRIORITY 4; size S per site, and the identifying test is mechanical.
+  Confidence: the mechanism is proven — one live instance found, reproduced and fixed this run.)*
+  A1 was not "the sky-mode histogram has a bug". It was: **`tone.stretch` hard-clips ~1.5 % of every stretched
+  image to *exactly* zero, and any statistic taken over the whole finite population sees that spike as real
+  data.** One value, 1.5 % of the pixels — it beats a noise-spread sky in a histogram every time, and it drags
+  any low percentile to 0.0. `_sky_mode` was one consumer of that population; it is unlikely to be the only
+  one. **The generative test, which needs no measurement:** *does this statistic run on display-space pixels,
+  and would a spike at exactly 0 change its answer?* If yes, it is a candidate.
+  **Where to look** (each is a read, not yet a finding — check before filing): the Levels black-point
+  suggestion and the histogram's "shadows clipping" readout (both explicitly reason about the low end);
+  `analyze_proxy`'s `sky`, which Auto's own denoise/sharpen decisions are sized from; the gradient
+  background-model fits, which weight by pixel value; and anything measuring a percentile below p5 on a
+  post-stretch array. **Care:** the fix is *not* "drop zeros everywhere" — a readout whose whole job is to
+  report clipping must keep counting them. The rule is that a statistic estimating a *property of the sky*
+  excludes them, and one estimating *how much was clipped* does not. State which kind each site is in the
+  commit.
 
 - **NEW IDEA (Builder 2026-08-31, the anchoring question the v0.320.1 per-panel patches deliberately left
   measured-but-unaddressed) — chain each mosaic panel's refine reference to a neighbour it overlaps, so the
@@ -21854,8 +22576,38 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-09-02, the piece v0.325.0 deliberately left out — promoted from its
-  "deliberately not done" line so it is findable as work) — put the planned week in the user's calendar.**
+- **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-t59xya`) — ~~put the planned week in the user's
+  calendar.~~** Built as filed, as composition: `GET /api/plan/week/calendar.ics` and an **Add this week to
+  your calendar** anchor on the Plan-my-week card. One event per night that has a pick, titled with what to
+  point at (*"Image M 31"*), described in the same jargon-free sentence the per-target calendar uses.
+
+  **Both cautions on the entry were honoured, and one was worth more than expected.**
+  *The UID scheme* — the week's events go through the **same** `_window_ics_event` as `/next-session`, via a
+  small `_week_night_as_window` adapter, rather than a second event builder. So a night that appears in both
+  calendars carries **one** UID and the second import *updates* the entry instead of doubling it; pinned by a
+  test that the two files' UID sets actually intersect. *Only nights with a pick become events* — a
+  "nothing is well placed" entry is worse than none — and an empty week 404s rather than handing back a
+  blank calendar, matching how `/next-session/{safe}/calendar.ics` already behaves.
+
+  **One thing the entry didn't ask for, which the shape made obvious.** The `/week` endpoint's
+  signature-cache block is now a shared `_cached_week_plan`, used by the JSON payload *and* the `.ics`. The
+  calendar is therefore the *same plan object* the card in front of the user is showing — the two cannot
+  report different nights, targets or times for the same request, and the download costs no second ephemeris
+  pass. Pinned by a test that walks the JSON payload and asserts every placed night's `DTSTART`/`DTEND`/target
+  name appears in the file.
+
+  **Upgrade-safe (§9):** one new read-only endpoint, one new client URL helper, no config key, no schema, no
+  on-disk change, no default flipped, no existing response shape touched. The link is gated on the card
+  actually having a placed night (the standing "is this control gated on the same data as the emptiness beside
+  it?" rule), so on a fresh install it simply isn't there.
+
+  **Tests: +9.** `tests/webapp/test_plan.py` (6) — one event per planned night and no more; the events match
+  the card's own plan field for field; the shared UID with `/next-session`; the no-location 404; the
+  nothing-placed 404; and the same input validation as its JSON twin.
+  `frontend/src/components/tonight/PlanWeekCard.test.tsx` (3) — the link and its `download`, the altitude
+  floor carried into the URL so the file matches what is on screen, and the link's absence on an empty week.
+
+  *(Original entry follows.)*
   *(Pillar: plan + autonomy — PRIORITY 2–3; size S; additive, offline, no new deps.)* The card now says
   "Saturday is your best M 31 night, 21:40 → 01:46" — and then the owner has to remember it. The *per-target*
   answer already ships as a one-tap `.ics` (`GET /api/plan/next-session/{safe}/calendar.ics`, built from
@@ -30080,6 +30832,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   than after the failure, and treat "errors that begin partway through a suite that was green an hour ago" as
   a disk symptom until `df` says otherwise. Deletes still succeed when writes don't, so recovery is always
   available; a fresh session is never needed for this.
+
+- **⭐ NEW IDEA (Builder 2026-09-02, the audit's own lesson from A1, made mechanical) — give the display-space
+  tests one shared fixture that is *real* stretch output, and use it wherever a regression test reasons about
+  post-stretch pixels.** *(Pillar: maintainability in service of correctness — size S; no behaviour change.)*
+  A1's headline was the bug; its sting was that **the regression test written for that exact defect in
+  v0.210.6 passed on a fixture that could not exhibit it** — `clip(sky + normal)`, which has no hard shadow
+  clip, so it never saw what `autostretch` actually produces. The test confirmed the fix's *model* of the bug
+  rather than the bug, and the defect survived underneath it for four months.
+  **Shape:** one helper in `tests/` — a linear OSC-like stack (sky + noise, an extended object, stars) put
+  through the app's own `autostretch`, with a known pure-background corner — plus, beside it, the guard the
+  A1 tests now lead with: **assert the fixture really does clip shadows to zero**, so a future change to the
+  stretch cannot silently turn the tests below it into no-ops. Then migrate the display-space tests that
+  currently hand-roll an approximation onto it. **Care:** this is not a licence to rewrite passing tests
+  wholesale — migrate a test only when it reasons about the low end or the histogram, and keep any fixture
+  that is deliberately synthetic (a degenerate/flat case) exactly as it is.
 
 - **NEW IDEA (Builder 2026-08-30, the shape the v0.311.1 bug had, and the reason it existed) — there are now
   **two** answers to "render this run's picture at size N, exactly as it is shown", and the bug was the gap

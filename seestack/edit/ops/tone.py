@@ -44,11 +44,12 @@ def _stretch(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
 # --- nonlinear tone shapers (operate in display space [0,1]) ----------------
 
-# A gentle fixed S-curve (the same one the built-in galaxy/nebula presets ship)
-# used as the auto-contrast fallback when the data-driven suggestion declines — a
-# stack already bright enough to have nothing to lift, or too degenerate to
-# measure. It slightly steepens the midtones (0.25→0.20, 0.75→0.82) for a pleasant
-# contrast start; strictly monotone, so it can't invert or posterise.
+# The gentle fixed S-curve the auto-contrast fallback used to be, kept as the
+# reference shape ``seestack.edit.curve.fallback_tone_curve`` reproduces at a sky
+# of zero. It is no longer applied as-is: its lower point (0.25→0.20) sits *below*
+# the sky of a typical stretched stack, so using it darkened the background by
+# about a fifth whenever the data-driven suggestion declined. The fallback now
+# anchors the same shoulder on the image's own measured sky instead.
 _AUTO_CONTRAST_FALLBACK = [[0.0, 0.0], [0.25, 0.2], [0.75, 0.82], [1.0, 1.0]]
 
 
@@ -77,9 +78,12 @@ def _curves(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     # gentle S-curve when the data offers no useful suggestion. A hand-edited curve
     # (non-identity points) always wins, so toggling auto never discards manual work.
     if params.get("auto") and _points_are_identity(pts):
-        from seestack.edit.curve import suggest_tone_curve
-        suggested = suggest_tone_curve(as_rgb(rgb))
-        pts = suggested if suggested is not None else _AUTO_CONTRAST_FALLBACK
+        from seestack.edit.curve import fallback_tone_curve, suggest_tone_curve
+        src = as_rgb(rgb)
+        suggested = suggest_tone_curve(src)
+        # Both branches obey the same rule — never move the sky — so which side of
+        # the suggestion's gate a stack falls on can't change its background.
+        pts = suggested if suggested is not None else fallback_tone_curve(src)
     xs = np.array([p[0] for p in pts], dtype=np.float64)
     ys = np.array([p[1] for p in pts], dtype=np.float64)
     # A tone curve needs at least two control points spanning a range of x. A
@@ -231,13 +235,34 @@ def _scnr(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
 
 def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
-    from seestack.post.color_cal import ColorCalibrationOptions, calibrate_color
+    from seestack.post.color_cal import (
+        DEFAULT_APERTURE_RADIUS_PX,
+        DEFAULT_DETECT_FWHM_PX,
+        MIN_APERTURE_RADIUS_PX,
+        MIN_DETECT_FWHM_PX,
+        MODE_GAIA,
+        MODE_GRAY_STAR,
+        ColorCalibrationOptions,
+        calibrate_color,
+    )
 
     mode = str(params.get("mode", "gray_star"))
     # gaia needs a WCS + network; on the decimated preview proxy fall back to gray_star.
     if mode == "gaia" and (ctx.is_proxy or ctx.wcs is None):
         mode = "gray_star"
-    opts = ColorCalibrationOptions(enabled=True, mode=mode)
+    # The star-detection geometry is in *full-resolution* pixels; on the decimated
+    # preview proxy a 3 px star spans 3/proxy_scale px, so shrink both the finder's
+    # FWHM and the photometry aperture by the same factor. Unscaled, the proxy hunted
+    # for stars several times wider than any it contained, found too few, and fell
+    # back to a *different white balance* than the export — a preview that lies about
+    # the picture's colour, worst on the big mosaic canvases that decimate the most.
+    # On the export (proxy_scale == 1) ``scaled_px`` is the identity, so nothing moves.
+    opts = ColorCalibrationOptions(
+        enabled=True, mode=mode,
+        detect_fwhm_px=max(MIN_DETECT_FWHM_PX, ctx.scaled_px(DEFAULT_DETECT_FWHM_PX)),
+        aperture_radius_px=max(MIN_APERTURE_RADIUS_PX,
+                               ctx.scaled_px(DEFAULT_APERTURE_RADIUS_PX)),
+    )
     calibrated, result = calibrate_color(rgb, ctx.wcs, opts)
     # Record which white-balance path actually ran (star-based, background-neutral
     # fallback, or gave up) so a caller can tell the user whether their image was
@@ -246,6 +271,18 @@ def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndar
         "mode_used": result.mode_used,
         "n_stars_used": int(result.n_stars_used),
         "notes": result.notes,
+        # Scaling the geometry closes most of the gap, but a heavily-decimated proxy
+        # can still hold too few resolvable stars for a star-based solve the export
+        # will manage. When that happens the preview's colour genuinely is not the
+        # export's, so say so (the editor captions it) instead of diverging silently.
+        # ``proxy_scale > 1`` is the real condition, not ``is_proxy``: a small stack's
+        # "proxy" is the full pixels undecimated, so a fallback there is the export's
+        # own answer and there is nothing to warn about.
+        "proxy_fallback": bool(
+            ctx.is_proxy and ctx.proxy_scale > 1.0
+            and mode in (MODE_GRAY_STAR, MODE_GAIA)
+            and result.mode_used not in (MODE_GRAY_STAR, MODE_GAIA)
+        ),
     }
     return calibrated
 

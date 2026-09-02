@@ -394,3 +394,59 @@ def test_fov_deg_from_header_rejects_nonphysical(tmp_path):
         focal_len_mm=0.0, pixel_size_um=2.9,
     )
     assert fov_deg_from_header(load_header(p)) is None
+
+
+# --------------------------------------------------------------------------- #
+# camera_name_from_header — never guess the owner's gear
+# --------------------------------------------------------------------------- #
+
+def test_camera_name_prefers_what_the_camera_says_about_itself():
+    from astropy.io.fits import Header
+
+    from seestack.io.fits_loader import camera_name_from_header
+
+    # A Seestar's bare name is normalised to the form the app's captions use.
+    assert camera_name_from_header(Header({"INSTRUME": "Seestar S30"})) == "ZWO Seestar S30"
+    assert camera_name_from_header(Header({"INSTRUME": "Seestar S50"})) == "ZWO Seestar S50"
+    assert camera_name_from_header(
+        Header({"INSTRUME": "ZWO Seestar S30"})) == "ZWO Seestar S30"
+    # …and it wins over the optics, because it is the camera's own statement.
+    assert camera_name_from_header(
+        Header({"INSTRUME": "Seestar S30", "FOCALLEN": 250.0})) == "ZWO Seestar S30"
+
+
+def test_camera_name_falls_back_to_the_focal_length():
+    from astropy.io.fits import Header
+
+    from seestack.io.fits_loader import camera_name_from_header
+
+    assert camera_name_from_header(Header({"FOCALLEN": 150.0})) == "ZWO Seestar S30"
+    assert camera_name_from_header(Header({"FOCALLEN": 250.0})) == "ZWO Seestar S50"
+    # A rounded / measured focal length still lands on its model…
+    assert camera_name_from_header(Header({"FOCALLEN": 154.0})) == "ZWO Seestar S30"
+    # …but the two models never blur into each other.
+    assert camera_name_from_header(Header({"FOCALLEN": 200.0})) is None
+
+
+def test_camera_name_says_nothing_rather_than_guessing():
+    """The whole point: a caption naming the wrong camera is a false statement
+    printed onto a picture the owner shares. Silence is the honest answer."""
+    from astropy.io.fits import Header
+
+    from seestack.io.fits_loader import camera_name_from_header
+
+    assert camera_name_from_header(Header()) is None
+    assert camera_name_from_header(Header({"EXPTIME": 10.0})) is None
+    assert camera_name_from_header(Header({"FOCALLEN": 0.0})) is None
+    assert camera_name_from_header(Header({"FOCALLEN": 530.0})) is None  # somebody's refractor
+    assert camera_name_from_header(Header({"INSTRUME": "   "})) is None
+
+
+def test_a_non_seestar_instrument_is_named_as_written():
+    """A beginner who drops a DSLR frame in should see their own gear on the
+    caption, not ours and not a blank."""
+    from astropy.io.fits import Header
+
+    from seestack.io.fits_loader import camera_name_from_header
+
+    assert camera_name_from_header(Header({"INSTRUME": "Canon EOS 6D"})) == "Canon EOS 6D"

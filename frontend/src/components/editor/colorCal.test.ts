@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { autoColorCalCaption } from "./colorCal";
+import { autoColorCalCaption, colorCalProxyFallbackCaption } from "./colorCal";
 
 describe("autoColorCalCaption", () => {
   it("returns null when unavailable or the mode is unknown", () => {
@@ -80,5 +80,33 @@ describe("autoColorCalCaption", () => {
     expect(
       autoColorCalCaption({ mode_used: "gray_star", n_stars_used: 12 })!.text,
     ).not.toContain("capped an extreme channel");
+  });
+});
+
+describe("colorCalProxyFallbackCaption", () => {
+  it("stays silent unless the backend flagged a real preview↔export divergence", () => {
+    expect(colorCalProxyFallbackCaption(undefined)).toBeNull();
+    expect(colorCalProxyFallbackCaption(null)).toBeNull();
+    // An older backend simply omits the key — never nag on a missing field.
+    expect(
+      colorCalProxyFallbackCaption({ mode_used: "background_neutral", n_stars_used: 0 }),
+    ).toBeNull();
+    // A preview that reached the same star-based balance as the export.
+    expect(
+      colorCalProxyFallbackCaption({
+        mode_used: "gray_star", n_stars_used: 44, proxy_fallback: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("says plainly that the saved picture's colour will differ", () => {
+    const cap = colorCalProxyFallbackCaption({
+      mode_used: "background_neutral", n_stars_used: 0, proxy_fallback: true,
+    });
+    expect(cap).not.toBeNull();
+    expect(cap).toMatch(/full-resolution export/i);
+    expect(cap).toMatch(/differ/i);
+    // Plain language: no proxy/decimation jargon aimed at a beginner.
+    expect(cap).not.toMatch(/proxy|decimat/i);
   });
 });

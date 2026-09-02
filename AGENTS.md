@@ -62,10 +62,37 @@ expert.** Everything is judged by whether it helps *that* person.
 **North Star:** drop your Seestar frames in → get a great-looking, trustworthy
 image out, with as little fuss as possible.
 
+**📋 OWNER FACTS — the authoritative list. If a fact about the owner is not in this
+block, it is UNKNOWN: ask via the backlog, never hard-code a guess.** *(Added
+2026-09-02 after an audit found `webapp/pipeline.py` hard-coding "ZWO Seestar S50"
+onto every baked caption and citing "AGENTS.md §1" as its authority — a fact this
+file had never contained. The owner has an S30.)*
+- **Scope: ZWO Seestar S30** (150 mm focal length, 2.1° field — confirmed by the
+  owner 2026-07-24). **Not an S50** (250 mm, 1.27°). Where the model matters, derive
+  it from the frame's own `FOCALLEN`/`XPIXSZ` (`seestack/io/fits_loader.py`) rather
+  than assuming either.
+- **Install:** TrueNAS/Docker, upgraded **in place**, non-technical owner.
+- **Data:** thousands of subs per target (~5,477 on the largest). **Raws live only in
+  `incoming/`, with no backup** — see §10, which is not negotiable.
+- **Live settings:** `copy_to_cache` **off** (so the app reads the owner's raws in
+  place — anything that touches a frame path touches `incoming/`), `auto_stack` and
+  `auto_edit_on_autostack` **off**, unless the owner says otherwise.
+- **Shooting style:** heavy mosaic user (`<T>_mosaic_sub/`), many targets spanning
+  many nights. **Test mosaic-shaped and large-canvas cases, not just a 1080p single
+  field** — several 2026-09-02 findings existed only at mosaic scale.
+
 **Priorities, in strict order (the owner set these).** When choosing what to do,
 higher on this list wins — always:
 
-1. **Make the editor excellent.** The non-destructive editor is where a good stack
+1. **Make the editor excellent.** ⚠️ **RE-OPENED 2026-09-02 — do not believe any
+   "the editor is well-hardened" claim further down this file.** An external audit
+   verified by reproduction that (a) Auto's contrast curve **brightens the sky by
+   ~36% on every Auto picture** (`_sky_mode` reads the STF's zero-clip spike as the
+   sky), and (b) several editor ops **disagree between preview and export** because
+   their pixel-unit parameters are not scaled by the proxy factor — worst on the
+   mosaic-size canvases the owner actually has. Both are in "Bugs (fix these first)".
+   **These outrank all share/copy/export-polish work**, which is where recent runs
+   have clustered. The non-destructive editor is where a good stack
    becomes a good *picture*, and today it has real problems (live preview that
    doesn't match/behave, clunky and confusing controls, and a weak default
    result). **Go deep here: hunt and fix its bugs, make the controls obvious, and
@@ -648,12 +675,20 @@ add a test that an *old* config/DB upgrades cleanly.
 
 ## 11. Coordinating with other agents
 
-Multiple agents overlap in time — Builders run roughly hourly, and the Scout runs
-alongside them — and **both merge into `main`.** Two things make this safe by
-construction: each agent runs in its **own isolated container** (there is no shared
-working directory, so no file races), and **git serialises merges** (one lands, the
-next must sync before it can). Nothing here can touch the *deployed* install's data.
-Your job is just to keep the overlap harmless.
+Multiple agents overlap in time. Git serialises merges and containers are isolated,
+so file races are not the risk. **The risk is two Builders choosing the same item in
+the same minute:** this has cost at least twelve items across ten collision events
+(2026-08-26 → 09-02), and every one happened while two Builder runs overlapped.
+Claiming an item in `docs/IMPROVEMENTS.md` is a **publication, not a lock**, and has
+not prevented a single one — by the time you claim, the other run already chose.
+
+**Choose so that two simultaneous runs rarely pick the same thing.** Within the
+highest-priority section that has open work, pick **uniformly at random among the top
+four open, unclaimed entries** (a ⭐ entry is always taken first; do not mark anything
+⭐ that is not urgent). Then, *before writing a line*: `git fetch origin main`, and
+`git log --oneline origin/main -30` grepped for the item's code nouns. If it is on
+`main`, stop and pick again; if it is claimed on a branch pushed within the last two
+hours, pick the next.
 
 **While working**
 - Read recent `git log` and open PRs/branches first; skip topics already in flight.
