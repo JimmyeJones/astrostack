@@ -565,3 +565,40 @@ def test_a_re_solve_of_the_same_frame_still_leaves_incoming_alone(tmp_path):
 
     _assert_unchanged(before, tmp_path / "incoming", "three plate solves")
     assert sorted(p.name for p in incoming.iterdir()) == [frame.name]
+
+
+def test_the_stub_astap_really_would_litter(tmp_path):
+    """Meta-test for layer 4, so a green run above means something.
+
+    The two tests above assert that a folder did *not* change. That assertion is
+    trivially true if the stub quietly stopped writing anything — a stub with a
+    typo'd flag name, a changed argv shape, or a `-f` the solver no longer
+    passes would leave the whole layer permanently green while checking nothing.
+    That exact failure mode (a regression test that passes on a fixture which
+    cannot exhibit the bug) is what let A1 survive its own fix for four months,
+    so layer 4 carries a positive control: point the stub at a folder we *don't*
+    protect and watch it litter.
+
+    Mirrors :func:`test_the_sentinel_actually_fires`, which does the same job for
+    layer 2.
+    """
+    import subprocess
+
+    exe = _write_stub_astap(tmp_path)
+    victim_dir = tmp_path / "not-incoming"
+    victim_dir.mkdir()
+    victim = victim_dir / "frame.fit"
+    victim.write_bytes(b"raw")
+
+    subprocess.run([str(exe), "-f", str(victim), "-wcs"], check=True, capture_output=True)
+
+    assert sorted(p.name for p in victim_dir.iterdir()) == [
+        "frame.fit", "frame.ini", "frame.wcs"], (
+        "the stub ASTAP no longer writes sidecars beside its -f file, so the two "
+        "tests above are asserting nothing")
+    # …and the sidecar it writes is really readable as a WCS, so "the solve
+    # succeeded" in those tests is a genuine solve and not an empty file.
+    from seestack.io.wcs_io import wcs_text_from_sidecar
+
+    text = wcs_text_from_sidecar(victim_dir / "frame.wcs")
+    assert text and "CRVAL1" in text

@@ -1175,6 +1175,49 @@ def _capture_window(frames: list) -> tuple[str | None, str | None]:
     return min(dated)[1], max(dated)[1]
 
 
+def _stack_camera_name(frames: list) -> str | None:
+    """The camera this stack's subs were taken with, or ``None`` if they don't say.
+
+    Read from a sub's own header (``INSTRUME``, else the focal length) rather than
+    assumed — see :func:`seestack.io.fits_loader.camera_name_from_header` for why
+    guessing is not an option here. Only a header is authoritative, so this reads
+    one: the frames' rows carry no camera field.
+
+    Cheap and best-effort by design. It reads *headers only* (no pixel data) and
+    stops at the first frame that answers, so an ordinary stack pays one header
+    read; a set whose first few frames are unreadable is bounded rather than
+    walking thousands of files, and a mixed-gear set is named by its first sub,
+    which is the same convention every other card here uses. Any failure yields
+    ``None`` and the caption simply omits the camera.
+    """
+    from seestack.io.fits_loader import camera_name_from_header
+    from seestack.io.project import readable_frame_path
+
+    tried = 0
+    for f in frames:
+        if tried >= _CAMERA_HEADER_MAX_READS:
+            break
+        try:
+            path = readable_frame_path(f)
+            if not path:
+                continue
+            tried += 1
+            from astropy.io import fits as _fits
+
+            name = camera_name_from_header(_fits.getheader(path))
+        except Exception:  # noqa: BLE001 — provenance is non-critical
+            continue
+        if name:
+            return name
+    return None
+
+
+#: How many frames :func:`_stack_camera_name` will open before giving up. The
+#: first readable sub normally answers; the cap keeps a library of unreadable or
+#: header-less files from turning one provenance card into thousands of reads.
+_CAMERA_HEADER_MAX_READS = 5
+
+
 def _capture_hours(frames: list) -> list[str]:
     """The distinct **UTC hours** this run's subs were shot in, sorted, written
     as instants on the hour (``"2024-11-15T21:00:00Z"``). ``[]`` when nothing is
@@ -1497,6 +1540,14 @@ def _build_output_header_meta(
         meta["DATE-OBS"] = (capture_start, "start of the first sub combined")
     if capture_end and capture_end != capture_start:
         meta["DATE-END"] = (capture_end, "start of the last sub combined")
+    # Which camera took the light. Carried from the subs' own headers rather than
+    # assumed: the acquisition nameplate baked into every shared and printed
+    # picture used to *assert* "ZWO Seestar S50" with no header field behind it,
+    # and the owner has an S30 (AGENTS.md §1 "Owner facts"). Absent when the subs
+    # don't say — a caption with no camera beats a caption naming the wrong one.
+    camera = _stack_camera_name(frames)
+    if camera:
+        meta["INSTRUME"] = (camera, "camera the subs were taken with")
     # Label the method the dispatcher actually ran, applying the *same* frame-count
     # gates it uses (`min_max_reject and n >= 3`, `sigma_clip and n >= 4`): below
     # those counts the dispatcher silently falls through to plain mean (no rejection

@@ -1903,6 +1903,11 @@ export interface AutoColorCal {
   mode_used: string;
   n_stars_used: number;
   notes?: string;
+  // True only on a *live preview* whose decimated proxy held too few resolvable
+  // stars for the star-based balance the full-res export will manage — i.e. the
+  // colour on screen is genuinely not the colour that gets saved. Absent on a
+  // full-res render and on an older backend.
+  proxy_fallback?: boolean;
 }
 
 export interface PsfSuggestion {
