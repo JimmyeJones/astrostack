@@ -48,9 +48,15 @@ def test_recap_poster_renders_a_square_jpeg(client, solved_library):
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/jpeg"
     assert "my-sky-so-far.jpg" in r.headers["content-disposition"]
+    from PIL import JpegImagePlugin
+
     with Image.open(io.BytesIO(r.content)) as img:
         assert img.size[0] == img.size[1]
         assert img.size[0] >= 512
+        # Every JPEG the user keeps carries full-resolution colour (4:4:4).
+        # Pillow defaults to 4:2:0, which smears a 2-3 px star's colour into
+        # the sky around it — `tests/test_jpeg_chroma.py` has the measurement.
+        assert JpegImagePlugin.get_sampling(img) == 0
 
 
 def test_recap_poster_renders_on_an_empty_library_rather_than_erroring(client):

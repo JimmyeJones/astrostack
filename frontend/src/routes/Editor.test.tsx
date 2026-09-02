@@ -413,7 +413,7 @@ describe("EditorView", () => {
       id: "share1", kind: "editor_share", target: "M_42", state: "done",
       phase: "", done: 1, total: 1, detail: "", created_utc: null,
       started_utc: null, finished_utc: null, error: null,
-      result: { blurb: "M 42 · 3h 12m · 152 subs" },
+      result: { blurb: "M 42 · 3.2 h · 152 subs" },
     });
 
     renderEditor();
@@ -421,7 +421,7 @@ describe("EditorView", () => {
     const btn = await screen.findByText("Download share image (JPEG)");
     fireEvent.click(btn);
     await waitFor(() =>
-      expect(screen.getByText("M 42 · 3h 12m · 152 subs")).toBeInTheDocument());
+      expect(screen.getByText("M 42 · 3.2 h · 152 subs")).toBeInTheDocument());
     expect(screen.getByLabelText("Copy caption")).toBeInTheDocument();
   });
 
@@ -436,7 +436,7 @@ describe("EditorView", () => {
       id: "share1", kind: "editor_share", target: "M_42", state: "done",
       phase: "", done: 1, total: 1, detail: "", created_utc: null,
       started_utc: null, finished_utc: null, error: null,
-      result: { blurb: "M 42 · 3h 12m · 152 subs" },
+      result: { blurb: "M 42 · 3.2 h · 152 subs" },
     });
 
     renderEditor();
@@ -469,7 +469,7 @@ describe("EditorView", () => {
       id: "share1", kind: "editor_share", target: "M_42", state: "done",
       phase: "", done: 1, total: 1, detail: "", created_utc: null,
       started_utc: null, finished_utc: null, error: null,
-      result: { filename: "m42.jpg", blurb: "M 42 · 3h 12m · 152 subs" },
+      result: { filename: "m42.jpg", blurb: "M 42 · 3.2 h · 152 subs" },
     });
 
     renderEditor();
@@ -479,7 +479,7 @@ describe("EditorView", () => {
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
     const data = share.mock.calls[0][0] as ShareData;
     expect(data.files?.[0].name).toBe("m42.jpg");
-    expect(data.title).toBe("M 42 · 3h 12m · 152 subs");
+    expect(data.title).toBe("M 42 · 3.2 h · 152 subs");
     delete nav.canShare;
     delete nav.share;
   });

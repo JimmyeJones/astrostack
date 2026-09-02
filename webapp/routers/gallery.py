@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from seestack.edit.proxy import rejection_map_path_for
+from seestack.stack.output import save_display_jpeg
 from seestack.stackhealth import seam_verdict
 from webapp import deps
 from webapp.capture_nights import capture_night_count, capture_night_range
@@ -850,7 +851,7 @@ def get_gallery_montage(request: Request, limit: int = MONTAGE_DEFAULT_TILES):
             status_code=404,
             detail="You need finished pictures of at least two targets to make a wall.")
     buf = io.BytesIO()
-    image.save(buf, format="JPEG", quality=92)
+    save_display_jpeg(image, buf, quality=92)
     return Response(
         content=buf.getvalue(),
         media_type="image/jpeg",

@@ -279,6 +279,11 @@ def test_before_after_downloads_one_composed_jpeg(client, solved_library):
     assert im.width == DEFAULT_WIDTH
     # Two half-cells side by side plus a caption bar — wider than it is tall.
     assert im.height < im.width
+    # Every JPEG the user keeps carries full-resolution colour (4:4:4).
+    # Pillow defaults to 4:2:0, which smears a 2-3 px star's colour into the
+    # sky around it — see `tests/test_jpeg_chroma.py` for the measurement.
+    from PIL import JpegImagePlugin
+    assert JpegImagePlugin.get_sampling(im) == 0
 
 
 def test_before_after_captions_itself_from_the_runs_own_provenance(
@@ -303,7 +308,7 @@ def test_before_after_captions_itself_from_the_runs_own_provenance(
     assert client.get(
         f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg").status_code == 200
     assert "42 frames stacked" in seen["caption"]      # n_frames_used
-    assert "21m of light" in seen["caption"]           # total_exposure_s = 1260 s
+    assert "21 min of light" in seen["caption"]           # total_exposure_s = 1260 s
     assert seen["labels"][1] == "42 frames stacked"
     # And it names the target rather than leading with the comparison.
     assert seen["caption"].split(" · ")[0] not in ("", "one frame")

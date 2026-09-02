@@ -1,33 +1,49 @@
 """Copy-friendly share blurb + social-sized JPEG writer."""
 
+import json
+from pathlib import Path
+
 import numpy as np
 
 from seestack.sharecard import format_duration, share_blurb
 from seestack.stack.output import png_bytes_to_jpeg, write_share_jpeg
 
-
-def test_format_duration_buckets():
-    assert format_duration(30) == "30s"
-    assert format_duration(59) == "59s"
-    assert format_duration(60) == "1m"
-    assert format_duration(150) == "2m"          # rounds to whole minutes
-    assert format_duration(3600) == "1h"          # exact hour drops the minutes
-    assert format_duration(11520) == "3h 12m"     # 152 subs × ~75.8 s ≈ 3h12m
-    assert format_duration(7200 + 300) == "2h 05m"  # zero-padded minutes
+# The table `frontend/src/format.test.ts` reads too — see the file's own comment.
+SHARED_CASES = Path(__file__).parent / "fixtures" / "integration_format.json"
 
 
-def test_format_duration_empty_for_nothing():
+def test_format_duration_matches_the_shared_table():
+    """The app has ONE integration-time vocabulary, and this is half of the pin.
+
+    `formatIntegration` (`frontend/src/format.ts`) reads the same file in
+    `format.test.ts`. Before this table existed the two disagreed on every
+    picture with more than a minute of light in it — the Target page said
+    "3.2 h" and the caption you copy off the Editor said "3h 12m" — so a
+    beginner had two spellings of one number and no way to connect them.
+    """
+    cases = json.loads(SHARED_CASES.read_text(encoding="utf-8"))["cases"]
+    assert len(cases) >= 10, "the shared table should not shrink"
+    for seconds, expected in cases:
+        assert format_duration(seconds) == expected, seconds
+
+
+def test_format_duration_says_nothing_rather_than_a_placeholder():
+    """The one deliberate divergence from the SPA: a stat tile can print "—",
+    but a caption must drop the clause rather than post a dash to Instagram."""
     assert format_duration(0) == ""
     assert format_duration(None) == ""
     assert format_duration(-5) == ""
+    assert format_duration(float("nan")) == ""
+    assert format_duration(float("inf")) == ""
+    assert format_duration("not a number") == ""
 
 
 def test_share_blurb_full():
-    assert share_blurb("M 42", 152, 11520) == "M 42 · 3h 12m · 152 subs"
+    assert share_blurb("M 42", 152, 11520) == "M 42 · 3.2 h · 152 subs"
 
 
 def test_share_blurb_singular_sub():
-    assert share_blurb("NGC 7000", 1, 75) == "NGC 7000 · 1m · 1 sub"
+    assert share_blurb("NGC 7000", 1, 75) == "NGC 7000 · 1 min · 1 sub"
 
 
 def test_share_blurb_omits_missing_parts():
@@ -35,7 +51,7 @@ def test_share_blurb_omits_missing_parts():
     assert share_blurb("M 31", None, None) == "M 31"
     assert share_blurb("M 31", 0, 0) == "M 31"
     # No name → still tidy.
-    assert share_blurb("", 10, 300) == "5m · 10 subs"
+    assert share_blurb("", 10, 300) == "5 min · 10 subs"
     # Nothing at all.
     assert share_blurb(None, None, None) == ""
 

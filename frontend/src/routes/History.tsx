@@ -781,11 +781,19 @@ function NotesEditor({ safe, run }: { safe: string; run: StackRun }) {
 const DEFAULT_STRETCH = 0.5;
 const DEFAULT_BLACK = 0.35;
 
-function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compareToId, identity, focus, derivedFrom }: {
+function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compareToId, identity, focus, derivedFrom, targetName }: {
   safe: string; run: StackRun; onDelete: () => void; deleting?: boolean;
   isCleanest?: boolean; noiseDelta?: number; compareToId?: number | null;
   identity?: ObjectInfo | null; focus?: FocusVerdict;
   derivedFrom?: DerivedFromNote | null;
+  /** The target's display name ("M 42"), for anything that leaves the app.
+   *
+   *  The card *heads* itself with `run.output_basename` on purpose — that is how
+   *  you tell one of a target's stacks from another in here. But a shared
+   *  picture goes out to a group chat, where a title of "M_42_stack" and a file
+   *  called `m-42-stack.jpg` are just the app's filing system leaking: Gallery
+   *  and Best pictures both share the same run as "M 42". */
+  targetName?: string | null;
 }) {
   const qc = useQueryClient();
   const [adjust, setAdjust] = useState(false);
@@ -990,6 +998,16 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     scaleBar: storedPreviewScaleBar(annotations.data, run),
     fallbackName: safe,
   });
+
+  // The subject of everything that leaves the app from this card — the share
+  // sheet's title and the shared file's name. It is the target's display name,
+  // never `run.output_basename`: the basename is a *filename* ("M_42_stack"),
+  // and sharing under it posted the app's filing convention rather than the
+  // object, with the underscores and the "_stack" suffix intact. Same picture,
+  // same run, shared from Gallery or Best pictures, already went out as "M 42".
+  // `safe` is the last resort (the URL slug), which is still a name someone
+  // typed; `sharePictureText` handles a blank.
+  const shareName = (targetName ?? "").trim() || safe;
 
   const previewSrc = `${api.stackArtifactUrl(safe, run.id, "preview")}${cacheBust ? `?v=${cacheBust}` : ""}`;
   // While the first suggestion fetch is still in flight, keep showing the STF
@@ -1437,7 +1455,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                       asMenuItem
                       url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
                       {...sharePictureText(
-                        run.output_basename,
+                        shareName,
                         formatCaptureNights(
                           run.capture_night_start, run.capture_night_end),
                       )}
@@ -1617,7 +1635,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         {...(run.has_preview
           ? (() => {
               const { title, filename } = sharePictureText(
-                run.output_basename,
+                shareName,
                 formatCaptureNights(
                   run.capture_night_start, run.capture_night_end),
               );
@@ -1775,6 +1793,7 @@ export function HistoryView() {
               identity={identity.data ?? null}
               focus={focus.get(r.id)}
               derivedFrom={derivedFromNote(r, list)}
+              targetName={target.data?.name ?? null}
               compareToId={previousRunId(list, r.id)} />
           ))}
         </SimpleGrid>

@@ -10,9 +10,9 @@ import type { LibraryRecap } from "../api/client";
 function recap(over: Partial<LibraryRecap> = {}): LibraryRecap {
   return {
     has_anything: true,
-    caption: "12 nights under the sky · 8h 20m of light · 4 targets",
+    caption: "12 nights under the sky · 8.3 h of light · 4 targets",
     since: "Since 14 Jan 2026",
-    stats: [{ value: "8h 20m", label: "of light collected" }],
+    stats: [{ value: "8.3 h", label: "of light collected" }],
     window_months: 12,
     n_nights: 12, n_targets: 4, n_subs_kept: 1234, total_integration_s: 30000,
     top_target_name: "M 31", top_target_integration_s: 15120,
@@ -40,7 +40,7 @@ describe("ShareYourSkyCard", () => {
     expect(link).toHaveAttribute("href", "/api/recap.jpg");
     expect(link).toHaveAttribute("download");
     expect(screen.getByText(
-      "12 nights under the sky · 8h 20m of light · 4 targets",
+      "12 nights under the sky · 8.3 h of light · 4 targets",
     )).toBeInTheDocument();
     expect(screen.getByText("Since 14 Jan 2026")).toBeInTheDocument();
   });
@@ -52,7 +52,7 @@ describe("ShareYourSkyCard", () => {
     renderCard();
     fireEvent.click(await screen.findByRole("button", { name: /Copy caption/ }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(
-      "12 nights under the sky · 8h 20m of light · 4 targets"));
+      "12 nights under the sky · 8.3 h of light · 4 targets"));
   });
 
   it("shows the caption to copy by hand when the clipboard is blocked", async () => {

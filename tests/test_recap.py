@@ -30,7 +30,7 @@ def _full() -> RecapFacts:
 
 def test_stats_lead_with_integration_then_nights_targets_subs():
     assert recap_stats(_full()) == [
-        ("8h 20m", "of light collected"),
+        ("8.3 h", "of light collected"),
         ("12", "nights out"),
         ("4", "targets imaged"),
         ("1,234", "subs kept"),
@@ -42,7 +42,7 @@ def test_stats_drop_missing_and_zero_figures_rather_than_printing_them():
     out and the rest closes up."""
     facts = RecapFacts(total_integration_s=600.0, n_targets=0, n_nights=None,
                        n_subs_kept=7)
-    assert recap_stats(facts) == [("10m", "of light collected"), ("7", "subs kept")]
+    assert recap_stats(facts) == [("10 min", "of light collected"), ("7", "subs kept")]
 
 
 def test_stats_singularise():
@@ -62,13 +62,13 @@ def test_stats_are_empty_on_an_untouched_library():
 
 def test_caption_reads_like_a_person_would_say_it():
     assert recap_caption(_full()) == (
-        "12 nights under the sky · 8h 20m of light · 4 targets · "
-        "biggest project: M 31 (4h 12m)"
+        "12 nights under the sky · 8.3 h of light · 4 targets · "
+        "biggest project: M 31 (4.2 h)"
     )
 
 
 def test_caption_omits_every_missing_part_without_a_dangling_separator():
-    assert recap_caption(RecapFacts(total_integration_s=7200.0)) == "2h of light"
+    assert recap_caption(RecapFacts(total_integration_s=7200.0)) == "2.0 h of light"
     assert recap_caption(RecapFacts(top_target_name="  M 42  ")) == "biggest project: M 42"
     assert recap_caption(RecapFacts()) == ""
 
@@ -87,7 +87,7 @@ def test_caption_singularises_one_night_and_one_target():
 
 
 def test_top_project_line_names_the_target_and_its_time():
-    assert recap_top_project_line(_full()) == "Biggest project: M 31 · 4h 12m"
+    assert recap_top_project_line(_full()) == "Biggest project: M 31 · 4.2 h"
 
 
 def test_top_project_line_uses_no_glyph_the_built_in_font_lacks():
@@ -230,7 +230,7 @@ def test_caption_adds_what_else_you_shot_after_the_biggest_project():
                           "other_target_names": ("M 42", "NGC 7000", "M 45")})
     cap = recap_caption(facts)
     assert cap.endswith(
-        "biggest project: M 31 (4h 12m) · also shot: M 42, NGC 7000 and M 45")
+        "biggest project: M 31 (4.2 h) · also shot: M 42, NGC 7000 and M 45")
 
 
 def test_caption_counts_the_targets_it_did_not_name():
@@ -244,8 +244,8 @@ def test_caption_counts_the_targets_it_did_not_name():
 def test_caption_is_unchanged_when_nothing_else_was_shot():
     """The single-target library's caption is byte-for-byte what it was before."""
     assert recap_caption(_full()) == (
-        "12 nights under the sky · 8h 20m of light · 4 targets · "
-        "biggest project: M 31 (4h 12m)")
+        "12 nights under the sky · 8.3 h of light · 4 targets · "
+        "biggest project: M 31 (4.2 h)")
 
 
 def test_poster_renders_the_also_shot_line_without_failing():

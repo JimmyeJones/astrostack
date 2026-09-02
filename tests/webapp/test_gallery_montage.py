@@ -80,6 +80,11 @@ def test_montage_renders_a_jpeg_of_every_finished_target(client, solved_library)
     # Two pictures → one row of two, plus the title strip above them.
     assert img.size[0] > img.size[1]
     assert img.size[0] >= 800
+    # Every JPEG the user keeps carries full-resolution colour (4:4:4).
+    # Pillow defaults to 4:2:0, which smears a 2-3 px star's colour into the
+    # sky around it — see `tests/test_jpeg_chroma.py` for the measurement.
+    from PIL import JpegImagePlugin
+    assert JpegImagePlugin.get_sampling(img) == 0
 
 
 def test_one_picture_is_not_a_wall(client, solved_library):
