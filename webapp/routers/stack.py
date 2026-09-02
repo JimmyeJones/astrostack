@@ -377,7 +377,10 @@ def stack_estimate(
     finally:
         proj.close()
         lib.close()
-    reach = rejection_reach(options, est.n_frames)
+    # Pass the mosaic's per-pixel depth so the form's "can this remove a satellite
+    # trail?" line answers for the pixels the picture will actually have. On a
+    # single field ``panel_depth`` is None and this is the frame count, as before.
+    reach = rejection_reach(options, est.n_frames, depth=est.panel_depth)
     return {
         "n_frames": est.n_frames,
         "canvas_w": est.canvas_w,
