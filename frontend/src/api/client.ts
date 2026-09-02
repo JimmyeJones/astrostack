@@ -2720,6 +2720,17 @@ export const api = {
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return req<PlanWeek>(`/api/plan/week${suffix}`);
   },
+  // Download URL for the planned week as a .ics calendar file — one event per
+  // night that has a pick, so "Saturday is your M 31 night" survives closing the
+  // tab. Takes the same options as `getPlanWeek` so the file matches the card
+  // that offers it. A plain href/download, not a fetch.
+  planWeekIcsUrl: (opts?: { nights?: number; minAlt?: number }) => {
+    const qs = new URLSearchParams();
+    if (opts?.nights != null) qs.set("nights", String(opts.nights));
+    if (opts?.minAlt != null) qs.set("min_alt", String(opts.minAlt));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return `/api/plan/week/calendar.ics${suffix}`;
+  },
 
   // life list
   // The famous objects you've captured and the ones still to get. Read-only and
