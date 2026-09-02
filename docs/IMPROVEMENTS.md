@@ -580,6 +580,35 @@ _(nothing else claimed — claim an item here with your branch name)_
   command's own `-f` argument (a shared `_sidecar_paths`/`_write_solved_sidecars`), which is what the real
   binary does; every assertion is unchanged.
 
+  **Hardened on top, v0.326.4 (Builder, branch `claude/zen-mccarthy-xesefm`) — collision eleven, stood down
+  and re-applied additively.** That run built the same fix independently and inside the same hour (a scratch
+  copy, the same stub-binary approach, an all-but-identically-named guard test); **this entry's version is on
+  `main` and ships, and the duplicate was dropped rather than re-litigated** — it is equal or better at every
+  point, and its log-tail path substitution is a nicety the duplicate lacked. Three pieces are genuinely
+  additive and were re-applied in this entry's own names:
+  - **`test_the_stub_astap_really_would_litter`** — a **positive control for layer 4**. Both layer-4 tests
+    assert that a folder did *not* change, which is trivially true if the stub quietly stops writing (a
+    typo'd flag, a changed argv shape, a `-f` the solver no longer passes) — the whole layer would sit
+    permanently green while checking nothing. It now points the stub at an unprotected folder and asserts it
+    litters, and that the `.wcs` it writes is really readable as a WCS. This is the A1 failure mode
+    (a test that passes on a fixture which cannot exhibit the bug) applied to a *guard*, and layer 2 already
+    carries the same control in `test_the_sentinel_actually_fires`.
+  - **`test_a_stale_sidecar_beside_the_frame_cannot_fake_a_solve`** — a second bug this fix closed for free
+    and nothing pinned. `solved` is `returncode == 0 and sidecar.exists()`: **existence, not authorship.** A
+    `.wcs` left beside a frame by an older build or by the owner's own ASTAP run sat exactly where the wrapper
+    looked, so a run that matched nothing could inherit someone else's answer and persist it as this frame's
+    WCS. A scratch directory that starts empty closes it by construction.
+  - Two unit-level pins for the mechanism the end-to-end tests rest on: `-f` is never a path in the caller's
+    folder (and the copy carries the same *bytes*, so it solves the owner's actual pixels), and the returned
+    `fits_path` is the caller's frame rather than a scratch path that would land in the project DB dangling.
+
+  **The one thing deliberately NOT changed:** this entry says the copy "happens once per `solve()`, not once
+  per ladder rung", but `_solve_once` holds the `TemporaryDirectory`, so a frame that walks all three rungs
+  copies three times. **Leave it.** Hoisting the staging into `solve()` would let a `.wcs` written by one rung
+  survive into the next, where `returncode == 0` alone would then read as solved — the very
+  existence-not-authorship hole above. A fresh directory per rung is the safer structure and the extra copies
+  are unmeasured; per this file's Performance rule, do not trade that for an unmeasured win.
+
   **The owner check from the entry still stands** and is worth running once on the live box:
   `ls incoming/<any target>_sub | grep -c '\.wcs$'`. A non-zero count is the litter this fix stops *adding to*
   — v0.326.2 does not remove what is already there, and must not: §10 permits no deletion inside `incoming/`,
