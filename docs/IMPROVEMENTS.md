@@ -16985,7 +16985,30 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via `scripts/agent-dogfood.sh`) — "My best
+- **✅ SHIPPED (Builder, v0.322.9, branch `claude/zen-mccarthy-v56oj1`) — ~~"My best pictures" offers **Play
+  slideshow** on a wall that is empty, and the obvious gate is the wrong one.~~** Built the honest gate the
+  entry demanded, not the one-line one it warned against.
+
+  **`hasAnythingToShow(best, videos)` lives beside `buildSlides` and is defined *against* it** — literally
+  `buildSlides(...).length > 0` — so the button and the show cannot disagree about whether there is anything
+  to play. That also inherits `buildSlides`' own skip of a preview-less picture for free, which a hand-written
+  count would have got wrong; a test pins exactly that case.
+
+  **The trap was answered, not dodged.** `BestPicturesView` now runs the `gallery` query too, under the *same*
+  `["gallery"]` query key `ShowAndTellView` uses — so the two share one cached response rather than adding a
+  request per page — and the button survives on a library whose only finished picture is a **Moon still**.
+  That is the case a naive `items.length > 0` gate breaks, and it has its own rendered test.
+
+  **Upgrade-safe (§9):** frontend-only, read-only, no new endpoint. An older backend that omits `videos`
+  simply contributes nothing to the answer, exactly as it does to the show.
+
+  **Tests (+4 unit in `showAndTell.test.ts`, +2 rendered in `BestPictures.test.tsx`, 1 fails before):** the
+  false-only-when-empty contract, the Moon-still-alone case both as a unit and end-to-end on the page, the
+  ranked-picture-alone case, agreement with the show about a picture it would skip, and the fresh install
+  where the button is now withheld.
+
+    *(Original spec follows.)* **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via
+  `scripts/agent-dogfood.sh`) — "My best
   pictures" offers **Play slideshow** on a wall that is empty, and the obvious gate is the wrong one.**
   *(Pillar: friendliness — PRIORITY 3; size XS; **read the trap before writing the one-line fix**.)* On a fresh
   install the page reads *"Once you've finished stacking a couple of targets, your best pictures will gather
