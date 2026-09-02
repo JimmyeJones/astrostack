@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from seestack.io.library import Library
-from seestack.io.project import StackRunRow
+from seestack.io.project import FrameRow, StackRunRow
 from webapp import pipeline
 from webapp.config import Settings
 from webapp.jobs import Job
@@ -1192,5 +1193,136 @@ def test_heal_ignores_an_ordinary_handful_of_align_drops(solved_library, monkeyp
             proj.close()
         lib.refresh_target_stats(safe)
         assert pipeline._auto_stack_degraded_recheck(lib, safe) is None
+    finally:
+        lib.close()
+
+
+def test_setting_the_missing_subs_aside_ends_a_hold_that_never_lifts(
+        solved_library, monkeypatch):
+    """A8. The hold is right while the files are coming back and a dead end when
+    they never do: the owner deletes a session from ``incoming/`` (his folder,
+    his right), the DB rows stay, ``unreadable`` never drops, and every scan for
+    the rest of time reports the same hold over data that cannot improve. He was
+    told, and offered nothing to do.
+
+    Fail-before: re-scanning re-reports the hold, unchanged, for ever. With the
+    gone subs set aside — a database-only, reversible flag, nothing on disk
+    touched — the hold is gone, the target's accepted count stops claiming subs
+    that do not exist, and it goes back to the ordinary "stack when there is more
+    than last time" rule.
+    """
+    _patch_run_stack(monkeypatch)
+    settings = _settings(solved_library).model_copy(
+        update={"auto_stack_min_frames": 1})
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            assert len(ids) >= 3
+            _record_run(proj, n_frames_used=len(ids))
+            # One brand-new sub, so the frame-count trigger fires and the hold is
+            # what actually stops the stack (rather than "nothing new to do").
+            extra = proj.add_frame(FrameRow(
+                source_path=str(Path(proj.project_dir) / "extra.fit"),
+                wcs_json="WCS", ra_center_deg=83.6, dec_center_deg=-5.4))
+            (Path(proj.project_dir) / "extra.fit").write_bytes(b"x")
+            _unread(proj, ids[:-1])  # deleted for good — never coming back
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+
+        # Held, and re-scanning changes nothing: this is the dead end.
+        for _ in range(2):
+            summary = pipeline._pipeline_body(
+                settings, _FakeJM(), Job(kind="pipeline"), root=None)
+            assert safe not in summary["auto_stacked"]
+            held = summary.get("auto_stack_held_unreadable") or []
+            assert any(h["target"] == safe for h in held)
+
+        proj = lib.open_target(safe)
+        try:
+            assert set(proj.set_missing_frames_aside()) == set(ids[:-1])
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        held = summary.get("auto_stack_held_unreadable") or []
+        assert not any(h["target"] == safe for h in held), (
+            "the hold must be over once the missing subs are set aside")
+
+        # …and the target now counts only subs that exist.
+        proj = lib.open_target(safe)
+        try:
+            remaining = {f.id for f in proj.iter_frames(accepted_only=True)}
+            assert remaining == {ids[-1], extra}
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_a_scan_puts_set_aside_subs_back_when_their_files_return(
+        solved_library, monkeypatch):
+    """The other half, and the reason the button is safe to offer: plugging the
+    drive back in undoes it with no action from the owner at all — including on a
+    target the QC pass never touched, which is exactly the state a target sits in
+    while its files are away."""
+    _patch_run_stack(monkeypatch)
+    settings = _settings(solved_library).model_copy(
+        update={"auto_stack_min_frames": 1})
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            _unread(proj, ids[:-1])
+            assert set(proj.set_missing_frames_aside()) == set(ids[:-1])
+            assert proj.count_frames_set_aside_as_missing() == len(ids) - 1
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+
+        proj = lib.open_target(safe)
+        try:
+            _reread(proj, ids)  # the share comes back
+        finally:
+            proj.close()
+
+        pipeline._pipeline_body(settings, _FakeJM(), Job(kind="pipeline"), root=None)
+
+        proj = lib.open_target(safe)
+        try:
+            assert proj.count_frames_set_aside_as_missing() == 0
+            assert set(_solved_ids(proj)) == set(ids)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_a_healthy_scan_sets_nothing_aside_and_reports_nothing(
+        solved_library, monkeypatch):
+    """Every file present — every healthy install — so the new pass is invisible:
+    no frame changes, and the scan summary gains no key."""
+    _patch_run_stack(monkeypatch)
+    settings = _settings(solved_library)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert "missing_files_restored" not in summary
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                assert proj.count_frames_set_aside_as_missing() == 0
+            finally:
+                proj.close()
     finally:
         lib.close()

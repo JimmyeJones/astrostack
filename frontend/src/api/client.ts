@@ -2352,6 +2352,12 @@ export const api = {
       `/api/targets/${safe}/frames/set-aside-night`,
       { method: "POST", body: JSON.stringify({ start_utc, end_utc }) },
     ),
+  // "Those subs are gone — carry on without them." Database-only and undone
+  // automatically by the next scan if the files come back.
+  setMissingAside: (safe: string) =>
+    req<{ changed: number; changed_ids: number[] }>(
+      `/api/targets/${safe}/frames/set-missing-aside`, { method: "POST" },
+    ),
   rejectSummary: (safe: string) =>
     req<{
       counts: Record<string, number>;

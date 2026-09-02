@@ -15,6 +15,7 @@ mapping can be reused anywhere the counts are known.
 
 from __future__ import annotations
 
+from seestack.io.project import REJECT_REASON_FILE_MISSING
 from seestack.solve.astap import SOLVE_FAILED_TIMEOUT
 
 # Ordered bucket definitions. Each raw ``reject_reason`` is matched by the first
@@ -63,6 +64,10 @@ _BUCKETS: list[tuple[str, str, str]] = [
      "Settings and run Plate Solve again."),
     ("removed", "You removed these",
      "Frames you rejected by hand."),
+    ("missing", "Their files aren't on your disk any more",
+     "You told AstroStack these subs are gone, so it carries on without them. "
+     "Nothing was deleted by the app — and if the files ever turn up again, "
+     "they go straight back into the stack."),
     ("error", "Couldn't be read or measured",
      "These files couldn't be read (they may be corrupt or were still "
      "downloading), so they're skipped. The rest are fine."),
@@ -89,6 +94,12 @@ def _bucket_for(reason: str) -> str:
                 else "solve_failed")
     if reason == "user":
         return "removed"
+    if reason == REJECT_REASON_FILE_MISSING:
+        # The owner's own "those subs are gone, carry on without them". Its own
+        # bucket rather than the vague "other", because it is a thing he *did*
+        # and the one bucket where the reassurance ("the app deleted nothing")
+        # is the whole point.
+        return "missing"
     # auto:grade:<metric>, bulk:<worst-metric>, qc:<metric> — split by the
     # physical cause the metric names (soft/seeing vs cloud/transparency).
     if reason.startswith(("auto:grade:", "bulk:", "qc:")):

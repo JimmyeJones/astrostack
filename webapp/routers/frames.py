@@ -559,6 +559,42 @@ def set_aside_night(safe: str, body: NightSetAside, request: Request) -> dict:
     return {"changed": len(ids), "changed_ids": ids}
 
 
+@router.post("/set-missing-aside")
+def set_missing_aside(safe: str, request: Request) -> dict:
+    """"Those subs are gone — carry on without them." Sets aside every accepted
+    sub whose file is no longer on disk, so a target held back by the walk-away
+    readability preflight can stack again.
+
+    The hold exists so a drive that flapped can't publish a thin picture over a
+    good one, and while the files are coming back that is exactly right. But a
+    session the owner **deleted** from ``incoming/`` — their folder, their right —
+    is never coming back: the rows stay, ``unreadable`` never drops, and the
+    target is held until brand-new subs outnumber the best run it ever made. The
+    app told them so and offered them nothing to do about it. This is the one
+    thing to do.
+
+    Database-only and reversible: nothing on disk is read, written, moved or
+    deleted (``AGENTS.md`` §10), a hand-graded sub is left alone, and every scan
+    puts a set-aside sub straight back the moment its file reappears — no action
+    needed. Returns the ids so the UI can offer an immediate undo (a ``bulk``
+    accept of exactly those), and ``0`` when everything is readable, which is
+    every healthy install.
+    """
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        try:
+            ids = proj.set_missing_frames_aside()
+        finally:
+            proj.close()
+        if ids:
+            lib.refresh_target_stats(safe)
+    except sqlite3.OperationalError as exc:
+        raise HTTPException(status_code=503, detail=STORAGE_READONLY_MSG) from exc
+    finally:
+        lib.close()
+    return {"changed": len(ids), "changed_ids": ids}
+
+
 @router.get("/{frame_id}/preview")
 async def frame_preview(
     safe: str,
