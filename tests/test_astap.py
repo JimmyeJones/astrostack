@@ -1,6 +1,7 @@
 """ASTAP wrapper — discovery and ini parsing (no real solve)."""
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -113,6 +114,28 @@ def test_solver_passes_db_dir(tmp_path, monkeypatch):
     assert str(tmp_path) in captured["cmd"]
 
 
+def _sidecar_paths(cmd):
+    """Where the real ASTAP would put its sidecars for this command line: beside
+    the file named by ``-f``.
+
+    The solver hands ASTAP a scratch **copy** and never the source frame, because
+    ASTAP writes beside ``-f`` and with ``copy_to_cache`` off that path is a raw
+    sub in the owner's read-only ``incoming/`` tree (AGENTS.md §10). A fake that
+    writes beside the *original* frame is therefore modelling a binary that does
+    not exist — and would go on "passing" if the solver started handing over the
+    source path again.
+    """
+    target = Path(cmd[cmd.index("-f") + 1])
+    return target.with_suffix(".wcs"), target.with_suffix(".ini")
+
+
+def _write_solved_sidecars(cmd):
+    """Behave like a successful ASTAP run: sidecars beside the ``-f`` file."""
+    wcs, ini = _sidecar_paths(cmd)
+    wcs.write_text("CRVAL1=10\n")
+    ini.write_text("CRVAL1=10\nCRVAL2=20\nCDELT2=0.0007\nCROTA2=0\n")
+
+
 def _make_solver(tmp_path):
     (tmp_path / "astap").write_bytes(b"")
     (tmp_path / "d05_0101.290").write_bytes(b"x")
@@ -125,8 +148,6 @@ def test_adaptive_ladder_escalates_downsample(tmp_path, monkeypatch):
     frame = tmp_path / "frame.fits"
     frame.write_bytes(b"")
     solver = _make_solver(tmp_path)
-    wcs = frame.with_suffix(".wcs")
-    ini = frame.with_suffix(".ini")
 
     calls: list[list[str]] = []
 
@@ -139,11 +160,9 @@ def test_adaptive_ladder_escalates_downsample(tmp_path, monkeypatch):
             returncode = 1
         # Only "solve" (write sidecars, rc 0) once ASTAP is told to downsample.
         if "-z" in cmd:
-            wcs.write_text("CRVAL1=10\n")
-            ini.write_text("CRVAL1=10\nCRVAL2=20\nCDELT2=0.0007\nCROTA2=0\n")
+            _write_solved_sidecars(cmd)
             _P.returncode = 0
         else:
-            wcs.unlink(missing_ok=True)
             _P.returncode = 1
             _P.stderr = "no solution found"
         return _P()
@@ -184,15 +203,12 @@ def test_adaptive_ladder_survives_a_timeout_on_the_first_rung(tmp_path, monkeypa
     frame = tmp_path / "frame.fits"
     frame.write_bytes(b"")
     solver = _make_solver(tmp_path)
-    wcs = frame.with_suffix(".wcs")
-    ini = frame.with_suffix(".ini")
 
     def fake_run(cmd, **kwargs):
         # First rung (no -z) runs long and times out; a downsampled rung solves.
         if "-z" not in cmd:
             raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 60))
-        wcs.write_text("CRVAL1=10\n")
-        ini.write_text("CRVAL1=10\nCRVAL2=20\nCDELT2=0.0007\nCROTA2=0\n")
+        _write_solved_sidecars(cmd)
 
         class _P:
             stdout = ""
@@ -284,8 +300,6 @@ def test_ladder_solves_on_full_res_widened_star_pool_rung(tmp_path, monkeypatch)
     frame = tmp_path / "frame.fits"
     frame.write_bytes(b"")
     solver = _make_solver(tmp_path)
-    wcs = frame.with_suffix(".wcs")
-    ini = frame.with_suffix(".ini")
 
     def fake_run(cmd, **kwargs):
         class _P:
@@ -295,11 +309,8 @@ def test_ladder_solves_on_full_res_widened_star_pool_rung(tmp_path, monkeypatch)
 
         # Solve only when the star pool is widened past the default (-s >= 1000).
         if "-s" in cmd and int(cmd[cmd.index("-s") + 1]) >= 1000:
-            wcs.write_text("CRVAL1=10\n")
-            ini.write_text("CRVAL1=10\nCRVAL2=20\nCDELT2=0.0007\nCROTA2=0\n")
+            _write_solved_sidecars(cmd)
             _P.returncode = 0
-        else:
-            wcs.unlink(missing_ok=True)
         return _P()
 
     monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
