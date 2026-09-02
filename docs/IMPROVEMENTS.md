@@ -10850,6 +10850,17 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-09-02, a gap the v0.326.1 fix opened rather than closed) — the editor's ghost curve
+  now has two possible shapes and only explains one of them.** *(Pillar: friendliness — PRIORITY 3; size XS.)*
+  `/editor/curve-suggestion` returns `target_bg` on the data-driven branch, and the UI uses it to name the goal
+  ("aims your typical tone toward a pleasant grey"). On the **sky-anchored fallback** — which is now the common
+  branch on a sky-dominated stack, i.e. most Seestar stacks — `target_bg` is `None` by design (there is no
+  midtone target; it pins the background and lifts a shoulder above it), so the ghost appears with **no
+  explanation at all** beside it. One plain-language line for that branch would close it: *"keeps your
+  background exactly where the stretch put it, and adds a little contrast above it."* **Grep first:** the copy
+  lives with the Curves widget's auto-contrast ghost in `Editor.tsx`/`CurvesWidget.tsx`; this is a sentence,
+  not a control, and it must not become another always-on banner.
+
 - **NEW IDEA (Builder 2026-09-02, the half the v0.323.1 rejection-reach fix could not reach) — the same blind
   κ-σ runs on the *walk-away* path, where there is no form to warn on.** *(Pillar: autonomy + image quality —
   PRIORITY 2/4; size S for the advisory, **do NOT blind-flip the default**; confidence: traced, mechanism the
@@ -20123,6 +20134,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **⭐ NEW IDEA (Builder 2026-09-02, generalised from the A1 fix this run — the strongest follow-on it
+  exposed) — sweep every display-space measurement for the *same* clipped-shadow blindness A1 turned out to
+  be.** *(Pillar: image quality + trust — PRIORITY 4; size S per site, and the identifying test is mechanical.
+  Confidence: the mechanism is proven — one live instance found, reproduced and fixed this run.)*
+  A1 was not "the sky-mode histogram has a bug". It was: **`tone.stretch` hard-clips ~1.5 % of every stretched
+  image to *exactly* zero, and any statistic taken over the whole finite population sees that spike as real
+  data.** One value, 1.5 % of the pixels — it beats a noise-spread sky in a histogram every time, and it drags
+  any low percentile to 0.0. `_sky_mode` was one consumer of that population; it is unlikely to be the only
+  one. **The generative test, which needs no measurement:** *does this statistic run on display-space pixels,
+  and would a spike at exactly 0 change its answer?* If yes, it is a candidate.
+  **Where to look** (each is a read, not yet a finding — check before filing): the Levels black-point
+  suggestion and the histogram's "shadows clipping" readout (both explicitly reason about the low end);
+  `analyze_proxy`'s `sky`, which Auto's own denoise/sharpen decisions are sized from; the gradient
+  background-model fits, which weight by pixel value; and anything measuring a percentile below p5 on a
+  post-stretch array. **Care:** the fix is *not* "drop zeros everywhere" — a readout whose whole job is to
+  report clipping must keep counting them. The rule is that a statistic estimating a *property of the sky*
+  excludes them, and one estimating *how much was clipped* does not. State which kind each site is in the
+  commit.
 
 - **NEW IDEA (Scout 2026-09-02, spotted auditing `noise_ratio.py`) — say what stacking *should* have bought,
   next to what it did, so a beginner can tell a healthy stack from an underperforming one.** *(Pillar: trust +
@@ -30269,6 +30299,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **⭐ NEW IDEA (Builder 2026-09-02, the audit's own lesson from A1, made mechanical) — give the display-space
+  tests one shared fixture that is *real* stretch output, and use it wherever a regression test reasons about
+  post-stretch pixels.** *(Pillar: maintainability in service of correctness — size S; no behaviour change.)*
+  A1's headline was the bug; its sting was that **the regression test written for that exact defect in
+  v0.210.6 passed on a fixture that could not exhibit it** — `clip(sky + normal)`, which has no hard shadow
+  clip, so it never saw what `autostretch` actually produces. The test confirmed the fix's *model* of the bug
+  rather than the bug, and the defect survived underneath it for four months.
+  **Shape:** one helper in `tests/` — a linear OSC-like stack (sky + noise, an extended object, stars) put
+  through the app's own `autostretch`, with a known pure-background corner — plus, beside it, the guard the
+  A1 tests now lead with: **assert the fixture really does clip shadows to zero**, so a future change to the
+  stretch cannot silently turn the tests below it into no-ops. Then migrate the display-space tests that
+  currently hand-roll an approximation onto it. **Care:** this is not a licence to rewrite passing tests
+  wholesale — migrate a test only when it reasons about the low end or the histogram, and keep any fixture
+  that is deliberately synthetic (a degenerate/flat case) exactly as it is.
 
 - **NEW IDEA (Builder 2026-08-30, the shape the v0.311.1 bug had, and the reason it existed) — there are now
   **two** answers to "render this run's picture at size N, exactly as it is shown", and the bug was the gap
