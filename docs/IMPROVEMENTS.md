@@ -21747,8 +21747,38 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-09-02, the piece v0.325.0 deliberately left out — promoted from its
-  "deliberately not done" line so it is findable as work) — put the planned week in the user's calendar.**
+- **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-t59xya`) — ~~put the planned week in the user's
+  calendar.~~** Built as filed, as composition: `GET /api/plan/week/calendar.ics` and an **Add this week to
+  your calendar** anchor on the Plan-my-week card. One event per night that has a pick, titled with what to
+  point at (*"Image M 31"*), described in the same jargon-free sentence the per-target calendar uses.
+
+  **Both cautions on the entry were honoured, and one was worth more than expected.**
+  *The UID scheme* — the week's events go through the **same** `_window_ics_event` as `/next-session`, via a
+  small `_week_night_as_window` adapter, rather than a second event builder. So a night that appears in both
+  calendars carries **one** UID and the second import *updates* the entry instead of doubling it; pinned by a
+  test that the two files' UID sets actually intersect. *Only nights with a pick become events* — a
+  "nothing is well placed" entry is worse than none — and an empty week 404s rather than handing back a
+  blank calendar, matching how `/next-session/{safe}/calendar.ics` already behaves.
+
+  **One thing the entry didn't ask for, which the shape made obvious.** The `/week` endpoint's
+  signature-cache block is now a shared `_cached_week_plan`, used by the JSON payload *and* the `.ics`. The
+  calendar is therefore the *same plan object* the card in front of the user is showing — the two cannot
+  report different nights, targets or times for the same request, and the download costs no second ephemeris
+  pass. Pinned by a test that walks the JSON payload and asserts every placed night's `DTSTART`/`DTEND`/target
+  name appears in the file.
+
+  **Upgrade-safe (§9):** one new read-only endpoint, one new client URL helper, no config key, no schema, no
+  on-disk change, no default flipped, no existing response shape touched. The link is gated on the card
+  actually having a placed night (the standing "is this control gated on the same data as the emptiness beside
+  it?" rule), so on a fresh install it simply isn't there.
+
+  **Tests: +9.** `tests/webapp/test_plan.py` (6) — one event per planned night and no more; the events match
+  the card's own plan field for field; the shared UID with `/next-session`; the no-location 404; the
+  nothing-placed 404; and the same input validation as its JSON twin.
+  `frontend/src/components/tonight/PlanWeekCard.test.tsx` (3) — the link and its `download`, the altitude
+  floor carried into the URL so the file matches what is on screen, and the link's absence on an empty week.
+
+  *(Original entry follows.)*
   *(Pillar: plan + autonomy — PRIORITY 2–3; size S; additive, offline, no new deps.)* The card now says
   "Saturday is your best M 31 night, 21:40 → 01:46" — and then the owner has to remember it. The *per-target*
   answer already ships as a one-tap `.ics` (`GET /api/plan/next-session/{safe}/calendar.ics`, built from
