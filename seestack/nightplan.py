@@ -1301,12 +1301,25 @@ def plan_week(
     ``max_targets`` are scanned — :data:`WEEK_MAX_TARGETS`, reported back on the
     result so the UI can be honest about it.
 
+    When that cap *does* bite, the targets it keeps are the ones with the most
+    integration already on them. The library arrives ordered by name
+    (``Library.list_targets`` is ``ORDER BY name COLLATE NOCASE``), so a plain head
+    slice would plan a big library's week around the first forty objects
+    alphabetically and silently drop the project the owner has actually spent
+    nights on — "finish what I've got" answered with the wrong "got". Total
+    exposure is the honest measure of investment, with the accepted-frame count and
+    then ``safe`` breaking ties so the choice is deterministic. Under the cap the
+    set is the whole library either way, and the returned lists are sorted by
+    placement regardless, so nothing about an ordinary install's answer moves.
+
     One vectorised observability batch per night over all targets at once, so the
     cost scales with ``nights``, not with the size of the library. Purely offline
     and read-only, like the rest of the planner.
     """
-    positioned = [t for t in library_targets
-                  if t.ra_deg is not None and t.dec_deg is not None]
+    positioned = sorted(
+        (t for t in library_targets if t.ra_deg is not None and t.dec_deg is not None),
+        key=lambda t: (-(t.total_exposure_s or 0.0), -(t.frames_accepted or 0), t.safe),
+    )
     considered = positioned[:max(0, max_targets)]
     plan = WeekPlan(
         generated_utc=start_utc.astimezone(timezone.utc).isoformat(),
