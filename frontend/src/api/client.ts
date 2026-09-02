@@ -1867,6 +1867,18 @@ export interface Histogram {
   // live preview *over*-reduces the stars relative to the full-res export.
   // Surfaced as an honest advisory (see starReduceOverstatesCaption).
   star_reduce_preview_overstates?: boolean;
+  // True when an enabled Sharpen op's radius, shrunk by proxy_scale, goes
+  // sub-pixel on the decimated preview, so the unsharp mask collapses towards the
+  // identity and the live preview shows only a fraction of the local contrast the
+  // full-res export adds (see sharpenUnderstatesCaption). Absent on an older backend.
+  sharpen_preview_understates?: boolean;
+  // True when an enabled Hot-pixel removal op is *skipped* on the decimated
+  // preview: striding turns a real star into a lone isolated pixel, which is the
+  // signature the op treats as a defect, so previewing it erased stars the export
+  // never touches. The preview leaves the image alone and says so (see
+  // hotPixelsSkippedCaption); the export still cleans the frame. Absent on an
+  // older backend.
+  hot_pixels_preview_skipped?: boolean;
   // Robust per-channel sky-background medians + colour-cast verdict over the
   // finished display image (sky population only, so stars/target don't pull it),
   // so the editor can show whether the background ended up neutral (see

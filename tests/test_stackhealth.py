@@ -470,6 +470,40 @@ def test_rejection_blind_note_silent_when_min_max_was_used():
     assert "rejection_blind" not in _kinds(notes)
 
 
+def test_rejection_blind_note_fires_on_a_shallow_mosaic_that_clears_the_count():
+    """Audit finding A6, the after-the-fact half. A 2×2 mosaic three subs deep
+    holds twelve frames — past the κ=3 threshold of 11 — so the note stayed
+    silent, while every pixel on the canvas saw only three samples and the κ-σ
+    pass clipped nothing (``REJFRAC 0.0``). The peak per-pixel coverage is the
+    honest depth: when even the *best*-covered pixel is below the threshold, no
+    pixel anywhere could have been clipped."""
+    notes = stack_health(
+        _run(n_frames_used=12, coverage_min=3, coverage_max=3, is_mosaic=True,
+             rejection_mode="sigma-clip", rejection_fraction=0.0,
+             options_json='{"sigma_clip": true, "sigma_kappa": 3.0}'),
+        [_frame() for _ in range(12)],
+    )
+    note = _note(notes, "rejection_blind")
+    assert note is not None
+    # ...and it names the count the user can act on, not the target's total —
+    # "with only 12 subs" beside a 12-sub badge reads as nonsense.
+    assert "3 subs overlapping at any one spot" in note.message
+    assert "11 frames" in note.message
+    assert note.action == "restack"
+
+
+def test_rejection_blind_note_silent_on_a_mosaic_whose_panels_are_deep_enough():
+    """The other direction: a mosaic whose thinnest overlap still clears the
+    threshold is genuinely protected, so nothing fires."""
+    notes = stack_health(
+        _run(n_frames_used=400, coverage_min=20, coverage_max=60, is_mosaic=True,
+             rejection_mode="sigma-clip", rejection_fraction=0.003,
+             options_json='{"sigma_clip": true, "sigma_kappa": 3.0}'),
+        [_frame() for _ in range(40)],
+    )
+    assert "rejection_blind" not in _kinds(notes)
+
+
 def test_rejection_blind_note_silent_on_a_drizzle_run():
     notes = stack_health(
         _run(n_frames_used=5, rejection_mode="drizzle-reject",
