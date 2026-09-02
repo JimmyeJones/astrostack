@@ -1031,6 +1031,53 @@ def test_plan_week_honours_nights_and_rejects_bad_input(client, solved_library):
     assert client.get("/api/plan/week", params={"when": "not-a-time"}).status_code == 422
 
 
+def test_plan_week_is_cached_but_only_for_the_same_question(client, solved_library):
+    """A week is seven dark-window searches — measured ~1 s for a London site, and
+    flat in library size because ``plan_week`` batches the targets. A second of
+    ephemeris on every render of the card is still a second, so the answer is
+    cached behind the shared registry-signature cache.
+
+    What the cache must *not* do is answer a different question: the signature
+    carries the altitude floor, the night count, the site and the library, so
+    changing any of them recomputes rather than serves.
+    """
+    from seestack import nightplan as np_plan
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    params = {"when": JAN_EVENING}
+
+    first = client.get("/api/plan/week", params=params)
+    assert first.status_code == 200
+
+    calls = {"n": 0}
+    real = np_plan.plan_week
+
+    def _counted(*a, **kw):
+        calls["n"] += 1
+        return real(*a, **kw)
+
+    import webapp.routers.plan as plan_router
+    original = plan_router.plan_week
+    plan_router.plan_week = _counted
+    try:
+        # Same question, same reference instant → served, not recomputed.
+        again = client.get("/api/plan/week", params=params)
+        assert again.status_code == 200
+        assert calls["n"] == 0
+        assert again.json() == first.json()
+
+        # A different floor is a different question.
+        assert client.get("/api/plan/week",
+                          params={**params, "min_alt": 55}).status_code == 200
+        assert calls["n"] == 1
+        # …and so is a different number of nights.
+        assert client.get("/api/plan/week",
+                          params={**params, "nights": 3}).status_code == 200
+        assert calls["n"] == 2
+    finally:
+        plan_router.plan_week = original
+
+
 def test_plan_week_min_alt_narrows_what_qualifies(client, solved_library):
     """A high altitude floor is honoured, exactly as the other planners honour it
     — a beginner with trees isn't told to shoot something at 20°."""
