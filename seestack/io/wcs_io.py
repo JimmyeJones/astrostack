@@ -195,6 +195,82 @@ def celestial_wcs_from_fits(fits_path: str | Path):  # noqa: ANN201 — returns 
         return None, 0, 0
 
 
+def wcs_text_after_pixel_steps(wcs_text: str | None, steps) -> str | None:  # noqa: ANN001
+    """Move a WCS onto a canvas that has been cropped and/or rescaled.
+
+    ``steps`` is what :func:`seestack.edit.ops.geometry.geometry_pixel_steps`
+    returns: ``("crop", x0, y0)`` and ``("resize", in_w, in_h, out_w, out_h)``
+    entries, in the order they were applied. A crop is a pure translation of the
+    reference pixel; a resize also rescales the pixel→world matrix, per axis,
+    using the same corner-aligned sampling ``scipy.ndimage.zoom`` does
+    (``x_in = x_out · (n_in − 1)/(n_out − 1)``).
+
+    Returns ``None`` — "no WCS", never a guess — when the input has no usable
+    solution, when a resize would invalidate SIP distortion coefficients (they
+    are polynomials in *source* pixels; a crop only shifts their origin, which
+    they are already expressed relative to, but a rescale does not), or when the
+    header is too legacy to rewrite safely (``CROTA``).
+    """
+    if not wcs_text or not wcs_text_is_usable(wcs_text):
+        return None
+    steps = list(steps or [])
+    if not steps:
+        return wcs_text
+    import warnings
+
+    import numpy as np
+    from astropy.io.fits import Header
+    from astropy.wcs import WCS, FITSFixedWarning
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FITSFixedWarning)
+            wcs = WCS(Header.fromstring(wcs_text)).celestial
+        if not wcs.has_celestial or wcs.naxis != 2:
+            return None
+        resizes = [s for s in steps if s[0] == "resize"]
+        if resizes and (wcs.sip is not None or wcs.wcs.has_crota()):
+            return None
+        crpix = [float(v) for v in wcs.wcs.crpix]
+        fx_total, fy_total = 1.0, 1.0
+        for step in steps:
+            if step[0] == "crop":
+                _, x0, y0 = step
+                crpix[0] -= float(x0)
+                crpix[1] -= float(y0)
+            else:
+                _, in_w, in_h, out_w, out_h = step
+                fx = (in_w - 1.0) / (out_w - 1.0) if out_w > 1 else 1.0
+                fy = (in_h - 1.0) / (out_h - 1.0) if out_h > 1 else 1.0
+                if fx <= 0 or fy <= 0:
+                    return None
+                crpix[0] = (crpix[0] - 1.0) / fx + 1.0
+                crpix[1] = (crpix[1] - 1.0) / fy + 1.0
+                fx_total *= fx
+                fy_total *= fy
+        wcs.wcs.crpix = crpix
+        if resizes:
+            # Scale the *columns* of the linear transform — a column is one pixel
+            # axis, and it is the pixel axes that changed length. (Scaling CDELT
+            # would scale the world *rows* instead, which is only the same thing
+            # when the two axis factors are equal and the matrix is diagonal.)
+            if wcs.wcs.has_cd():
+                m = np.array(wcs.wcs.cd, dtype=float, copy=True)
+                m[:, 0] *= fx_total
+                m[:, 1] *= fy_total
+                wcs.wcs.cd = m
+            else:
+                pc = np.array(wcs.wcs.get_pc(), dtype=float, copy=True)
+                pc[:, 0] *= fx_total
+                pc[:, 1] *= fy_total
+                wcs.wcs.pc = pc
+        text = str(wcs.to_header(relax=True))
+    except Exception as exc:  # noqa: BLE001 — a WCS we can't rewrite is dropped, not guessed
+        log.warning("WCS geometry rewrite failed: %s", exc)
+        return None
+    return text if wcs_text_is_usable(text) else None
+
+
 def _rotate_matrix_and_crpix(m, crpix, width: int, height: int, north_up_deg: float):  # noqa: ANN001,ANN202
     """Re-express a canvas's ``(CD, CRPIX, NAXIS)`` on the grid that
     :func:`seestack.render.orient.rotate_image_north_up` produces from it.
