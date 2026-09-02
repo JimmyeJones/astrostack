@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import sharedIntegrationCases from "../../tests/fixtures/integration_format.json";
 import {
   captureNightsClause, formatCaptureNights, formatDiskSize, formatIntegration,
   formatMonthYear, formatNightDate, formatNightDayMonth, formatStampDate,
@@ -27,6 +28,19 @@ describe("formatIntegration", () => {
     // A genuine sub-boundary value stays in its own unit.
     expect(formatIntegration(30)).toBe("30 s");
     expect(formatIntegration(3000)).toBe("50 min");
+  });
+
+  // The app has ONE integration-time vocabulary, and this is half of the pin —
+  // `tests/test_sharecard.py` reads the same table for the Python formatter that
+  // writes the copyable caption, the baked nameplate, the montage strip and the
+  // recap poster. Before the table existed those said "3h 12m" for the very same
+  // picture this page labels "3.2 h". See the fixture's own comment.
+  it("agrees with the Python caption formatter on the shared table", () => {
+    const cases = sharedIntegrationCases.cases as [number, string][];
+    expect(cases.length).toBeGreaterThanOrEqual(10);
+    for (const [seconds, expected] of cases) {
+      expect(formatIntegration(seconds), `${seconds} s`).toBe(expected);
+    }
   });
 });
 

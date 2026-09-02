@@ -303,7 +303,7 @@ def test_before_after_captions_itself_from_the_runs_own_provenance(
     assert client.get(
         f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg").status_code == 200
     assert "42 frames stacked" in seen["caption"]      # n_frames_used
-    assert "21m of light" in seen["caption"]           # total_exposure_s = 1260 s
+    assert "21 min of light" in seen["caption"]           # total_exposure_s = 1260 s
     assert seen["labels"][1] == "42 frames stacked"
     # And it names the target rather than leading with the comparison.
     assert seen["caption"].split(" · ")[0] not in ("", "one frame")

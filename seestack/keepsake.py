@@ -63,7 +63,7 @@ _MIN_DETAIL_PX = 11
 
 def keepsake_caption(fields: NameplateFields) -> tuple[str, str]:
     """``(title, details)`` for a keepsake — e.g.
-    ``("M 31", "4h 12m (505×30s) · 19 Jul 2026 · ZWO Seestar S50")``.
+    ``("M 31", "4.2 h (505×30s) · 19 Jul 2026 · ZWO Seestar S50")``.
 
     Either half may be empty: an un-named target has no title, and a run with no
     usable provenance has no details. Both empty means there is nothing to say,

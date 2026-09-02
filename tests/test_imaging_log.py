@@ -57,7 +57,7 @@ def test_row_values_are_beginner_legible():
     assert vals[1] == "M 31"
     assert vals[2] == "120"
     # Integration is a plain duration, never raw seconds.
-    assert vals[3] == "1h"
+    assert vals[3] == "1.0 h"
     assert vals[4] == "2.4"
     assert vals[5] == "dark+flat"
     assert vals[6] == "no"
@@ -66,9 +66,12 @@ def test_row_values_are_beginner_legible():
 
 
 def test_integration_formats():
-    assert imaging_log_row_values(_row(integration_s=3600 + 24 * 60))[3] == "1h 24m"
-    assert imaging_log_row_values(_row(integration_s=18 * 60))[3] == "18m"
-    assert imaging_log_row_values(_row(integration_s=7200))[3] == "2h"
+    # The app's one integration vocabulary (see
+    # `tests/fixtures/integration_format.json`) — not a third spelling for the
+    # log column a beginner pastes beside the picture's own page.
+    assert imaging_log_row_values(_row(integration_s=3600 + 24 * 60))[3] == "1.4 h"
+    assert imaging_log_row_values(_row(integration_s=18 * 60))[3] == "18 min"
+    assert imaging_log_row_values(_row(integration_s=7200))[3] == "2.0 h"
     # Unknown / zero / negative → blank, never a wrong value.
     assert imaging_log_row_values(_row(integration_s=None))[3] == ""
     assert imaging_log_row_values(_row(integration_s=0))[3] == ""

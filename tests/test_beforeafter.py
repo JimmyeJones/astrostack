@@ -49,15 +49,15 @@ def test_panel_labels_degrade_one_field_at_a_time():
 
 def test_caption_reads_as_one_plain_sentence():
     assert before_after_caption("M 42", 505, 30, 11520) == (
-        "M 42 · one 30-second frame vs 505 frames stacked · 3h 12m of light")
+        "M 42 · one 30-second frame vs 505 frames stacked · 3.2 h of light")
 
 
 def test_caption_drops_missing_clauses_rather_than_printing_blanks():
     # No name → the comparison and the integration alone.
     assert before_after_caption(None, 505, 30, 11520) == (
-        "one 30-second frame vs 505 frames stacked · 3h 12m of light")
+        "one 30-second frame vs 505 frames stacked · 3.2 h of light")
     # No frame count → no comparison clause (it would say "vs Stacked").
-    assert before_after_caption("M 42", None, 30, 11520) == "M 42 · 3h 12m of light"
+    assert before_after_caption("M 42", None, 30, 11520) == "M 42 · 3.2 h of light"
     # No integration → no dangling "of light".
     assert before_after_caption("M 42", 505, 30, None) == (
         "M 42 · one 30-second frame vs 505 frames stacked")

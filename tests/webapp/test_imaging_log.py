@@ -77,14 +77,14 @@ def test_one_row_per_run_newest_first(client, solved_library):
     newer, older = rows[1], rows[2]
     assert newer[0] == "2026-07-20"
     assert newer[2] == "200"
-    assert newer[3] == "1h 24m"
+    assert newer[3] == "1.4 h"
     assert newer[5] == "none"   # no calibration applied
     assert newer[6] == "yes"    # mosaic
     assert newer[8] == "0.192.0"
 
     assert older[0] == "2026-05-01"
     assert older[2] == "30"
-    assert older[3] == "15m"
+    assert older[3] == "15 min"
     assert older[5] == "dark+flat"
     assert older[6] == "no"
 
