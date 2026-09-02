@@ -576,7 +576,7 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # shoulder on the identity (no sky brightening, no blown star cores), so it only
     # ever *gently* lifts faint structure above the noise. Scout-vetted on realistic
     # dim OSC stacks (2026-07-04); the "no sky brightening" half was only true of the
-    # design, not the code, until v0.326.0 (see `seestack/edit/curve.py`).
+    # design, not the code, until v0.326.1 (see `seestack/edit/curve.py`).
     ops.append(("tone.curves", {"auto": True}))
     if sharpen_amount >= 0.05:  # sharpening clean data helps; noisy data hurts
         radius = _sharpen_radius_from_fwhm(median_fwhm)

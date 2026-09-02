@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Anchor, Badge, Group, Paper, Table, Text, Title } from "@mantine/core";
+import { IconCalendarPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
@@ -109,6 +110,23 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
             })}
           </Table.Tbody>
         </Table>
+      ) : null}
+
+      {/* The card names the night; this is what stops the user having to
+          remember it. One event per night that has a pick, titled with what to
+          point at — the same one-tap .ics the Target page's next-session card
+          offers, over the whole week. Only shown when there is something to
+          add: the endpoint 404s on an empty week, and a download that fails is
+          worse than no button (the standing "is this control gated on the same
+          data as the emptiness beside it?" rule). */}
+      {placed.length > 0 ? (
+        <Anchor href={api.planWeekIcsUrl(minAlt != null ? { minAlt } : undefined)}
+          download size="xs" fw={500} mt="sm" display="inline-block">
+          <Group gap={4} wrap="nowrap">
+            <IconCalendarPlus size={13} />
+            Add this week to your calendar
+          </Group>
+        </Anchor>
       ) : null}
 
       {others.length > 0 ? (
