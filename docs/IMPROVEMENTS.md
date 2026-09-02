@@ -10413,6 +10413,42 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **⭐ QA LEAD (Builder 2026-09-02, generalised from the v0.323.0 empty-slideshow fix) — sweep every *primary
+  call to action* that renders on a surface which can legitimately be empty, and ask whether it leads anywhere
+  on a fresh install.** *(Pillar: friendliness — PRIORITY 3; size S per candidate, and the *identifying* test
+  costs nothing. Confidence: the shape is proven — one live instance found and fixed this run.)* The confirmed
+  instance: "My best pictures" rendered **Play slideshow** unconditionally beside its own "your pictures will
+  gather here later" empty state, while the count badge three lines up *was* gated. The generative test, which
+  needs no measurement: **is this control gated on the same data as the emptiness it sits beside — and is that
+  data actually the data the destination reads?** The second half is the interesting one and is where the trap
+  lives: the slideshow's content is `buildSlides(best, videos)`, a *superset* of the wall, so the obvious gate
+  (`items.length > 0`) would have hidden a working show from a beginner whose first picture was a Moon still.
+  So a candidate is only settled by naming the destination's own emptiness predicate, not the host page's.
+  **Where to look:** any page with an empty state and a button in its header — the Gallery, the Life list,
+  Compare (which needs *two* runs), Tonight, Calibration, Moon & Sun — plus the sidebar links, which are always
+  present by design and are *not* candidates (a nav link to an empty page is a page, not a dead action).
+  **Care:** a *failed* query is "unknown", not "empty" — the v0.323.0 fix keeps its button when the gallery
+  errors, because a graceful empty destination costs a dead click while a wrong hide costs the whole feature.
+  Any candidate fixed here should make the same call the same way.
+
+- **NEW IDEA (Builder 2026-09-02, spotted while building the v0.323.1 print button) — sweep the app for
+  sentences that *name* a number the form could just set, and give each one the button.** *(Pillar: autonomy —
+  PRIORITY 2; size XS per site once found. Confidence: two live sites already have the button, the rest are
+  unenumerated.)* The Stack form now has two: the `memoryFix` button ("Use drizzle ×1.4 instead — fits at ~2.1
+  GB") and, as of v0.323.1, the print one ("Use drizzle ×1.4 — prints at A3"). Both existed first as a
+  *sentence* naming a machine-actionable value, and in both cases the knob was inside the collapsed advanced
+  disclosure — so the sentence was advice a beginner could read and not act on. **The identifying test:** does
+  the copy contain a concrete value (a scale, a κ, a count, a mode name) that some control on a screen the user
+  can reach would accept? If yes, it is a candidate. **Named starting points, none checked yet:**
+  `drizzleTooFewHint` ("consider turning Drizzle off" — a boolean, so trivially actionable),
+  `drizzleClipHint` (names `drizzle_reject` outright), `backgroundModeNudge` (names a mode), and the
+  calibration-suggestion copy. **Care, and the reason this is a sweep rather than a rule:** a button is a second
+  element on a dense form, against the owner's standing "extremely busy" priority — so each site has to justify
+  itself the way the print one did, by being *conditional on something rare* rather than always-on. An advisory
+  that fires on most stacks should stay a sentence. And check the query-key trap the print button hit: a fix
+  that sets two form keys must land them in **one** state update, or the panel re-queries through an
+  intermediate state and flickers between two verdicts.
+
 - **✅ SHIPPED (Builder, v0.322.3, branch `claude/wizardly-feynman-yryq05`) — ~~Compare tells you one stack is
   "the cleaner stack" even when the two are *different objects*.~~** Built as the entry's **second** option, the
   one it called better: the figure stays, the *claim* goes. `noiseComparison` now returns `sameTarget`
@@ -17142,6 +17178,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEW IDEA (Builder 2026-09-02, spotted while tracing the editor export path for v0.322.9) — an edited export
+  records which run it came from and *nobody ever reads it*, so History gives a beginner two near-identical
+  rows and no way to tell which is the original.** *(Pillar: understand + trust — PRIORITY 3; size XS–S.
+  Traced, high confidence — the datum is verified present and verified unused.)* `webapp/pipeline.py:1450`
+  writes `"derived_from": run_id` into the export's `options_json`, and the FITS carries the same fact as
+  `EDITFROM`. **A grep for `derived_from` across `frontend/src` and `webapp/` returns exactly that one write
+  site** — nothing reads it, on any surface. Meanwhile the two rows an export produces on the History page look
+  alike: same target, adjacent timestamps, one of them `notes="edited"`. A beginner who exports an edit and
+  later wants "the original data" has to *know* that the linear FITS lives on a different row. **Shape:** one
+  line on the edited run's History card — *"Edited from `M_31_master`"* — linking to that run, read straight
+  off `options_json` (already on the run payload, so no new API field and no schema change). **Care, and why
+  this is XS–S rather than XS:** a re-export under the same basename **archives** the previous outputs and
+  `repoint_stack_runs` moves the old row's paths, so the source run *can* have been repointed or, if the user
+  deleted it, be gone entirely — the line must degrade to plain text (or nothing) when the id no longer
+  resolves, never a dead link. Also note `derived_from` is only written by the *export* path; an "Apply &
+  save" run records its own row and does not carry it, so the line must self-hide rather than claim an unknown
+  ancestor. **Beginner bar ✔** — one plain sentence, no knob, and it answers the exact question ("which of
+  these is my raw stack?") the v0.322.9 export-panel copy now points at.
 
 - **✅ SHIPPED (Builder, v0.323.0, branch `claude/zen-mccarthy-2rptmf`) — ~~"My best pictures" offers **Play
   slideshow** on a wall that is empty, and the obvious gate is the wrong one.~~** **Both filed shapes, because
