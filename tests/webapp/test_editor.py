@@ -416,9 +416,59 @@ def test_curve_suggestion_from_image(client, solved_library):
     ys = [p[1] for p in pts]
     assert all(b > a for a, b in zip(xs, xs[1:]))
     assert all(b > a for a, b in zip(ys, ys[1:]))
-    # target_bg names the goal the lift solves for; it's the engine's target grey.
+    # target_bg names the goal the *data-driven midtone lift* solves for. It is set
+    # on that branch only: the sky-anchored fallback (which this synthetic
+    # sky-dominated stack takes, since its median IS its sky) pins the background
+    # and lifts a shoulder above it, so there is no target grey to name.
     from seestack.edit.curve import CURVE_TARGET_BG
-    assert body["target_bg"] == CURVE_TARGET_BG
+    assert body["target_bg"] in (None, CURVE_TARGET_BG)
+    if body["target_bg"] is not None:
+        mid = next(p for p in pts if p[1] > p[0])
+        assert mid[1] <= CURVE_TARGET_BG + 1e-6
+
+
+def test_curve_suggestion_is_the_curve_auto_contrast_will_actually_apply(
+        client, solved_library):
+    """The editor draws this response as the ghost behind the Curves op's flat
+    identity line, and bakes it on click — so it has to be what the op applies,
+    on *both* of the op's branches.
+
+    It used to return ``null`` whenever the data-driven lift declined, while the
+    render went on applying a fallback curve: the widget drew a straight line
+    contradicting the preview beside it, and "Bake to edit" had nothing to bake.
+    """
+    import seestack.edit.curve as curve_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="curve_parity")
+    recipe = {"ops": [
+        {"id": "tone.stretch", "uid": "s1", "params": {"stretch": 0.7, "black": 0.3}},
+        {"id": "tone.curves", "uid": "cv1", "params": {}},
+    ]}
+    q = _enc(recipe)
+    url = (f"/api/targets/{safe}/stack-runs/{rid}/editor/curve-suggestion"
+           f"?recipe={q}&uid=cv1")
+
+    # Force the branch the op takes on a sky-dominated stack: the data-driven lift
+    # declines, and the sky-anchored fallback is what gets rendered.
+    original = curve_mod.suggest_tone_curve
+    curve_mod.suggest_tone_curve = lambda *a, **k: None
+    try:
+        body = client.get(url).json()
+    finally:
+        curve_mod.suggest_tone_curve = original
+
+    pts = body["points"]
+    assert pts is not None, "the fallback is applied, so it must be drawn"
+    assert pts[0] == [0.0, 0.0] and pts[-1] == [1.0, 1.0]
+    assert len(pts) >= 3, "a drawn fallback is never the bare identity"
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    assert all(b > a for a, b in zip(xs, xs[1:]))
+    assert all(b > a for a, b in zip(ys, ys[1:]))
+    # The fallback pins the sky and lifts a shoulder above it — there is no midtone
+    # target to name, so it must not claim one.
+    assert body["target_bg"] is None
 
 
 def test_curve_suggestion_unknown_uid_falls_back(client, solved_library):
@@ -855,11 +905,17 @@ def test_histogram_reports_color_cal_outcome(client, solved_library):
         f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={_enc(recipe)}").json()
     cc = hist["color_cal"]
     assert cc is not None
-    assert set(cc) == {"mode_used", "n_stars_used", "notes"}
+    assert set(cc) == {"mode_used", "n_stars_used", "notes", "proxy_fallback"}
     # gray_star on the preview solves from stars, falls back to background-neutral,
     # or gives up — every path stamps one of these modes (never gaia on the proxy).
     assert cc["mode_used"] in {"gray_star", "background_neutral", "none"}
     assert isinstance(cc["n_stars_used"], int)
+    # ``proxy_fallback`` is the honest "this preview's colour is not the export's"
+    # flag: always present (so the editor can trust it), and true only when the
+    # preview really did land on a different white balance from the export's.
+    assert isinstance(cc["proxy_fallback"], bool)
+    assert cc["proxy_fallback"] == (
+        hist["proxy_scale"] > 1.0 and cc["mode_used"] not in {"gray_star", "gaia"})
     # A recipe with no colour-cal op → no outcome to report.
     plain = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6, "black": 0.35}}]}
     hist2 = client.get(
@@ -1000,6 +1056,77 @@ def test_histogram_flags_star_reduce_preview_overstatement(client, solved_librar
     # A recipe with no star-reduce op is never flagged.
     none = hist_for({"ops": [{"id": "tone.stretch", "params": {}}]})
     assert none["star_reduce_preview_overstates"] is False
+
+
+def test_histogram_flags_sharpen_preview_understatement(client, solved_library):
+    """When the preview proxy is decimated enough that an enabled Sharpen op's
+    radius goes sub-pixel, the unsharp mask collapses towards the identity and the
+    preview shows a fraction of the export's local contrast; the histogram reports
+    ``sharpen_preview_understates`` so the editor can caption it. Regression for
+    audit finding A2 — sharpen was the one proxy-scaled op with no advisory."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # A wide master (1700 px) → proxy_scale 2, so radius 1.0 goes sub-pixel
+    # (1.0 / 2 = 0.5 < the 0.6 knee) while radius 2.0 survives (2.0/2 = 1.0).
+    rid = _make_run(solved_library, safe, basename="wide_sharp", h=120, w=1700)
+
+    def hist_for(recipe):
+        q = _enc(recipe)
+        return client.get(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
+
+    weak = hist_for({"ops": [{"id": "detail.sharpen",
+                              "params": {"amount": 1.0, "radius": 1.0}}]})
+    assert weak["proxy_scale"] >= 2.0
+    assert weak["sharpen_preview_understates"] is True
+
+    # A broader radius is representable on the same proxy → no understatement.
+    strong = hist_for({"ops": [{"id": "detail.sharpen",
+                                "params": {"amount": 1.0, "radius": 2.0}}]})
+    assert strong["sharpen_preview_understates"] is False
+
+    # A disabled sharpen op doesn't count.
+    disabled = hist_for({"ops": [{"id": "detail.sharpen", "enabled": False,
+                                  "params": {"amount": 1.0, "radius": 1.0}}]})
+    assert disabled["sharpen_preview_understates"] is False
+
+    # A recipe with no sharpen op is never flagged.
+    none = hist_for({"ops": [{"id": "tone.stretch", "params": {}}]})
+    assert none["sharpen_preview_understates"] is False
+
+
+def test_histogram_flags_hot_pixels_skipped_on_a_decimated_preview(client, solved_library):
+    """Hot-pixel removal is skipped on any decimated preview proxy — a strided
+    proxy turns real stars into lone isolated pixels, the very signature the op
+    treats as a defect — so the histogram reports ``hot_pixels_preview_skipped``
+    and the editor says the export still applies it. A full-resolution proxy runs
+    the op as before and must not raise the flag."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    wide = _make_run(solved_library, safe, basename="wide_hot", h=120, w=1700)
+    small = _make_run(solved_library, safe)  # 80x100 → proxy_scale 1
+
+    def hist_for(rid, recipe):
+        q = _enc(recipe)
+        return client.get(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
+
+    hot = {"ops": [{"id": "detail.hot_pixels", "params": {"sigma": 5.0}}]}
+    skipped = hist_for(wide, hot)
+    assert skipped["proxy_scale"] >= 2.0
+    assert skipped["hot_pixels_preview_skipped"] is True
+
+    # A stack small enough that its proxy *is* the full image runs the op.
+    full_res = hist_for(small, hot)
+    assert full_res["proxy_scale"] == 1.0
+    assert full_res["hot_pixels_preview_skipped"] is False
+
+    # A disabled hot-pixel op doesn't count.
+    disabled = hist_for(wide, {"ops": [{"id": "detail.hot_pixels", "enabled": False,
+                                        "params": {"sigma": 5.0}}]})
+    assert disabled["hot_pixels_preview_skipped"] is False
+
+    # A recipe with no hot-pixel op is never flagged.
+    none = hist_for(wide, {"ops": [{"id": "tone.stretch", "params": {}}]})
+    assert none["hot_pixels_preview_skipped"] is False
 
 
 def test_trim_suggestion_mosaic(client, solved_library):

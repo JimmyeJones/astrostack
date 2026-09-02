@@ -1141,3 +1141,100 @@ def test_plan_week_min_alt_narrows_what_qualifies(client, solved_library):
     assert sum(n["n_usable"] for n in high["nights"]) <= \
         sum(n["n_usable"] for n in low["nights"])
     assert all(n["best"] is None for n in high["nights"])
+
+
+# ---------------------------------------------------------------------------
+# "Add this week to your calendar" — /api/plan/week/calendar.ics
+# ---------------------------------------------------------------------------
+
+def test_plan_week_ics_downloads_one_event_per_planned_night(client, solved_library):
+    """The card says "Saturday is your M 42 night"; this is what stops the user
+    having to remember it. One event per night that has a pick, titled with what
+    to point at."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    plan = client.get("/api/plan/week", params={"when": JAN_EVENING}).json()
+    placed = [n for n in plan["nights"] if n["best"] is not None]
+    assert placed, "Orion is well up on January nights from London"
+
+    r = client.get("/api/plan/week/calendar.ics", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/calendar")
+    assert "attachment" in r.headers.get("content-disposition", "")
+    assert "astrostack-week.ics" in r.headers.get("content-disposition", "")
+
+    body = r.text
+    assert body.startswith("BEGIN:VCALENDAR")
+    assert body.rstrip().endswith("END:VCALENDAR")
+    # Exactly the nights that had a pick — never an event saying "nothing is
+    # well placed", and never a night the card didn't show.
+    assert body.count("BEGIN:VEVENT") == len(placed)
+    assert "SUMMARY:Image " in body
+    assert "Bring the Seestar out" in body   # the same jargon-free wording
+
+
+def test_plan_week_ics_events_match_the_card_that_offers_them(client, solved_library):
+    """The calendar and the card are the same plan, so they cannot disagree about
+    which night, which target, or what time to start."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    plan = client.get("/api/plan/week", params={"when": JAN_EVENING}).json()
+    body = client.get("/api/plan/week/calendar.ics",
+                      params={"when": JAN_EVENING}).text
+
+    for night in plan["nights"]:
+        best = night["best"]
+        if best is None:
+            continue
+        start = datetime.fromisoformat(best["usable_start_utc"])
+        end = datetime.fromisoformat(best["usable_end_utc"])
+        assert f"DTSTART:{start.astimezone(timezone.utc):%Y%m%dT%H%M%SZ}" in body
+        assert f"DTEND:{end.astimezone(timezone.utc):%Y%m%dT%H%M%SZ}" in body
+        assert best["name"] in body
+
+
+def test_plan_week_ics_reuses_the_next_session_uid_so_a_night_is_never_doubled(
+        client, solved_library):
+    """Adding the week *and* a target's next session must update one calendar
+    entry for a shared night, not create two. Both build the UID from
+    (target, window start), so the same night is the same event."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    week = client.get("/api/plan/week/calendar.ics",
+                      params={"when": JAN_EVENING}).text
+    session = client.get("/api/plan/next-session/M_42/calendar.ics",
+                         params={"when": JAN_EVENING}).text
+
+    def _uids(ics: str) -> set[str]:
+        return {ln.split(":", 1)[1].strip() for ln in ics.splitlines()
+                if ln.startswith("UID:")}
+
+    week_uids, session_uids = _uids(week), _uids(session)
+    assert week_uids and session_uids
+    assert len(week_uids) == week.count("BEGIN:VEVENT")   # unique within the file
+    # M 42 is the library's placed target, so the week's M 42 nights are a subset
+    # of the ones its own next-session calendar names — same ids, not doubles.
+    assert week_uids & session_uids, "a shared night must share its UID"
+
+
+def test_plan_week_ics_without_location_404s(client, solved_library):
+    """No site → nothing to add, so the download 404s rather than handing back an
+    event-less calendar (and the card hides the link)."""
+    r = client.get("/api/plan/week/calendar.ics", params={"when": JAN_EVENING})
+    assert r.status_code == 404
+
+
+def test_plan_week_ics_with_nothing_placed_404s(client, solved_library):
+    """An altitude floor nothing clears → no events, so 404 rather than a blank
+    calendar file."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/week/calendar.ics",
+                   params={"when": JAN_EVENING, "min_alt": 80})
+    assert r.status_code == 404
+
+
+def test_plan_week_ics_rejects_bad_input_like_its_json_twin(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    assert client.get("/api/plan/week/calendar.ics",
+                      params={"nights": 0}).status_code == 422
+    assert client.get("/api/plan/week/calendar.ics",
+                      params={"nights": 99}).status_code == 422
+    assert client.get("/api/plan/week/calendar.ics",
+                      params={"when": "not-a-time"}).status_code == 422

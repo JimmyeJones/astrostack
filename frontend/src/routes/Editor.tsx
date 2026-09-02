@@ -33,9 +33,11 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { starReduceOverstatesCaption } from "../components/editor/starReducePreview";
+import { sharpenUnderstatesCaption } from "../components/editor/sharpenPreview";
+import { hotPixelsSkippedCaption } from "../components/editor/hotPixelsPreview";
 import { canNeutraliseSkyCast, neutraliseBackgroundOps, skyCastCaption }
   from "../components/editor/skyCast";
-import { autoColorCalCaption } from "../components/editor/colorCal";
+import { autoColorCalCaption, colorCalProxyFallbackCaption } from "../components/editor/colorCal";
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { recentreCropRect, recentreKeptLabel } from "../components/editor/recentreCrop";
@@ -1688,6 +1690,27 @@ export function EditorView() {
                 <Text size="xs" c="dimmed">{starReduceOverstatesCaption(hist.data)}</Text>
               </Group>
             ) : null}
+            {/* Sharpen's radius is a full-res measure; once proxy_scale shrinks
+                it below about half a proxy pixel the unsharp mask goes sub-pixel
+                and the preview shows a fraction of the export's local contrast.
+                Same limit as deconvolution, same honest caption. Advisory only. */}
+            {sharpenUnderstatesCaption(hist.data) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">{sharpenUnderstatesCaption(hist.data)}</Text>
+              </Group>
+            ) : null}
+            {/* Hot-pixel removal can't run on a strided proxy without mistaking
+                real stars for defects, so the preview skips it. Say so, or the
+                user judges a starless preview the export will never produce. */}
+            {hotPixelsSkippedCaption(hist.data) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">{hotPixelsSkippedCaption(hist.data)}</Text>
+              </Group>
+            ) : null}
             {/* Which white-balance path the recipe's colour-calibration op ran on
                 this live preview (the one-click Auto includes one) — star-based,
                 the too-few-stars background-neutral fallback, or gave up. Mirrors
@@ -1706,6 +1729,20 @@ export function EditorView() {
                 </Group>
               );
             })()}
+            {/* …and when that balance is the *proxy's* fallback rather than the one
+                the export will apply, the preview's colour genuinely isn't the
+                saved picture's. Scaling the detection geometry to the proxy grid
+                closes this most of the time; when it can't, say so rather than
+                diverge silently. Advisory only. */}
+            {colorCalProxyFallbackCaption(hist.data?.color_cal) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">
+                  {colorCalProxyFallbackCaption(hist.data?.color_cal)}
+                </Text>
+              </Group>
+            ) : null}
             {/* Robust read-out of the *finished* sky background's colour balance,
                 measured over the sky population of the post-recipe display image.
                 Beginners have no other way to see whether their background ended

@@ -1,6 +1,7 @@
 """ASTAP wrapper — discovery and ini parsing (no real solve)."""
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -113,6 +114,28 @@ def test_solver_passes_db_dir(tmp_path, monkeypatch):
     assert str(tmp_path) in captured["cmd"]
 
 
+def _sidecar_paths(cmd):
+    """Where the real ASTAP would put its sidecars for this command line: beside
+    the file named by ``-f``.
+
+    The solver hands ASTAP a scratch **copy** and never the source frame, because
+    ASTAP writes beside ``-f`` and with ``copy_to_cache`` off that path is a raw
+    sub in the owner's read-only ``incoming/`` tree (AGENTS.md §10). A fake that
+    writes beside the *original* frame is therefore modelling a binary that does
+    not exist — and would go on "passing" if the solver started handing over the
+    source path again.
+    """
+    target = Path(cmd[cmd.index("-f") + 1])
+    return target.with_suffix(".wcs"), target.with_suffix(".ini")
+
+
+def _write_solved_sidecars(cmd):
+    """Behave like a successful ASTAP run: sidecars beside the ``-f`` file."""
+    wcs, ini = _sidecar_paths(cmd)
+    wcs.write_text("CRVAL1=10\n")
+    ini.write_text("CRVAL1=10\nCRVAL2=20\nCDELT2=0.0007\nCROTA2=0\n")
+
+
 def _make_solver(tmp_path):
     (tmp_path / "astap").write_bytes(b"")
     (tmp_path / "d05_0101.290").write_bytes(b"x")
@@ -125,8 +148,6 @@ def test_adaptive_ladder_escalates_downsample(tmp_path, monkeypatch):
     frame = tmp_path / "frame.fits"
     frame.write_bytes(b"")
     solver = _make_solver(tmp_path)
-    wcs = frame.with_suffix(".wcs")
-    ini = frame.with_suffix(".ini")
 
     calls: list[list[str]] = []
 
@@ -139,11 +160,9 @@ def test_adaptive_ladder_escalates_downsample(tmp_path, monkeypatch):
             returncode = 1
         # Only "solve" (write sidecars, rc 0) once ASTAP is told to downsample.
         if "-z" in cmd:
-            wcs.write_text("CRVAL1=10\n")
-            ini.write_text("CRVAL1=10\nCRVAL2=20\nCDELT2=0.0007\nCROTA2=0\n")
+            _write_solved_sidecars(cmd)
             _P.returncode = 0
         else:
-            wcs.unlink(missing_ok=True)
             _P.returncode = 1
             _P.stderr = "no solution found"
         return _P()
@@ -184,15 +203,12 @@ def test_adaptive_ladder_survives_a_timeout_on_the_first_rung(tmp_path, monkeypa
     frame = tmp_path / "frame.fits"
     frame.write_bytes(b"")
     solver = _make_solver(tmp_path)
-    wcs = frame.with_suffix(".wcs")
-    ini = frame.with_suffix(".ini")
 
     def fake_run(cmd, **kwargs):
         # First rung (no -z) runs long and times out; a downsampled rung solves.
         if "-z" not in cmd:
             raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 60))
-        wcs.write_text("CRVAL1=10\n")
-        ini.write_text("CRVAL1=10\nCRVAL2=20\nCDELT2=0.0007\nCROTA2=0\n")
+        _write_solved_sidecars(cmd)
 
         class _P:
             stdout = ""
@@ -284,8 +300,6 @@ def test_ladder_solves_on_full_res_widened_star_pool_rung(tmp_path, monkeypatch)
     frame = tmp_path / "frame.fits"
     frame.write_bytes(b"")
     solver = _make_solver(tmp_path)
-    wcs = frame.with_suffix(".wcs")
-    ini = frame.with_suffix(".ini")
 
     def fake_run(cmd, **kwargs):
         class _P:
@@ -295,11 +309,8 @@ def test_ladder_solves_on_full_res_widened_star_pool_rung(tmp_path, monkeypatch)
 
         # Solve only when the star pool is widened past the default (-s >= 1000).
         if "-s" in cmd and int(cmd[cmd.index("-s") + 1]) >= 1000:
-            wcs.write_text("CRVAL1=10\n")
-            ini.write_text("CRVAL1=10\nCRVAL2=20\nCDELT2=0.0007\nCROTA2=0\n")
+            _write_solved_sidecars(cmd)
             _P.returncode = 0
-        else:
-            wcs.unlink(missing_ok=True)
         return _P()
 
     monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
@@ -401,3 +412,96 @@ def test_is_solve_timeout_error_ignores_unrelated_text():
     assert not is_solve_timeout_error("")
     assert not is_solve_timeout_error("no solution found")
     assert not is_solve_timeout_error("no star database")
+
+
+# --------------------------------------------------------------------------- #
+# 🔒 The scratch-copy guarantee, at unit level (AGENTS.md §10)
+#
+# ``tests/webapp/test_incoming_readonly_guard.py`` proves the *outcome* end to
+# end with a stub binary. These pin the two properties that outcome rests on, so
+# a regression names its own cause instead of surfacing as "a folder changed".
+# --------------------------------------------------------------------------- #
+
+def test_astap_is_never_pointed_at_the_callers_own_frame(tmp_path, monkeypatch):
+    # The single fact the whole guarantee reduces to: ASTAP derives its sidecar
+    # names from ``-f``, so ``-f`` must never be a path in the caller's tree.
+    frames = tmp_path / "incoming" / "M_42_sub"
+    frames.mkdir(parents=True)
+    frame = frames / "Light_M42_10.0s_0001.fit"
+    frame.write_bytes(b"the owner's only copy")
+    solver = _make_solver(tmp_path)
+    seen: list[tuple[Path, bytes]] = []
+
+    def fake_run(cmd, **kwargs):
+        given = Path(cmd[cmd.index("-f") + 1])
+        # Record what ASTAP was handed, and *what it holds*, while it still exists.
+        seen.append((given, given.read_bytes()))
+        _write_solved_sidecars(cmd)
+
+        class _P:
+            stdout = ""
+            stderr = ""
+            returncode = 0
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    solver.solve(frame)
+
+    assert seen, "ASTAP was never invoked"
+    given, given_bytes = seen[0]
+    assert given != frame
+    assert frames not in given.parents, (
+        f"ASTAP was pointed inside the frame's own folder: {given}")
+    # Same *name*, so ASTAP's own log tail still names the frame the user knows…
+    assert given.name == frame.name
+    # …and the same bytes, so it is solving the owner's actual pixels.
+    assert given_bytes == frame.read_bytes()
+
+
+def test_the_result_names_the_callers_frame_not_the_scratch_copy(tmp_path, monkeypatch):
+    # Staging is an implementation detail; callers store and display this path,
+    # and a scratch path leaking into the project DB would be a dangling record.
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    solver = _make_solver(tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        _write_solved_sidecars(cmd)
+
+        class _P:
+            stdout = ""
+            stderr = ""
+            returncode = 0
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    result = solver.solve(frame)
+    assert result.solved
+    assert result.fits_path == frame
+
+
+def test_a_stale_sidecar_beside_the_frame_cannot_fake_a_solve(tmp_path, monkeypatch):
+    """A solve is "solved" only if *this* run wrote the sidecar.
+
+    ``solved`` is ``returncode == 0 and sidecar.exists()`` — existence, not
+    authorship. A ``.wcs`` left beside a frame by an older build of this app, or
+    by the owner running ASTAP himself, used to sit exactly where the wrapper
+    looked, so a run that found nothing could inherit somebody else's answer and
+    persist it as this frame's WCS. Solving in a scratch directory that starts
+    empty closes that by construction; this pins it, because nothing else does.
+    """
+    frame = tmp_path / "frame.fits"
+    frame.write_bytes(b"")
+    frame.with_suffix(".wcs").write_text("CRVAL1=999\n")   # someone else's answer
+    frame.with_suffix(".ini").write_text("CRVAL1=999\nCRVAL2=99\nCDELT2=0.1\nCROTA2=0\n")
+    solver = _make_solver(tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        class _P:  # ASTAP ran, matched nothing, wrote nothing
+            stdout = ""
+            stderr = "no solution found"
+            returncode = 0
+        return _P()
+
+    monkeypatch.setattr("seestack.solve.astap.subprocess.run", fake_run)
+    assert not solver.solve(frame).solved

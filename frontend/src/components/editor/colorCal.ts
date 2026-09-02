@@ -59,3 +59,25 @@ export function autoColorCalCaption(
   }
   return null;
 }
+
+// Pure helper: caption for "this preview's white balance is not the export's".
+//
+// Colour calibration solves from star colours, and the live preview runs on a
+// decimated proxy. The op scales its detection geometry to the proxy's grid so
+// the two normally agree — but a heavily-decimated proxy can still hold too few
+// resolvable stars for a star-based solve the full-res export will manage, and
+// then it falls back to the starless background-neutral balance. That is a real
+// divergence: the colour on screen is not the colour that gets saved. The
+// backend flags exactly that case (`proxy_fallback`, preview renders only), so
+// we say it plainly instead of letting the preview mislead. Advisory only.
+export function colorCalProxyFallbackCaption(
+  cc: AutoColorCal | undefined | null,
+): string | null {
+  if (!cc?.proxy_fallback) return null;
+  return (
+    "This downscaled preview couldn't find enough stars to balance the colour, "
+    + "so it balanced from the sky background instead. The full-resolution export "
+    + "will use star colours, so the saved picture's colour will differ a little "
+    + "from this preview."
+  );
+}
