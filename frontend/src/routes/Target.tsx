@@ -462,18 +462,30 @@ export function TargetView() {
   // (thin stack, noise badge, "sharpest yet", integration trend) are statements
   // about the *latest* stack, and pinning an old favourite must not make them
   // describe it.
+  // The fallback is the newest run **that has a picture**, not simply the newest
+  // run — the second half of `_representative_run`'s precedence, and the same
+  // divergence one step along: a newest run with no preview (a channel-combine,
+  // or one whose preview file has gone) left this page showing *nothing* while
+  // the Library tile went on showing the run before it. A target with no picture
+  // anywhere still falls all the way back to `latestRun`, because the action row
+  // (Edit, Stack) works on a run that has yet to render one.
   const pictureRun = useMemo(() => {
     const coverId = target.data?.cover_stack_run_id ?? null;
+    const list = runs.data ?? [];
     if (coverId != null) {
-      const pinned = (runs.data ?? []).find(
-        (r) => r.id === coverId && r.has_preview);
+      const pinned = list.find((r) => r.id === coverId && r.has_preview);
       if (pinned) return pinned;
     }
-    return latestRun;
+    return list.find((r) => r.has_preview) ?? latestRun;
   }, [runs.data, target.data?.cover_stack_run_id, latestRun]);
   // ...and whether that picture is a pinned cover that ISN'T the newest stack —
   // the one case a beginner could be confused by ("why isn't my new stack here?").
-  const showingOlderCover = !!pictureRun && !!latestRun && pictureRun.id !== latestRun.id;
+  // Compared against the newest run *with a picture*, so falling back past a
+  // preview-less newest run doesn't claim a cover nobody pinned.
+  const newestPicture = useMemo(
+    () => (runs.data ?? []).find((r) => r.has_preview), [runs.data]);
+  const showingOlderCover = !!pictureRun && !!newestPicture
+    && pictureRun.id !== newestPicture.id;
   // The night this picture's subs were **shot**, for the share sheet's caption —
   // never `timestamp_utc`, which is when the stack ran. `""` on a run with no
   // recorded window, which `sharePictureText` turns into no date clause at all.

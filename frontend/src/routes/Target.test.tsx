@@ -2118,3 +2118,41 @@ describe("TargetView honours the pinned cover", () => {
     expect(screen.queryByTestId("pinned-cover-note")).toBeNull();
   });
 });
+
+describe("TargetView hero when the newest run has no picture", () => {
+  // The second half of `_representative_run`'s precedence, and the same
+  // divergence A5 was about one step along: it falls back to the newest run
+  // **with a preview**, not simply the newest run. Fails before: a preview-less
+  // newest run (a channel-combine, or one whose preview file has gone) left this
+  // page showing nothing while the Library tile went on showing the run before it.
+  it("falls back to the newest run that actually has one", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget({ has_preview: true }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 4, has_preview: false }),
+      mkRun({ id: 3 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    const img = await screen.findByAltText("Latest stacked picture of M42");
+    expect(img.getAttribute("src")).toContain("/stack-runs/3/");
+    // …and it is not announced as a pinned cover: nobody pinned anything.
+    expect(screen.getByText("Your picture")).toBeInTheDocument();
+    expect(screen.queryByTestId("pinned-cover-note")).toBeNull();
+  });
+
+  it("still routes the action row at the newest run when nothing has a picture", async () => {
+    // A target mid-first-stack: the row's Edit/Stack must keep working.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 7, has_preview: false }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    expect(await screen.findByRole("link", { name: "Edit latest stack" }))
+      .toHaveAttribute("href", "/targets/M_42/edit/7");
+  });
+});
