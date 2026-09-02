@@ -449,11 +449,36 @@ export function TargetView() {
   });
   const runs = useQuery({ queryKey: ["runs", safe], queryFn: () => api.listStackRuns(safe) });
   const latestRun = runs.data?.[0];  // listStackRuns returns newest first
+  // *The* picture of this target — the one this page shows, saves, shares and
+  // edits. Every other surface (the Library tile, the Best wall, the montage,
+  // `gallery._representative_run`) resolves the **pinned cover** first and only
+  // falls back to the newest run; this page took the newest run flat, so pinning
+  // run 3 and then stacking run 4 left the Target page showing a different
+  // picture from the Library card while its own notes talked about "the cover".
+  // Same precedence as `_representative_run`, including its degrade: a cover
+  // whose preview has gone silently falls back to the newest picture.
+  //
+  // `latestRun` deliberately stays the newest run: the analysis notes below
+  // (thin stack, noise badge, "sharpest yet", integration trend) are statements
+  // about the *latest* stack, and pinning an old favourite must not make them
+  // describe it.
+  const pictureRun = useMemo(() => {
+    const coverId = target.data?.cover_stack_run_id ?? null;
+    if (coverId != null) {
+      const pinned = (runs.data ?? []).find(
+        (r) => r.id === coverId && r.has_preview);
+      if (pinned) return pinned;
+    }
+    return latestRun;
+  }, [runs.data, target.data?.cover_stack_run_id, latestRun]);
+  // ...and whether that picture is a pinned cover that ISN'T the newest stack —
+  // the one case a beginner could be confused by ("why isn't my new stack here?").
+  const showingOlderCover = !!pictureRun && !!latestRun && pictureRun.id !== latestRun.id;
   // The night this picture's subs were **shot**, for the share sheet's caption —
   // never `timestamp_utc`, which is when the stack ran. `""` on a run with no
   // recorded window, which `sharePictureText` turns into no date clause at all.
   const captureLabel = formatCaptureNights(
-    latestRun?.capture_night_start, latestRun?.capture_night_end);
+    pictureRun?.capture_night_start, pictureRun?.capture_night_end);
   // The *measured* framing verdict for the newest picture, if there is one. The
   // note below renders it; this page reads the same answer (one shared query) so
   // the object card can drop its catalog "will it fit?" prediction while the
@@ -465,9 +490,9 @@ export function TargetView() {
   // WCS yields a real orientation correction (else the endpoint no-ops). One
   // cheap read of the run's own suggestion, gated on it having a FITS to read.
   const renderSuggestion = useQuery({
-    queryKey: ["render-suggestion", safe, latestRun?.id],
-    queryFn: () => api.stackRenderSuggestion(safe, latestRun!.id),
-    enabled: !!latestRun?.has_fits,
+    queryKey: ["render-suggestion", safe, pictureRun?.id],
+    queryFn: () => api.stackRenderSuggestion(safe, pictureRun!.id),
+    enabled: !!pictureRun?.has_fits,
     staleTime: Infinity,
   });
   const wallpaperCanNorthUp = typeof renderSuggestion.data?.north_up_deg === "number";
@@ -1252,8 +1277,8 @@ export function TargetView() {
             leftSection={<IconHistory size={16} />} aria-label="History">
             History
           </Button>
-          {latestRun ? (
-            <Button component={Link} to={`/targets/${safe}/edit/${latestRun.id}`} variant="default"
+          {pictureRun ? (
+            <Button component={Link} to={`/targets/${safe}/edit/${pictureRun.id}`} variant="default"
               leftSection={<IconWand size={16} />} aria-label="Edit latest stack">
               Edit
             </Button>
@@ -1264,7 +1289,7 @@ export function TargetView() {
               picture" — on the page the owner named as the busiest in the app.
               Nothing was removed: every item below is the control that used to
               be a button, with its own wording and behaviour. */}
-          {latestRun?.has_preview ? (
+          {pictureRun?.has_preview ? (
             <Menu shadow="md" width={260} position="bottom-end" withinPortal>
               <Menu.Target>
                 <Button variant="default" leftSection={<IconDownload size={16} />}
@@ -1279,18 +1304,18 @@ export function TargetView() {
                   loses its first item off the top — scroll instead of clip. */}
               <Menu.Dropdown mah={420} style={{ overflowY: "auto" }}>
                 <Menu.Label>Download</Menu.Label>
-                {latestRun.has_fits ? (
+                {pictureRun.has_fits ? (
                   <Menu.Item leftSection={<IconPhotoDown size={16} />}
-                    component="a" href={api.stackFullResPngUrl(safe, latestRun.id)}>
-                    {fullResPngLabel(latestRun.canvas_w, latestRun.canvas_h)}
+                    component="a" href={api.stackFullResPngUrl(safe, pictureRun.id)}>
+                    {fullResPngLabel(pictureRun.canvas_w, pictureRun.canvas_h)}
                   </Menu.Item>
                 ) : null}
                 <Menu.Item leftSection={<IconPhotoDown size={16} />}
-                  component="a" href={api.stackArtifactUrl(safe, latestRun.id, "preview")}>
-                  {latestRun.has_fits ? "Quick preview PNG (up to 1024px)" : "PNG (best quality)"}
+                  component="a" href={api.stackArtifactUrl(safe, pictureRun.id, "preview")}>
+                  {pictureRun.has_fits ? "Quick preview PNG (up to 1024px)" : "PNG (best quality)"}
                 </Menu.Item>
                 <Menu.Item leftSection={<IconPhotoDown size={16} />}
-                  component="a" href={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}>
+                  component="a" href={api.stackArtifactUrl(safe, pictureRun.id, "jpeg")}>
                   JPEG (smaller — best for sharing)
                 </Menu.Item>
                 {/* The framed variant: the same picture matted on a dark card
@@ -1300,7 +1325,7 @@ export function TargetView() {
                 <Menu.Item leftSection={<IconPhotoDown size={16} />}
                   component="a"
                   href={api.stackArtifactUrl(
-                    safe, latestRun.id, "jpeg", false, false, true)}>
+                    safe, pictureRun.id, "jpeg", false, false, true)}>
                   Framed keepsake
                   <span style={MENU_HINT}>
                     Its name, date and exposure printed on the picture
@@ -1315,7 +1340,7 @@ export function TargetView() {
                 <Menu.Item leftSection={<IconPhotoDown size={16} />}
                   component="a"
                   href={api.stackArtifactUrl(
-                    safe, latestRun.id, "jpeg", false, false, false, true)}>
+                    safe, pictureRun.id, "jpeg", false, false, false, true)}>
                   With scale &amp; compass
                   <span style={MENU_HINT}>
                     How big it is and which way is North, printed on the picture
@@ -1325,7 +1350,7 @@ export function TargetView() {
                 <Menu.Label>Share</Menu.Label>
                 <SharePictureButton
                   asMenuItem
-                  url={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}
+                  url={api.stackArtifactUrl(safe, pictureRun.id, "jpeg")}
                   {...sharePictureText(
                     target.data?.name,
                     // The same date `LatestPictureCard`'s share text uses for the
@@ -1365,7 +1390,7 @@ export function TargetView() {
                   </>}
                   ariaLabel="Share the framed keepsake"
                   url={api.stackArtifactUrl(
-                    safe, latestRun.id, "jpeg", false, false, true, true, true)}
+                    safe, pictureRun.id, "jpeg", false, false, true, true, true)}
                   {...sharePictureText(target.data?.name, captureLabel)}
                   filename={keepsakeFilename(
                     sharePictureText(target.data?.name).filename)}
@@ -1384,8 +1409,8 @@ export function TargetView() {
                     picture has one. */}
                 <DownloadMenuItem
                   icon={<IconVideo size={16} />}
-                  url={api.stackZoomClipUrl(safe, latestRun.id)}
-                  filename={`${latestRun.output_basename || "stack"}_zoom.webp`}
+                  url={api.stackZoomClipUrl(safe, pictureRun.id)}
+                  filename={`${pictureRun.output_basename || "stack"}_zoom.webp`}
                   label="Zoom clip"
                   hint="A few seconds gliding into your target — for posting"
                   busyHint="Building your clip — a few seconds the first time"
@@ -1393,7 +1418,7 @@ export function TargetView() {
                   hintStyle={MENU_HINT}
                 />
                 <Menu.Divider />
-                <WallpaperMenuItems safe={safe} runId={latestRun.id}
+                <WallpaperMenuItems safe={safe} runId={pictureRun.id}
                   canNorthUp={wallpaperCanNorthUp} />
               </Menu.Dropdown>
             </Menu>
@@ -1413,7 +1438,8 @@ export function TargetView() {
           content rather than analysis. Nothing was removed; it moved. */}
       <Grid gutter="xs">
         <Grid.Col span={{ base: 12, md: 7 }}>
-          <LatestPictureCard safe={safe} name={target.data?.name} run={latestRun} />
+          <LatestPictureCard safe={safe} name={target.data?.name} run={pictureRun}
+            pinnedCover={showingOlderCover} />
           {/* Pre-stack reassurance: the sharpest sub, shown until a finished picture
               exists — then the real stack supersedes it. Deliberately *not* in a tab:
               it is the first-run guidance a brand-new target leans on. */}

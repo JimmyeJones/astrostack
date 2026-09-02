@@ -1021,16 +1021,21 @@ def test_histogram_flags_deconv_preview_understatement(client, solved_library):
     assert none["deconv_preview_understates"] is False
 
 
-def test_histogram_flags_star_reduce_preview_overstatement(client, solved_library):
-    """When the preview proxy is decimated enough that an enabled Star-reduction
-    op's star size falls below one proxy pixel, the erosion footprint clamps up
-    and the preview over-reduces the stars; the histogram reports
-    ``star_reduce_preview_overstates`` so the editor can honestly caption that the
-    export keeps the stars a little larger. A size that survives the proxy, or a
-    disabled op, must not raise the flag."""
+def test_histogram_flags_star_reduce_preview_divergence(client, solved_library):
+    """A Star-reduction op's live preview does not apply the export's strength on
+    any decimated proxy — its erosion footprint rounds to whole proxy pixels and
+    the stars are what decimation destroys first. The histogram reports
+    ``star_reduce_preview_overstates`` (key kept for compatibility) so the editor
+    can caption it. An undecimated view, or a disabled op, must not raise it.
+
+    The rule used to be "the star size fell below one proxy pixel", and the
+    caption told the user the export would keep their stars larger. Measured, the
+    preview goes both ways (0.63x-1.58x of the export) with no consistent sign at
+    the default size — see tests/test_edit_proxy_parity.py — so a big star on a
+    decimated proxy is flagged too, and no direction is claimed.
+    """
     safe = client.get("/api/targets").json()[0]["safe_name"]
-    # A wide master (1700 px) → proxy_scale 2, so size 1 collapses (1/2 = 0.5 < 1)
-    # while size 4 survives (4/2 = 2 >= 1).
+    # A wide master (1700 px) → proxy_scale 2.
     rid = _make_run(solved_library, safe, basename="wide_star", h=120, w=1700)
 
     def hist_for(recipe):
@@ -1038,15 +1043,16 @@ def test_histogram_flags_star_reduce_preview_overstatement(client, solved_librar
         return client.get(
             f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
 
-    weak = hist_for({"ops": [{"id": "stars.reduce",
-                              "params": {"amount": 0.5, "size": 1}}]})
-    assert weak["proxy_scale"] >= 2.0
-    assert weak["star_reduce_preview_overstates"] is True
+    small = hist_for({"ops": [{"id": "stars.reduce",
+                               "params": {"amount": 0.5, "size": 1}}]})
+    assert small["proxy_scale"] >= 2.0
+    assert small["star_reduce_preview_overstates"] is True
 
-    # A larger star size is representable on the same proxy → no overstatement.
-    strong = hist_for({"ops": [{"id": "stars.reduce",
-                                "params": {"amount": 0.5, "size": 4}}]})
-    assert strong["star_reduce_preview_overstates"] is False
+    # A larger star size is no more faithful on the same decimated proxy — it was
+    # simply wrong in the other direction, and used to go uncaptioned.
+    large = hist_for({"ops": [{"id": "stars.reduce",
+                               "params": {"amount": 0.5, "size": 4}}]})
+    assert large["star_reduce_preview_overstates"] is True
 
     # A disabled star-reduce op doesn't count.
     disabled = hist_for({"ops": [{"id": "stars.reduce", "enabled": False,
@@ -1057,76 +1063,14 @@ def test_histogram_flags_star_reduce_preview_overstatement(client, solved_librar
     none = hist_for({"ops": [{"id": "tone.stretch", "params": {}}]})
     assert none["star_reduce_preview_overstates"] is False
 
-
-def test_histogram_flags_sharpen_preview_understatement(client, solved_library):
-    """When the preview proxy is decimated enough that an enabled Sharpen op's
-    radius goes sub-pixel, the unsharp mask collapses towards the identity and the
-    preview shows a fraction of the export's local contrast; the histogram reports
-    ``sharpen_preview_understates`` so the editor can caption it. Regression for
-    audit finding A2 — sharpen was the one proxy-scaled op with no advisory."""
-    safe = client.get("/api/targets").json()[0]["safe_name"]
-    # A wide master (1700 px) → proxy_scale 2, so radius 1.0 goes sub-pixel
-    # (1.0 / 2 = 0.5 < the 0.6 knee) while radius 2.0 survives (2.0/2 = 1.0).
-    rid = _make_run(solved_library, safe, basename="wide_sharp", h=120, w=1700)
-
-    def hist_for(recipe):
-        q = _enc(recipe)
-        return client.get(
-            f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
-
-    weak = hist_for({"ops": [{"id": "detail.sharpen",
-                              "params": {"amount": 1.0, "radius": 1.0}}]})
-    assert weak["proxy_scale"] >= 2.0
-    assert weak["sharpen_preview_understates"] is True
-
-    # A broader radius is representable on the same proxy → no understatement.
-    strong = hist_for({"ops": [{"id": "detail.sharpen",
-                                "params": {"amount": 1.0, "radius": 2.0}}]})
-    assert strong["sharpen_preview_understates"] is False
-
-    # A disabled sharpen op doesn't count.
-    disabled = hist_for({"ops": [{"id": "detail.sharpen", "enabled": False,
-                                  "params": {"amount": 1.0, "radius": 1.0}}]})
-    assert disabled["sharpen_preview_understates"] is False
-
-    # A recipe with no sharpen op is never flagged.
-    none = hist_for({"ops": [{"id": "tone.stretch", "params": {}}]})
-    assert none["sharpen_preview_understates"] is False
-
-
-def test_histogram_flags_hot_pixels_skipped_on_a_decimated_preview(client, solved_library):
-    """Hot-pixel removal is skipped on any decimated preview proxy — a strided
-    proxy turns real stars into lone isolated pixels, the very signature the op
-    treats as a defect — so the histogram reports ``hot_pixels_preview_skipped``
-    and the editor says the export still applies it. A full-resolution proxy runs
-    the op as before and must not raise the flag."""
-    safe = client.get("/api/targets").json()[0]["safe_name"]
-    wide = _make_run(solved_library, safe, basename="wide_hot", h=120, w=1700)
-    small = _make_run(solved_library, safe)  # 80x100 → proxy_scale 1
-
-    def hist_for(rid, recipe):
-        q = _enc(recipe)
-        return client.get(
-            f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
-
-    hot = {"ops": [{"id": "detail.hot_pixels", "params": {"sigma": 5.0}}]}
-    skipped = hist_for(wide, hot)
-    assert skipped["proxy_scale"] >= 2.0
-    assert skipped["hot_pixels_preview_skipped"] is True
-
-    # A stack small enough that its proxy *is* the full image runs the op.
-    full_res = hist_for(small, hot)
-    assert full_res["proxy_scale"] == 1.0
-    assert full_res["hot_pixels_preview_skipped"] is False
-
-    # A disabled hot-pixel op doesn't count.
-    disabled = hist_for(wide, {"ops": [{"id": "detail.hot_pixels", "enabled": False,
-                                        "params": {"sigma": 5.0}}]})
-    assert disabled["hot_pixels_preview_skipped"] is False
-
-    # A recipe with no hot-pixel op is never flagged.
-    none = hist_for(wide, {"ops": [{"id": "tone.stretch", "params": {}}]})
-    assert none["hot_pixels_preview_skipped"] is False
+    # ...and neither is a run small enough that the "proxy" is the real pixels:
+    # there the preview *is* the export, so there is nothing to warn about.
+    small_rid = _make_run(solved_library, safe, basename="small_star", h=80, w=100)
+    q = _enc({"ops": [{"id": "stars.reduce", "params": {"amount": 0.5, "size": 1}}]})
+    undecimated = client.get(
+        f"/api/targets/{safe}/stack-runs/{small_rid}/editor/histogram?recipe={q}").json()
+    assert undecimated["proxy_scale"] == 1.0
+    assert undecimated["star_reduce_preview_overstates"] is False
 
 
 def test_trim_suggestion_mosaic(client, solved_library):

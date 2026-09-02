@@ -32,7 +32,7 @@ import { autoCauseSentence, autoSummarySentence, autoValueSentence, presetSugges
 import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
   from "../components/editor/dataDrivenDefaults";
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
-import { starReduceOverstatesCaption } from "../components/editor/starReducePreview";
+import { starReduceDiffersCaption } from "../components/editor/starReducePreview";
 import { sharpenUnderstatesCaption } from "../components/editor/sharpenPreview";
 import { hotPixelsSkippedCaption } from "../components/editor/hotPixelsPreview";
 import { canNeutraliseSkyCast, neutraliseBackgroundOps, skyCastCaption }
@@ -1683,11 +1683,11 @@ export function EditorView() {
                 heavily-decimated proxy, so on a large mosaic/drizzle the preview
                 *overstates* the effect (opposite of deconv). Caption it honestly
                 so the user doesn't under-set the amount. Advisory only. */}
-            {starReduceOverstatesCaption(hist.data) ? (
+            {starReduceDiffersCaption(hist.data) ? (
               <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
                 <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
-                <Text size="xs" c="dimmed">{starReduceOverstatesCaption(hist.data)}</Text>
+                <Text size="xs" c="dimmed">{starReduceDiffersCaption(hist.data)}</Text>
               </Group>
             ) : null}
             {/* Sharpen's radius is a full-res measure; once proxy_scale shrinks
