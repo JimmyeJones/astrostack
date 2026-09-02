@@ -73,10 +73,9 @@ function BestCard({ pic, rank, onView }: {
 
 export function BestPicturesView() {
   const best = useQuery({ queryKey: ["galleryBest"], queryFn: () => api.getGalleryBest() });
-  // The show also plays Moon/Sun stills, which are not on this wall — so whether
-  // the button leads anywhere needs the same two sources the show itself reads.
-  // Same query key as `ShowAndTellView`, so this shares one cached response
-  // rather than adding a request per page.
+  // The slideshow draws Moon/Sun stills as well as this wall, so whether it has
+  // anything to play is not a question this page's own data can answer. Same
+  // query key the show itself uses, so the two share one cached response.
   const gallery = useQuery({ queryKey: ["gallery"], queryFn: api.getGallery });
   const [viewing, setViewing] = useState<BestPicture | null>(null);
 
@@ -101,11 +100,17 @@ export function BestPicturesView() {
         ) : null}
         {/* The entry point to the slideshow. It lives here rather than as a
             sixteenth sidebar link: this is the page you're already on when you
-            want to show someone your pictures. Withheld only while the show
-            genuinely has nothing to play — which is *not* the same as this wall
-            being empty (see `hasAnythingToShow`), so a first-timer whose only
-            picture is a Moon still still gets the button. */}
-        {hasAnythingToShow(best.data?.items, gallery.data?.videos) ? (
+            want to show someone your pictures.
+
+            Shown only once something is known to be playable — on a fresh
+            install this page is otherwise a paragraph saying your pictures will
+            gather here later, under a primary-looking button that goes nowhere.
+            `hasAnythingToShow` asks the show's own builder rather than this
+            wall's length, because a first finished Moon still is a real show
+            with an empty wall. A failed gallery query is *unknown*, not empty,
+            so the button stays: /show has a graceful "nothing to show yet"
+            state, and hiding a working slideshow is the worse mistake. */}
+        {hasAnythingToShow(items, gallery.data?.videos) || gallery.isError ? (
           <Button
             component={Link} to="/show" size="xs" variant="light" ml="auto"
             leftSection={<IconPlayerPlay size={14} />}

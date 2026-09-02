@@ -1393,6 +1393,40 @@ describe("StackView", () => {
       .toBeInTheDocument();
   });
 
+  it("offers the bigger print as a button, not only a sentence, and one click "
+    + "sets both drizzle knobs at once", async () => {
+    // The scale the sentence names is already verified to reach that paper and
+    // to fit the memory budget — but both knobs it names live inside the
+    // collapsed advanced disclosure, so reading it left a beginner hunting.
+    mockPrintForm(printEstimate(false, 250));
+    const estimate = vi.spyOn(client.api, "stackEstimate");
+    renderStack();
+
+    const button = await screen.findByRole("button",
+      { name: "Use drizzle ×1.4 — prints at A3" });
+    estimate.mockClear();
+    fireEvent.click(button);
+
+    // Both keys land in one update: the estimate is keyed on each, so a
+    // two-step set would re-query through "drizzle on at the old scale".
+    await waitFor(() => expect(estimate).toHaveBeenCalled());
+    for (const call of estimate.mock.calls) {
+      expect(call[1]).toMatchObject({ drizzle: true, drizzle_scale: 1.4 });
+    }
+  });
+
+  it("withholds the bigger-print button wherever it withholds the sentence",
+    async () => {
+      // It is gated on the sentence, so it inherits every condition that
+      // sentence is held to and can never appear on its own.
+      mockPrintForm(printEstimate(false, 12));
+      renderStack();
+      await waitFor(() =>
+        expect(screen.getByText(/print sharply up to A4/)).toBeInTheDocument());
+      expect(screen.queryByRole("button", { name: /prints at A3/ }))
+        .not.toBeInTheDocument();
+    });
+
   it("withholds the bigger-print nudge on a stack with too few frames for drizzle", async () => {
     // The form already warns that drizzle needs 200+ dithered subs; recommending
     // it a line above that warning would be the panel arguing with itself.
