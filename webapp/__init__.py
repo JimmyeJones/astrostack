@@ -7,4 +7,3 @@ auto-runs the ingest→QC→solve pipeline, and a built React SPA.
 """
 
 __version__ = "0.327.2"
-__version__ = "0.327.2"

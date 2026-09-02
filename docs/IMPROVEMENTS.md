@@ -879,7 +879,7 @@ _(nothing else claimed — claim an item here with your branch name)_
   K scans over N days. **Also:** the "healing an already-degraded picture is deliberately left open" note in
   `AGENTS.md` §1 is **stale** — `_auto_stack_degraded_recheck` shipped.
 
-- **✅ SHIPPED (Builder, v0.326.8, branch `claude/sweet-babbage-35yfmt`) — ~~A9: editor exports drop the
+- **✅ SHIPPED (Builder, v0.327.2, branch `claude/sweet-babbage-35yfmt`) — ~~A9: editor exports drop the
   WCS.~~** Fixed in all three parts the entry named — carry it when nothing moved, *move it* for crop and
   resize, drop it only for rotate — and reproduced first through the real export job.
 
