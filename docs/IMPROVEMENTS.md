@@ -425,6 +425,62 @@ _(nothing else claimed — claim an item here with your branch name)_
 > (backlog bloat, collisions, QA-rotation aim) are filed as the R-items further below; `AGENTS.md` §1 and §11
 > have already been updated for the highest-value ones.**
 
+- **✅ SHIPPED (Builder, v0.326.1, branch `claude/zen-mccarthy-t59xya`) — ~~A1: Auto's contrast curve
+  brightens the sky on every Auto picture, and the regression test that should catch it passes on a fixture
+  that cannot exhibit the bug.~~** Fixed in all three parts the audit named, and reproduced first.
+
+  **The root cause, confirmed.** `autostretch` hard-clips the darkest **1.5 %** of pixels to *exactly* zero.
+  `_sky_mode` histogrammed the whole finite population over `[p0.5, median]`, and with p0.5 sitting at 0.0 the
+  zero spike — one value, so always the tallest bin there is — *was* the mode: the sky read **0.00078**
+  instead of the **0.185** it actually sat at. With the sky reported near black, the "the median *is* the sky,
+  so decline" gate never fired and the lift landed on the background itself.
+  `_sky_mode` now measures over the **strictly positive** pixels. Clipped shadows are not sky; an image with
+  no clipped shadows has no zeros to drop, so its measurement is unchanged pixel for pixel (pinned by a test
+  that recomputes the old histogram by hand on an unclipped fixture and gets the same number).
+
+  **The other branch had to move with it, and that is not scope creep — it is the same defect.** Fixing the
+  measurement makes the *decline* branch fire on exactly the sky-dominated stacks that used to be lifted, and
+  the old fixed fallback `[[0,0],[0.25,0.2],[0.75,0.82],[1,1]]` has its lower control point **below** a
+  typical stretched sky: it pulls a 0.19 background down to ~0.15, and it brightened a flat 0.6 to 0.634.
+  Shipping only half would have swapped a +12 % brightening for a −20 % darkening. So `fallback_tone_curve`
+  re-expresses the same shape relative to the measured sky — sky and both endpoints on the identity, one
+  shoulder above the sky lifted a touch — reducing to the old curve's shoulder *exactly* (`0.75 → 0.82`) at a
+  sky of zero. The point that moved the sky is simply gone, because moving the sky **is** the bug. Which
+  branch runs was never the user's choice, so both now obey one rule: **never move the background.**
+
+  **Measured, before → after** (synthetic OSC stack through the real `autostretch`, then `tone.curves`
+  `auto=True`): background **+12.49 % → +0.00 %**, and the object's core **+0.00 % → +3.08 %**. The old
+  behaviour was precisely backwards — it brightened the sky and added no contrast to the object.
+
+  **One site wider than filed, because the fix changed which branch is common.** The editor's ghost curve
+  (`/editor/curve-suggestion`) returned `null` whenever the data-driven lift declined, while the render went on
+  applying the fallback — so the widget drew a straight line contradicting the preview beside it, and "Bake to
+  edit" had nothing to bake. It now returns **the curve auto-contrast will actually apply**, on both branches;
+  `target_bg` stays `None` on the fallback (which has no midtone target to name), so the response shape is
+  unchanged and an older frontend reads it exactly as before.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no API shape change, no setting flipped.
+  Editing is non-destructive, so nothing already exported is touched and a **hand-edited curve is still never
+  overridden** (auto only engages on the untouched identity) — what changes is the picture Auto *renders* from
+  now on, which is the point of the fix.
+
+  **Tests (+10; 7 of them fail before).** `tests/test_edit_curve.py` (+8) builds its fixture from **real
+  `autostretch` output** rather than a synthesised approximation — the audit's central criticism — and leads
+  with a guard that the fixture really does clip shadows to zero, *so that the tests below cannot silently stop
+  testing anything the way the previous one did*. Then: the sky reads the background patch within 5 %; an
+  unclipped frame measures identically to before; end-to-end the sky moves < 1 % while the object gains; the
+  fallback pins the sky as a control point on the identity; the fallback keeps the old shoulder at a black sky;
+  and it degrades to the identity with no headroom. `tests/test_edit_tone_ops.py` (+1, 1 rewritten) pins the
+  corrected fallback contract on both a structured and a featureless frame. `tests/webapp/test_editor.py` (+1)
+  pins the ghost against the applied curve on the fallback branch.
+
+  **Worth carrying forward, and the audit is right about it:** the previous fix for this same defect
+  (v0.210.6) shipped with a test written by the agent that wrote the fix, and that test encoded the fix's
+  *model* of the bug — `clip(sky + normal)`, which has no zero spike — rather than the bug. A regression test
+  for anything in the display-space chain should be fed the **real** upstream transform's output.
+
+  *(Original audit entry follows.)*
+
 - **🔴🔴 A1 — AUTO'S CONTRAST CURVE BRIGHTENS THE SKY BY ~36% ON EVERY AUTO PICTURE, AND THE REGRESSION TEST
   THAT SHOULD CATCH IT PASSES ON A FIXTURE THAT CANNOT EXHIBIT THE BUG.** *(Severity: **wrong picture, on the
   on-by-default path, at every stack depth**. Confidence: **verified by reproduction**. This is the single
