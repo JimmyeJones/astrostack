@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { BestPicture, VideoStill } from "./api/client";
 import { formatStampDate } from "./format";
 import {
-  buildSlides, deepSkyFact, deepSkyMeta, nextIndex, runSlideKey, showFromHref,
-  startIndexFor, videoSlideKey,
+  buildSlides, deepSkyFact, deepSkyMeta, hasAnythingToShow, nextIndex, runSlideKey,
+  showFromHref, startIndexFor, videoSlideKey,
 } from "./showAndTell";
 
 function pic(over: Partial<BestPicture>): BestPicture {
@@ -133,6 +133,29 @@ describe("buildSlides", () => {
   it("handles a library with nothing in it, and an older backend's missing videos", () => {
     expect(buildSlides(undefined, undefined)).toEqual([]);
     expect(buildSlides([], undefined)).toEqual([]);
+  });
+});
+
+describe("hasAnythingToShow", () => {
+  it("says no for a library with nothing finished in it", () => {
+    expect(hasAnythingToShow([], [])).toBe(false);
+    expect(hasAnythingToShow(undefined, undefined)).toBe(false);
+    expect(hasAnythingToShow([], undefined)).toBe(false);
+  });
+
+  it("says YES when the only finished picture is a Moon still — the case the "
+    + "obvious 'are there best pictures?' gate gets wrong", () => {
+    expect(hasAnythingToShow([], [still({ capture_id: "c1" })])).toBe(true);
+  });
+
+  it("says yes for a ranked wall with no video captures at all", () => {
+    expect(hasAnythingToShow([pic({})], [])).toBe(true);
+  });
+
+  it("says no when everything it was handed is undrawable, matching what "
+    + "buildSlides would actually produce", () => {
+    expect(hasAnythingToShow([pic({ preview_url: "" })],
+                             [still({ preview_url: "" })])).toBe(false);
   });
 });
 

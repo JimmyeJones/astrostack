@@ -10413,6 +10413,42 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **⭐ QA LEAD (Builder 2026-09-02, generalised from the v0.323.0 empty-slideshow fix) — sweep every *primary
+  call to action* that renders on a surface which can legitimately be empty, and ask whether it leads anywhere
+  on a fresh install.** *(Pillar: friendliness — PRIORITY 3; size S per candidate, and the *identifying* test
+  costs nothing. Confidence: the shape is proven — one live instance found and fixed this run.)* The confirmed
+  instance: "My best pictures" rendered **Play slideshow** unconditionally beside its own "your pictures will
+  gather here later" empty state, while the count badge three lines up *was* gated. The generative test, which
+  needs no measurement: **is this control gated on the same data as the emptiness it sits beside — and is that
+  data actually the data the destination reads?** The second half is the interesting one and is where the trap
+  lives: the slideshow's content is `buildSlides(best, videos)`, a *superset* of the wall, so the obvious gate
+  (`items.length > 0`) would have hidden a working show from a beginner whose first picture was a Moon still.
+  So a candidate is only settled by naming the destination's own emptiness predicate, not the host page's.
+  **Where to look:** any page with an empty state and a button in its header — the Gallery, the Life list,
+  Compare (which needs *two* runs), Tonight, Calibration, Moon & Sun — plus the sidebar links, which are always
+  present by design and are *not* candidates (a nav link to an empty page is a page, not a dead action).
+  **Care:** a *failed* query is "unknown", not "empty" — the v0.323.0 fix keeps its button when the gallery
+  errors, because a graceful empty destination costs a dead click while a wrong hide costs the whole feature.
+  Any candidate fixed here should make the same call the same way.
+
+- **NEW IDEA (Builder 2026-09-02, spotted while building the v0.323.1 print button) — sweep the app for
+  sentences that *name* a number the form could just set, and give each one the button.** *(Pillar: autonomy —
+  PRIORITY 2; size XS per site once found. Confidence: two live sites already have the button, the rest are
+  unenumerated.)* The Stack form now has two: the `memoryFix` button ("Use drizzle ×1.4 instead — fits at ~2.1
+  GB") and, as of v0.323.1, the print one ("Use drizzle ×1.4 — prints at A3"). Both existed first as a
+  *sentence* naming a machine-actionable value, and in both cases the knob was inside the collapsed advanced
+  disclosure — so the sentence was advice a beginner could read and not act on. **The identifying test:** does
+  the copy contain a concrete value (a scale, a κ, a count, a mode name) that some control on a screen the user
+  can reach would accept? If yes, it is a candidate. **Named starting points, none checked yet:**
+  `drizzleTooFewHint` ("consider turning Drizzle off" — a boolean, so trivially actionable),
+  `drizzleClipHint` (names `drizzle_reject` outright), `backgroundModeNudge` (names a mode), and the
+  calibration-suggestion copy. **Care, and the reason this is a sweep rather than a rule:** a button is a second
+  element on a dense form, against the owner's standing "extremely busy" priority — so each site has to justify
+  itself the way the print one did, by being *conditional on something rare* rather than always-on. An advisory
+  that fires on most stacks should stay a sentence. And check the query-key trap the print button hit: a fix
+  that sets two form keys must land them in **one** state update, or the panel re-queries through an
+  intermediate state and flickers between two verdicts.
+
 - **✅ SHIPPED (Builder, v0.322.3, branch `claude/wizardly-feynman-yryq05`) — ~~Compare tells you one stack is
   "the cleaner stack" even when the two are *different objects*.~~** Built as the entry's **second** option, the
   one it called better: the figure stays, the *claim* goes. `noiseComparison` now returns `sameTarget`
@@ -10937,21 +10973,50 @@ to **Shipped**.)_
   former**, since a second derivation of the same statistic is exactly what the v0.317.1 process note warns
   about. **Care:** it is a tooltip, not a fourth column — the Target page is the "extremely busy" one.
 
-- **NEW IDEA (Builder 2026-08-30, the half deliberately left out of the Stack-form print line v0.318.0) — make
-  the print nudge a *button*, not only a sentence.** *(Pillar: autonomy + friendliness — PRIORITY 2–3; size XS;
-  frontend-only, no new data.)* The estimate panel now says *"Turning Drizzle on at ×1.3 would print it at A3
-  instead"*, and the scale it names is already **machine-actionable** — `print_plan.bigger_drizzle_scale` is a
-  number the form could just set, and it is already verified to fit the memory budget and to actually reach that
-  paper. But the two knobs it names (`drizzle`, `drizzle_scale`) live inside the collapsed **advanced**
-  disclosure, so a beginner who reads the sentence still has to go find them. The panel two lines up already has
-  exactly this pattern — the one-click `memoryFix` button — so the shape is settled and copyable.
-  **Why it was left out rather than done:** the filed spec said *keep it to one line*, against the owner's
-  standing "extremely busy" priority, and a button is a second element on a dense form. **What would settle it:**
-  it appears only when there is something to reach for *and* the stack has enough frames for drizzle to pay off,
-  which on a beginner's first stacks is rarely — so it is not an always-on control. **Care:** it must set *both*
-  keys (`drizzle: true` and the scale), and the existing `set()` helper takes one key at a time; check whether a
-  two-key set re-queries the estimate once or twice before wiring it, or the panel will flicker between two
-  verdicts.
+- **✅ SHIPPED (Builder, v0.323.1, branch `claude/zen-mccarthy-2rptmf`) — ~~make the print nudge a *button*,
+  not only a sentence.~~** Built as filed, with the entry's two cautions answered rather than assumed.
+  `frontend/src/stackPrintBigger.ts` — `printBiggerAction(plan, current)` — is the deliberate sibling of
+  `stackMemoryFix.ts`: a pure helper holding the label and the "is there anything to offer?" rule, so both are
+  unit-testable without rendering the form. The button reads **"Use drizzle ×1.4 — prints at A3"**, the same
+  action-plus-payoff shape the `memoryFix` button two lines up already uses.
+
+  **The `set()` caution was real, and the answer is to not use `set()`.** The estimate query is keyed on
+  `drizzle` **and** `drizzle_scale`, so two one-key `set()` calls would re-query twice and flicker the verdict
+  through an intermediate state (drizzle on at the *old* scale — a canvas neither the before nor the after).
+  The action therefore hands back a `values` object and the click does one `setValues` spread: one render, one
+  key change, one refetch. A route test asserts every `stackEstimate` call after the click carries **both**.
+
+  **The always-on caution is answered by construction, not by a second rule:** the button is gated on
+  `printBigger`, the sentence's own visibility, so it inherits every condition that sentence is held to (a
+  bigger paper is reachable, the scale fits the memory budget, and the stack has at least
+  `DRIZZLE_TOO_FEW_FRAMES` frames) and can never appear where the sentence doesn't. It also refuses to render a
+  no-op — a scale equal to what the form already has — which the engine's step-up should make impossible, but a
+  control that appears to do something and does nothing is exactly the defect this button was added to fix.
+
+  **Upgrade-safe (§9):** frontend-only, read-only, no engine/API/schema/config/default change; it sets two
+  existing form fields the user could already set by hand.
+
+  **Tests (+9):** 7 in `stackPrintBigger.test.ts` (the label and the paired values, a whole scale written
+  `×2` the way the engine's own sentence does, a raise from an already-on lower scale, the no-op refusal, three
+  half-filled plans, and four unusable scales), and 2 in `Stack.test.tsx` — the click sets both knobs in one
+  update, and the button is absent wherever the sentence is.
+
+  Original spec, for the record:
+
+    *(Pillar: autonomy + friendliness — PRIORITY 2–3; size XS;
+    frontend-only, no new data.)* The estimate panel now says *"Turning Drizzle on at ×1.3 would print it at A3
+    instead"*, and the scale it names is already **machine-actionable** — `print_plan.bigger_drizzle_scale` is a
+    number the form could just set, and it is already verified to fit the memory budget and to actually reach that
+    paper. But the two knobs it names (`drizzle`, `drizzle_scale`) live inside the collapsed **advanced**
+    disclosure, so a beginner who reads the sentence still has to go find them. The panel two lines up already has
+    exactly this pattern — the one-click `memoryFix` button — so the shape is settled and copyable.
+    **Why it was left out rather than done:** the filed spec said *keep it to one line*, against the owner's
+    standing "extremely busy" priority, and a button is a second element on a dense form. **What would settle it:**
+    it appears only when there is something to reach for *and* the stack has enough frames for drizzle to pay off,
+    which on a beginner's first stacks is rarely — so it is not an always-on control. **Care:** it must set *both*
+    keys (`drizzle: true` and the scale), and the existing `set()` helper takes one key at a time; check whether a
+    two-key set re-queries the estimate once or twice before wiring it, or the panel will flicker between two
+    verdicts.
 
 - ~~**NEW IDEA (Builder 2026-08-30, the obvious next tap on the per-run night count v0.317.0) — say "over 4
   nights" where a person is *looking at* the picture, not only where they copy a caption.**~~ —
@@ -14891,23 +14956,52 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
-- **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via `scripts/agent-dogfood.sh`) — the
-  editor's export panel asks the beginner a question whose own help text says the answer doesn't matter.**
-  *(Pillar: friendliness / editor — PRIORITY 1; size XS to decide, S to build whichever way it goes. Traced,
-  high confidence.)* "Export full resolution" carries a **TIFF: Linear / Auto-stretched** `Select`
-  (`routes/Editor.tsx:2306`) whose `HintLabel` reads *"It's already display-ready, so **both options produce
-  that same result**."* That is accurate — `_write_tiff`'s `already_display` branch short-circuits **before**
-  `mode` is read, and `pipeline.py:1432` passes `tiff_mode=…` and `already_display=True` together, so an editor
-  export's TIFF ignores the control entirely — which makes it a decision a beginner has to stop and make, on
-  the priority-1 surface, that changes nothing. **Two honest shapes, and the choice is the work:** (a) make it
-  *mean* something — `autostretch` is already what the mode does on a stacker run, so the branch could honour
-  `mode` for a *linear* re-render of the same edit, which is a real second artefact; or (b) keep one output and
-  fold the sentence into the panel's existing info text, so nothing is asked. **Care:** the owner's standing
-  constraint is that nothing may be *removed* — (b) is a removal of a control, so it needs the setting's
-  meaning to genuinely not exist, which is exactly what the tooltip already asserts; either way say so in the
-  commit rather than deleting it quietly. Grep `tiff_mode` first: `frontend/src/tiffDownload.ts` reads it off
-  `options_json` to choose the History download hint, so whichever way this goes, that copy has to still be
-  true.
+- **✅ SHIPPED (Builder, v0.322.9, branch `claude/zen-mccarthy-2rptmf`) — ~~the editor's export panel asks the
+  beginner a question whose own help text says the answer doesn't matter.~~** **Shape (b), and the reasoning
+  the entry asked for is here rather than only in the commit.** Shape (a) was considered first and is not
+  honest: there *is* no linear version of an edit. The recipe's result **is** the tone mapping — the ops that
+  produced it are not invertible — so a "linear re-render of the same edit" could only be the source stack's
+  own linear data with the edit thrown away, which is a file the run it was edited from already has. Making the
+  control mean something would have meant inventing a second artefact that misrepresents itself.
+
+  So the panel now **states what the export writes instead of asking about it**: the `Select` is gone and a
+  dimmed line under the button reads *"Saves the picture exactly as shown — a 16-bit TIFF and a FITS — as a new
+  image in this target's History. Your original stack keeps its own untouched files."* On the owner's
+  nothing-may-be-removed constraint: **no capability is removed, because the control never had one.**
+  `tiff_mode` is still sent (as `"linear"`, the same value the sibling `exportSavedEdit` has always hardcoded)
+  and still accepted by the endpoint, so the API shape and any older backend are untouched — the beginner just
+  no longer pays a decision for a value the writer discards.
+
+  The old hint also carried a **second** false sentence the entry hadn't caught: *"for the underlying
+  unstretched data, use the separate FITS output."* An editor export's FITS is written with the same
+  `already_display=True` and stamped `SSDISPLY`/`BUNIT = display` — it is display-space too. The replacement
+  line says the original stack keeps its own files, which is where that data actually lives.
+
+  `tiffDownload.ts` is unchanged and still true: an editor export sets `display_space: true`, which is the
+  branch it already reads. **Tests (+4):** a Python one on the bytes
+  (`tests/test_tiff_opens_dark.py` — an editor export's TIFF is `array_equal` under both modes, *and* a plain
+  stack's still differs, so this is a property of a display-space export rather than a dead parameter; if
+  anyone ever makes `mode` matter here, it fails and the copy must be rewritten with it), and three in
+  `frontend/src/api/exportRunTiffMode.test.ts` pinning that the field stays on the wire, defaults to `linear`,
+  agrees with `exportSavedEdit`, and still passes an explicit mode through.
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness / editor — PRIORITY 1; size XS to decide, S to build whichever way it goes. Traced,
+    high confidence.)* "Export full resolution" carries a **TIFF: Linear / Auto-stretched** `Select`
+    (`routes/Editor.tsx:2306`) whose `HintLabel` reads *"It's already display-ready, so **both options produce
+    that same result**."* That is accurate — `_write_tiff`'s `already_display` branch short-circuits **before**
+    `mode` is read, and `pipeline.py:1432` passes `tiff_mode=…` and `already_display=True` together, so an editor
+    export's TIFF ignores the control entirely — which makes it a decision a beginner has to stop and make, on
+    the priority-1 surface, that changes nothing. **Two honest shapes, and the choice is the work:** (a) make it
+    *mean* something — `autostretch` is already what the mode does on a stacker run, so the branch could honour
+    `mode` for a *linear* re-render of the same edit, which is a real second artefact; or (b) keep one output and
+    fold the sentence into the panel's existing info text, so nothing is asked. **Care:** the owner's standing
+    constraint is that nothing may be *removed* — (b) is a removal of a control, so it needs the setting's
+    meaning to genuinely not exist, which is exactly what the tooltip already asserts; either way say so in the
+    commit rather than deleting it quietly. Grep `tiff_mode` first: `frontend/src/tiffDownload.ts` reads it off
+    `options_json` to choose the History download hint, so whichever way this goes, that copy has to still be
+    true.
 - **Background-mesh box floor (`_scaled_box` `minimum=16`) is the one pixel-scale divergence with
   no honest advisory.** *(Traced, Builder editor-parity audit 2026-07-16; low confidence it's a
   visible defect — arguably a defensible tradeoff.)* `seestack/edit/ops/background.py::_scaled_box`
@@ -17085,24 +17179,67 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **DOGFOOD FINDING (Builder 2026-09-01, seen on a real running app via `scripts/agent-dogfood.sh`) — "My best
-  pictures" offers **Play slideshow** on a wall that is empty, and the obvious gate is the wrong one.**
-  *(Pillar: friendliness — PRIORITY 3; size XS; **read the trap before writing the one-line fix**.)* On a fresh
-  install the page reads *"Once you've finished stacking a couple of targets, your best pictures will gather
-  here automatically"* — the wall self-hides below `BEST_PICTURES_MIN` — and directly above that sentence sits
-  a primary-looking **Play slideshow** button. `routes/BestPictures.tsx:100` renders it unconditionally, while
-  the count badge three lines above it *is* gated on `items.length > 0`, so this is an oversight rather than a
-  decision. It is not a crash: `/show` has a graceful "Nothing to show yet" state. It is a beginner's first
-  visit to a page whose only call to action goes nowhere.
-  **⚠ The trap, and why this is filed rather than fixed in passing:** the slideshow is **not** built from the
-  best-pictures wall alone — `ShowAndTellView` calls `buildSlides(best.items, gallery.videos)`, so someone with
-  no ranked stacks but a finished **Moon or Sun still** has a perfectly good show. Gating the button on
-  `items.length > 0` would hide a working slideshow from exactly the beginner whose first picture was a lunar
-  video, which is a worse bug than the one being fixed. The honest gate is "would `buildSlides` produce
-  anything", which this page cannot answer today because it never runs the `gallery` query. So the shapes are:
-  add that query here (one extra request on a page that already makes one), or export a tiny shared
-  `hasAnythingToShow` the two pages agree on. Either way, pin it with a test for the Moon-still-only library —
-  that is the case a naive fix breaks.
+- **NEW IDEA (Builder 2026-09-02, spotted while tracing the editor export path for v0.322.9) — an edited export
+  records which run it came from and *nobody ever reads it*, so History gives a beginner two near-identical
+  rows and no way to tell which is the original.** *(Pillar: understand + trust — PRIORITY 3; size XS–S.
+  Traced, high confidence — the datum is verified present and verified unused.)* `webapp/pipeline.py:1450`
+  writes `"derived_from": run_id` into the export's `options_json`, and the FITS carries the same fact as
+  `EDITFROM`. **A grep for `derived_from` across `frontend/src` and `webapp/` returns exactly that one write
+  site** — nothing reads it, on any surface. Meanwhile the two rows an export produces on the History page look
+  alike: same target, adjacent timestamps, one of them `notes="edited"`. A beginner who exports an edit and
+  later wants "the original data" has to *know* that the linear FITS lives on a different row. **Shape:** one
+  line on the edited run's History card — *"Edited from `M_31_master`"* — linking to that run, read straight
+  off `options_json` (already on the run payload, so no new API field and no schema change). **Care, and why
+  this is XS–S rather than XS:** a re-export under the same basename **archives** the previous outputs and
+  `repoint_stack_runs` moves the old row's paths, so the source run *can* have been repointed or, if the user
+  deleted it, be gone entirely — the line must degrade to plain text (or nothing) when the id no longer
+  resolves, never a dead link. Also note `derived_from` is only written by the *export* path; an "Apply &
+  save" run records its own row and does not carry it, so the line must self-hide rather than claim an unknown
+  ancestor. **Beginner bar ✔** — one plain sentence, no knob, and it answers the exact question ("which of
+  these is my raw stack?") the v0.322.9 export-panel copy now points at.
+
+- **✅ SHIPPED (Builder, v0.323.0, branch `claude/zen-mccarthy-2rptmf`) — ~~"My best pictures" offers **Play
+  slideshow** on a wall that is empty, and the obvious gate is the wrong one.~~** **Both filed shapes, because
+  they were not alternatives:** the page now runs the `gallery` query (same `["gallery"]` key the show itself
+  uses, so the two share one cached response and a visit that goes on to press the button pays nothing), *and*
+  `showAndTell.ts` exports the shared `hasAnythingToShow(best, videos)` the two pages agree on. It asks
+  `buildSlides` rather than counting anything, so it inherits the builder's own skip of an entry with no
+  `preview_url` for free — a picture the show could not draw either.
+
+  **The Moon-still trap is pinned, twice:** a unit test that `hasAnythingToShow([], [moonStill])` is `true`,
+  and a `BestPictures.test.tsx` render of exactly that library asserting the button is still there. A naive
+  `items.length > 0` fails both.
+
+  **One judgement the entry didn't specify: a *failed* gallery query is "unknown", not "empty", so the button
+  stays.** The asymmetry is the whole point of the filed trap — `/show` has a graceful "nothing to show yet"
+  state, so erring towards offering it costs a dead click, while erring the other way hides a working
+  slideshow. Pinned by its own test. (Pending is different from failed and is left to resolve: `best` is
+  already awaited by the view's own loader, so a wall with pictures shows the button immediately and only a
+  library whose *only* content is video stills sees it arrive with the gallery.)
+
+  **Tests (+8):** 4 for `hasAnythingToShow` in `showAndTell.test.ts` (empty/undefined, the Moon-still-only
+  library, a wall with no videos, and everything-undrawable), and 4 in `BestPictures.test.tsx` (the empty
+  install has no button beside its empty-state sentence, the Moon-still-only library does have one pointing at
+  `/show`, an ordinary wall has one, and a rejected gallery query keeps it).
+
+  Original spec, for the record:
+
+    *(Pillar: friendliness — PRIORITY 3; size XS; **read the trap before writing the one-line fix**.)* On a fresh
+    install the page reads *"Once you've finished stacking a couple of targets, your best pictures will gather
+    here automatically"* — the wall self-hides below `BEST_PICTURES_MIN` — and directly above that sentence sits
+    a primary-looking **Play slideshow** button. `routes/BestPictures.tsx:100` renders it unconditionally, while
+    the count badge three lines above it *is* gated on `items.length > 0`, so this is an oversight rather than a
+    decision. It is not a crash: `/show` has a graceful "Nothing to show yet" state. It is a beginner's first
+    visit to a page whose only call to action goes nowhere.
+    **⚠ The trap, and why this is filed rather than fixed in passing:** the slideshow is **not** built from the
+    best-pictures wall alone — `ShowAndTellView` calls `buildSlides(best.items, gallery.videos)`, so someone with
+    no ranked stacks but a finished **Moon or Sun still** has a perfectly good show. Gating the button on
+    `items.length > 0` would hide a working slideshow from exactly the beginner whose first picture was a lunar
+    video, which is a worse bug than the one being fixed. The honest gate is "would `buildSlides` produce
+    anything", which this page cannot answer today because it never runs the `gallery` query. So the shapes are:
+    add that query here (one extra request on a page that already makes one), or export a tiny shared
+    `hasAnythingToShow` the two pages agree on. Either way, pin it with a test for the Moon-still-only library —
+    that is the case a naive fix breaks.
 
 - **DOGFOOD FINDING, LOW VALUE — recorded so it is not re-found, not because it should be fixed (Builder
   2026-09-01).** The **Library**'s target card truncates a long name (*"Sample: Orion Nebula (…"*) where the

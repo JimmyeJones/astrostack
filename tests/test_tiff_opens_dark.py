@@ -80,6 +80,45 @@ def test_an_editor_exports_tiff_opens_as_the_finished_picture(tmp_path):
     assert _median_level(paths["tiff"]) > 0.35
 
 
+def test_an_editor_exports_tiff_is_the_same_file_whichever_mode_is_asked_for(tmp_path):
+    """The editor's export panel used to offer a "TIFF: Linear / Auto-stretched"
+    choice; it now *states* what the export writes instead, because the choice
+    could not change it — `_write_tiff` returns in its `already_display` branch
+    before `mode` is read, and `webapp/pipeline.py` passes `already_display=True`
+    on every editor export.
+
+    Pinned here, on the bytes, rather than on the removed control: the copy in the
+    panel ("saves the picture exactly as shown") and in `tiffDownload.ts` ("the
+    finished picture, at full depth") are both claims about this file. If a future
+    change ever makes `mode` mean something for a display-space export, this fails
+    and that copy has to be rewritten in the same commit."""
+    disp = np.full((48, 48, 3), 0.45, dtype=np.float32)
+    disp[8:24, 8:24, :] = 0.9                              # something to differ over
+    cov = np.ones(disp.shape[:2], dtype=np.float32)
+    both = {
+        mode: write_stack_outputs(
+            project_dir=tmp_path / mode, rgb=disp, coverage=cov, wcs_text=None,
+            out_basename="edited", tiff_mode=mode, already_display=True,
+        )["tiff"]
+        for mode in ("linear", "autostretch")
+    }
+    assert np.array_equal(tifffile.imread(both["linear"]),
+                          tifffile.imread(both["autostretch"]))
+    # And the mode is not inert in general — the stacker's own control still works,
+    # so this is a property of a display-space export, not a dead parameter.
+    rgb = _sky_with_a_faint_object()
+    plain_cov = np.ones(rgb.shape[:2], dtype=np.float32)
+    plain = {
+        mode: write_stack_outputs(
+            project_dir=tmp_path / f"plain_{mode}", rgb=rgb, coverage=plain_cov,
+            wcs_text=None, out_basename="m", tiff_mode=mode,
+        )["tiff"]
+        for mode in ("linear", "autostretch")
+    }
+    assert not np.array_equal(tifffile.imread(plain["linear"]),
+                              tifffile.imread(plain["autostretch"]))
+
+
 def test_the_autostretch_mode_is_the_other_non_dark_case(tmp_path):
     """The stacker's other TIFF mode bakes the export stretch in, so it opens
     bright too — the second case `tiffOpensAsShown` treats as "as shown"."""
