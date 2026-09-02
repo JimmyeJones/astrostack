@@ -21,35 +21,45 @@ from seestack.edit.registry import (
 from seestack.edit.starmask import star_mask
 
 
-def star_reduce_overstates_on_proxy(size: float, proxy_scale: float) -> bool:
-    """True when the star-reduction live preview *overstates* the full-res export.
+def star_reduce_differs_on_proxy(size: float, proxy_scale: float) -> bool:
+    """True when the star-reduction live preview does not faithfully show the
+    strength the full-res export will apply.
 
     Star reduction erodes with a footprint of ``size`` full-resolution pixels,
     divided by ``proxy_scale`` for the decimated live-preview proxy (``_reduce`` /
     :mod:`seestack.edit.starmask`) so the preview shrinks stars by the same
     *physical* amount the export will. But morphology can't use a sub-pixel
-    footprint: once ``size / proxy_scale`` falls below 1 px the proxy footprint
-    clamps up to 1 proxy-pixel = ``proxy_scale`` full-res px — physically *larger*
-    than the export's ``size`` px — so the preview erodes a wider neighbourhood
-    and shows *more* star reduction than the full-res export applies. A user
-    tuning the amount on such a preview then under-sets it and the export comes
-    out with weaker star reduction than they saw. This only bites on a heavily
-    decimated proxy (a ≤1500 px view of a large drizzle/mosaic).
+    footprint — it rounds to whole pixels and clamps at one — and the stars
+    themselves are what decimation destroys first, so on a decimated proxy the
+    preview's reduction lands somewhere near, but not on, the export's.
 
-    Mirror of ``detail.deconv_understates_on_proxy`` in the opposite direction.
-    Advisory only — there is no clean pixel-level fix: the sub-pixel footprint is
-    fundamentally unrepresentable on the decimated grid, and simply blending the
-    darkening by the fractional radius over-corrects into *under*-reduction
-    (measured: at ``proxy_scale`` 3–4 the current preview over-reduces by ~1.06–
-    1.09×, but a fractional blend drops to ~0.5–0.73× — erosion is non-linear), so
-    we caption the limit honestly rather than fake a correction. The sibling
-    ``stars.boost_nebula`` shares the same ``star_mask`` footprint mechanism.
+    **This used to claim a direction, and the direction was wrong.** The rule was
+    "``size / proxy_scale < 1`` ⇒ the preview *over*-reduces", reasoned from where
+    the footprint clamps. Measured instead — preview ÷ export star flux removed,
+    three synthetic Seestar fields (600 stars, 1.27 px sigma) × proxy steps 2–5 ×
+    ``size`` 1–4 — the ratio spans **0.63 to 1.58** and only ``size`` 1 (0.20–0.50
+    proxy px) over-reduces in every fixture. At the *default* ``size`` 2 it ranged
+    0.81–1.06 with no consistent sign, and at ``size`` 3–4 the preview
+    consistently under-reduced by 5–37 % — the exact opposite of what the caption
+    told the user, on the values Auto and the presets actually use. No threshold
+    in ``size / proxy_scale`` separates the two directions (0.5 proxy px
+    over-reduces at ``size`` 1 and under-reduces at ``size`` 2), because the
+    footprint rounding and the star mask move together.
+
+    So the honest statement is the one every measurement supports: **on a
+    decimated proxy the number is not faithful in either direction** — every
+    decimated case measured at least 5 % off, most far more. The editor says that
+    and asks the user to judge the strength on the export, instead of pointing
+    them confidently the wrong way. On the export (``proxy_scale == 1``), and with
+    the op off (``size <= 0``), there is nothing to caption. Advisory only: there
+    is no clean pixel-level fix, since blending the darkening by the fractional
+    radius over-corrects into heavy under-reduction (~0.5–0.73×) — erosion is
+    non-linear. The sibling ``stars.boost_nebula`` shares the same ``star_mask``
+    footprint mechanism.
     """
     if not np.isfinite(size) or not np.isfinite(proxy_scale):
         return False
-    if proxy_scale <= 1.0 or size <= 0.0:
-        return False
-    return (size / proxy_scale) < 1.0
+    return proxy_scale > 1.0 and size > 0.0
 
 
 def _reduce(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
