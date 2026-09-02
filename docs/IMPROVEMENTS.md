@@ -17287,24 +17287,43 @@ problems. Dogfood it every big-picture run and fix root causes.
 > could have seen, and this is now the **tenth** such collision. Claim even the XS ones, in the run's first
 > commit, and push it immediately.
 
-- **NEW IDEA (Builder 2026-09-02, spotted while tracing the editor export path for v0.322.9) — an edited export
-  records which run it came from and *nobody ever reads it*, so History gives a beginner two near-identical
-  rows and no way to tell which is the original.** *(Pillar: understand + trust — PRIORITY 3; size XS–S.
-  Traced, high confidence — the datum is verified present and verified unused.)* `webapp/pipeline.py:1450`
-  writes `"derived_from": run_id` into the export's `options_json`, and the FITS carries the same fact as
-  `EDITFROM`. **A grep for `derived_from` across `frontend/src` and `webapp/` returns exactly that one write
-  site** — nothing reads it, on any surface. Meanwhile the two rows an export produces on the History page look
-  alike: same target, adjacent timestamps, one of them `notes="edited"`. A beginner who exports an edit and
-  later wants "the original data" has to *know* that the linear FITS lives on a different row. **Shape:** one
-  line on the edited run's History card — *"Edited from `M_31_master`"* — linking to that run, read straight
-  off `options_json` (already on the run payload, so no new API field and no schema change). **Care, and why
-  this is XS–S rather than XS:** a re-export under the same basename **archives** the previous outputs and
-  `repoint_stack_runs` moves the old row's paths, so the source run *can* have been repointed or, if the user
-  deleted it, be gone entirely — the line must degrade to plain text (or nothing) when the id no longer
-  resolves, never a dead link. Also note `derived_from` is only written by the *export* path; an "Apply &
-  save" run records its own row and does not carry it, so the line must self-hide rather than claim an unknown
-  ancestor. **Beginner bar ✔** — one plain sentence, no knob, and it answers the exact question ("which of
-  these is my raw stack?") the v0.322.9 export-panel copy now points at.
+- **✅ SHIPPED (Builder, v0.325.1, branch `claude/zen-mccarthy-gmo0to`) — ~~an edited export records which run
+  it came from and *nobody ever reads it*, so History gives a beginner two near-identical rows and no way to
+  tell which is the original.~~** Built as filed, frontend-only: `derived_from` is already inside the run
+  payload's `options` blob (`_parse_options` hands the whole stored JSON through), so no API, schema or
+  response-shape change was needed — a pure `derivedFromNote(run, runs)` in `routes/History.tsx` and one line
+  on the export's card.
+
+  **Both degraded shapes the entry warned about are handled, and pinned.** A deleted source run resolves to
+  nothing, so the line becomes plain text (*"Edited from a stack that's no longer here"*) with **no href** —
+  never a dead link; and an "Apply & save" run, which records its own row and carries no `derived_from`, says
+  nothing rather than claiming an ancestor. `options` is whatever JSON the run stored, so the helper refuses
+  anything that isn't a finite number (`"3"`, `NaN`, `{}`, `[3]`) and refuses a row that points at itself.
+
+  **The link is a scroll, not a navigation:** both rows sit in one grid on this page, so each card now carries
+  `id="stack-run-<id>"` and the line's click brings the source card into view (`scrollIntoView`), with the
+  bare-hash `href` kept for middle-click/copy but its default prevented so it doesn't push a history entry.
+
+  **Tests (+7):** 4 unit (`derivedFromNote` — the named source, the ordinary run, the deleted source, and the
+  junk/`derived_from`-is-this-row refusals) and 3 render in `History.test.tsx` (the line with its `#stack-run-3`
+  href and a click that scrolls the source card, a plain-stack target with no such line, and the
+  deleted-source line rendering without an href).
+
+    *(Original spec, for the record — pillar: understand + trust, PRIORITY 3; size XS–S.)* `webapp/pipeline.py:1450`
+    writes `"derived_from": run_id` into the export's `options_json`, and the FITS carries the same fact as
+    `EDITFROM`. **A grep for `derived_from` across `frontend/src` and `webapp/` returns exactly that one write
+    site** — nothing reads it, on any surface. Meanwhile the two rows an export produces on the History page look
+    alike: same target, adjacent timestamps, one of them `notes="edited"`. A beginner who exports an edit and
+    later wants "the original data" has to *know* that the linear FITS lives on a different row. **Shape:** one
+    line on the edited run's History card — *"Edited from `M_31_master`"* — linking to that run, read straight
+    off `options_json` (already on the run payload, so no new API field and no schema change). **Care, and why
+    this is XS–S rather than XS:** a re-export under the same basename **archives** the previous outputs and
+    `repoint_stack_runs` moves the old row's paths, so the source run *can* have been repointed or, if the user
+    deleted it, be gone entirely — the line must degrade to plain text (or nothing) when the id no longer
+    resolves, never a dead link. Also note `derived_from` is only written by the *export* path; an "Apply &
+    save" run records its own row and does not carry it, so the line must self-hide rather than claim an unknown
+    ancestor. **Beginner bar ✔** — one plain sentence, no knob, and it answers the exact question ("which of
+    these is my raw stack?") the v0.322.9 export-panel copy now points at.
 
 - **✅ SHIPPED (Builder, v0.323.0, branch `claude/zen-mccarthy-2rptmf`) — ~~"My best pictures" offers **Play
   slideshow** on a wall that is empty, and the obvious gate is the wrong one.~~** **Both filed shapes, because
