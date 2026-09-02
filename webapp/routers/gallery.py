@@ -899,14 +899,31 @@ def _unique_entry_name(stem: str, suffix: str, used: dict[str, int]) -> str:
     ``used`` is the caller's running tally, keyed case-insensitively so the
     archive stays unambiguous on a case-insensitive filesystem (a Mac or Windows
     unzip would otherwise silently overwrite one member with the other).
+
+    The **generated** ``-N`` name is reserved in ``used`` too, not just the base
+    name: without that, a later real stem that happens to equal an earlier
+    generated name (e.g. a ``pic-2`` target after two ``pic`` collisions, or a
+    third source that sanitises onto a suffixed same-day still) would be treated
+    as fresh and emitted unchanged, colliding with the earlier generated member —
+    and ``zipfile`` accepts the duplicate (a ``UserWarning``) while every unzip
+    tool silently overwrites, dropping a picture from a "download all" backup. So
+    we advance past any generated name that is itself already taken.
     """
     name = f"{stem}{suffix}"
     seen = used.get(name.lower())
-    if seen:
-        used[name.lower()] = seen + 1
-        return f"{stem}-{seen + 1}{suffix}"
-    used[name.lower()] = 1
-    return name
+    if not seen:
+        used[name.lower()] = 1
+        return name
+    # Name taken: find the next `-N` form that is itself free, then reserve it so
+    # a future real stem equal to it collides rather than duplicating.
+    n = seen + 1
+    candidate = f"{stem}-{n}{suffix}"
+    while candidate.lower() in used:
+        n += 1
+        candidate = f"{stem}-{n}{suffix}"
+    used[name.lower()] = n
+    used[candidate.lower()] = 1
+    return candidate
 
 
 def _video_still_pictures(
