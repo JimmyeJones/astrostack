@@ -240,3 +240,63 @@ def test_print_plan_withholds_the_nudge_when_over_budget(
     data = client.get(f"/api/targets/{safe}/stack-estimate").json()
     assert data["would_exceed"] is True
     assert data["print_plan"]["bigger_name"] is None
+
+
+def test_estimate_says_whether_rejection_can_reach_a_lone_outlier(
+    client, solved_library):
+    """The Stack form's warnings are only honest if they know what will actually
+    run. With the default options a 3-frame stack combines as a plain *mean* — no
+    rejection pass dispatches at all — so the estimate must say so rather than
+    leave the form to assume the ticked sigma-clip box means protection."""
+    from seestack.stack.stacker import kappa_min_frames
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    url = f"/api/targets/{safe}/stack-estimate"
+
+    reach = client.get(url).json()["rejection_reach"]
+    assert reach["method"] == "mean"
+    assert reach["n_frames"] == 3
+    assert reach["reaches"] is False
+    assert reach["lone_outlier_min_frames"] is None
+
+    # Auto outlier removal is the fix the form offers, and it really does help:
+    # at this frame count auto resolves to min/max, which drops an extreme from 3.
+    auto = client.get(url, params={"auto_reject": "true"}).json()["rejection_reach"]
+    assert auto["method"] == "min-max-reject"
+    assert auto["reaches"] is True
+    assert auto["lone_outlier_min_frames"] == 3
+
+    # A loosened κ drops the blindness threshold to min/max's own floor of 3, but
+    # the clip's ≥4-frame *dispatch* gate is independent of κ — so this stack is
+    # still a plain mean, which is the trap `_resolve_auto_reject` guards against.
+    assert kappa_min_frames(1.0) == 3
+    loose = client.get(url, params={"sigma_kappa": 1.0}).json()["rejection_reach"]
+    assert loose["method"] == "mean"
+    assert loose["reaches"] is False
+    # …and with auto on at that κ the engine still picks min/max, not a κ-σ that
+    # would never run.
+    loose_auto = client.get(url, params={"auto_reject": "true",
+                                         "sigma_kappa": 1.0}).json()["rejection_reach"]
+    assert loose_auto["method"] == "min-max-reject"
+    assert loose_auto["reaches"] is True
+
+
+def test_estimate_reach_follows_the_sigma_clip_toggle(client, solved_library):
+    """``sigma_clip`` is not a sizing knob, so it was never a query param — but
+    the reach answer is wrong without it (an untouched default would report a
+    clip the user turned off). It must round-trip, and must not move the peak:
+    the rejection-map plane it gates is only allocated when
+    ``record_rejection_map`` is set, which this dry run never sets."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    url = f"/api/targets/{safe}/stack-estimate"
+
+    # 3 frames: the clip can't dispatch either way, so both read "mean"…
+    on = client.get(url, params={"sigma_clip": "true"}).json()
+    off = client.get(url, params={"sigma_clip": "false"}).json()
+    assert on["rejection_reach"]["method"] == "mean"
+    assert off["rejection_reach"]["method"] == "mean"
+    # …and omitting it keeps the engine's own default (true), so an older
+    # frontend that never passes it sees exactly what it saw before.
+    assert client.get(url).json()["rejection_reach"] == on["rejection_reach"]
+    # Sizing is untouched by the new parameter.
+    assert off["peak_bytes"] == on["peak_bytes"] == client.get(url).json()["peak_bytes"]

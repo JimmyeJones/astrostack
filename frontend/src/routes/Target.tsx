@@ -1540,11 +1540,12 @@ export function TargetView() {
               if (ids.length) setLastReject({ ids, label: "auto-grade" });
             }}
           />
-          <Text size="xs" c="dimmed" mb={4}>
-            Keys: <b>j</b>/<b>k</b> move · <b>a</b> accept · <b>r</b> reject
-          </Text>
           {/* The column headings explain themselves on hover — which is to say,
-              not at all on a phone. One line until it's asked for. */}
+              not at all on a phone. One line until it's asked for. The keyboard
+              shortcuts that used to sit above this line now live inside it: a
+              permanent "Keys: j/k move · a accept · r reject" is an instruction
+              for hardware a phone doesn't have, and this disclosure already
+              carries the sibling sentence about tapping a heading to sort. */}
           <FrameColumnGuide />
           <Paper withBorder>
             <Table.ScrollContainer minWidth={620} mah="65vh">
