@@ -139,8 +139,8 @@ def recap_stats(facts: RecapFacts) -> list[tuple[str, str]]:
 def recap_caption(facts: RecapFacts) -> str:
     """The copy-paste blurb to post beside the poster, e.g.
 
-    ``"12 nights under the sky · 8h 20m of light · 4 targets · biggest project:
-    M 31 (4h 12m)"``
+    ``"12 nights under the sky · 8.3 h of light · 4 targets · biggest project:
+    M 31 (4.2 h)"``
 
     Built from whatever is known, in the order a person would say it, with each
     part omitted when its figure is missing — so it never shows a dangling

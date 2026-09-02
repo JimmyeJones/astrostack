@@ -1632,7 +1632,7 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
 
         from seestack.io.project import Project
         from seestack.printexport import print_advice, print_options, render_print
-        from seestack.stack.output import safe_basename
+        from seestack.stack.output import safe_basename, save_display_jpeg
 
         lib = Library.open_or_create(settings.resolved_library_root)
         try:
@@ -1679,8 +1679,8 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
                 # The DPI tag is the whole point: without it a lab sizes the print
                 # from the pixel count alone, which is how a 20-inch enlargement of
                 # a 6-inch picture happens.
-                img.save(jpeg, format="JPEG", quality=95, optimize=True,
-                         dpi=(option.dpi, option.dpi))
+                save_display_jpeg(img, jpeg, quality=95,
+                                  dpi=(option.dpi, option.dpi))
             finally:
                 proj.close()
             return {"safe": safe, "run_id": run_id,

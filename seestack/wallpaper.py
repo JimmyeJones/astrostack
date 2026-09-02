@@ -271,8 +271,10 @@ def render_wallpaper_jpeg(
             cropped = cropped.resize((max(1, round(cw * scale)),
                                       max(1, round(ch * scale))), Image.LANCZOS)
 
+        from seestack.stack.output import save_display_jpeg
+
         buf = BytesIO()
-        cropped.save(buf, format="JPEG", quality=quality, optimize=True)
+        save_display_jpeg(cropped, buf, quality=quality)
     return buf.getvalue()
 
 

@@ -2367,6 +2367,7 @@ async def before_after_jpeg(safe: str, run_id: int, request: Request,
         build_before_after,
         panel_labels,
     )
+    from seestack.stack.output import save_display_jpeg
 
     asked = int(width) if width else DEFAULT_WIDTH
 
@@ -2396,7 +2397,7 @@ async def before_after_jpeg(safe: str, run_id: int, request: Request,
         if image is None:  # pragma: no cover — both halves were just loaded
             raise HTTPException(status_code=404, detail="Nothing to compare")
         buf = io.BytesIO()
-        image.save(buf, format="JPEG", quality=92)
+        save_display_jpeg(image, buf, quality=92)
         return buf.getvalue()
 
     data = await run_in_threadpool(_compose)
