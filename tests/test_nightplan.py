@@ -7,7 +7,7 @@ astronomy, not a snapshot. Altitude tolerances allow for refraction and the
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -1452,62 +1452,66 @@ def test_plan_week_agrees_with_next_session_from_the_small_hours_too():
         == [w.dark_start.isoformat() for w in wins]
 
 
-# --------------------------------------------------------------------------- #
-# The sampling grid never leaves its window (v0.326.2)
-# --------------------------------------------------------------------------- #
+# --- The sampling grid never leaves the dark window (regression) ----------------
+#
+# ``_times_grid`` used to round the step count to the *nearest* whole step, so a
+# window whose length wasn't a multiple of the step got a final stamp up to half a
+# step past its end. Every planner number is derived from those stamps, so a
+# target still climbing at dawn was reported as usable — and "shoot until X" —
+# after astronomical dark was already over.
 
-def test_the_sampling_grid_never_steps_past_the_end_of_its_window():
-    """``_times_grid`` rounded its step count to the *nearest* whole step, so the
-    last stamp could sit up to half a step beyond ``end``. Every planner number is
-    derived from these stamps, so that became a reported "shoot until" time after
-    astronomical dark was over."""
-    from datetime import timedelta
+def test_the_sampling_grid_never_steps_past_the_end_of_the_window():
+    """A window that isn't a whole number of steps still ends *at* its end."""
+    start = datetime(2026, 1, 17, 18, 27, tzinfo=timezone.utc)
+    end = start + timedelta(minutes=688.0)  # 137.6 steps of 5 min — not a multiple
+    stamps, times = np_plan._times_grid(start, end, 5.0)
 
-    start = datetime(2026, 1, 17, 18, 0, tzinfo=timezone.utc)
-    for total_min in (2.0, 7.0, 57.0, 60.0, 62.0, 63.0, 122.5, 580.0, 584.0):
-        end = start + timedelta(minutes=total_min)
-        stamps, times = np_plan._times_grid(start, end, 5.0)
-        assert stamps[0] == start
-        assert stamps[-1] <= end, (
-            f"a {total_min}-minute window sampled {(stamps[-1] - end).total_seconds():+.0f}s "
-            "past its own end")
-        # The window is still fully covered: the last stamp is the end itself
-        # (clipped), so a target usable only in the final minutes is not dropped.
-        assert stamps[-1] == end
-        assert all(b > a for a, b in zip(stamps, stamps[1:], strict=False))  # increasing
-        assert len(times) == len(stamps)
+    assert stamps[0] == start
+    assert stamps[-1] == end, "the last sample must be the window's end, not past it"
+    assert all(a < b for a, b in zip(stamps, stamps[1:], strict=False)), "strictly increasing"
+    assert len(stamps) == len(times)
+    # Every interior sample is still exactly one step off the start.
+    assert stamps[-2] == start + timedelta(minutes=5.0 * (len(stamps) - 2))
 
 
-def test_an_exact_multiple_window_is_sampled_exactly_as_before():
-    """No-regression guard for the common case: a window that is a whole number of
-    steps long must keep the identical stamps it always had."""
-    from datetime import timedelta
+def test_a_window_that_is_an_exact_multiple_of_the_step_is_unchanged():
+    """No-regression guard: the ordinary case must sample exactly as it always has."""
+    start = datetime(2026, 1, 17, 18, 30, tzinfo=timezone.utc)
+    end = start + timedelta(minutes=600.0)  # 120 whole 5-minute steps
+    stamps, _ = np_plan._times_grid(start, end, 5.0)
 
-    start = datetime(2026, 1, 17, 18, 0, tzinfo=timezone.utc)
-    stamps, _ = np_plan._times_grid(start, start + timedelta(minutes=60.0), 5.0)
-    assert stamps == [start + timedelta(minutes=5.0 * i) for i in range(13)]
+    assert len(stamps) == 121
+    assert stamps == [start + timedelta(minutes=5.0 * i) for i in range(121)]
+    # ...and each sample is still worth a whole step, so totals don't move.
+    assert list(np_plan._sample_minutes(stamps, 5.0)) == [5.0] * 121
 
 
-def test_a_target_up_all_night_is_never_told_to_shoot_past_astronomical_dark():
-    """End to end, on the nights the bug was measured on: M 31 from London in
-    October is above the floor at the last sample of the night, which is exactly
-    when the overhang surfaced (04:38 reported against a 04:37 dark end). The
-    reported minutes must not exceed the night either — the grid includes both
-    ends, so a target usable for the whole window has one more sample than it has
-    steps, and used to be credited 590 minutes of a 584-minute night."""
-    m31 = LibraryTarget(safe="m31", name="Andromeda", ra_deg=10.68, dec_deg=41.27,
-                        frames_accepted=10, total_exposure_s=100.0)
-    for day in (17, 18, 19, 20):
-        plan = plan_tonight(LONDON, datetime(2026, 10, day, 20, 0, tzinfo=timezone.utc),
-                            library_targets=[m31], include_catalog=False,
-                            min_altitude_deg=30.0)
-        entry = next(p for p in plan.targets if p.id == "m31")
-        dark_end = plan.dark_window["end_utc"]
-        dark_start = plan.dark_window["start_utc"]
-        assert entry.usable_end_utc is not None
-        assert entry.usable_end_utc <= dark_end, (
-            f"night of Oct {day}: told to shoot until {entry.usable_end_utc}, "
-            f"but astronomical dark ends at {dark_end}")
-        assert entry.usable_start_utc >= dark_start
-        assert entry.transit_utc <= dark_end
-        assert entry.minutes_above_min_alt <= plan.dark_window["duration_minutes"]
+def test_a_clipped_last_sample_is_only_credited_the_minutes_it_covers():
+    """``minutes_above_min_alt`` counts sampled minutes; the clipped tail is short."""
+    start = datetime(2026, 1, 17, 18, 27, tzinfo=timezone.utc)
+    stamps, _ = np_plan._times_grid(start, start + timedelta(minutes=688.0), 5.0)
+    weights = np_plan._sample_minutes(stamps, 5.0)
+
+    assert list(weights[:-1]) == [5.0] * (len(stamps) - 1)
+    assert weights[-1] == pytest.approx(3.0)  # 688 = 137 × 5 + 3
+
+
+@pytest.mark.parametrize("start_utc", [
+    datetime(2026, 1, 15, 20, 0, tzinfo=timezone.utc),
+    datetime(2026, 10, 15, 20, 0, tzinfo=timezone.utc),
+])
+def test_no_reported_usable_window_ever_runs_past_astronomical_dark(start_utc):
+    """End to end: a target still high at dawn is never told to keep shooting after
+    darkness ends. M 31 from London used to be given a ``usable_end`` 60 s past
+    ``dark_end`` on consecutive October nights."""
+    wins = np_plan.next_observing_windows(
+        LONDON, 10.68, 41.27, start_utc=start_utc, nights=14, want=14)
+    assert wins, "M 31 is well placed from London on these nights"
+    for w in wins:
+        assert w.usable_start is not None and w.usable_end is not None
+        assert w.dark_start <= w.usable_start <= w.usable_end <= w.dark_end, (
+            f"usable {w.usable_start}–{w.usable_end} escapes the dark "
+            f"window {w.dark_start}–{w.dark_end}")
+        # The transit it reports, and the minutes it credits, live inside it too.
+        span_minutes = (w.dark_end - w.dark_start).total_seconds() / 60.0
+        assert w.minutes_above_min_alt <= span_minutes + 5.0

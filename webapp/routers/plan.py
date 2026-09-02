@@ -27,7 +27,9 @@ from seestack.nightplan import (
     WEEK_NIGHTS,
     HorizonProfile,
     LibraryTarget,
+    NextObservingWindow,
     Observer,
+    WeekPlan,
     best_months,
     load_catalog,
     moon_interference,
@@ -332,6 +334,69 @@ _WEEK_CACHE_TTL_S = 300.0
 _WEEK_CACHE_BUCKET_MINUTES = 5
 
 
+def _cached_week_plan(
+    request: Request,
+    settings: Any,
+    observer: Observer,
+    start: datetime,
+    *,
+    nights: int,
+    min_altitude: int,
+) -> WeekPlan:
+    """The week plan for these inputs, served from the registry cache when warm.
+
+    Shared by the ``/week`` payload and its ``.ics`` download so the calendar a
+    user adds is, by construction, the same plan the card in front of them shows
+    — the two cannot report different nights or times for the same request.
+
+    A week costs ``nights`` dark-window searches, and that search — not the
+    per-target work — is the whole bill: measured on a London site over 7 nights,
+    **0.96 s for one target and 1.07 s for eighty**, because :func:`plan_week`
+    runs one vectorised observability batch per night over the whole library.
+    (The shape it replaced — ``next_observing_windows`` per target — was **9.7 s
+    at ten targets**, since it re-searched every night's darkness once per
+    target.) Flat in the library size is the right cost, but a second of
+    ephemeris on every card render is still a second, so the answer is cached
+    behind the same registry-signature cache the Dashboard roll-ups use.
+
+    The signature carries every input, plus "now" bucketed to
+    :data:`_WEEK_CACHE_BUCKET_MINUTES` — the planner's own sampling step, so a
+    cached answer can never be staler than the resolution of the numbers it
+    reports. (Only the first night is time-dependent at all: it is the one
+    clipped to "now".) A changed location, altitude floor, horizon, night count
+    or library rebuilds rather than serves.
+    """
+    targets = _library_targets(request)
+    horizon = HorizonProfile.from_pairs(settings.horizon_profile)
+    bucket = start.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    bucket = bucket.replace(minute=(bucket.minute // _WEEK_CACHE_BUCKET_MINUTES)
+                            * _WEEK_CACHE_BUCKET_MINUTES)
+    sig = (
+        bucket.isoformat(), int(nights), min_altitude,
+        observer.lat_deg, observer.lon_deg, observer.elevation_m,
+        tuple(tuple(p) for p in (settings.horizon_profile or [])),
+        # Depth is in the signature because the ``WEEK_MAX_TARGETS`` cap selects
+        # *by* it (``plan_week`` keeps the most-shot targets): a night's capture
+        # can change which forty targets get planned without adding a target or
+        # moving one, and a signature blind to that would keep serving the old
+        # selection. Free on a library under the cap, where the set is everything
+        # either way.
+        tuple((t.safe, t.ra_deg, t.dec_deg, t.total_exposure_s, t.frames_accepted)
+              for t in targets),
+    )
+    return cached_for_registry(
+        request.app, "plan_week", sig,
+        lambda: plan_week(
+            observer, targets,
+            start_utc=start,
+            nights=int(nights),
+            min_altitude_deg=float(min_altitude),
+            horizon=horizon,
+        ),
+        ttl_s=_WEEK_CACHE_TTL_S,
+    )
+
+
 @router.get("/week")
 def get_plan_week(
     request: Request,
@@ -384,52 +449,8 @@ def get_plan_week(
             "n_targets_with_position": 0,
         }
 
-    targets = _library_targets(request)
-    horizon = HorizonProfile.from_pairs(settings.horizon_profile)
-    # A week costs ``nights`` dark-window searches, and that search — not the
-    # per-target work — is the whole bill: measured on a London site over 7
-    # nights, **0.96 s for one target and 1.07 s for eighty**, because
-    # ``plan_week`` runs one vectorised observability batch per night over the
-    # whole library. (The shape it replaced — ``next_observing_windows`` per
-    # target — was **9.7 s at ten targets**, since it re-searched every night's
-    # darkness once per target.) Flat in the library size is the right cost, but
-    # a second of ephemeris on every card render is still a second, so the answer
-    # is cached behind the same registry-signature cache the Dashboard roll-ups
-    # use.
-    #
-    # The signature carries every input, plus "now" bucketed to
-    # ``_WEEK_CACHE_BUCKET_MINUTES`` — the planner's own sampling step, so a
-    # cached answer can never be staler than the resolution of the numbers it
-    # reports. (Only the first night is time-dependent at all: it is the one
-    # clipped to "now".) A changed location, altitude floor, horizon, night count
-    # or library rebuilds rather than serves.
-    bucket = start.astimezone(timezone.utc).replace(second=0, microsecond=0)
-    bucket = bucket.replace(minute=(bucket.minute // _WEEK_CACHE_BUCKET_MINUTES)
-                            * _WEEK_CACHE_BUCKET_MINUTES)
-    sig = (
-        bucket.isoformat(), int(nights), min_altitude,
-        observer.lat_deg, observer.lon_deg, observer.elevation_m,
-        tuple(tuple(p) for p in (settings.horizon_profile or [])),
-        # Depth is in the signature because the ``WEEK_MAX_TARGETS`` cap selects
-        # *by* it (``plan_week`` keeps the most-shot targets): a night's capture
-        # can change which forty targets get planned without adding a target or
-        # moving one, and a signature blind to that would keep serving the old
-        # selection. Free on a library under the cap, where the set is everything
-        # either way.
-        tuple((t.safe, t.ra_deg, t.dec_deg, t.total_exposure_s, t.frames_accepted)
-              for t in targets),
-    )
-    plan = cached_for_registry(
-        request.app, "plan_week", sig,
-        lambda: plan_week(
-            observer, targets,
-            start_utc=start,
-            nights=int(nights),
-            min_altitude_deg=float(min_altitude),
-            horizon=horizon,
-        ),
-        ttl_s=_WEEK_CACHE_TTL_S,
-    )
+    plan = _cached_week_plan(request, settings, observer, start,
+                             nights=int(nights), min_altitude=min_altitude)
     payload = asdict(plan)
     payload["location_source"] = location_source
     return payload
@@ -616,6 +637,96 @@ def get_next_session_ics(
         content=body,
         media_type="text/calendar",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _week_night_as_window(night: Any) -> NextObservingWindow:
+    """Adapt one planned :class:`WeekNight` to the window shape the calendar
+    serialiser already understands.
+
+    The week plan carries ISO strings (it is a JSON payload) and keeps the Moon's
+    illumination on the *night* rather than on the pick; :func:`_window_ics_event`
+    wants datetimes and one flat window. Converting here rather than writing a
+    second event builder is what keeps the two calendars' wording — and, more
+    importantly, their ``UID`` scheme — identical, so adding the week after
+    adding a target's next session *updates* the shared night instead of
+    duplicating it. Only called for a night that has a ``best`` pick.
+    """
+    best = night.best
+    return NextObservingWindow(
+        dark_start=datetime.fromisoformat(night.dark_start_utc),
+        dark_end=datetime.fromisoformat(night.dark_end_utc),
+        usable_start=(datetime.fromisoformat(best.usable_start_utc)
+                      if best.usable_start_utc else None),
+        usable_end=(datetime.fromisoformat(best.usable_end_utc)
+                    if best.usable_end_utc else None),
+        max_altitude_deg=best.max_altitude_deg,
+        minutes_above_min_alt=best.minutes_above_min_alt,
+        moon_illumination=night.moon_illumination,
+        # A placed pick always has a usable window, so the planner always measured
+        # this; 0.0 only defensively, which reads as "Moon down" — the quieter
+        # error if it were ever missing.
+        moon_up_fraction=(best.moon_up_fraction if best.moon_up_fraction is not None
+                          else 0.0),
+        score=best.score,
+    )
+
+
+@router.get("/week/calendar.ics")
+def get_plan_week_ics(
+    request: Request,
+    when: str | None = Query(default=None,
+                             description="ISO-8601 UTC reference to plan from; defaults to now"),
+    min_alt: int | None = Query(default=None, ge=0, le=80),
+    nights: int = Query(default=WEEK_NIGHTS, ge=1, le=14,
+                        description="How many nights ahead to look"),
+) -> Response:
+    """Download the planned week as an ``.ics`` calendar file — one event per
+    night, titled with what to point at that night.
+
+    "Plan my week" tells you Saturday is your M 31 night; this is what stops you
+    having to remember it. Same machinery, same inputs and the same cached plan
+    as :func:`get_plan_week`, so the calendar can never disagree with the card
+    that offers it. Read-only and offline (``.ics`` is just text — no calendar
+    account, no network).
+
+    Only nights that actually have a pick become events: an entry reading
+    "nothing is well placed" is worse than no entry, and a blank calendar is
+    worse than an honest 404.
+    """
+    settings = deps.get_settings(request)
+
+    start = datetime.now(timezone.utc)
+    if when:
+        try:
+            start = datetime.fromisoformat(when)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+    observer, _ = _resolve_observer(request, settings)
+    if observer is None:
+        raise HTTPException(status_code=404,
+                            detail="No week to add (set a location first)")
+
+    min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
+    plan = _cached_week_plan(request, settings, observer, start,
+                             nights=int(nights), min_altitude=min_altitude)
+
+    location = f"{observer.lat_deg:.4f}, {observer.lon_deg:.4f}"
+    events = [
+        _window_ics_event(n.best.safe, n.best.name, _week_night_as_window(n), location)
+        for n in plan.nights if n.best is not None
+    ]
+    if not events:
+        raise HTTPException(status_code=404, detail="No nights to add this week")
+
+    body = to_ics(events)
+    return Response(
+        content=body,
+        media_type="text/calendar",
+        headers={"Content-Disposition": 'attachment; filename="astrostack-week.ics"'},
     )
 
 

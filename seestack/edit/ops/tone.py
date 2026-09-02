@@ -44,14 +44,12 @@ def _stretch(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
 # --- nonlinear tone shapers (operate in display space [0,1]) ----------------
 
-# The gentle fixed S-curve (the same one the built-in galaxy/nebula presets ship)
-# that USED to be the auto-contrast fallback. Auto now derives a *sky-anchored*
-# fallback instead (``curve.fallback_tone_curve``): this constant's lower knee
-# maps 0.25→0.20, i.e. it darkens everything below 0.25 — and the frames that
-# reach the fallback are precisely the sky-dominated ones whose sky the stretch
-# has just placed at 0.18–0.25, so it was dimming the background ~20 % on the
-# pictures it ran on most. Kept as the named preset shape (and as the shoulder the
-# sky-anchored curve reuses); no longer applied to a picture unmeasured.
+# The gentle fixed S-curve the auto-contrast fallback used to be, kept as the
+# reference shape ``seestack.edit.curve.fallback_tone_curve`` reproduces at a sky
+# of zero. It is no longer applied as-is: its lower point (0.25→0.20) sits *below*
+# the sky of a typical stretched stack, so using it darkened the background by
+# about a fifth whenever the data-driven suggestion declined. The fallback now
+# anchors the same shoulder on the image's own measured sky instead.
 _AUTO_CONTRAST_FALLBACK = [[0.0, 0.0], [0.25, 0.2], [0.75, 0.82], [1.0, 1.0]]
 
 
@@ -83,10 +81,8 @@ def _curves(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         from seestack.edit.curve import fallback_tone_curve, suggest_tone_curve
         src = as_rgb(rgb)
         suggested = suggest_tone_curve(src)
-        # Both branches leave the *sky* exactly where the stretch put it: the
-        # suggestion anchors it on the identity, and the fallback is measured from
-        # this image rather than being a fixed table that happens to darken the
-        # tones a sky-dominated stack actually occupies.
+        # Both branches obey the same rule — never move the sky — so which side of
+        # the suggestion's gate a stack falls on can't change its background.
         pts = suggested if suggested is not None else fallback_tone_curve(src)
     xs = np.array([p[0] for p in pts], dtype=np.float64)
     ys = np.array([p[1] for p in pts], dtype=np.float64)
