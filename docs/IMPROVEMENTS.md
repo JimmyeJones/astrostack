@@ -611,11 +611,48 @@ _(nothing else claimed — claim an item here with your branch name)_
 - **🟠 A2 — PREVIEW AND EXPORT DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
   PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that
   lies. Confidence: verified on synthetic data. Three instances, **one mechanism**.)*
-  - **`tone.color_calibrate`** (`seestack/post/color_cal.py`): `DAOStarFinder(fwhm=3.0)`, aperture 4 px and
+  - **✅ SHIPPED (Builder, v0.326.3, branch `claude/zen-mccarthy-xesefm`) — ~~`tone.color_calibrate`~~**, the
+    instance that changes the picture's **colour**. Reproduced first, then fixed in the direction the entry
+    named. `_detect_calibration_stars`'s `fwhm=3.0` was a hard-coded literal and the 4 px aperture came from
+    a dataclass default, so both described a *full-resolution* star on whatever grid they were handed. They
+    are now `ColorCalibrationOptions.detect_fwhm_px` / `.aperture_radius_px`, and
+    `seestack.edit.ops.tone._color_calibrate` scales both through `ctx.scaled_px` with floors
+    (`MIN_DETECT_FWHM_PX` 1.0, `MIN_APERTURE_RADIUS_PX` 1.5 — below those a star is one pixel and
+    DAOStarFinder's matched filter starts ranking noise). **`min_stars` is deliberately NOT scaled**: it is a
+    count of stars, and the star count does not change with resolution — what changed was detection
+    *efficiency*, and that is what the geometry fixes.
+    **Measured, before → after** on a synthetic OSC field (tinted sky, neutral stars, sensor cast) at proxy
+    step 3: preview detections **35 % of the export's → 100 %**; the preview's white balance
+    `background_neutral` (gains R 1.056, B 0.912) **→ `gray_star`, R 1.250, B 0.800, matching the export
+    exactly**. The old preview was **15.5 % out in red and 14.0 % in blue** — a picture whose colour the
+    export never applies. On the export (`proxy_scale == 1`) the scaling is the identity, pinned by a test
+    that the full-res path is bit-for-bit what the engine defaults produce.
+    **The entry's second half shipped too**, because scaling closes most of the gap but not all of it: a
+    proxy decimated far enough still holds too few resolvable stars for a solve the export will manage. The
+    op now records **`proxy_fallback`** (true only when the render is a *decimated* preview and its
+    star-based request really did land on a different path), the histogram endpoint carries it in the existing
+    `color_cal` object, and the editor captions it in plain language beside the deconv/star-reduce advisories
+    — *"the saved picture's colour will differ a little from this preview"*. `proxy_scale > 1` is the
+    condition, not `is_proxy`: a small stack's "proxy" is the undecimated pixels, where a fallback is the
+    export's own answer and there is nothing to warn about.
+    **Upgrade-safe (§9):** two additive dataclass fields with their existing values as defaults, one additive
+    key inside an existing JSON blob, no schema, no on-disk change, no default flipped. The stacker's own
+    post-stack colour calibration is full-res and untouched.
+    **Tests (+7, 4 of which fail before).** A new `tests/test_edit_proxy_parity.py` measures preview↔export on
+    a **mosaic-shaped canvas at a real proxy step**, which is the only place any of this is visible. Its
+    fixture is built to be *able* to exhibit the bug and says so: the sky carries its own tint (otherwise
+    gray-star and background-neutral give the same answer and the divergence is invisible), and the star
+    density is of a Seestar's order (a field dense enough to clear the 20-star floor at 35 % efficiency cannot
+    show the bug at all — the first fixture this run wrote was exactly that, and passed on the *broken* code).
+    Plus the flag's two directions, the full-res no-flag case, `tests/webapp/test_editor.py` on the endpoint
+    contract, and `colorCal.test.ts` on the caption.
+    **Still open below: the other two instances and the two smaller ones** — they are a different mechanism
+    each (a floor that bites, a fixed 3×3 window) and want a run each.
+  - ~~**`tone.color_calibrate`** (`seestack/post/color_cal.py`): `DAOStarFinder(fwhm=3.0)`, aperture 4 px and
     `min_stars=20` are **none of them scaled**. On a mosaic canvas at proxy step 3 the proxy finds too few
     stars and silently falls back to `background_neutral` **while the export runs gray-star** — measured
     preview/export gain ratio **R 1.157, B 1.287** on a 4000×2400 canvas. A 1920×1080 single field matches
-    within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.
+    within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.~~
   - **`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
     own 1.5 px radius becomes 0.375 px at step 4 — the preview shows **13–46 %** of the export's sharpening,
     and unlike deconv and star-reduce it shows **no advisory**.

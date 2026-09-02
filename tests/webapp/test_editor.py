@@ -905,11 +905,17 @@ def test_histogram_reports_color_cal_outcome(client, solved_library):
         f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={_enc(recipe)}").json()
     cc = hist["color_cal"]
     assert cc is not None
-    assert set(cc) == {"mode_used", "n_stars_used", "notes"}
+    assert set(cc) == {"mode_used", "n_stars_used", "notes", "proxy_fallback"}
     # gray_star on the preview solves from stars, falls back to background-neutral,
     # or gives up — every path stamps one of these modes (never gaia on the proxy).
     assert cc["mode_used"] in {"gray_star", "background_neutral", "none"}
     assert isinstance(cc["n_stars_used"], int)
+    # ``proxy_fallback`` is the honest "this preview's colour is not the export's"
+    # flag: always present (so the editor can trust it), and true only when the
+    # preview really did land on a different white balance from the export's.
+    assert isinstance(cc["proxy_fallback"], bool)
+    assert cc["proxy_fallback"] == (
+        hist["proxy_scale"] > 1.0 and cc["mode_used"] not in {"gray_star", "gaia"})
     # A recipe with no colour-cal op → no outcome to report.
     plain = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6, "black": 0.35}}]}
     hist2 = client.get(
