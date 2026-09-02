@@ -46,7 +46,6 @@ import { WallpaperMenuItems } from "../components/WallpaperMenu";
 import { SharePictureButton } from "../components/SharePictureButton";
 import { ScanToPhoneModal } from "../components/ScanToPhoneButton";
 import { keepsakeFilename, sharePictureText } from "../share";
-import { representativeRun } from "../representative";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
 import { UnsolvedHelp } from "../components/target/UnsolvedHelp";
@@ -450,22 +449,11 @@ export function TargetView() {
   });
   const runs = useQuery({ queryKey: ["runs", safe], queryFn: () => api.listStackRuns(safe) });
   const latestRun = runs.data?.[0];  // listStackRuns returns newest first
-  // …and *the* picture: the pinned cover when there is one, exactly as the
-  // Library tile, the Best wall and the montage already resolve it. This page
-  // used to take the newest run for its hero, so pinning a cover and then
-  // re-stacking showed a different picture here from the card you clicked to get
-  // here. Everything you do *to the picture* — view it, edit it, save or share
-  // it — follows this one; the notes below still describe the newest stack,
-  // which is what they say they do.
-  const hero = useMemo(
-    () => representativeRun(runs.data, target.data?.cover_stack_run_id),
-    [runs.data, target.data?.cover_stack_run_id]);
-  const heroRun = hero.run;
   // The night this picture's subs were **shot**, for the share sheet's caption —
   // never `timestamp_utc`, which is when the stack ran. `""` on a run with no
   // recorded window, which `sharePictureText` turns into no date clause at all.
   const captureLabel = formatCaptureNights(
-    heroRun?.capture_night_start, heroRun?.capture_night_end);
+    latestRun?.capture_night_start, latestRun?.capture_night_end);
   // The *measured* framing verdict for the newest picture, if there is one. The
   // note below renders it; this page reads the same answer (one shared query) so
   // the object card can drop its catalog "will it fit?" prediction while the
@@ -473,14 +461,13 @@ export function TargetView() {
   // than one frame" twice, near the top and again at the bottom.
   const measuredFraming = useStackFraming(
     safe, latestRun?.has_fits ? latestRun.id : null);
-  // Whether to offer the wallpaper "North up" toggle: only when the run behind
-  // the Save/share menu — the picture, not necessarily the newest stack — yields
-  // a real orientation correction (else the endpoint no-ops). One cheap read of
-  // the run's own suggestion, gated on it having a FITS to read.
+  // Whether to offer the wallpaper "North up" toggle: only when the latest run's
+  // WCS yields a real orientation correction (else the endpoint no-ops). One
+  // cheap read of the run's own suggestion, gated on it having a FITS to read.
   const renderSuggestion = useQuery({
-    queryKey: ["render-suggestion", safe, heroRun?.id],
-    queryFn: () => api.stackRenderSuggestion(safe, heroRun!.id),
-    enabled: !!heroRun?.has_fits,
+    queryKey: ["render-suggestion", safe, latestRun?.id],
+    queryFn: () => api.stackRenderSuggestion(safe, latestRun!.id),
+    enabled: !!latestRun?.has_fits,
     staleTime: Infinity,
   });
   const wallpaperCanNorthUp = typeof renderSuggestion.data?.north_up_deg === "number";
@@ -1265,9 +1252,9 @@ export function TargetView() {
             leftSection={<IconHistory size={16} />} aria-label="History">
             History
           </Button>
-          {heroRun ? (
-            <Button component={Link} to={`/targets/${safe}/edit/${heroRun.id}`} variant="default"
-              leftSection={<IconWand size={16} />} aria-label="Edit your picture">
+          {latestRun ? (
+            <Button component={Link} to={`/targets/${safe}/edit/${latestRun.id}`} variant="default"
+              leftSection={<IconWand size={16} />} aria-label="Edit latest stack">
               Edit
             </Button>
           ) : null}
@@ -1277,7 +1264,7 @@ export function TargetView() {
               picture" — on the page the owner named as the busiest in the app.
               Nothing was removed: every item below is the control that used to
               be a button, with its own wording and behaviour. */}
-          {heroRun?.has_preview ? (
+          {latestRun?.has_preview ? (
             <Menu shadow="md" width={260} position="bottom-end" withinPortal>
               <Menu.Target>
                 <Button variant="default" leftSection={<IconDownload size={16} />}
@@ -1292,18 +1279,18 @@ export function TargetView() {
                   loses its first item off the top — scroll instead of clip. */}
               <Menu.Dropdown mah={420} style={{ overflowY: "auto" }}>
                 <Menu.Label>Download</Menu.Label>
-                {heroRun.has_fits ? (
+                {latestRun.has_fits ? (
                   <Menu.Item leftSection={<IconPhotoDown size={16} />}
-                    component="a" href={api.stackFullResPngUrl(safe, heroRun.id)}>
-                    {fullResPngLabel(heroRun.canvas_w, heroRun.canvas_h)}
+                    component="a" href={api.stackFullResPngUrl(safe, latestRun.id)}>
+                    {fullResPngLabel(latestRun.canvas_w, latestRun.canvas_h)}
                   </Menu.Item>
                 ) : null}
                 <Menu.Item leftSection={<IconPhotoDown size={16} />}
-                  component="a" href={api.stackArtifactUrl(safe, heroRun.id, "preview")}>
-                  {heroRun.has_fits ? "Quick preview PNG (up to 1024px)" : "PNG (best quality)"}
+                  component="a" href={api.stackArtifactUrl(safe, latestRun.id, "preview")}>
+                  {latestRun.has_fits ? "Quick preview PNG (up to 1024px)" : "PNG (best quality)"}
                 </Menu.Item>
                 <Menu.Item leftSection={<IconPhotoDown size={16} />}
-                  component="a" href={api.stackArtifactUrl(safe, heroRun.id, "jpeg")}>
+                  component="a" href={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}>
                   JPEG (smaller — best for sharing)
                 </Menu.Item>
                 {/* The framed variant: the same picture matted on a dark card
@@ -1313,7 +1300,7 @@ export function TargetView() {
                 <Menu.Item leftSection={<IconPhotoDown size={16} />}
                   component="a"
                   href={api.stackArtifactUrl(
-                    safe, heroRun.id, "jpeg", false, false, true)}>
+                    safe, latestRun.id, "jpeg", false, false, true)}>
                   Framed keepsake
                   <span style={MENU_HINT}>
                     Its name, date and exposure printed on the picture
@@ -1328,7 +1315,7 @@ export function TargetView() {
                 <Menu.Item leftSection={<IconPhotoDown size={16} />}
                   component="a"
                   href={api.stackArtifactUrl(
-                    safe, heroRun.id, "jpeg", false, false, false, true)}>
+                    safe, latestRun.id, "jpeg", false, false, false, true)}>
                   With scale &amp; compass
                   <span style={MENU_HINT}>
                     How big it is and which way is North, printed on the picture
@@ -1338,7 +1325,7 @@ export function TargetView() {
                 <Menu.Label>Share</Menu.Label>
                 <SharePictureButton
                   asMenuItem
-                  url={api.stackArtifactUrl(safe, heroRun.id, "jpeg")}
+                  url={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}
                   {...sharePictureText(
                     target.data?.name,
                     // The same date `LatestPictureCard`'s share text uses for the
@@ -1378,7 +1365,7 @@ export function TargetView() {
                   </>}
                   ariaLabel="Share the framed keepsake"
                   url={api.stackArtifactUrl(
-                    safe, heroRun.id, "jpeg", false, false, true, true, true)}
+                    safe, latestRun.id, "jpeg", false, false, true, true, true)}
                   {...sharePictureText(target.data?.name, captureLabel)}
                   filename={keepsakeFilename(
                     sharePictureText(target.data?.name).filename)}
@@ -1397,8 +1384,8 @@ export function TargetView() {
                     picture has one. */}
                 <DownloadMenuItem
                   icon={<IconVideo size={16} />}
-                  url={api.stackZoomClipUrl(safe, heroRun.id)}
-                  filename={`${heroRun.output_basename || "stack"}_zoom.webp`}
+                  url={api.stackZoomClipUrl(safe, latestRun.id)}
+                  filename={`${latestRun.output_basename || "stack"}_zoom.webp`}
                   label="Zoom clip"
                   hint="A few seconds gliding into your target — for posting"
                   busyHint="Building your clip — a few seconds the first time"
@@ -1406,7 +1393,7 @@ export function TargetView() {
                   hintStyle={MENU_HINT}
                 />
                 <Menu.Divider />
-                <WallpaperMenuItems safe={safe} runId={heroRun.id}
+                <WallpaperMenuItems safe={safe} runId={latestRun.id}
                   canNorthUp={wallpaperCanNorthUp} />
               </Menu.Dropdown>
             </Menu>
@@ -1426,12 +1413,11 @@ export function TargetView() {
           content rather than analysis. Nothing was removed; it moved. */}
       <Grid gutter="xs">
         <Grid.Col span={{ base: 12, md: 7 }}>
-          <LatestPictureCard safe={safe} name={target.data?.name} run={heroRun}
-            pinned={hero.pinned} newerRunId={hero.newer?.id ?? null} />
+          <LatestPictureCard safe={safe} name={target.data?.name} run={latestRun} />
           {/* Pre-stack reassurance: the sharpest sub, shown until a finished picture
               exists — then the real stack supersedes it. Deliberately *not* in a tab:
               it is the first-run guidance a brand-new target leans on. */}
-          {!heroRun?.has_preview ? <FirstLookCard safe={safe} /> : null}
+          {!latestRun?.has_preview ? <FirstLookCard safe={safe} /> : null}
         </Grid.Col>
         {readiness ? (
           <Grid.Col span={{ base: 12, md: 5 }}>
@@ -1772,9 +1758,9 @@ export function TargetView() {
         ]}
       />
 
-      {heroRun?.has_preview ? (
+      {latestRun?.has_preview ? (
         <ScanToPhoneModal
-          url={api.stackArtifactUrl(safe, heroRun.id, "jpeg")}
+          url={api.stackArtifactUrl(safe, latestRun.id, "jpeg")}
           opened={toPhone}
           onClose={() => setToPhone(false)}
         />

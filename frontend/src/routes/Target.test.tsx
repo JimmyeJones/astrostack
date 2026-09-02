@@ -121,7 +121,7 @@ describe("TargetView action row on a phone", () => {
       ["Process this target", "button", "Process"],
       ["Re-run QC and Solve", "button", "Re-check"],
       ["History", "link", "History"],
-      ["Edit your picture", "link", "Edit"],
+      ["Edit latest stack", "link", "Edit"],
       ["Save or share the latest picture", "button", "Save"],
       ["Stack", "link", "Stack"],
     ];
@@ -398,7 +398,7 @@ describe("TargetView hero action row grouping", () => {
     await screen.findByRole("button", { name: "Process this target" });
     expect(screen.getByRole("button", { name: "Re-run QC and Solve" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Edit your picture" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit latest stack" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Stack" })).toBeInTheDocument();
     // …and the four picture controls are gone from the row itself — not as
     // buttons and not as links — leaving exactly one dropdown in their place.
@@ -2050,51 +2050,5 @@ describe("mosaicGradingNote", () => {
     expect(note).toContain("6-panel mosaic");
     expect(note).toContain("compared against itself");
     expect(note).toContain("isn't cloud");
-  });
-});
-
-describe("TargetView hero picture follows the pinned cover", () => {
-  // A5. The Library tile, the Best wall, the montage and the "grainier newest"
-  // note all resolve the pinned cover first (`gallery._representative_run`).
-  // This page took `runs[0]`, so pinning run 3 and re-stacking to run 4 left the
-  // page a beginner opens showing a *different picture* from the card they
-  // clicked to get there, while its own notes talked about "the cover".
-  it("shows, edits and offers the cover — not the newer stack", async () => {
-    vi.spyOn(client.api, "getTarget").mockResolvedValue(
-      mkTarget({ has_preview: true, cover_stack_run_id: 3 }));
-    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
-      mkRun({ id: 4, output_basename: "newer" }),
-      mkRun({ id: 3, output_basename: "cover" }),
-    ]);
-    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
-
-    renderTarget();
-
-    // The picture itself, and the card that names it as the cover.
-    const img = await screen.findByAltText("Latest stacked picture of M42");
-    expect(img.getAttribute("src")).toContain("/stack-runs/3/");
-    expect(screen.getByText("Your picture (cover)")).toBeInTheDocument();
-    expect(screen.getByTestId("cover-newer-note").textContent)
-      .toContain("You have a newer stack");
-
-    // …and the two routes into it: the row's Edit button and the card's link.
-    expect(screen.getByRole("link", { name: "Edit your picture" }))
-      .toHaveAttribute("href", "/targets/M_42/edit/3");
-    expect(screen.getByRole("link", { name: "Edit this picture" }))
-      .toHaveAttribute("href", "/targets/M_42/edit/3");
-  });
-
-  it("still shows the newest stack when nothing is pinned", async () => {
-    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget({ has_preview: true }));
-    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
-      mkRun({ id: 4 }), mkRun({ id: 3 })]);
-    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
-
-    renderTarget();
-
-    const img = await screen.findByAltText("Latest stacked picture of M42");
-    expect(img.getAttribute("src")).toContain("/stack-runs/4/");
-    expect(screen.getByText("Your picture")).toBeInTheDocument();
-    expect(screen.queryByTestId("cover-newer-note")).toBeNull();
   });
 });
