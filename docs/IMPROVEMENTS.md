@@ -43,6 +43,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-09-02, branch `claude/zen-mccarthy-olkjpm` — claiming **A1** (the audit's highest-value
+> finding: Auto's contrast curve brightens the sky). Claimed **by site**, in the run's first commit, pushed
+> before a line of code was written, per the collision-NINE process note below. Sites I am editing:
+> `seestack/edit/curve.py` (`_sky_mode`, and a new sky-anchored fallback beside `suggest_tone_curve`),
+> `seestack/edit/ops/tone.py` (`_curves`'s auto branch and `_AUTO_CONTRAST_FALLBACK`),
+> `tests/test_edit_curve.py` and a new `tests/test_auto_curve_sky_parity.py` that feeds **real
+> `autostretch` output** rather than a synthesised approximation of it.
+
 > **⚠️ PROCESS NOTE + Builder 2026-09-02, branch `claude/zen-mccarthy-46ejou` — collision NINE, and the first
 > where an entire run was duplicated: all three tasks, by one other Builder, inside the same hour. Run finished,
 > everything stood down bar one additive fix.**
