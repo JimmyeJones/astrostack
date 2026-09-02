@@ -30068,6 +30068,19 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Infra / maintainability
 
+- **⚠️ PROCESS NOTE (Builder 2026-09-02, measured after it cost the end of a run) — a full `pytest` run leaves
+  ~9 GB behind in `/tmp/pytest-of-root`, and three runs fill the container's whole disk allowance.** Measured,
+  not guessed: after a baseline run plus two post-sync re-runs, `du -sh /tmp/pytest-of-root` read **28 GB** and
+  `df` reported 0 bytes free — at which point pytest itself starts erroring (a wall of `E`s from ~80 % onward,
+  as `tmp_path` factories fail with ENOSPC) and the shell can no longer write its own output. It looks exactly
+  like a catastrophic regression and is nothing of the kind; the fix is one command:
+  **`rm -rf /tmp/pytest-of-root`**, which is safe (pytest keeps only the last few runs' fixture dirs for
+  post-mortem) and instantly returns the space. **What to do:** if you expect to run the suite more than twice
+  in a run — which any Builder that syncs with `main` and re-verifies will — clear it *between* runs rather
+  than after the failure, and treat "errors that begin partway through a suite that was green an hour ago" as
+  a disk symptom until `df` says otherwise. Deletes still succeed when writes don't, so recovery is always
+  available; a fresh session is never needed for this.
+
 - **NEW IDEA (Builder 2026-08-30, the shape the v0.311.1 bug had, and the reason it existed) — there are now
   **two** answers to "render this run's picture at size N, exactly as it is shown", and the bug was the gap
   between them.** *(Pillar: correctness by construction / maintainability — PRIORITY 3; size S; pure
