@@ -1121,14 +1121,13 @@ async def highlight_suggestion(safe: str, run_id: int, request: Request,
 
 
 class CurveSuggestionOut(BaseModel):
-    """Data-driven starting tone curve for the ``tone.curves`` op — a gentle,
-    strictly-monotone midtone-lift curve derived from the display-space histogram
-    of the image entering the op. ``points`` is an ordered list of ``[x, y]``
-    control points (endpoints pinned at 0/1), or ``None`` when there's no useful
-    suggestion (too few finite pixels, a degenerate range, or a typical tone
-    already at/above the target). ``target_bg`` is the display-space grey the
-    midtone lift aims for, so the UI can name the goal; ``None`` when there's no
-    suggestion."""
+    """The tone curve auto-contrast will actually apply to this image — a gentle,
+    strictly-monotone curve derived from the display-space histogram of the image
+    entering the op. ``points`` is an ordered list of ``[x, y]`` control points
+    (endpoints pinned at 0/1), or ``None`` when there is nothing to draw at all.
+    ``target_bg`` is the display-space grey the midtone lift aims for, so the UI
+    can name the goal; ``None`` when the data-driven lift declined and the
+    sky-anchored fallback is what will run."""
 
     points: list[list[float]] | None
     target_bg: float | None = None
@@ -1142,8 +1141,19 @@ async def curve_suggestion(safe: str, run_id: int, request: Request,
     """Suggest a gentle starting tone curve for the Curves op from the histogram of
     the display-space image *entering* that op (all ops before it applied), so a
     beginner gets a pleasant contrast start to nudge instead of a flat identity
-    line. Mirrors the other data-driven "From your image" buttons."""
-    from seestack.edit.curve import CURVE_TARGET_BG, suggest_tone_curve
+    line. Mirrors the other data-driven "From your image" buttons.
+
+    Returns the curve auto-contrast *will apply*, which is the point: the editor
+    draws this as the ghost behind the flat identity line, and bakes it on click.
+    So when the data-driven lift declines it returns the sky-anchored fallback the
+    op falls back to — the same call, in the same order, as
+    :func:`seestack.edit.ops.tone._curves` — rather than nothing, which would draw
+    a straight line contradicting the preview beside it."""
+    from seestack.edit.curve import (
+        CURVE_TARGET_BG,
+        fallback_tone_curve,
+        suggest_tone_curve,
+    )
 
     project_dir, run = _run_info(request, safe, run_id)
     rec = _decode_recipe_query(request, safe, run_id, recipe)
@@ -1157,9 +1167,16 @@ async def curve_suggestion(safe: str, run_id: int, request: Request,
                           already_display=_run_display_space(run))
         out = apply_recipe(rgb, sub, ctx, for_preview=True)
         pts = suggest_tone_curve(out)
-        if pts is None:
+        if pts is not None:
+            return CurveSuggestionOut(points=pts, target_bg=CURVE_TARGET_BG)
+        # The fallback has no midtone target to name — it pins the sky and lifts a
+        # shoulder above it — so ``target_bg`` stays None and the UI says nothing
+        # about a target grey. An identity fallback means there is genuinely
+        # nothing to draw.
+        fallback = fallback_tone_curve(out)
+        if len(fallback) <= 2:
             return CurveSuggestionOut(points=None)
-        return CurveSuggestionOut(points=pts, target_bg=CURVE_TARGET_BG)
+        return CurveSuggestionOut(points=fallback)
 
     return await run_in_threadpool(work)
 

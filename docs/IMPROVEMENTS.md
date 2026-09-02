@@ -425,6 +425,62 @@ _(nothing else claimed — claim an item here with your branch name)_
 > (backlog bloat, collisions, QA-rotation aim) are filed as the R-items further below; `AGENTS.md` §1 and §11
 > have already been updated for the highest-value ones.**
 
+- **✅ SHIPPED (Builder, v0.326.1, branch `claude/zen-mccarthy-t59xya`) — ~~A1: Auto's contrast curve
+  brightens the sky on every Auto picture, and the regression test that should catch it passes on a fixture
+  that cannot exhibit the bug.~~** Fixed in all three parts the audit named, and reproduced first.
+
+  **The root cause, confirmed.** `autostretch` hard-clips the darkest **1.5 %** of pixels to *exactly* zero.
+  `_sky_mode` histogrammed the whole finite population over `[p0.5, median]`, and with p0.5 sitting at 0.0 the
+  zero spike — one value, so always the tallest bin there is — *was* the mode: the sky read **0.00078**
+  instead of the **0.185** it actually sat at. With the sky reported near black, the "the median *is* the sky,
+  so decline" gate never fired and the lift landed on the background itself.
+  `_sky_mode` now measures over the **strictly positive** pixels. Clipped shadows are not sky; an image with
+  no clipped shadows has no zeros to drop, so its measurement is unchanged pixel for pixel (pinned by a test
+  that recomputes the old histogram by hand on an unclipped fixture and gets the same number).
+
+  **The other branch had to move with it, and that is not scope creep — it is the same defect.** Fixing the
+  measurement makes the *decline* branch fire on exactly the sky-dominated stacks that used to be lifted, and
+  the old fixed fallback `[[0,0],[0.25,0.2],[0.75,0.82],[1,1]]` has its lower control point **below** a
+  typical stretched sky: it pulls a 0.19 background down to ~0.15, and it brightened a flat 0.6 to 0.634.
+  Shipping only half would have swapped a +12 % brightening for a −20 % darkening. So `fallback_tone_curve`
+  re-expresses the same shape relative to the measured sky — sky and both endpoints on the identity, one
+  shoulder above the sky lifted a touch — reducing to the old curve's shoulder *exactly* (`0.75 → 0.82`) at a
+  sky of zero. The point that moved the sky is simply gone, because moving the sky **is** the bug. Which
+  branch runs was never the user's choice, so both now obey one rule: **never move the background.**
+
+  **Measured, before → after** (synthetic OSC stack through the real `autostretch`, then `tone.curves`
+  `auto=True`): background **+12.49 % → +0.00 %**, and the object's core **+0.00 % → +3.08 %**. The old
+  behaviour was precisely backwards — it brightened the sky and added no contrast to the object.
+
+  **One site wider than filed, because the fix changed which branch is common.** The editor's ghost curve
+  (`/editor/curve-suggestion`) returned `null` whenever the data-driven lift declined, while the render went on
+  applying the fallback — so the widget drew a straight line contradicting the preview beside it, and "Bake to
+  edit" had nothing to bake. It now returns **the curve auto-contrast will actually apply**, on both branches;
+  `target_bg` stays `None` on the fallback (which has no midtone target to name), so the response shape is
+  unchanged and an older frontend reads it exactly as before.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no API shape change, no setting flipped.
+  Editing is non-destructive, so nothing already exported is touched and a **hand-edited curve is still never
+  overridden** (auto only engages on the untouched identity) — what changes is the picture Auto *renders* from
+  now on, which is the point of the fix.
+
+  **Tests (+10; 7 of them fail before).** `tests/test_edit_curve.py` (+8) builds its fixture from **real
+  `autostretch` output** rather than a synthesised approximation — the audit's central criticism — and leads
+  with a guard that the fixture really does clip shadows to zero, *so that the tests below cannot silently stop
+  testing anything the way the previous one did*. Then: the sky reads the background patch within 5 %; an
+  unclipped frame measures identically to before; end-to-end the sky moves < 1 % while the object gains; the
+  fallback pins the sky as a control point on the identity; the fallback keeps the old shoulder at a black sky;
+  and it degrades to the identity with no headroom. `tests/test_edit_tone_ops.py` (+1, 1 rewritten) pins the
+  corrected fallback contract on both a structured and a featureless frame. `tests/webapp/test_editor.py` (+1)
+  pins the ghost against the applied curve on the fallback branch.
+
+  **Worth carrying forward, and the audit is right about it:** the previous fix for this same defect
+  (v0.210.6) shipped with a test written by the agent that wrote the fix, and that test encoded the fix's
+  *model* of the bug — `clip(sky + normal)`, which has no zero spike — rather than the bug. A regression test
+  for anything in the display-space chain should be fed the **real** upstream transform's output.
+
+  *(Original audit entry follows.)*
+
 - **🔴🔴 A1 — AUTO'S CONTRAST CURVE BRIGHTENS THE SKY BY ~36% ON EVERY AUTO PICTURE, AND THE REGRESSION TEST
   THAT SHOULD CATCH IT PASSES ON A FIXTURE THAT CANNOT EXHIBIT THE BUG.** *(Severity: **wrong picture, on the
   on-by-default path, at every stack depth**. Confidence: **verified by reproduction**. This is the single
@@ -641,9 +697,33 @@ _(nothing else claimed — claim an item here with your branch name)_
   run while the Builder prompt says 2–4. Also **§7 spends 25 lines on Qt/libEGL** for three GUI tests of a
   desktop app the owner never runs — move it to a footnote and make the Qt-skip command the default.
 
-- **🟢 LOW / HONESTY (Builder 2026-09-02, tripped over while testing `plan_week` — reproduced and measured) —
-  the planner can tell you to shoot up to two minutes *after* astronomical dark ends, and can credit a window
-  with darkness that doesn't exist.** *(Severity: low — it is at most ~2.5 min, but it is a plainly false
+- **✅ SHIPPED (Builder, v0.325.3, branch `claude/zen-mccarthy-t59xya`) — ~~the planner can tell you to shoot
+  up to two minutes *after* astronomical dark ends, and can credit a window with darkness that doesn't
+  exist.~~** Fixed in the direction the entry called the honest one: `_times_grid` now rounds the step count
+  **up** and **clips the last stamp to `window.end`**, so the grid keeps its final sample (a target usable only
+  in the closing minutes is still seen) while never sampling past the end of darkness.
+
+  **The second half the entry asked for, and the constraint that shaped it.** `minutes_above_min_alt` was a
+  flat `count × step`, which would now credit a clipped tail with a whole step it doesn't cover. A new
+  `_sample_minutes` gives each sample the minutes it actually stands for — a full step for every sample except
+  the last, which gets the remainder. On a window that *is* an exact multiple of the step the remainder **is**
+  a full step, so the weights are uniform and every existing number is bit-for-bit unchanged; that is what lets
+  the fix touch a shared hot function (`plan_tonight`, `rank_targets_now`, `next_observing_windows`,
+  `plan_week` and `moon_window` all sample through it) without moving the ordinary case. The two 24-hour
+  callers (`_dark_window_after_noon` at a 4-minute step, the solar-noon search at 15) are exact multiples by
+  construction and are untouched.
+
+  **Measured, before → after.** The worst overhang over a 14-night January scan from London was **120 s** past
+  `dark_end` (night of 2026-01-17: darkness ends 05:55:31, last stamp 05:57:31) → **0 s**. End to end, M 31
+  from a London site on 2026-10-18/-19 was reporting `usable_end` **60 s after** `dark_end`; it no longer can.
+
+  **Upgrade-safe (§9):** one pure engine function; no config, schema, on-disk, API-shape or default change.
+  **Tests (+4 in `tests/test_nightplan.py`, the end-to-end one fails before):** the grid never steps past the
+  end and stays strictly increasing; an exact-multiple window samples *identically* to before (the
+  no-regression half); a clipped tail is credited only the 3 minutes it covers; and, parametrised over a
+  January and an October scan, no reported `usable_start`/`usable_end` ever escapes its own dark window.
+
+  *(Original entry follows.)* *(Severity: low — it is at most ~2.5 min, but it is a plainly false
   statement on a "shoot between X and Y" line, and it now appears on three surfaces: `/tonight`,
   `/next-session/{safe}` and the new `/plan/week`. §1 priority 3. Confidence: reproduced.)*
 
@@ -10770,6 +10850,17 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-09-02, a gap the v0.326.1 fix opened rather than closed) — the editor's ghost curve
+  now has two possible shapes and only explains one of them.** *(Pillar: friendliness — PRIORITY 3; size XS.)*
+  `/editor/curve-suggestion` returns `target_bg` on the data-driven branch, and the UI uses it to name the goal
+  ("aims your typical tone toward a pleasant grey"). On the **sky-anchored fallback** — which is now the common
+  branch on a sky-dominated stack, i.e. most Seestar stacks — `target_bg` is `None` by design (there is no
+  midtone target; it pins the background and lifts a shoulder above it), so the ghost appears with **no
+  explanation at all** beside it. One plain-language line for that branch would close it: *"keeps your
+  background exactly where the stretch put it, and adds a little contrast above it."* **Grep first:** the copy
+  lives with the Curves widget's auto-contrast ghost in `Editor.tsx`/`CurvesWidget.tsx`; this is a sentence,
+  not a control, and it must not become another always-on banner.
+
 - **NEW IDEA (Builder 2026-09-02, the half the v0.323.1 rejection-reach fix could not reach) — the same blind
   κ-σ runs on the *walk-away* path, where there is no form to warn on.** *(Pillar: autonomy + image quality —
   PRIORITY 2/4; size S for the advisory, **do NOT blind-flip the default**; confidence: traced, mechanism the
@@ -20044,6 +20135,25 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **⭐ NEW IDEA (Builder 2026-09-02, generalised from the A1 fix this run — the strongest follow-on it
+  exposed) — sweep every display-space measurement for the *same* clipped-shadow blindness A1 turned out to
+  be.** *(Pillar: image quality + trust — PRIORITY 4; size S per site, and the identifying test is mechanical.
+  Confidence: the mechanism is proven — one live instance found, reproduced and fixed this run.)*
+  A1 was not "the sky-mode histogram has a bug". It was: **`tone.stretch` hard-clips ~1.5 % of every stretched
+  image to *exactly* zero, and any statistic taken over the whole finite population sees that spike as real
+  data.** One value, 1.5 % of the pixels — it beats a noise-spread sky in a histogram every time, and it drags
+  any low percentile to 0.0. `_sky_mode` was one consumer of that population; it is unlikely to be the only
+  one. **The generative test, which needs no measurement:** *does this statistic run on display-space pixels,
+  and would a spike at exactly 0 change its answer?* If yes, it is a candidate.
+  **Where to look** (each is a read, not yet a finding — check before filing): the Levels black-point
+  suggestion and the histogram's "shadows clipping" readout (both explicitly reason about the low end);
+  `analyze_proxy`'s `sky`, which Auto's own denoise/sharpen decisions are sized from; the gradient
+  background-model fits, which weight by pixel value; and anything measuring a percentile below p5 on a
+  post-stretch array. **Care:** the fix is *not* "drop zeros everywhere" — a readout whose whole job is to
+  report clipping must keep counting them. The rule is that a statistic estimating a *property of the sky*
+  excludes them, and one estimating *how much was clipped* does not. State which kind each site is in the
+  commit.
+
 - **NEW IDEA (Scout 2026-09-02, spotted auditing `noise_ratio.py`) — say what stacking *should* have bought,
   next to what it did, so a beginner can tell a healthy stack from an underperforming one.** *(Pillar: trust +
   understand — PRIORITY 4/3; size S; additive, engine number already exists.)* The "stacking cut your noise
@@ -21946,8 +22056,38 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW IDEA (Builder 2026-09-02, the piece v0.325.0 deliberately left out — promoted from its
-  "deliberately not done" line so it is findable as work) — put the planned week in the user's calendar.**
+- **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-t59xya`) — ~~put the planned week in the user's
+  calendar.~~** Built as filed, as composition: `GET /api/plan/week/calendar.ics` and an **Add this week to
+  your calendar** anchor on the Plan-my-week card. One event per night that has a pick, titled with what to
+  point at (*"Image M 31"*), described in the same jargon-free sentence the per-target calendar uses.
+
+  **Both cautions on the entry were honoured, and one was worth more than expected.**
+  *The UID scheme* — the week's events go through the **same** `_window_ics_event` as `/next-session`, via a
+  small `_week_night_as_window` adapter, rather than a second event builder. So a night that appears in both
+  calendars carries **one** UID and the second import *updates* the entry instead of doubling it; pinned by a
+  test that the two files' UID sets actually intersect. *Only nights with a pick become events* — a
+  "nothing is well placed" entry is worse than none — and an empty week 404s rather than handing back a
+  blank calendar, matching how `/next-session/{safe}/calendar.ics` already behaves.
+
+  **One thing the entry didn't ask for, which the shape made obvious.** The `/week` endpoint's
+  signature-cache block is now a shared `_cached_week_plan`, used by the JSON payload *and* the `.ics`. The
+  calendar is therefore the *same plan object* the card in front of the user is showing — the two cannot
+  report different nights, targets or times for the same request, and the download costs no second ephemeris
+  pass. Pinned by a test that walks the JSON payload and asserts every placed night's `DTSTART`/`DTEND`/target
+  name appears in the file.
+
+  **Upgrade-safe (§9):** one new read-only endpoint, one new client URL helper, no config key, no schema, no
+  on-disk change, no default flipped, no existing response shape touched. The link is gated on the card
+  actually having a placed night (the standing "is this control gated on the same data as the emptiness beside
+  it?" rule), so on a fresh install it simply isn't there.
+
+  **Tests: +9.** `tests/webapp/test_plan.py` (6) — one event per planned night and no more; the events match
+  the card's own plan field for field; the shared UID with `/next-session`; the no-location 404; the
+  nothing-placed 404; and the same input validation as its JSON twin.
+  `frontend/src/components/tonight/PlanWeekCard.test.tsx` (3) — the link and its `download`, the altitude
+  floor carried into the URL so the file matches what is on screen, and the link's absence on an empty week.
+
+  *(Original entry follows.)*
   *(Pillar: plan + autonomy — PRIORITY 2–3; size S; additive, offline, no new deps.)* The card now says
   "Saturday is your best M 31 night, 21:40 → 01:46" — and then the owner has to remember it. The *per-target*
   answer already ships as a one-tap `.ics` (`GET /api/plan/next-session/{safe}/calendar.ics`, built from
@@ -30159,6 +30299,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **⭐ NEW IDEA (Builder 2026-09-02, the audit's own lesson from A1, made mechanical) — give the display-space
+  tests one shared fixture that is *real* stretch output, and use it wherever a regression test reasons about
+  post-stretch pixels.** *(Pillar: maintainability in service of correctness — size S; no behaviour change.)*
+  A1's headline was the bug; its sting was that **the regression test written for that exact defect in
+  v0.210.6 passed on a fixture that could not exhibit it** — `clip(sky + normal)`, which has no hard shadow
+  clip, so it never saw what `autostretch` actually produces. The test confirmed the fix's *model* of the bug
+  rather than the bug, and the defect survived underneath it for four months.
+  **Shape:** one helper in `tests/` — a linear OSC-like stack (sky + noise, an extended object, stars) put
+  through the app's own `autostretch`, with a known pure-background corner — plus, beside it, the guard the
+  A1 tests now lead with: **assert the fixture really does clip shadows to zero**, so a future change to the
+  stretch cannot silently turn the tests below it into no-ops. Then migrate the display-space tests that
+  currently hand-roll an approximation onto it. **Care:** this is not a licence to rewrite passing tests
+  wholesale — migrate a test only when it reasons about the low end or the histogram, and keep any fixture
+  that is deliberately synthetic (a degenerate/flat case) exactly as it is.
 
 - **NEW IDEA (Builder 2026-08-30, the shape the v0.311.1 bug had, and the reason it existed) — there are now
   **two** answers to "render this run's picture at size N, exactly as it is shown", and the bug was the gap
