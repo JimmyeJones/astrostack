@@ -1347,6 +1347,38 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
     return out, recipe
 
 
+def _edit_export_wcs_text(fits_path: str, recipe) -> str | None:  # noqa: ANN001
+    """The celestial WCS to write onto an editor export of ``fits_path``.
+
+    An editor export used to be written with ``wcs_text=None`` unconditionally, so
+    **every** edited picture lost its sky solution — and with it North-up, the
+    scale bar, the compass and object labels, all of which read the run's own FITS
+    (:func:`seestack.io.wcs_io.celestial_wcs_from_fits`). Tone edits don't move a
+    single pixel, so there was nothing to lose in the first place; crop and resize
+    move pixels in a way the solution can follow exactly.
+
+    Returns ``None`` — no WCS, rather than a wrong one — when the source has no
+    solution, or when the recipe rotates (see
+    :func:`~seestack.edit.ops.geometry.geometry_pixel_steps`). Best-effort: any
+    failure here yields ``None`` and the export is written exactly as it was
+    before, so this can never cost a user their edit.
+    """
+    from seestack.edit.ops.geometry import geometry_pixel_steps
+    from seestack.io.wcs_io import celestial_wcs_from_fits, wcs_text_after_pixel_steps, wcs_to_text
+
+    try:
+        wcs, width, height = celestial_wcs_from_fits(fits_path)
+        if wcs is None or width <= 0 or height <= 0:
+            return None
+        steps = geometry_pixel_steps(recipe, (height, width))
+        if steps is None:
+            return None
+        return wcs_text_after_pixel_steps(wcs_to_text(wcs), steps)
+    except Exception:  # noqa: BLE001 — provenance, never worth failing an export over
+        log.warning("editor export WCS carry-over failed", exc_info=True)
+        return None
+
+
 def render_run_recipe_fullres_png(
     fits_path: str, recipe_dict: dict, *,
     max_long_edge: int = 8000, north_up: bool = False,
@@ -1448,7 +1480,8 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int,
         # the TIFF/preview must be written as-is, not re-stretched/linear-rescaled.
         paths = write_stack_outputs(
             project_dir=proj.project_dir, rgb=out, coverage=coverage,
-            wcs_text=None, out_basename=base, tiff_mode=tiff_mode,
+            wcs_text=_edit_export_wcs_text(run.fits_path, recipe),
+            out_basename=base, tiff_mode=tiff_mode,
             header_meta=edit_meta, already_display=True,
         )
         # Re-exporting under an existing basename archives the prior export's

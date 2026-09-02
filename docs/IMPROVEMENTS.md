@@ -879,10 +879,57 @@ _(nothing else claimed — claim an item here with your branch name)_
   K scans over N days. **Also:** the "healing an already-degraded picture is deliberately left open" note in
   `AGENTS.md` §1 is **stale** — `_auto_stack_degraded_recheck` shipped.
 
-- **🟡 A9 — editor exports drop the WCS**, so any edited picture loses North-up, scale bar, compass and object
-  labels. `_apply_editor_to_run` (`webapp/pipeline.py`) passes `wcs_text=None` to `write_stack_outputs`
-  **even when the recipe contains no geometry op**. **Fix:** carry the source header's celestial cards when no
-  enabled `geometry.*` op is present; adjust CRPIX for crop/resize; drop only for rotate.
+- **✅ SHIPPED (Builder, v0.326.8, branch `claude/sweet-babbage-35yfmt`) — ~~A9: editor exports drop the
+  WCS.~~** Fixed in all three parts the entry named — carry it when nothing moved, *move it* for crop and
+  resize, drop it only for rotate — and reproduced first through the real export job.
+
+  **Why this was worse than "an overlay is missing".** The edited picture is the one the owner shares; the
+  linear master is a working file. So the run that had lost North-up, the scale bar, the compass and its
+  object labels was precisely the run every one of those was for. And the recipe that lost them most often is
+  the one that moves **no pixels at all**: a tone-only edit exports onto the identical grid, so the source
+  solution was already exactly right and was thrown away anyway.
+
+  **The pixel replay is derived from the ops, not re-implemented beside them.** `crop_bounds` and
+  `resize_shape` are now split out of `_crop`/`_resize` (`seestack/edit/ops/geometry.py`) and a new
+  `geometry_pixel_steps` walks a recipe's *enabled* geometry ops through them, so the WCS moves by the very
+  numbers the image moved by — including every no-op guard the ops already carry (a degenerate crop, a unit
+  resize, a sub-threshold rotate) which must **not** move the WCS either. A second copy of that arithmetic
+  would have drifted the first time one of those guards was tuned.
+
+  **The one call worth knowing: resize follows `scipy.ndimage.zoom`'s corner-aligned sampling**
+  (`x_in = x_out · (n_in − 1)/(n_out − 1)`), not the intuitive `x_in = x_out / scale`. The tests pin a real
+  star's sky position through the **real op** rather than the keywords: measured **0.0004–0.28″** (< 0.06 px)
+  across scales 0.37/0.5/2.0, where the intuitive convention lands **1.6–5.5″** out — so the bound is tight
+  enough that the wrong convention fails. Crop is a pure integer translation and lands exactly (0.0″). The
+  scale factors multiply the transform's **columns** (pixel axes), not its rows, which is only the same thing
+  on a diagonal matrix — a test with a 23° field rotation pins that.
+
+  **It returns `None` rather than a guess**, in four places: no solution on the source; an active rotate
+  (it resamples onto a grid the source solution no longer describes, and a plausible-looking wrong WCS is
+  worse than none — every overlay would then be quietly off); a resize under **SIP** distortion (the
+  coefficients are polynomials in *source* pixels — a crop only shifts the origin they are already relative
+  to, a rescale invalidates them); and a legacy `CROTA` header. The whole carry-over is best-effort inside a
+  `try`, so it can never cost a user their export.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk layout change, no API shape change, no setting
+  flipped, and nothing already exported is touched. Runs exported before this keep behaving exactly as they
+  do today (no WCS); an unsolved source still exports without one, pinned by a test. The sky-coverage stat
+  unions rather than sums, so an edited run now contributing its footprint cannot double-count the patch its
+  own master already covers.
+
+  **Tests (+21; the 3 webapp ones fail before, and the 18 engine ones cover code that did not exist).**
+  `tests/test_edit_geometry_wcs.py` (18) pins the replay against what the ops actually did to the image and
+  the rewritten WCS against a centroided star. `tests/webapp/test_editor_export_wcs.py` (3 of 5 failing
+  before) goes through the real export job and reads the result back the way the app's own overlays do —
+  including that `…/annotations` now returns the same compass, scale bar and North-up turn for the edited run
+  as for the master it came from.
+
+  *(Original audit entry follows.)*
+
+  ~~**🟡 A9 — editor exports drop the WCS**~~, so any edited picture loses North-up, scale bar, compass and object
+    labels. `_apply_editor_to_run` (`webapp/pipeline.py`) passes `wcs_text=None` to `write_stack_outputs`
+    **even when the recipe contains no geometry op**. **Fix:** carry the source header's celestial cards when no
+    enabled `geometry.*` op is present; adjust CRPIX for crop/resize; drop only for rotate.
 
 - **✅ SHIPPED (Builder, v0.326.5, branch `claude/zen-mccarthy-xesefm`) — ~~A4: every baked caption says "ZWO
   Seestar S50"; the owner has an S30.~~** Derived, in the direction the entry named — and pointedly **not**
