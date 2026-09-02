@@ -291,6 +291,32 @@ _MAX_SEESTAR_OUTPUT_FRAMES = 2
 # Mirrors the scanner's ``_CAPTURE_SUFFIXES`` (kept local for the same reason).
 _CAPTURE_FOLDER_SUFFIXES = ("_video", "_photo")
 
+# How the Seestar names the picture it stacked on the device: ``Stacked.fit``,
+# ``Stacked_60s.fit``, ``Stacked_10.0s_M 31_....fit``. Its raw subs are always
+# ``Light_<target>_<exp>_<filter>_….fit``, so the *filename* separates the two
+# even when the folder holds many of each — which the per-folder count guard
+# above cannot do (the owner's real library has one on-device output **per
+# session** sitting in the bare folder: ``M 3`` carries 22 of them, ``M 13`` 9,
+# ``M 101`` 11). Kept local rather than imported from the scanner for the same
+# reason as ``_CAPTURE_FOLDER_SUFFIXES``: the engine's DB layer does not import
+# the scanner.
+_SEESTAR_OUTPUT_STEM_PREFIX = "stacked"
+
+
+def _is_seestar_output_filename(source_path: str) -> bool:
+    """True when a frame's *filename* is the Seestar's on-device stacked output.
+
+    Deliberately strict about what follows the prefix — ``Stacked.fit``,
+    ``Stacked_60s.fit`` and ``Stacked-01.fit`` match, ``StackedByMe.fit`` does
+    not — because this runs on the on-by-default ingest path, where an
+    over-broad match silently drops a user's real subs from their stack.
+    """
+    stem = Path(source_path).stem.strip().lower()
+    if not stem.startswith(_SEESTAR_OUTPUT_STEM_PREFIX):
+        return False
+    rest = stem[len(_SEESTAR_OUTPUT_STEM_PREFIX):]
+    return rest == "" or not rest[0].isalnum()
+
 
 class Project:
     """Handle to a Seestack project directory and its SQLite database."""
@@ -824,6 +850,20 @@ class Project:
         folders legitimately hold many frames and are all junk, so they are not
         size-guarded.
 
+        **Filename escape hatch (the count guard is not enough on its own).**
+        "One stacked image" is true per *session*, not per folder: the owner's
+        real library keeps every night's on-device output in the same bare
+        folder, so ``M 3/`` holds **22** of them, ``M 13`` 9 and ``M 101`` 11 —
+        all far past the cap, all still averaging into the stack and still
+        eligible as its reference. The count cannot tell those from the
+        mixed-source folder the guard exists to protect, but the *filename*
+        can: the device writes its output as ``Stacked*.fit`` and its raw subs
+        as ``Light_*.fit``. So a frame whose name is on-device output is
+        rejected **at any count**, and every other frame in the folder still
+        answers to the count guard exactly as before — which leaves a genuine
+        ``<T>/`` folder of ``Light_*`` subs untouched however many ``Stacked``
+        images sit next to it.
+
         Returns the ids of the frames newly rejected by this call.
         """
         assert self._conn is not None
@@ -835,7 +875,14 @@ class Project:
         # frames reject unconditionally. Matching the full parent *path* (not just
         # the basename) also keeps a same-named folder elsewhere on disk from
         # cross-triggering.
-        output_by_folder: dict[str, list[int]] = {}
+        #
+        # ``folder_ids`` counts the whole folder (so the guard still asks "is
+        # this folder a user's subs?" of the same population it always did),
+        # while ``folder_unnamed`` holds only the frames the filename cannot
+        # vouch for — the ones the count still has to decide.
+        folder_ids: dict[str, list[int]] = {}
+        folder_unnamed: dict[str, list[int]] = {}
+        named_output_ids: list[int] = []
         capture_ids: list[int] = []
         for frame in list(self.iter_frames()):
             if frame.id is None or frame.user_override or not frame.accept:
@@ -843,13 +890,18 @@ class Project:
             parent = Path(frame.source_path).parent
             parent_low = parent.name.lower()
             if parent_low == base_low:
-                output_by_folder.setdefault(str(parent), []).append(frame.id)
+                key = str(parent)
+                folder_ids.setdefault(key, []).append(frame.id)
+                if _is_seestar_output_filename(frame.source_path):
+                    named_output_ids.append(frame.id)
+                else:
+                    folder_unnamed.setdefault(key, []).append(frame.id)
             elif parent_low.endswith(_CAPTURE_FOLDER_SUFFIXES):
                 capture_ids.append(frame.id)
-        to_reject: list[int] = list(capture_ids)
-        for ids in output_by_folder.values():
+        to_reject: list[int] = capture_ids + named_output_ids
+        for key, ids in folder_ids.items():
             if len(ids) <= _MAX_SEESTAR_OUTPUT_FRAMES:
-                to_reject.extend(ids)
+                to_reject.extend(folder_unnamed.get(key, ()))
         if not to_reject:
             return []
         with self.transaction():

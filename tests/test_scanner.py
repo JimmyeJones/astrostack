@@ -520,6 +520,51 @@ def test_scan_keeps_a_tiny_root_session_when_a_container_shares_its_name(tmp_pat
         lib.close()
 
 
+def test_rescan_heals_a_whole_seasons_worth_of_on_device_outputs(tmp_path):
+    """End-to-end at the owner's shape: a pre-v0.184.9 library where the bare
+    ``M 3/`` folder's output has been ingested **once per session**. A re-scan
+    must clear all nine, not stop at the two the count guard allowed. Fails
+    before (all nine stayed accepted and in the reference pool)."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 3").mkdir(parents=True)
+    outputs = [scan_root / "M 3" / f"Stacked_10.0s_M 3_{i:02d}.fit" for i in range(9)]
+    for i, path in enumerate(outputs):
+        write_seestar_fits(path, n_stars=5, seed=100 + i)
+    (scan_root / "M 3_sub").mkdir(parents=True)
+    for i in range(3):
+        write_seestar_fits(scan_root / "M 3_sub" / f"Light_{i:03d}.fit", n_stars=5, seed=i)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, scan_root)
+        entry = lib.find_target("M 3")
+        proj = lib.open_target(entry.safe_name)
+        try:
+            # The pre-convention state this heals: every session's output sitting
+            # inside the very target the raw subs map to.
+            for path in outputs:
+                proj.add_frame(FrameRow(source_path=str(path)))
+        finally:
+            proj.close()
+
+        scan_and_organize(lib, scan_root)
+        proj = lib.open_target(entry.safe_name)
+        try:
+            frames = list(proj.iter_frames())
+            out = [f for f in frames if "Stacked" in Path(f.source_path).name]
+            assert len(out) == 9
+            assert all(f.accept is False for f in out)
+            assert all(f.reject_reason == REJECT_REASON_SEESTAR_OUTPUT for f in out)
+            # The raw subs are the only thing left to stack — and to reference.
+            accepted = list(proj.iter_frames(accepted_only=True))
+            assert len(accepted) == 3
+            assert all("M 3_sub" in f.source_path for f in accepted)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
 def test_scan_still_rejects_a_real_on_device_output_beside_its_subs(tmp_path):
     """The no-regression half: a genuine same-parent ``M 31/`` output folder
     beside ``M 31_sub/`` is still recognised and its frame still rejected."""
@@ -610,6 +655,87 @@ def test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_
         rejected = proj.reject_seestar_output_frames("Andromeda")
         assert rejected == []  # folder too big to be the on-device output — nothing rejected
         for fid in real_ids + sub_ids:
+            assert proj.get_frame(fid).accept is True
+    finally:
+        proj.close()
+
+
+def test_reject_seestar_output_frames_rejects_one_on_device_output_per_session(tmp_path):
+    """The owner's real shape: the bare ``<T>/`` folder holds the Seestar's own
+    stacked picture from **every session**, not one image in total — ``M 3``
+    carries 22 of them beside ``M 3_SUB``. The per-folder count guard reads 22 as
+    "these must be a user's real subs" and spares the lot, so they keep averaging
+    into the stack and stay eligible as its reference. The *filename* is what
+    separates them: the device writes ``Stacked*.fit``, its subs ``Light_*.fit``.
+    Fails before (0 of 22 rejected)."""
+    proj = Project.create(tmp_path / "proj", name="M 3")
+    try:
+        root = tmp_path / "incoming"
+        outputs = [
+            proj.add_frame(FrameRow(
+                source_path=str(root / "M 3" / f"Stacked_10.0s_M 3_{i:03d}.fit")))
+            for i in range(22)
+        ]
+        subs = [
+            proj.add_frame(FrameRow(
+                source_path=str(root / "M 3_SUB" / f"Light_M 3_10.0s_IRCUT_{i:04d}.fit")))
+            for i in range(30)
+        ]
+
+        rejected = proj.reject_seestar_output_frames("M 3")
+        assert set(rejected) == set(outputs)
+        for fid in outputs:
+            assert proj.get_frame(fid).accept is False
+            assert proj.get_frame(fid).reject_reason == REJECT_REASON_SEESTAR_OUTPUT
+        for fid in subs:
+            assert proj.get_frame(fid).accept is True
+
+        # Still idempotent — a re-scan rejects nothing more.
+        assert proj.reject_seestar_output_frames("M 3") == []
+    finally:
+        proj.close()
+
+
+def test_reject_seestar_output_frames_keeps_real_subs_sitting_beside_the_outputs(tmp_path):
+    """The mixed case both guards have to survive at once: a folder holding the
+    user's own ``Light_*`` subs **and** a session's worth of the device's
+    ``Stacked*`` pictures. Only the latter go. Fails before (nothing was rejected
+    at all, because the folder's 30 frames sail past the count guard) — and would
+    fail just as loudly if the fix rejected by folder rather than by filename."""
+    proj = Project.create(tmp_path / "proj", name="Andromeda")
+    try:
+        root = tmp_path / "incoming"
+        real_ids = [
+            proj.add_frame(FrameRow(source_path=str(root / "Andromeda" / f"Light_{i:03d}.fit")))
+            for i in range(8)
+        ]
+        outputs = [
+            proj.add_frame(FrameRow(source_path=str(root / "Andromeda" / f"Stacked_{i:02d}.fit")))
+            for i in range(22)
+        ]
+
+        rejected = proj.reject_seestar_output_frames("Andromeda")
+        assert set(rejected) == set(outputs)
+        for fid in real_ids:
+            assert proj.get_frame(fid).accept is True
+    finally:
+        proj.close()
+
+
+def test_reject_seestar_output_frames_does_not_match_a_users_own_stacked_something(tmp_path):
+    """Over-broad matching on this path silently drops real subs from a stack, so
+    the filename test is anchored: ``Stacked.fit``/``Stacked_60s.fit`` are the
+    device's, ``StackedRegion.fit`` is somebody's own file and is left alone (its
+    folder is too big for the count guard, so nothing else can save it)."""
+    proj = Project.create(tmp_path / "proj", name="Comet")
+    try:
+        root = tmp_path / "incoming"
+        mine = [
+            proj.add_frame(FrameRow(source_path=str(root / "Comet" / f"StackedRegion{i}.fit")))
+            for i in range(5)
+        ]
+        assert proj.reject_seestar_output_frames("Comet") == []
+        for fid in mine:
             assert proj.get_frame(fid).accept is True
     finally:
         proj.close()
